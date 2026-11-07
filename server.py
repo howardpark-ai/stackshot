@@ -1789,8 +1789,8 @@ _CLOSE_WAS = threading.local()      # the item as it stood before the close bein
 
 
 def _fallback_mover(project: str) -> str:
-    """the session that moves, and hears the notices of, an item nothing else names: the project's builder (the background agent whose mandate builds), else its -main
-    agent, never the item's creator. "" when the project names neither. Cached for a few seconds per project and registry version: the board derives every item's mover."""
+    """the session that moves, and hears the notices of, an item nothing else names: the project's builder (the background agent whose mandate builds; for a page
+    [handoff.builder_by_page] maps, the mapped builder when the project lists it: _builder_for), else its -main agent, never the item's creator. "" when the project names neither. Cached for a few seconds per project and registry version: the board derives every item's mover."""
     key = str(project or "").strip()
     if not key:
         return ""
@@ -1802,7 +1802,7 @@ def _fallback_mover(project: str) -> str:
     hit = _FALLBACK_CACHE.get(key)
     if hit and hit[0] == ver and now - hit[1] < 20.0:
         return hit[2]
-    who = _builder_agent(key) or _main_agent(key)
+    who = _builder_for(key) or _main_agent(key)
     if not who:
         try:
             who = _page_keeper(key)        # a page that lists no -main agent but names its keeper (`session:`, the -main agent of a page not yet converted)
@@ -2468,7 +2468,7 @@ def _owner_then(project: str, mover_before: str, sender: str, next_text: str, ne
     none (the model's own default then stands: the first session in needs, else nobody, and his answer hands the item to the project's builder, else its -main agent)."""
     if _is_background(mover_before, project):
         return mover_before
-    b = _builder_agent(project)
+    b = _builder_for(project)
     if b:
         bid = _session_id(b)
         named = any(_session_id(x) == bid for x in needs)
@@ -8012,6 +8012,28 @@ def _builder_agent(project: str) -> str:
     return _router_live.builder(project)
 
 
+def _builder_by_page() -> dict[str, str]:
+    """[handoff.builder_by_page]: project page key -> the background agent that builds that area. A table of another type reads as empty (every item keeps the project's first
+    builder, today's behaviour); an entry that is not text is skipped. Keys lose their surrounding slashes. Read where it is used, so a reload applies."""
+    sec = _cfg.get("handoff")
+    tab = sec.get("builder_by_page") if isinstance(sec, dict) else None
+    if not isinstance(tab, dict):
+        return {}
+    return {k.strip().strip("/"): v.strip() for k, v in tab.items() if isinstance(k, str) and isinstance(v, str) and k.strip().strip("/") and v.strip()}
+
+
+def _builder_for(project: str) -> str:
+    """The builder a new item of `project` (the page it is filed on) goes to by default: the agent [handoff.builder_by_page] maps the page to, by prefix (the key itself or a page under it,
+    the longest key first), when that agent is a background agent of the item's project; else the project's first builder (_builder_agent). Never an error: an unmapped page, an empty map and a
+    mapped agent the project does not list all give the first builder. An explicit mover on a create never comes through here."""
+    key = str(project or "").strip().strip("/")
+    tab = _builder_by_page() if key else {}
+    for page in sorted((p for p in tab if key == p or key.startswith(p + "/")), key=len, reverse=True):
+        if _is_background(tab[page], project):
+            return tab[page]
+    return _builder_agent(project)
+
+
 # ---- an item's contact (contact.py): the front agent the person the board is for talks to about the item; stored in metadata.contact, a filing field
 def _contact_fronts(project: str) -> dict[str, str]:
     """The project's front agents with their mandate lines ({} when it lists none, or the registry cannot be read)."""
@@ -11530,7 +11552,7 @@ _CONTACT_FORM = (f" Parameter contact (a filing field: it moves no state clock, 
                  "A front agent that creates an item is its contact, wherever the item is filed. When the contact retires, or the item is re-filed under another project, it falls to the (new) project's -main agent, unless it is also a front agent there or is the item's creator and a front agent of any project (it stays). ")
 
 
-@mcp.tool(name="create", description=_lead(f"Create a board item: something {OWNER} would ask \"is X done?\" about (a deliverable a session owns, a decision or input he must give, a blocker on someone outside, a handoff between sessions), never a working step. A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. subject: {_PFX}, then the outcome wanted as a task (a subject with no scope prefix is given the one its project's scope names, and the reply says so), never a topic or a symptom (right: subject=\"{_PFX0}Make the export finish in under a minute\"; the length limit is below). project: the item's gbrain page (required, must exist: create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID), required: the server records the sender as the item's creator (a fact of History, \"created by\"; a background agent may create items too).{_OFF_MAP_NOTE}. Name who moves the item with mover= (and then=); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused; message the front agent for a check or answer only it can give); with no mover= an alive item is moved by the project's builder, else its -main agent, never by its creator; an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`); an item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`); owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. " + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM + "Right call: create(project=\"projects/widgets\", subject=\"" + _PFX0 + "Make the export finish in under a minute\", sender=\"my-x\", mover=\"my-x\", description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\", next=\"my-x: profile the nightly run\"). "
+@mcp.tool(name="create", description=_lead(f"Create a board item: something {OWNER} would ask \"is X done?\" about (a deliverable a session owns, a decision or input he must give, a blocker on someone outside, a handoff between sessions), never a working step. A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. subject: {_PFX}, then the outcome wanted as a task (a subject with no scope prefix is given the one its project's scope names, and the reply says so), never a topic or a symptom (right: subject=\"{_PFX0}Make the export finish in under a minute\"; the length limit is below). project: the item's gbrain page (required, must exist: create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID), required: the server records the sender as the item's creator (a fact of History, \"created by\"; a background agent may create items too).{_OFF_MAP_NOTE}. Name who moves the item with mover= (and then=); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused; message the front agent for a check or answer only it can give); with no mover= an alive item is moved by the project's builder (for a page the instance maps to a builder, that one when the project lists it), else its -main agent, never by its creator; an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`); an item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`); owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. " + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM + "Right call: create(project=\"projects/widgets\", subject=\"" + _PFX0 + "Make the export finish in under a minute\", sender=\"my-x\", mover=\"my-x\", description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\", next=\"my-x: profile the nightly run\"). "
                                                           "The reply may end with a line listing up to 3 similar open or recently completed items: the create always goes through, so check them for a duplicate before working the new item. request_id: any random string of yours; a retry with the same one returns the item already created."))
 def stackshot_create(
     subject: str,
