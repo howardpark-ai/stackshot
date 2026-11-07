@@ -5,8 +5,11 @@ Standard library only (Python 3.12+). CI runs it on every pull request (.github/
 commit-msg hook can run it on a message file or a branch name. CONTRIBUTING.md ("Commit and PR text") states the rule.
 
 What is checked, line by line:
-  * generic patterns built in (they are no one's data): a board item id (board#N, board-tmp-<name>#N) and a link to a
+  * generic patterns built in (they are no one's data): a board item id (board#N, board-tmp-<name>#N), a link to a
     board site's items/<n> path (a URL with a host);
+  * attribution lines, which this public repository refuses (a push cannot be taken back, and GitHub keeps every pull
+    request ref): a `Co-Authored-By:` trailer of any author, a `Claude-Session:` trailer, a claude.ai/claude.com session
+    URL, and the "Generated with/by/using Claude" footer. A hit prints its kind and line number and does not repeat the line;
   * the deny list: Python regexes, one per line, case-insensitive, read from the environment variable CLEAN_TEXT_DENY
     (in CI the repository secret of that name, given to this one step only: a secret is masked in the logs, a variable
     is not), else the per-user file ${XDG_CONFIG_HOME:-$HOME/.config}/stackshot/clean-text-deny (for the git hooks and a
@@ -14,12 +17,14 @@ What is checked, line by line:
     data and is never written into the repository. Neither one (a fork's pull request gets no secret): only the generic
     patterns run, and the output says so in one line (not a failure). A deny pattern is never printed, and neither is the
     text of a line it hit: a hit names the field, the line number and the pattern's line number in the list ("deny pattern 3").
-Lines that are allowed on purpose are not matched against the deny list: the Claude or Anthropic `Co-Authored-By:` trailer (with the Anthropic noreply address; a person's trailer is checked) and the `Claude-Session:` trailer,
-the "Generated with [Claude Code]" footer line and a bare claude.ai/code/session URL line (whole lines only: text added to
-one is checked). The generic patterns still read them.
+No line is exempt: every line of every field is read by the generic patterns, the attribution patterns and the deny list
+alike. The one exception is the four commits of ATTRIBUTION_EXEMPT_SHAS (old commits on main with a Co-Authored-By line, met
+only when a push walks all history), exempt from the attribution patterns alone. In CI only the pull request's own commits are
+read (base..head), so older commits on main are never looked at.
 The standard merge subjects ("Merge branch 'main' into <branch>", "Merge pull request #N from <owner>/<branch>", and
 `git pull`'s "Merge branch '<x>' of <url> into <branch>") are skipped as the first line of a commit message, except that
-the branch names in them are checked as branch names (the owner and the URL are not).
+the branch names in them are checked as branch names (the owner and the URL are not) and that the attribution patterns
+read the whole subject.
 
     python3 tools/clean_text.py --message-file F [--message-file G ...]   # a commit message file
     python3 tools/clean_text.py --message-stdin                            # a commit message on standard input
@@ -32,7 +37,7 @@ The git hooks in .githooks/ (core.hooksPath, see CONTRIBUTING.md) run it before 
 The modes combine. Exit 0: clean; 1: something matched; 2: the call itself is wrong (a bad deny pattern, an unreadable file,
 a git failure).
 """
-import argparse, os, re, subprocess, sys, warnings
+import argparse, os, re, subprocess, sys, urllib.parse, warnings
 
 # (label, regex). Generic: nothing here is specific to one instance.
 GENERIC = [
@@ -41,13 +46,81 @@ GENERIC = [
     ("link to a board item (host/items/N)", re.compile(r"https?://[^\s/]+/items/\d+", re.I)),
 ]
 
-# The allowed boilerplate, exempt from the deny list. Each pattern is the whole line, so text added to such a line is checked.
-ALLOWED_LINES = [
-    re.compile(r"^\s*Co-Authored-By:\s+(?:Claude|Anthropic)\b[^<>\n]*<noreply@anthropic\.com>\s*$", re.I),   # a person's trailer is checked
-    re.compile(r"^\s*Claude-Session:\s+https://claude\.ai/code/session_[\w-]+\s*$", re.I),
-    re.compile(r"^\s*(?:\U0001F916\s*)?Generated with \[Claude Code\]\(https://claude\.(?:com|ai)/claude-code\)\s*$", re.I),
-    re.compile(r"^\s*https://claude\.ai/code/session_[\w-]+\s*$", re.I),
+# Attribution lines are refused in this public repository, whoever the author. They are kept apart from GENERIC because a hit never
+# prints its line: the kind of hit and its place are enough, and the check does not repeat a refused session URL in its own output
+# (the pull request's title and body are public anyway; the workflow's env header prints them). A trailer counts only at the start of a line, after any quote or list mark a pasted message carries (a bullet, a number
+# with a dot or a bracket); what follows the colon is not read, so a trailer of any name and address is refused, and prose that merely
+# names the trailer is not. Each pattern is tried on the line as written and with its %XX escapes decoded, so a session URL cannot hide
+# behind an encoded path.
+class _SessionUrl:
+    """A claude.ai or claude.com URL that holds "session_" after its host, found per whitespace-separated token in linear time. The
+    host ends at a non-name character (so "claude.commands.session_start" and "claude.ai-tools/.../session_store.py" are not URLs).
+    Only the first host in a token is looked at: if a later host has "session_" after it, so has the first, so one look is enough, and
+    a long run of repeated hosts is not rescanned from each. No limit on the padding between host and "session_"."""
+    _host = re.compile(r"claude\.(?:ai|com)(?![\w-])", re.I)
+    _code = re.compile(r"claude\.ai\.?(?::\d*)?/+code/", re.I)     # the code-session path, with a port, a trailing dot or doubled slashes
+
+    def search(self, line):
+        if self._code.search(line):
+            return True
+        for token in line.split():
+            m = self._host.search(token)
+            if m and "session_" in token[m.end():].lower():
+                return True
+        return False
+
+
+class _Footer:
+    """The "Generated with/by/using Claude ..." footer line, found by reading the line the way a person does instead of by its
+    spellings: HTML tags, markdown links (the link text is kept), bare URLs, markup, punctuation and emoji are stripped, and the line
+    is a hit when what is left starts with "generated with", "generated by" or "generated using" and names Claude in the rest of the
+    line. A line that merely contains the words further in, as in a sentence about numbers, is not read by this rule; only the
+    narrower inline form "Generated with Claude Code" (and the product's link) is refused anywhere in a line. Cost is linear in the
+    line: the link pattern is bounded; the tag pattern is not, but a tag cannot contain "<", so each "<" scans at most to the next
+    one; and the inline pattern takes one literal whitespace character before its single repeat, so a long run of spaces is never
+    split two ways."""
+    _tag = re.compile(r"<[^<>]*>")
+    _link = re.compile(r"\[([^\[\]]{0,300})\]\([^()\s]{0,500}\)")
+    _url = re.compile(r"(?:https?://|www\.)\S+", re.I)
+    _noise = re.compile(r"[\W_]+")
+    _start = re.compile(r"^ ?generated (?:with|by|using) (.*)$", re.I)
+    _name = re.compile(r"\bclaude\b", re.I)
+    # "Generated with Claude Code" inside a longer line (markdown around the name allowed), and the product's link
+    _inline = re.compile(r"\bGenerated\s+(?:with|by|using)\s[\[*_`(\s]*Claude[\s*_`\]]*Code\b|claude\.(?:com|ai)/claude-code", re.I)
+
+    def search(self, line):
+        if self._inline.search(line):
+            return True
+        if "generated" not in line.lower():                 # the cheap exit for nearly every line
+            return False
+        text = self._tag.sub(" ", line)
+        text = self._link.sub(r"\1", text)
+        text = self._url.sub(" ", text)
+        text = self._noise.sub(" ", text)
+        m = self._start.match(text)
+        return bool(m and self._name.search(m.group(1)))
+
+
+ATTRIBUTION = [
+    ("Co-Authored-By trailer (attribution lines are refused)", re.compile(r"^\s*(?:(?:[>*+\u2022-]|\d+[.)])\s*)*Co-Authored-By\s*:", re.I)),
+    ("Claude-Session trailer (attribution lines are refused)", re.compile(r"\bClaude-Session\s*:", re.I)),
+    # A claude.ai or claude.com URL that holds session_ however far after the host, and the code-session path of claude.ai (see _SessionUrl)
+    ("claude.ai/code session URL (session links are refused)", _SessionUrl()),
+    # the footer: a line that, once markup is stripped, starts "Generated with/by/using" and names Claude, a "Generated with Claude Code"
+    # inside a longer line, and the product's link (see _Footer; one label, so a footer line is reported once)
+    ("'Generated with Claude' footer (attribution lines are refused)", _Footer()),
 ]
+
+# Four commits already on main carry a Co-Authored-By line, from before this rule. A push by a URL no remote has, or to a remote with no
+# tracking branch, walks all history ("more, not less", pre-push), so these exact commits, named by full sha, are exempt from the
+# ATTRIBUTION patterns only; the deny list and every other generic pattern still read them. The set is closed: naming a sha here
+# cannot exempt a new commit, since a sha is fixed by the commit's own content. Main's history is never rewritten.
+ATTRIBUTION_EXEMPT_SHAS = frozenset({
+    "004575b22737cffeb11494dbdc02e9dec0e96ec9",
+    "4e8b0fc3018b7b455ff704e938349d891227d0e6",
+    "dd4da4cd38eacb62ce052d0027c074f31246ae61",
+    "eb96e2362ae290db94c3e002d7fe82b386073483",
+})
 
 # GitHub's own merge subjects: only the first line of a message is skipped, and only these exact shapes.
 # (regex, the groups that are branch names): the subject is skipped, but its branch names are checked as branch names.
@@ -91,33 +164,43 @@ def load_deny(raw):
     return deny, bad
 
 
-def classified_lines(text, is_message=False):
-    """[(line number, line, allowed)] for the lines of one field: allowed is True for the boilerplate lines, which only the
-    generic patterns still look at (a board id typed into a trailer name is still one), never the deny list. A standard
-    merge subject is left out."""
+def numbered_lines(text, is_message=False):
+    """[(line number, line)] for the lines of one field. A standard merge subject is left out."""
     lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out = []
     for i, line in enumerate(lines):
         if i == 0 and is_message and merge_branches(line) is not None:
             continue
-        out.append((i + 1, line, any(p.match(line) for p in ALLOWED_LINES)))
+        out.append((i + 1, line))
     return out
 
 
-def check_field(label, text, deny, is_message=False):
-    """[(label, line number, line text or None, why)] for every hit of a generic or a deny pattern in the field. The text of a
-    line a deny pattern hit is None: the log never repeats it."""
+def attribution_hits(line):
+    """The labels of the attribution patterns that hit the line as written or with its %XX escapes decoded."""
+    decoded = urllib.parse.unquote(line)
+    return [name for name, rx in ATTRIBUTION if rx.search(line) or rx.search(decoded)]
+
+
+def check_field(label, text, deny, is_message=False, exempt_attribution=False):
+    """[(label, line number, line text or None, why)] for every hit of a generic, an attribution or a deny pattern in the field. The
+    text of a line a deny or an attribution pattern hit is None: the log never repeats it. exempt_attribution switches off the
+    attribution patterns only (the commits in ATTRIBUTION_EXEMPT_SHAS)."""
     hits = []
-    if is_message:                       # the subject of a standard merge is skipped, but the branch names in it are not
+    if is_message:                       # the subject of a standard merge is skipped, but the branch names in it and its attribution are not
         first = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")[0]
         for name in merge_branches(first) or []:
             hits += check_field(f"{label}, merge subject branch", name, deny, False)
-    for no, line, allowed in classified_lines(text, is_message):
-        deny_hits = [] if allowed else [n for n, rx in deny if rx.search(line)]
-        shown = None if deny_hits else line
+        if merge_branches(first) is not None and not exempt_attribution:
+            hits += [(label, 1, None, why) for why in attribution_hits(first)]
+    for no, line in numbered_lines(text, is_message):
+        deny_hits = [n for n, rx in deny if rx.search(line)]
+        attr = [] if exempt_attribution else attribution_hits(line)
+        shown = None if deny_hits or attr else line
         for name, rx in GENERIC:
             if rx.search(line):
                 hits.append((label, no, shown, name))
+        for name in attr:
+            hits.append((label, no, None, name))
         for n in deny_hits:
             hits.append((label, no, None, f"deny pattern {n}"))
     return hits
@@ -159,7 +242,7 @@ def deny_source():
 
 
 def commits_in(revs):
-    """[(short sha, message)] for the commits `git log` selects with the revision arguments `revs` (a list, e.g. ["A..B"] or
+    """[(full sha, message)] for the commits `git log` selects with the revision arguments `revs` (a list, e.g. ["A..B"] or
     ["SHA", "--not", "--remotes=origin"]), newest first. `git log -z` ends each record with a NUL, which a commit message cannot hold,
     so the output is read as alternating sha and message and no byte of a message can fake a boundary. The bytes are decoded
     with errors="replace" (a message need not be UTF-8)."""
@@ -176,7 +259,13 @@ def commits_in(revs):
     if len(parts) % 2 or not all(re.fullmatch(r"[0-9a-f]{40,64}", parts[i].strip()) for i in range(0, len(parts), 2)):
         print(f"clean-text: git log {rng} gave output that could not be read", file=sys.stderr)
         raise SystemExit(2)
-    return [(parts[i].strip()[:10], parts[i + 1]) for i in range(0, len(parts), 2)]
+    return [(parts[i].strip(), parts[i + 1]) for i in range(0, len(parts), 2)]
+
+
+def commit_field(sha, msg):
+    """The field of one commit message: labeled with the short sha, exempt from the attribution patterns when the full sha is
+    one of ATTRIBUTION_EXEMPT_SHAS."""
+    return (f"commit {sha[:10]}", msg, True, sha in ATTRIBUTION_EXEMPT_SHAS)
 
 
 def trim(line, n=200):
@@ -185,7 +274,7 @@ def trim(line, n=200):
 
 
 def run(fields, deny_raw, out=sys.stdout, source=None):
-    """fields: [(label, text, is_message)]. Prints the verdict; returns the exit code."""
+    """fields: [(label, text, is_message[, exempt_attribution])]. Prints the verdict; returns the exit code."""
     deny, bad = load_deny(deny_raw)
     for n, why in bad:
         print(f"clean-text: deny pattern {n} {why}; fix {source or 'the deny list'}", file=out)
@@ -197,8 +286,8 @@ def run(fields, deny_raw, out=sys.stdout, source=None):
         print("clean-text: the deny list was not available (CLEAN_TEXT_DENY is empty or unset and there is no deny file; "
               "a fork's pull request gets no secret): only the generic patterns ran", file=out)
     hits = []
-    for label, text, is_message in fields:
-        hits += check_field(label, text, deny, is_message)
+    for label, text, is_message, *exempt in fields:
+        hits += check_field(label, text, deny, is_message, bool(exempt and exempt[0]))
     for label, no, line, why in hits:
         print(f"FAIL {label}, line {no}: " + (f"{trim(line)!r}  <- {why}" if line is not None else why), file=out)
     if hits:
@@ -235,7 +324,7 @@ def main(argv=None):
         fields.append(("body", read_file(a.body_file), False))
     if a.commits:
         for sha, msg in commits_in([a.commits]):
-            fields.append((f"commit {sha}", msg, True))
+            fields.append(commit_field(sha, msg))
     if a.new_commits:
         # With a remote name: the commits that remote's tracking branches lack. A commit another remote has does not count as
         # published here. Without one (or a name git would read as a glob): every commit reachable from SHA, the safe direction.
@@ -243,7 +332,7 @@ def main(argv=None):
         if a.remote and not re.search(r"[*?\[\]]", a.remote):
             revs += ["--not", f"--remotes={a.remote}"]
         for sha, msg in commits_in(revs):
-            fields.append((f"commit {sha}", msg, True))
+            fields.append(commit_field(sha, msg))
     if a.from_env:
         env = os.environ
         fields.append(("title", env.get("PR_TITLE", ""), False))
@@ -252,7 +341,7 @@ def main(argv=None):
         base, head = env.get("BASE_REV", ""), env.get("HEAD_SHA", "")
         if base and head:
             for sha, msg in commits_in([f"{base}..{head}"]):
-                fields.append((f"commit {sha}", msg, True))
+                fields.append(commit_field(sha, msg))
         else:
             print("clean-text: BASE_REV or HEAD_SHA is not set: the commits were not checked", file=sys.stderr)
             return 2
