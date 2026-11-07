@@ -114,6 +114,12 @@ ATTRIBUTION = {   # each refused shape: what, the line
     "a session URL with a port": f"https://{CAI}:443/code/{SID}",
     "a session URL with a trailing dot on the host": f"https://{CAI}./code/{SID}",
     "a session URL with a doubled slash": f"https://{CAI}//code/{SID}",
+    "a session URL after 600 characters of path": f"https://{CAI}/" + "a" * 600 + f"/{SID}",
+    "a session URL after 600 characters of query": f"https://{CAI}/?x=" + "a" * 600 + f"&id={SID}",
+    "a claude.com session URL after 600 characters of path": "https://claude.com/" + "a" * 600 + f"/{SID}",
+    "a session URL after 5000 characters of path": f"https://{CAI}/" + "a" * 5000 + f"/{SID}",
+    "a session URL in a markdown link after 600 characters of path": f"[run](https://{CAI}/" + "a" * 600 + f"/{SID})",
+    "a session URL with a trailing dot on the host and a long path": f"https://{CAI}./" + "a" * 600 + f"/{SID}",
     "a session URL with a percent-encoded path": f"https://{CAI}/%63ode/{SID}",
     "a session URL with a percent-encoded slash-free host path": f"https://{CAI}/%63%6f%64%65/{SID}",
     "a Claude-Session trailer with a space before the colon and a plain value": f"{CS} : abc",
@@ -314,13 +320,18 @@ _N = 262144
 _slow = {"repeated host": "claude.ai" * (_N // 9), "repeated host with spaces": "claude.ai " * (_N // 10), "repeated host and slash": "claude.ai/" * (_N // 10),
          "open angle brackets": "<" * _N, "open square brackets": "[" * _N, "footer words then brackets": GW + " " + "[" * _N,
          "footer words then tags": GW + " " + "<a " * (_N // 3), "footer words then empty links": GW + " " + "[a]( " * (_N // 5),
-         "footer words then URLs": GW + " " + "https://" * (_N // 8), "percent escapes": "%41" * (_N // 3)}
+         "footer words then URLs": GW + " " + "https://" * (_N // 8), "percent escapes": "%41" * (_N // 3),
+         "footer words then a long run of spaces": GW + " " + " " * _N + "x", "footer words, spaces and brackets": GW + " " + " [" * (_N // 2),
+         "the word Generated and spaces": "Generated" + " " * _N + "x", "footer words, spaces, then Claude and spaces": GW + " Claude" + " " * _N + "x",
+         "long path then no session id": f"https://{CAI}/" + "a" * _N, "host, path and a late session id": f"https://{CAI}/" + "a" * _N + SESS}
 for _what, _line in _slow.items():
     _t = time.monotonic(); ct.attribution_hits(_line); _d = time.monotonic() - _t
     check(f"a {len(_line) // 1024} KB line of {_what} is read within 3 seconds", _d < 3.0, round(_d, 2))
 _t = time.monotonic(); rc, out = tool(["--message-file", write("slow.txt", "S\n\n" + "claude.ai" * (65000 // 9) + "\n")]); _d = time.monotonic() - _t
 check("a 64 KB line of repeated hosts passes the whole tool within 5 seconds", rc == 0 and _d < 5.0, (rc, round(_d, 2)))
 _t = time.monotonic(); rc, out = tool(["--message-file", write("slow2.txt", "S\n\n" + "claude.ai" * (65000 // 9) + SESS + "x\n")]); _d = time.monotonic() - _t
+_t = time.monotonic(); rc, out = tool(["--message-file", write("slow3.txt", "S\n\n" + GW + " " + " " * 65000 + "x\n")]); _d = time.monotonic() - _t
+check("a footer opening followed by 65,000 spaces passes the whole tool within 5 seconds", rc == 0 and _d < 5.0, (rc, round(_d, 2)))
 check("a 64 KB line of repeated hosts ending in session_ is read within 5 seconds (no host boundary, so not a URL)", rc == 0 and _d < 5.0, (rc, round(_d, 2)))
 
 # the workflow reads the PR's own commits: base..head, never all history
