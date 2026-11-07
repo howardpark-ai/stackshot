@@ -1564,17 +1564,19 @@ run_group() {   # $@ = the PRs of one group, in queue order (two or more, at mos
     local -a prs=("$@") live_prs=("$@") merged_prs=() shas=() held_prs=() addprs=() lost_prs=()
     local ar unk_why=""; local -a unk=()
     local lead="$1" pr="$1" glog="$LOGDIR/group-$1.log" m recycle="" rc_note="" audit_note="" verified="" mg_notlive="" q_fail=held q_note="" q_riders="" qstart=0 out rc title
-    local gfailed=0 ROLLED_MARK="$LOGDIR/pr-$1.rolledback" names="" sha restarted fast=0 fast_why="" good="" mergesha="" mergeoid="" abort_step="" abort_why="" pre_note="" premerged="" k unn=""; local -a keep=()
+    local gfailed=0 ROLLED_MARK="$LOGDIR/pr-$1.rolledback" names="" sha restarted fast=0 fast_why="" good="" mergesha="" mergeoid="" abort_step="" abort_why="" pre_note="" premerged="" k unn="" live_names="" live_pr="" live_is=""; local -a keep=()
     for m in "${prs[@]}"; do names="${names:+$names }#$m"; done
     exec > >(tee -a "$glog") 2>&1
     gsay() { local l k; l="$(say "$@")"; echo "$l"; for k in "${prs[@]}"; do printf '%s\n' "$l" | mq_plain >> "$LOGDIR/pr-$k.log"; done; }   # progress, into the group log and (the words a waiter looks for made harmless) every PR's own log
     mn() { local k r=""; for k in "${merged_prs[@]}"; do r="${r:+$r }#$k"; done; printf '%s' "$r"; }   # the merged PRs as "#a #b"
+    set_live() { live_names="$(mn)"; case "$live_names" in *" "*) live_pr="PRs $live_names"; live_is=are ;; *) live_pr="PR $live_names"; live_is=is ;; esac; }   # from the merge on, the messages name the PRs this group merged, not every member: a member the queue ejected was never merged
     plog() { printf '%s\n' "$(say "$2")" >> "$LOGDIR/pr-$1.log"; }                                                                               # a result line, into one PR's log only
     fail() {   # a failure of the whole group: every PR still open (live_prs: the merged ones too once their deploy is what failed) gets its FAILED line, the release queue is dealt with by $q_fail, one red report
-        local k; MQ_FAIL="$1: $2"; say "FAILED at $1: $2"
+        local k who="PRs $names"; MQ_FAIL="$1: $2"; say "FAILED at $1: $2"
+        [ -z "$live_names" ] || who="$live_pr"   # once the merge is settled, only the merged PRs are named
         for k in "${live_prs[@]}"; do plog "$k" "FAILED at $1: $(printf '%s' "$2" | mq_plain)"; done
         qg_after_fail "$1"
-        tell "[release] PRs $names FAILED at $1: $2$q_note · log $glog"
+        tell "[release] $who FAILED at $1: $2$q_note · log $glog"
         exit 1
     }
     mq_settle() {   # $1 = a PR: let go of it in the queue (best effort). Its marker goes once the queue no longer holds it: dropped, or "is not in the line" (never added: the add was refused, or it settled already), or no active entry in `mq status`
@@ -1764,6 +1766,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
         qg_handoff "ended with none of them merged"; exit 1
     fi
     q_fail=pause   # from here a failure is one of merged PRs
+    set_live
     # ---- what the queue merged goes out together. The merge commit is the one every other is an ancestor of (the chain merges one PR a push, each on top of the last)
     fetch_retry || fail "merge commit" "the merge queue merged $(mn) but main cannot be fetched to find its merge commit; merged, not live (./deploy.sh by hand)"
     local s7 c T="" M="" ok i hd land; local -a fulls=() uniq
@@ -1775,6 +1778,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
     done
     merged_prs=(${merged_prs[@]+"${merged_prs[@]}"}); shas=(${shas[@]+"${shas[@]}"})
     if [ ${#merged_prs[@]} -eq 0 ]; then gsay "none of the merged PRs can be deployed by this group ($names)"; merged_prs=("${lost_prs[@]}"); qg_after_fail "merge commit"; exit 1; fi
+    set_live
     mapfile -t uniq < <(printf '%s\n' "${shas[@]}" | sort -u)
     for s7 in "${uniq[@]}"; do
         c="$(git rev-parse --verify --quiet "$s7^{commit}" 2>/dev/null)"
@@ -1829,7 +1833,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
     NOTICE_SENT=""
     if [ "${PICK_NOTICE:-0}" = 1 ]; then
         [ "$recycle" != --recycle ] || nsum="a recycle does not deliver it"
-        notice_send "release: stackshot PRs $names" "stackshot PRs $names are live at $sha; what sessions are told changed in $NOTICE_FROM; $nsum" || nrc=$?
+        notice_send "release: stackshot $live_pr" "stackshot $live_pr $live_is live at $sha; what sessions are told changed in $NOTICE_FROM; $nsum" || nrc=$?
         case $nrc in
             0) nt_note="; notice: sent with [fleet] notice_cmd"; NOTICE_SENT=1 ;;
             1) nt_note="; notice: none sent, no [fleet] notice_cmd is set" ;;
@@ -1843,7 +1847,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
             if rd="$(python3 client.py recycle-due --pr "https://github.com/$REPO/pull/$m" 2>&1)"; then flagged=1; rc_note="$rc_note; recycle (PR #$m): $(echo "$rd" | sed 's/^stackshot: //' | paste -sd ';' -)"; fi
         done
         if [ $flagged = 1 ]; then :
-        elif idle_recycle "release: stackshot PRs $names"; then rc_note="$rc_note; recycle: no item flagged, so the fleet tool was asked for one once the box is idle"
+        elif idle_recycle "release: stackshot $live_pr"; then rc_note="$rc_note; recycle: no item flagged, so the fleet tool was asked for one once the box is idle"
         else rc_note="$rc_note; recycle NOT marked: no item was flagged and the fleet tool could not be asked"; fi
         say "recycle: ${rc_note#; }"
     fi
@@ -1862,10 +1866,10 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
     if main_green post "$verified"; then
         pending_clear
         if [ -n "$mg_notlive" ]; then
-            tell "[release] PRs $names: main's tests passed on ${verified:0:7}, but it is not live ($mg_notlive); it goes live with the next release once main is fixed, or ./deploy.sh once main's tip run is green · log $glog"
+            tell "[release] $live_pr: main's tests passed on ${verified:0:7}, but it is not live ($mg_notlive); it goes live with the next release once main is fixed, or ./deploy.sh once main's tip run is green · log $glog"
             return $gfailed
         fi
-        [ -z "$audit_note" ] || tell "[release] PRs $names deployed at ${verified:0:7}${audit_note} · log $glog"
+        [ -z "$audit_note" ] || tell "[release] $live_pr deployed at ${verified:0:7}${audit_note} · log $glog"
         for m in "${merged_prs[@]}"; do released "$m" "$verified"; done
         return $gfailed
     fi

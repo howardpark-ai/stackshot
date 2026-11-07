@@ -1228,6 +1228,16 @@ check("group where the queue ejects the second PR: the first is deployed ONCE at
 check("ejected second PR: one red report for it ([release] PR #25 FAILED at merge queue, naming the reason) and one green for the first; the group's failure pauses nothing and the queue goes on (both leave the queue file)",
       len(s["msgs"]) == 2 and sum("FAILED at merge queue" in m and "PR #25" in m for m in s["msgs"]) == 1 and sum("PR #23 merged and deployed" in m for m in s["msgs"]) == 1 and not s["paused"] and s["queue"] == [], (s["msgs"], s["paused"], s["queue"]))
 check("ejected PR: its marker is gone (the queue no longer holds it) and it is not merged by the old path; no `mq drop` was needed", handed(s) == [] and "pr merge" not in s["gh"] and not any(l.startswith("mq drop") for l in s["mq"]), (handed(s), s["mq"]))
+s = grp("on-group-eject-notice", prs=("23", "25"), tip=M1, mq_prs=f"23=merged@{M1[:7]},25=ejected", files=QF(["25"]), pickfiles="next_rules.py", notice="notify")
+check("group where the queue ejects the second PR: the live notice names only the merged PR (#23), never the ejected one",
+      len(s["notice"]) == 1 and s["notice"][0].startswith("release: stackshot PR #23 \u2014 stackshot PR #23 is live at ") and "#25" not in s["notice"][0], (s["notice"], s["msgs"]))
+s = grp("on-group-eject-deploy-fails", prs=("23", "25"), tip=M1, mq_prs=f"23=merged@{M1[:7]},25=ejected", files=QF(["25"]), deploy_fail="1")
+check("group where the queue ejects the second PR and the deploy of the first fails: the group's red report names only the merged PR (#23), never the ejected one",
+      (lambda d: s["rc"] == 1 and len(d) == 1 and "[release] PR #23 FAILED at deploy" in d[0] and "#25" not in d[0])([m for m in s["msgs"] if "FAILED at deploy" in m]), (s["rc"], s["msgs"]))
+# plural-wording guard only: it passes on the code before the merged-names fix too
+s = grp("on-group-notice-both", prs=("23", "25"), tip=M2, pickfiles="next_rules.py", notice="notify")
+check("group where both PRs merge: the live notice names both, in the plural",
+      len(s["notice"]) == 1 and s["notice"][0].startswith("release: stackshot PRs #23 #25 \u2014 stackshot PRs #23 #25 are live at "), s["notice"])
 s = grp("on-group-eject-first", tip=M2, prs=("23", "25"), mq_prs=f"23=failed,25=merged@{M2[:7]}", docs=M2, grouplog=f"{M2} Merge pull request #25 from agent/x", fullshas=M2)
 check("group where the queue fails the FIRST PR (its checks failed in the group): the second still goes out, once, with its `done:` line; the first reports the queue's reason", s["rc"] == 1 and s["deploys"] == [M2] and "done: " in prlog(s, 25) and "FAILED at merge queue" in prlog(s, 23) and "required check suites failed" in prlog(s, 23), (s["rc"], s["deploys"], prlog(s, 23), glog(s)[-500:]))
 s = grp("on-group-none", mq_prs="23=failed,25=ejected", files=QF(["25", "35"]))
