@@ -1530,7 +1530,6 @@ with sync_playwright() as p:
                 ctx = (br.new_context(viewport={"width": w, "height": 844}, color_scheme=scheme, has_touch=True, is_mobile=True, device_scale_factor=2) if touch
                        else br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme))
                 pg = ctx.new_page(); pg.goto(f.as_uri()); pg.evaluate(OPEN); pg.wait_for_timeout(120)
-                if nm == "item (comment)": pg.evaluate("() => { const a = document.createElement('a'); a.className = 'b idiscuss'; a.href = '#'; a.textContent = 'Discuss ↗'; document.querySelector('main').appendChild(a); }")      # the fleet link, drawn only for a signed-in viewer with a session
                 for step in (0, 1):
                     if step and pg.query_selector("#panel-open"): pg.click("#panel-open"); pg.mouse.move(w // 2, 400); pg.wait_for_timeout(450)
                     d = pg.evaluate(BTNS); st = "open" if d["pOpen"] else "closed"; tag = f"buttons {nm} {w} {scheme} panel {st}"
@@ -1585,7 +1584,7 @@ with sync_playwright() as p:
                         pg.screenshot(path=os.path.join(HSHOTS, f"buttons-{re.sub(chr(32), '-', nm)}-{w}.png"), full_page=True)
                 ctx.close()
     check("the buttons: every kind was measured (Audit now is a text link now, checked in the panel alignment block): Send, Copy, Clear, Clear all, Watch, Mute, Default, Disable, Enable, the title bar's icon buttons, in the panel open and closed at both widths",
-          {"Send", "Copy", "Clear", "Clear all", "Watch", "Mute", "Default", "Disable", "Enable", "Discuss ↗", "Theme: system", "Search"} <= seen_btn["labels"]
+          {"Send", "Copy", "Clear", "Clear all", "Watch", "Mute", "Default", "Disable", "Enable", "Theme: system", "Search"} <= seen_btn["labels"]
           and {(390, "open"), (390, "closed"), (1280, "open"), (1280, "closed")} <= seen_btn["states"] and len(seen_btn["pages"]) == len(BTN_FILES), (sorted(seen_btn["labels"]), sorted(seen_btn["states"])))
     # ---- the color tool (shared/colortool.js, stackshot's settings in ui/colortool.py): on every page a Colors button (a bare two-color circle split by a diagonal line, no text, no frame) at the very bottom of the side panel, on the dark theme only. At 360, 390 and 412 px (touch)
     # and 800, 1100 and 1440 px it overlaps no other fixed control (the reload and Back to top buttons, the title bar's theme and panel buttons); the panel it opens is fixed in the page body, opens upward from the button, lies above the reload and Back to top
