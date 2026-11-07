@@ -71,6 +71,9 @@ SESS = "sess" + "ion_"                      # split, so this file holds no sessi
 SID = SESS + "01AbCdEf"
 CAI = "claude" + ".ai"
 SURL = f"https://{CAI}/code/{SID}"
+GW = "Generated " + "with"                  # split like the rest: the footer words never stand whole in this file
+GB = "Generated " + "by"
+GU = "Generated " + "using"
 GEN = "Generated " + "with [Claude " + "Code](https://claude.com/claude-" + "code)"
 TRAILERS = f"{CO}: Claude Opus 5.5 <{AN}>\n{CS}: {SURL}\n"
 FOOTER = f"\U0001F916 {GEN}\n\n{SURL}\n"
@@ -102,7 +105,7 @@ ATTRIBUTION = {   # each refused shape: what, the line
     "a Claude-Session trailer in lower case": f"{CS.lower()}: abc",
     "a Claude-Session trailer in upper case": f"{CS.upper()}: abc",
     "a session URL on a www host": f"https://www.{CAI}/code/{SID}",
-    "a session URL in mixed case": "https://Claude.AI/" + "Code/Session_01AbCdEf",
+    "a session URL in mixed case": "https://Claude.AI/" + "Code/" + SESS.capitalize() + "01AbCdEf",
     "a session URL followed by a full stop": SURL + ".",
     "a session URL followed by a comma": f"{SURL}, then more",
     "a session URL inside round brackets": f"({SURL})",
@@ -133,6 +136,33 @@ ATTRIBUTION = {   # each refused shape: what, the line
     "the generated-with footer in upper case": GEN.upper(),
     "the product link alone": "[Claude " + "Code](https://claude.com/claude-" + "code)",
     "the product link in a claude.ai spelling": "https://claude.ai/claude-" + "code",
+    # the footer read as a line (markup, links, tags and emoji stripped; starts Generated with/by/using; names Claude)
+    "a generated-with line naming Claude alone": GW + " Claude",
+    "a generated-with line with the phrase in bold": f"**{GW}** Claude Code",
+    "a generated-with line with a link on the name": f"{GW} [Claude](https://{CAI})",
+    "a generated-with line with a model name": f"{GW} Claude Opus 5.5",
+    "a generated-with line with a colon": f"{GW}: Claude Code",
+    "a generated-with line with a hyphen in the name": f"{GW} Claude-Code",
+    "a generated-with line naming the CLI": f"{GW} the Claude Code CLI",
+    "a generated-with line with an HTML link": f'{GW} <a href="x">Claude Code</a>',
+    "a generated-with line with HTML bold on the phrase": f"<b>{GW}</b> Claude",
+    "a generated-with line wholly inside a link": f"[{GW} Claude](https://example.invalid/x)",
+    "a generated-with line behind a quote mark": f"> {GW} Claude",
+    "a generated-with line behind a list mark": f"- {GW} Claude",
+    "a generated-with line in italics": f"*{GW} Claude*",
+    "a generated-with line with a bare URL before the name": f"{GW} https://example.invalid/x Claude",
+    "a generated-with line with an emoji after the name": f"{GW} Claude \U0001F916",
+    "a generated-by line naming Claude alone": GB + " Claude",
+    "a generated-using line naming Claude alone": GU + " Claude",
+    "a generated-with line in upper case naming Claude alone": (GW + " Claude").upper(),
+    # the narrower inline form, after other text on the line, with markdown around the name
+    "a generated-with Claude Code footer after other text": "Made by hand. " + GW + " Claude Code",
+    "a generated-with Claude Code footer after other text, in bold": "Made by hand. " + GW + " **Claude Code**",
+    "a generated-with Claude Code footer after other text, in backticks": "Made by hand. " + GW + " `Claude Code`",
+    "a generated-with Claude Code footer after other text, with a bracket": "Made by hand. " + GW + " [Claude Code]",
+    "a generated-by Claude Code footer after other text": "Made by hand. " + GB + " Claude Code",
+    "a generated-using Claude Code footer after other text": "Made by hand. " + GU + " Claude Code",
+    "the product link after other text": "Made by hand. [Claude " + "Code](https://claude.com/claude-" + "code)",
 }
 
 # ---- 1. clean text passes, in every mode
@@ -259,6 +289,36 @@ check("check_field: the exemption switches off every attribution pattern of that
 check("commit_field exempts by the full sha only", ct.commit_field(sorted(ct.ATTRIBUTION_EXEMPT_SHAS)[0], "m")[3] is True
       and ct.commit_field(sorted(ct.ATTRIBUTION_EXEMPT_SHAS)[0][:10], "m")[3] is False and ct.commit_field("0" * 40, "m")[3] is False)
 
+# a mistyped sha in the exempt set would exempt nothing and go unnoticed: each one must be a commit of this repository's history
+def _git_ok(*args):
+    r = subprocess.run(["git", "-C", STACK, *args], env=BASE_ENV, capture_output=True, text=True, timeout=60)
+    return r.returncode, r.stdout.strip()
+_rc, _inside = _git_ok("rev-parse", "--is-inside-work-tree")
+_rc2, _shallow = _git_ok("rev-parse", "--is-shallow-repository")
+if _rc != 0 or _inside != "true":
+    print("skip: exempt shas exist in the history: this tree is not a git work tree")
+elif _rc2 != 0 or _shallow != "false":
+    print("skip: exempt shas exist in the history: this is a shallow clone (the old commits may be missing)")
+else:
+    for _sha in sorted(ct.ATTRIBUTION_EXEMPT_SHAS):
+        _rc, _ = _git_ok("cat-file", "-e", _sha + "^{commit}")
+        check(f"the exempt sha {_sha[:10]} is a commit in this repository's history", _rc == 0, _sha)
+
+# bounded cost: long lines of the shapes that used to backtrack are read in linear time (the cap is far above the measured cost)
+import time
+_N = 262144
+_slow = {"repeated host": "claude.ai" * (_N // 9), "repeated host with spaces": "claude.ai " * (_N // 10), "repeated host and slash": "claude.ai/" * (_N // 10),
+         "open angle brackets": "<" * _N, "open square brackets": "[" * _N, "footer words then brackets": GW + " " + "[" * _N,
+         "footer words then tags": GW + " " + "<a " * (_N // 3), "footer words then empty links": GW + " " + "[a]( " * (_N // 5),
+         "footer words then URLs": GW + " " + "https://" * (_N // 8), "percent escapes": "%41" * (_N // 3)}
+for _what, _line in _slow.items():
+    _t = time.monotonic(); ct.attribution_hits(_line); _d = time.monotonic() - _t
+    check(f"a {len(_line) // 1024} KB line of {_what} is read within 3 seconds", _d < 3.0, round(_d, 2))
+_t = time.monotonic(); rc, out = tool(["--message-file", write("slow.txt", "S\n\n" + "claude.ai" * (65000 // 9) + "\n")]); _d = time.monotonic() - _t
+check("a 64 KB line of repeated hosts passes the whole tool within 5 seconds", rc == 0 and _d < 5.0, (rc, round(_d, 2)))
+_t = time.monotonic(); rc, out = tool(["--message-file", write("slow2.txt", "S\n\n" + "claude.ai" * (65000 // 9) + SESS + "x\n")]); _d = time.monotonic() - _t
+check("a 64 KB line of repeated hosts ending in session_ is read within 5 seconds (no host boundary, so not a URL)", rc == 0 and _d < 5.0, (rc, round(_d, 2)))
+
 # the workflow reads the PR's own commits: base..head, never all history
 wf = open(os.path.join(STACK, ".github", "workflows", "clean-text.yml"), encoding="utf-8").read()
 check("the workflow runs --from-env with the base branch as the base revision", 'BASE_REV="origin/$BASE_REF" uv run --no-project python tools/clean_text.py --from-env' in wf, wf)
@@ -270,7 +330,10 @@ msg = "Subject\n\n" + CLEAN_BODY + "\n" + TRAILERS + FOOTER
 rc, out = tool(["--message-file", write("m1.txt", msg)])
 check("a message with the trailers, footer and session URL is refused on every one of those lines", rc == 1 and out.count("FAIL message") == 5, (rc, out))
 rc, out = tool(["--message-file", write("m1b.txt", msg)], deny=SID + "\nnoreply\nclaude")
-check("a deny list does not exempt them: they are refused, and the deny list is read on them without echoing the line", rc == 1 and "deny pattern" in out and "refused" in out and SID not in out, (rc, out))
+import re
+check("a deny list does not exempt them: they are refused, and the deny list is read on them without echoing the line",
+      rc == 1 and re.search(r"^FAIL message m1b\.txt, line \d+: deny pattern [123]$", out, re.M) is not None and "refused" in out and SID not in out, (rc, out))
+check("(the same run) the attribution hits are still reported beside the deny hits", out.count("FAIL message m1b.txt") >= 7, out)
 rc, out = tool(["--body-file", write("b1.md", CLEAN_BODY + "\n" + FOOTER)])
 check("a PR body ending with the footer and the session URL is refused", rc == 1 and out.count("FAIL body") == 2, (rc, out))
 rc, out = tool(["--message-file", write("m2.txt", f"S\n\n{CS}: {SURL} board#5\n")])
@@ -283,7 +346,17 @@ rc, out = tool(["--message-file", write("m4.txt", "Fix the row\n\nSigned-off-by:
 check("other trailers are not skipped", rc == 1, (rc, out))
 for text, what in (("Explain the claude.ai connector setup", "claude.ai alone"), ("A session of the claude code client", "the words claude code in prose"),
                    ("Pass Claude the file", "the name Claude"), ("Numbers generated with Claude 3 are not comparable", "generated with a model name"),
-                   ("Generated with care by the build", "generated with something else"), ("Docs for the claude.ai/code feature", "a bare claude.ai/code mention with no slash after"), ("Reads the https://claude.ai/chat/abc page title", "a chat link is not a code session link")):
+                   ("Generated with care by the build", "generated with something else"), ("Docs for the claude.ai/code feature", "a bare claude.ai/code mention with no slash after"), ("Reads the https://claude.ai/chat/abc page title", "a chat link is not a code session link"),
+                   (f"claude.commands.{SESS}start runs first", "a dotted name that merely starts with claude.com"),
+                   (f"Read claude.compact.{SESS}id from the config", "a dotted config key that starts with claude.com"),
+                   (f"https://github.com/foo/{CAI}-tools/blob/main/{SESS}store.py", "a repo path whose name starts with claude.ai-"),
+                   (f"see {CAI}-docs.example.invalid/{SESS}notes", "a host that continues the name with a hyphen"),
+                   (f"The report was {GW.lower()} Claude Opus last week", "a sentence that says something was generated with Claude"),
+                   (f"Output {GB.lower()} Claude is reviewed by hand", "a sentence that starts with another word"),
+                   (f"{GW} Excel and a script", "generated with another tool"),
+                   (f"{GW} [the tool]({'claude'}-notes)", "a link whose target, not its text, holds the name"),
+                   (f"{GW} https://example.invalid/{'claude'}-notes", "a URL that holds the name"),
+                   (f"{GW} Claudette", "a longer name that starts with the letters")):
     rc, out = tool(["--title", text])
     check(f"attribution patterns do not misfire: {what}", rc == 0, (rc, out))
 
