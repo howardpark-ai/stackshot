@@ -563,8 +563,17 @@ check("merge_group: the concurrency group holds the ref (each entry has its own 
       "github.ref" in conc["group"] and "github.workflow" in conc["group"]
       and holds(conc["cancel-in-progress"], *EVENTS["a pull request"]) is True and all(holds(conc["cancel-in-progress"], *EVENTS[k]) is False for k in EVENTS if k != "a pull request"), conc)
 pr_jobs = [n for n in y["jobs"] if n not in ("shards", "measure", "suites")]   # the jobs that read the pull request (today tool-text)
-check("merge_group: every job that reads the pull request starts on a pull_request only, so a merge-queue entry skips it (skipped counts as passing), as a queue/** push does",
-      pr_jobs and all(y["jobs"][n]["if"].lstrip().startswith("github.event_name == 'pull_request'") for n in pr_jobs), {n: y["jobs"][n].get("if") for n in pr_jobs})
+check("merge_group: every job that reads the pull request is skipped for a merge-queue entry (its `if:` evaluated for the event: skipped counts as passing), as for a queue/** push",
+      pr_jobs and all(holds(y["jobs"][n].get("if", "True"), *EVENTS[MG]) is False for n in pr_jobs), {n: y["jobs"][n].get("if") for n in pr_jobs})
+# the whole of the run, not only the steps named above: every step of `suites` (by position and name: the unnamed ones too) and every other job, evaluated for the event. A merge-queue entry must match a queue/** push in each
+def whole_run(event, ref):
+    steps = {f"{i}: {st.get('name') or st.get('uses') or st.get('run', '')[:30]}": holds(st.get("if", "True"), event, ref) for i, st in enumerate(uj["steps"])}
+    jobs = {n: holds(j.get("if", "True"), event, ref) for n, j in y["jobs"].items()}
+    return jobs, steps
+wr_mg, wr_q = whole_run(*EVENTS[MG]), whole_run(*EVENTS["a push to a queue branch"])
+check("merge_group: every job and every step of the `suites` job (the `if:` of each evaluated, the whole set: the lock check, the map restore, the checkout …) runs for a merge-queue entry exactly when it runs for a queue/** push",
+      wr_mg == wr_q and len(wr_mg[1]) >= 10 and any(k.endswith("the suite map") for k in wr_mg[1]) and any("lock is present" in k for k in wr_mg[1]),
+      [(k, wr_mg[0][k], wr_q[0].get(k)) for k in wr_mg[0] if wr_mg[0][k] != wr_q[0].get(k)] + [(k, v, wr_q[1].get(k)) for k, v in wr_mg[1].items() if v != wr_q[1].get(k)])
 named_events = set(re.findall(r"github\.event_name\s*(?:==|!=)\s*'([^']*)'", open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read()))
 check("merge_group: every event name the file's expressions test for is one it triggers on, and merge_group is among them (a queue run is told apart from main's in the file, not left to fall through)",
       named_events <= {"push", "pull_request", "merge_group", "workflow_dispatch"} and "merge_group" in named_events, named_events)
