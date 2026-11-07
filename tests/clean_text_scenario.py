@@ -21,6 +21,9 @@ subject's branch names are checked though the subject is skipped; board#N counts
 board-tmp-<name>#N takes digits and hyphens in the name; commit-msg reads "#" lines of a -m message but not git's "# On branch" status
 lines or anything below the scissors line; pre-push checks the commits the remote being pushed to lacks (a commit only another remote
 has is checked; a push by URL maps to its remote; an unknown URL checks all history).
+Also: both hooks run the machine-wide hook of the same name (the user's global core.hooksPath, else $XDG_CONFIG_HOME/git/hooks) when it is executable, with the same arguments
+and, for pre-push, the same standard input; either one failing refuses, both run; a hook that is absent, not executable, or a link to
+the repo's own hook is skipped.
 
     tests/run-suite clean_text   (or python3, stdlib only)   → exit 0 / 1"""
 import importlib.util, os, subprocess, sys
@@ -502,6 +505,184 @@ rc, out = hgit(wt, "push", "-q", "origin", "fix/in-worktree:refs/heads/fix/board
 check("a linked worktree: pre-push refuses a board-id branch name", rc != 0 and "FAIL branch" in out, (rc, out))
 rc, out = hgit(wt, "push", "-q", "origin", "fix/in-worktree")
 check("a linked worktree: pre-push passes a clean push", rc == 0, (rc, out))
+
+# ---- 12. the hooks also run the machine-wide hook of the same name (chain-global: the user's global core.hooksPath, else
+# $XDG_CONFIG_HOME/git/hooks), when it exists and is executable
+# HOME, XDG_CONFIG_HOME and GIT_CONFIG_GLOBAL point into the scratch folder, so the real machine's hook and config are never read here. A stand-in hook records what
+# it was given (its arguments, its standard input, the message file it was handed) under GX_LOG and exits with a chosen status.
+GX = os.path.join(tmp, "gx"); GXH = os.path.join(GX, "git", "hooks"); GXLOG = os.path.join(tmp, "gx-log")
+GXTMP = os.path.join(tmp, "gx-tmp")           # the hooks' TMPDIR: nothing may stay in it
+os.makedirs(GXLOG); os.makedirs(GXTMP)
+GENV = {**BASE_ENV, "HOME": os.path.join(tmp, "gx-home"), "XDG_CONFIG_HOME": GX, "GX_LOG": GXLOG, "TMPDIR": GXTMP}
+HENV = GENV                                   # hgit, hrun and hcommit above read this name at call time
+def stand_in(hook, code, executable=True, d=None, log=None):
+    d = d or GXH; log = log or GXLOG
+    os.makedirs(d, exist_ok=True); os.makedirs(log, exist_ok=True)
+    p = os.path.join(d, hook)
+    if os.path.lexists(p): os.remove(p)
+    body = '#!/bin/sh\necho ran >> "%s/%s.ran"\nprintf "%%s\\n" "$@" > "%s/%s.args"\n' % (log, hook, log, hook)
+    body += 'cp "$1" "%s/commit-msg.msg"\n' % log if hook == "commit-msg" else 'cat > "%s/pre-push.stdin"\n' % log
+    body += "exit %d\n" % code
+    with open(p, "w") as f: f.write(body)
+    os.chmod(p, 0o755 if executable else 0o644)
+def stand_in_clear():
+    shutil.rmtree(GXLOG, ignore_errors=True); os.makedirs(GXLOG)
+def seen(name, log=None):
+    p = os.path.join(log or GXLOG, name)
+    if not os.path.exists(p): return None
+    with open(p, encoding="utf-8") as f: return f.read()
+def stand_in_remove():
+    shutil.rmtree(GX, ignore_errors=True); stand_in_clear()
+
+hg = os.path.join(tmp, "hg"); os.makedirs(hg)
+git(hg, "init", "-q", "-b", "main")
+os.makedirs(os.path.join(hg, "tools"))
+shutil.copy(SCRIPT, os.path.join(hg, "tools", "clean_text.py"))
+shutil.copytree(HOOKS_SRC, os.path.join(hg, ".githooks"))
+git(hg, "config", "core.hooksPath", ".githooks")
+git(hg, "add", "-A"); git(hg, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "Add the hooks")
+CLEAN, DIRTY = "Fix the row", "Fix the row (board#5)"
+
+# 1. no machine-wide hook directory: as before
+stand_in_remove()
+g0 = count(hg)
+rc, out = hcommit(hg, "a.txt", CLEAN)
+check("global hook: none present, a clean commit passes as before", rc == 0 and count(hg) == g0 + 1, (rc, out))
+rc, out = hcommit(hg, "b.txt", DIRTY)
+check("global hook: none present, a dirty commit is refused as before", rc != 0 and "board item id" in out and "machine-wide" not in out and count(hg) == g0 + 1, (rc, out))
+tip = git(hg, "rev-parse", "HEAD")
+rc, out = hrun(hg, "pre-push", [f"refs/heads/ok {tip} refs/heads/ok {ZERO}"])
+check("global hook: none present, pre-push passes a clean push as before", rc == 0, (rc, out))
+rc, out = hrun(hg, "pre-push", [f"refs/heads/main {tip} refs/heads/fix/board#3 {ZERO}"])
+check("global hook: none present, pre-push refuses a dirty branch name as before", rc == 1 and "FAIL branch" in out and "machine-wide" not in out, (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+
+# 2. executable, exits 0: still passes, and it got the same arguments and standard input
+stand_in("commit-msg", 0); stand_in("pre-push", 0); stand_in_clear()
+g1 = count(hg)
+rc, out = hcommit(hg, "c.txt", CLEAN + "\n\nA second line.")
+args = seen("commit-msg.args")
+check("global hook: exit 0 and a clean message, the commit goes through", rc == 0 and count(hg) == g1 + 1, (rc, out))
+check("global hook: commit-msg got the message file as its one argument", args is not None and len(args.splitlines()) == 1 and args.strip().endswith("COMMIT_EDITMSG"), args)
+check("global hook: commit-msg saw the whole message", (seen("commit-msg.msg") or "").startswith(CLEAN + "\n\nA second line."), seen("commit-msg.msg"))
+msgfile = os.path.join(tmp, "gx-COMMIT_EDITMSG")
+with open(msgfile, "w", encoding="utf-8") as f: f.write("Fix the row\n\n# On branch some-branch\nA line.\n")
+stand_in_clear()
+r = subprocess.run([os.path.join(hg, ".githooks", "commit-msg"), msgfile], cwd=hg, env=HENV, capture_output=True, timeout=60)
+check("global hook: commit-msg is given the original file, git's template lines included (the repo hook strips them for its own check only)",
+      r.returncode == 0 and seen("commit-msg.args") == msgfile + "\n" and "# On branch some-branch" in (seen("commit-msg.msg") or ""), (r.returncode, seen("commit-msg.args"), seen("commit-msg.msg")))
+tip = git(hg, "rev-parse", "HEAD")
+stand_in_clear()
+lines = [f"refs/heads/ok {tip} refs/heads/ok {ZERO}", f"refs/heads/two {tip} refs/heads/two {ZERO}"]
+rc, out = hrun(hg, "pre-push", lines, args=("origin", "ssh://example.invalid/r.git"))
+check("global hook: exit 0, pre-push passes", rc == 0, (rc, out))
+check("global hook: pre-push got the remote name and URL", seen("pre-push.args") == "origin\nssh://example.invalid/r.git\n", seen("pre-push.args"))
+check("global hook: pre-push got the same lines on standard input", seen("pre-push.stdin") == "".join(l + "\n" for l in lines), seen("pre-push.stdin"))
+hgit(hg, "branch", "-q", "dirty", "HEAD~1"); hgit(hg, "checkout", "-q", "dirty")
+rc, out = hcommit(hg, "d.txt", DIRTY, "--no-verify")
+dirty = git(hg, "rev-parse", "HEAD"); hgit(hg, "checkout", "-q", "main")
+stand_in_clear()
+rc, out = hrun(hg, "pre-push", [f"refs/heads/dirty {dirty} refs/heads/dirty {ZERO}"])
+check("global hook: the repo's own check still reads the same lines (a dirty commit is refused with the hook at 0)", rc == 1 and f"FAIL commit {dirty[:10]}" in out, (rc, out))
+check("global hook: it also got those lines", f"refs/heads/dirty {dirty} refs/heads/dirty {ZERO}\n" == seen("pre-push.stdin"), seen("pre-push.stdin"))
+bare = os.path.join(tmp, "gx-remote.git"); os.makedirs(bare)
+git(bare, "init", "-q", "--bare", "-b", "main")
+git(hg, "remote", "add", "origin", bare)
+stand_in_clear()
+rc, out = hgit(hg, "push", "-q", "origin", "main")
+check("global hook: a real push passes, the hook got the remote name, the URL and the pushed ref",
+      rc == 0 and seen("pre-push.args") == f"origin\n{bare}\n" and f"refs/heads/main {git(hg, 'rev-parse', 'main')} refs/heads/main {ZERO}" in (seen("pre-push.stdin") or ""), (rc, out, seen("pre-push.args"), seen("pre-push.stdin")))
+
+# 3. executable, exits 1, the repo's own check passes: refused
+stand_in("commit-msg", 1); stand_in("pre-push", 1); stand_in_clear()
+g2 = count(hg)
+rc, out = hcommit(hg, "e.txt", CLEAN)
+check("global hook: exit 1 with a clean message, the commit is refused and says which hook", rc != 0 and count(hg) == g2 and "machine-wide" in out and seen("commit-msg.ran") is not None, (rc, out))
+tip = git(hg, "rev-parse", "HEAD")
+rc, out = hrun(hg, "pre-push", [f"refs/heads/ok {tip} refs/heads/ok {ZERO}"])
+check("global hook: exit 1 with a clean push, pre-push is refused and says which hook", rc == 1 and "machine-wide" in out and seen("pre-push.ran") is not None, (rc, out))
+rc, out = hgit(hg, "push", "-q", "origin", "main:refs/heads/by-hook")
+check("global hook: a real push is refused and the remote has no such branch", rc != 0 and "by-hook" not in git(bare, "branch"), (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+
+# 4. exits 0, the repo's own check fails: refused
+stand_in("commit-msg", 0); stand_in("pre-push", 0); stand_in_clear()
+g3 = count(hg)
+rc, out = hcommit(hg, "f.txt", DIRTY)
+check("global hook: exit 0 but the repo's check fails, the commit is refused", rc != 0 and "board item id" in out and count(hg) == g3 and seen("commit-msg.ran") is not None, (rc, out))
+rc, out = hrun(hg, "pre-push", [f"refs/heads/main {tip} refs/heads/fix/board#3 {ZERO}"])
+check("global hook: exit 0 but the repo's check fails, the push is refused", rc == 1 and "FAIL branch" in out and seen("pre-push.ran") is not None, (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+
+# 5. present but not executable: ignored, no error
+stand_in("commit-msg", 1, executable=False); stand_in("pre-push", 1, executable=False); stand_in_clear()
+g4 = count(hg)
+rc, out = hcommit(hg, "g.txt", CLEAN)
+check("global hook: not executable, the commit passes and the file is not run", rc == 0 and count(hg) == g4 + 1 and seen("commit-msg.ran") is None and "machine-wide" not in out, (rc, out))
+rc, out = hcommit(hg, "h.txt", DIRTY)
+check("global hook: not executable, the repo's check still refuses", rc != 0 and "board item id" in out and seen("commit-msg.ran") is None, (rc, out))
+tip = git(hg, "rev-parse", "HEAD")
+rc, out = hrun(hg, "pre-push", [f"refs/heads/ok {tip} refs/heads/ok {ZERO}"])
+check("global hook: not executable, pre-push passes and the file is not run", rc == 0 and seen("pre-push.ran") is None and "machine-wide" not in out, (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+
+# 6. both fail: both ran, and the exit is non-zero
+stand_in("commit-msg", 1); stand_in("pre-push", 1); stand_in_clear()
+g5 = count(hg)
+rc, out = hcommit(hg, "i.txt", DIRTY)
+check("global hook: both fail on a commit, both ran and the output shows both refusals",
+      rc != 0 and count(hg) == g5 and seen("commit-msg.ran") is not None and "board item id" in out and "machine-wide" in out, (rc, out))
+rc, out = hrun(hg, "pre-push", [f"refs/heads/main {tip} refs/heads/fix/board#3 {ZERO}"])
+check("global hook: both fail on a push, both ran and the exit is non-zero",
+      rc == 1 and seen("pre-push.ran") is not None and "FAIL branch" in out and "machine-wide" in out, (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+
+# the machine-wide hook being this very hook (a link to it) is not run again: no recursion
+stand_in_remove(); os.makedirs(GXH)
+for h in ("commit-msg", "pre-push"): os.symlink(os.path.join(hg, ".githooks", h), os.path.join(GXH, h))
+rc, out = hcommit(hg, "j.txt", CLEAN)
+check("global hook: a link to the repo's own commit-msg is skipped (no recursion), the commit passes", rc == 0, (rc, out))
+rc, out = hcommit(hg, "k.txt", DIRTY)
+check("global hook: a link to the repo's own commit-msg is skipped, the repo's check still refuses", rc != 0 and "board item id" in out, (rc, out))
+rc, out = hrun(hg, "pre-push", [f"refs/heads/ok {tip} refs/heads/ok {ZERO}"])
+check("global hook: a link to the repo's own pre-push is skipped (no recursion)", rc == 0, (rc, out))
+stand_in_remove()
+# the user's global core.hooksPath comes first (a leading ~ expanded), before the XDG directory
+GXALT = os.path.join(GENV["HOME"], "alt-hooks"); GXDECOY = os.path.join(tmp, "gx-decoy-log")
+GXCFG = os.path.join(tmp, "gx-gitconfig")
+with open(GXCFG, "w") as f: f.write("[core]\n\thooksPath = ~/alt-hooks\n")
+stand_in_remove(); shutil.rmtree(GXDECOY, ignore_errors=True)
+HENV = {**GENV, "GIT_CONFIG_GLOBAL": GXCFG}
+stand_in("commit-msg", 1, log=GXDECOY); stand_in("pre-push", 1, log=GXDECOY)           # the XDG directory: must not be used now
+stand_in("commit-msg", 0, d=GXALT); stand_in("pre-push", 0, d=GXALT)
+g6 = count(hg)
+rc, out = hcommit(hg, "l.txt", CLEAN)
+check("global core.hooksPath: its hook runs (~ expanded), the XDG directory is not used, the clean commit passes",
+      rc == 0 and count(hg) == g6 + 1 and seen("commit-msg.ran") is not None and seen("commit-msg.ran", GXDECOY) is None, (rc, out))
+check("global core.hooksPath: commit-msg got the message file as its one argument", len((seen("commit-msg.args") or "").splitlines()) == 1 and (seen("commit-msg.args") or "").strip().endswith("COMMIT_EDITMSG"), seen("commit-msg.args"))
+lines = [f"refs/heads/ok {tip} refs/heads/ok {ZERO}"]
+rc, out = hrun(hg, "pre-push", lines, args=("origin", "ssh://example.invalid/r.git"))
+check("global core.hooksPath: pre-push got the same arguments and standard input, the XDG directory is not used",
+      rc == 0 and seen("pre-push.args") == "origin\nssh://example.invalid/r.git\n" and seen("pre-push.stdin") == lines[0] + "\n" and seen("pre-push.ran", GXDECOY) is None, (rc, out, seen("pre-push.args"), seen("pre-push.stdin")))
+stand_in("commit-msg", 1, d=GXALT); stand_in("pre-push", 1, d=GXALT)
+rc, out = hcommit(hg, "m.txt", CLEAN)
+check("global core.hooksPath: its hook exits 1, the commit is refused", rc != 0 and count(hg) == g6 + 1 and "machine-wide" in out, (rc, out))
+rc, out = hrun(hg, "pre-push", lines)
+check("global core.hooksPath: its hook exits 1, the push is refused", rc == 1 and "machine-wide" in out, (rc, out))
+rc, out = hcommit(hg, "m.txt", DIRTY)
+check("global core.hooksPath: both fail on a commit, both ran", rc != 0 and "board item id" in out and "machine-wide" in out, (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+# a global core.hooksPath that names the repo's own hook directory is the very same file: skipped, no loop
+with open(GXCFG, "w") as f: f.write("[core]\n\thooksPath = %s\n" % os.path.join(hg, ".githooks"))
+rc, out = hcommit(hg, "n.txt", CLEAN)
+check("global core.hooksPath naming the repo's own hooks: skipped (no recursion), the commit passes", rc == 0, (rc, out))
+rc, out = hcommit(hg, "o.txt", DIRTY)
+check("global core.hooksPath naming the repo's own hooks: the repo's check still refuses", rc != 0 and "board item id" in out, (rc, out))
+rc, out = hrun(hg, "pre-push", lines)
+check("global core.hooksPath naming the repo's own hooks: pre-push passes (no recursion)", rc == 0, (rc, out))
+hgit(hg, "reset", "-q", "--hard", "HEAD")
+HENV = GENV; stand_in_remove(); shutil.rmtree(GXALT, ignore_errors=True)
+check("global hook: pre-push leaves no temporary file behind, pass or fail", os.listdir(GXTMP) == [], os.listdir(GXTMP))
 
 if fails: print(f"{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: clean_text, {len(ran)} checks"); sys.exit(0)

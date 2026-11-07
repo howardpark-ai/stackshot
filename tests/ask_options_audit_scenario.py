@@ -13,6 +13,8 @@ refuse such an ask now; this finds the ones written before them, or that got thr
      option, or none by any form, is; with two options (drawn without letters) any place counts
   3b2 a leading word shared with another option's label does not pass the recommended one ("Ship later" for "Ship now"); an option, letter or place right after not, avoid, never, skip, except or instead of is turned away
      ("Wide, not Narrow" names Wide)
+  3b4 [keywords.ask_options] (invented stand-ins: particle "zz", refusal "nope"): a label followed by the particle names its option, and a label right after the refusal word is turned away, in the audit and the
+     write-time note; with the settings empty nothing changes
   3c options the page cannot read (one option, no single recommended, a non-boolean recommended) count as Yes / No, so an open question over them is found and the detail says so
   3d an ask that cannot be split into Decide and Recommend is not read
   4  the pass: the finding is a filing-pass finding, sent once to where the daily run's findings go (the project's -main agent, marked for the owner, for the owner's own item) with the fix line; sent again after a write
@@ -211,6 +213,49 @@ check("3b3 the write gate and the audit agree on decomposed Greek: recommend_mis
 check("3b3 …and the label stored decomposed against a composed Recommend, and an NFD Recommend naming another label, are read the same way",
       ask_read.recommend_missing(LAYOUT("έγκριση", opts(*(unicodedata.normalize("NFD", k) for k in GR), rec=unicodedata.normalize("NFD", "έγκριση")))) == ""
       and ask_read.recommend_missing(LAYOUT(unicodedata.normalize("NFD", "άρνηση"), opts(*GR, rec="έγκριση"))) == "έγκριση")
+
+# ---- 3b4. [keywords.ask_options]: a particle glued to a label, and a refusal word of another language (invented ASCII stand-ins: particle "zz", refusal "nope")
+import config as _cfg
+def kw_set(particles=(), refusals=()):
+    sec = _cfg.CFG.setdefault("keywords", {}).setdefault("ask_options", {}); sec["particles"] = list(particles); sec["refusals"] = list(refusals)
+def kw_off(): _cfg.CFG.get("keywords", {}).pop("ask_options", None)
+PART = lambda rec, o=WNT, r="Narrow": ask_read.recommend_mismatch(LAYOUT(rec, opts(*o, rec=r)))
+def found_for(rec, labels=WNT, recommended="Narrow"):
+    got, _all = found(build(asking(9300, ask("which layout the item page uses", rec), opts(*labels, rec=recommended))))
+    return bool(got)
+try:
+    kw_off()
+    check("3b4 with the settings empty a particle glued to the label is no mention, and 'nope' turns nothing away (the English behavior)",
+          PART("Narrowzz") == "none" and found_for("Narrowzz") and PART("nope Wide") == "Wide" and ask_read._mention("Wide", "nope Wide") == (True, False),
+          (PART("Narrowzz"), PART("nope Wide"), ask_read._mention("Wide", "nope Wide")))
+    kw_set(particles=["zz"])
+    check("3b4 a particle setting: the label followed by the particle names the option, through recommend_mismatch and through the audit; without the particle nothing changes",
+          PART("Narrowzz") == "" and not found_for("Narrowzz") and PART("Narrow") == "" and PART("Widezz") == "Wide" and PART("Narrowzzq") == "none" and ask_read._mention("Narrow", "Narrowzz") == (True, False),
+          (PART("Narrowzz"), PART("Widezz"), PART("Narrowzzq")))
+    check("3b4 …a multi-word label takes the particle after its last word; a Greek label takes a stand-in particle too",
+          mm("Use Azz", USEAB, "Use A") == "" and mm("Use Bzz", USEAB, "Use A") == "Use B" and mm("έγκρισηzz", GR, "έγκριση") == "", (mm("Use Azz", USEAB, "Use A"), mm("Use Bzz", USEAB, "Use A"), mm("έγκρισηzz", GR, "έγκριση")))
+    kw_set(refusals=["nope", "no way"])
+    check("3b4 a refusal setting: a label, letter or place right after the word is turned away (the other option, or none), as 'not' does; the English words still work",
+          PART("nope Wide, Narrow") == "" and PART("Wide, nope Narrow") == "Wide" and PART("nope Narrow") == "none" and PART("no way Narrow, Wide") == "Wide" and PART("nope B") == "none" and PART("nope the second") == "none"
+          and PART("Wide, not Narrow") == "Wide" and PART("nope-ish Narrow") == "" and ask_read._mention("Narrow", "nope Narrow") == (True, True),
+          [PART(x) for x in ("nope Wide, Narrow", "Wide, nope Narrow", "nope Narrow", "no way Narrow, Wide", "nope B", "nope the second", "Wide, not Narrow", "nope-ish Narrow")])
+    check("3b4 …through the audit the same Recommend is a finding with the setting on and not with it off",
+          found_for("nope Narrow") and found_for("Wide, nope Narrow"), (found_for("nope Narrow"), found_for("Wide, nope Narrow")))
+    kw_off()
+    check("3b4 …and with it off again 'nope Narrow' names the option as it always did", PART("nope Narrow") == "" and not found_for("nope Narrow"), (PART("nope Narrow"), found_for("nope Narrow")))
+    # the write-time note: its substring read already finds a glued particle, and a configured refusal word before the only mention makes the label unnamed
+    NOTE = lambda rec: server._options_note(LAYOUT(rec, opts(*WNT, rec="Narrow")))
+    kw_set(particles=["zz"], refusals=["nope"])
+    check("3b4 the write-time note (server._options_note): quiet for a label with its particle; speaks with the refusal word before the only mention, and not for 'nope Wide, Narrow' or without the word",
+          NOTE("Narrowzz") == "" and "“Narrow”" in NOTE("nope Narrow") and NOTE("nope Wide, Narrow") == "" and NOTE("Narrow") == "" and NOTE("Narrow, nope Wide") == "" and NOTE("nope Narrow, Narrow") == "",
+          [NOTE(x) for x in ("Narrowzz", "nope Narrow", "nope Wide, Narrow", "Narrow", "Narrow, nope Wide", "nope Narrow, Narrow")])
+    kw_off()
+    check("3b4 …with the settings off the note is quiet for 'nope Narrow' and 'Narrowzz' (nothing changes)", NOTE("nope Narrow") == "" and NOTE("Narrowzz") == "", (NOTE("nope Narrow"), NOTE("Narrowzz")))
+    check("3b4 …the English refusals are not a note either way ('not Narrow' stays as it was)", NOTE("not Narrow") == "")
+    kw_set(particles=["zz"], refusals=["nope"])
+    check("3b4 …and with a setting on 'not Narrow' is still no note (only the configured words reach the note)", NOTE("not Narrow") == "", NOTE("not Narrow"))
+finally:
+    kw_off()
 
 # ---- 3c. options the page cannot read are Yes / No to it
 bad = build(

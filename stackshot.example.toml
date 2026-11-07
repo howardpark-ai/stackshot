@@ -78,6 +78,10 @@ notice_cmd = ""                                     # the command that tells the
                                                     # as spaces, cut to 400 characters). release.sh runs it after a green deploy whose session pick is a notice (docs/session-reload.md).
                                                     # "" = none: the release log says no notice command is set, and the release goes on
 
+[release]                                           # release.sh
+report_to = "projects/example"                      # the page key (or session name) release.sh sends the report of each release to (green or red, the PR, the commit, what was restarted), and names in the line
+                                                    # it prints when a release starts. The default is the stand-in page of the example config: point it at a page of your own, for example "projects/example-reports"
+
 [subject]
 prefixes = ["[work] ", "[home] "]                   # every subject starts with one of these
 fallback_prefix = ""                                # the prefix of an item the server files itself (a pane's terminal prompt, a job gap) for a project whose scope has no prefix of its own; it must be one of `prefixes`, else the first one is used. "" = the first
@@ -154,6 +158,8 @@ remind_hours = 6                                    # the ten-minute passes: a f
 orphan_handover = "report"                          # mode "script": an open item whose mover (or post-wake mover) is a session that is gone, a project's last retired agent included, is handed to the closest
                                                     # live agent (the project's own, then its parent's -main, its hub's, the scope's general one: successor.py), with a History line giving the reason; an item
                                                     # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check
+summary_to = "projects/example"                     # mode "script": the page key (or session name) the summary of each run is sent to. The default is the stand-in page of the example config: point
+                                                    # it at a page of your own, for example "projects/example-reports"
 builder = "my-engineer"                             # mode "script": who a tripped threshold, and an unmoved finding of a project with no builder, is sent to
 main = "my-main"                                   # mode "script": the -main agent that gets the findings addressed to the owner (marked [for <owner>]) and the run's summary
 model = ""                                          # mode "script": the model of the per-suspect calls; "" = the [router] model
@@ -755,6 +761,10 @@ ignore_phrases = []                                 # (words) phrases that conta
 
 [keywords.waiting]
 park_words = []                                     # (words) other-language words for park, postpone or hold: the owner's answer with one parks the item
+
+[keywords.ask_options]
+particles = []                                      # (words) the suffixes that may follow the last word of an option's label in a Recommend sentence (a language that glues them on): the label still counts as named. Example: ["zz"] reads "Widezz" as naming the option "Wide"
+refusals = []                                       # (words) other-language words or phrases that say 'not this option' right before a label, letter or place (the English ones are not, no, avoid, never, skip, except, don't, instead of, rather than). Example: ["nope"] turns away the option in "nope Wide"
 
 [keywords.server]
 command_cues = []                                   # (words) other-language words that say an item waits on the owner running or pasting a command

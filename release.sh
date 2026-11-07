@@ -176,7 +176,7 @@
 #                                 wait and taken again for the deploy, so a release waiting on main never holds another one's deploy (a lock still
 #                                 held after 15 min then fails "deploy lock": merged, not deployed). 4. ./deploy.sh pinned to the commit main's
 #                                 tests passed on (DEPLOY_TO: fast-forward to the newest commit that contains M whose run passed, never to a tip with no passing run);
-#                                 5. one message to projects/example: green or red, the PR, the commit, what was restarted, what the session
+#                                 5. one message to [release] report_to (default projects/example): green or red, the PR, the commit, what was restarted, what the session
 #                                 pick chose and from which files, the log path.
 #                                 A green one goes with --release green (the turn rule's second build): the
 #                                 server logs it, rules it merged as `stackshot (auto)`, comments on the items anchored to the PR
@@ -259,6 +259,7 @@ python3() { command python3 "$@" 5>&- 6>&- 7>&- 8>&- 9>&-; }
 sleep() { command sleep "$@" 5>&- 6>&- 7>&- 8>&- 9>&-; }
 REPO="$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
 LOGDIR="$(python3 config.py state releases)"; mkdir -p "$LOGDIR"
+REPORT_TO="$(python3 -c 'import config; print(config.release_report_to())' 2>/dev/null)"; REPORT_TO="${REPORT_TO:-projects/example}"   # [release] report_to: where tell() sends the report of a release; the stand-in page when unset (or when this config.py predates the key)
 WAIT_CHECKS="${RELEASE_WAIT_CHECKS:-3000}"   # seconds a PR's checks may stay pending (50 min); the knob lets the tests prove the give-up on a short cap, one scenario pins this default
 MERGEABLE_WAIT="${RELEASE_WAIT_MERGEABLE:-180}"   # seconds GitHub may say mergeable UNKNOWN (it recomputes after main moves) before the release gives up; read every 10 s
 LOCK_FILE="${DEPLOY_LOCK_FILE:-$LOGDIR/deploy.lock}"      # next to the other release state; DEPLOY_LOCK_FILE / DEPLOY_LOCK_WAIT let the tests point elsewhere
@@ -443,7 +444,7 @@ mq_compare() {   # release.sh --mq-compare <pr> <run>: wait for the queue's verd
 say() { echo "$(date -u +%FT%TZ) $*"; }
 tell() {  # one message to the project; never fails the run. Extra arguments go to client.py (--release green --pr <url>)
     local text="$1"; shift
-    python3 client.py message projects/example "$text" --sender release "$@" >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- || say "message not sent: $text"
+    python3 client.py message "$REPORT_TO" "$text" --sender release "$@" >/dev/null 2>&1 9>&- 7>&- 6>&- 5>&- || say "message not sent: $text"
 }
 released() {  # $1 = a PR, $2 = its merge commit: main's full run passed on it and it is in $LAST_GOOD. The server settles the open items with a release step
                # for the PR (client.py released; refused unless the merge is in last-good and HEAD): an item whose only open steps are that release is closed, done,
@@ -2100,7 +2101,7 @@ case "${1:-}" in
         systemd-run --user --quiet --collect --unit "stackshot-release-$1" -p WorkingDirectory="$HERE" \
             --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run-group "$@" \
             || { echo "could not start stackshot-release-$1 (systemd-run failed): nothing was started" >&2; exit 1; }
-        echo "started stackshot-release-$1: hands the PRs $* to the merge queue as one group, deploys what it merges once, and reports to projects/example · log $LOGDIR/group-$1.log (and each PR's pr-N.log)"; exit 0 ;;
+        echo "started stackshot-release-$1: hands the PRs $* to the merge queue as one group, deploys what it merges once, and reports to $REPORT_TO · log $LOGDIR/group-$1.log (and each PR's pr-N.log)"; exit 0 ;;
     queue) shift; queue_cmd "$@"; exit $? ;;
     --mq-compare) mq_compare "${2:-}" "${3:-}"; exit $? ;;   # the unit a shadow release starts when it ends (THE MERGE QUEUE, SHADOW)
     ''|-h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 2 ;;   # the header comment, up to the first line of code
@@ -2110,6 +2111,6 @@ case "${1:-}" in
         systemd-run --user --quiet --collect --unit "stackshot-release-$pr" -p WorkingDirectory="$HERE" \
             --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run "$pr" ${2:+"$2"} \
             || { echo "could not start stackshot-release-$pr (systemd-run failed): nothing was started" >&2; exit 1; }     # uv, gh, python3 and the fleet tool as the shell sees them; a start that failed is said so (the queue skips it)
-        echo "started stackshot-release-$pr: merges PR #$pr when its checks pass, deploys, picks what the sessions need (${2:-from the files it changed}), and reports to projects/example · log $LOGDIR/pr-$pr.log"; exit 0 ;;
+        echo "started stackshot-release-$pr: merges PR #$pr when its checks pass, deploys, picks what the sessions need (${2:-from the files it changed}), and reports to $REPORT_TO · log $LOGDIR/pr-$pr.log"; exit 0 ;;
 esac
 exit 0
