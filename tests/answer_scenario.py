@@ -124,7 +124,9 @@ item("a", 56, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent") 
 item("a", 57, needs=["decision"], ask=YESNO, mover="Oliver", then="Oliver")               # the decision hand-over: a then that names him is no then
 item("a", 58, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent", hold=True, wake="2099-01-01", hold_set={"by": "t", "at": now})   # the hand-over, F1: still on hold with a wake after the answer
 item("a", 59, needs=["decision", "external"], ask=YESNO, mover="Oliver", then="home-agent", party="the vendor", chase="2099-01-01")           # the hand-over, F1: external stays in needs
-item("a", 62)                                                                                                                              # the hand-over: a prerequisite that is open now and closed in the test
+item("a", 90, needs=["home-agent"], next="home-agent: confirm the runs are gone")                  # a session sets the your-step and names the mover in one update, then his note
+item("a", 91, needs=["home-agent"], next="home-agent: confirm the runs are gone")                  # the same, with its own Oliver line in next saying the step
+item("a", 62)                                                                                                                            # the hand-over: a prerequisite that is open now and closed in the test
 item("a", 60, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent", after=["a62"])                                               # the hand-over, F1: an open after link
 item("a", 67)                                                                                                                              # the prerequisite of, closed in the test
 item("a", 63, needs=["decision"], ask=ASK, mover="Oliver", then="home-agent", after=["a67"],
@@ -890,5 +892,24 @@ try:
           and not b(85).conflicts and any(t[0] == "a85" and t[1] == AGENT for t in told), (rd("a", 85)["metadata"], b(85), told))
 finally:
     server._watch.enabled = _real_enabled
+
+# ---- a your-step set by an update that also names the mover (mover=Oliver) still gets the server's step, so his note ticks it
+STEP90 = "Run the 8 run deletions yourself: my gh DELETE call is refused by the permission layer"
+_ol = lambda g: [(x["status"], x["text"]) for x in server._hs._steps.view(rd("a", g)["metadata"], keeper=OWNER) if x["text"].startswith("Oliver:")]
+server.stackshot_update("a90", sender="home-agent", step=STEP90, mover="Oliver", next="home-agent: confirm the runs are gone\nOliver: `for id in 1 2; do gh api -X DELETE runs/$id; done`")
+_m90 = rd("a", 90)["metadata"]
+check("named mover, setup: step= and mover=Oliver in one update: his step is on the list as the server's own (owner_step), beside the session's own Oliver line",
+      _m90.get("state") == "your-step" and _m90.get("mover") == "Oliver" and _m90.get("owner_step") == f"Oliver: {STEP90}"
+      and [(s_, t_.startswith("Oliver: `for id")) for s_, t_ in _ol(90)] == [("open", True), ("open", False)] and _ol(90)[1][1] == f"Oliver: {STEP90}", (_m90.get("owner_step"), _ol(90)))
+told.clear(); r_s90 = server._answer("a90", "", "tried it, it says forbidden", "send"); _m90 = rd("a", 90)["metadata"]
+check("named mover: his note on that step ticks the server's step (done, his words after the arrow), leaves the session's own Oliver line open, and the then-mover is still told to judge the note",
+      r_s90 == "stepreply" and "owner_step" not in _m90
+      and [s_ for s_, t_ in _ol(90) if t_.startswith(f"Oliver: {STEP90}")] == ["done"] and [s_ for s_, t_ in _ol(90) if t_.startswith("Oliver: `for id")] == ["open"]
+      and any("Judge the note" in t[2] for t in told), (r_s90, _ol(90), _m90.get("owner_step"), [t[2][:80] for t in told]))
+# a session that wrote its own Oliver line saying the same as the step: the equality rule adopts it (no second step), and his note ticks it
+server.stackshot_update("a91", sender="home-agent", step=STEP90, mover="Oliver", next=f"home-agent: confirm the runs are gone\nOliver: {STEP90}")
+check("named mover: the session's own `Oliver: <step>` line equal to the step is his one step (adopted, none added beside it)", len(_ol(91)) == 1 and rd("a", 91)["metadata"].get("owner_step") == f"Oliver: {STEP90}", (_ol(91), rd("a", 91)["metadata"].get("owner_step")))
+server._answer("a91", "", "why does this fail?", "send")
+check("named mover: his note ticks that one line by equality", [s_ for s_, _ in _ol(91)] == ["done"], _ol(91))
 
 print(("ok" if not fails else "FAILED") + f": answer scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

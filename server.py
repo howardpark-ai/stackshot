@@ -866,7 +866,7 @@ def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", auth
     a release, a migration). `note` is the server's own line on one of its passes that is an event on the item
     (a wake, a release from hold, a recycle done) and `author` = (name, id) of a write that is neither a session's nor the server's
     own pass: only the owner's answer on the board, `(OWNER, "board")`. Neither reaches GitHub since an earlier change (the issue mirror carries the subject, open or
-    closed and the description alone, with no comment); the arguments stay for the callers. `author` still stamps the revision (_record_writer). A session's write to an item settles an answer it was told of (_answer_ack). An update that names the mover, or only files, sets `_NO_SETTLE` around its save: the mover is left as the write has it. `mirror` False: no job for the GitHub queue (the migration
+    closed and the description alone, with no comment); the arguments stay for the callers. `author` still stamps the revision (_record_writer). A session's write to an item settles an answer it was told of (_answer_ack). An update that names the mover, or only files, sets `_NO_SETTLE` around its save: the mover is left as the write has it (his step on the checklist is still made or dropped when the update names the mover; a filing save leaves it). `mirror` False: no job for the GitHub queue (the migration
     pass writes an item that has no issue so: a "changed" job for such an item would create one). `background` True: a bulk repair's save, whose description sync
     is queued behind every live job (ghsync.on_change) and stays inside the reserve a live write keeps. `activity` files the save under an activity kind (activity.py) when the writer
     alone does not say: the confirm tool (`confirm`), an anchor event (`event`), a message written onto the item (`message`), the owner's comment on GitHub (`answer`); left blank a session's
@@ -887,6 +887,8 @@ def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", auth
     if not getattr(_NO_SETTLE, "on", False):
         _settle_mover_on_save(item, before)      # an item that waits on him has him as mover (the agent in then), and the mover he held goes back when it leaves his state: for every save, the server's own included
         _owner_steps_on_save(item, before, writer, author)      # N2/N4/N5: an item that waits on him has his open step on its checklist, and one that stops waiting on him by a session's write loses it: every save, the server's own included
+    elif _NO_SETTLE.on == "named":
+        _owner_steps_on_save(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms ("quiet") leaves the checklist alone
     _record_writer(item, writer, author)     # every revision names who wrote it (the hand-off clock reads it)
     _stamp_activity(item, before, writer, author, activity, activity_at)      # the activity clock: only a real write about the work moves it (an audit's write and a bare confirm do not)
     _handoff_on_save(gid, before, item, writer, author)      # step 2: the writer touches the item (a hand-off to it is taken); a new mover is a hand-off record
