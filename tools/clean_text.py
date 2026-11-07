@@ -5,8 +5,10 @@ Standard library only (Python 3.12+). CI runs it on every pull request (.github/
 commit-msg hook can run it on a message file or a branch name. CONTRIBUTING.md ("Commit and PR text") states the rule.
 
 What is checked, line by line:
-  * generic patterns built in (they are no one's data): a board item id (board#N, board-tmp-<name>#N) and a link to a
-    board site's items/<n> path (a URL with a host);
+  * generic patterns built in (they are no one's data): a board item id (board#N, board-tmp-<name>#N), a link to a
+    board site's items/<n> path (a URL with a host), and attribution lines, which this public repository refuses (a push
+    cannot be taken back, and GitHub keeps every pull request ref): a `Co-Authored-By:` trailer of any author, a
+    `Claude-Session:` trailer, a claude.ai/code session URL, and the "Generated with [Claude Code]" footer;
   * the deny list: Python regexes, one per line, case-insensitive, read from the environment variable CLEAN_TEXT_DENY
     (in CI the repository secret of that name, given to this one step only: a secret is masked in the logs, a variable
     is not), else the per-user file ${XDG_CONFIG_HOME:-$HOME/.config}/stackshot/clean-text-deny (for the git hooks and a
@@ -14,9 +16,8 @@ What is checked, line by line:
     data and is never written into the repository. Neither one (a fork's pull request gets no secret): only the generic
     patterns run, and the output says so in one line (not a failure). A deny pattern is never printed, and neither is the
     text of a line it hit: a hit names the field, the line number and the pattern's line number in the list ("deny pattern 3").
-Lines that are allowed on purpose are not matched against the deny list: the Claude or Anthropic `Co-Authored-By:` trailer (with the Anthropic noreply address; a person's trailer is checked) and the `Claude-Session:` trailer,
-the "Generated with [Claude Code]" footer line and a bare claude.ai/code/session URL line (whole lines only: text added to
-one is checked). The generic patterns still read them.
+No line is exempt: every line of every field is read by the generic patterns and the deny list alike. In CI only the pull
+request's own commits are read (base..head), so older commits on main that carry such lines are never looked at.
 The standard merge subjects ("Merge branch 'main' into <branch>", "Merge pull request #N from <owner>/<branch>", and
 `git pull`'s "Merge branch '<x>' of <url> into <branch>") are skipped as the first line of a commit message, except that
 the branch names in them are checked as branch names (the owner and the URL are not).
@@ -39,14 +40,13 @@ GENERIC = [
     ("board item id (board#N)", re.compile(r"board#\d+", re.I)),                     # no left boundary: _board#N and xboard#N count
     ("board item id (board-tmp-<name>#N)", re.compile(r"board-tmp-[a-z0-9-]+#\d+", re.I)),
     ("link to a board item (host/items/N)", re.compile(r"https?://[^\s/]+/items/\d+", re.I)),
-]
-
-# The allowed boilerplate, exempt from the deny list. Each pattern is the whole line, so text added to such a line is checked.
-ALLOWED_LINES = [
-    re.compile(r"^\s*Co-Authored-By:\s+(?:Claude|Anthropic)\b[^<>\n]*<noreply@anthropic\.com>\s*$", re.I),   # a person's trailer is checked
-    re.compile(r"^\s*Claude-Session:\s+https://claude\.ai/code/session_[\w-]+\s*$", re.I),
-    re.compile(r"^\s*(?:\U0001F916\s*)?Generated with \[Claude Code\]\(https://claude\.(?:com|ai)/claude-code\)\s*$", re.I),
-    re.compile(r"^\s*https://claude\.ai/code/session_[\w-]+\s*$", re.I),
+    # Attribution lines are refused in this public repository, whoever the author. A Co-Authored-By trailer is read at the start of
+    # a line (a trailer counts only there), after any quote or list mark a pasted message carries; what follows the colon is not read,
+    # so a trailer of any name and address is refused, and prose that merely names the trailer is not.
+    ("Co-Authored-By trailer (attribution lines are refused)", re.compile(r"^\s*(?:[>*+-]\s*)*Co-Authored-By\s*:", re.I)),
+    ("Claude-Session trailer (attribution lines are refused)", re.compile(r"\bClaude-Session\s*:", re.I)),
+    ("claude.ai/code session URL (session links are refused)", re.compile(r"claude\.ai/code/", re.I)),
+    ("'Generated with Claude Code' footer (attribution lines are refused)", re.compile(r"\bGenerated\s+with\s+\[?Claude\b|claude\.(?:com|ai)/claude-code", re.I)),
 ]
 
 # GitHub's own merge subjects: only the first line of a message is skipped, and only these exact shapes.
@@ -91,16 +91,14 @@ def load_deny(raw):
     return deny, bad
 
 
-def classified_lines(text, is_message=False):
-    """[(line number, line, allowed)] for the lines of one field: allowed is True for the boilerplate lines, which only the
-    generic patterns still look at (a board id typed into a trailer name is still one), never the deny list. A standard
-    merge subject is left out."""
+def numbered_lines(text, is_message=False):
+    """[(line number, line)] for the lines of one field. A standard merge subject is left out."""
     lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out = []
     for i, line in enumerate(lines):
         if i == 0 and is_message and merge_branches(line) is not None:
             continue
-        out.append((i + 1, line, any(p.match(line) for p in ALLOWED_LINES)))
+        out.append((i + 1, line))
     return out
 
 
@@ -112,8 +110,8 @@ def check_field(label, text, deny, is_message=False):
         first = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")[0]
         for name in merge_branches(first) or []:
             hits += check_field(f"{label}, merge subject branch", name, deny, False)
-    for no, line, allowed in classified_lines(text, is_message):
-        deny_hits = [] if allowed else [n for n, rx in deny if rx.search(line)]
+    for no, line in numbered_lines(text, is_message):
+        deny_hits = [n for n, rx in deny if rx.search(line)]
         shown = None if deny_hits else line
         for name, rx in GENERIC:
             if rx.search(line):
