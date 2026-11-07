@@ -200,6 +200,14 @@ enabled = false                                     # (audit.py scan, after the 
 # glob = "~/rules/**/*.md"
 # keeper = "my-keeper"
 
+[refusal_report]                                    # the weekly count of refused board writes (tools/refusal_report.py): the server keeps a line per create, update, complete, confirm and message call in
+enabled = false                                     # <paths.state>/calls/, and the audit's unit (audit.py refusals, after the run) sends one message that asks nothing for each finished Monday-to-Sunday week:
+                                                    # create and update calls refused of all, the share, the week before, the kinds, the sessions refused most, what the server corrected instead. false (the default):
+                                                    # nothing is sent (`audit.py refusals --dry-run` still prints the last week). Read at each run, so a change needs no restart. Every other key is optional.
+# to = ""                                           # the page key or session name the report goes to; "" = [audit] summary_to
+# top = 6                                           # how many kinds of refusal the report lists (1 to 20)
+# sender = "stackshot refusal report"
+
 [ask]                                               # the ask line on a needs=decision item (metadata.ask): "Decide: … · Recommend: … · Stakes: … · By: …", one line, ≤ 240 chars
 refuse_after = ""                                   # YYYY-MM-DD ([instance] timezone): from this date a needs=decision item without an ask line is refused;
                                                     # before it (and with "", the default) it is accepted and the reply nags. A misshaped ask is always refused
