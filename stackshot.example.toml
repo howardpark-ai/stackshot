@@ -466,7 +466,7 @@ allowed_emails = ["you@example.com"]
 allowed_client_redirect_uris = ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"]
 ui_open = true                                      # true: the web UI is served to whoever reaches it and the edge decides who that is (an access proxy in front);
                                                     # false: the server asks for a sign-in itself (the same Google sign-in as /mcp), allowed_emails only
-ui_session_days = 30
+ui_session_days = 30                                # days a board sign-in lasts; each visit (a browser opening a page) starts them again, so only a machine not opened for this long asks again
 portal_identity = ""                                # who the portal's machine token (STACKSHOT_PORTAL_TOKEN in secrets/oauth.env) acts as
 
 [board]                                             # what the server tells a session about its items

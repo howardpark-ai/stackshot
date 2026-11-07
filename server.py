@@ -8238,6 +8238,27 @@ def _auth():
                                    claims={"email": identity, "via": "portal"})
             return await super().verify_token(token)
 
+        async def _show_consent_page(self, request):
+            """The Allow page is for a third-party client (claude.ai, a connector, anything that registered itself): it is the page that tells the person which client is asking.
+            The board's own sign-in is this server asking itself, so it goes straight on to Google, and only for the one client the board registered for itself (_UI_CLIENT)
+            with its own callback (/ui/callback). The rest of the protection stays: the consent binding cookie is set as the Allow page's approval sets it and is checked at the
+            Google callback, and the code goes to /ui/callback, which takes it only from the browser that holds the signed flow cookie of a sign-in started by /ui/login
+            (its state, and the PKCE verifier the code is exchanged with). Any other client, a board look-alike registered with the same callback included, still gets the Allow page."""
+            try:
+                txn_id = request.query_params.get("txn_id") or ""
+                txn = await self._transaction_store.get(key=txn_id) if txn_id else None
+                if txn is not None and _ui_is_board_client(txn.client_id, txn.client_redirect_uri):
+                    import secrets as _s
+                    from starlette.responses import RedirectResponse
+                    txn.consent_token = _s.token_urlsafe(32)
+                    await self._transaction_store.put(key=txn_id, value=txn, ttl=15 * 60)
+                    resp = RedirectResponse(url=self._build_upstream_authorize_url(txn_id, txn.model_dump()), status_code=302)
+                    self._set_consent_binding_cookie(request, resp, txn_id, txn.consent_token)
+                    return resp
+            except Exception as e:  # noqa: BLE001  — anything unexpected (a library that changed) falls back to the Allow page, never to no check
+                print(f"board sign-in: Allow page kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+            return await super()._show_consent_page(request)
+
     p = _Provider(
         client_id=cid,
         client_secret=sec,
@@ -8546,7 +8567,7 @@ def _custom_route_ro(path, methods, **kw):
         async def guarded(request):
             path = request.url.path
             if not _ro.is_read_only():
-                resp = _panel_ordered(request, await fn(request))
+                resp = _ui_renewed(request, _panel_ordered(request, await fn(request)))
                 if request.method == "POST" and path.startswith(_UI_WRITES):      # a write from a page of the board: the home is drawn again on its next read
                     _board_home_drop()
                 return resp
@@ -8554,7 +8575,7 @@ def _custom_route_ro(path, methods, **kw):
                 return PlainTextResponse(_ro.REFUSAL, status_code=503, headers={"Cache-Control": "no-store"})
             if path in _RO_LIVE_ONLY:
                 return PlainTextResponse("this page reads GitHub and the other machines; on a read-only standby copy (STACKSHOT_READ_ONLY) it is on the live board.", status_code=503, headers={"Cache-Control": "no-store"})
-            return _ro_with_banner(_panel_ordered(request, await fn(request)))
+            return _ui_renewed(request, _ro_with_banner(_panel_ordered(request, await fn(request))))
         deco(guarded)
         return fn
     return wrap
@@ -14704,20 +14725,70 @@ def _ui_unsign(value: str) -> str:
         return ""
 
 
-def _ui_email(request: Request) -> str:
-    """Who is signed in to the board, '' when nobody (no cookie, a forged or expired one, an address no longer allowed)."""
+def _ui_now() -> float:
+    """The clock the board's sign-in reads (a test pins it)."""
+    return time.time()
+
+
+def _ui_session(request: Request) -> dict[str, Any]:
+    """The board's session cookie as it stands: its payload when this server signed it, the address is still allowed and it has not run out, else {}."""
     try:
         d = json.loads(_ui_unsign(request.cookies.get(_UI_COOKIE, "")) or "{}")
     except Exception:
-        return ""
+        return {}
+    if not isinstance(d, dict):
+        return {}
     email = str(d.get("email") or "")
-    return email if email in _cfg.CFG["auth"]["allowed_emails"] and float(d.get("exp") or 0) > time.time() else ""
+    return d if email in _cfg.CFG["auth"]["allowed_emails"] and float(d.get("exp") or 0) > _ui_now() else {}
+
+
+def _ui_email(request: Request) -> str:
+    """Who is signed in to the board, '' when nobody (no cookie, a forged or expired one, an address no longer allowed)."""
+    return str(_ui_session(request).get("email") or "")
+
+
+def _ui_set_session(resp, email: str) -> None:
+    """Put the board's session cookie on a response: signed, for [auth] ui_session_days from now."""
+    secs = 86400 * _ui_days()
+    resp.set_cookie(_UI_COOKIE, _ui_sign(json.dumps({"email": email, "exp": _ui_now() + secs})), max_age=secs,
+                    httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/")
+
+
+def _ui_is_navigation(request: Request) -> bool:
+    """True when a person's browser is opening the page (Sec-Fetch-Mode: navigate), or the client says nothing about it (a tool); False for a script's fetch() or a
+    sub-resource. A navigation can be sent to the sign-in; a script's request cannot use that, it needs the plain 401."""
+    mode = request.headers.get("sec-fetch-mode")
+    return not mode or mode == "navigate"
+
+
+# A visit restarts the session's days. The cookie is written again only when it has used up an hour of them, so a burst of page loads does not set a cookie on each.
+_UI_RENEW_AFTER = 3600
+
+
+def _ui_renewed(request: Request, resp):
+    """The response with the session cookie renewed when the request is a visit by someone signed in: a GET that a browser opens as a page (not a script's fetch, so a tab left polling
+    does not keep a session alive on its own), with a session that is still good (an expired one never comes back; a removed address is not renewed). Not on /ui/ (the sign-in's own routes:
+    logout deletes the cookie), not on a failed answer, not on a public cacheable file."""
+    try:
+        if (request.method != "GET" or _ui_open() or _auth_mode() == "off" or request.url.path.startswith("/ui/")
+                or request.url.path.strip("/") in _UI_PUBLIC or not _ui_is_navigation(request) or getattr(resp, "status_code", 200) >= 400
+                or "public" in str(resp.headers.get("cache-control") or "")):
+            return resp
+        d = _ui_session(request)
+        if d and float(d["exp"]) - _ui_now() <= 86400 * _ui_days() - _UI_RENEW_AFTER:
+            _ui_set_session(resp, str(d["email"]))
+    except Exception as e:  # noqa: BLE001
+        print(f"sign-in not renewed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return resp
 
 
 def _ui_guard(request: Request):
-    """None when the request may see the board, else the redirect to the sign-in."""
+    """None when the request may see the board, else the way to the sign-in: a redirect for a page the browser is opening, a plain 401 for a script's request (a page's script
+    that follows a redirect would run the sign-in again and again from a tab nobody is looking at)."""
     if _ui_open() or _auth_mode() == "off" or _ui_email(request):
         return None
+    if not _ui_is_navigation(request):
+        return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
     from urllib.parse import quote
     from starlette.responses import RedirectResponse
     nxt = request.url.path + (("?" + request.url.query) if request.url.query else "")
@@ -14763,6 +14834,12 @@ def _ui_client_id() -> str:
     return _UI_CLIENT["id"]
 
 
+def _ui_is_board_client(client_id: str, redirect_uri: str) -> bool:
+    """True for the one client the board registered for its own sign-in in this run, asking for its own callback; a client that merely looks like it is not."""
+    cid = _UI_CLIENT.get("id")
+    return bool(cid) and str(client_id) == cid and str(redirect_uri) == _ui_redirect_uri()
+
+
 def _ui_exchange(code: str, verifier: str) -> str:
     """An authorization code → the address that signed in ('' when the exchange or the token does not hold)."""
     import asyncio
@@ -14784,6 +14861,8 @@ async def ui_login(request: Request):
     from starlette.responses import RedirectResponse
     if _ui_open() or _auth_mode() == "off":
         return RedirectResponse("/", status_code=302)
+    if not _ui_is_navigation(request):          # a script's request starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
+        return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
     nxt = str(request.query_params.get("next") or "/")
     if not nxt.startswith("/") or nxt.startswith("//"):
         nxt = "/"
@@ -14796,7 +14875,7 @@ async def ui_login(request: Request):
     q = urlencode({"response_type": "code", "client_id": cid, "redirect_uri": _ui_redirect_uri(), "code_challenge": challenge, "code_challenge_method": "S256",
                    "state": state, "scope": "openid https://www.googleapis.com/auth/userinfo.email"})
     r = RedirectResponse(str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/authorize?" + q, status_code=302)
-    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": time.time() + 600})), max_age=600,
+    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": _ui_now() + 600})), max_age=600,
                  httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/ui")
     return r
 
@@ -14811,14 +14890,13 @@ async def ui_callback(request: Request):
     except Exception:
         flow = {}
     code, state = str(request.query_params.get("code") or ""), str(request.query_params.get("state") or "")
-    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < time.time():
+    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _ui_now():
         return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
     email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
     if email not in _cfg.CFG["auth"]["allowed_emails"]:
         return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
     r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)
-    r.set_cookie(_UI_COOKIE, _ui_sign(json.dumps({"email": email, "exp": time.time() + 86400 * _ui_days()})), max_age=86400 * _ui_days(),
-                 httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/")
+    _ui_set_session(r, email)
     r.delete_cookie(_UI_FLOW, path="/ui")
     return r
 
