@@ -78,6 +78,7 @@ from typing import Any, Callable, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config as _cfg  # noqa: E402
+import option_labels as _ol  # noqa: E402  — the letter an option's label repeats from its badge, dropped on read
 import readonly as _ro  # noqa: E402  — a warm standby copy makes no GitHub write
 import ghbudget as _gb   # noqa: E402  — the hourly ledger of GitHub calls shared with the other readers of the host's token
 
@@ -869,7 +870,10 @@ def parse_header(text: str) -> tuple[str, str] | None:
 def _options_text(opts: Any) -> str:
     """The options as plain lines, "- Ship (recommended): Ship it now" (the item page's History says an options edit with them)."""
     rows = [o for o in (opts if isinstance(opts, list) else []) if isinstance(o, dict)]
-    return "\n".join(f"- {str(o.get('label') or '').strip()}" + (" (recommended)" if o.get("recommended") else "") + f": {str(o.get('line') or '').strip()}" for o in rows)
+    labels = [str(o.get("label") or "").strip() for o in rows]
+    if isinstance(opts, list) and len(rows) == len(opts):      # a list of options only: the labels as a card shows them (the letter its badge draws is dropped, option_labels.py)
+        labels = [lb or chr(65 + i) for i, lb in enumerate(_ol.strip_letters(labels))]
+    return "\n".join(f"- {lb}" + (" (recommended)" if o.get("recommended") else "") + f": {str(o.get('line') or '').strip()}" for lb, o in zip(labels, rows))
 
 
 def refile_words(frm: str, to: str) -> str:
