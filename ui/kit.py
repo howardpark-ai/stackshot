@@ -59,7 +59,7 @@ def row(*, tag_html: str = "", href: str, rid: str, title: str, age_html: str = 
         li_id: str = "", li_class: str = "", data: str = "", title_attr: str = "", new_tab: bool = True, title_html: str = "", project_html: str = "", edge: str = "") -> str:
     """One item as the row every list draws, as an `<li>` for a `<ul class="ir-rows">`.
 
-    `project_html` (home and Closed: the project's name as a link to its page, already escaped) is drawn as a small quiet line above the title (`.ir-proj`); `edge` is the state kind (EDGES) whose color the card's left edge takes, empty for the plain edge.
+    `project_html` (home and Closed: the project's name as a link to its page, then the item's owner; a project page: the owner alone; already escaped) is drawn as a small quiet line above the title (`.ir-proj`); `edge` is the state kind (EDGES) whose color the card's left edge takes, empty for the plain edge.
     Line one: the state tag (only where the list mixes states), `#id` and the title in one link (the id in the title's color and size, weight 400), the age at the right. The title
     wraps; the page never cuts it. The id sits outside `.hgoal` (the title's own span), which the page script reads when it names a row.
     Then, each only when it has something to say: the who line (`.ir-who`), the detail behind its guide line (`.ir-det`), the actions at the text's left edge (`.ir-act`).
@@ -103,8 +103,9 @@ li.irow[data-st=you]{--st:var(--t-you)}li.irow[data-st=agent]{--st:var(--t-agent
 li.irow:target{background:color-mix(in srgb,var(--acc) 8%,var(--card));box-shadow:inset 3px 0 0 var(--acc)}
 @media(max-width:480px){li.irow{padding:10px 12px 12px}}
 /* the project line: small and quiet above the title, a link to the project's page */
-.ir-proj{font-size:12px;line-height:16px;margin:0 0 2px;overflow-wrap:anywhere}
+.ir-proj{font-size:12px;line-height:16px;margin:0 0 2px;overflow-wrap:anywhere;color:var(--mut)}
 .ir-proj a.pjl{color:var(--mut)}.ir-proj a.pjl:hover{color:var(--acc)}
+.ir-proj a.pjo{color:var(--mut)}.ir-proj a.pjo:hover{color:var(--acc)}
 .ir-top{display:flex;align-items:baseline;gap:8px;min-width:0}
 .ir-title{flex:1 1 auto;min-width:0;font-weight:600;overflow-wrap:anywhere}
 .ir-title a.ir-link{color:var(--fg)}.ir-title a.ir-link:hover{color:var(--acc)}

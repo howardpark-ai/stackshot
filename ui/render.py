@@ -1552,7 +1552,9 @@ def _run_stale_s(): return 3 * max(float(_runners.conf("panel_refresh_s")), _eve
 class Board:
     """The board's data, read once: items, sessions, projects, anchors, versions, the hub's status — and what is drawn from it."""
 
-    def __init__(self, data_dir: str, now=None):
+    def __init__(self, data_dir: str, now=None, contact_of=None):
+        """`contact_of(item) -> str` (the server's `_contact_label`): the item's contact as the item page's side column names it, so a list row names the same agent. None reads the stored contact."""
+        self.contact_of = contact_of; self._contacts = {}      # the lookup runs at most once per item in a render (row_contact)
         ZONE = _cfg.tz(); now = now or datetime.datetime.now(ZONE)
         PUB = str(_cfg.get("fleet", "publisher_letter") or "a")                  # the box that runs the server: first column, always live
         FLEET = fleet_names()                                                    # letter → fleet name
@@ -2455,12 +2457,25 @@ class Board:
         if k == "stepreply" and taken_by: msg = f"Sent: {taken_by} has your note and decides whether the step is done."
         return f'<p class="isent {cls}" role="status">{esc(msg)}</p>'
     OWNER_TIP = "the front agent to talk to about this item"      # the hover text on the side column's "Owner" label (no line under the row)
+    def contact_name(self, r, contact=None) -> str:
+        """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, server._contact_label), else the stored metadata.contact as the session's name now; "" when none."""
+        stored = str((r.get("metadata") or {}).get("contact") or "").strip()
+        return str(contact).strip() if contact is not None else (self.mover_name(stored) if stored else "")
+    def row_contact(self, r) -> str:
+        """The contact a list row names: the same name as the side column's Owner row (contact_name), derived by `contact_of` when the board has one. One lookup per item and render, kept for the rows of the other lists that draw it again."""
+        g = r["gid"]
+        if g not in self._contacts:
+            c = None
+            if self.contact_of is not None:
+                try: c = str(self.contact_of(r) or "")
+                except Exception: c = None      # an extra: the row then reads the stored contact
+            self._contacts[g] = self.contact_name(r, c)
+        return self._contacts[g]
     def owner_row(self, r, contact=None) -> tuple:
         """The side column's first row → (the "Owner" label with its hover text, the value), or ("", "") when the item has no contact (no row). The value is the contact's session
         name, drawn as every session on the page is (sess_html): a link to the fleet tool's view ([client] session_view) while the session has a live pane, plain text otherwise. `contact`: the name as the server
         derived it (an open item's live contact, server._contact_label); None reads the stored metadata.contact as the session's name now."""
-        stored = str((r.get("metadata") or {}).get("contact") or "").strip()
-        name = str(contact).strip() if contact is not None else (self.mover_name(stored) if stored else "")
+        name = self.contact_name(r, contact)
         if not name: return ("", "")
         val = self.sess_html(name, arrow=True)      # the page's one rule: a link to the session's view while its pane lives, plain text otherwise
         return (f'<span title="{esc(self.OWNER_TIP)}">Owner</span>', val)
@@ -3404,7 +3419,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         script keeps current; on Your move amber past two days and red past five; on Waiting, which is sorted by end date, the end date in its place: "until Wed Mar 4th" or "no end date", plain text, the age on hover; wait_end_slot). The who line, small and gray, only when it says something: On agent the mover, or "handed to X, not yet taken";
         Waiting "then X · watched by Y · set by Z"; Your move none (it is always the owner), except on a project page. The detail behind its guide line: Your move the ask's question or the step (a command or link in a block to copy,
         a draft under it), On agent the immediate next step, Waiting "Until <when>: <what>" and the chases, then "after the wait: <next step>"; a `woke:` line shows until the mover writes. The actions under the detail: on Your move the answer form, drawn hidden
-        for the page script to show with a token (_HOME_JS); the title is the link to the item. named=True (home) draws the project's name above the title (project_line); a project page's rows leave it out, the page says the project.
+        for the page script to show with a token (_HOME_JS); the title is the link to the item. named=True (home) draws the project's name above the title (project_line) and the item's owner after it (row_line); a project page's rows show the owner alone, the page says the project.
         The card's left edge takes the list's color (Your move, On agent, Queued for release, Waiting).
         flags=True (the project page's lists) keeps what an item's line there carried: the due badge, the stale ⚠ and the "waits for recycle" badge, on the who line."""
         e = esc; m = r["metadata"]; gid = r["gid"]
@@ -3442,12 +3457,20 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         else: detail = f'<span class="hnext">{nxt}</span>{dr}'
         return _ui.row(href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=age, who_html=" · ".join(x for x in who if x),
                        detail_html=detail + "".join(notes), actions_html=actions, li_id=anchor(r), li_class="hrow",
-                       project_html=self.project_line(r) if named else "", edge=RELEASE_LIST if which == RELEASE_LIST else _ui.kind_of_list(which))
+                       project_html=self.row_line(r, project=named), edge=RELEASE_LIST if which == RELEASE_LIST else _ui.kind_of_list(which))
     def project_line(self, r):
-        """The project's name as the small line above a row's title (home and Closed): a link to the project's page, the label proj_label gives (the row's name, then the sub-page's); "" for an item with no project."""
-        k = proj_key(r)
+        """The project's name as the small line above a row's title (home and Closed): a link to the project's page, the label proj_label gives for the item's top-level project (proj_top), never the sub-page it is filed on (the project page's
+        own sub-page badge and the who line name that); "" for an item with no project. Reads the registry the board already holds, no lookup of its own."""
+        k = proj_top(r) or proj_key(r)
         if not k: return ""
         return _ui.project_line(under("/" + (self.row_of(k) or k)), self.proj_label(k))
+    def row_line(self, r, project=True):
+        """The small quiet line above a row's title: `project · owner`, the owner being the name the item page's side column shows (row_contact), a link to the session's view while it has a live pane and plain text otherwise (sess_html).
+        project=False (a project page's rows: the page says the project) leaves the owner alone; an item with no contact shows the project alone, and one with neither has no line."""
+        parts = [self.project_line(r)] if project else []
+        n = self.row_contact(r)
+        if n: parts.append(self.sess_html(n, cls="pjo"))
+        return " · ".join(x for x in parts if x)
     def sent_notes_html(self):
         """The hidden element the home page's script (_HOME_JS) reads to show the notice of an answer sent from a row: the item page's own notices (one text per ?sent= code, the home wording where it has
         one) and the prefix an issue-numbered id is written with. The home page and the project page carry it, both draw answer forms in their rows; the notice shows after #counts, else after this element."""
@@ -3500,12 +3523,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 + '</nav>')
     def done_row(self, r, sub="", who_html=None, named=False):
         """One closed item as the one row: its outcome as the state tag (Done, Dropped, Superseded; Closed for one closed with no outcome recorded), `#id title` and how long ago it closed at the right, the close reason
-        behind the guide line. `sub` (a project page's row for an item on a sub-page) names the sub-page on the who line; `named=True` (the Closed page's Last 14 days) draws the project's name above the title (project_line).
+        behind the guide line. `sub` (a project page's row for an item on a sub-page) names the sub-page on the who line; `named=True` (the Closed page's Last 14 days) draws the project's name above the title (project_line) and the owner after it (row_line); a project page's rows show the owner alone.
         Its card keeps the plain edge."""
         oc, why, _by = outcome_of(r)
         return _ui.row(tag_html=_ui.tag(_ui.kind_of_outcome(oc)), href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=self.stamp(r["_updated"], "ir-age"),
                        who_html=who_html if who_html is not None else (esc(sub) if sub else ""), detail_html=esc(why) if why else ('<span class="dim">no outcome recorded</span>' if oc in ("", "unrecorded") else ""), li_id=anchor(r),
-                       project_html=self.project_line(r) if named else "")
+                       project_html=self.row_line(r, project=named))
     COMPLETED_PAGE = 25          # rows to a page of the Completed section on the Landed page
     def completed_page(self, page):
         """The page asked for of the Completed section -> (rows, page, pages): the items closed in the last 14 days, newest first, COMPLETED_PAGE to a page. `page` is what the address carried (a string, an int or None): anything that is
@@ -3555,7 +3578,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         sc = _prj.scope_of(k, entry, self.proj)
         return sc, (order.index(sc) if sc in order else len(order))
     def landed_html(self, mark=True, page=None) -> str:
-        """The Closed page (GET /closed, the Landed page renamed, behind the board's sign-in; /landed redirects here): two sections, New (one entry per close that the owner has not cleared) and Last 14 days (completed_html). Both draw their rows the way home's lists do (scope_sections, ui/groups.py): one foldable subsection per scope (work, home, ops as sala's sidebar has them, from the project's scope in projects.py) in [project_scopes] order, the scope's name and its row count in the summary, open by default; the entries of a scope newest first. A row names its project in a small line above the title (project_line), as home's rows do, and its card has the green New edge.
+        """The Closed page (GET /closed, the Landed page renamed, behind the board's sign-in; /landed redirects here): two sections, New (one entry per close that the owner has not cleared) and Last 14 days (completed_html). Both draw their rows the way home's lists do (scope_sections, ui/groups.py): one foldable subsection per scope (work, home, ops as sala's sidebar has them, from the project's scope in projects.py) in [project_scopes] order, the scope's name and its row count in the summary, open by default; the entries of a scope newest first. A row names its project and its owner in a small line above the title (row_line), as home's rows do, and its card has the green New edge.
         An entry is the one row (ui/kit.py): the outcome tag (Done, Dropped), `#id title` with the close's age beside it ("12m ago", "30h ago"; the exact time in the board's zone on hover), the close reason behind the guide line (wrapped, never cut),
         and Clear under the reason. Like a phone's notifications an entry stays until he clears it: nothing here clears anything but a Clear (`/landed/clear` with that close's key) or
         Clear all (every key on the page) button, and opening the page clears nothing. The page's script (_LANDED_JS) keeps a cleared line in place, dimmed, with an Undo (`/landed/unclear`) until the page is reloaded. Clear all sits at the top, above the list. mark=False draws no buttons.
@@ -3571,7 +3594,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                     f'{e(landed_ago(now_ts - rec["ts"]))}</span>')
             # the one row: the outcome as its tag, `#id title` with the close's age at the right, the close reason behind the guide line, Clear under the reason (where Your move has its Send)
             return _ui.row(tag_html=_ui.tag(_ui.kind_of_outcome(oc)), href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=when, detail_html=e(why) if why else "",
-                           actions_html=clear, li_class="lrow", data=f'data-key="{e(key)}"', project_html=self.project_line(r), edge=_ui.NEW)
+                           actions_html=clear, li_class="lrow", data=f'data-key="{e(key)}"', project_html=self.row_line(r), edge=_ui.NEW)
         # the same subsections as home's lists (scope_sections): one foldable subsection per scope in [project_scopes] order, the entries of a scope newest first (landed_rows is), each a row with no who line
         secs = self.scope_sections("closed.new", rows, lambda pr: line(*pr), row=lambda pr: pr[1])
         note = (f'{len(rows)} close{"s" if len(rows) != 1 else ""} by agents, newest first. An entry stays here until you clear it.') if rows \

@@ -14,6 +14,8 @@ machines, five receivers, long paths, code and links; no live store, no network)
   - the home lists: at 360, 412 and 1440 px, light and dark, Your move and Queued for release open and On agent and Waiting closed as the page
     loads; with every fold open and every ask form shown each row inside the screen, its top line (number, whole title, age at the right edge) above its mover line, detail block and form, its buttons inside it; the age
     colours apart; the five count cards in the header (title, rendered line, cards, search), 60 px tall on one row, with no sideways scroll;
+  - the line above a row's title (home, Closed and a project page): at 360, 412 and 1440 px, light and dark, `project · owner` (the owner alone on a project page) inside its row, above the title line, in the small quiet type,
+    wrapping when a long project name and a long owner name meet, never running past the card;
   - the Closed page: at 360 and 412 px, light and dark, each New row the one row: outcome tag, title and relative close time on the top line, the close reason under it and never cut, Clear under the reason (32 px or taller);
     a Clear leaves the row in place, dimmed, with an Undo (a stub answers the page's fetch), Clear all leaves every row with its own Undo;
   - the header of the item page (also with its answer box), a project's page, Projects, Closed, Search and Runners: each starts with home's header, the title, the five count cards and the search box,
@@ -102,8 +104,8 @@ def item(i, owner, proj, subj, status="open", desc="A fixture item.", age=3 * H,
         "metadata": {"owner": owner, "project": proj, **md}, "updated": (now - age).timestamp(), "state_updated": (now - age).timestamp()}))
 for j, (n, s, org) in enumerate(LONGP):
     sid = f"{j + 50:08d}-5555-4555-8555-555555555555"; sess[sid] = {"name": s, "machine": "a", "url": "https://claude.ai/code/session_" + s, "seen": "x"}
-    item(20 + j, sid, f"projects/{n}", f"[home] a long item subject for {n} that goes on for a while", needs=["decision", "external", ""][j % 3], priority="p2", next="do the thing")
-    item(40 + j, sid, f"projects/{n}", f"[home] second item for {n}", priority="p3")
+    item(20 + j, sid, f"projects/{n}", f"[home] a long item subject for {n} that goes on for a while", needs=["decision", "external", ""][j % 3], priority="p2", next="do the thing", contact=s)      # a long project name and a long owner on one line
+    item(40 + j, sid, f"projects/{n}", f"[home] second item for {n}", priority="p3", contact=LONG if j % 2 else s)      # the owner with a pane (a link) and a name no pane carries (text)
 (T / "fleet/a/sessions.json").write_text(json.dumps(sess))
 item(1, A, "projects/alpha", f"[home] an item page with long monospace, code and links: {LONG}", needs="decision", priority="p1",
      ask="Decide: whether `~/.local/share/stackshot/a/long/path/that/does/not/break/anywhere/config.toml` moves · Recommend: yes · Stakes: low · By: Fri",
@@ -151,7 +153,7 @@ item(66, A, "projects/alpha", "[home] a step item typed in a pane", age=1 * DAYS
 item(67, A, "projects/alpha", "[home] a step item of plain words", age=1 * DAYS, state="your-step", step="Open the side gate and tell the guard the long-named visitor " + LONG + " is on the way, then say done", next="ops-falcon-engineer: check it",
      draft="こんにちは、オリバーです。\n\n  - 第一: 日程はそのままです。 " + LONG + "\n  - 第二: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOp/edit#heading=h.abcdefghijkl\n\nよろしくお願いします。\nThanks, Alex.")   # a draft (draft.py): the block wraps and keeps its lines, the row's "draft" label, with Copy beside it, fits
 item(68, A, "projects/alpha", "[home] a numbered step with two ssh commands", age=1 * DAYS, state="your-step", step="In PowerShell, do these in order:\n1. Run `ssh -t box-a 'sala op reauth ops-falcon-engineer-background-builder-with-a-long-name --from me --words \"go\"'` and wait for the line that says queued\n2. Run `ssh -t box-a 'tmux ls'` and read the list\n3. Say done on the item", next="ops-falcon-engineer: check it")   # a numbered step (step_commands.py): one list, a copy block per command
-item(69, A, "projects/alpha", "[home] Move the widget to shelf-2 and let it sync by itself when shelf-1 is full", age=4 * H, needs=["decision"], next="Oliver: decide",       # a long Your move title is cut on the top line while the age stays at the right edge
+item(69, A, "projects/alpha", "[home] Move the widget to shelf-2 and let it sync by itself when shelf-1 is full", age=4 * H, needs=["decision"], next="Oliver: decide", contact=LONG,       # a long Your move title is cut on the top line while the age stays at the right edge
      ask="Decide: how a returning shelf-1 is kept from syncing beside shelf-2 after a switch · Recommend: Check at boot · Stakes: low · By: Fri",
      options=[{"label": "Check at boot", "line": "Check at boot.", "recommended": True}, {"label": "Block the sync only", "line": "Block it.", "recommended": False}])
 item(62, X, "projects/alpha", "[home] handed over to a session with a long name", age=10 * M, needs=["ops-falcon-engineer"], mover="ops-falcon-engineer", next="ops-falcon-engineer: take it",
@@ -215,7 +217,7 @@ import landed
 for k, (n, by) in enumerate([("project-with-a-very-long-example-name-01", LONG), ("project-with-a-very-long-example-name-02", "ops-falcon-main"), ("infrastructureandtoolingwithoutanyhyphensatallverylongname", ""),
                              ("alpha", LONG), ("alpha", "ops-falcon-engineer"), ("short-project", LONG)]):
     gid = 180 + k; pk = f"projects/{n}"
-    item(gid, X, pk, f"[home] landed item {k} with a long subject that wraps at phone width: {LONG} /opt/example/very/long/path/that/does/not/break/anywhere/x.json", status="completed", age=(k + 1) * H, outcome="dropped" if k % 3 == 1 else "done", reason=(f"PR {k} is live and the nightly run is green {LONG} /opt/example/very/long/path/that/does/not/break/anywhere/x.json" if k % 2 == 0 else "done"))
+    item(gid, X, pk, f"[home] landed item {k} with a long subject that wraps at phone width: {LONG} /opt/example/very/long/path/that/does/not/break/anywhere/x.json", status="completed", age=(k + 1) * H, outcome="dropped" if k % 3 == 1 else "done", reason=(f"PR {k} is live and the nightly run is green {LONG} /opt/example/very/long/path/that/does/not/break/anywhere/x.json" if k % 2 == 0 else "done"), contact=LONG if k % 2 == 0 else "ops-falcon-main")      # a long owner name on the Closed page's project line, and a live one
     landed.record(f"a{gid}", (now - (k + 1) * H).timestamp(), "dropped" if k % 3 == 1 else "done", by=by, project=pk)
 landed.clear([landed.key(f"a{gid}", (now - 6 * H).timestamp())], now=now.timestamp())      # the last of the six (gid, k=5) is the cleared one
 b = render.Board(str(T / "store"), now=now)
@@ -604,6 +606,27 @@ with sync_playwright() as p:
             if HSHOTS and nm == "board" and scheme == "light":
                 pg.evaluate("window.scrollTo(0, 0)"); pg.wait_for_timeout(100); pg.screenshot(path=os.path.join(HSHOTS, "home-375-light.png"), full_page=True)
             ctx.close()
+    # ---- the line above a row's title names the project and the owner (home, Closed), the owner alone on a project page: at 360, 412 and 1440 px, light and dark, with every fold open, it stays inside its row and above the
+    # title line, wraps instead of running past the card (a long project name and a long owner name together), keeps the small quiet type, and an owner is drawn in the line's own muted colour ----
+    PROJLINE = """() => { const out = []; let n = 0, owners = 0, both = 0;
+      for (const li of document.querySelectorAll('li.irow')) { const pj = li.querySelector('.ir-proj'); if (!pj) continue; n++;
+        const r = li.getBoundingClientRect(), b = pj.getBoundingClientRect(), top = li.querySelector('.ir-top').getBoundingClientRect(), cs = getComputedStyle(pj), id = (li.querySelector('.ir-id') || {}).textContent;
+        if (b.left < r.left - 0.5 || b.right > r.right + 0.5 || pj.scrollWidth > pj.clientWidth + 1 || li.scrollWidth > li.clientWidth + 1) out.push(id + ' the project line leaves its row ' + Math.round(b.left) + '..' + Math.round(b.right) + ' of ' + Math.round(r.left) + '..' + Math.round(r.right));
+        if (b.bottom > top.top + 1) out.push(id + ' the project line is not above the title line: ' + Math.round(b.bottom) + ' > ' + Math.round(top.top));
+        if (cs.fontSize !== '12px') out.push(id + ' the project line is ' + cs.fontSize);
+        const o = pj.querySelector('.pjo'), p = pj.querySelector('a.pjl');
+        if (o) { owners++; if (getComputedStyle(o).color !== cs.color || getComputedStyle(o).fontSize !== '12px') out.push(id + ' the owner is not in the quiet type of its line:' + getComputedStyle(o).color + ' vs ' + cs.color); }
+        if (o && p) { both++; if (!pj.textContent.includes(' · ')) out.push(id + ' the project and the owner have no separator'); }
+        if (o && !p && pj.textContent.trim() !== o.textContent.trim()) out.push(id + ' the owner is not alone on the line: ' + pj.textContent); }
+      return {n: n, owners: owners, both: both, bad: out.slice(0, 6)}; }"""
+    for nm, key_ in (("board", "board"), ("project page", "project page"), ("Closed page", "landed page")):
+        for w in (360, 412, 1440):
+            for scheme in ("light", "dark"):
+                ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme); pg = ctx.new_page(); pg.goto(PAGES[key_].as_uri()); pg.wait_for_timeout(100); pg.evaluate(OPEN); pg.wait_for_timeout(50)
+                pl = pg.evaluate(PROJLINE)
+                check(f"{nm} {w} {scheme}: the project line (project · owner; the owner alone on a project page) is inside its row, above the title, small and quiet, and wraps rather than runs on",
+                      pl["bad"] == [] and pl["owners"] >= (8 if nm == "board" else 2) and (pl["both"] > 0 if nm != "project page" else pl["both"] == 0), pl)
+                ctx.close()
     # ---- the Closed page: Clear all at the top above the list; each row of the New section is the one row: the outcome tag and the title (a link) with its relative close time (the exact time in the instance timezone on hover) on the top line, the close reason under it
     # (wrapped, never cut), Clear under the reason (32 px or taller, inside the screen); a row fits at 360 px.
     # Then the Undo state: a Clear leaves the row in place, dimmed, its Clear replaced by an Undo of the same place and size; Clear all leaves every row with its own Undo; an Undo puts the row back. The browser has no server on a file:// page, so the
