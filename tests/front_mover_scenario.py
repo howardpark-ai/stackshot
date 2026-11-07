@@ -58,16 +58,18 @@ def refusal(fn):
     except Exception as e:  # noqa: BLE001
         return str(e)
 
-def says_why(msg, front, field="mover"):
-    return (msg.startswith("Refused:") and front in msg and f"{field}={front}" in msg and "no hand-off notice" in msg
-            and BUILD in msg and "builder" in msg and "message" in msg and REVIEW not in msg.split("builder", 1)[1][:60])
+def fixed(reply, front, field="mover"):
+    """the reply says the front agent was replaced by the builder, and how to keep it"""
+    return (f"{field}={front} is a user-facing agent" in reply and f"{field}={BUILD}, the project's builder, was used instead" in reply
+            and f"send {field}={front} again" in reply)
 
 # ---- create
-msg = refusal(lambda: server.stackshot_create(subject="[home] handed to the front", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{MAIN}: look at it"))
-check("create: another session's front-agent mover is refused, naming the builder and the message route", says_why(msg, MAIN), msg)
-msg = refusal(lambda: server.stackshot_create(subject="[home] handed to the side desk", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{SIDE}: look at it"))
-check("create: one front agent may not hand to another front agent either", says_why(msg, SIDE), msg)
-check("create: a refused create writes no item", not (T / "store/a/40.json").exists() and not (T / "store/a/41.json").exists(), sorted(os.listdir(T / "store/a")))
+r = server.stackshot_create(subject="[home] handed to the front", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{BUILD}: look at it")
+g = r.split()[1]
+check("create: another session's front-agent mover becomes the builder, and the reply says so", r.startswith("created") and server._holder(rd(g)) == BUILD and fixed(r, MAIN), r)
+check("create: the fix is on the item: server_fixed names it", MAIN in json.dumps(rd(g)["metadata"].get("server_fixed")), rd(g)["metadata"].get("server_fixed"))
+r = server.stackshot_create(subject="[home] handed to the side desk", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{BUILD}: look at it")
+check("create: one front agent handing to another front agent gets the builder too", r.startswith("created") and server._holder(rd(r.split()[1])) == BUILD and fixed(r, SIDE), r)
 
 r = server.stackshot_create(subject="[home] the front agent's own", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on")
 check("create: a front agent naming itself as mover is accepted", r.startswith("created") and server._holder(rd(r.split()[1])) == MAIN, r)
@@ -80,18 +82,21 @@ check("create: a background mover set by another background agent is accepted", 
 r = refusal(lambda: server.stackshot_create(subject="[home] the owner decides", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
                                             ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", then=BUILD))
 check("create: the owner as mover (with his decision) is accepted", r == "", r)
-msg = refusal(lambda: server.stackshot_create(subject="[home] then the front", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
-                                              ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", then=MAIN))
-check("create: then=<front agent> by another session is refused the same way", says_why(msg, MAIN, "then"), msg)
+r = server.stackshot_create(subject="[home] then the front", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
+                            ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", then=MAIN)
+check("create: then=<front agent> by another session becomes the builder, and the reply says so", r.startswith("created") and fixed(r, MAIN, "then") and rd(r.split()[1])["metadata"].get("then") == BUILD, r)
 
 # ---- update
 put(1, mover=BUILD)
 before = (T / "store/a/1.json").read_bytes()
-msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{MAIN}: check it"))
-check("update: another session's front-agent mover is refused, naming the builder and the message route", says_why(msg, MAIN), msg)
-msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, then=MAIN))
-check("update: then=<front agent> by another session is refused", says_why(msg, MAIN, "then"), msg)
-check("update: a refused update leaves the item as it was", (T / "store/a/1.json").read_bytes() == before)
+r = server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{BUILD}: check it")
+check("update: another session's front-agent mover becomes the builder, and the reply says so", fixed(r, MAIN) and server._holder(rd(1)) == BUILD, r)
+check("update: the fix is on the item", MAIN in json.dumps(rd(1)["metadata"].get("server_fixed")), rd(1)["metadata"].get("server_fixed"))
+r = server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN)
+check("update: sending the same front-agent mover again keeps it as sent, with a note", server._holder(rd(1)) == MAIN and "kept as you sent it" in r, r)
+put(1, mover=BUILD)
+r = server.stackshot_update(item_id="a1", sender=BUILD, then=MAIN)
+check("update: then=<front agent> by another session becomes the builder", fixed(r, MAIN, "then") and rd(1)["metadata"].get("then") == BUILD, r)
 r = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, mover=REVIEW))
 check("update: a background mover is accepted", r == "" and server._holder(rd(1)) == REVIEW, r)
 put(2, mover=BUILD)
@@ -117,10 +122,10 @@ check("update: re-sending the item's current front-agent then is not refused", "
 
 # ---- post_wake_mover is the mover once a wait ends: gated like mover and then
 put(9, mover=BUILD)
-msg = refusal(lambda: server.stackshot_update(item_id="a9", sender=BUILD, post_wake_mover=MAIN))
-check("update: post_wake_mover=<front agent> by another session is refused", says_why(msg, MAIN, "post_wake_mover"), msg)
-msg = refusal(lambda: server.stackshot_create(subject="[home] wake to the front", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, post_wake_mover=MAIN, next=f"{BUILD}: wait"))
-check("create: post_wake_mover=<front agent> by another session is refused", says_why(msg, MAIN, "post_wake_mover"), msg)
+r = server.stackshot_update(item_id="a9", sender=BUILD, post_wake_mover=MAIN)
+check("update: post_wake_mover=<front agent> by another session becomes the builder", fixed(r, MAIN, "post_wake_mover"), r)
+r = server.stackshot_create(subject="[home] wake to the front", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, post_wake_mover=MAIN, next=f"{BUILD}: wait")
+check("create: post_wake_mover=<front agent> by another session becomes the builder", r.startswith("created") and fixed(r, MAIN, "post_wake_mover"), r)
 r = refusal(lambda: server.stackshot_update(item_id="a9", sender=MAIN, post_wake_mover=MAIN))
 check("update: a front agent naming itself as post_wake_mover is not refused here", "no hand-off notice" not in r, r)
 
@@ -184,22 +189,22 @@ check("needs: a user-facing agent is still refused there", "is a user-facing age
 
 # ---- the tool text says it
 form = server._MODEL_FORM
-check("tool text: mover and then say a front agent is named only by itself and another session's write is refused", "a front agent (a session" in form and "only by itself" in form and "is refused" in form and "then=<front agent> from another session is refused" in form, form[:800])
+check("tool text: mover and then say a front agent is named only by itself and another session's write is refused", "a front agent (a session" in form and "only by itself" in form and "gets the project's builder instead" in form and "then=<front agent> from another session gets the builder the same way" in form, form[:800])
 
 snap = json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))
 snap_s = json.dumps(snap)
-check("tool text: the mover and then parameters of create and update carry the refusal (snapshot)", snap_s.count("from another session that sets mover=<front agent> is refused") >= 2
-      and snap_s.count("from another session that sets then=<front agent> is refused") >= 2, snap_s[:300])
+check("tool text: the mover and then parameters of create and update carry the fix (snapshot)", snap_s.count("from another session that sets mover=<front agent> gets the project's builder instead") >= 2
+      and snap_s.count("from another session that sets then=<front agent> gets the project's builder instead") >= 2, snap_s[:300])
 
 check("tool text: post_wake_mover says a front agent only by itself", "post_wake_mover=<who moves it when the wait ends; a front agent only by itself" in form, form[:200])
-check("tool text: update's own hand-over sentence says a front agent is not told and the write is refused", "an update from another session that sets mover, then or post_wake_mover to a front agent is refused" in server._UPDATE_DESC, server._UPDATE_DESC[:200])
+check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in server._UPDATE_DESC, server._UPDATE_DESC[:200])
 
-check("tool text: the post_wake_mover parameter of create and update carries the refusal (snapshot)",
-      json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))).count("sets post_wake_mover=<front agent> is refused") >= 2)
+check("tool text: the post_wake_mover parameter of create and update carries the fix (snapshot)",
+      json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))).count("sets post_wake_mover=<front agent> gets the project's builder instead") >= 2)
 
 _cdecl = next(l for l in pathlib.Path(STACK, "server.py").read_text(encoding="utf-8").splitlines() if l.startswith('@mcp.tool(name="create"'))
-check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover is refused",
-      "a create from another session that sets mover, then or post_wake_mover to a front agent is refused" in _cdecl, _cdecl[:300])
+check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover gets the builder",
+      "a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
