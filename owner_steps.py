@@ -15,6 +15,9 @@ the new one added: N3), and an answer ticks the server's step and nothing else. 
 adopted: it is recorded as the server's step and no second one is added beside it. A `<owner>:` line about something else (a session's "review PR 12 when you can") is the session's own:
 the server adds its step beside it, and neither his answer, a withdrawn ask nor a `done` touches that line.
 
+His name stands once: a text that already opens with it (any spelling is_named accepts) is not named again by line_of, and every comparison of a step with the server's line goes by steps.owner_key, so a step
+stored with the name twice (made before this) is still the same step and no stored data changes.
+
 Pure functions on an item's metadata dict, no server import (steps and nextlines are the one copy of the checklist and its lines)."""
 from __future__ import annotations
 
@@ -41,8 +44,14 @@ def is_named(text: Any) -> bool:
 
 
 def line_of(text: Any) -> str:
-    """The step the server makes for `text`: `<owner>: <text on one line>`."""
-    return f"{_model.owner_display()}: {_steps.clean(text)}"
+    """The step the server makes for `text`: `<owner>: <text on one line>`. A text that already opens with his name (is_named: any case, a role in parentheses, a list marker or bold marks around it,
+    however many times) gets none put in front: it reads the same written with the name or without."""
+    return f"{_model.owner_display()}: {_steps.without_owner(text)}"
+
+
+def same_line(a: Any, b: Any) -> bool:
+    """Do two lines read as one step of his: the same words, his name once or twice or in another spelling aside (steps.owner_key). A line stored with the name twice is one with it written once."""
+    return _steps.owner_key(a) == _steps.owner_key(b)
 
 
 def decide_of(ask: Any) -> str:
@@ -80,8 +89,8 @@ ALIKE: Any = None     # set by the server: a predicate for a line a script of th
 def _same(cl: list[dict[str, Any]], *texts: Any, alike: bool = True) -> list[int]:
     """The open lines of his that read as one of `texts` (steps.key: the first line, case and spacing aside), or are the server's own script's line for the step (ALIKE; `alike=False` leaves those out).
     A `<owner>:` line a session wrote about something else is never one of them."""
-    keys = {_steps.key(t) for t in texts if _steps.clean(t)}
-    return [i for i in _open(cl) if _steps.key(cl[i]["text"]) in keys or (alike and ALIKE is not None and ALIKE(cl[i]["text"]))]
+    keys = {_steps.owner_key(t) for t in texts if _steps.clean(t)}
+    return [i for i in _open(cl) if _steps.owner_key(cl[i]["text"]) in keys or (alike and ALIKE is not None and ALIKE(cl[i]["text"]))]
 
 
 def _put_steps(meta: dict[str, Any], cl: list[dict[str, Any]]) -> None:
@@ -107,7 +116,7 @@ def ensure(meta: dict[str, Any], text: Any, keeper: str, by: str, at: float, wri
     mine = _same(cl, rec, alike=False) if rec else []
     out = "added"
     if mine:
-        if _steps.key(rec) == _steps.key(want) or (ALIKE is not None and ALIKE(cl[mine[0]]["text"])):
+        if same_line(rec, want) or (ALIKE is not None and ALIKE(cl[mine[0]]["text"])):
             return ""
         gone = [cl[mine[0]]["text"]]
         _mark(cl, [mine[0]], _steps.DROPPED, by, at)
@@ -146,7 +155,7 @@ def forget_closed(meta: dict[str, Any], keeper: str) -> None:
     if not rec:
         meta.pop(KEY, None)
         return
-    if not any(_steps.key(s["text"]) == _steps.key(rec) for s in _steps.view(meta, keeper=keeper) if s["status"] == _steps.OPEN):
+    if not any(same_line(s["text"], rec) for s in _steps.view(meta, keeper=keeper) if s["status"] == _steps.OPEN):
         meta.pop(KEY, None)
 
 
@@ -181,8 +190,8 @@ def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, mak
 def refuse_done(steps_old: list[dict[str, Any]], done_ix: list[int], recorded: Any = "", want: Any = "") -> str:
     """The refusal text (without its `Refused: `) for a `done` that names his step, "" when none does (N4: only his answer ticks it). His step is the one the server made (`recorded`, metadata.owner_step) and an open
     line that says what the ask does (`want`); a `<owner>:` line a session wrote about something else is the session's to tick."""
-    keys = {_steps.key(t) for t in (recorded, line_of(want) if want else "") if _steps.clean(t)}
-    mine = [i for i in done_ix if steps_old[i]["status"] == _steps.OPEN and is_named(steps_old[i]["text"]) and _steps.key(steps_old[i]["text"]) in keys]
+    keys = {_steps.owner_key(t) for t in (recorded, line_of(want) if want else "") if _steps.clean(t)}
+    mine = [i for i in done_ix if steps_old[i]["status"] == _steps.OPEN and is_named(steps_old[i]["text"]) and _steps.owner_key(steps_old[i]["text"]) in keys]
     if not mine:
         return ""
     i = mine[0]

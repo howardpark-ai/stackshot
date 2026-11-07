@@ -3257,7 +3257,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         text = []
         for n, x in enumerate(mine, 1):
             ls = [ln for ln in str(x["text"]).split("\n") if ln.strip()]
-            first = _steps.strip_opener(ls[0]) if ls and not _sc.FENCE_RX.match(ls[0]) else ""
+            first = _steps.strip_owner(ls[0]) if ls and not _sc.FENCE_RX.match(ls[0]) else ""
             if not first: continue
             if len(ls) == 1 and _steps.clean(first) == _steps.clean((r["metadata"] or {}).get("step")): continue      # the step the server made for a your-step says the step's summary, which the block already shows
             text.append(f"{n}. {first}")
