@@ -308,13 +308,11 @@ def _wake_window_rx(wake: Any) -> "re.Pattern[str] | None":
     return re.compile("|".join((near, weekday, after_duration)), re.I)
 
 
-def reads_as_window(text: Any, wake: Any) -> str:
-    """The waiting word of the first line of next that says the work waits for the wake's own day ("collect logs until 2099-03-02, then review", "after Mon Mar 2nd", "soak for 3 days, check Mar 2",
-    "wait until Monday"; the rules for how near the day must be are in _wake_window_rx), else "". A negation before the word ("no need to wait") passes it; a code span, a link, a fenced block
-    and the lines the server appends in parentheses are not read."""
+def _window_hit(text: Any, wake: Any) -> "tuple[str, str]":
+    """(the first line of `text` that says the work waits for the wake's own day, its waiting word) or ("", "")."""
     rx = _wake_window_rx(wake)
     if rx is None:
-        return ""
+        return "", ""
     for raw in _FENCE_RX.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), str(text or "")).splitlines():
         line = clean(raw)
         if not line or line.startswith("(") or _MARK_RX.sub("", line).startswith("("):
@@ -323,8 +321,20 @@ def reads_as_window(text: Any, wake: Any) -> str:
         for m in rx.finditer(plain):
             k = next(k for k in ("w1", "w2", "w3") if m.group(k))
             if not _negated(plain, m.start(k)):
-                return clean(m.group(k)).lower()
-    return ""
+                return line, clean(m.group(k)).lower()
+    return "", ""
+
+
+def reads_as_window(text: Any, wake: Any) -> str:
+    """The waiting word of the first line of next that says the work waits for the wake's own day ("collect logs until 2099-03-02, then review", "after Mon Mar 2nd", "soak for 3 days, check Mar 2",
+    "wait until Monday"; the rules for how near the day must be are in _wake_window_rx), else "". A negation before the word ("no need to wait") passes it; a code span, a link, a fenced block
+    and the lines the server appends in parentheses are not read."""
+    return _window_hit(text, wake)[1]
+
+
+def window_line(text: Any, wake: Any) -> str:
+    """The first line of `text` that says the work waits for the wake's own day (reads_as_window's line, not its word), else "": the wait reason a hold with a wake already carries in its words."""
+    return _window_hit(text, wake)[0]
 
 
 # ---------------------------------------------------------------------------------------------------------------- a wake alone whose own step is timed
