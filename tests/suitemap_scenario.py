@@ -485,7 +485,8 @@ def holds(expr, event, ref):
     return eval(e, {"__builtins__": {}})
 EVENTS = {"a pull request": ("pull_request", "refs/pull/7/merge"), "a push to main": ("push", "refs/heads/main"),
           "a push to a queue branch": ("push", "refs/heads/queue/main/g1"), "a manual run": ("workflow_dispatch", "refs/heads/some-branch"),
-          "a manual run on a queue branch": ("workflow_dispatch", "refs/heads/queue/main/g1")}
+          "a manual run on a queue branch": ("workflow_dispatch", "refs/heads/queue/main/g1"),
+          "a merge-queue entry": ("merge_group", "refs/heads/gh-readonly-queue/main/pr-7-0123456789abcdef0123456789abcdef01234567")}   # GitHub's native queue: its own branch, not a push
 MEASURED_ONLY = ["the shards' maps", "merge the shards' maps", "run every suite, measured", "keep the map", "save the map", "publish the map for release.sh", "audit the selection"]
 SELECTION, MANUAL = "run the suites the change reaches", "run the suites named, or every suite"
 def what_runs(event, ref):
@@ -498,6 +499,7 @@ def expected(kind, queue_suites):
         return {"shards": True, "measure": True, "suites job": True, "measured steps": [n for n in MEASURED_ONLY if n != "save the map"], "selection": False, "manual": False}
     if kind == "a push to main":
         return {"shards": True, "measure": True, "suites job": True, "measured steps": MEASURED_ONLY, "selection": False, "manual": False}
+    # a merge-queue entry (merge_group) is a pull request's run too: the selection in the `suites` job, no shards, no measured-run step (falls out below)
     manual = kind.startswith("a manual run")   # on any ref, a queue branch's included: the manual step alone, never the selection too
     return {"shards": False, "measure": False, "suites job": True, "measured steps": [], "selection": not manual, "manual": manual}
 check("mergequeue.toml and tests.yml agree on the queue: `suites` is all or select, queue_prefix starts with the `queue/` the push trigger lists and ends with /, and the check mq reads (`required`) is the job named `suites`",
@@ -543,7 +545,38 @@ for kind, (ev, ref) in EVENTS.items():
             have_pool = pool(job["runs-on"], ev, ref, hv, hi)
             if have_pool != want: bad.append((jname, kind, hv, hi, have_pool, want))
 check("tests.yml: the shard plan, the shards and the `suites` job run on ubuntu-latest for every kind of event (the whole `runs-on` expression evaluated)",
-      not bad and len(EVENTS) == 5, bad[:3])
+      not bad and len(EVENTS) == 6, bad[:3])
+# GitHub's native merge queue (merge_group): the same run as a queue/** push (evaluated above: no shards, no measured-run step, the selection; `suites` reports), plus what the event itself needs
+MG = "a merge-queue entry"
+mg_on = y[True].get("merge_group")
+check("merge_group: tests.yml triggers on it with types checks_requested, and the entry's branch (gh-readonly-queue/…) is not in the push list (a push trigger too would run every entry twice)",
+      isinstance(mg_on, dict) and mg_on.get("types") == ["checks_requested"] and not any("gh-readonly-queue" in b for b in push_on) and push_on == ["main", "queue/**"], (mg_on, push_on))
+check("merge_group: it runs what a queue/** push runs (select: the suites job with the selection step; no shard plan, no shards, no map kept, saved, published or audited)",
+      got[MG] == got["a push to a queue branch"] == {"shards": False, "measure": False, "suites job": True, "measured steps": [], "selection": True, "manual": False}, (got[MG], got["a push to a queue branch"]))
+check("merge_group: the `suites` job (the check main requires) runs for it and keeps its name, whatever the skipped shard jobs (`!cancelled()` lets a skipped need through)",
+      got[MG]["suites job"] and "cancelled()" in uj["if"] and "name" not in uj and not got[MG]["shards"] and not got[MG]["measure"], (uj.get("if"), uj.get("name")))
+cache_step = next(st for st in uj["steps"] if st.get("name") == "the suite map")
+check("merge_group: the map's cache key falls through the PR's base commit to the entry's base_sha, then to the earlier head, and the restore falls back to the newest map (the entry's base_sha may have no map of its own)",
+      cache_step["with"]["key"] == "suitemap-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}" and cache_step["with"]["restore-keys"].strip() == "suitemap-", cache_step["with"])
+conc = y["concurrency"]
+check("merge_group: the concurrency group holds the ref (each entry has its own branch, so entries never share a group) and cancel-in-progress is true for a pull_request only: an entry's run is never cancelled by another",
+      "github.ref" in conc["group"] and "github.workflow" in conc["group"]
+      and holds(conc["cancel-in-progress"], *EVENTS["a pull request"]) is True and all(holds(conc["cancel-in-progress"], *EVENTS[k]) is False for k in EVENTS if k != "a pull request"), conc)
+pr_jobs = [n for n in y["jobs"] if n not in ("shards", "measure", "suites")]   # the jobs that read the pull request (today tool-text)
+check("merge_group: every job that reads the pull request is skipped for a merge-queue entry (its `if:` evaluated for the event: skipped counts as passing), as for a queue/** push",
+      pr_jobs and all(holds(y["jobs"][n].get("if", "True"), *EVENTS[MG]) is False for n in pr_jobs), {n: y["jobs"][n].get("if") for n in pr_jobs})
+# the whole of the run, not only the steps named above: every step of `suites` (by position and name: the unnamed ones too) and every other job, evaluated for the event. A merge-queue entry must match a queue/** push in each
+def whole_run(event, ref):
+    steps = {f"{i}: {st.get('name') or st.get('uses') or st.get('run', '')[:30]}": holds(st.get("if", "True"), event, ref) for i, st in enumerate(uj["steps"])}
+    jobs = {n: holds(j.get("if", "True"), event, ref) for n, j in y["jobs"].items()}
+    return jobs, steps
+wr_mg, wr_q = whole_run(*EVENTS[MG]), whole_run(*EVENTS["a push to a queue branch"])
+check("merge_group: every job and every step of the `suites` job (the `if:` of each evaluated, the whole set: the lock check, the map restore, the checkout …) runs for a merge-queue entry exactly when it runs for a queue/** push",
+      wr_mg == wr_q and len(wr_mg[1]) >= 10 and any(k.endswith("the suite map") for k in wr_mg[1]) and any("lock is present" in k for k in wr_mg[1]),
+      [(k, wr_mg[0][k], wr_q[0].get(k)) for k in wr_mg[0] if wr_mg[0][k] != wr_q[0].get(k)] + [(k, v, wr_q[1].get(k)) for k, v in wr_mg[1].items() if v != wr_q[1].get(k)])
+named_events = set(re.findall(r"github\.event_name\s*(?:==|!=)\s*'([^']*)'", open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read()))
+check("merge_group: every event name the file's expressions test for is one it triggers on, and merge_group is among them (a queue run is told apart from main's in the file, not left to fall through)",
+      named_events <= {"push", "pull_request", "merge_group", "workflow_dispatch"} and "merge_group" in named_events, named_events)
 check("tests.yml: the map is saved to the cache from main only: a queue branch's commit may be rebased or deleted, and the audit of a later run would not resolve it",
       "github.ref == 'refs/heads/main'" in save_step["if"] and "github.event_name == 'push'" in save_step["if"], save_step.get("if"))
 # the plan command: its lines are the lists `shard --index` gives (one plan, however it is asked), with a map, without one, and with a map that is not there (the cache missed)
