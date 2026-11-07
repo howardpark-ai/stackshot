@@ -210,8 +210,8 @@ check("headings are sentence case with a count", all(f"<h2>{w} <span" in home fo
 check("home: no Task board and no Completed section, fold or card", not any(x in home for x in ('id="by-project"', 'id="completed"', 'data-fold="by-project"', 'data-fold="completed"', 'table class="pidx"', 'href="#completed"', ">Task board<")),
       [x for x in ('id="by-project"', 'id="completed"', 'href="#completed"', ">Task board<") if x in home])
 LABEL = r'((?:[^<]|<span class="more">[^<]*</span>)*)'     # a card's label: plain text, or its short form with the rest in span.more
-BADGE = r'(?:<i class="hnew">(\d+)<em> new</em></i>)?'    # the Closed card's badge, after the label: the count of closes not cleared yet
-cards = [re.sub(r"<[^>]*>", "", x[0]) for x in re.findall(r'<a class="hcard[^"]*" href="[^"]*"[^>]*><b>\d+</b><span>' + LABEL + r'</span>' + BADGE + r'</a>', home)]
+BADGE = r'(?: <i class="hnew">(\d+)<em> new</em></i>)?'    # the Closed card's count, on the label line right after the label: the closes not cleared yet
+cards = [re.sub(r"<[^>]*>", "", x[0]) for x in re.findall(r'<a class="hcard[^"]*" href="[^"]*"[^>]*><b>\d+</b><span>' + LABEL + BADGE + r'</span></a>', home)]
 check("home: the count cards run from Your move to Closed, and there is no Completed or Landed card", cards[:1] == ["Your move"] and cards[-1:] == ["Closed"] and "Waiting" in cards and "Completed" not in cards and "Landed" not in cards, cards)
 check("home: the other sections stay (Your move, On agent, Waiting, and the panel's four)", all(f'<section id="{x}">' in home for x in ("your-move", "agents-at-work", "waiting-list", "machines", "runners", "audit-panel")), ids)
 LDP = bd.landed_html(); PRJ = bd.projects_html(); ITEMP = bd.item_html("a1", answer=None, watch=None)
@@ -442,7 +442,7 @@ def pr(n, repo="acme/widget"): return f"https://github.com/{repo}/pull/{n}"
 def home_of(): return r2.Board(str(T / "store"), now=None).html()
 def count_card(h, href):
     """(count, label text) of the card linking to href, or None; the label's short-form markup is stripped."""
-    m = re.search(rf'<a class="hcard[^"]*" href="{href}"[^>]*><b>(\d+)</b><span>{LABEL}</span>{BADGE}</a>', h)
+    m = re.search(rf'<a class="hcard[^"]*" href="{href}"[^>]*><b>(\d+)</b><span>{LABEL}{BADGE}</span></a>', h)
     return (m.group(1), re.sub(r"<[^>]*>", "", m.group(2))) if m else None
 def row_ids(sec): return re.findall(r'<span class="ir-id">(a\d+)</span>', sec)
 h = home_of(); q = section(h, "queued-release"); ag = section(h, "agents-at-work")
@@ -456,14 +456,14 @@ check("queued: a count card beside the others, after On agent, with the section'
 check("queued: the cards are in the sections' order", re.findall(r'<a class="hcard[^"]*" href="#([a-z-]+)"', h[h.find('id="counts"'):h.find("</nav>", h.find('id="counts"'))]) == ["your-move", "agents-at-work", "queued-release", "waiting-list"])
 cn = h[h.find('<nav class="hcards"'):h.find("</nav>", h.find('<nav class="hcards"'))]
 check("cards: Queued for release has a short form (Queued, the rest in span.more), the other four cards are plain labels", '<span>Queued<span class="more"> for release</span></span>' in cn and cn.count('class="more"') == 1
-      and re.findall(r"<b>\d+</b><span>([^<]*)</span>", cn) == ["Your move", "On agent", "Waiting", "Closed"], cn)
+      and [x.strip() for x in re.findall(r"<b>\d+</b><span>([^<]*)(?:</span>|<i )", cn)] == ["Your move", "On agent", "Waiting", "Closed"], cn)
 check("cards: 60 px tall at every width, one-line labels, the short form chosen by the cards' column (a container query on the nav), not by the window",
       "nav.hcards{display:grid;" in css and "container:hcards/inline-size}" in css and re.search(r"a\.hcard\{[^}]*height:60px[^}]*\}", css) and re.search(r"a\.hcard span\{[^}]*white-space:nowrap[^}]*text-overflow:ellipsis", css)
       and re.search(r"@container hcards \(max-width:\d+px\)\{a\.hcard span \.more\{[^}]*clip-path:inset\(50%\)", css) and not re.search(r"@media[^{]*\{[^@]*\.hcard span \.more", css)
       and "overflow-wrap:anywhere}@container" not in css)
 # the Closed card: the big number is the items closed in the last 14 days (the Last 14 days section's count), the badge beside it the closes not cleared yet (the New section's count)
 def closed_card(b):
-    hh = b.html(); m = re.search(r'<a class="(hcard[^"]*)" href="/closed"([^>]*)><b>(\d+)</b><span>Closed</span>(<i class="hnew">(\d+)<em> new</em></i>)?</a>', hh)
+    hh = b.html(); m = re.search(r'<a class="(hcard[^"]*)" href="/closed"([^>]*)><b>(\d+)</b><span>Closed( <i class="hnew">(\d+)<em> new</em></i>)?</span></a>', hh)
     return m and {"cls": m.group(1), "n": int(m.group(3)), "new": int(m.group(5)) if m.group(5) else None, "attrs": m.group(2)}
 _keys = [ld.key(x["gid"], x["ts"]) for x in ld.records()]
 _c = closed_card(Bd())
@@ -475,9 +475,27 @@ check("Closed card (badge shown): the 14-day closed count, with the uncleared cl
       _c and _c["n"] == HAND and _c["new"] == len(_keys) == 3 and "zero" not in _c["cls"] and "3 new: closed by an agent, not cleared yet" in _c["attrs"] and HAND != 3, (_c, HAND))
 check("Closed page: New counts the same uncleared closes the badge says, Last 14 days the same count as the big number", f'<h2 class="lsec">New <span class="count">{_c["new"]}</span></h2>' in Bd().landed_html()
       and f'Last 14 days <span class="count">{_c["n"]}</span>' in Bd().landed_html(), _c)
+# the count sits beside the word Closed: on the label line, in green text, and the number line holds the number alone (a card cannot grow to hold a pill beside the number: each measures its own width for its narrow rules)
+_nav = lambda hh: hh[hh.find('<nav class="hcards"'):hh.find("</nav>", hh.find('<nav class="hcards"'))]
+_hh = Bd().html(); _cn = _nav(_hh); _cards = re.findall(r'<a class="hcard[^"]*"[^>]*>.*?</a>', _cn); _cl = [x for x in _cards if 'href="/closed"' in x]; _rest = [x for x in _cards if 'href="/closed"' not in x]
+check("Closed card (count beside the label): the label line is the word Closed then the count '3 new' as one green <i class=hnew> in the same span; the number line holds the number alone, and no pill follows the label span",
+      len(_cards) == 5 and len(_cl) == 1 and re.search(r'<b>\d+</b><span>Closed <i class="hnew">3<em> new</em></i></span></a>$', _cl[0]) and re.fullmatch(r"<b>\d+</b>", re.search(r"<b>.*?</b>", _cl[0]).group(0)) and _cn.count("<i ") == 1
+      and "</span><i" not in _cn and "</b><i" not in _cn, _cl)
+check("Closed card (count beside the label): the other four cards are unchanged: the number, then the label alone in its span (Queued for release with its short form), no count",
+      len(_rest) == 4 and all(re.fullmatch(r'<a class="hcard[^"]*" href="[^"]+"[^>]*><b>\d+</b><span>[^<]*(?:<span class="more">[^<]*</span>)?</span></a>', x) for x in _rest) and _rest[2].count('class="more"') == 1, _rest)
+_pill = re.search(r"a\.hcard i\.hnew\{([^}]*)\}", css); _q = re.findall(r"@container hcard \(max-width:(\d+)px\)\{a\.hcard i\.hnew(\.w\d)? em\{[^}]*clip-path:inset\(50%\)", css)
+check("Closed card (count beside the label): the count's CSS is plain green text (no border, padding or grid cell of its own), the word ' new' is clipped by the card's own width (a container query on the card, one width for a count of one digit and one each for two, three and four digits or more: the numbers the browser checks use), and the card keeps measuring its own width",
+      _pill and "color:var(--ok)" in _pill.group(1) and not re.search(r"border|padding|grid-area|background", _pill.group(1)) and [(int(x[0]), x[1]) for x in _q] == [(79, ""), (85, ".w2"), (92, ".w3"), (98, ".w4")] and ".hnew.wide" not in css and ".hnew.wide) b" not in css and "container:hcard/inline-size" in css and re.search(r"a\.hcard b\{grid-area:1/1;", css), (_pill and _pill.group(1), _q))
+_wide = {}
+for _k in (9, 10, 123, 4567, 12345):
+    _bk = Bd(); _bk.landed_count = lambda _k=_k: _k; _wide[_k] = re.findall(r'<span>Closed( <i class="hnew[^"]*">\d+<em> new</em></i>)</span></a>', _nav(_bk.html()))
+check("Closed card (count beside the label): the count's class says its digits so the card can keep the word 'new' for as long as it fits: none for one digit, w2, w3, w4 for two, three, four or more",
+      _wide == {9: [' <i class="hnew">9<em> new</em></i>'], 10: [' <i class="hnew w2">10<em> new</em></i>'], 123: [' <i class="hnew w3">123<em> new</em></i>'], 4567: [' <i class="hnew w4">4567<em> new</em></i>'],
+                12345: [' <i class="hnew w4">12345<em> new</em></i>']}, _wide)
 ld.clear(_keys)
 try:
     _c0 = closed_card(Bd()); _h0 = Bd().html()
+    check("Closed card (no new close): the label line is the word Closed alone in its span, with no count and no trailing space", f'<b>{HAND}</b><span>Closed</span></a>' in _nav(_h0) and "hnew" not in _nav(_h0), _nav(_h0))
     check("Closed card (badge hidden): every close cleared leaves the 14-day count and no badge at all", _c0 and _c0["n"] == HAND and _c0["new"] is None and ('<i class="hnew">' not in _h0) and "not cleared yet" not in _c0["attrs"], _c0)
     _b = Bd(); _b.done = []; _z = closed_card(_b)
     check("Closed card (nothing closed in 14 days, nothing new): 0, muted, no badge", _z and _z["n"] == 0 and _z["new"] is None and "zero" in _z["cls"], _z)
@@ -639,7 +657,7 @@ def header_of(pg):
 def cards_of(hd):
     """[(href, number, label text, badge)] of the header's count cards, in order."""
     return [(m.group(1), m.group(2), re.sub(r"<[^>]*>", "", m.group(3)), m.group(4) or "")
-            for m in re.finditer(r'<a class="hcard[^"]*" href="([^"]*)"[^>]*><b>(\d+)</b><span>' + LABEL + r'</span>' + r'(<i class="hnew[^"]*">\d+<em> new</em></i>)?</a>', hd)]
+            for m in re.finditer(r'<a class="hcard[^"]*" href="([^"]*)"[^>]*><b>(\d+)</b><span>' + LABEL + r'( <i class="hnew[^"]*">\d+<em> new</em></i>)?</span></a>', hd)]
 def pages_now():
     """Every page of the board, drawn from the fixture as it is now: name -> HTML."""
     snap = {"ts": _time.time(), "errors": {}, "failed": [], "runners": [{"box": "box-a", "repo": "acme/widget", "state": "idle", "name": "box-a-1", "kind": "", "reason": "", "job": None}]}
