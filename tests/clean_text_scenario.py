@@ -67,7 +67,10 @@ CLEAN_BODY = "Wrap the handoff row on narrow screens.\n\nThe table no longer ove
 AN = "noreply@" + "anthropic.com"
 CO = "Co-Authored-" + "By"
 CS = "Claude-" + "Session"
-SURL = "https://claude.ai/" + "code/session_01AbCdEf"
+SESS = "sess" + "ion_"                      # split, so this file holds no session id or session URL in any spelling
+SID = SESS + "01AbCdEf"
+CAI = "claude" + ".ai"
+SURL = f"https://{CAI}/code/{SID}"
 GEN = "Generated " + "with [Claude " + "Code](https://claude.com/claude-" + "code)"
 TRAILERS = f"{CO}: Claude Opus 5.5 <{AN}>\n{CS}: {SURL}\n"
 FOOTER = f"\U0001F916 {GEN}\n\n{SURL}\n"
@@ -88,6 +91,48 @@ ATTRIBUTION = {   # each refused shape: what, the line
     "the generated-with footer with its robot": f"\U0001F916 {GEN}",
     "the generated-with footer in lower case": GEN.lower(),
     "a generated-with line with no link": "Generated " + "with Claude Code",
+    "a Co-Authored-By trailer with a space before the colon": f"{CO} : Claude <{AN}>",
+    "a Co-Authored-By trailer after a dash bullet": f"- {CO}: Claude <{AN}>",
+    "a Co-Authored-By trailer after a number and a dot": f"1. {CO}: Claude <{AN}>",
+    "a Co-Authored-By trailer after a number and a bracket": f"2) {CO}: Claude <{AN}>",
+    "a Co-Authored-By trailer after a round bullet": f"\u2022 {CO}: Claude <{AN}>",
+    "a Co-Authored-By trailer in bold": f"**{CO}:** Claude <{AN}>",
+    "a Co-Authored-By trailer in upper case": f"{CO.upper()}: Claude <{AN}>",
+    "a Claude-Session trailer with a space before the colon": f"{CS} : {SURL}",
+    "a Claude-Session trailer in lower case": f"{CS.lower()}: abc",
+    "a Claude-Session trailer in upper case": f"{CS.upper()}: abc",
+    "a session URL on a www host": f"https://www.{CAI}/code/{SID}",
+    "a session URL in mixed case": "https://Claude.AI/" + "Code/Session_01AbCdEf",
+    "a session URL followed by a full stop": SURL + ".",
+    "a session URL followed by a comma": f"{SURL}, then more",
+    "a session URL inside round brackets": f"({SURL})",
+    "a session URL inside square brackets": f"[{SURL}]",
+    "a session URL inside a markdown link": f"[the run]({SURL})",
+    "a session URL with a port": f"https://{CAI}:443/code/{SID}",
+    "a session URL with a trailing dot on the host": f"https://{CAI}./code/{SID}",
+    "a session URL with a doubled slash": f"https://{CAI}//code/{SID}",
+    "a session URL with a percent-encoded path": f"https://{CAI}/%63ode/{SID}",
+    "a session URL with a percent-encoded slash-free host path": f"https://{CAI}/%63%6f%64%65/{SID}",
+    "a Claude-Session trailer with a space before the colon and a plain value": f"{CS} : abc",
+    "a Claude-Session trailer after other text on the line": f"note {CS}: abc",
+    # the code-session path of claude.ai with no session_ in it, so only the path pattern can catch these
+    "a code-session path with a port and no session id": "https://claude.ai:443/" + "code/abc123",
+    "a code-session path with a trailing dot on the host and no session id": "https://claude.ai./" + "code/abc123",
+    "a code-session path with a doubled slash and no session id": "https://claude.ai//" + "code/abc123",
+    "a code-session path with a percent-encoded letter and no session id": f"https://{CAI}/%63ode/abc123",
+    "a code-session path fully percent-encoded and no session id": f"https://{CAI}/%63%6f%64%65/abc123",
+    "the generated-with footer with bold on the name only": "Generated " + "with **Claude** " + "Code",
+    "a claude.ai URL that holds session_ elsewhere": f"https://{CAI}/some/other/path?id={SID}",
+    "a claude.com URL that holds session_": f"https://claude.com/some/path/{SID}",
+    "the generated-with footer with the name in bold": "Generated " + "with **Claude " + "Code**",
+    "the generated-with footer with the name in backticks": "Generated " + "with `Claude " + "Code`",
+    "the generated-with footer with a bold link text": "Generated " + "with [**Claude " + "Code**](https://claude.com/claude-" + "code)",
+    "the generated-with footer with a bracket and no link": "Generated " + "with [Claude " + "Code]",
+    "a generated-by footer": "Generated " + "by Claude " + "Code",
+    "a generated-using footer": "Generated " + "using Claude " + "Code",
+    "the generated-with footer in upper case": GEN.upper(),
+    "the product link alone": "[Claude " + "Code](https://claude.com/claude-" + "code)",
+    "the product link in a claude.ai spelling": "https://claude.ai/claude-" + "code",
 }
 
 # ---- 1. clean text passes, in every mode
@@ -170,11 +215,62 @@ for what, line in ATTRIBUTION.items():
         check(f"{what} in a {field} is refused", rc == 1 and f"FAIL {field}" in out and "refused" in out and "line " in out, (rc, out))
     rc, out = tool(["--title", line])
     check(f"{what} in a title is refused", rc == 1 and "FAIL title" in out, (rc, out))
+# a hit names its kind and its place and never repeats the line, so a refused session URL is not copied into a public log
+for what, line in ATTRIBUTION.items():
+    marked = line + " zq9x7"
+    for field, args in (("message", ["--message-file", write("nx-m.txt", "Wrap the row\n\n" + marked + "\n")]),
+                        ("body", ["--body-file", write("nx-b.md", CLEAN_BODY + "\n" + marked + "\n")]),
+                        ("title", ["--title", marked])):
+        rc, out = tool(args)
+        check(f"{what} in a {field}: the log does not repeat the line", rc == 1 and "zq9x7" not in out and SESS + "01" not in out and "FAIL" in out, (rc, out))
+rc, out = tool(["--message-file", write("nx2.txt", f"S\n\n{CS}: {SURL} board#5 zq9x7\n")])
+check("a board id on an attribution line: both are reported and the line is not repeated", rc == 1 and "board item id" in out and "Claude-Session" in out and "zq9x7" not in out, (rc, out))
+rc, out = tool(["--message-file", write("nx3.txt", "S\n\nSee board#5 for why.\n")])
+check("a board id alone still prints its line", "See board#5 for why." in out, (rc, out))
+
+# a merge subject is skipped for the deny list, but its attribution is not; a merge-looking line anywhere but line 1 is not skipped at all
+for subj, what in ((f"Merge branch 'x' of {SURL} into fix/y", "a pull's url"),
+                   (f"Merge branch 'x' of https://{CAI}/%63ode/{SID} into fix/y", "an encoded url"),
+                   (f"Merge pull request #1 from {CAI}/code/{SESS}01", "the owner of a pull request merge"),
+                   ("Merge pull request #1 from claude.ai/" + "code/x", "a code path as the owner"),
+                   (f"Merge branch 'main' into fix/{CAI}/code/{SESS}01", "the into-branch")):
+    rc, out = tool(["--message-file", write("mgs.txt", subj + "\n")])
+    check(f"merge subject: a session URL in {what} is refused", rc == 1 and "FAIL message" in out and SESS + "01" not in out, (rc, out))
+rc, out = tool(["--message-file", write("mgs2.txt", "Merge branch 'main' into fix/x\n")])
+check("merge subject: a plain subject still passes", rc == 0, (rc, out))
+rc, out = tool(["--message-file", write("mgs3.txt", "Fix the row\n\nMerge branch 'main' into fix/board#3\n")])
+check("a merge subject on line 3 is not skipped (its branch name is read as ordinary text)", rc == 1 and "line 3" in out and "board item id" in out, (rc, out))
+rc, out = tool(["--message-file", write("mgs4.txt", f"Fix the row\n\nMerge branch 'x' of {SURL} into fix/y\n")])
+check("a merge subject on line 3 holding a session URL is refused on line 3", rc == 1 and "line 3" in out and SESS + "01" not in out, (rc, out))
+rc, out = tool(["--message-file", write("mgs5.txt", f"Fix the row\n\nMerge pull request #1 from some-owner/fix/board#6\n")])
+check("a pull-request merge subject on line 3 is not skipped", rc == 1 and "line 3" in out, (rc, out))
+rc, out = tool(["--title", f"Merge branch 'x' of {SURL} into fix/y"])
+check("a merge-subject-shaped title with a session URL is refused", rc == 1, (rc, out))
+
+# the exempt set: four full shas, attribution only
+check("the exempt set holds four full lower-case shas", len(ct.ATTRIBUTION_EXEMPT_SHAS) == 4 and all(len(x) == 40 and x == x.lower() and set(x) <= set("0123456789abcdef") for x in ct.ATTRIBUTION_EXEMPT_SHAS), ct.ATTRIBUTION_EXEMPT_SHAS)
+trailer_msg = f"Old change\n\n{CO}: Claude Opus 5.5 <{AN}>\n"
+check("check_field: without the exemption a trailer is a hit", len(ct.check_field("c", trailer_msg, [], True)) == 1)
+check("check_field: with the exemption the trailer passes", ct.check_field("c", trailer_msg, [], True, True) == [])
+check("check_field: the exemption does not cover a board id on the same commit", [h[3] for h in ct.check_field("c", trailer_msg + "refs board#5\n", [], True, True)] == ["board item id (board#N)"])
+dl, _ = ct.load_deny("old change")
+check("check_field: the exemption does not cover the deny list", [h[3] for h in ct.check_field("c", trailer_msg, dl, True, True)] == ["deny pattern 1"])
+check("check_field: the exemption switches off every attribution pattern of that commit, a session URL line included", len(ct.check_field("c", trailer_msg + SURL + "\n", [], True, True)) == 0)
+check("commit_field exempts by the full sha only", ct.commit_field(sorted(ct.ATTRIBUTION_EXEMPT_SHAS)[0], "m")[3] is True
+      and ct.commit_field(sorted(ct.ATTRIBUTION_EXEMPT_SHAS)[0][:10], "m")[3] is False and ct.commit_field("0" * 40, "m")[3] is False)
+
+# the workflow reads the PR's own commits: base..head, never all history
+wf = open(os.path.join(STACK, ".github", "workflows", "clean-text.yml"), encoding="utf-8").read()
+check("the workflow runs --from-env with the base branch as the base revision", 'BASE_REV="origin/$BASE_REF" uv run --no-project python tools/clean_text.py --from-env' in wf, wf)
+check("the workflow takes the head from the pull request and the base from its base ref", "HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}" in wf and "BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}" in wf)
+check("the workflow fetches the whole history so base..head can be read", "fetch-depth: 0" in wf)
+check("the workflow never walks all history (no --new-commits, no bare --commits)", "--new-commits" not in wf and "--commits" not in wf)
+
 msg = "Subject\n\n" + CLEAN_BODY + "\n" + TRAILERS + FOOTER
 rc, out = tool(["--message-file", write("m1.txt", msg)])
 check("a message with the trailers, footer and session URL is refused on every one of those lines", rc == 1 and out.count("FAIL message") == 5, (rc, out))
-rc, out = tool(["--message-file", write("m1b.txt", msg)], deny="session_01AbCdEf\nnoreply\nclaude")
-check("a deny list does not exempt them: they are refused, and the deny list is read on them without echoing the line", rc == 1 and "deny pattern" in out and "refused" in out and "session_01AbCdEf" not in out, (rc, out))
+rc, out = tool(["--message-file", write("m1b.txt", msg)], deny=SID + "\nnoreply\nclaude")
+check("a deny list does not exempt them: they are refused, and the deny list is read on them without echoing the line", rc == 1 and "deny pattern" in out and "refused" in out and SID not in out, (rc, out))
 rc, out = tool(["--body-file", write("b1.md", CLEAN_BODY + "\n" + FOOTER)])
 check("a PR body ending with the footer and the session URL is refused", rc == 1 and out.count("FAIL body") == 2, (rc, out))
 rc, out = tool(["--message-file", write("m2.txt", f"S\n\n{CS}: {SURL} board#5\n")])
@@ -186,7 +282,8 @@ check("the words inside a sentence are not a trailer", rc == 0, (rc, out))
 rc, out = tool(["--message-file", write("m4.txt", "Fix the row\n\nSigned-off-by: A <a@example.invalid>\nboard#7\n")])
 check("other trailers are not skipped", rc == 1, (rc, out))
 for text, what in (("Explain the claude.ai connector setup", "claude.ai alone"), ("A session of the claude code client", "the words claude code in prose"),
-                   ("Pass Claude the file", "the name Claude"), ("Reads the https://claude.ai/chat/abc page title", "a chat link is not a code session link")):
+                   ("Pass Claude the file", "the name Claude"), ("Numbers generated with Claude 3 are not comparable", "generated with a model name"),
+                   ("Generated with care by the build", "generated with something else"), ("Docs for the claude.ai/code feature", "a bare claude.ai/code mention with no slash after"), ("Reads the https://claude.ai/chat/abc page title", "a chat link is not a code session link")):
     rc, out = tool(["--title", text])
     check(f"attribution patterns do not misfire: {what}", rc == 0, (rc, out))
 
@@ -483,6 +580,40 @@ check("(setup) a commit with attribution lines made with --no-verify", rc == 0, 
 attrib = git(hk, "rev-parse", "HEAD")
 rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib} refs/heads/attrib {ZERO}"])
 check("pre-push: a new branch holding a commit with attribution lines is refused, naming the commit", rc == 1 and f"FAIL commit {attrib[:10]}" in out and "refused" in out, (rc, out))
+# an old attributed commit: named by its full sha in the (scratch copy of the) tool's exempt set it passes; any other sha is refused
+rc, out = hcommit(hk, "att2.txt", "Add another row\n\n" + TRAILERS.strip(), "--no-verify")
+attrib2 = git(hk, "rev-parse", "HEAD")
+rc, out = hcommit(hk, "att3.txt", "Add a third row\n\nrefs board#8\n\n" + TRAILERS.strip(), "--no-verify")
+attrib3 = git(hk, "rev-parse", "HEAD")
+hk_tool = os.path.join(hk, "tools", "clean_text.py")
+tool_text = open(hk_tool, encoding="utf-8").read()
+marker = "ATTRIBUTION_EXEMPT_SHAS = frozenset({\n"
+check("(setup) the exempt set can be patched in the scratch copy", tool_text.count(marker) == 1)
+def exempt_only(*shas):
+    with open(hk_tool, "w", encoding="utf-8") as f: f.write(tool_text.replace(marker, marker + "".join(f'    "{x}",\n' for x in shas)))
+try:
+    exempt_only(attrib)
+    rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib} refs/heads/attrib {ZERO}"])
+    check("pre-push: an old commit named in the exempt set passes the walk of all history", rc == 0 and "FAIL" not in out, (rc, out))
+    rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib2} refs/heads/attrib {ZERO}"])
+    check("pre-push: the exempt commit passes but the next attributed commit is refused, and only it", rc == 1 and f"FAIL commit {attrib2[:10]}" in out and f"FAIL commit {attrib[:10]}" not in out, (rc, out))
+    exempt_only(attrib[:10])
+    rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib} refs/heads/attrib {ZERO}"])
+    check("pre-push: a short sha in the exempt set exempts nothing", rc == 1 and f"FAIL commit {attrib[:10]}" in out, (rc, out))
+    exempt_only(attrib, attrib2, attrib3)
+    rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib3} refs/heads/attrib {ZERO}"])
+    check("pre-push: an exempt commit is still read for a board id and the deny list", rc == 1 and f"FAIL commit {attrib3[:10]}" in out and "board item id" in out and f"FAIL commit {attrib2[:10]}" not in out
+          and "Co-Authored" not in out and "Claude-Session" not in out, (rc, out))
+    rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib2} refs/heads/attrib {ZERO}"])
+    check("pre-push: two exempt commits pass together", rc == 0, (rc, out))
+    rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib2} refs/heads/attrib {attrib}"])
+    check("pre-push: an update range holding only an exempt commit passes", rc == 0, (rc, out))
+finally:
+    with open(hk_tool, "w", encoding="utf-8") as f: f.write(tool_text)
+rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib} refs/heads/attrib {parent}"])
+check("pre-push: with the real exempt set the same commit is refused again", rc == 1 and f"FAIL commit {attrib[:10]}" in out, (rc, out))
+rc, out = hrun(hk, "pre-push", [f"refs/heads/attrib {attrib} refs/heads/attrib {ZERO}"], args=("nowhere", "git@example.invalid:o/r.git"))
+check("pre-push: a push by a URL no remote has walks all history and refuses the attributed commit", rc == 1 and f"FAIL commit {attrib[:10]}" in out, (rc, out))
 hgit(hk, "checkout", "-q", "main")
 
 # pre-push through a real push to a local bare repository
