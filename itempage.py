@@ -17,6 +17,7 @@ import step_commands as _sc
 import model as _model
 import model_guards as _mg
 import states as _states
+import steps as _steps
 import watchers as _wat
 
 CLIP = 160                         # the longest an action or an entry is quoted inside a sentence
@@ -175,7 +176,7 @@ def next_lines(text: Any, mover: str) -> list[NextLine]:
         if out and (raw[:1] in (" ", "\t") or s.startswith("(") or (marked and not named)):
             out[-1].subs.append(body)
             continue
-        out.append(NextLine(body if named or not clean(mover) else f"{clean(mover)}: {body}", named))
+        out.append(NextLine(_steps.collapse_owner(body) if named else body if not clean(mover) else f"{clean(mover)}: {body}", named))
     flush()
     return out
 

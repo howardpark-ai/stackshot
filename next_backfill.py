@@ -34,7 +34,7 @@ def _base(rec: dict[str, Any]) -> str:
 def _stem(text: Any) -> str:
     """A step's first line without its `→ answer`, as compared."""
     ln = _steps.first_line(text)
-    return _steps.key(ln.split(_hs.ARROW.strip(), 1)[0]) if _hs.ARROW.strip() in ln else _steps.key(ln)
+    return _steps.owner_key(ln.split(_hs.ARROW.strip(), 1)[0]) if _hs.ARROW.strip() in ln else _steps.owner_key(ln)
 
 
 def plan(meta: dict[str, Any] | None, status: str = "open", keeper: str = "") -> list[dict[str, Any]]:
@@ -63,7 +63,7 @@ def audit(meta: dict[str, Any] | None, status: str = "open", keeper: str = "") -
         ans = _hs.answer_words(rec.get("choice"), rec.get("text"))
         line = _hs.with_answer(_hs.line_of(base), ans)
         near = next((s for s in his if abs(float(s.get("at") or 0) - ts) <= NEAR), None)
-        same = next((s for s in his if _stem(s["text"]) == _steps.key(_hs.line_of(base))), None)
+        same = next((s for s in his if _stem(s["text"]) == _steps.owner_key(_hs.line_of(base))), None)
         if near is not None:
             have.append({"ts": ts, "line": line, "why": "step there"})
         elif same is not None:
