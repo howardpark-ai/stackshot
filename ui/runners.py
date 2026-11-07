@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Any
 
 import config as _cfg
-from runners import ORG_MARK, SWITCH_ACTIONS, _columns, _machines, _now, asof_html, conf, pending_html, switch_boxes, switch_enabled
+from runners import ORG_MARK, SWITCH_ACTIONS, _columns, _machines, _now, asof_html, conf, enabled, pending_html, switch_boxes, switch_enabled, unused
 from ui import under
 
 # ----------------------------------------------------------------------------- the page
@@ -125,10 +125,23 @@ def _buttons(b: str, sw: dict[str, Any], token: Any) -> str:
                    f'<input type="hidden" name="token" value="{tk}"><button type="submit" class="b">{SWITCH_ACTIONS[a]}</button></form>' for a in acts)
 
 
+def not_used_html(snap: dict[str, Any]) -> str:
+    """The one plain line the page shows instead of cards and a table when the board uses no CI runners: none listed in [runners] repos (or no [runners] table), or a clean read that
+    found none. "" when there is something to draw."""
+    if not enabled():
+        return '<p class="sub rnotused" role="status">This board does not use self-hosted CI runners.</p>'
+    if unused(snap):
+        return '<p class="sub rnotused" role="status">GitHub lists no self-hosted CI runners for the repositories this board follows.</p>'
+    return ""
+
+
 def table_html(snap: dict[str, Any], now: float | None = None, token: Any = None) -> str:
     """Everything the page swaps every 30 s: the as-of line, the errors, the count cards, the machines' table. `token` (server.py) makes a box's form token; None draws no button.
     Escapes everything it draws."""
     now = _now() if now is None else now
+    note = not_used_html(snap)
+    if note:
+        return note
     if snap.get("pending"):
         return pending_html()
     cols = _columns(snap)
@@ -210,11 +223,12 @@ def page_html(board: Any, snap: dict[str, Any], token: Any = None) -> str:
     from ui import render as R
     font_css = str(_cfg.get("instance", "font_css") or "")
     title = f"CI runners · {board.title}"
+    sub = "" if not_used_html(snap) else f'<p class="sub">GitHub Actions runners on each machine. They belong to the {_e(_org_phrase(snap))} and take jobs from every repo.</p>'      # the not-used line is the body's
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_e(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{_e(font_css)}">' if font_css else "")
             + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}{_CSS}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header()}'
-            f'<h1>CI runners</h1><p class="sub">GitHub Actions runners on each machine. They belong to the {_e(_org_phrase(snap))} and take jobs from every repo.</p>'
+            f'<h1>CI runners</h1>{sub}'
             f'<p id="rn-note" class="rstale-js" role="status"></p><p id="rn-result" role="status" aria-live="polite"></p>'
             f'<div id="rn-body" data-ts="{int(snap["ts"])}"{" data-stale=\"1\"" if snap.get("stale") else ""}{" data-refreshing=\"1\"" if snap.get("refreshing") or snap.get("pending") else ""}>{table_html(snap, token=token)}</div></main>' + board.panel_tail()
             + _JS % (json.dumps(str(_cfg.get("instance", "timezone") or "UTC")), json.dumps(_cfg.tz_abbr())) + R._FAB_PAIR + R._THEME_JS + R._RELOAD_JS + R._TOTOP_JS + R._BFCACHE_JS + '</body></html>')

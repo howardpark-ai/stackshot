@@ -302,21 +302,20 @@ jobs:
   # when nothing relevant is touched or no AWS credentials are there; once the script runs, a model or network error (or any other failure on its
   # model path) is a warning and a pass, never a block, and only a parsed "the text and the code disagree" fails. A uv or PyPI failure while the job starts the script can still fail it.
   # The call goes to Amazon Bedrock: bedrock-runtime in the region named by the repository variable TOOL_TEXT_AWS_REGION (required: with none set the script skips), signed in with the
-  # role named by the repository variable TOOL_TEXT_AWS_ROLE (see the sign-in below), so there is no secret in GitHub, none in this file, and no workspace id. The model defaults to the inference profile
+  # role named by the repository secret TOOL_TEXT_AWS_ROLE (see the sign-in below), so there is no access key in GitHub, none in this file, and no workspace id. The model defaults to the inference profile
   # global.anthropic.claude-haiku-5-5 (repository variable TOOL_TEXT_MODEL to change it). The PR's text (diff, body)
   # is data: the diff is read by git inside the script, the body goes through a file, and every value of the event goes in through env, never into the shell text.
   tool-text-model:
     # skipped for pull requests from forks: the model call is paid (a pull_request event is the only trigger this job has; a pushed commit on main starts none)
     # THE SIGN-IN ON A HOSTED RUNNER. A hosted runner has no AWS profile in a home folder, so the job signs in through GitHub's OIDC token instead
-    # (aws-actions/configure-aws-credentials, below): the repository variable TOOL_TEXT_AWS_ROLE holds the ARN of an IAM role that trusts this repository's
+    # (aws-actions/configure-aws-credentials, below): the repository secret TOOL_TEXT_AWS_ROLE holds the ARN of an IAM role (a secret, not a variable: a `with:` value prints unmasked in a public run log, and the ARN holds the AWS account number; a secret is masked) that trusts this repository's
     # token (the OIDC provider token.actions.githubusercontent.com, sub `repo:<owner>/<repo>:pull_request`) and may call bedrock:InvokeModel and
-    # bedrock:InvokeModelWithResponseStream on the inference profile and the foundation model behind it, nothing else. No key lives in GitHub. When the role
-    # is set, the job uses it (the AWS profile variable is then not passed). When the role is NOT set there is
-    # no sign-in to be had, so the job does not start (it shows as skipped, which counts as passing, and costs no minute): a missing role is a skipped check,
-    # never a failure. The role is created outside this repository (your AWS account); this file only reads its name. CONTRIBUTING.md, "The tool-text gates", item 4.
+    # bedrock:InvokeModelWithResponseStream on the inference profile and the foundation model behind it, nothing else. No key lives in GitHub. A secret cannot be read
+    # in an `if`, so the job-level condition holds only the switch. When the secret is NOT set the sign-in step fails (it is continue-on-error), no credentials are there and
+    # text_check.py skips with a warning: a missing role is a skipped check, never a failure (the job does start and takes a short runner minute). The role is created outside
+    # this repository (your AWS account); this file only reads its name. CONTRIBUTING.md, "The tool-text gates", item 4.
     if: >-
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.TOOL_TEXT_MODEL_CHECK == 'on'
-      && vars.TOOL_TEXT_AWS_ROLE != ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -327,7 +326,7 @@ jobs:
       TOOL_TEXT_MODEL_CHECK: ${{ vars.TOOL_TEXT_MODEL_CHECK }}
       TOOL_TEXT_MODEL: ${{ vars.TOOL_TEXT_MODEL }}
       TOOL_TEXT_AWS_REGION: ${{ vars.TOOL_TEXT_AWS_REGION }}
-      TOOL_TEXT_AWS_PROFILE: ${{ vars.TOOL_TEXT_AWS_ROLE == '' && vars.TOOL_TEXT_AWS_PROFILE || '' }}   # an AWS profile, only when no role is set; empty when the role signs in (boto3's default chain then reads the role's credentials from the environment)
+      TOOL_TEXT_AWS_PROFILE: ''   # a hosted runner has no AWS profile: empty, so boto3's default chain reads the role's credentials from the environment
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -344,11 +343,10 @@ jobs:
         with:
           python-version: "3.14"
       - name: sign in to AWS through GitHub's OIDC token
-        if: vars.TOOL_TEXT_AWS_ROLE != ''
         continue-on-error: true   # a wrong role ARN or trust policy is a skipped check with a warning (no credentials: text_check.py skips), never a red PR, as for its other AWS problems
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd   # v6.3.0, pinned by commit
         with:
-          role-to-assume: ${{ vars.TOOL_TEXT_AWS_ROLE }}
+          role-to-assume: ${{ secrets.TOOL_TEXT_AWS_ROLE }}
           aws-region: ${{ vars.TOOL_TEXT_AWS_REGION }}     # required: the script has no default and skips when it is unset
           role-session-name: tool-text-model-${{ github.run_id }}
           role-duration-seconds: 900

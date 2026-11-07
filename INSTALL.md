@@ -33,7 +33,8 @@ cd ~/stackshot
 
 A clone you will commit from (not one that only runs the service) also turns on the repository's git hooks, once:
 `git config core.hooksPath .githooks`. They refuse a commit message or a push that carries the instance owner's data;
-`install.sh` does not change git configuration, so this is yours to run. CONTRIBUTING.md, "Commit and PR text", has the rest.
+`install.sh` does not change git configuration, so this is yours to run. The hooks also run the machine-wide hook of the same
+name when one is installed (in the user's global `core.hooksPath` first, else in `${XDG_CONFIG_HOME:-$HOME/.config}/git/hooks`), and skip it otherwise. CONTRIBUTING.md, "Commit and PR text", has the rest.
 
 ## 2. Set up
 

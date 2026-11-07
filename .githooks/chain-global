@@ -1,0 +1,20 @@
+#!/bin/sh
+# Runs the machine's own (global) git hook of the same name, when there is one. Usage: chain-global <hook-name> [hook args…]
+# The hook's stdin passes through. The repo sets `core.hooksPath .githooks`, which REPLACES the global hooks directory, so a
+# machine-wide hook there would never run in this clone; the hooks of this directory call this helper to run it after their own check.
+#
+# The global hooks directory is, in this order:
+#   1. the user's global `core.hooksPath` (`git config --global`, a leading `~` expanded), which this clone's local setting shadows;
+#   2. else ${XDG_CONFIG_HOME:-$HOME/.config}/git/hooks.
+# The hook <dir>/<hook-name> runs with the same arguments and stdin, only if it is a file and executable, and is not the very same
+# file as this directory's own hook of that name (`-ef`: the global setting may point back here, and that must not loop).
+# No such hook: nothing happens, exit 0. The hook's exit status is this helper's.
+name=${1:?usage: chain-global <hook-name> [hook args...]}
+shift
+own=$(dirname "$0")/$name
+dir=$(git config --global --get --type=path core.hooksPath 2>/dev/null) || dir=
+[ -n "$dir" ] || dir=${XDG_CONFIG_HOME:-${HOME:-}/.config}/git/hooks
+hook=$dir/$name
+[ -f "$hook" ] && [ -x "$hook" ] || exit 0
+[ -e "$own" ] && [ "$hook" -ef "$own" ] && exit 0
+exec "$hook" "$@"
