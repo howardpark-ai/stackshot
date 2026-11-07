@@ -762,5 +762,9 @@ ignore_phrases = []                                 # (words) phrases that conta
 [keywords.waiting]
 park_words = []                                     # (words) other-language words for park, postpone or hold: the owner's answer with one parks the item
 
+[keywords.ask_options]
+particles = []                                      # (words) the suffixes that may follow the last word of an option's label in a Recommend sentence (a language that glues them on): the label still counts as named. Example: ["zz"] reads "Widezz" as naming the option "Wide"
+refusals = []                                       # (words) other-language words or phrases that say 'not this option' right before a label, letter or place (the English ones are not, no, avoid, never, skip, except, don't, instead of, rather than). Example: ["nope"] turns away the option in "nope Wide"
+
 [keywords.server]
 command_cues = []                                   # (words) other-language words that say an item waits on the owner running or pasting a command
