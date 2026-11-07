@@ -17,8 +17,8 @@ skipped only when ALL of these hold; anything else, and anything this cannot rea
        not older than --max-age and the commit it was made at is in main's history; a suite with no usable carry refuses the map;
     2. neither side changes the harness or a check outside the suites (the ALWAYS set below): .github/, release.sh, deploy.sh, tests/run-suite, tests/pyproject.toml,
        tests/uv.lock, tests/suitemap.py, tools/retest_skip.py (the CI workflow, the release and the test runner read these); any `*.lock` file and any `# /// script` block of a Python
-       file (the workflow's first step checks every script's lock against its inline metadata, which no suite does); tools/tool_text.py, tools/text_check.py and
-       tests/tool_text.snapshot.json (the two tool-text jobs; what they read besides these, server.py and the tool functions and output helpers HELPERS names, needs no entry of its
+       file (the workflow's first step checks every script's lock against its inline metadata, which no suite does); tools/tool_text.py and
+       tests/tool_text.snapshot.json (the tool-text job; what they read besides these, server.py and the tool functions and output helpers HELPERS names, needs no entry of its
        own: a change that matters there also changes the snapshot, which always retests); tools/clean_text.py (the clean-text workflow). The test tests/release_queue_scenario.py (13k) holds the list to every tools/ and tests/ file the workflows name;
     3. no file is changed by both sides;
     4. no change adds a dependency the map cannot show. The map's read sets are those of the map's commit, so a change that makes a file load, run or read another one is
@@ -62,12 +62,11 @@ HARNESS_DIRS = (".github/",)
 HARNESS_FILES = ("release.sh", "deploy.sh", "tests/run-suite", "tests/pyproject.toml", "tests/uv.lock", "tests/suitemap.py", "tools/retest_skip.py")
 # The checks the workflows run that are not suites (so the suite map knows nothing of what they read): a change to one of these inputs, on either side, retests.
 #   tests.yml, first step: every `# /// script` Python file has a current <file>.lock       -> any `*.lock` file, and the script block of any Python file (script_block_changed)
-#   tests.yml, tool-text and tool-text-model jobs: tools/tool_text.py, tools/text_check.py over tests/tool_text.snapshot.json
+#   tests.yml, tool-text job: tools/tool_text.py over tests/tool_text.snapshot.json
 #   clean-text.yml: tools/clean_text.py
 CHECK_FILES = {
-    "tools/tool_text.py": "the tool-text jobs of the CI workflow run",
-    "tools/text_check.py": "the tool-text jobs of the CI workflow run",
-    "tests/tool_text.snapshot.json": "the tool-text jobs of the CI workflow compare with",
+    "tools/tool_text.py": "the tool-text job of the CI workflow runs",
+    "tests/tool_text.snapshot.json": "the tool-text job of the CI workflow compares with",
     "tools/clean_text.py": "the clean-text workflow runs",
 }
 LOCK_WHY = "the CI workflow's lock check reads"
