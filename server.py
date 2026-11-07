@@ -141,6 +141,8 @@ import bullet_text as _bt  # noqa: E402  — how a line reads and how a text bec
 import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
 import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
 import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
+import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
+import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
 import ladder as _ladder  # noqa: E402  — the one ladder a quiet mover's item climbs, behind [ladder] enabled; the pure half (ladder.py)
 import mover_state as _mover_state  # noqa: E402  — the item's effective mover (the pane half moved to liveness.py), shared by the stall pass and the audit
 import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
@@ -903,6 +905,7 @@ def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", auth
         _owner_steps_on_save(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms ("quiet") leaves the checklist alone
     _record_writer(item, writer, author)     # every revision names who wrote it (the hand-off clock reads it)
     _stamp_activity(item, before, writer, author, activity, activity_at)      # the activity clock: only a real write about the work moves it (an audit's write and a bare confirm do not)
+    _ask_stamp(item, before, writer)      # who wrote the ask and when (metadata.ask_rec), on a save that changes it
     _handoff_on_save(gid, before, item, writer, author)      # step 2: the writer touches the item (a hand-off to it is taken); a new mover is a hand-off record
     _handoff_his_over(gid, item, author)     # his hand-off ends with his answer, or when the item is no longer his to move
     _handoff_follow(gid, before, item, writer, author)      # the record follows the mover whatever changed it: the server's own save, a script's, his answer; a stale open record ends
@@ -3121,7 +3124,7 @@ def _front_sender(who: str) -> bool:
 # purpose through the message tool are not touched.
 PRESENCE_MINUTES = 30.0
 _FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
+                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress"}      # news about the item: progress (named here so a new, unmapped tag is a decision the tag-coverage test catches)
 
@@ -4792,6 +4795,212 @@ def _ask_owed(meta: dict[str, Any]) -> str:
         raise ToolError(f'Refused: a needs=decision item needs an ask line: ask="{_rmod.ASK_FORM}" (≤ {_rmod.ASK_MAX} chars). {_ASK_IN_NEXT}')
     return (f'\n[ask] a needs=decision item carries an ask line: ask="{_rmod.ASK_FORM}" (≤ {_rmod.ASK_MAX} chars'
             + (f"; refused from {_rmod.when_words(dt.date.fromisoformat(after))}" if after else "") + ")\n[ask] " + _ASK_IN_NEXT)
+
+# ----------------------------------------------------------------------------- an ask that is wrong or moot leaves the owner's move (ask_leaves.py)
+# The server may take off his move what its author calls wrong, in one plain sentence, and apply what he said. It only removes from his move or applies his word: it never writes an ask,
+# closes an item or answers for him, and it acts on the author's own plain sentence, nothing else a session writes. Everything it does is a line in History and in the reply. A board item the
+# ask waits on being dropped removes nothing: the author's next write to the item carries a line saying so (_ask_after_write).
+def _ask_stamp(item: dict[str, Any], before: dict[str, Any] | None, writer: str) -> None:
+    """_save's step: keep who wrote the ask and when (metadata.ask_rec). A failure here never fails a write."""
+    meta = item.get("metadata")
+    if not isinstance(meta, dict):
+        return
+    try:
+        was = (before or {}).get("metadata")
+        was = was if isinstance(was, dict) else None
+        who = (_session_label(writer) or writer) if writer and _askl.changed(meta, was) else ""      # the label may read every machine's sessions.json: only a save that changes the ask needs it
+        _askl.stamp(meta, was, who, time.time())
+    except Exception as e:  # noqa: BLE001
+        print(f"ask: {item.get('id')} record not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def _ask_stands(item: dict[str, Any]) -> str:
+    """The ask that stands on the owner's move now ("" when none): the open item's ask line with a decision in needs, never a watcher's own ask."""
+    if item.get("status") != "open":
+        return ""
+    meta = item.get("metadata") or {}
+    return _askl.standing(meta, _needs_kinds(meta), bool(_watch.asked_of(meta)))
+
+
+def _ask_lookup(ref: str) -> "tuple[str, str, float, str] | None":
+    """(status, outcome, when it was last changed: the close time of a closed item, how it ended in words) of the item a number ("12", from the ask's text) or a store id names; None when it cannot be
+    read. An item closed as superseded continues in its replacement: it is followed through the chain to its end and the end's state is returned, so only a chain that ends in a dropped item reads as
+    dropped; a replacement that is open or done is where the question went on, and the ask stands."""
+    try:
+        gid = _norm_id(f"board#{ref}") if ref.isdigit() else _norm_id(ref)
+        it = _load(gid)
+    except Exception:  # noqa: BLE001
+        return None
+    chain, seen = [], {gid}
+    while it.get("status") == "completed" and (it.get("metadata") or {}).get("outcome") == "superseded":
+        nxt = str((it.get("metadata") or {}).get("superseded_by") or "")
+        if not nxt:
+            return None
+        try:
+            nxt = _norm_id(nxt)
+            if nxt in seen:
+                return None
+            seen.add(nxt)
+            chain.append(nxt)
+            it = _load(nxt)
+        except Exception:  # noqa: BLE001
+            return None
+    try:
+        closed = float(it.get("state_updated") or it.get("updated") or 0)
+    except (TypeError, ValueError):
+        closed = 0.0
+    outcome = str((it.get("metadata") or {}).get("outcome") or "")
+    how = f"superseded by {_gh.shown(chain[0])}, and the replacement chain ended in {_gh.shown(chain[-1])}, which was {outcome}" if chain else outcome
+    return str(it.get("status") or ""), outcome, closed, how
+
+
+def _ask_when(ts: float) -> str:
+    return _rmod.when_words(dt.datetime.fromtimestamp(ts, ZONE))
+
+
+def _ask_authors(item: dict[str, Any]) -> "list[str]":
+    """The sessions whose own word about the ask counts: the author the record names, else (an ask stored before the record) the session that moves the item and the one that created it."""
+    meta = item.get("metadata") or {}
+    by = str(_askl.rec_of(meta).get("by") or "")
+    if by:
+        return [by]
+    return [x for x in (_holder(item), str(meta.get("owner") or "")) if x and not _model.is_owner(x)]
+
+
+def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
+    """Take the standing ask off the owner's move: the ask, its options and his stored your-call go, `decision` leaves needs, the item goes back to its author (a live session; else as any answered
+    decision's hand-over leaves it), one History line says what and why, and metadata.ask_left keeps the ask and its options so that his late answer is kept as a comment (_answer). Only its
+    author's own plain sentence (`why`) calls for it; `expect` = the ask the caller saw, so a write that changed it meanwhile leaves it alone. The server's own save: it
+    answers nothing for him, writes no ask and closes nothing. → the reply line ("" when nothing was taken off)."""
+    with _ITEM_LOCK:
+        try:
+            item = _load(gid)
+        except ToolError:
+            return ""
+        meta = item.get("metadata")
+        ask = _ask_stands(item)
+        if not isinstance(meta, dict) or not ask or (expect and ask != expect):
+            return ""
+        now = time.time()
+        rec = _askl.rec_of(meta)
+        authors = _ask_authors(item)
+        back = next((a for a in ([sender.strip()] if sender.strip() else []) + authors if a and not _model.is_owner(a)), "")
+        shown_opts = _rmod.options_of(item)
+        meta.pop("ask", None); meta.pop("options", None); meta.pop("idle", None)
+        _state_end(meta, "your-call")
+        _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
+        if back and _then_live(back, meta):
+            meta["then"] = back      # the author takes the item back; read below, so the hand-over sees the `then` set here and not the one stored before
+        mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # after the line above: _decision_hand_over reads the then that stands now
+        meta[_askl.LEFT] = {"at": now, "ask": ask, "how": "word", "why": why[:200], "by": str(rec.get("by") or ""), **({"options": shown_opts} if shown_opts else {})}
+        _decision_hand_over(meta, mover_in, then_in, parked=False, waiting=_model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
+        _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
+        item["metadata"] = meta
+        item["updated"] = item["state_updated"] = item["confirmed"] = now
+        _save(gid, item, note="ask taken off his move")
+    _publish()
+    item["gid"] = gid
+    to = _holder(item)
+    line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
+            f"The item is back with {_session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _notice_link(gid)}")
+    if to and not (sender.strip() and _ho_same(to, sender)):
+        try:
+            _tell_woken(gid, _session_id(to), f"{_FOR_OWNER} {line}" if _front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
+        except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
+            print(f"ask: {gid} mover not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    print(f"ask: {gid} taken off the owner's move (its author's word): {why}", file=sys.stderr, flush=True)
+    return (f"\n(the server took the ask off {OWNER}'s move: you said it is wrong, \"{_clip_line(why, 110)}\". "
+            f"The item is back with {_session_label(to) if to else 'its default mover'}; History says so. His late answer, if one comes, is kept as a comment.)")
+
+
+# The update parameters whose text is read as the write's new text (ask_leaves.author_says_wrong): the sentence that takes an ask off his move must be ALL the new text of the call, so every
+# parameter that can carry free text is listed here, and every other parameter says why it carries none. A test keeps the two lists equal to the update signature, so a parameter added
+# later has to be placed in one of them.
+_ASK_TEXT_PARAMS = ("subject", "description", "next", "options", "said", "work", "check", "wait_basis", "reason", "expected_reason", "step", "supplies", "goal", "wait_event", "draft", "watch_reason",
+                    "outcome_text", "wait_reason", "reword",                                                  # free text
+                    "owner_name", "owner", "agent", "observers", "step_proof",                                # stored as written, with no check against a closed set: counted as text too
+                    "wait_anchor", "post_wake_mover", "then")                                                 # a stored string a session names, accepted as written (found by a real update call with a hedge in it)
+_ASK_NONTEXT_PARAMS = (
+    "item_id", "status", "priority", "outcome", "wait_kind",                                                 # a fixed word, or the item's own id
+    "due", "wake", "expected_by", "ask_by",                                                                  # a date or a time
+    "needs", "mover", "contact", "sender", "project",                                                        # a kind, or a session, a front agent or a page: a string with words in it is refused or not stored (a test sends one through the real update)
+    "anchors", "after", "superseded_by",                                                                     # a link or an item id: the same test
+    "done", "dropped", "rank",                                                                               # step numbers; a retired field
+    "ask", "clear_ask",                                                                                      # the ask itself: a write that sets one takes the ask-time check, not this
+    "clear_needs", "clear_due", "clear_wake", "hold", "clear_hold", "recycle", "clear_recycle", "clear_options", "clear_after", "clear_wait_basis", "clear_rank", "clear_goal", "clear_mover",
+    "clear_then", "clear_wait", "clear_draft", "clear_next", "clear_check")                                   # switches
+_ASK_HELD_TEXT_KEYS = ("steps", "work", "wait_basis")      # records of lines: only the `text` of each is held, never its status, state, name or time ("open", "done", "dropped" are not the item's text)
+_ASK_HELD_KEYS = ("next", "step", "wait_reason", "watch_reason", "goal", "draft", "check", "supplies", "expected_reason", "reason", "outcome_text", "wait_event", "work", "owner_name", "owner", "agent", "observers")      # the options are left out: their labels are short words (Wait, Keep) that a hedge could equal whole
+
+
+def _ask_write_texts(params: "dict[str, Any]") -> "list[str]":
+    """Every string a write carries in a text parameter (_ASK_TEXT_PARAMS; a mapping or list parameter gives each string inside it), for ask_leaves.new_lines and author_says_wrong."""
+    return [x for n in _ASK_TEXT_PARAMS for x in _askl.text_leaves(params.get(n))]
+
+
+def _ask_pre(item_id: str) -> "dict[str, Any]":
+    """What an update needs to know of the ask before the write: the item, the ask that stood and its record, where the owner's notes are looked for from, and the text the item held (every text it
+    keeps, one line each), so that only a line new in the write is read as its author's word. {} when the item cannot be read."""
+    try:
+        gid = _norm_id(item_id)
+        item = _load(gid)
+    except ToolError:
+        return {}
+    try:
+        return _ask_pre_read(gid, item)
+    except Exception as e:  # noqa: BLE001  — a damaged stamp or record (a time that is no number) never fails the write: the ask's lines are skipped
+        print(f"ask: {gid} not read before the write: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return {}
+
+
+def _ask_pre_read(gid: str, item: dict[str, Any]) -> "dict[str, Any]":
+    meta = item.get("metadata") or {}
+    held = [item.get("subject"), item.get("description")] + [meta.get(k) for k in _ASK_HELD_KEYS]      # every text the item keeps, one line each below: a line the item holds whole is not new
+    for k in _ASK_HELD_TEXT_KEYS:
+        v = meta.get(k)
+        held += [e.get("text") if isinstance(e, dict) else e for e in (v if isinstance(v, list) else [v])]
+    return {"gid": gid, "ask": _ask_stands(item), "rec": dict(_askl.rec_of(meta)), "look": _askl.look_back(meta), "old": "\n".join(x for v in held for x in _askl.text_leaves(v) if x.strip())}
+
+
+def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bool, texts: "list[str]") -> str:
+    """An update's tail for the ask on its item (the reply's extra lines). Three things, in this order:
+      a write that sets an ask → the ask-time check: his comments and notes since the item's last ask are shown, so one that already answers the ask is seen at the write;
+      a write by the ask's author whose ENTIRE new text (every text parameter of the call, _ASK_TEXT_PARAMS; a line the item already held whole is not new) is one plain sentence, "the ask is wrong|moot|stale|...", the closed shape of
+        ask_leaves.author_says_wrong → the server takes the ask off his move (_ask_leave);
+      a write by the session that wrote the ask, moves the item or created it, while the ask still stands → the one-line reminder to withdraw it if it is wrong or moot, with his notes since the ask; for the
+        ask's author it also says which board item the ask waits on was dropped after the ask was written (ask_leaves.dropped_deps), the only thing the server does about a dropped dependency.
+    A write that clears the ask, or leaves none, adds nothing. Never fails the write: the update is saved."""
+    gid = pre.get("gid") if pre else ""
+    if not gid:
+        return ""
+    try:
+        with _ITEM_LOCK:
+            item = _load(gid)
+        now_ask = _ask_stands(item)
+        meta = item.get("metadata") or {}
+        if not now_ask or clear_ask:
+            return ""
+        who = sender.strip()      # a write with no sender is nobody's own word: it takes no ask off his move and gets no reminder
+        if ask.strip():
+            notes = _askl.notes_since(meta, float(pre.get("look") or 0))
+            return _askl.check_line(OWNER, _askl.notes_line(notes, _clip_line, _ask_when)) if notes else ""
+        authors = _ask_authors(item)
+        mine = bool(who) and any(_ho_same(who, a) for a in authors)
+        if _cfg.ask_leaves_on():
+            word = _askl.author_says_wrong(_askl.new_lines(texts, str(pre.get("old") or ""))) if mine and pre.get("ask") == now_ask else ""
+            if word:
+                out = _ask_leave(gid, word, sender=who, expect=now_ask)
+                if out:
+                    return out
+        if mine or (who and _ho_same(who, _holder(item))) or (who and _ho_same(who, str(meta.get("owner") or ""))):
+            since = float(_askl.rec_of(meta).get("at") or pre.get("look") or 0)
+            at = _askl.rec_of(meta).get("at")      # an ask with no record has no time to compare a drop with: nothing is said of its dependencies
+            dropped = _askl.dropped_line(_askl.dropped_deps(now_ask, _ask_lookup, float(at)), _ask_when) if mine and at else ""
+            return _askl.reminder(_gh.shown(gid), OWNER, _askl.notes_line(_askl.notes_since(meta, since), _clip_line, _ask_when), dropped)
+    except Exception as e:  # noqa: BLE001  — the update is saved and published; the ask's lines are a stderr line when they fail
+        print(f"ask: {gid} tail not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return ""
+
 
 # ----------------------------------------------------------------------------- the options
 # metadata.options: the alternatives a needs=decision item asks the owner to pick between, shown on the item page, under the ask in
@@ -11835,6 +12044,14 @@ def _create_item(
 # A close carries how the item ended, like an issue tracker's closed issue. Before, a completed
 # item kept its state from just before the close (its next, ask and whose move), which read as live work.
 OUTCOMES = ("done", "dropped", "superseded")
+# What the server does with an ask on its own, in one place: the close text and the update text carry the same words. The grammar is closed (ask_leaves.py).
+_ASK_RULE = (f"The server takes an ask off {OWNER}'s move in one case only: its author's own plain sentence. A write by the ask's author whose whole new text, in every text parameter of the call (description, next, subject, goal and the others; a line sent again whole from before is not new), is exactly one sentence, "
+             "\"The ask is wrong.\", \"My question is moot.\" or \"This ask is no longer needed.\" (also stale, void, obsolete, no longer valid; at most one \"- \" bullet before it, and only \"now\", \"anymore\" or a full stop after it) "
+             f"removes the ask, its options and his stored your-call, hands the item back to its author, says so in History and in the reply, and keeps his late answer as a comment. "
+             "Any other new line or sentence in that write (a hedge, a label such as Note:, a quote, a question, another language) means no word, and a write with no sender counts for nothing. "
+             "A dropped dependency removes nothing: a gate is a precondition, so a dropped gate often makes the ask more live. When an ask whose text names an item after/once/when/until/waiting for/depends on "
+             "has that item closed as dropped after the ask was written, the ask's author is reminded on each of his writes to the item while that item stays dropped and the ask stands (withdraw the ask with clear_ask=true if it is moot, otherwise it stands). "
+             f"The server never writes an ask, closes an item or answers for {OWNER}. ")
 _CLOSE_FORM = (
     "A close (complete, or update with status=completed) carries outcome: done | dropped (won't do, no longer needed, or can't) | "
     "superseded (replaced by another item: reworded, merged or split), with superseded_by = the replacing item's id (open or completed); "
@@ -11844,7 +12061,8 @@ _CLOSE_FORM = (
     "Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and superseded_by. "
     "A close also marks every step still open, by the closer (done when the outcome is done, dropped otherwise; steps marked in the same call keep their marks; "
     "this settles a step of his too, the one case where a session's call marks it, because the item is over), and tells the mover of every other open item whose next or description names the closed item (board#N), "
-    "one message per mover (the first 8 items, then a count); the items that wait on it through after get their own wake, and the closer is not told."
+    "one message per mover (the first 8 items, then a count); the items that wait on it through after get their own wake, and the closer is not told. "
+    + _ASK_RULE
 )
 # claude.ai caches a connector's tool list for about a day and a relaunch does not refresh it (claude-ai-mcp#45, #1044),
 # so a session whose cached complete predates the close fields closes through the portal's Code Mode, which reads the live schema.
@@ -12010,7 +12228,9 @@ _UPDATE_DESC = (
     "close: complete(item_id=\"board#N\", sender=\"my-x\", outcome=\"done\", reason=\"Export shipped in PR 12\", outcome_text=\"- PR 12 merged\\n- live on the box\"). "
     "Other right shapes: wake=\"<YYYY-MM-DD or YYYY-MM-DDTHH:MM, a future time>\"; description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\" (bullets of at most 120 characters); "
     "ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: a week's delay misses the demo · By: <a date in words, or no date>\" (one line, at most 240 characters, with needs=[\"decision\"]). "
-    "status: open | completed (`needs` says whose move it is; complete rather than delete). " + _CLOSE_FORM + " A new or reworded open step that opens with a front agent is refused on an item another session moves: open it with the mover's name, or message the front agent (a step it already holds stays). " + _ITEM_FORM + " " + _NEXT_FORM + f" ask=\"none\" clears it (so does clear_ask=true). The ask's mockup rule above also holds on an update that sets the ask, description, next, needs or options or puts the item on needs=decision. options=[] (or \"none\", or clear_options=true) clears the options, which need no recommended one then (refused while the ask is an open question; a non-empty list still takes 2 to 6 entries, exactly one recommended). When {OWNER} answers by picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the first line of next: it replaces the stored ask and leaves next. When this work settles or changes a premise of another open "
+    "status: open | completed (`needs` says whose move it is; complete rather than delete). " + _CLOSE_FORM + " A new or reworded open step that opens with a front agent is refused on an item another session moves: open it with the mover's name, or message the front agent (a step it already holds stays). " + _ITEM_FORM + " " + _NEXT_FORM + f" ask=\"none\" clears it (so does clear_ask=true). "
+    f"A write that leaves an ask standing on an item you move or wrote ends with a one-line reminder to withdraw the ask if it is wrong or moot, with {OWNER}'s notes since the ask; a write that sets an ask shows {OWNER}'s comments and notes since the item's last ask, so one that already answers it is seen before you ask again. "
+    f"His note on a step that only says he did it (\"ran it\"; \"run it\" is a request and ticks nothing) ticks the step, and one in which he says he will do it later (\"I'll do it tomorrow evening\") holds the item until then; a note that asks something, is negated (\"not tomorrow\"), is a deadline (\"by tomorrow evening\"), does the step now (\"I'll do it now, then check tomorrow\"), is no action of the step (\"I'll let you know tomorrow\") or says more still goes to the session to judge. The ask's mockup rule above also holds on an update that sets the ask, description, next, needs or options or puts the item on needs=decision. options=[] (or \"none\", or clear_options=true) clears the options, which need no recommended one then (refused while the ask is an open question; a non-empty list still takes 2 to 6 entries, exactly one recommended). When {OWNER} answers by picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the first line of next: it replaces the stored ask and leaves next. When this work settles or changes a premise of another open "
     "item, update that one too, in the same turn. "
     "item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. "
     f"wake (YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {_cfg.tz_abbr()}; a full ISO time with seconds or a UTC offset is converted to that minute in {_cfg.tz_abbr()}, and the reply says so) alone is a reminder, never a hold, on an item you keep moving: the item stays active in its lane, and at that "
@@ -14120,14 +14340,16 @@ def stackshot_update(
         mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     _gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
+    ask_pre = _ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
     with _session_write():
-        return _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
+        out = _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
                        hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, after=after, work=work, said=said, check=check,
                        clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
                        expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
                        goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover,
                        clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
-                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes) + fix_note + note + _off_map_note_item(sender, item_id, project)
+                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes) + fix_note
+        return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
 
 
 _COMPLETE_DESC = (
@@ -18256,6 +18478,8 @@ def _answer_deliver(gid: str, item: dict[str, Any], rec: dict[str, Any], then: s
     yours = ("" if _answer_words(rec).rstrip()[-1:] in (".", "!", "?", ")") else ".") + " It's yours now" if handed and not then else ""      # a decision handed over: the mover's line plus the tail
     to_then = lambda t: t.replace(f"It goes to {_session_label(then)} now", "It's yours now", 1).replace(f" → {url}", f"{yours}{judge} → {url}", 1)      # the then-mover's own line: "It's yours now", and for a note the instruction to judge it
     told: list[str] = []
+    if judge and rec.get("applied"):      # the server read his note and applied it (note_read.py): the then-mover is told what was done instead of being asked to judge the note
+        judge = ". " + str(rec["applied"])
     def tell(sid: str, text: str) -> None:
         _tell_woken(gid, sid, text, tag="answer")
         told.append(sid)
@@ -18396,14 +18620,17 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         if item.get("status") != "open":
             return "closed"
         meta = dict(item.get("metadata") or {})
-        stepped, then, handed, letter = False, "", "", ""
+        stepped, then, handed, letter, until = False, "", "", "", ""
         if choice:
             choice, letter = _split_letter(item, choice)      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it
         if choice:                      # an option's button: only while the item needs his decision, and only one of the item's stored options (Approve and Decline are no fallback); with none stored, Yes or No (the same two the page draws)
             valid = [f[0] for f in _option_forms(item)] or [o["label"] for o in _rmod.yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
-                return "stale"
-            kind = "decision"
+                if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
+                    return "stale"
+                text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
+            else:
+                kind = "decision"
         elif act == "done":             # the button of a your-step row. Only an item that stands in your-step with its step line has one: any other is refused, nothing written
             if meta.get("state") != "your-step" or not _states.clean(meta.get("step")):
                 return "nostep"
@@ -18458,7 +18685,15 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
                 _check_his_step(meta, rec["step"], now)
             else:                           # N4: his note on the step is his answer too: the server's step is ticked with his words (`→ "…"`); the lines a session wrote stay open for the session that judges them
-                _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_owner_want(meta), writer=NAME, add=False)
+                said = _noteread.read(text, _pages.zone_now(), _watch.parse_date)      # what the note says, applied by the server (note_read.py): a note that says he did it, or names a later time
+                if said["until"]:           # "tomorrow evening": his step stays open and the item waits until then, on his words (the park path below); the then-mover is told it is held
+                    until = said["until"]
+                    rec["applied"] = f"The server read the note as a later time and put the item on hold until {until} {_cfg.tz_abbr()}: nothing is asked of you before then."
+                else:
+                    _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words("", text), make=_owner_want(meta), writer=NAME, add=False)
+                    if said["done"]:        # "ran it": his step is ticked as an empty Send ticks it (every open line of his), the then-mover is told
+                        _check_his_step(meta, rec["step"], now)
+                        rec["applied"] = "The server read the note as done and ticked his step: carry on as after a Done."
             _state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)
@@ -18466,6 +18701,11 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
             if then and not _model.is_owner(then):
                 _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else _notice_to falls back to the page's keeper)
+            if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
+                until = _parse_wake(until)
+                meta["hold"], meta["wake"] = True, until
+                _cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, ZONE))}")
+                _hold_set(meta, f"{OWNER} (board)", now)
             item["state_updated"] = item["confirmed"] = now
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
@@ -18475,6 +18715,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if meta.get("ask"):
                 rec["ask"] = str(meta["ask"])   # the ask he answered stays with his answer: the item drops it, and a decision asked again within an hour with that same ask is refused (_gate_decision_again)
             meta.pop("ask", None)
+            meta.pop(_askl.LEFT, None)      # an answered ask leaves no "taken off" record: a late pick on an older ask reads stale
             _state_end(meta, "your-call")   # the call is made: a stored your-call no longer stands (a park picked below reads as derived)
             if matched:                 # a pick among the options settles the question: ask and options go, his answer keeps the label and line
                 meta.pop("options", None)
@@ -18493,7 +18734,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         item["metadata"] = meta
         item["updated"] = now
         _save(gid, item, note=_answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
-        if parked or (kind == "decision" and eff["do"] == "wait"):
+        if parked or until or (kind == "decision" and eff["do"] == "wait"):
             _WAKE_EVENT.set()           # the minute loop takes the new wake in
         if kind == "decision" and eff["do"] == "drop":
             try:
