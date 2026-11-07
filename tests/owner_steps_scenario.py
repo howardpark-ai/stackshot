@@ -57,6 +57,8 @@ for i in (*range(1, 20), 23, 24, 25, 26, 27, 28, 29, 30, 31, 32):
 item(20, needs=["decision"], ask=ASK, options=OPTS)               # asked before the server made his steps: the list holds no step of his
 item(21, needs=["decision"], ask=ASK, options=OPTS, next="home-agent: build it\nOliver: pick the release path")      # …with a `Oliver:` line a session wrote
 item(22, state="your-step", step=STEP, needs=["home-agent"], next="home-agent: prepare the box")                         # …a your-step stored without his step on the list
+CMD = "run `for p in a b; do echo $p; done` in a build-box terminal"
+for i in (33, 34): item(i, state="your-step", step=CMD, next="home-agent: build it")      # a your-step whose step carries a command
 (T / "store/next-id").write_text("40"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
@@ -176,6 +178,23 @@ r = server._answer("a2", "", "", "done")
 check("Done on a your-step ticks his step (the path that is there): done by Oliver, no arrow", r == "done" and his(2) == [("done", f"Oliver: {STEP}")] and mt(2)["steps"][-1]["by"] == "Oliver", (r, his(2)))
 r = server._answer("a22", "", "", "done")
 check("Done on a your-step stored before the server made his steps leaves the list as it was (nothing to tick)", r == "done" and his(22) == [] , (r, st(22)))
+
+# ---- 5b. an answer to an ask ticks the ask's step, never the step of a your-step that stands beside it (only his Done or a note on the step does that)
+r = upd(33, needs="decision", ask=ASK, options=OPTS)
+HC = f"Oliver: {CMD}"
+check("(setup) a your-step with a command, then an ask beside it: his step is the command's, one line", (HC in [t for _, t in his(33)]) and [s for s, t in his(33) if t == HC] == ["open"], st(33))
+r = server._answer("a33", "Ship", "", "")
+check("his plain answer to the ask is recorded and the ask leaves", r == "decision" and "ask" not in mt(33) and "decision" not in (mt(33).get("needs") or []), (r, mt(33)))
+check("…but it does not tick the step that tells him to run the command: that line stays open, once, and the answer is its own done line",
+      [(s, t) for s, t in his(33) if s == "open"] == [OPEN(HC)] and ("done", f"{H1} → Ship") in his(33) and HC not in [t for s, t in his(33) if s == "done"], his(33))
+check("…the your-step stands, the recorded step is still the command's, and nothing was added a second time", mt(33).get("state") == "your-step" and mt(33).get("owner_step") == HC and mt(33)["next"].count(HC) == 1, mt(33))
+upd(33, priority="p1")
+check("…a later session write adds no fresh copy of it", [t for s, t in his(33) if s == "open"] == [HC], st(33))
+r = server._answer("a33", "", "", "send")
+check("only his Done ticks the command's step (done by him, no arrow)", r == "done" and (("done", HC) in his(33)) and not [1 for s, _ in his(33) if s == "open"], (r, his(33)))
+upd(34, needs="decision", ask=ASK, options=OPTS)
+r = server._answer("a34", "", "yes please, go on", "answer")
+check("a free-text answer to the ask leaves the command's step open too", r == "decision" and [t for s, t in his(34) if s == "open"] == [HC], (r, his(34)))
 
 # ---- 6. N4: a session cannot tick his step; it may withdraw
 r = upd(6, needs="decision", ask=ASK, options=OPTS)

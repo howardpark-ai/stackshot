@@ -150,14 +150,18 @@ def forget_closed(meta: dict[str, Any], keeper: str) -> None:
         meta.pop(KEY, None)
 
 
-def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, make: str = "", writer: str = "", add: bool = True) -> list[str]:
+def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, make: str = "", writer: str = "", add: bool = True, apart: bool = False) -> list[str]:
     """His answer ticks his step: the one the server made (metadata.owner_step) while it is open, else an open line that says what `make` does (an item that asked before the server made his steps), and no other
     `<owner>:` line. The step is done by `by` at `at`, shows `→ answer` after its first line, and leaves next. `make`: the step's text, added first (written by `writer`) when none stands, so his answer is on the
-    list all the same (`add` false: none is added, a note on his step ticks the step that stands and makes none). → the first lines ticked, [] when there was none (and `make` empty)."""
+    list all the same (`add` false: none is added, a note on his step ticks the step that stands and makes none). `apart`: his answer is to an ask that stands BESIDE a your-step, so the recorded step (the your-step's, which only his Done or a note on it ticks) is left alone: only an open line that
+    says what `make` does is ticked, else `make` is added and ticked, and metadata.owner_step stays. → the first lines ticked, [] when there was none (and `make` empty)."""
     keeper = keeper or ""
     cl = _steps.view(meta, keeper=keeper)
     rec = _steps.clean(meta.get(KEY))
-    idx = (_same(cl, rec) if rec else []) or (_same(cl, line_of(make)) if make else [])
+    if apart:
+        idx = [i for i in (_same(cl, line_of(make), alike=False) if make else []) if _steps.key(cl[i]["text"]) != _steps.key(rec)]
+    else:
+        idx = (_same(cl, rec) if rec else []) or (_same(cl, line_of(make)) if make else [])
     if not idx and make and add:
         want = line_of(make)
         _nl.append(meta, want, writer, keeper)
@@ -168,7 +172,8 @@ def tick(meta: dict[str, Any], keeper: str, by: str, at: float, answer: str, mak
     texts = [cl[i]["text"] for i in idx]
     out = _mark(cl, idx, _steps.DONE, by, at, answer)
     _nl.prune(meta, texts, keeper)
-    meta.pop(KEY, None)
+    if not apart:
+        meta.pop(KEY, None)
     _put_steps(meta, cl)
     return out
 

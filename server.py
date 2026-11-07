@@ -18044,7 +18044,8 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             item["state_updated"] = item["confirmed"] = now
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
-            _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words(choice, text), make=_owner_want(meta), writer=NAME)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
+            beside = meta.get("state") == "your-step" and bool(_states.clean(meta.get("step")))      # the ask stands beside a your-step: his answer to it is not his word that the step is done
+            _hs.tick(meta, str(meta.get("owner") or ""), OWNER, now, _hs.answer_words(choice, text), make=(_hs.decide_of(meta.get("ask")) or _OWNER_STEP_NONE) if beside else _owner_want(meta), writer=NAME, apart=beside)      # N4: his answer ticks his step, shown on it (`→ the option`); an item that asked before the server made his steps gets the step now, done
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))
             if meta.get("ask"):
                 rec["ask"] = str(meta["ask"])   # the ask he answered stays with his answer: the item drops it, and a decision asked again within an hour with that same ask is refused (_gate_decision_again)
