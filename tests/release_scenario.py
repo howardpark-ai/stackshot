@@ -1307,6 +1307,21 @@ got = {ln.split()[1]: ln.split()[0] for ln in s["out"].splitlines()[1:] if ln.st
 off = [(f, n, got.get(f)) for f, n in named if got.get(f) != n]
 check("docs/session-reload.md: every file its table names has the need session_need gives it", len(named) >= 10 and not off, off or named)
 
+# ---- the report's destination is a setting: [release] report_to, the stand-in page when it is unset
+REPORTS = "projects/example-reports"
+s = scenario("report-to-set", merge="ok", report_to=REPORTS)
+check("report_to: a configured page receives the green report (the same arguments), and the stand-in page receives nothing",
+      len(s["msgs"]) == 1 and s["msgs"][0].startswith(f"message | {REPORTS} | [release] PR #23 merged and deployed") and s["msgs"][0].rstrip("\n").endswith(GREEN_ARGS) and "projects/example |" not in s["msg"], s["msg"])
+s = scenario("report-to-set-red", merge="fail", after="open", report_to=REPORTS)
+check("report_to: a failed release reports to the configured page too, once", s["rc"] != 0 and len(s["msgs"]) == 1 and s["msgs"][0].startswith(f"message | {REPORTS} | ") and "projects/example |" not in s["msg"], (s["rc"], s["msg"]))
+s = scenario("report-to-unset", merge="ok")
+check("report_to: unset (the config gives nothing), the report goes to the stand-in page", len(s["msgs"]) == 1 and s["msgs"][0].startswith("message | projects/example | [release] PR #23"), s["msg"])
+for nm, kw, want in (("unset", {}, "projects/example"), ("set", {"report_to": REPORTS}, REPORTS)):
+    s = scenario(f"start-{nm}", front=True, units="", **kw)
+    check(f"report_to ({nm}): the line printed when a release starts names the page the report will go to", s["rc"] == 0 and f"and reports to {want} · log " in s["out"] and (nm == "set") == (want != "projects/example") and (nm != "set" or "projects/example ·" not in s["out"]), s["out"])
+    s = scenario(f"start-group-{nm}", raw=["--group", "23", "24"], units="", **kw)
+    check(f"report_to ({nm}): so does the line printed when a group starts", s["rc"] == 0 and f"and reports to {want} · log " in s["out"] and (nm != "set" or "projects/example ·" not in s["out"]), s["out"])
+
 wf = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text()
 check("the step names main_green reads are tests.yml's own", all(f"- name: {n}\n" in wf for n in ("run every suite, measured", "audit the selection")))
 
