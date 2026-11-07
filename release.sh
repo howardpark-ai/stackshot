@@ -131,7 +131,7 @@
 #                                 written under flock on last-good.lock; one it cannot read (not a sha, a commit this checkout does not know) is
 #                                 never overwritten, it is told to the keeper and the old path runs. When any condition fails the old path
 #                                 (3b) runs, and the log says which;
-#                                 3. `gh pr merge --merge` (no --delete-branch); when that call errors (a GitHub 504 after the
+#                                 3. `gh pr merge --merge --admin` (no --delete-branch); when that call errors (a GitHub 504 after the
 #                                 merge went through), the PR's state is read again for up to
 #                                 about 50 s: MERGED carries on as a clean merge (the error goes into the report),
 #                                 anything else fails "merge" with the original error. Then the head branch: the open PRs based on it
@@ -1965,7 +1965,7 @@ run() {
         else skip_why="${skip_why:-$fast_why}"; fast_why="${fast_why:+$fast_why; }the retest skip no longer holds: $skip_why"; skipped=0; upd_note="; the branch was behind main and its retest was skipped, but then $skip_why, so it took the old path"; fi
     fi
     [ $fast = 1 ] || say "not up to date for a deploy at the merge: $fast_why; the deploy waits for main's tests (the old path)"
-    local out; if out="$(gh pr merge "$pr" --repo "$REPO" --merge --match-head-commit "$headsha" 2>&1 9>&-)"; then say "merged"
+    local out; if out="$(gh pr merge "$pr" --repo "$REPO" --merge --admin --match-head-commit "$headsha" 2>&1 9>&-)"; then say "merged"
     else   # the call can error after the merge went through (a 504): GitHub's answer is eventually consistent, so ask again
         local err; err="$(echo "$out" | tail -1)"; say "the merge call errored: $err; reading the PR's state again"
         local i after merged_at="" merged_full=""

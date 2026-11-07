@@ -132,7 +132,7 @@ check("cross-repository: green, no branch call at all", s["rc"] == 0 and "merged
 def gl(s): return s["gh"].splitlines()
 def at_gh(s, line): return gl(s).index(line) if line in gl(s) else -1
 R = "example-owner/stackshot"; LIST = f"pr list --repo {R} --base agent/topic --state open --limit 100 --json number"; DEL = f"api -X DELETE repos/{R}/git/refs/heads/agent/topic"
-MERGE_LINE = f"pr merge 23 --repo {R} --merge --match-head-commit {HEADSHA}"
+MERGE_LINE = f"pr merge 23 --repo {R} --merge --admin --match-head-commit {HEADSHA}"
 E_a, E_b = f"pr edit 32 --repo {R} --base main", f"pr edit 28 --repo {R} --base main"
 s = scenario("stacked", merge="ok", stacked="32,28", branch="present")
 check("stacked: exits 0, deploys, reports green", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"], (s["out"], s["msg"]))
@@ -197,7 +197,7 @@ for nm, args, kw in (("pin-normal", (), {}), ("pin-recycle", ("--recycle",), {})
     s = scenario(nm, args=args, merge="ok", **kw)
     want = kw.get("head", HEADSHA)
     check(f"{nm}: gh pr merge is pinned to the head it read (--match-head-commit {want[:7]})",
-          s["rc"] == 0 and f"pr merge 23 --repo example-owner/stackshot --merge --match-head-commit {want}" in s["gh"].splitlines(), s["gh"])
+          s["rc"] == 0 and f"pr merge 23 --repo example-owner/stackshot --merge --admin --match-head-commit {want}" in s["gh"].splitlines(), s["gh"])
     check(f"{nm}: gh pr merge gets no fd 9", s["merge_fd9"] == "closed", s["merge_fd9"])
 s = scenario("pin-moved", merge="fail", after="open")
 check("the head moved after the read (the pinned merge is refused): never deploys, FAILED at merge", s["rc"] == 1 and not s["deployed"] and "FAILED at merge" in s["msg"], s["msg"])
@@ -968,7 +968,7 @@ s = fast("upd-pass", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{
 check("behind: update-branch (a merge, no --rebase), then the deploy at the merge, pinned to the new head, main's run read after the deploy",
       s["rc"] == 0 and s["deploys"] == [MERGE] and s["order"] == ["update-branch", f"deploy:{MERGE}", "client:message", "run-view"]
       and UPD_LINE in s["gh"].splitlines() and "--rebase" not in s["gh"]
-      and f"pr merge 23 --repo example-owner/stackshot --merge --match-head-commit {H1}" in s["gh"].splitlines(), (s["rc"], s["order"], s["gh"], s["out"]))
+      and f"pr merge 23 --repo example-owner/stackshot --merge --admin --match-head-commit {H1}" in s["gh"].splitlines(), (s["rc"], s["order"], s["gh"], s["out"]))
 check("behind: the PR's tests are polled every 20 s on the new head (one pending read), the log tells each step in order",
       s["sleeps"] == ["20"] and at(s["log"], "checks pass", "update lock taken", "update-branch round 1 of 3: main's tip ba5e000 is not in the PR head abc1234",
                                    "the PR head is now d00d100; waiting for the PR's tests on d00d100 (up to 50 min)", "waiting for the PR's tests on d00d100 (pending); 0 min of up to 50",

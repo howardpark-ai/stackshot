@@ -203,7 +203,7 @@ def rlog(s): return (s["dir"] / "retest.log").read_text().splitlines() if (s["di
 s = fast("skip-pass", merge="ok", history=HIST_B, retest=SKIP, extra=SKIP_ON)
 check("no retest: the branch is not updated and its tests are not waited for again; the merge is pinned to the head the checks passed on, deployed at the merge, main's run read after",
       s["rc"] == 0 and s["deploys"] == [MERGE] and s["order"] == [f"deploy:{MERGE}", "client:message", "run-view"] and "update-branch" not in s["gh"] and not s["sleeps"]
-      and f"pr merge 23 --repo example-owner/stackshot --merge --match-head-commit {HEADSHA}" in s["gh"].splitlines() and s["lastgood"] == MERGE, (s["rc"], s["order"], s["gh"], s["sleeps"], s["out"]))
+      and f"pr merge 23 --repo example-owner/stackshot --merge --admin --match-head-commit {HEADSHA}" in s["gh"].splitlines() and s["lastgood"] == MERGE, (s["rc"], s["order"], s["gh"], s["sleeps"], s["out"]))
 check("no retest: the helper is asked twice (before the lock, then again under it on main's tip as it is then) with the PR head, main's tip and the published map's repository and cache; the log names the two file sets",
       len(rlog(s)) == 2 and all(l == f"--repo {s['dir']}/box --head {HEADSHA} --main {BASE} --slug example-owner/stackshot --cache {s['dir']}/releases/suitemap" for l in rlog(s))
       and at(s["log"], "checks pass", f"retest skipped for the PR head abc1234 on main's tip ba5e000: {NOTE}", "deploy lock taken", "retest skipped for the PR head abc1234", "no retest: the PR's last green checks stand",
