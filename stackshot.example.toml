@@ -637,6 +637,13 @@ switchover_fallback = true                          # with switchover on: false 
 # `owner` (the test suites copy this file) do not start failing on a date; an instance's own file leaves the key out, or sets the day it wants.
 owner_param_until = "2099-12-31"
 
+# [handoff.builder_by_page]                         # the builder of an area: a new item with no mover is handed to the project's FIRST builder (the first background agent whose mandate builds); this table
+                                                    # sends the items filed on a page to another builder of the same project. Key = a project page key, matched as a prefix on the page the item is filed on (the page itself and
+                                                    # the pages under it; the longest key wins); value = the background agent. The agent must be listed on the item's project as a background agent, else the first builder takes
+                                                    # the item as before (never an error). An explicit mover on a create always wins. ABSENT or empty = every item goes to the first builder (the code names no entry).
+                                                    # Read at each call: a reload applies it. Uncomment the header and the lines you need
+# "projects/app/web" = "my-ui-engineer"
+
 [said]                                             # the trailers: a session's write may carry his own words on the item
                                                     # (said=[{tag, quote, msg, session}], tag Acked-by | Suggested-by | Reported-by), checked against his
                                                     # message in that session's transcript on the server box. A readable transcript that fails the check (no
