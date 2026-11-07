@@ -5111,20 +5111,20 @@ def _gate_open_question(meta: dict[str, Any]) -> None:
 
 
 # ----------------------------------------------------------------------------- a design decision's mockup rides on the ask
-# A needs=decision item whose text links a mockup (a claude.ai artifact page) carries that link on the ask, the line the owner answers, and not only in the
+# A needs=decision item whose text links a mockup (a claude.ai artifact page or a fleet tool's /mockup/<n> page) carries that link on the ask, the line the owner answers, and not only in the
 # background: the home row and the item page draw "Mockup \u2197" beside the question (render.mockup_url), and an ask with no link leaves him to hunt for it.
-_MOCKUP_ASK = "[mockup](<the artifact link>)"
+_MOCKUP_ASK = "[mockup](<the mockup link>)"
 
 
 def _gate_mockup(meta: dict[str, Any], description: str) -> None:
-    """Refuse a needs=decision item whose description, next or options name a claude.ai artifact link while its ask names none."""
-    if "decision" not in _needs_kinds(meta) or _rmod.ARTIFACT_RX.search(str(meta.get("ask") or "")):
+    """Refuse a needs=decision item whose description, next or options name a mockup link (a claude.ai artifact page or a /mockup/<n> page) while its ask names none."""
+    if "decision" not in _needs_kinds(meta) or _rmod.mockup_hit(meta.get("ask")):
         return
     opts = " ".join(f'{o.get("label") or ""} {o.get("line") or ""}' for o in meta.get("options") or [] if isinstance(o, dict))
     for where, text in (("description", description), ("next", str(meta.get("next") or "")), ("options", opts)):
-        hit = _rmod.ARTIFACT_RX.search(text or "")
+        hit = _rmod.mockup_hit(text)
         if hit:
-            raise ToolError(f"Refused: this needs=decision item links a mockup ({hit.group(0).rstrip('.,;:!?')}) in its {where} but not in its ask. "
+            raise ToolError(f"Refused: this needs=decision item links a mockup ({hit}) in its {where} but not in its ask. "
                             f"Put {_MOCKUP_ASK} in the ask's Decide part, so {OWNER} opens the design from the question he answers: "
                             f"ask=\"Decide: <what to decide> {_MOCKUP_ASK} \u00b7 Recommend: \u2026 \u00b7 Stakes: \u2026 \u00b7 By: \u2026\" (\u2264 {_rmod.ASK_MAX} chars, the link counted).")
 
@@ -11825,7 +11825,7 @@ _ITEM_FORM = (
     f"One decision per item: an ask that packs several decisions, or points at choices by a number or letter code the item does not spell out (“choices 2-3”, “2b”), is refused. "
     f"Split it into one item per decision and write each option out in words in the ask or the description, so that {OWNER} can decide from the item page alone. "
     "A decision to change wording quotes the current and the proposed text, labeled before and after, in the description or the options' lines. "
-    "A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page) puts [mockup](<that link>) in the ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the question. A mockup link goes in the ask only, never in an option: an option label or line holding a markdown link or an http(s) URL is refused. "
+    "A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page, or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the question. A mockup link goes in the ask only, never in an option: an option label or line holding a markdown link or an http(s) URL is refused. "
     f"When the item waits on {OWNER} running a command or a paste, the item carries it: in next when it is short (a code span), "
     "otherwise on the project page, with next linking to it (a chat reply alone scrolls past). "
     "options: when the decision is a pick between alternatives, list them, each on one line, "

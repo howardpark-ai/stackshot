@@ -16,6 +16,9 @@ store, no network, no server socket.
      "Mockup ↗" beside the question, opening the first link (the ask's, then the options', then the description's) in a new tab; an item with no
      artifact link draws none, and neither does a closed item
   3  the tool text: create and update say it in one line
+  4  a mockup page of the fleet tool's web UI (https://<host>/mockup/<n>, the host from [client] mockup_hosts, the instance config only) counts like a claude.ai artifact page: the write
+     gate, the first-link rule, the home row's and the item page's "Mockup ↗" (a plain link, never an iframe) and the bare link's label; a lookalike host, http://, a host with a port or
+     userinfo, a non-numeric id and a link only quoted inside another address are no mockup; a missing, misshaped or empty key means no host and never crashes
 
     uv run tests/decision_mockup_scenario.py        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -91,7 +94,7 @@ refused("1 create: …and one whose next links it", lambda: mk(next=f"Oliver: an
 e = ""
 try: mk(description=DESC_ART)
 except Exception as ex: e = str(ex)
-check("1 create: the refusal reads like the others: one sentence of why, then the fix with the ask's form", e.startswith("Refused: this needs=decision item links a mockup") and "Decide: <what to decide> [mockup](<the artifact link>) · Recommend:" in e
+check("1 create: the refusal reads like the others: one sentence of why, then the fix with the ask's form", e.startswith("Refused: this needs=decision item links a mockup") and "Decide: <what to decide> [mockup](<the mockup link>) · Recommend:" in e
       and "Oliver opens the design from the question he answers" in e, e)
 out = mk(description=DESC_ART, ask=ASK_ART)
 gid = (re.match(r"created (\w\d+)", out) or [0, ""])[1]
@@ -119,7 +122,7 @@ check("1 update: an item that is no decision may link one", ART in rd(4)["descri
 # ---- an option is a clickable card: no link in it, the mockup link goes in the ask
 def opts_with(label=None, line=None):
     return [{"label": label or "Approve", "line": line or "Ship the new layout.", "recommended": True}, {"label": "Decline", "line": "Keep the old one.", "recommended": False}]
-OPT_WANT = ("Refused", "option 1", "clickable card", "ask's Decide part", "[mockup](<the artifact link>)")
+OPT_WANT = ("Refused", "option 1", "clickable card", "ask's Decide part", "[mockup](<the mockup link>)")
 refused("1 create: an option line with a markdown link is refused, naming the option and saying the link goes in the ask", lambda: mk(options=opts_with(line=f"Ship the layout drawn in [mockup]({ART2}).")), *OPT_WANT, "(Approve)", "[mockup](")
 refused("1 create: …a bare URL in the line", lambda: mk(options=opts_with(line=f"Ship the layout drawn at {ART2}")), *OPT_WANT, ART2)
 refused("1 create: …a bare http URL in the label", lambda: mk(options=opts_with(label="See http://example.test/x")), *OPT_WANT, "http://example.test/x")
@@ -173,10 +176,107 @@ check(f"2 page: a closed item draws none", 'class="mockup"' not in b.item_html("
 css = b._css()
 check(f"2 style: the link keeps its two words together and the question still wraps (no overflow at a phone's width)", "a.mockup{white-space:nowrap" in css and ".hnext,.hwait{display:block;min-width:0;overflow-wrap:anywhere" in css, None)
 
+# ================================================================ 4. a fleet tool's /mockup/<n> page
+import render as r1
+cfgc = server._cfg.CFG.setdefault("client", {}); had_key = "mockup_hosts" in cfgc; was_key = cfgc.get("mockup_hosts")
+try:
+    HOST = "mockup.example.invalid"
+    cfgc.pop("mockup_hosts", None)
+    check("4 default: with no key there is no host, and a mockup page is no mockup (the claude.ai form still is)", r1.mockup_hosts() == () and r1.mockup_hit(f"https://{HOST}/mockup/7") == "" and r1.mockup_hit(ART) == ART, r1.mockup_hosts())
+    cfgc["mockup_hosts"] = [HOST]
+    SALA = f"https://{HOST}/mockup/7"
+    DESC_SALA = f"- A new layout for the settings page, drawn at {SALA}\n- Done when the layout is picked"
+    ASK_SALA = f"Decide: ship the new settings layout [mockup]({SALA})? · Recommend: yes · Stakes: low · By: Fri"
+    refused("4 create: a decision whose description links a /mockup/<n> page and whose ask does not is refused", lambda: mk(description=DESC_SALA), *WANT, SALA, "description")
+    refused("4 create: …and one whose next links it", lambda: mk(next=f"Oliver: answer the ask, see {SALA}"), *WANT, "next")
+    refused("4 create: …the link at the end of a sentence is named without its dot", lambda: mk(description=f"- A new layout, see {SALA}.\n- Done when picked"), *WANT, f"({SALA}) in its description")
+    out = mk(description=DESC_SALA, ask=ASK_SALA)
+    gid = (re.match(r"created (\w\d+)", out) or [0, ""])[1]
+    check("4 create: a decision whose ask carries the link is accepted", bool(gid) and SALA in rd(gid)["metadata"].get("ask", ""), out[:300])
+    out = mk(description=DESC_SALA, ask=f"Decide: ship the new settings layout, see {SALA}, ok? · Recommend: yes · Stakes: low · By: Fri")
+    check("4 create: …a bare link in the ask, followed by a comma, is accepted", bool(re.match(r"created \w\d+", out)), out[:300])
+    refused("4 create: …a host in upper case is the same host", lambda: mk(description=f"- A new layout, drawn at {SALA.replace(HOST, HOST.upper())}\n- Done"), *WANT, HOST.upper())
+    # an id that is not a number, a lookalike host, http, another port, userinfo and a link quoted in another address are no mockup anywhere
+    NOT = [f"https://{HOST}.evil.example/mockup/1", f"http://{HOST}/mockup/1", f"https://{HOST}/mockup/abc", f"https://{HOST}/mockup/12x", f"https://{HOST}/mockup/",
+           f"https://{HOST}:8443/mockup/1", f"https://{HOST}@evil.example/mockup/1", f"https://evil{HOST}/mockup/1", f"https://{HOST}/mockups/1", f"https://{HOST}/other/mockup/1",
+           f"https://evil.example/?u={SALA.replace('https://', 'https%3A//')}", f"https://{HOST}/mockup/1_x", f"https://{HOST}/mockup/1.png",
+           f"https://evil.example/?u=https://{HOST}/mockup/1", f"xhttps://{HOST}/mockup/1", f"https://{HOST}/mockup/1/../../terminal", f"https://{HOST}/mockup/1/%2e%2e/terminal",
+           f"https://{HOST}/mockup/1/..%2f..%2fterminal", f"https://{HOST}/mockup/1/./x", f"https://evil.example/a/https://{HOST}/mockup/1", f"https://evil.example/a-https://{HOST}/mockup/1",
+           f"https://{HOST}/mockup/7/..\\..\\terminal", f"https://{HOST}/mockup/7/..\\x", f"https://{HOST}/mockup/7/\\..\\..\\terminal", f"https://{HOST}/mockup/7/%5c..%5cx",
+           f"https://{HOST}/mockup/7\\..\\x", f"https://{HOST}/mockup/7\\.\\x"]
+    for u in NOT:
+        mk_ok = mk(description=f"- A new layout, drawn at {u}\n- Done when picked", ask=ASK)
+        check(f"4 create: {u.replace(HOST, '<host>')} is no mockup (a bare ask is accepted)", bool(re.match(r"created \w\d+", mk_ok)) and r1.mockup_hit(u) == "", (mk_ok[:200], r1.mockup_hit(u)))
+    check("4 helper: the first link wins, trailing punctuation goes, a path or query stays", r1.mockup_hit(f"a {SALA}?x=1#top. b {ART}") == SALA + "?x=1#top" and r1.mockup_hit(f"({SALA}) and {ART}") == SALA
+          and r1.mockup_hit(f"x {ART}, then {SALA}") == ART and r1.mockup_hit(f"{SALA}/") == SALA and r1.mockup_hit(f"{SALA}/v2.") == SALA + "/v2" and r1.mockup_hit(f"see {SALA}!") == SALA and r1.mockup_hit(None) == "", None)
+    check("4 helper: a dot segment in the path is no mockup, a dot in the query or fragment is, and a later real link still counts", r1.mockup_hit(f"{SALA}?x=../y") == SALA + "?x=../y" and r1.mockup_hit(f"{SALA}/v1.2/x#a..b") == SALA + "/v1.2/x#a..b"
+          and r1.mockup_hit(f"{SALA}/../../terminal and then {SALA}") == SALA and r1.mockup_hit(f"https://evil.example/?u={SALA} but ({SALA})") == SALA
+          and r1.mockup_hit(f"({SALA}) and xhttps://{HOST}/mockup/2") == SALA and r1.mockup_hit(f"ftp:{SALA}") == "", None)
+    # the scheme starts the token: only white space, a bracket, a quote or markdown emphasis may precede it (a link after # @ : , = and so on is quoted inside something else)
+    check("4 helper: a link after # @ : , ; = | is no mockup, one wrapped in markdown, brackets, quotes or after white space is", all(r1.mockup_hit(f"x{c}{SALA}") == "" for c in "#@:,;=|~!") and r1.mockup_hit(f"a,{SALA}") == "" and r1.mockup_hit(f"a #{SALA}") == ""
+          and all(r1.mockup_hit(t) == SALA for t in (f"[mockup]({SALA})", f"<{SALA}>", f'"{SALA}"', f"'{SALA}'", f"`{SALA}`", f"**{SALA}**", f"x\n{SALA}", f"{SALA}.", f"{SALA}, ok", f"[{SALA}]", SALA)), None)
+    check("4 helper: a trailing dot segment is refused even though sentence punctuation is dropped", all(r1.mockup_hit(f"{SALA}{t}") == "" for t in ("/..", "/../", "/.", "/../.", "/%2e%2e", "/..?x=1", "/..\\x", "\\..", "/\\..\\..\\terminal", "/%5c..%5cx", "/%5C..", "\\%2e%2e")) and r1.mockup_hit(f"{SALA}/v1.") == SALA + "/v1" and r1.mockup_hit(f"{SALA}\\v1") == SALA + "\\v1" and r1.mockup_hit(f"_{SALA}_") == "", None)
+    check("4 helper: a host needs letters or digits in every label: . .. - -a a-. and an empty label are no host", all(not re.fullmatch(r1._HOST_RX, h) for h in (".", "..", "-", "a..b", "-a", "a-", ".a", "a.", "a b", "")) and all(re.fullmatch(r1._HOST_RX, h) for h in (HOST, "a", "a-b.c1", "x.y-z.example")), None)
+    item(30, needs=["decision"], ask=ASK, mover="Oliver", then="team-back")
+    refused_nw("4 update: a description that adds a /mockup/<n> link to a decision with a bare ask is refused", 30, lambda: upd(30, description=DESC_SALA), *WANT, SALA)
+    upd(30, description=DESC_SALA, ask=ASK_SALA)
+    check("4 update: the same description is accepted with the link in the ask", rd(30)["metadata"]["ask"] == ASK_SALA, rd(30)["metadata"])
+    refused_nw("4 update: an option holding a /mockup/<n> link is refused like any link", 30, lambda: upd(30, options=[{"label": "Approve", "line": f"Ship it, see {SALA}", "recommended": True}, OPTS[1]]), *OPT_WANT)
+    # the pages
+    item(31, needs=["decision"], ask=ASK, desc=DESC_SALA, mover="Oliver", then="team-back")                       # stored before the gate: the description's link
+    item(32, needs=["decision"], ask=ASK_SALA, mover="Oliver", then="team-back")                                    # the ask carries it: drawn once as a link, no chip
+    item(33, needs=["decision"], ask=f"Decide: ship the layout at {SALA} ? · Recommend: yes · Stakes: low · By: Fri", mover="Oliver", then="team-back")   # a bare link in the ask: labeled
+    item(34, needs=["decision"], ask=ASK, desc=f"- see https://{HOST}.evil.example/mockup/1 and http://{HOST}/mockup/1", mover="Oliver", then="team-back")
+    item(35, status="completed", needs=["decision"], ask=ASK_SALA, desc=DESC_SALA, outcome="done", reason="picked")
+    check("4 pages: mockup_url finds the /mockup/<n> link (ask first), none for lookalikes, none for a closed item", r2.mockup_url(rd(31) | {"gid": "a31"}) == SALA and r2.mockup_url(rd(32) | {"gid": "a32"}) == SALA
+          and r2.mockup_url(rd(34) | {"gid": "a34"}) == "" and r2.mockup_url(rd(35) | {"gid": "a35"}) == "", None)
+    b2 = r2.Board(f"{tmp}/store")
+    ym2 = {r["gid"]: (r, m) for r, m in b2.home_pairs()[home.YOUR_MOVE]}
+    row = b2.home_row(*ym2["a31"], home.YOUR_MOVE)
+    q = re.search(r'<span class="hnext hq">(.*?)</span></div>', row, re.S)
+    check("4 home: row a31 shows Mockup ↗ beside the question, a plain link to the page in a new tab", bool(q) and q.group(1).endswith(LINK(SALA)) and "<iframe" not in row, row[:900])
+    row = b2.home_row(*ym2["a32"], home.YOUR_MOVE)
+    check("4 home: a question that carries the link itself draws no second one", 'class="mockup"' not in row and row.count(SALA) == 1, row[:900])
+    row = b2.home_row(*ym2["a34"], home.YOUR_MOVE)
+    check("4 home: a decision linking only lookalikes shows no chip", 'class="mockup"' not in row and "Mockup" not in row, row[:600])
+    pg = b2.item_html("a31")
+    blk = re.search(r'<div class="iask"><b>Ask</b><dl>(.*?)</dl>', pg, re.S)
+    check("4 page: a31's Ask block shows Mockup ↗ once, and the page embeds nothing", bool(blk) and LINK(SALA) in blk.group(1) and pg.count('class="mockup"') == 1 and "<iframe" not in pg, blk.group(1)[:600] if blk else pg[:300])
+    pg = b2.item_html("a32")
+    check("4 page: a32 draws its own link once, and no chip", pg.count(f'href="{SALA}"') == 1 and 'class="mockup"' not in pg and "<iframe" not in pg, None)
+    pg = b2.item_html("a33")
+    check("4 page: a bare link in the ask is labeled mockup, not the host", f'href="{SALA}"' in pg and f">{HOST}</a>" not in pg and ">mockup ↗</a>" in pg, re.findall(r"<a [^>]*mockup[^>]*>[^<]*</a>", pg))
+    check("4 page: a closed item and a lookalike draw no chip", 'class="mockup"' not in b2.item_html("a35") and 'class="mockup"' not in b2.item_html("a34"), None)
+    check("4 label: a lookalike host keeps its host as the label, a claude.ai artifact link its own", r2.link_label(NOT[0]) == f"{HOST}.evil.example" and r2.link_label(ART) == "session" and r2.link_label(SALA) == "mockup"
+          and r1.link_label(SALA) == "mockup" and r1.link_label(NOT[10]) != "mockup", None)
+    # the host is the instance's alone: a missing, empty or misshaped key means no host and never crashes
+    OTHER = "https://other-a.example.invalid/mockup/9"
+    cfgc["mockup_hosts"] = ["other-a.example.invalid", "Other-B.Example.Invalid", 5, "bad host/", ""]
+    check("4 config: a listed host counts (any case, junk entries dropped) and a host not listed does not", r1.mockup_hosts() == ("other-a.example.invalid", "other-b.example.invalid") and r1.mockup_hit(f"x {OTHER}") == OTHER
+          and r1.mockup_hit("https://OTHER-B.example.invalid/mockup/3") == "https://OTHER-B.example.invalid/mockup/3" and r1.mockup_hit(SALA) == "" and r1.mockup_hit(ART) == ART, r1.mockup_hosts())
+    refused("4 config: the gate follows the configured host", lambda: mk(description=f"- drawn at {OTHER}\n- Done"), *WANT, OTHER)
+    cfgc["mockup_hosts"] = "other-a.example.invalid"
+    check("4 config: one name as a string is a list of one", r1.mockup_hosts() == ("other-a.example.invalid",) and r1.mockup_hit(OTHER) == OTHER, r1.mockup_hosts())
+    cfgc["mockup_hosts"] = []
+    check("4 config: an empty list means no host: the /mockup/<n> rule is off and the rest keeps the claude.ai one", r1.mockup_hit(SALA) == "" and r1.mockup_hit(ART) == ART, None)
+    check("4 config: …and the lookbehind and dot-segment rules do not touch the claude.ai form", r1.mockup_hit(f"x https://evil.example/?u={ART}") == ART and r1.mockup_hit(f"{ART}/../x") == ART + "/../x", None)
+    out = mk(description=DESC_SALA, ask=ASK)
+    check("4 config: …so a bare ask beside a /mockup/<n> description is accepted", bool(re.match(r"created \w\d+", out)), out[:300])
+    for bad in ([5], ["x.example:80"], ["."], [".."], ["-"], ["a..b"], [""], "", [None, "bad host/"], ("", ), "a b", 5, {"a": 1}, None, True):
+        cfgc["mockup_hosts"] = bad
+        check(f"4 config: a value with no usable host ({bad!r}) means no host and does not crash", r1.mockup_hosts() == () and r1.mockup_hit(SALA) == "" and r1.mockup_hit(ART) == ART, r1.mockup_hosts())
+    server._cfg.CFG.pop("client", None)
+    check("4 config: no [client] section at all means no host", r1.mockup_hosts() == () and r1.mockup_hit(SALA) == "" and r1.mockup_hit(ART) == ART, r1.mockup_hosts())
+finally:
+    server._cfg.CFG["client"] = cfgc
+    if had_key: cfgc["mockup_hosts"] = was_key
+    else: cfgc.pop("mockup_hosts", None)
+
 # ================================================================ 3. the tool text
 snap = json.loads(pathlib.Path(STACK, "tests/tool_text.snapshot.json").read_text(encoding="utf-8"))["tools"]
 for tool in ("create", "update"):
     d = snap[tool]["description"]
+    check(f"3 text: {tool} names the /mockup/<n> page beside the claude.ai artifact page", "claude.ai/artifact/… page, or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup]" in d, d[:200])
     check(f"3 text: {tool} says a decision's mockup link goes in the ask's Decide part", "puts [mockup](<that link>) in the ask's Decide part too, or the write is refused" in d and "Mockup ↗ beside the question" in d, d[:200])
     check(f"3 text: {tool} says a mockup link goes in the ask only and an option holding a link is refused", "goes in the ask only" in d and "markdown link" in d and "http(s) URL" in d and "is refused" in d, d[:200])
     check(f"3 text: {tool} no longer lets the options carry the mockup link", "description, next or options link a mockup" not in d, d[:200])

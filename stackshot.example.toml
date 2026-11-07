@@ -707,6 +707,10 @@ session_links = ""                                  # the fleet tool's live stor
                                                     # session is stored on an item by that id and shown by its current name; without it (or with "") nothing changes.
                                                     # (board.md and the brief still give this link; the web pages link a name to session_view instead.)
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 1 (Heartbeat fleet store); the registry file beside it is 19 (Session registry file).
+# mockup_hosts = ["mockup.example.invalid"]         # the hosts whose https://<host>/mockup/<n> page counts as a design decision's mockup, like a claude.ai artifact page (the fleet tool serves one for a session
+                                                    # without the artifact tool). The host ends at the slash, the id is digits only and a path with a . or .. segment (a backslash counts as a slash) is no mockup.
+                                                    # The link must start after white space, a bracket, a quote or * (a link wrapped only in _underscores_ is not recognized). The host is set here only: a missing key,
+                                                    # a misshaped value, [] and a list with no usable host mean no host, so only a claude.ai artifact page counts. Live
 session_view = ""                                   # the fleet tool's web view of one session, e.g. "https://sala.example.com/#s={name}": on the board, the item page
                                                     # and the project page every session name with a live pane (fleet.present) links here, {name} its
                                                     # url-quoted name, in a new tab; a name with no live pane, a cloud session's included, stays text.

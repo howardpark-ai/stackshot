@@ -2,6 +2,7 @@
 render_all() returns both from one load. Shape: pure text helpers at module level, and a Board that loads the store, the fleet state and the hub status ONCE and carries the model
 (sessions, projects, anchors) and the two emitters. The board's web pages are drawn by ui/render.py."""
 import contextlib
+import functools
 import io
 import json, os, sys, glob, datetime, re, subprocess, hashlib, html as H
 from pathlib import Path
@@ -384,9 +385,35 @@ def open_ask(r):
     get, and read as waiting on him). "" otherwise; the stored line stays (a decision put back brings it back), and the item
     page's History names it on the line where the decision left the needs."""
     return ask_of(r) if r.get("status") != "completed" and needs_kind(r) == "call" else ""
-# A design decision's mockup (a claude.ai artifact page) is linked on the question itself: the home row and the item page's Ask block draw
+# A design decision's mockup (a claude.ai artifact page, or a /mockup/<n> page of the fleet tool's web UI) is linked on the question itself: the home row and the item page's Ask block draw
 # "Mockup ↗" beside the Decide part, so the owner opens the design from the ask he answers and not only from the item's background.
-ARTIFACT_RX = re.compile(r"https://claude\.ai/(?:code/)?artifact/[^\s<>()\[\]\"'`]+")
+_HOST_RX = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*"   # dot-separated labels of letters, digits and inner hyphens: never ".", ".." or "-" alone
+def mockup_hosts():
+    """The hosts whose https://<host>/mockup/<n> page counts as a mockup, from the instance config only ([client] mockup_hosts, a list or one name; read at use, so a reload is live). A missing
+    or misshaped key, an empty list and a list with no usable host give no host: then only a claude.ai artifact page is a mockup."""
+    v = _cfg.get("client", "mockup_hosts")
+    if isinstance(v, str): v = [v]
+    if not isinstance(v, (list, tuple)): return ()
+    return tuple(h.strip().lower() for h in v if isinstance(h, str) and re.fullmatch(_HOST_RX, h.strip()))
+@functools.lru_cache(maxsize=8)
+def _mockup_rx(hosts):
+    tail = r"[^\s<>()\[\]\"'`]+"
+    alts = ["https://claude\\.ai/(?:code/)?artifact/" + tail]
+    # the host ends at the slash (a lookalike such as <host>.evil.example never matches), the id is digits only and ends at a non-word character or a sentence dot; the scheme starts the token,
+    # so a link that follows any other character (a word character or / . = ? & % - # @ : , ...) is quoted inside something else and is no mockup; only white space, a bracket, a quote or markdown emphasis may precede it
+    if hosts: alts.append(r"(?<![^\s<>()\[\]\"'`*])https://(?P<sala>(?i:" + "|".join(re.escape(h) for h in hosts) + r")/mockup/[0-9]+(?![\w-]|\.\w)(?:[/\\?#]" + tail + ")?)")
+    return re.compile("|".join(alts))
+def _dot_segment(link):
+    """True when the path of a link holds a . or .. segment, spelled plainly or percent-encoded, with a backslash read as a slash as a browser does: it would walk out of /mockup/<n> to another page of the host."""
+    from urllib.parse import unquote
+    path = re.split(r"[?#]", link, maxsplit=1)[0].split("//", 1)[-1]
+    return any(seg in (".", "..") for seg in unquote(path).replace("\\", "/").split("/"))
+def mockup_hit(text):
+    """The first mockup link in `text` (a claude.ai artifact page or a configured host's /mockup/<n> page), its trailing sentence punctuation dropped; "" when it has none."""
+    for m in _mockup_rx(mockup_hosts()).finditer(str(text or "")):
+        if m.groupdict().get("sala") is not None and _dot_segment(m.group(0)): continue   # the whole match: a trailing /.. is a dot segment, not sentence punctuation
+        return m.group(0).rstrip(".,;:!?")
+    return ""
 def _vtime(v):
     """A stored version's own time: the later of its `updated` and `confirmed` clocks, 0.0 when it has neither."""
     out = 0.0
@@ -427,6 +454,7 @@ def link_label(u):
     if "notion" in h: return "Notion"
     if "docs.google.com" in h: return {"/document": "Google Doc", "/spreadsheets": "Google Sheet", "/presentation": "Google Slides"}.get(next((k for k in ("/document", "/spreadsheets", "/presentation") if path.startswith(k)), ""), "Google Docs")
     if "drive.google.com" in h: return "Drive"
+    if "claude.ai" not in h and mockup_hit(u) == u: return "mockup"   # a fleet tool's mockup page: a plain link, never embedded (its pages share the terminal's address)
     if "claude.ai" in h: return "session"
     if "slack.com" in h: return "Slack"
     return h
