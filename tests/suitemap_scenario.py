@@ -562,8 +562,9 @@ conc = y["concurrency"]
 check("merge_group: the concurrency group holds the ref (each entry has its own branch, so entries never share a group) and cancel-in-progress is true for a pull_request only: an entry's run is never cancelled by another",
       "github.ref" in conc["group"] and "github.workflow" in conc["group"]
       and holds(conc["cancel-in-progress"], *EVENTS["a pull request"]) is True and all(holds(conc["cancel-in-progress"], *EVENTS[k]) is False for k in EVENTS if k != "a pull request"), conc)
-check("merge_group: the jobs that read the pull request (tool-text, tool-text-model) start on a pull_request only, so a merge-queue entry skips them (skipped counts as passing), as a queue/** push does",
-      all(y["jobs"][n]["if"].lstrip().startswith("github.event_name == 'pull_request'") for n in ("tool-text", "tool-text-model")), [y["jobs"][n]["if"] for n in ("tool-text", "tool-text-model")])
+pr_jobs = [n for n in y["jobs"] if n not in ("shards", "measure", "suites")]   # the jobs that read the pull request (today tool-text)
+check("merge_group: every job that reads the pull request starts on a pull_request only, so a merge-queue entry skips it (skipped counts as passing), as a queue/** push does",
+      pr_jobs and all(y["jobs"][n]["if"].lstrip().startswith("github.event_name == 'pull_request'") for n in pr_jobs), {n: y["jobs"][n].get("if") for n in pr_jobs})
 named_events = set(re.findall(r"github\.event_name\s*(?:==|!=)\s*'([^']*)'", open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read()))
 check("merge_group: every event name the file's expressions test for is one it triggers on, and merge_group is among them (a queue run is told apart from main's in the file, not left to fall through)",
       named_events <= {"push", "pull_request", "merge_group", "workflow_dispatch"} and "merge_group" in named_events, named_events)

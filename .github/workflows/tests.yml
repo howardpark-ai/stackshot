@@ -35,7 +35,7 @@
 # GitHub's queue tests an entry on a branch it makes, `gh-readonly-queue/main/pr-<n>-<sha>`, and starts the workflows that trigger on `merge_group` (types: checks_requested) for it; the required check on main is the job
 # `suites` (app GitHub Actions), and a check that never reports makes the queue wait until it times out, so `suites` must report on that event. A `merge_group` run gets exactly what a `queue/**` push gets: the `suites` job's
 # selection step, no plan, no shards, no measured-run steps, no map saved, no audit (a merge-queue branch is deleted after the merge, as a queue/** one may be). The branch is NOT in the `push` list above: the merge_group event is the trigger,
-# and a push trigger as well would run every entry twice. Differences of the event, all handled in this file: it has no pull_request context (so the tool-text jobs, which read the PR, skip, as they do on a queue/** push),
+# and a push trigger as well would run every entry twice. Differences of the event, all handled in this file: it has no pull_request context (so the tool-text job, which reads the PR, skips, as it does on a queue/** push),
 # `github.sha` is the entry's head (`github.event.merge_group.head_sha`; checkout takes it from the ref) and `github.event.merge_group.base_sha` stands where a PR's base commit is for the map's cache key (the
 # restore falls back to the newest saved map when no entry has that key, as on a queue/** push), `github.event.before` is empty, and `github.ref` is the entry's own branch, so the concurrency group is its own and
 # a newer entry never cancels an older one. tests/suitemap_scenario.py evaluates every `if:` for a merge_group event and fails when it runs anything but what a queue/** push runs.
