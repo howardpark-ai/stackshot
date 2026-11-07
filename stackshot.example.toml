@@ -26,7 +26,7 @@ markdown = "~/stackshot-data/board.md"              # the rendered board kept in
 rules = "~/stackshot-data/RULES.md"                 # the rulebook the `rules` tool serves
 rules_parts = []                                    # skill files (SKILL.md) the `rules` tool appends after the rulebook, in this order, each under "## Part: <name>" (cloud and Cowork sessions get no hooks to load them). Example: ["~/skills/writing/SKILL.md"]. [] = none
 brain = "~/brain"                                   # the pages checkout (for example gbrain's managed mirror): the page registry and page freshness (the server box only)
-docs_merge_script = ""                            # release.sh: the script whose allow-list of no-test changes (docs, comments, runner settings) the fast path reads; "" = none, and the fast path fails closed
+docs_merge_script = ""                            # the script that merges a change no test can exercise (docs, comments, runner settings) without release.sh; "" = none (release.sh does not read it)
 fleet_names = "~/stackshot-data/session-names.tsv"    # os hostname → fleet name → letter (a letter with no fleet state yet)
 state = "~/.local/state/stackshot"                  # everything the instance writes for itself: site/, ledger.json, requests.json, messages.jsonl, cloud-sessions.json, publish.lock, anchor-hub/, inbox/, clients/
 secrets = "~/.config/stackshot"                     # oauth.env (Google client + portal token), portal/ (client files), anchor-hub/env, anchor-hub/google/, client.token, client.url

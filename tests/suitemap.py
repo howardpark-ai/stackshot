@@ -32,7 +32,7 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           and those traced over 24 h ago, the rest keep their file half);
                                                           exit 1 when a suite fails (a suite that fails only when measured
                                                           passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
-                                                          earlier clean measurement beside it as `carry` for tools/retest_skip.py)
+                                                          earlier clean measurement beside it as `carry` for a reader of the map; release.sh no longer reads it)
   tests/suitemap.py run [-T secs] suite…                  run the suites plainly; exit 1 when one fails
   tests/suitemap.py plan --of N [--map MAP]               the whole plan of main's measured run, made once: `shard0=a b c`, `shard1=…`
                                                           lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*)
@@ -70,7 +70,7 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
   suite's measurement when the inner suite runs it in a child that coverage does not follow, and a change to that code (a
   scenario that now runs a module in process) shows up in the outer suite's measurement only after the merge. So
   a change that selects an inner suite selects its outer suite too.
-  release.sh's retest skip (tools/retest_skip.py) reads this map for what each suite reads and used to refuse the whole map for
+  release.sh's retest skip (tools/retest_skip.py, removed when releases moved to GitHub's merge queue) read this map for what each suite reads and used to refuse the whole map for
   one `ok: false` suite. A suite that fails only when measured (the release suite, 4 to 9 times slower measured than plain, timed
   out at the 2400 s limit once, and the map of that run was refused for every PR it served) keeps its last clean measurement
   beside the new one as `carry` (the read sets, when it was traced, and `at`, the commit it was measured at): the skip reads the
