@@ -47,6 +47,7 @@ import watchers as _watch  # noqa: E402
 import render as _render  # noqa: E402
 import step_proof as _sp  # noqa: E402
 import steps as _steps  # noqa: E402
+import wait_end as _we  # noqa: E402
 import waiting as _wt  # noqa: E402
 
 
@@ -67,6 +68,10 @@ FIX = {
     "why-not-now": "do the step now, or write what concretely keeps it from running before then (an event, someone's run, a scheduled job)",
     "proof-wait": "close the item with that evidence; if part of it really cannot be staged (another party, a vendor, a date), write that as the wait's basis",
     "step-handover": "split the delivery into a step of its own or give it step_proof, or hand the item to the session the next step names (mover=)",
+    "wait-end": ("say what ends the wait: after=[\"board#N\"]; wait_kind=event with wait_event=<pr_merged|pr_released owner/repo#n | box_online <machine> | recycle | fleet_op <verb>> and ask_by=YYYY-MM-DD; "
+                 "wait_kind=anchor with wait_anchor=<link> (add the link with the anchors tool); wait_kind=relay with wait_event=<who> and ask_by (news only " + _cfg.owner() + " relays); step_proof for a step a pull request's merge or release finishes; "
+                 "or rewrite the line as the action to take now"),
+    "event-missing": "add an event type for it to event_waits.py, or tell the mover to wait on a time or a relay",
     "ask-options": f"rewrite the ask with options ({_render.OPTIONS_MIN} to {_render.OPTIONS_MAX} answers {_cfg.owner()} could pick, one recommended and named in the Recommend part), or reword the Decide part as a yes/no whose Recommend answers yes or no",
     "reads-as-wait": "set the wait itself (a hold with its reason, an after item, an event wait), or write next as the action to take now",
 }
@@ -314,7 +319,7 @@ def field_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], no
 
 # ---------- the filing rules: is the item filed in the right state? ----------
 FILING_KINDS = ("arbitrary-hold", "mislabeled-state")      # the board report's kinds that are filing rules (all of them now)
-CHECKS_FILING = ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now")      # the categories the filing pass can raise
+CHECKS_FILING = ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing")      # the categories the filing pass can raise
 
 
 _YESNO_FIRST_RX = re.compile(r"\s*(?:yes|no|approve|decline)\b", re.I)      # a Recommend part that opens by answering a yes/no
@@ -391,6 +396,61 @@ def date_only_wait(it: dict[str, Any], meta: dict[str, Any], mover: str, after_o
     return f"read as doing, but its wake {meta.get('wake')} is {_hours(wake - now)} away and every open next line waits for it ({_clip(found[0], 60)!r}): nothing is left to do before then"
 
 
+def wait_end_gaps(gid: str, it: dict[str, Any], meta: dict[str, Any], mover: str, after_open: Callable[[dict[str, Any]], Any], by_shown: dict[str, str], items: dict[str, dict[str, Any]],
+                  now: float, facts: Any) -> tuple[list[Any], set[str]]:
+    """The wait-end rule (wait_end.py) for one open item: the lines of its next that wait in words for something nothing tells the item has happened, and a stored wait no watcher can end → [wait_end.Gap]. Reads only.
+    Nothing for an item the owner or no session moves, a dead one, or with `[audit] wait_end = "off"`; a gap the mover sent back or the server fixed already (server_fixes.WAIT_END, declined or marked: the
+    same open line after the wait ended is not asked about again) is left out. `facts`: the wait_end.Facts of this pass, built once by the caller. → (the gaps, the lines of
+    the steps the rule handled already: the generic reads-as-wait finding stays quiet about those lines and no others). One item's failure is printed and the item skipped."""
+    import server_fixes as _sf  # noqa: PLC0415
+    if _cfg.audit_wait_end() == "off" or _no_session(mover) or it.get("status") != "open":
+        return [], set()
+    try:
+        mod = _model.derive(it, now, after_open)
+    except Exception:  # noqa: BLE001  (an item the model cannot read has no wait to judge)
+        return [], set()
+    if mod.state not in (_model.ALIVE, _model.WAITING):
+        return [], set()
+    def open_item(ref: str) -> str:
+        g = by_shown.get(str(ref))
+        return g if g and (items.get(g) or {}).get("status") == "open" else ""
+    try:
+        gaps = _we.item_gaps(gid, meta, mover, "alive" if mod.state == _model.ALIVE else "waiting", facts, open_item, lambda a, b: _norm(a) == _norm(b), now,
+                             pending=lambda tok: _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok))
+        return gaps, handled_lines(meta)
+    except Exception as e:  # noqa: BLE001  — one item's failure never stops the filing pass
+        print(f"wait end: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return [], set()
+
+
+def handled_lines(meta: dict[str, Any]) -> set[str]:
+    """The lines of the steps the rule has handled: a step whose text (its whole text, the token's hash) a WAIT_END token the server fixed or the mover sent back was made from. Read from the tokens and
+    the steps, not from a gap found again: a line whose target has closed since is no gap now, and is still handled. A step edited anywhere has another hash and is new."""
+    hashes = _we.handled_hashes(meta)
+    out: set[str] = set()
+    if not hashes:
+        return out
+    for s in _steps.view(meta):
+        if _we.line_hash(s["text"]) in hashes:
+            out |= {_line_key(ln) for ln in str(s["text"]).splitlines() if ln.strip()}
+    return out
+
+
+def _line_key(text: Any) -> str:
+    """A physical line of next as the wait-end rule and the generic wait words both see it: marker and opener off, spaces folded."""
+    return " ".join(_steps.strip_opener(_steps.first_line(text)).split())
+
+
+def covered_lines(meta: dict[str, Any], gaps: list[Any]) -> set[str]:
+    """The lines of next the rule has spoken for: every line of the step of each of these gaps (a stored wait has none)."""
+    out: set[str] = set()
+    view = _steps.view(meta)
+    for g in gaps:
+        if 1 <= int(g.pos or 0) <= len(view):
+            out |= {_line_key(ln) for ln in str(view[int(g.pos) - 1]["text"]).splitlines() if ln.strip()}
+    return out
+
+
 def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], now: float, env: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(findings, flags) of the filing rules over the open items; reads only. A finding has the shape, category and evidence the daily run's had before the pass took these rules over (the run no longer finds them): stuck-elsewhere (the first open step belongs to someone other than the mover), board checks (the board report's arbitrary-hold,
     a hold nothing explains, and mislabeled-state, a stored state its fields contradict), reads-as-wait (an alive item whose next says it waits) and why-not-now (an alive item whose wake is the whole of its wait: date_only_wait). `flags` = [{"id", "project", "mover",
@@ -401,6 +461,14 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
     flags: list[dict[str, Any]] = []
     known = {k.lower() for k in env.role_map()} | {_norm(k) for k in env.role_map()}
     _br.install_fallback()
+    wait_mode = _cfg.audit_wait_end()
+    by_shown = {_nr.shown(g): g for g in items}
+    wfacts: Any = _we.Facts()
+    if wait_mode != "off" and callable(getattr(env, "wait_facts", None)):
+        try:
+            wfacts = env.wait_facts()      # once for the whole pass: the machines, the fleet's heartbeats and the anchors file are read here, not per item
+        except Exception as e:  # noqa: BLE001  (the rule then reads the items themselves)
+            print(f"wait end: facts not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
     def add(gid: str, meta: dict[str, Any], mover: str, category: str, detail: str, to: str = "", fix: str = "") -> None:
         findings.append({"id": _nr.shown(gid), "project": str(meta.get("project") or ""), "owner": mover, "mover": mover, "category": category, "detail": detail,
@@ -424,6 +492,22 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
         if ao:
             add(gid, meta, mover, "ask-options", ao)
         hits, broad = wait_words(it, after_open, now)
+        wgaps, handled = wait_end_gaps(gid, it, meta, mover, after_open, by_shown, items, now, wfacts)
+        spoken = covered_lines(meta, [g for g in wgaps if g.kind != _we.EVENT]) | handled if (wgaps or handled) else set()
+        asks = [g for g in wgaps if g.kind != _we.EVENT]
+        if asks:
+            fixable = wait_mode == "fix" and bool(asks[0].plan)
+            if not (fixable and now - last < _cfg.audit_wait_end_settle_minutes() * 60):      # a mover still at work on its next is left alone before the pass fixes anything
+                more = f" (and {len(asks) - 1} more: {'; '.join(_clip(g.evidence, 70) for g in asks[1:3])})" if len(asks) > 1 else ""
+                add(gid, meta, mover, "wait-end", asks[0].evidence + more)
+                findings[-1]["gap"] = asks[0] if fixable else None
+        if spoken:
+            hits = [h for h in hits if _line_key(h[0]) not in spoken]       # the lines the rule words (or handled: fixed by the server, sent back by the mover): a second message for them would repeat it
+            rest = "\n".join(ln for ln in str(meta.get("next") or "").splitlines() if _line_key(ln) not in spoken)
+            broad = [] if hits else _mg.wait_lines(rest)[1]                 # the broad words of the other lines only; a line of another kind that waits still gets its own reads-as-wait finding
+        for g in [g for g in wgaps if g.kind == _we.EVENT]:
+            add(gid, meta, mover, "event-missing", g.evidence, to=_cfg.audit_builder(), fix=_we.event_fix(g, mover))
+            break
         if hits:
             add(gid, meta, mover, "reads-as-wait", f"next line {_clip(hits[0][0], 90)!r} reads as a wait ({hits[0][1]}) on an item that is alive")
         elif dated := date_only_wait(it, meta, mover, after_open, now):      # the daily run's why-not-now shape, in code: no model call, no cap

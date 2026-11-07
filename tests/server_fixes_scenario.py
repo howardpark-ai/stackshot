@@ -301,6 +301,14 @@ check("6.5 the pass does not call the park for a front agent's item", not parked
 fs_, _f = AC.filing_findings({"a9210": rd(9210)}, {}, now, env())
 check("6.5 …and the finding for it is still raised", any(f["category"] == "why-not-now" for f in fs_), fs_)
 
+# 6.7 the wait-end fix is one of the server's fixes (wait_end_scenario holds its cases); a send-back unmarks and declines only the kinds it names
+check("6.7 wait_end is one of the fixes", SF.WAIT_END == "wait_end" and SF.WAIT_END in SF.FIXES)
+meta_ = {}
+SF.mark(meta_, SF.WAIT_END, "item:board#" "1|aaaaaaaa"); SF.mark(meta_, SF.WAIT_END, "pr:o/r#7|bbbbbbbb")
+server._wait_end_sent_back(meta_, ("item",))
+check("6.7 a send-back of the item kind unmarks and declines only that kind", SF.declined(meta_, SF.WAIT_END, "item:board#" "1|aaaaaaaa") and not SF.marked(meta_, SF.WAIT_END, "item:board#" "1|aaaaaaaa")
+      and SF.marked(meta_, SF.WAIT_END, "pr:o/r#7|bbbbbbbb") and not SF.declined(meta_, SF.WAIT_END, "pr:o/r#7|bbbbbbbb"), meta_)
+
 # 6.6 nothing left of the dead pieces
 check("6.6 the unused front-mover gate is gone", not hasattr(server, "_gate_front_mover"), None)
 

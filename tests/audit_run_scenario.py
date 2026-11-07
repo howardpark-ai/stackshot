@@ -1784,6 +1784,38 @@ finally:
     _cfg.CFG.pop("registry_audit", None)
 rec_clear()
 
+# ---- the wait-end pass (wait_end_scenario holds the cases against the server's fix): the pass only acts through env.wait_end
+import wait_end as _WE
+def _gap(op="after"):
+    return _WE.Gap("item", 1, "wait for board#" "2", "board#" "2", "ev", {"op": op, "ids": ["g2"], "shown": ["board#" "2"]}, "item:board#" "2|abcdef01")
+def _wf(i, mover="home-agent", cat="wait-end", gap=True):
+    return {"id": f"board#{i}", "project": "projects/alpha", "owner": mover, "mover": mover, "category": cat, "detail": "d", "fix": "f", "source": "code", **({"gap": _gap()} if gap else {})}
+wcalls, wsent = [], []
+def _we_ok(gid, plan, now_): wcalls.append((gid, plan)); return {"fixed": True, "what": "after=board#" "2", "why": ""}
+def _wdeliver(to, text, fyi=False): wsent.append((to, text, fyi)); return True, "[200] ok"
+wenv = lambda **kw: AR.Env(roles=ROLES, fallback=lambda p: "alpha-main", builder=lambda p: "alpha-builder", page_of=lambda p: ("", None), deliver=_wdeliver, **kw)
+fl = [_wf(1), _wf(2), _wf(3, gap=False), _wf(4, cat="event-missing", gap=False)]
+shown_ = {f"board#{i}": f"g{i}" for i in range(1, 5)}
+left_, rep_ = AR.wait_end_pass(fl, {}, shown_, now, wenv(wait_end=_we_ok))
+check("wait-end pass: a finding with a fix is made through env.wait_end and no longer sent; one with no fix and the builder's message stand", [f["id"] for f in left_] == ["board#" "3", "board#" "4"] and [c[0] for c in wcalls] == ["g1", "g2"] and rep_["fixed"] == ["board#" "1", "board#" "2"], (left_, rep_))
+check("wait-end pass: the plan reaches the fix with its token and line", wcalls[0][1]["op"] == "after" and wcalls[0][1]["token"] == "item:board#" "2|abcdef01" and wcalls[0][1]["pos"] == 1, wcalls)
+check("wait-end pass: one fyi message names the items fixed, to the mover", len(wsent) == 1 and wsent[0][2] is True and "board#" "1" in wsent[0][1] and "board#" "2" in wsent[0][1], wsent)
+check("wait-end pass: the record counts what stands", rep_["asked"] == 1 and rep_["routed"] == 1, rep_)
+wcalls.clear(); wsent.clear()
+left_, rep_ = AR.wait_end_pass([_wf(1)], {}, shown_, now, wenv())
+check("wait-end pass: with no env.wait_end nothing is made and the finding stands", len(left_) == 1 and not wcalls and not wsent and rep_["fixed"] == [], (left_, rep_))
+left_, rep_ = AR.wait_end_pass([_wf(i) for i in range(1, 15)], {}, {f"board#{i}": f"g{i}" for i in range(1, 15)}, now, wenv(wait_end=_we_ok))
+check("wait-end pass: at most ten fixes a pass", len(rep_["fixed"]) == _WE.FIX_CAP and len(left_) == 4, (len(rep_["fixed"]), len(left_)))
+wcalls.clear()
+left_, rep_ = AR.wait_end_pass([_wf(1, mover="alpha-main")], {}, shown_, now, wenv(wait_end=_we_ok))
+check("wait-end pass: a front agent's item is not fixed (it would get no notice)", len(left_) == 1 and not wcalls, (left_, wcalls))
+left_, rep_ = AR.wait_end_pass([_wf(1)], {}, shown_, now, wenv(wait_end=lambda g, p, n: {"fixed": False, "why": "the line changed"}))
+check("wait-end pass: a fix the server declines leaves the finding standing", len(left_) == 1 and rep_["fixed"] == [], (left_, rep_))
+left_, rep_ = AR.wait_end_pass([_wf(1)], {}, shown_, now, wenv(wait_end=lambda g, p, n: 1 / 0))
+check("wait-end pass: a fix that raises is recorded and never stops the pass", len(left_) == 1 and rep_["errors"] and "ZeroDivisionError" in rep_["errors"][0], rep_)
+import audit_checks as _AC9
+check("wait-end: event-missing is sent once (never repeated or escalated)", AR.ONCE == ("event-missing",) and "wait-end" in _AC9.CHECKS_FILING and "event-missing" in _AC9.CHECKS_FILING)
+
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: audit_run scenario, {len(ran)} checks")

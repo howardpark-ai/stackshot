@@ -141,6 +141,7 @@ import bullet_text as _bt  # noqa: E402  — how a line reads and how a text bec
 import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
 import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
 import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
+import wait_end as _we  # noqa: E402  — a next line that waits in words for something nothing tells the item has happened, and the fix the filing pass makes of it (wait_end.py)
 import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
 import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
 import ladder as _ladder  # noqa: E402  — the one ladder a quiet mover's item climbs, behind [ladder] enabled; the pure half (ladder.py)
@@ -7124,7 +7125,7 @@ def _filing_tick() -> "dict[str, Any] | None":
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     import audit_run as _ar
-    return _ar.filing_pass(env=_ar.Env(deliver=_filing_deliver, step_mark=_front_step_mark, step_move=_front_step_move, wake_park=_wake_park))
+    return _ar.filing_pass(env=_ar.Env(deliver=_filing_deliver, step_mark=_front_step_mark, step_move=_front_step_move, wake_park=_wake_park, wait_end=_wait_end_fix, wait_facts=_wait_end_facts))
 
 
 def _dates_expected_tick() -> "dict[str, Any] | None":
@@ -9310,6 +9311,156 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
         _sf.record(meta, _sf.WAKE_PARK, wake, _wake_park_line(wake, basis_ok), now)
         _save(gid, item, note="wake parked")
         return {"parked": True, "wake": wake, "why": ""}
+
+
+def _wait_end_facts() -> "_we.Facts":
+    """What the wait-end rule (wait_end.py) reads of the world: the fleet's machines and which are online, this repository and [released.repos], and, per item, the pull requests and links its anchors
+    name. Read from files, no network (the anchors file is read once per call of the factory)."""
+    boxes = _evw_boxes()
+    store = _anc.load()
+
+    def scoped(gid: str) -> list[str]:
+        try:
+            project = str((_load(gid).get("metadata") or {}).get("project") or "")
+        except Exception:  # noqa: BLE001
+            return []
+        return [str(e["url"]) for e in _scoped_anchors(project, gid, store)]
+
+    def prs(gid: str) -> list[str]:
+        out = []
+        for u in scoped(gid):
+            m = _we._PR_URL.match(u)
+            if m:
+                out.append(f"{_cfg.canon_repo(m.group(1))}#{int(m.group(2))}")
+        return out
+
+    def takes(url: str) -> bool:
+        try:
+            return bool(_anc.anchor_id(_anc.split_fragment(url)[0]))
+        except Exception:  # noqa: BLE001
+            return False
+    return _we.Facts(machines={k: f for k, (f, _r) in boxes.items()}, online=frozenset(f.lower() for f, r in boxes.values() if r and _lv.puller_online(r)),
+                     own_repo=_cfg.canon_repo(_own_repo()), released=frozenset(a.lower() for r in _cfg.released_repos() for a in _cfg.repo_aliases(r)),
+                     item_prs=prs, item_anchors=scoped, anchor_url=takes)
+
+
+def _wait_end_sent_back(meta: dict[str, Any], kinds: "tuple[str, ...]") -> None:
+    """The mover sends a wait the server set back (clear_after, clear_wait, step_proof "none"): each token of the given kinds that server_fixes marks for WAIT_END is unmarked and declined, so the
+    server leaves that line alone until its words change."""
+    for tok in _sf.mark_tokens(meta, _sf.WAIT_END):
+        if _we.kind_of_token(tok) in kinds:
+            _sf.unmark(meta, _sf.WAIT_END, tok)
+            _sf.decline(meta, _sf.WAIT_END, tok)
+
+
+def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, Any]":
+    """The ten-minute filing pass's fix of a wait a next line states in words (audit_run.wait_end_pass; server_fixes.WAIT_END; wait_end.py): the item is read again under the lock and the gap found again
+    from its words (a line that changed, a wait the mover sent back, a decision on the owner, a held item: nothing is written), then the plan is set through the gates a write passes: `after`
+    (_gate_after), an event wait (_evwait_gate), an anchor wait (the link is added to the anchors scoped to the item, _anchor_wait_gate) or a step proof (_step_proof_set), a backstop day (the wake or ask_by it
+    has, else now plus [waiting] cap_days), and a History line (server_fixes.record). A waiting item takes its mover as post_wake_mover. The server's own save: no writer. A gate's refusal leaves the item as
+    it was. Never closes an item and writes no ask. -> {"fixed": bool, "what": str, "why": str}."""
+    tok, op = str(plan.get("token") or ""), str(plan.get("op") or "")
+
+    def no(why: str) -> "dict[str, Any]":
+        return {"fixed": False, "what": "", "why": why}
+    if not tok or op not in ("after", "event", "anchor", "proof", "backstop", "anchor_pick"):
+        return no("no plan")
+    facts = _wait_end_facts()
+    if op == "event":
+        _evwait_preread("event", plan.get("phrase"))
+    with _ITEM_LOCK:
+        item = _load(gid)
+        meta = item.get("metadata")
+        if not isinstance(meta, dict) or item.get("status") != "open" or meta.get("hold") or _waits_decision(meta):
+            return no("not an open item the mover moves")
+        mod = _model_of(item)
+        alive = mod.state == _model.ALIVE
+        mover = mod.mover if alive else (mod.wait.post_wake_mover if mod.wait else "")
+        if not mover or _model.is_owner(mover):
+            return no(f"{OWNER} moves it")
+        if _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok):
+            return no("this line was fixed or sent back already")
+        gap = next((g for g in _we.item_gaps(gid, meta, mover, "alive" if alive else "waiting", facts, _open_item_named, _ho_same, now,
+                                             pending=lambda t: _sf.declined(meta, _sf.WAIT_END, t)) if g.token == tok and g.plan.get("op") == op), None)
+        if gap is None:
+            return no("the line or the wait changed")
+        was = json.loads(json.dumps(item))
+        # a backstop day is a date (watchers.day_epoch): a stored ask_by or wake that is no date is no backstop, and the cap day takes its place
+        dated = [str(meta.get(k)) for k in ("ask_by", "wake") if _watch.day_epoch(meta.get(k)) is not None]
+        has_back = bool(dated)
+        back = dated[0] if dated else _we.backstop_day(now, _wt.cap_days(), ZONE)
+        anchor_undo: "tuple[Any, Any] | None" = None
+        saved = False
+
+        def undo_anchor() -> None:
+            """A gate refused after the anchor was added to the list: the list goes back as it was, unless someone else changed it since."""
+            if anchor_undo is None:
+                return
+            try:
+                if _anc.load() == anchor_undo[1]:
+                    _anc.save(anchor_undo[0])
+            except Exception as e:  # noqa: BLE001
+                print(f"wait end: {gid} anchor not taken back: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+        def waiting_as(kind: str) -> None:
+            meta.pop("mover", None)
+            meta["post_wake_mover"] = mover
+            meta["wait_kind"] = kind
+            if not has_back:
+                meta["ask_by"] = back
+            _state_end(meta)
+
+        try:
+            if op == "after":
+                meta["after"] = _gate_after(plan.get("ids"), gid)
+                waiting_as("item")
+                what = f"after={', '.join(str(x) for x in plan.get('shown') or ())}"
+            elif op == "event":
+                meta["wait_event"] = str(plan.get("phrase") or "")
+                waiting_as("event")
+                what = f"wait_event={plan.get('phrase')}"
+            elif op == "anchor":
+                url = str(plan.get("url") or "")
+                project = str(meta.get("project") or "")
+                store = _anc.load()
+                if not any(_same_anchor(e["url"], url) for e in _ascope.anchor_scope(store, gid, project)):
+                    before = json.loads(json.dumps(store))
+                    _anc.add(store, project, [url], [gid], by=NAME)
+                    _anc.save(store)
+                    anchor_undo = (before, json.loads(json.dumps(_anc.load())))
+                meta["wait_anchor"] = url
+                meta["wait_event"] = _clip_line(plan.get("event"), _model.LINE_MAX)
+                waiting_as("anchor")
+                _anchor_wait_gate(was["metadata"], meta, gid)
+                what = f"anchor wait on {_clip_line(url, 50)}"
+            elif op == "proof":
+                if _we.line_hash(_steps.view(meta)[int(plan["pos"]) - 1]["text"]) != tok.rpartition("|")[2]:
+                    return no("the step changed")
+                _step_proof_set(meta, _steps.view(meta), [{"step": int(plan["pos"]), "proof": str(plan["proof"])}])
+                what = f"step {plan['pos']} proof {plan['proof']}"
+            elif op == "backstop":
+                meta["ask_by"] = back
+                if not _watch.can_end(meta):
+                    return no("a backstop day does not end this wait")
+                what = f"ask_by={back}"
+            else:
+                meta["wait_anchor"] = str(plan.get("url") or "")
+                _anchor_wait_gate(was["metadata"], meta, gid)
+                what = f"wait_anchor={_clip_line(plan.get('url'), 50)}"
+            _watch_on_write(gid, was, meta, {}, set(), "", False)       # the wait's stamp, and the event wait's gate (a wait for what has already happened is refused)
+            _sf.record(meta, _sf.WAIT_END, tok, _we.history({**plan, "pos": gap.pos}, gap.line, gap.pos, back, _session_label(mover) or mover), now)
+            _save(gid, item, note="wait set")
+            saved = True
+        except ToolError as e:
+            return no(str(e)[:200])
+        except Exception as e:  # noqa: BLE001  — one item's failure never stops the pass
+            print(f"wait end: {gid} not fixed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+            return no(f"{e.__class__.__name__}")
+        finally:
+            if not saved:
+                undo_anchor()       # a refusal leaves the item as it was, the anchors list too
+    _publish()
+    return {"fixed": True, "what": what, "why": ""}
 
 
 def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...]) -> str:
@@ -12378,6 +12529,7 @@ _UPDATE_DESC = (
     "A wake without hold whose next (this call's and the stored lines) says the work waits for that wake's day within a line (\"collect logs until <that day>, then review\") "
     "gets a note on the reply, never a refusal: the wake is stored, the item stays on agent, the note gives the park form above. "
     "When your write sets or keeps a wake with no hold over an hour ahead, you are the item's mover and every open step opens with a time at the wake's hour or day (\"at 03:00\", \"on <that day>\", \"after <that day>\", \"tomorrow at 9\"), the server parks it itself: on hold, wait_basis from your wait_reason, stored waiting on a time; the reply says `(parked: …)` and History has a line; the ten-minute pass does the same for a wake it finds that way (the mover gets one message naming the items); to work a step now, write it as the action and pass clear_hold=true: the server then leaves that wake alone. "
+    "A next line that says in words it waits for an open item, a pull request's merge or release, a machine coming back online or a link, while the item stores no wait for it, is set by the ten-minute pass when the line is the item's only open step and one thing is named (after, an event wait, an anchor wait, or a step proof for a pure wait step among other work; History has a line and the mover gets one message): clear_after=true, clear_wait=true or step_proof=\"none\" sends it back and the server leaves that line alone; a line it cannot set with certainty comes back to the mover as a question. "
     "Steps started by an outside event (\"when the next release lands\") get a note instead: park with hold=true, wake, wait_basis, wait_reason (needs=external for a named outside party's reply). "
     f"Neither applies to an action to take now, another party's step in flight, or an item not on agent (on hold, waiting on {OWNER}'s decision or an open after item, needs=external, outside, verifying, blocked). "
     "An item that waits on another item is not parked but names it: after=[\"board#N\"]. "
@@ -13823,6 +13975,7 @@ def _update_unlocked(
         raise ToolError("Refused: clear_after drops the after list; it does not go with a new one")
     if clear_after:
         meta.pop("after", None)
+        _wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
         meta["after"] = _gate_after(after, gid)
     nm = _anc.names() if owner else {}                 # the fleet's names, read once for the owner and its name
@@ -14152,6 +14305,8 @@ def _update_unlocked(
         if stored_mv and named_now and not _model.is_owner(stored_mv) and not any(x == stored_mv or _anc.canonical(x, nm_mv) == _anc.canonical(stored_mv, nm_mv) or _rmod.same_ref(x, stored_mv) for x in named_now):
             meta.pop("mover", None)
     _model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
+    if "wait_kind" in model_drop:
+        _wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
     _gate_ask_on_wait(gid, item, meta, was_needs, closing)           # a decision asked of the owner on an item that still waits: the clear_wait hint
     watch_note = _watch_on_write(gid, item_was, meta, model_set, model_drop, debtor, sender.strip())   # the wait's record, the arrival that was shown
     _gate_metadata(meta, creating=False)
@@ -16306,6 +16461,7 @@ def _step_proof_set(meta: dict[str, Any], steps: list[dict[str, Any]], spec: Any
             if kind == "none":
                 if cur.pop(k, None) is not None:
                     note += f"\n(step {i + 1} proof: cleared)"
+                    _wait_end_sent_back(meta, (_we.PR, _we.DELIVERY))      # a proof the server set from the line's words, sent back
                 continue
             if _steps.is_his(steps[i]["text"], unnamed_is_his=False):
                 raise ToolError(f"Refused: step {i + 1} is {OWNER}'s own step: it is ticked by his answer, never by an event, so it takes no proof")

@@ -103,6 +103,7 @@ from audit_checks import (CHECKS_CODE, FIX, _clip, _f, _hours, _item_view, _labe
 RUBRIC = HERE / "audit_rubric.txt"
 SENDER = "stackshot audit"
 UNMOVED_MIN_HOURS = 6.0       # the previous run counts as "before this one" when it started this long ago; with scheduled runs some hours apart the run before is always the previous one
+ONCE = ("event-missing",)    # a finding of these categories is sent once and never repeated or escalated (the builder's message about an event no type reports)
 REMIND_TRIES = 3             # a ten-minute pass sends an unanswered finding this many times (first send and reminders), then once to the builder as unmoved, then (a finding that went to a builder) once to the project's -main agent (split_sent)
 TIGHTEN_SHARE = 0.20          # a run that flags more than this share of the open items trips a tightening review
 FAIL_STOP = 3                 # model calls in a row that fail (no answer) end the calls of the run
@@ -167,6 +168,8 @@ class Env:
         self.orphans = kw.get("orphans")            # (apply) -> the server's answer to its orphan hand-over ({"checked", "applied", "found", "moved", "left", ...}); None here asks the server (client.orphan_handover)
         self.step_mark = kw.get("step_mark")        # (gid, step hash or None, now, mover) -> whether the item's stuck_since clock was written (None hash: dropped); the server's, None = the front-step rule does nothing (front_step.py)
         self.step_move = kw.get("step_move")        # (gid, step hash, opener, mover, hours, now) -> {"moved": bool, "why": str, "line": str}: the server rewords the step to the mover and writes the History line (front_step.py)
+        self.wait_end = kw.get("wait_end")          # (gid, plan, now) -> {"fixed": bool, "what": str, "why": str}: the server sets the wait a next line names, with a History line (wait_end.py, server_fixes.py); None = the pass only asks the mover
+        self.wait_facts = kw.get("wait_facts")      # () -> wait_end.Facts: the machines, the pull requests and the links the wait-end rule reads; None = the rule reads only the items themselves
         self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
 
     def role_map(self) -> dict[str, dict[str, Any]]:
@@ -1523,6 +1526,50 @@ def wake_park_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, An
     return [f for f in findings if str(f.get("id")) not in done or f.get("category") != "why-not-now"], rep
 
 
+def wait_end_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]], by_shown: dict[str, str], now: float, env: Env) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The server's own fix of a wait a next line states in words (server_fixes.WAIT_END, wait_end.py): each `wait-end` finding the filing rules raise in code that carries a fix (`gap.plan`) is made through `env.wait_end`
+    (after, an event wait, an anchor wait, a step proof or a backstop day, through the gates a write passes, with a History line) and no longer sent as a finding, at most wait_end.FIX_CAP a pass. The mover gets one message, `fyi`,
+    naming what was set and how to send it back, when it is a session a message can reach. An item whose mover is a front agent is not fixed (it would get no notice) and its finding stands, and so does a finding the server could not
+    fix (the write gates refused it, or the line changed under it). Nothing is closed and no ask is written. With `[audit] wait_end = "ask"` (or no `env.wait_end`) nothing is written: the findings go to the movers as questions.
+    -> (the findings without the ones fixed, {fixed, asked, routed, errors, messages})."""
+    import wait_end as _we  # noqa: PLC0415
+    rep: dict[str, Any] = {"fixed": [], "asked": 0, "routed": 0, "errors": [], "messages": []}
+    done: set[str] = set()
+    owed: dict[str, list[str]] = {}
+    proj: dict[str, str] = {}
+    live = env.wait_end is not None and _cfg.audit_wait_end() == "fix"
+    for f in findings:
+        gap = f.get("gap")
+        if f.get("category") != "wait-end" or f.get("source") != "code" or gap is None or not live:
+            continue
+        gid = by_shown.get(str(f.get("id") or ""))
+        if not gid or len(rep["fixed"]) >= _we.FIX_CAP:
+            continue
+        if str((env.role_map().get(str(f.get("mover") or "")) or {}).get("role") or "") in FRONT_ROLES:      # a front agent gets no notice of a fix: the finding stands
+            continue
+        try:
+            res = env.wait_end(gid, {**gap.plan, "token": gap.token, "line": gap.line, "pos": gap.pos, "kind": gap.kind}, now) or {}
+        except Exception as e:  # noqa: BLE001  - one item's failure never stops the pass
+            rep["errors"].append(f"{f['id']}: {type(e).__name__}: {_clip(e, 100)}")
+            continue
+        if not res.get("fixed"):
+            continue
+        done.add(str(f["id"]))
+        rep["fixed"].append(f["id"])
+        owed.setdefault(str(f.get("mover") or ""), []).append(f"{f['id']} ({res.get('what') or gap.plan.get('op')})")
+        proj.setdefault(str(f.get("mover") or ""), str(f.get("project") or ""))
+    for mover, shown in owed.items():
+        to, front = recipient(mover, proj.get(mover, ""), env, mover)
+        if to != mover or front:
+            continue
+        ok, said = _send(env, mover, _we.mover_message(shown), fyi=True)
+        rep["messages"].append({"to": mover, "delivered": ok, "said": _clip(said, 120)})
+    left = [f for f in findings if not (str(f.get("id")) in done and f.get("category") == "wait-end")]
+    rep["asked"] = sum(1 for f in left if f.get("category") == "wait-end")
+    rep["routed"] = sum(1 for f in left if f.get("category") == "event-missing")
+    return left, rep
+
+
 # ---------- the filing pass (every ten minutes, in the server) ----------
 FILING_FILE = "filing.json"
 
@@ -1608,7 +1655,7 @@ def split_sent(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]],
             lv = (levels or {}).get(k, 0)
             if lv:
                 f["lvl"] = lv       # the level a repeat has reached stays on its record
-            if hrs > 0 and now is not None and n <= REMIND_TRIES + (1 if lv else 0) and now - st[0] >= hrs * 3600:
+            if hrs > 0 and now is not None and f.get("category") not in ONCE and n <= REMIND_TRIES + (1 if lv else 0) and now - st[0] >= hrs * 3600:
                 f["tries"] = n + 1
                 f["prev"] = {"sent": st[0], "sending_from": st[1], "run_started": st[2], "tries": n}       # what carry_unreached puts back if this send is not reached
                 if n >= REMIND_TRIES:
@@ -1675,9 +1722,11 @@ def filing_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | 
     by_shown = {_nr.shown(g): g for g in items}
     front = None
     parked: dict[str, Any] = {}
+    waited: dict[str, Any] = {}
     if not dry:
         findings, front = front_step_pass(findings, items, by_shown, now, env)
         findings, parked = wake_park_pass(findings, items, by_shown, now, env)
+        findings, waited = wait_end_pass(findings, items, by_shown, now, env)
     recs = _audit.runs(limit=5)
     latest = next((r for r in recs if r.get("finished") is not None and not r.get("error")), None)
     prior = read_filing()
@@ -1695,9 +1744,10 @@ def filing_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | 
     rec = {"started": now, "finished": end, "items_read": n_open, "repeats": len(repeats), "flags": flags, "messages": sent,
            **({"front_steps": front} if front and (front["moved"] or front["started"] or front["cleared"] or front["errors"]) else {}),
            **({"wake_park": parked} if parked.get("parked") or parked.get("errors") else {}),
+           **({"wait_end": waited} if waited.get("fixed") or waited.get("errors") or waited.get("asked") or waited.get("routed") else {}),
            "findings": [{k: f[k] for k in ("id", "project", "owner", "category", "mover", "detail", "source", "sent", "sending_from", "run_started", "tries", "lvl") if k in f} for f in findings]}
     write_pass_record(_filing_path(), rec)
-    return {**res, "sent": sent, **({"front_steps": front} if front else {}), **({"wake_park": parked} if parked else {})}
+    return {**res, "sent": sent, **({"front_steps": front} if front else {}), **({"wake_park": parked} if parked else {}), **({"wait_end": waited} if waited else {})}
 
 
 # ---------- the dates pass (every ten minutes, in the server) ----------

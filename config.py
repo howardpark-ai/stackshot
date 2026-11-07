@@ -217,6 +217,8 @@ def audit_at() -> list[str]:
 
 AUDIT_MODES = ("script", "agent")
 AUDIT_ORPHAN_MODES = ("apply", "report", "off")
+AUDIT_WAIT_END_MODES = ("fix", "ask", "off")
+AUDIT_WAIT_END_SETTLE_MINUTES = 60.0      # an item last written less than this long ago is left to its mover before the wait-end rule fixes anything (wait_end.py)
 AUDIT_MAX_CALLS = 40
 AUDIT_MAX_MINUTES = 100
 AUDIT_MAX_MINUTES_CEIL = 110      # the unit's TimeoutStartSec is 2 h; a longer setting reads as this
@@ -284,6 +286,26 @@ def audit_remind_hours() -> float:
     except (TypeError, ValueError):
         return AUDIT_REMIND_HOURS
     return n if n >= 0 and n == n and n != float("inf") else AUDIT_REMIND_HOURS
+
+
+def audit_wait_end() -> str:
+    """[audit] wait_end: what the ten-minute filing pass does with an open item whose next line waits for something nothing tells the item has happened (wait_end.py): "fix" (the default) sets the wait the
+    line names where the server can (after, an event wait, an anchor wait, a step proof) and asks the mover about the rest, "ask" only asks the mover, "off" makes no such check. Anything else reads as the default."""
+    v = str(get("audit", "wait_end") or "").strip().lower()
+    return v if v in AUDIT_WAIT_END_MODES else "fix"
+
+
+def audit_wait_end_settle_minutes() -> float:
+    """[audit] wait_end_settle_minutes: minutes since an item's last write before the wait-end rule fixes anything on it (a mover still at work on its next is left alone). Default 60; 0 = no wait. A number;
+    anything else, a negative number or a boolean reads as the default."""
+    v = get("audit", "wait_end_settle_minutes")
+    if isinstance(v, bool) or v is None or v == "":
+        return AUDIT_WAIT_END_SETTLE_MINUTES
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return AUDIT_WAIT_END_SETTLE_MINUTES
+    return n if n >= 0 and n == n and n != float("inf") else AUDIT_WAIT_END_SETTLE_MINUTES
 
 
 def audit_orphan_handover() -> str:

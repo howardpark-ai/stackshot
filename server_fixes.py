@@ -10,10 +10,13 @@ The fixes (each a key of FIXES):
                 pass: server `_wake_park`, through audit_run.Env.wake_park)
   front_mover   mover, then or post_wake_mover set to a front agent by another session is set to the project's builder instead (server `_fix_front_mover`); with no builder the write is refused as before
   wait_reason   a hold with a wake and no reason, whose own next or description already says what the item waits for on the wake's day, takes that line as its wait_basis (server `_fix_loose_reason`)
+  wait_end      a next line that waits in words for another item, a pull request, a machine coming online or a link, with nothing telling the item when that happens, gets the wait the line names
+                (after, an event wait, an anchor wait, or a step proof), with a backstop day; the ten-minute filing pass only (server `_wait_end_fix`, wait_end.py, through audit_run.Env.wait_end)
   settled_pick  not a write: the readers that take words for a wait on the owner (board_report's mislabeled-state check, the server's hold note) skip a quoted span and a pick he already made
                 (`settled_out`), so a past answer quoted in a wait is no wait on him
 
-A mover who disagrees sends that fix back and the server leaves the field alone: for wake_park `clear_hold=true` on the item the server parked records the wake in `metadata.fix_declined`,
+A mover who disagrees sends that fix back and the server leaves the field alone: for wait_end `clear_after`, `clear_wait` or `step_proof=none` on what the server set records the line's token in
+`metadata.fix_declined` and the pass leaves that line alone; for wake_park `clear_hold=true` on the item the server parked records the wake in `metadata.fix_declined`,
 and neither the write nor the pass parks that wake again; for front_mover the same mover value sent again by the session whose write was fixed, less than a day after, goes through as sent
 (`metadata.server_fixed` holds the value it substituted, bound to that sender and the time, until it is sent or a day passes; another session sending the value is substituted as a new case);
 for wait_reason the mover's own wait_basis in the call is used as given, and for settled_pick nothing is sent back (it is a reading, not a write). A fix is bound to a token (the wake, the
@@ -32,8 +35,8 @@ DECLINED = "fix_declined"    # metadata.fix_declined = {fix: [token, ...]}: toke
 KEEP = 5
 BOUND_TTL = 24 * 3600.0     # a fix bound to a sender (front_mover) is the sender's to send back for this long
 
-WAKE_PARK, FRONT_MOVER, WAIT_REASON, SETTLED_PICK = "wake_park", "front_mover", "wait_reason", "settled_pick"
-FIXES = (WAKE_PARK, FRONT_MOVER, WAIT_REASON, SETTLED_PICK)
+WAKE_PARK, FRONT_MOVER, WAIT_REASON, SETTLED_PICK, WAIT_END = "wake_park", "front_mover", "wait_reason", "settled_pick", "wait_end"
+FIXES = (WAKE_PARK, FRONT_MOVER, WAIT_REASON, SETTLED_PICK, WAIT_END)
 
 
 def _tokens(meta: dict[str, Any] | None, key: str, fix: str) -> list[str]:
@@ -88,6 +91,10 @@ def unmark(meta: dict[str, Any], fix: str, token: str) -> None:
 def declined(meta: dict[str, Any] | None, fix: str, token: str) -> bool:
     """True when the mover sent this fix back for this token: the server leaves it alone until the token changes. Only wake_park is sent back this way."""
     return str(token) in _tokens(meta, DECLINED, fix)
+
+
+def declined_tokens(meta: dict[str, Any] | None, fix: str) -> list[str]:
+    return _tokens(meta, DECLINED, fix)
 
 
 def decline(meta: dict[str, Any], fix: str, token: str) -> None:
