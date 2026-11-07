@@ -9,13 +9,14 @@ question, or its options are the answers. These functions read an item's metadat
   recommend_missing(meta)    the recommended option's label when the ask's Recommend part does not name it, else ""
   yes_no_buttons(meta)       the page draws a Yes/No (or Approve/Decline) pair under the ask: no options stored, or options that are only such a pair
 
-Stdlib plus render.py (the ask's shape)."""
+Stdlib plus render.py (the ask's shape) and config.py ([keywords.ask_options])."""
 from __future__ import annotations
 
 import re
 import unicodedata
 from typing import Any
 
+import config as _cfg  # [keywords.ask_options]: the refusal words and particles of the instance's own language
 import render
 
 
@@ -104,13 +105,32 @@ _WORD_RX = re.compile(r"[^\W_]+")      # a word is letters and digits of any scr
 _LEAD_STOP = frozenset({"the", "a", "an", "to", "and", "of", "it", "this", "that", "do", "not"})      # words that open many labels and recommendations: no match on their own
 _ORDINALS = {"first": 0, "1st": 0, "second": 1, "2nd": 1, "third": 2, "3rd": 2, "fourth": 3, "4th": 3, "fifth": 4, "5th": 4, "sixth": 5, "6th": 5}
 # A word that turns the option after it away ("Wide, not Narrow", "Avoid Wait; Close", "instead of B"): the option it precedes is not the one named. Only when it sits right before it (no comma between).
-_NEG = r"(?:not|no|avoid|never|skip|except|don['’]?t|instead of|rather than)"
-_NEG_ANY_RX = re.compile(rf"\b{_NEG}\b", re.I)
+# [keywords.ask_options] `refusals` adds the instance's own words to these, and `particles` the suffixes that may follow a label's last word (a language that glues them on); empty adds nothing.
+_NEG_BASE = r"not|no|avoid|never|skip|except|don['’]?t|instead of|rather than"
 _PLACE = r"(?:(?-i:(?P<l>[A-F]))|(?P<d>[1-6]))"
-_POS_LEAD_RX = re.compile(rf"^\W*(?P<n>{_NEG}\s+)?(?:(?:option|choice|alternative|pick|plan)\s+)?(?:#\s*)?{_PLACE}(?=\s*(?:$|[,:;.)(—-]))", re.I)      # "B", "B, Beta", "option 2", "#2", "Not B" (a bare letter or digit that ends the phrase or opens a note: "A new column" is no place)
-_POS_OPTION_RX = re.compile(rf"\b(?P<n>{_NEG}\s+)?(?:option|choice|alternative)\s+#?{_PLACE}(?![\w-])", re.I)
-_POS_ORDINAL_RX = re.compile(rf"\b(?P<n>{_NEG}\s+(?:the\s+)?)?(?P<o>{'|'.join(_ORDINALS)})\b", re.I)
 _NO_PICK_RX = re.compile(r"^\W*(?:none|either|neither|no (?:preference|recommendation|pick)|your call|up to you|no view)\b", re.I)
+
+
+class _Rx:
+    """The matchers that depend on the configured refusal words and particles, compiled once per set of words (so a config reload is seen)."""
+
+    def __init__(self, refusals: str, particles: str) -> None:
+        self.neg = rf"(?:{_NEG_BASE}{'|' + refusals if refusals else ''})"
+        self.particle = rf"(?:{particles})?" if particles else ""
+        self.neg_any = re.compile(rf"\b{self.neg}\b", re.I)
+        self.pos_lead = re.compile(rf"^\W*(?P<n>{self.neg}\s+)?(?:(?:option|choice|alternative|pick|plan)\s+)?(?:#\s*)?{_PLACE}(?=\s*(?:$|[,:;.)(—-]))", re.I)      # "B", "B, Beta", "option 2", "#2", "Not B" (a bare letter or digit that ends the phrase or opens a note: "A new column" is no place)
+        self.pos_option = re.compile(rf"\b(?P<n>{self.neg}\s+)?(?:option|choice|alternative)\s+#?{_PLACE}(?![\w-])", re.I)
+        self.pos_ordinal = re.compile(rf"\b(?P<n>{self.neg}\s+(?:the\s+)?)?(?P<o>{'|'.join(_ORDINALS)})\b", re.I)
+
+
+_RX_CACHE: dict[tuple[str, str], _Rx] = {}
+
+
+def _rx() -> _Rx:
+    key = (_cfg.kw_alt("ask_options", "refusals"), _cfg.kw_alt("ask_options", "particles"))
+    if key not in _RX_CACHE:
+        _RX_CACHE[key] = _Rx(*key)
+    return _RX_CACHE[key]
 
 
 def _norm(text: Any) -> str:
@@ -122,21 +142,23 @@ def _words(text: str) -> list[str]:
     return _WORD_RX.findall(_norm(text).casefold())
 
 
-def _mention(label: str, text: str) -> tuple[bool, bool]:
-    """(named, turned away) for an option's whole label in the Recommend text: named when the label's words stand in it in order (case and punctuation aside); turned away when every such place has a "not" word right before it."""
+def _mention(label: str, text: str, neg: str | None = None) -> tuple[bool, bool]:
+    """(named, turned away) for an option's whole label in the Recommend text: named when the label's words stand in it in order (case and punctuation aside), a configured particle allowed right after the last word;
+    turned away when every such place has a "not" word right before it (`neg`: the pattern of those words, by default the built-in and configured ones)."""
     lw = _words(label)
     if not lw:
         return False, False
-    rx = re.compile(rf"(?<![^\W_])(?P<n>{_NEG}\s+(?:(?:the|pick|choose|take|use|go with|go)\s+)?)?{r'[\W_]+'.join(map(re.escape, lw))}(?![^\W_])", re.I)
+    x = _rx()
+    rx = re.compile(rf"(?<![^\W_])(?P<n>{neg or x.neg}\s+(?:(?:the|pick|choose|take|use|go with|go)\s+)?)?{r'[\W_]+'.join(map(re.escape, lw))}{x.particle}(?![^\W_])", re.I)
     hits = [bool(m.group("n")) for m in rx.finditer(_norm(text).casefold())]
     return bool(hits), bool(hits) and all(hits)
 
 
 def recommend_mismatch(meta: dict[str, Any]) -> str:
     """For the audit, where a note in a reply is not enough: "" when the ask's Recommend part agrees with the item's options or cannot be shown to disagree; else "none" (it names no option by any form below) or
-    the label of the other option it plainly names. Forms that name an option: its whole label (case and punctuation aside), a letter or a place that resolves to it ("B", "B, Beta", "option 2", "the second"; with two
+    the label of the other option it plainly names. Forms that name an option: its whole label (case and punctuation aside; a word of [keywords.ask_options] `particles` may follow its last word), a letter or a place that resolves to it ("B", "B, Beta", "option 2", "the second"; with two
     options, which the page draws without letters and with the recommended one first, any letter or place counts), and, when no label is named, a leading word shared with the recommended label alone (not with any other
-    option's label: "ship" for "Yes, ship", but not "Ship later" for "Ship now"). A label, letter or place right after not, no, avoid, never, skip, except, don't, instead of or rather than is turned away and names nothing:
+    option's label: "ship" for "Yes, ship", but not "Ship later" for "Ship now"). A label, letter or place right after not, no, avoid, never, skip, except, don't, instead of or rather than (or a word of [keywords.ask_options] `refusals`) is turned away and names nothing:
     "Wide, not Narrow" names Wide. A Recommend that names the recommended option and another with no "not" between ("Narrow over Wide") is left alone, and so is one that says there is no pick ("none, your call",
     "either"). No valid options, a yes/no pair or no ask in form: "" (not this check's)."""
     opts = valid_options(meta)
@@ -152,12 +174,13 @@ def recommend_mismatch(meta: dict[str, Any]) -> str:
         return ""
     if named:
         return opts[named[0]]["label"]
+    x = _rx()
     places: set[int] = set()      # letters, numbers and places that are named, not turned away
-    for rx in (_POS_LEAD_RX, _POS_OPTION_RX):
+    for rx in (x.pos_lead, x.pos_option):
         m = rx.search(text)
         if m and (m.group("n") is None or len(opts) == 2):
             places.add(ord(m.group("l")) - 65 if m.group("l") else int(m.group("d")) - 1)
-    places |= {_ORDINALS[m.group("o").lower()] for m in _POS_ORDINAL_RX.finditer(text) if m.group("n") is None or len(opts) == 2}
+    places |= {_ORDINALS[m.group("o").lower()] for m in x.pos_ordinal.finditer(text) if m.group("n") is None or len(opts) == 2}
     if places and (len(opts) == 2 or ri in places):
         return ""                      # a place on two options is ambiguous (the page draws no letters there); on more, the stored order
     other = [p for p in sorted(places) if p < len(opts)]
@@ -165,7 +188,7 @@ def recommend_mismatch(meta: dict[str, Any]) -> str:
         return opts[other[0]]["label"]
     if places:
         return ""                      # a place the options do not have: not shown to disagree
-    if _NEG_ANY_RX.search(text):
+    if x.neg_any.search(text):
         return "none"                  # a turned-away option or place and nothing else: it names no option
     rw = _words(text)
     lw = _words(opts[ri]["label"])
@@ -176,9 +199,19 @@ def recommend_mismatch(meta: dict[str, Any]) -> str:
 
 
 def recommend_missing(meta: dict[str, Any]) -> str:
-    """The recommended option's label when the ask's Recommend part does not name it (substring, case-insensitive and NFC-normalized as recommend_mismatch reads it), "" when it does, or when there is no option, no recommended one or no ask in form."""
+    """The recommended option's label when the ask's Recommend part does not name it (substring, case-insensitive and NFC-normalized as recommend_mismatch reads it), "" when it does, or when there is no option, no recommended one or no ask in form.
+    A label that stands in the text only right after a word of [keywords.ask_options] `refusals` is not named (with none set, nothing changes: the substring alone decides; a particle after the label is a substring match already)."""
     rec = next((o["label"] for o in meta.get("options") or [] if isinstance(o, dict) and o.get("recommended") is True), "")
     pa = render.parse_ask(str(meta.get("ask") or ""))
-    if not rec or not pa or _norm(rec).casefold() in _norm(pa["recommend"]).casefold():
+    if not rec or not pa or (_norm(rec).casefold() in _norm(pa["recommend"]).casefold() and not _refused_only(rec, pa["recommend"])):
         return ""
     return rec
+
+
+def _refused_only(label: str, text: str) -> bool:
+    """The label stands in the text, and every place it does is right after a configured refusal word (the instance's own, not the built-in English ones)."""
+    extra = _cfg.kw_alt("ask_options", "refusals")
+    if not extra:
+        return False
+    named, away = _mention(label, text, neg=rf"(?:{extra})")
+    return named and away
