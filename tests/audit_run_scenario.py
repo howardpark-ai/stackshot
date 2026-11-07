@@ -20,7 +20,7 @@ Two runs a day ([audit] at with two times): a second run on one date keeps the f
 run 9 hours before it once, and the tightening history counts days, not runs; the rulebook scan is none of the run's business.
 
     tests/run-suite audit_run        → exit 0 / 1"""
-import contextlib, datetime as dt, fcntl, io, json, os, pathlib, re, signal, subprocess, sys, threading, time
+import contextlib, datetime as dt, fcntl, io, json, os, pathlib, re, signal, subprocess, sys, threading, time, tomllib
 BID_00 = 9200
 BID_01 = 9201
 BID_02 = 9202
@@ -1664,6 +1664,42 @@ finally:
     _client.orphan_handover = real_oh
 rec_clear(); sent.clear()
 check("the README names the orphan hand-over, its route, its setting and the by-hand verb", "orphan hand-over" in pg_doc and "`POST /client/orphan-handover`" in pg_doc and "orphan_handover" in pg_doc and "audit.py orphans" in pg_doc)
+
+# ---- 32. the summary's destination is a setting: [audit] summary_to, the stand-in page by default
+STAND_IN = "projects/example"; REPORTS = "projects/example-reports"
+_au = _cfg.CFG["audit"]; _was = _au.pop("summary_to", None)
+try:
+    check("summary_to: the default is the stand-in page, and so is the example config's value", _cfg.audit_summary_to() == STAND_IN
+          and 'summary_to = "projects/example"' in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), _cfg.audit_summary_to())
+    rec_clear()
+    rec = go({}, now=now + 21)
+    check("…a run with the key unset sends its summary to the stand-in page (fyi), and the record says so", [(to, fy) for to, t, fy in sent if "Board audit" in t] == [(STAND_IN, True)]
+          and [m["to"] for m in rec["messages"] if m.get("kind") == "summary"] == [STAND_IN], (sent, rec["messages"]))
+    for bad in ("", "  ", "has space", "projects//x", "/projects/x", 7, ["projects/x"]):
+        _au["summary_to"] = bad
+        check(f"…a value that is no page key ({bad!r}) reads as the default, and notes() names it unless it is empty", _cfg.audit_summary_to() == STAND_IN
+              and bool(_cfg.report_notes(_cfg.CFG)) == (bad not in ("", "  ")), (_cfg.audit_summary_to(), _cfg.report_notes(_cfg.CFG)))
+    _au["summary_to"] = " " + REPORTS + " "
+    check("…a set value is read with its spaces cut", _cfg.audit_summary_to() == REPORTS and _cfg.report_notes(_cfg.CFG) == [], _cfg.audit_summary_to())
+    rec_clear()
+    rec = go({}, now=now + 22)
+    check("a configured summary_to receives the summary (fyi) and the stand-in page receives nothing", [(to, fy) for to, t, fy in sent if "Board audit" in t] == [(REPORTS, True)]
+          and not [1 for to, t, fy in sent if to == STAND_IN], sent)
+    check("…and the run record's summary message is addressed to it", [m["to"] for m in rec["messages"] if m.get("kind") == "summary"] == [REPORTS], rec["messages"])
+    # the release report's destination is read the same way (release.sh asks config.release_report_to(); tests/release_scenario.py holds the shell half)
+    _rl = _cfg.CFG.pop("release", None)
+    check("report_to: the default is the stand-in page, and so is the example config's value", _cfg.release_report_to() == STAND_IN
+          and tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))["release"]["report_to"] == STAND_IN, _cfg.release_report_to())
+    _cfg.CFG["release"] = {"report_to": REPORTS}
+    check("…a configured value is read, and notes() has nothing to say", _cfg.release_report_to() == REPORTS and _cfg.report_notes(_cfg.CFG) == [], _cfg.release_report_to())
+    _cfg.CFG["release"]["report_to"] = "two words"
+    check("…a malformed one reads as the default, and notes() (so doctor and a reload) names it", _cfg.release_report_to() == STAND_IN
+          and any("[release] report_to" in n for n in _cfg.report_notes(_cfg.CFG)) and any("[release] report_to" in n for n in _cfg.notes(_cfg.CFG)), _cfg.report_notes(_cfg.CFG))
+    _cfg.CFG.pop("release", None)
+    if _rl is not None: _cfg.CFG["release"] = _rl
+finally:
+    _au.pop("summary_to", None)
+    if _was is not None: _au["summary_to"] = _was
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

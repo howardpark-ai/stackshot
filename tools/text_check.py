@@ -39,7 +39,7 @@ SIZE AND COST. The diff is cut to 60,000 characters and the tools' text to 50,00
 rest while room is left, and the cut is said in the prompt. One call, max_tokens 600, no retry, 60 seconds: cents at Haiku's price.
 
 SIGN-IN AND ENDPOINT. Amazon Bedrock: boto3's `bedrock-runtime` client in the region named by TOOL_TEXT_AWS_REGION, `invoke_model` with the Anthropic messages body (`anthropic_version: bedrock-2023-05-31`), model id
-`global.anthropic.claude-haiku-5-5` (a global inference profile), signed in through boto3's default credential chain. In CI the job signs in through GitHub's OIDC token as the IAM role named by the repository variable
+`global.anthropic.claude-haiku-5-5` (a global inference profile), signed in through boto3's default credential chain. In CI the job signs in through GitHub's OIDC token as the IAM role named by the repository secret
 TOOL_TEXT_AWS_ROLE (tests.yml, the sign-in note on the `tool-text-model` job), and TOOL_TEXT_AWS_PROFILE names an AWS profile for a run by hand. The role's
 IAM grant is bedrock:InvokeModel (and InvokeModelWithResponseStream) on that inference profile and the foundation model behind it, and nothing else: the script calls
 no other Bedrock action. Haiku 5.5 thinks by default and would spend the 600 output tokens on it, so the body carries `thinking: {"type": "disabled"}`; a reply that still

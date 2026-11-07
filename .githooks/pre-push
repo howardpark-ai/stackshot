@@ -10,7 +10,19 @@
 # push by a URL that no configured remote has), every commit reachable from <local sha> is checked: more, not less.
 # A delete (local sha all zeros) is skipped. Merge subjects are skipped by the script, their branch names are not.
 # `git push --no-verify` skips the hook; CI checks again.
+# A clone that sets core.hooksPath replaces the machine-wide hook directory, so this hook also runs the machine-wide hook of the
+# same name through the chain-global helper beside it (the user's global core.hooksPath, else the XDG hook directory), with the
+# same arguments and the same lines on standard input. Both run, so every refusal shows; the push is refused if either refuses.
+# Nothing happens when there is no such hook.
 set -u
+# Standard input is read by two consumers, so it is kept in a file first.
+refs=$(mktemp "${TMPDIR:-/tmp}/pre-push.XXXXXX") || exit 1
+trap 'rm -f "$refs"' EXIT
+trap 'exit 1' HUP INT TERM
+cat >"$refs"
+status=0
+sh "$(dirname "$0")/chain-global" pre-push "$@" <"$refs" || status=$?
+[ "$status" -eq 0 ] || echo "pre-push: the machine-wide pre-push hook refused the push." >&2
 root=$(git rev-parse --show-toplevel) || exit 1
 command -v python3 >/dev/null 2>&1 || { echo "clean-text: python3 is not on PATH; the push was not checked" >&2; exit 1; }
 zero=0000000000000000000000000000000000000000
@@ -27,7 +39,6 @@ else
         done
     done
 fi
-status=0
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -n "${local_sha:-}" ] || continue
     case $local_sha in *[!0]*) ;; *) continue ;; esac            # all zeros: a delete
@@ -39,6 +50,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     else
         python3 "$root/tools/clean_text.py" --branch "$name" --new-commits "$local_sha" </dev/null >&2 || status=1
     fi
-done
+done <"$refs"
 [ "$status" -eq 0 ] || echo "pre-push: the push was refused; fix the text named above (git rebase -r or git commit --amend), or rename the branch." >&2
 exit "$status"
