@@ -159,6 +159,7 @@ class Env:
         self.orphans = kw.get("orphans")            # (apply) -> the server's answer to its orphan hand-over ({"checked", "applied", "found", "moved", "left", ...}); None here asks the server (client.orphan_handover)
         self.step_mark = kw.get("step_mark")        # (gid, step hash or None, now, mover) -> whether the item's stuck_since clock was written (None hash: dropped); the server's, None = the front-step rule does nothing (front_step.py)
         self.step_move = kw.get("step_move")        # (gid, step hash, opener, mover, hours, now) -> {"moved": bool, "why": str, "line": str}: the server rewords the step to the mover and writes the History line (front_step.py)
+        self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
 
     def role_map(self) -> dict[str, dict[str, Any]]:
         if self.roles is None:
@@ -1433,6 +1434,55 @@ def front_step_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, A
     return [f for f in findings if not (f.get("category") == "stuck-elsewhere" and by_shown.get(str(f.get("id") or "")) in moved)], rep
 
 
+def wake_park_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, Any]], by_shown: dict[str, str], now: float, env: Env) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The server's own fix of a wake that is the whole of a wait (server_fixes.WAKE_PARK): each why-not-now finding the filing rules raise in code (audit_checks.date_only_wait) is parked through
+    `env.wake_park`, the same park the write makes (hold with the wake and a wait_basis made from the step's words, a History line), and no longer sent as a finding. The mover gets one message,
+    `fyi`, naming what was parked and how to undo it (clear_hold), when it is a session a message can reach (a retired mover is not told: the History line is the record). An item whose mover is a front agent is not parked at all: it would get no notice, so the finding stands. A wake the
+    mover sent back (clear_hold on the park) is not parked again and is no finding either: the server leaves that field alone, with or without the writer. A finding for a wake the server could not
+    park stands. Nothing is closed and no ask is written. → (the findings without the ones parked or sent back, the report {parked, declined, errors, messages}). Without the environment's writer
+    nothing else is done."""
+    import server_fixes as _sf  # noqa: PLC0415
+    rep: dict[str, Any] = {"parked": [], "declined": [], "errors": [], "messages": []}
+    done: set[str] = set()
+    owed: dict[str, list[str]] = {}
+    proj: dict[str, str] = {}
+    for f in findings:
+        if f.get("category") != "why-not-now" or f.get("source") != "code":
+            continue
+        gid = by_shown.get(str(f.get("id") or ""))
+        if not gid:
+            continue
+        meta = (items.get(gid) or {}).get("metadata") or {}
+        if _sf.declined(meta, _sf.WAKE_PARK, str(meta.get("wake") or "")):
+            done.add(str(f["id"]))
+            rep["declined"].append(f["id"])
+            continue
+        if env.wake_park is None:
+            continue
+        if str((env.role_map().get(str(f.get("mover") or "")) or {}).get("role") or "") in FRONT_ROLES:      # a front agent gets no notice of a park: the finding stands, as it did before the fix
+            continue
+        try:
+            res = env.wake_park(gid, now) or {}
+        except Exception as e:  # noqa: BLE001  — one item's failure never stops the pass
+            rep["errors"].append(f"{f['id']}: {type(e).__name__}: {_clip(e, 100)}")
+            continue
+        if not res.get("parked"):
+            continue
+        done.add(str(f["id"]))
+        rep["parked"].append(f["id"])
+        owed.setdefault(str(f.get("mover") or ""), []).append(f"{f['id']} (wake {res.get('wake')})")
+        proj.setdefault(str(f.get("mover") or ""), str(f.get("project") or ""))
+    for mover, shown in owed.items():
+        to, front = recipient(mover, proj.get(mover, ""), env, mover)
+        if to != mover or front:
+            continue
+        ok, said = _send(env, mover, (f"The server parked {len(shown)} item{'s' if len(shown) > 1 else ''} of yours whose only open step waits for its wake, as the ten-minute check used to ask you to: " + "; ".join(shown)
+                                       + ". Each is on hold until its wake, with a wait_basis made from the step's own words, and History has a line. If a step can run now, write it as the action and pass clear_hold=true: "
+                                         "the server then leaves that wake alone."), fyi=True)
+        rep["messages"].append({"to": mover, "delivered": ok, "said": _clip(said, 120)})
+    return [f for f in findings if str(f.get("id")) not in done or f.get("category") != "why-not-now"], rep
+
+
 # ---------- the filing pass (every ten minutes, in the server) ----------
 FILING_FILE = "filing.json"
 
@@ -1584,8 +1634,10 @@ def filing_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | 
     n_open = sum(1 for it in items.values() if it.get("status") == "open")
     by_shown = {_nr.shown(g): g for g in items}
     front = None
+    parked: dict[str, Any] = {}
     if not dry:
         findings, front = front_step_pass(findings, items, by_shown, now, env)
+        findings, parked = wake_park_pass(findings, items, by_shown, now, env)
     recs = _audit.runs(limit=5)
     latest = next((r for r in recs if r.get("finished") is not None and not r.get("error")), None)
     prior = read_filing()
@@ -1602,9 +1654,10 @@ def filing_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | 
     carry_unreached(findings)
     rec = {"started": now, "finished": end, "items_read": n_open, "repeats": len(repeats), "flags": flags, "messages": sent,
            **({"front_steps": front} if front and (front["moved"] or front["started"] or front["cleared"] or front["errors"]) else {}),
+           **({"wake_park": parked} if parked.get("parked") or parked.get("errors") else {}),
            "findings": [{k: f[k] for k in ("id", "project", "owner", "category", "mover", "detail", "source", "sent", "sending_from", "run_started", "tries", "lvl") if k in f} for f in findings]}
     write_pass_record(_filing_path(), rec)
-    return {**res, "sent": sent, **({"front_steps": front} if front else {})}
+    return {**res, "sent": sent, **({"front_steps": front} if front else {}), **({"wake_park": parked} if parked else {})}
 
 
 # ---------- the dates pass (every ten minutes, in the server) ----------

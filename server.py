@@ -139,6 +139,7 @@ import next_rules as _nr  # noqa: E402  — the write checks of Next: a line nam
 import bullet_text as _bt  # noqa: E402  — how a line reads and how a text becomes `- ` bullets, for the gates, the cold call's close and the question route (bullet_text.py)
 import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
 import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
+import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
 import ladder as _ladder  # noqa: E402  — the one ladder a quiet mover's item climbs, behind [ladder] enabled; the pure half (ladder.py)
 import mover_state as _mover_state  # noqa: E402  — the item's effective mover (the pane half moved to liveness.py), shared by the stall pass and the audit
 import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
@@ -1896,45 +1897,71 @@ def _role_of(name: str, nm: dict[str, str] | None = None) -> tuple[dict[str, Any
     return roles, _role_name(roles, name, label)
 
 
-def _gate_front_mover(field: str, value: str, sender: str, project: str, current: str = "") -> None:
-    """A create or update that sets mover, then (which becomes the mover after the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by
-    another session, is refused: the server sends a front agent no hand-off notice, so the item would sit handed and not taken until the owner noticed. Allowed: a front agent
-    naming itself, the owner, a background agent, a session no page lists, a value that clears the field, and the value the item already stores in `current` (nothing changes
-    hands). A failing roles read lets the write through with one stderr line, as _front_sender does. The tools call it; the server's own moves (stall pass, cold call, backfill)
-    do not come through here."""
+def _front_mover_case(field: str, value: str, sender: str, project: str, current: str = "") -> "tuple[str, str, list[str], str] | None":
+    """The case the front-mover rule judges: (the front agent's key, its project, the project's builder list, the project's hub) when a create or update sets mover, then (which becomes the mover after
+    the owner's answer) or post_wake_mover (the mover once a wait ends) to a front agent, sent by another session; None otherwise. A front agent gets no hand-off notice, so the item would sit handed
+    and not taken until the owner noticed. Not a case: a front agent naming itself, the owner, a background agent, a session no page lists, a value that clears the field, and the value the item
+    already stores in `current` (nothing changes hands). A failing roles read is no case, with one stderr line, as _front_sender does."""
     v = _model.clean(value)
     if not v or v.lower() in _ASK_NONE or _model.is_owner(v):
-        return
+        return None
     try:
         nm = _anc.names()
         same = lambda a, b: bool(a) and bool(b) and (a == b or _session_id(a) == _session_id(b) or _anc.canonical(a, nm) == _anc.canonical(b, nm))
         cur = str(current or "").strip()
         if same(cur, v):
-            return
+            return None
         roles, key = _role_of(v, nm)
         if not key or roles[key].get("role") != "front":      # a one-session project's single name-line session is not front here either, as in the needs gate and _front_sender
-            return
+            return None
         s = str(sender or "").strip()
         if s:
             _r, skey = _role_of(s, nm)
             if (skey and skey == key) or same(s, v):
-                return
+                return None
         proj = roles[key]["project"]
         hub, _stew, back, _front, _keeper = _hub_sessions(project) if project else ("", "", [], [], "")
         builder = (_handoff_builder(project) if project else []) or back[:1]
     except Exception as e:  # noqa: BLE001  — the gate is an extra: a failure in it lets the write through
         print(f"front-mover gate: roles read for {field}={v} failed ({e.__class__.__name__}: {e}); the write passes", file=sys.stderr, flush=True)
-        return
+        return None
+    return key, proj, list(builder), hub
+
+
+def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]") -> ToolError:
+    key, proj, builder, hub = case
     where = (f"Hand build work to the project's builder, {builder[0]} ({field}={builder[0]}); " if builder
              else f"{hub or 'The project'} has no builder and no background agent to hand it to, so keep the item with its current mover; ")
-    raise ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
-                    f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). {where}"
-                    f"for a check or an answer only {key} can give, message it instead (message(to={key}, ...)).")
+    return ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
+                     f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). {where}"
+                     f"for a check or an answer only {key} can give, message it instead (message(to={key}, ...)).")
+
+
+def _fix_front_mover(field: str, value: str, sender: str, project: str, current: str, meta: "dict[str, Any] | None") -> "tuple[str, str, list[tuple[str, str, str]]]":
+    """The front-mover rule as a fix (server_fixes.FRONT_MOVER): a mover, then or post_wake_mover that another session sets to a front agent becomes the project's builder, since the front agent gets
+    no hand-off notice. → (the value to use, the note for the reply, the fixes to record on the item: (fix, token, History line), a line of "" = take the mark off). The value is the one sent when it is
+    no case (_front_mover_case), or when the server already substituted this very value on this item for this very sender less than a day ago and the sender sends it again: the mover's no, kept as sent with a note, and the server leaves that
+    field alone (another session, or the same one after a day, is substituted as a new case). With no builder to substitute the write is refused as before."""
+    case = _front_mover_case(field, value, sender, project, current)
+    if case is None:
+        return value, "", []
+    key, proj, builder, _hub = case
+    token = f"{field}={key}"
+    by, now = _session_id(sender) or sender, time.time()
+    hit = _sf.marked_by(meta, _sf.FRONT_MOVER, token, by, now)       # the substitution was this session's, within a day: its second send is the mover's no
+    if hit:
+        return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
+                       f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
+    if not builder:
+        raise _front_mover_refusal(field, case)
+    return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
+                        f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent; for a check or an answer only {key} can give, message it)"), \
+        [(_sf.FRONT_MOVER, _sf.bind(token, by, now), f"{field} {key} → {builder[0]}: {key} is a user-facing agent and gets no hand-off notice from another session; sending {field}={key} again keeps it as sent")]
 
 
 def _gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]], after: list[dict[str, Any]], sender: str) -> None:
     """A session's create or update may not put a NEW or reworded open step that opens with a front agent on an item another session moves: a front agent gets no work notice and its own wakes are
-    refused, so nothing could wake it for the step and it would sit until the owner noticed (the mover check of _gate_front_mover, applied to a step line). `before` and `after` = the checklist as it stood and
+    refused, so nothing could wake it for the step and it would sit until the owner noticed (the mover check of _fix_front_mover, applied to a step line). `before` and `after` = the checklist as it stood and
     as this write leaves it (`item` = the item as the write leaves it); only an open step whose text is not among the open steps before is judged, so a step already held by a front agent stays whatever else the
     write changes. Passes: the item's own mover (its own item), a background agent or the owner as opener, an item with no mover or a retired one (front_step.held reads the rest). A failing read lets the write through."""
     if item.get("status") != "open":
@@ -2562,7 +2589,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
 _REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")     # the structured fields a re-park may not change (status and hold beside them)
-_REPARK_QUIET = ("wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
+_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
 _DECISION_AGAIN_S = 3600.0        # a decision is not asked again within this long after the owner's last answer on the item unless the ask line changed
 
 
@@ -6706,7 +6733,7 @@ def _filing_tick() -> "dict[str, Any] | None":
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     import audit_run as _ar
-    return _ar.filing_pass(env=_ar.Env(deliver=_filing_deliver, step_mark=_front_step_mark, step_move=_front_step_move))
+    return _ar.filing_pass(env=_ar.Env(deliver=_filing_deliver, step_mark=_front_step_mark, step_move=_front_step_move, wake_park=_wake_park))
 
 
 def _dates_expected_tick() -> "dict[str, Any] | None":
@@ -8739,10 +8766,86 @@ def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any,
             except ToolError:
                 continue
             return text, (f"\n(parked: wake {w['wake']} alone is a reminder, and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
-                          f"so the item is on hold until then, stored as waiting on a time (reason: {_clip_line(text, 120)}). If a step can run now, write it as the action and pass clear_hold=true)")
+                          f"so the item is on hold until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
     except Exception as e:  # noqa: BLE001  — the correction is an extra: a failure leaves the write as it was, with the note
         print(f"date-only wait: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return "", ""
+
+
+def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: Any, description: str, wake_in: str) -> "tuple[str, tuple[str, str, str]]":
+    """The write's own fix of a hold that has a wake and no reason (server_fixes.WAIT_REASON): the item's own next, as this write leaves it, or its description says the work waits for the wake's own
+    day ("collect the logs until 2099-03-02, then review"), so that line is the wait_basis (the reply and History say so) in place of the refusal the model guard would give for a time wait with no
+    reason. Nothing for an item that waits on the owner or that he moves (the hold is refused as before), an item that already carries a basis for this wake, a wake the reader cannot parse, or a line the basis gate
+    would not pass. → (the wait_basis, (the reply note, the wake, the History line)), ("", ("", "", "")) when there is none."""
+    none = ("", ("", "", ""))
+    try:
+        if _waits_decision(meta) or _wt.basis_of(meta) or str(_wt.words_of(meta).get("quote") or "").strip() or not (wake_in or meta.get("wake")):
+            return none
+        mod = _model_of(item)
+        if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover):      # an item the owner moves (or in any owner state) is his: the hold stays refused as before
+            return none
+        wk = _parse_wake(wake_in) if wake_in else str(meta.get("wake") or "")
+        where, line = "", ""
+        for where_, text in (("next", next_after), ("description", description)):
+            line = _mg.window_line(text, wk)
+            if line:
+                where = where_
+                break
+        if not line:
+            return none
+        day = _wake_at(wk).date().isoformat()
+        words = " ".join(_steps.strip_opener(line).split())
+        basis = f"{words[:240]} (wake {day})" if day not in words else words[:260]
+        _gate_wait_basis({**item, "metadata": {**meta, "wake": wk}}, basis, wk, held=True)
+        note = (f"\n(fixed: this hold had a wake and no wait reason, and your {where} says what it waits for (\"{_clip_line(words, 90)}\"), so that line is the wait_basis. "
+                "Send wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\" to use other words: the server then leaves the field alone)")
+        return basis, (note, wk, f"wait reason: the hold had a wake and no reason; the {where} line \"{_clip_line(words, 80)}\" is its wait_basis. A wait_basis sent in a later write replaces it")
+    except Exception as e:  # noqa: BLE001  — the fix is an extra: a failure leaves the write as it was, with the refusal
+        if not isinstance(e, ToolError):
+            print(f"loose wait reason: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return none
+
+
+def _wake_park_line(wake: str, basis: str) -> str:
+    """The History line of a park the server made (server_fixes.WAKE_PARK): what it did, the reason it kept, and how the mover sends it back."""
+    return (f"parked: wake {wake} alone was a reminder and the only open next line waits for it; on hold until then (reason: {_clip_line(basis, 70)}). "
+            "clear_hold=true sends it back and the server leaves that wake alone")
+
+
+def _wake_park(gid: str, now: float) -> "dict[str, Any]":
+    """The ten-minute filing pass's park of a wake that is the whole of a wait (audit_run.wake_park_pass; server_fixes.WAKE_PARK): the same park a write makes (hold, the basis `_date_only_wait`
+    builds from the step's own words, the wake as stored), made as the server's own save: no writer, so the item's author, its activity clock and a pending decision answer are untouched
+    (the model is `_front_step_move`). Read again under the lock. Nothing for an item that is not open or that the owner moves, a wake the mover sent back, or one `_date_only_wait` does not park
+    (the finding stands then). Never closes an item and writes no ask. → {"parked": bool, "wake": str, "why": str}."""
+    with _ITEM_LOCK:
+        item = _load(gid)
+        meta = item.get("metadata")
+        if not isinstance(meta, dict) or item.get("status") != "open" or not meta.get("wake") or meta.get("hold"):
+            return {"parked": False, "why": "not an open item with a wake and no hold"}
+        mod = _model_of(item)
+        if not mod.mover or _model.is_owner(mod.mover) or _waits_decision(meta):
+            return {"parked": False, "why": f"{OWNER} moves it"}
+        wake = str(meta["wake"])
+        if _sf.declined(meta, _sf.WAKE_PARK, wake):
+            return {"parked": False, "why": "the mover sent this wake back"}
+        basis, _note = _date_only_wait(item, meta, meta.get("next"), "", (mod.mover,), "")
+        if not basis:
+            return {"parked": False, "why": "not a wake that is the whole of a wait"}
+        try:
+            basis_ok = _gate_wait_basis(item, basis, wake, held=True)
+            _gate_cap(item, [], "wake", wake, _wake_at(wake).timestamp(), basis_ok)
+        except ToolError as e:
+            return {"parked": False, "why": str(e)[:200]}
+        meta["hold"] = True
+        _hold_set(meta, NAME, now)
+        _cap_ok_drop(meta, "wake")
+        if meta.get("state") in _states.STATES and meta["state"] != "parked":      # a hold makes the item read parked: the stored state of another kind goes, as in the write's own park
+            _state_end(meta)
+        _state_apply(meta, "open", "", {}, frozenset({"wake", "hold", "wait_basis"}))
+        _basis_put(meta, basis_ok, wake, NAME)
+        _sf.record(meta, _sf.WAKE_PARK, wake, _wake_park_line(wake, basis_ok), now)
+        _save(gid, item, note="wake parked")
+        return {"parked": True, "wake": wake, "why": ""}
 
 
 def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...]) -> str:
@@ -8778,8 +8881,9 @@ _WAITS_ON_OWNER_RX = re.compile(
 
 
 def _waits_on_owner(text: str) -> bool:
-    """True when text says the item waits on the owner (waiting on the owner, his call, until the owner decides); a passing mention is not."""
-    return bool(_WAITS_ON_OWNER_RX.search(text or ""))
+    """True when text says the item waits on the owner (waiting on the owner, his call, until the owner decides); a passing mention is not, nor is a quoted span or a pick he already made
+    (server_fixes.settled_out: 'his answer was "wait until Oliver decides"', 'Oliver picked A')."""
+    return bool(_WAITS_ON_OWNER_RX.search(_sf.settled_out(text, _sf.owner_names())))
 
 
 def _scoped_anchor_exists(gid: str, meta: dict[str, Any]) -> bool:
@@ -11169,8 +11273,8 @@ _AGENT_DUE_FORM = (
 _MODEL_FORM = (
     " The item model (design: docs/design): an item is dead (closed), alive (someone in the perimeter is working: one mover) or waiting (nothing happens until something outside arrives). "
     "mover is how an item says whose move it is (there is no owner parameter any more: the sender of the create is recorded as its creator). "
-    f"Optional fields, stored as given (each parameter says how it is set): goal=<the end-state in one sentence, what {OWNER} would ask \"is it done?\" about>; mover=<who moves an alive item now: {OWNER}, a session name or the project's background agent; a front agent (a session {OWNER} talks to) only by itself: a create or update from another session that sets mover to one is refused (hand build work to the project's builder)>; "
-    f"then=<who takes it after {OWNER}'s answer or step; then=<front agent> from another session is refused the same way>; wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches; or scope an anchor to the item>; "
+    f"Optional fields, stored as given (each parameter says how it is set): goal=<the end-state in one sentence, what {OWNER} would ask \"is it done?\" about>; mover=<who moves an alive item now: {OWNER}, a session name or the project's background agent; a front agent (a session {OWNER} talks to) only by itself: a create or update from another session that sets mover to one gets the project's builder instead, and the reply and History say so (send the same mover again to keep it; with no builder it is refused)>; "
+    f"then=<who takes it after {OWNER}'s answer or step; then=<front agent> from another session gets the builder the same way>; wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches; or scope an anchor to the item>; "
     f"wait_event=<what must happen there (an anchor wait), or the party or event {OWNER} relays (a relay wait), or the fleet event an event wait watches: {_ew.FORMS}>, which the server asks for when a waiting item waits on an anchor event, a relay or an event without it; "
     f"ask_by=YYYY-MM-DD (a relay wait's end day; an event, item or anchor wait's backstop day, as a wake is); post_wake_mover=<who moves it when the wait ends; a front agent only by itself, as for mover>. "
     "An event wait is how an item whose mover waits in the background for something the fleet does (a release running, a PR's merge, a recycle or a fleet op finishing, a scheduled job's next run) says so: "
@@ -11211,6 +11315,7 @@ _WAIT_FORM = (
     "Parameter wait_basis: the reason a time wait's wake carries, one line with its date (wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a wait for a date outside the board, such as a vendor's reply date or a release freeze, reads \"<what happens> YYYY-MM-DD\"). "
     "Three wakes take it, each basis bound to the wake it was given for: a hold's wake (it parks the item, which reads as waiting, not on agent, until the wake), a stored verifying item's wake (its end date is its wait, so no hold flag is needed), and a wake past the cap (it lifts the cap for that wake alone; clear_wait_basis=true drops it). "
     "A wake alone on an item you keep moving (a doing item) within the cap is a check-back: a basis for it is refused as not needed. "
+    "A hold with a wake and no basis, where the item's own next (as this write leaves it) or its description says the work waits for that wake's day (\"collect the logs until 2099-03-02, then review\"), takes that line as its wait_basis: the reply says so and History has a line; send wait_basis=\"<your words, with the date>\" and the server leaves the field alone. "
     "A basis needs a wake date (a hold with no date is refused), names the date it waits for as YYYY-MM-DD on or after the wake day, shows on the item and in get, "
     "and the board's head lists these waits once a week. "
     "A wait that can no longer end (a check whose pull request was closed unmerged) fails at once and tells the item's mover; an after item that closes releases the item. "
@@ -11299,9 +11404,9 @@ _WAIT_KIND_PARAM = Annotated[str, Field(description="What a waiting item waits o
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what must happen at the anchor. A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, recycle and every fleet_op form; job_run turns only on the backstop day). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
-_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> is refused; hand build work to the project's builder, and message the front agent for a check or an answer only it can give.")]
-_THEN_PARAM = Annotated[str, Field(description=f"Who takes the item after {OWNER}'s answer or step (it becomes the mover then): a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets then=<front agent> is refused, as for mover.")]
-_POST_WAKE_PARAM = Annotated[str, Field(description=f"Who moves the item when its wait ends (it becomes the mover then): {OWNER}, a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> is refused, as for mover.")]
+_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused); message the front agent for a check or an answer only it can give.")]
+_THEN_PARAM = Annotated[str, Field(description=f"Who takes the item after {OWNER}'s answer or step (it becomes the mover then): a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets then=<front agent> gets the project's builder instead, as for mover.")]
+_POST_WAKE_PARAM = Annotated[str, Field(description=f"Who moves the item when its wait ends (it becomes the mover then): {OWNER}, a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> gets the project's builder instead, as for mover.")]
 _CONTACT_PARAM = Annotated[str, Field(description=f"The item's contact: the front agent (a user-facing agent) that {OWNER} talks to about it, by its name. Leave it out and the contact is the creator when that is a front agent, else the project's -main agent. "
                                       "A background agent that creates an item may name one of the project's front agents here; any other name is refused, and the refusal lists the project's front agents with their mandates. "
                                       "On an update it changes the contact with the same check; an update that re-files the item under another project (project=) makes that project's -main agent the contact, unless contact is passed too, the contact is a front agent of that project as well, or the contact is the item's creator and a front agent of any project (it stays).")]
@@ -11309,7 +11414,7 @@ _CONTACT_FORM = (f" Parameter contact (a filing field: it moves no state clock, 
                  "A front agent that creates an item is its contact, wherever the item is filed. When the contact retires, or the item is re-filed under another project, it falls to the (new) project's -main agent, unless it is also a front agent there or is the item's creator and a front agent of any project (it stays). ")
 
 
-@mcp.tool(name="create", description=_lead(f"Create a board item: something {OWNER} would ask \"is X done?\" about (a deliverable a session owns, a decision or input he must give, a blocker on someone outside, a handoff between sessions), never a working step. A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. subject: {_PFX}, then the outcome wanted as a task, never a topic or a symptom (right: subject=\"{_PFX0}Make the export finish in under a minute\"; the length limit is below). project: the item's gbrain page (required, must exist: create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID), required: the server records the sender as the item's creator (a fact of History, \"created by\"; a background agent may create items too).{_OFF_MAP_NOTE}. Name who moves the item with mover= (and then=); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent is refused (hand build work to the project's builder; message the front agent for a check or answer only it can give); with no mover= an alive item is moved by the project's builder, else its -main agent, never by its creator; an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`); an item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`); owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. " + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM + "Right call: create(project=\"projects/widgets\", subject=\"" + _PFX0 + "Make the export finish in under a minute\", sender=\"my-x\", mover=\"my-x\", description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\", next=\"my-x: profile the nightly run\"). "
+@mcp.tool(name="create", description=_lead(f"Create a board item: something {OWNER} would ask \"is X done?\" about (a deliverable a session owns, a decision or input he must give, a blocker on someone outside, a handoff between sessions), never a working step. A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. subject: {_PFX}, then the outcome wanted as a task, never a topic or a symptom (right: subject=\"{_PFX0}Make the export finish in under a minute\"; the length limit is below). project: the item's gbrain page (required, must exist: create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID), required: the server records the sender as the item's creator (a fact of History, \"created by\"; a background agent may create items too).{_OFF_MAP_NOTE}. Name who moves the item with mover= (and then=); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused; message the front agent for a check or answer only it can give); with no mover= an alive item is moved by the project's builder, else its -main agent, never by its creator; an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`); an item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`); owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. " + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM + "Right call: create(project=\"projects/widgets\", subject=\"" + _PFX0 + "Make the export finish in under a minute\", sender=\"my-x\", mover=\"my-x\", description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\", next=\"my-x: profile the nightly run\"). "
                                                           "The reply may end with a line listing up to 3 similar open or recently completed items: the create always goes through, so check them for a duplicate before working the new item. request_id: any random string of yours; a retry with the same one returns the item already created."))
 def stackshot_create(
     subject: str,
@@ -11351,12 +11456,16 @@ def stackshot_create(
     if not owner:
         raise ToolError("Refused: pass sender=<your own session name or id>: the server records the sender as the item's creator. "
                         f"Say who moves the item with mover=<a session, {OWNER} or the project's background agent>. The item model: {_MODEL_PAGE}.")
-    for f_, v_ in (("mover", mover), ("then", then), ("post_wake_mover", post_wake_mover)):
-        _gate_front_mover(f_, v_, owner, project)       # a front agent gets no hand-off notice: another session may not make it the mover
+    fixes: list[tuple[str, str, str]] = []; fix_note = ""
+    vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
+    for f_, v_ in list(vals.items()):
+        vals[f_], n_, fx_ = _fix_front_mover(f_, v_, owner, project, "", None)       # a front agent gets no hand-off notice: another session's value becomes the project's builder, and the reply says so
+        fix_note += n_; fixes += fx_
+    mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     _gate_self_wait("", owner, next_text=next, mover=mover, needs=needs, after=after, wait_kind=wait_kind, wait_reason=wait_reason, creating={"subject": subject, "project": project})   # before the item lock: it may ask a model
     _evwait_preread(wait_kind, wait_event)      # an event wait's facts (GitHub, git) are read before the item lock, not under it
     with _session_write():
-        return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact) + note + _off_map_note(owner, project)
+        return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes) + fix_note + note + _off_map_note(owner, project)
 
 
 def _create(
@@ -11389,9 +11498,19 @@ def _create(
     draft: str = "",
     step_proof: list[dict[str, Any]] | str | None = None,
     contact: str = "",
+    fixes: "list[tuple[str, str, str]] | None" = None,
 ) -> str:
     """The create tool without its identity check (_who): the reply text of _create_item."""
-    return _create_item(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact)[1]
+    return _create_item(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes)[1]
+
+
+def _record_fixes(meta: dict[str, Any], fixes: "list[tuple[str, str, str]] | None") -> None:
+    """Put what a tool wrapper fixed onto the item's metadata (server_fixes.record): (fix, token, History line); a line of "" takes the mark off instead (the mover sent the value again)."""
+    for fix, token, line in fixes or ():
+        if line:
+            _sf.record(meta, fix, token, line, time.time())
+        else:
+            _sf.unmark(meta, fix, token)
 
 
 def _create_item(
@@ -11426,6 +11545,7 @@ def _create_item(
     step_proof: list[dict[str, Any]] | str | None = None,
     contact: str = "",
     extra: dict[str, Any] | None = None,
+    fixes: "list[tuple[str, str, str]] | None" = None,
 ) -> tuple[str, str]:
     """Every gate and every write of the create tool, without its identity check (_who: the tool checks it, the client API's
     question write is proved by its machine token instead) -> (the new item's id, the tool's reply). The one place an item is
@@ -11511,6 +11631,7 @@ def _create_item(
         _gate_handoff("", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
     if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
         _refuse_if_owing(owner)
+    _record_fixes(meta, fixes)             # what the server fixed in this create (server_fixes.py): the mark and a History line
     item = {
         "id": "",
         "subject": subject,
@@ -11761,7 +11882,7 @@ _UPDATE_DESC = (
     "A session does not park to defer work it could do now: an item not on hold is one its mover can move now, so work it in your next free turn. "
     "A wake without hold whose next (this call's and the stored lines) says the work waits for that wake's day within a line (\"collect logs until <that day>, then review\") "
     "gets a note on the reply, never a refusal: the wake is stored, the item stays on agent, the note gives the park form above. "
-    "When your write sets or keeps a wake with no hold over an hour ahead, you are the item's mover and every open step opens with a time at the wake's hour or day (\"at 03:00\", \"on <that day>\", \"after <that day>\", \"tomorrow at 9\"), the server parks it itself: on hold, wait_basis from your wait_reason, stored waiting on a time; the reply says `(parked: …)`; to work a step now, write it as the action and pass clear_hold=true. "
+    "When your write sets or keeps a wake with no hold over an hour ahead, you are the item's mover and every open step opens with a time at the wake's hour or day (\"at 03:00\", \"on <that day>\", \"after <that day>\", \"tomorrow at 9\"), the server parks it itself: on hold, wait_basis from your wait_reason, stored waiting on a time; the reply says `(parked: …)` and History has a line; the ten-minute pass does the same for a wake it finds that way (the mover gets one message naming the items); to work a step now, write it as the action and pass clear_hold=true: the server then leaves that wake alone. "
     "Steps started by an outside event (\"when the next release lands\") get a note instead: park with hold=true, wake, wait_basis, wait_reason (needs=external for a named outside party's reply). "
     f"Neither applies to an action to take now, another party's step in flight, or an item not on agent (on hold, waiting on {OWNER}'s decision or an open after item, needs=external, outside, verifying, blocked). "
     "An item that waits on another item is not parked but names it: after=[\"board#N\"]. "
@@ -11770,7 +11891,7 @@ _UPDATE_DESC = (
     "wake (at most [waiting] cap_days out unless his words are on the item), since the notice may never come; the server releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a "
     "notice from that anchor (never when it drops one; in a project nobody rules, when any notice from it arrives), and tells the sessions in its needs (else the project's builder, else its -main agent). "
     f"clear_hold=true releases it now (its wake goes with it, and so does a time wait that {OWNER}'s answer stored with the park); wake=\"none\" (or clear_wake=true) drops the wake: a reminder simply goes, and a hold stays only when an after, an anchor or a recycle still holds it. "
-    f"mover hands the item over: set mover=<session> (then=<who takes it after {OWNER}'s answer or step>) and the new mover is told; a front agent gets no hand-off notice, so an update from another session that sets mover, then or post_wake_mover to a front agent is refused (hand build work to the project's builder; message the front agent for a check or answer only it can give); take over another session's item only when asked; a session about to be retired first hands over or completes its open items. "
+    f"mover hands the item over: set mover=<session> (then=<who takes it after {OWNER}'s answer or step>) and the new mover is told; a front agent gets no hand-off notice, so an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused; message the front agent for a check or answer only it can give); take over another session's item only when asked; a session about to be retired first hands over or completes its open items. "
     f"mover={OWNER} alone is refused on an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). "
     f"An update that leaves an open item in a state that is {OWNER}'s (his step, or needs holding decision) and names no mover sets mover={OWNER} itself and moves the stored session mover into then "
     f"(a stored then is kept; set then=<you> to have the item come back to you), and the reply ends with a `(mover: <session> → …)` note; every save does the same (a wake, his answer on the board, a create): when a save ends his state (his decision out of needs, the state moved on) the mover he held goes back to then; a write that names the mover or clears it (clear_mover), a rename, priority or project write, a re-bullet and a close are left alone (a close drops the mover and then). "
@@ -13134,12 +13255,13 @@ def _update_unlocked(
     outcome_text: str = "",
     contact: str = "",
     reword: dict[Any, str] | str | None = None,
+    fixes: "list[tuple[str, str, str]] | None" = None,
 ) -> str:
     """The update tool; its description is _UPDATE_DESC (+ _WAIT_FORM). The caller checks the identity (_who): the update and
     complete tools do, the client API's recycle-due write is proved by its machine token instead."""
     if not _steps.reword_given(reword):
         reword = None             # {} and "{}" name no step: the call is as if it passed none
-    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
+    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
     filing_only = bool(given) and set(given) <= _FILING_ONLY      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
     subject, description, next, ask, reason, outcome_text = (_shown_ids(x) for x in (subject, description, next, ask, reason, outcome_text))   # g7 →
     next_drop = next.strip().lower() in _nl.NONE_WORDS   # next="none" (or clear, -) removes the sender's own lines, as "none" clears due, wake and needs; an empty next is "not passed"
@@ -13354,11 +13476,23 @@ def _update_unlocked(
     # the wake pass tells the mover and the sessions in its needs once and drops it. Only hold=true parks (with a wake it
     # parks until then, and the pass releases it), and an item whose needs hold decision is never on hold (_is_held). A stored
     # item keeps the meaning it was written with: held + wake still releases at its wake.
+    _record_fixes(meta, fixes)      # what the tool fixed in this call (server_fixes.py): the mark and a History line, or the mark taken off when the mover sent the value again
     wait_fixed = ""
     if (wake or next_touch) and not (hold or clear_hold or clear_wake or filing_only or wait_basis or clear_wait_basis) and item.get("status") == "open":      # a wake alone that is the whole of the wait: parked by this write (_date_only_wait)
-        fixed_basis, wait_fixed = _date_only_wait(item, meta, next_after, wake, (sender, debtor), wait_reason)
-        if fixed_basis:
-            hold, wait_basis = True, fixed_basis
+        try:
+            park_wake = str(_parse_wake(wake) if wake else meta.get("wake") or "")
+        except ToolError:
+            park_wake = ""
+        if park_wake and not _sf.declined(meta, _sf.WAKE_PARK, park_wake):      # a wake the mover sent back (clear_hold on the server's park) is left alone
+            fixed_basis, wait_fixed = _date_only_wait(item, meta, next_after, wake, (sender, debtor), wait_reason)
+            if fixed_basis:
+                hold, wait_basis = True, fixed_basis
+                _sf.record(meta, _sf.WAKE_PARK, park_wake, _wake_park_line(park_wake, fixed_basis), time.time())
+    if hold and not (clear_hold or clear_wake or clear_wait_basis or filing_only or said_l or str(wait_basis or "").strip()) and item.get("status") == "open":      # a hold with a wake and no reason, whose own words give it: the server takes them as the wait_basis
+        loose_basis, reason_fixed = _fix_loose_reason(item, meta, next_after, description or str(item.get("description") or ""), wake)
+        if loose_basis:
+            wait_basis, wait_fixed = loose_basis, wait_fixed + reason_fixed[0]
+            _sf.record(meta, _sf.WAIT_REASON, reason_fixed[1], reason_fixed[2], time.time())
     basis_txt = " ".join(str(wait_basis or "").split())
     if basis_txt.lower() in _ASK_NONE:
         clear_wait_basis, basis_txt = True, ""
@@ -13387,6 +13521,8 @@ def _update_unlocked(
     if clear_wake:                # the wake goes; a hold stays only while something else holds it (the item rule below)
         meta.pop("wake", None); _cap_ok_drop(meta, "wake")
     if clear_hold:                # released now: the hold and its wake go together
+        if meta.get("wake") and _sf.marked(meta, _sf.WAKE_PARK, str(meta["wake"])):      # the server parked this wake and the mover sends it back: the server leaves that wake alone from here
+            _sf.unmark(meta, _sf.WAKE_PARK, str(meta["wake"])); _sf.decline(meta, _sf.WAKE_PARK, str(meta["wake"]))
         if meta.pop("hold", None):
             meta.pop("wake", None); _cap_ok_drop(meta, "wake")
             if _watch.stored_kind(meta) == "time":      # the time wait the hold stood on (a park with a then stores one) goes with it: wait_kind, post_wake_mover and the watcher's stamps
@@ -13825,14 +13961,18 @@ def stackshot_update(
     _sender_required(sender)
     _sender_not_owner(sender)
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
+    fixes: list[tuple[str, str, str]] = []; fix_note = ""
     if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
         try:
             meta_ = (_load(_norm_id(item_id)).get("metadata") or {})
         except Exception:  # noqa: BLE001
             meta_ = {}      # an unknown item is _update's to refuse
         proj_ = project or str(meta_.get("project") or "")
-        for f_, v_ in (("mover", mover), ("then", then), ("post_wake_mover", post_wake_mover)):
-            _gate_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""))    # a front agent gets no hand-off notice: another session may not make it the mover (the value the item already holds changes nothing)
+        vals = {"mover": mover, "then": then, "post_wake_mover": post_wake_mover}
+        for f_, v_ in list(vals.items()):
+            vals[f_], n_, fx_ = _fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent
+            fix_note += n_; fixes += fx_
+        mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
     _gate_self_wait(_norm_id(item_id), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
     with _session_write():
@@ -13842,7 +13982,7 @@ def stackshot_update(
                        expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
                        goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover,
                        clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
-                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword) + note + _off_map_note_item(sender, item_id, project)
+                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes) + fix_note + note + _off_map_note_item(sender, item_id, project)
 
 
 _COMPLETE_DESC = (

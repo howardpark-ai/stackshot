@@ -35,6 +35,7 @@ import config as _cfg  # noqa: E402
 import model as _model  # noqa: E402
 import next_report as _nr  # noqa: E402  — the store reader and the id words, shared
 import render as _render  # noqa: E402  — hold_whys: what holds an item on hold (the brief's "nothing holds it now")
+import server_fixes as _sf  # noqa: E402  — settled_out: words that quote or record a pick already made are no wait on its giver
 import sessions_registry as _sr  # noqa: E402
 import states as _states  # noqa: E402
 import steps as _steps  # noqa: E402
@@ -220,7 +221,7 @@ def check_item(item: dict[str, Any], gid: str, items: dict[str, dict[str, Any]],
     labeled = "external" in [x.lower() for x in _wt.needs_of(meta)] or stored == "outside" or bool(_wt.words_of(meta))      # a hold already labeled outside, or on his recorded words, is not second-guessed from its text
     if held and not probs and not labeled:
         text = " ".join(_texts(item))
-        if _decision_rx().search(text):
+        if _decision_rx().search(_sf.settled_out(text, _sf.owner_names())):      # a quoted span or a pick he already made is no wait on him (server_fixes.settled_out)
             probs.append(f"on hold while its words wait on {_cfg.owner()}'s decision: that is your-call, not a hold")
         elif _OUTSIDE_RX.search(text):
             probs.append("on hold while its words wait on an outside party: that is outside (needs external, party, chase), not a hold")
