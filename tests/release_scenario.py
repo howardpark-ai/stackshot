@@ -1,183 +1,229 @@
-"""Scenario test for release.sh --run: the merge step when `gh pr merge` errors although the merge went through (main is
-already at the merge commit: the release carries on to deploy instead of stopping at "merge").
+"""Scenario test for release.sh --run: the enqueue in GitHub's merge queue, the wait for GitHub's merge, and the deploy of what it merged.
 No network, no real gh, git or deploy: release.sh is copied into a temp dir beside stub config.py, client.py and deploy.sh,
-and gh, git and sleep are stubs on a fake PATH.
+and gh, git and sleep are stubs on a fake PATH (tests/_release_harness.py).
 
-Covers: a clean merge deploys and reports with no recheck; a merge call that errors while the PR reads MERGED (after a
-retry) carries on to deploy and report green, the report naming the error and the short merge commit, and deletes the head
-branch when it is still there; a deletion that fails, or a branch already gone, never fails the release; a cross-repository
-PR's branch is left alone; a PR still OPEN after every recheck fails "merge" with the original error, never deploys, and the
-rechecks span about 50 s (six reads, five sleeps of 10 s). The green report goes with --release green and the PR's URL (the
-server logs it and rules it), the red one without; a --recycle release whose recycle could not be asked for
-(recycle-due refused and sala refusing too: a stub, never the host's sala) goes without it as well.
+The enqueue and the wait (sections 1 to 9): a clean enqueue (`gh pr merge --merge --match-head-commit <head>`, pinned, no fd 9) is followed by reads of the PR's merge-queue
+state (GraphQL: state, mergeCommit, mergeQueueEntry) every 60 s until it is MERGED, and the release deploys the commit GitHub made. The first reads come every 10 s until the entry shows (3 min of grace), a read
+that fails is waited out, a PR that never shows or stays past the limit fails "merge queue", a PR closed meanwhile fails "pr state", a PR merged without ever being in the queue (the ruleset is
+off, the rollback case) is deployed and says so. A PR that leaves the queue without merging is believed on the second read, the reason GitHub gave (the timeline's RemovedFromMergeQueueEvent)
+goes into the failure, and nothing is deployed. A merge call that errors (a 504) after the PR was queued or merged carries on; one that leaves the PR plainly open fails "merge" with the call's error.
+A conflict that is only the generated tool-text snapshot is mended once, before the enqueue or after a removal from the queue (the stub of tools/snapshot_regen.py answers; its own decisions are
+tested in snapshot_regen_scenario.py), the PR's tests are waited for on the new head, and the PR is enqueued again. The head branch (a stacked PR closed when its base merged): the open PRs
+based on it are retargeted to main first and only then is the branch deleted. --recycle, mergeable UNKNOWN (read again every 10 s for 3 min), CONFLICTING, the front door and --help.
 
-The head branch (a stacked PR closed when its base merged): the merge no longer deletes it. The open PRs based on it are listed
-(gh pr list --base) and retargeted to main (gh pr edit --base main) first, one log line each, and only then is the branch deleted (the
-order of the gh calls is asserted); no stacked PR changes nothing but the extra list call; a retarget or a list that fails keeps the branch,
-says why in the log, and neither fails nor stops the release.
+The deploy lock: the deploy runs under an exclusive flock (the deploy stub sees it held, fd 9 closed in it, free again at the end); a lock held elsewhere is waited for, or, past the timeout, fails
+"deploy lock" with the PR merged and not deployed; the waits for GitHub are outside the lock; two releases sharing one lock file never deploy at the same time.
 
-The deploy lock: merge and deploy run under an exclusive flock (the deploy stub sees it held, fd 9 closed in it,
-and it is free again at the end); a lock held elsewhere is waited for and then the release goes on, or, past the timeout, fails
-"deploy lock" before anything is merged; the lock is released as soon as the deploy returns (no report or recycle child inherits it);
-the wait for checks is outside the lock (a held lock does not stop a release still waiting on its checks); two releases sharing one
-lock file never run their deploys at the same time. Every merge is pinned to the PR head the release read (--match-head-commit),
-and gh pr merge gets no fd 9.
+Main's tests (section 11): when the deploy gate is closed, the run on main that covers the merge is waited for, polled every 20 s here, and the deploy goes to the commit that run passed on (DEPLOY_TO);
+its suites failing stops the release merged and not deployed; a selection miss alone deploys and reports to the keeper; a run cancelled is skipped and a later run on a commit that contains the merge covers it; no run in
+time fails; the lock is let go for the wait. deploy.sh's pin (section 12), on a real throwaway checkout: DEPLOY_TO fast-forwards to that commit and no further, an unknown one or one off origin/main is refused, a run
+by hand goes to origin/main's tip, a fetch that fails is tried again.
 
-Main's tests before the deploy: the run on main that covers the merge is waited for, polled every 20 s; its suites failing
-stops the release merged and not deployed; a selection miss alone deploys and reports to the keeper; a run cancelled (replaced while
-queued, or after its job started) is skipped and a later run on a commit that contains the merge covers it (section 14); no run in time fails; the
-deploy lock is let go for the wait (another release deploys meanwhile) and taken again for the deploy, where a lock held past
-the timeout fails "deploy lock", merged and not deployed, fd 9 closed before the report; a run of an older commit never counts for
-the tip; the deploy is pinned to the commit main's run passed on (DEPLOY_TO), so with two releases on one lock, B merging and
-deploying while A waits, each deploys its own verified commit. deploy.sh's pin, on a real throwaway checkout: DEPLOY_TO fast-forwards
-to that commit and no further, one the checkout already contains is nothing to do, an unknown one or one off origin/main is
-refused, and a run by hand still goes to origin/main's tip. A fetch that fails, as one racing another release's fetch in the same
-checkout does, is tried again: main_green waits it out at its 20 s poll (git's error in the log) and fails only when the whole wait
-is spent; deploy.sh tries five times.
+The deploy gate (sections 13 to 13c): GitHub tested the merge on the tree it made, so it deploys at once, with main's full run read after the deploy and a rollback to the last good commit on a failure, when
+(a) the live checkout is an ancestor of the merge, (b) a last-good commit is recorded and in the live history, (c) no commit after it has a failed run on main (read page after page until the last-good commit's run). A run that is still
+pending is no reason to wait. Anything else closes the gate: main's tests first (section 11). The live checkout already containing the merge is a no-op deploy that still reports. The last-good record is read, compared and written under
+a lock file; one it cannot read is never overwritten (told, gate closed). A rollback takes out every other merge between the last good commit and the live checkout: each PR gets its own message and a marker, and its
+own run says "passed, but not live"; the report says a rollback does not undo data or state. A deploy that replaces release.sh under the running script is read from nothing it appends. The pending-verify record
+(written before deploy.sh, read by the next release to start after a kill) and the fourth review's cases: none is a verdict until the cap (3 h), a recovery rollback that never ran keeps its record, startup_failure counts as failed,
+no command that can leave a child behind holds a lock descriptor.
 
-Release on PR pass: a PR whose head contains main's tip (the up-to-date test: git merge-base --is-ancestor,
-after fetching main and the PR head) and for which a last good commit is recorded deploys the merge commit at once, under the lock, with
-the --recycle step and the green report right after; main's run for it is then waited for with the lock free. A pass is a log line and
-the last-good record (seeded on first use from the deployed HEAD when its run passed, atomic, never moved back); what else the run found
-goes to the keeper as a second message. A failing run rolls back to the last good commit under the lock again (deploy.sh
-DEPLOY_ROLLBACK=1 DEPLOY_TO=<it>), and the red report "FAILED at main's tests: rolled back to <sha>" names the merges the run covers when
-there are several, a commit another release deployed on top, and whether a recycle was flagged; no rollback (said in the report) when the
-live checkout no longer contains the failing commit or a newer commit whose run passed contains it; a rollback deploy that fails, or a lock
-that cannot be had, is reported with the command to run by hand; a run that cannot be read in time rolls nothing back. Not up to date, no
-record to roll back to, a PR head that cannot be fetched, or main having moved between the check and the merge: the old path, the reason
-in the log. The merge-call-error path (504) works on both. deploy.sh's rollback, on the real throwaway checkout: only with DEPLOY_ROLLBACK=1 and
-a DEPLOY_TO older than HEAD; a deploy without it still never moves backward.
+The session pick (section 16) and the report's destination (report_to).
 
-What the fast path may carry along (a) the live HEAD is main's tip, so a rolled-back commit still on main, or an old-path
-release merged and waiting on its run, is never swept in (behind it only by commits docs-merge.sh accepts, read from that script, counts as at
-the tip); (b) no failed run on main after the last good commit, read page after page until the last good commit's run (empty, crashed or not
-reaching it: the old path); a pending one is no reason to wait (two PRs back to back both go fast). The last-good record is read, compared and written under a lock file; one it cannot read is never
-overwritten (told, old path); a failed write is told. A rollback takes out every other merge between the last good commit and the live checkout: each PR gets its own message and a
-marker, so that its own run says "passed, but not live" (and, checked with git, does not become the last good commit); a run cancelled is skipped, and one that is the only run is unknown after the cap, not rolled back
-(section 14); the report says a rollback does not undo data or state and names the unit files left installed. deploy.sh's
-rollback is refused unless the deploy lock is held, no tracked file is changed and no untracked file stands where the target tracks a path, at a commit on origin/main, only for the value 1,
-and to a commit whose deploy.sh has the second step; it resets, then the target's own deploy.sh does the rest. A deploy that replaces
-release.sh under the running script is read from nothing it appends (every case arm ends in an explicit exit).
-Third review: the docs-only diff is read unquoted and must be summarised as files=N refused=0 for every header (a non-ASCII file, a checker that does not
-know diff-check); the rollback's lists are full shas; a passed merge is checked live and recorded under the deploy lock; a run cancelled after its job
-started is unknown for (b); the clash check reads NUL-separated names and refuses when git fails; a fast deploy leaves a pending-verify record that the next
-release to start (a killed watch) reads: pass recorded, fail rolled back and reported, unknown reported, pending kept.
-mergeable (a PR can read UNKNOWN right after another merge): UNKNOWN is read again every 10 s for up to 3 min (logged once), then MERGEABLE goes
-on; UNKNOWN throughout fails "mergeable" naming UNKNOWN and the 3 min; CONFLICTING fails at once. The usage and --help carry the four rules for running a release.
-Fourth review: the record is written before deploy.sh; none (no run, GitHub unreadable) is kept until the cap (3 h); a recovery rollback that never ran keeps its
-record; no command that can leave a child behind holds a lock descriptor; records oldest first; startup_failure counts as failed.
-
-A branch behind main (section 13g, Oliver: main's full run never blocks a release): release.sh brings it up to date (gh pr update-branch, a merge, never a
-rebase) under the update lock (one release at a time from the update to the merge; a second waits, and fails "update lock" past the timeout), waits for the PR's own tests on the
-new head (the suites check must be reported; capped like the first wait, a progress line every 5 min), and deploys at the merge on the fast path; main moving meanwhile is another
-round (3 at most, then the old path with the reason in the log); a conflict is FAILED at update-branch, failing tests FAILED at pr tests, neither falls back; --status shows the
-newest log line of a release parked on the tests. The update lock's default wait is 3 x (50 + 3 min) + 15 min; a failed check (any) fails the wait at once while a
-pass needs suites completed and successful in the check-runs of the new head's own commit (a pass read from the old head is pending); after the lock the PR is read again (a head pushed
-meanwhile has its tests waited for, an up-to-date branch is not updated); a re-check that cannot fetch is told as such; fd 5 is closed in gh, git and client.py, and the lock is held
-at the update and the merge and free at the deploy.
-
-A conflict that is only the generated tool-text snapshot (section 13i: several releases failed on it in one day): where update-branch errors, or the first look says
-CONFLICTING, release.sh asks tools/snapshot_regen.py (a stub here; its own decisions are tested in snapshot_regen_scenario.py) to merge main into the PR head, take main's snapshot,
-regenerate it and push the merge; on "pushed" the release goes back to the PR's tests on the new head, on anything else it fails exactly as before, the helper's reason added to the log.
-At most RELEASE_REGEN_MAX (2) per release, never for a cross-repository PR or when the fetch fails, run under the update lock with fd 5 closed in it, and no GitHub call of its own.
-
-
-    tests/run-suite release        → exit 0 / 1  (the later sections are release_queue_scenario.py: tests/run-suite release_queue)"""
+    tests/run-suite release        → exit 0 / 1  (the release queue and the CI-run poller are release_queue_scenario.py: tests/run-suite release_queue)"""
 import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threading, time
 import _scratch
 from _release_harness import *
 check("release.sh parses", subprocess.run(["bash", "-n", os.path.join(STACK, "release.sh")]).returncode == 0)
+R = "example-owner/stackshot"
+ENQUEUE = f"pr merge 23 --repo {R} --merge --match-head-commit {HEADSHA}"
+MERGE_SHORT = "0106c0d"
+def gl(s): return s["gh"].splitlines()
+def at_gh(s, line): return gl(s).index(line) if line in gl(s) else -1
+def enqueues(s): return [l for l in gl(s) if l.startswith("pr merge")]
 
-# ---- 1. a clean merge: deploy and the green report, no recheck, no branch call
-s = scenario("clean", merge="ok")
+# ---- 1. a clean run through the merge queue: enqueue, two reads of the queue, the merge, the deploy and the green report
+s = scenario("clean", merge="ok", gq="queued,queued,merged")
 check("clean: exits 0 and deploys", s["rc"] == 0 and s["deployed"], s["out"])
-check("clean: the green report, without a word about an error", "merged and deployed" in s["msg"] and "errored" not in s["msg"] and "main at 0106c0d" in s["msg"], s["msg"])
-check("clean: no recheck, no sleep, the branch looked up once (already gone: no delete)", "state,mergeCommit" not in s["gh"] and not s["sleeps"] and len(refchecks(s)) == 1 and not deletes(s), (s["gh"], s["sleeps"]))
+check("clean: one enqueue call, pinned to the head it read, with no --delete-branch and no --auto", enqueues(s) == [ENQUEUE] and "--delete-branch" not in s["gh"] and "--auto" not in s["gh"], s["gh"])
+check("clean: three reads of the queue's state, two sleeps of 60 s between them", s["gq_reads"] == 3 and s["sleeps"] == ["60", "60"], (s["gq_reads"], s["sleeps"]))
+check("clean: the log says it enqueued, where the PR stands in the queue, that the queue merged it and when",
+      at(s["log"], "checks pass", "enqueued: gh pr merge accepted the head abc1234", "in the merge queue (QUEUED position 1)", "merged by the merge queue as 0106c0d, 2 min after the enqueue", "deploy lock taken"), s["log"])
+check("clean: the green report, no word about an error or a missing queue", "merged and deployed" in s["msg"] and "errored" not in s["msg"] and "without the merge queue" not in s["msg"] and "main at 0106c0d" in s["msg"], s["msg"])
+check("clean: main's tests are read before the deploy (the gate is closed here: nothing recorded as good, so main's run first), then the report",
+      s["order"][:3] == ["run-view", f"deploy:{MERGE}", "client:message"], s["order"])
+check("clean: the state reads are GraphQL calls, one per cycle, carrying the PR number", s["gq_args"] and all("graphql" in a and "p=23" in a.replace("-F ", "") for a in s["gq_args"]), s["gq_args"])
 check("clean: the green report goes with --release green and the PR's URL (the server logs it, rules it, digests it)",
       s["msg"].startswith("message | projects/example | [release] PR #23 merged and deployed") and s["msg"].rstrip("\n").endswith(GREEN_ARGS), s["msg"])
 RELEASED_ARGS = "released | --pr | https://github.com/example-owner/stackshot/pull/23 | --sha | "
-check("clean (the old path): main's tests passed before the deploy, so once it is live the server is asked to settle the PR's items, once, after the green report, naming the merge",
-      len(s["released"]) == 1 and s["released"][0].startswith(RELEASED_ARGS) and all(c in "0123456789abcdef" for c in s["released"][0][len(RELEASED_ARGS):]) and len(s["released"][0]) > len(RELEASED_ARGS) + 6
+check("clean (main's tests first): once it is live the server is asked to settle the PR's items, once, after the green report, naming the merge",
+      len(s["released"]) == 1 and s["released"][0] == RELEASED_ARGS + MERGE
       and "items of PR #23: closed a1" in s["log"] and s["log"].index("done: ") < s["log"].index("items of PR #23"), (s["released"], s["log"]))
+check("clean: no branch call besides the one lookup (the branch is already gone)", len(refchecks(s)) == 1 and not deletes(s), s["gh"])
 s = scenario("clean-released-fails", merge="ok", released="fail")
 check("the items call fails: a log line, the release still exits 0 with its green report", s["rc"] == 0 and "the items of PR #23 were not settled: closed a1" in s["log"]
       and s["msg"].rstrip("\n").endswith(GREEN_ARGS), (s["rc"], s["log"]))
 
-# ---- 2. the merge call errors, the PR reads MERGED on the second read: carry on, report the error, delete the leftover branch
-s = scenario("recovered", merge="fail", after="merged", merged_from="2", branch="present")
-check("recovered: exits 0 and deploys", s["rc"] == 0 and s["deployed"], s["out"])
-check("recovered: the green report names the error's last line and the short merge commit",
-      "merged and deployed" in s["msg"] and "the merge call errored (HTTP 504: We couldn't respond to your request in time.) but the PR was merged at 0106c0d" in s["msg"]
-      and "FAILED" not in s["msg"], s["msg"])
-check("recovered: the log says the call errored and the PR is merged", "the merge call errored" in s["log"] and "merged at 0106c0d; carrying on" in s["log"], s["log"])
-check("recovered: two reads, one 10 s sleep between them", s["gh"].count("state,mergeCommit") == 2 and s["sleeps"] == ["10"], (s["gh"], s["sleeps"]))
-check("recovered: the head branch still there is deleted", deletes(s) == ["api -X DELETE repos/example-owner/stackshot/git/refs/heads/agent/topic"]
-      and "deleted the head branch agent/topic" in s["log"], s["gh"])
+# ---- 1b. merged at once, without the queue (the ruleset is off: the rollback path of the queue, or a repository without it)
+s = scenario("noqueue", merge="ok", gq="merged")
+check("merged at the enqueue call with the PR never in the queue: deploys, and says so in the log and in the report",
+      s["rc"] == 0 and s["deployed"] and not s["sleeps"] and "merged as 0106c0d without the merge queue" in s["log"] and "merged without the merge queue (the ruleset may be off)" in s["msg"], (s["out"], s["log"], s["msg"]))
+s = scenario("merged-nocommit", merge="ok", gq="queued,mergednocommit,merged")
+check("GitHub says merged but has no merge commit to give yet: read again, the deploy goes to the commit it then gives",
+      s["rc"] == 0 and s["deployed"] and "has no merge commit to give yet; reading again" in s["log"] and s["deploy_to"] == MERGE, (s["log"], s["deploy_to"]))
+s = scenario("merge-oid", merge="ok", gq="queued,merged", merge_oid=NEWER, runs=json.dumps([{"databaseId": 7, "headSha": NEWER}]))
+check("the deploy and main's run are about the commit GitHub made, whatever it is", s["rc"] == 0 and s["deploy_to"] == NEWER and "merged by the merge queue as 0107c0d" in s["log"], (s["log"], s["deploy_to"]))
 
-# ---- 3. MERGED, but the branch deletion fails: still green
-s = scenario("delfail", merge="fail", after="merged", branch="present", delete="fail")
-check("deletion fails: still exits 0, deploys and reports green", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"], (s["out"], s["msg"]))
-check("deletion fails: the log says the branch is still there", "the head branch agent/topic is still there" in s["log"], s["log"])
-check("deletion fails: MERGED on the first read, no sleep", not s["sleeps"], s["sleeps"])
+# ---- 2. the enqueue call errors (a 504) after the PR was queued or merged: carry on; the PR still plainly open: fail "merge"
+s = scenario("recovered-queued", merge="fail", gq="queued,merged", branch="present")
+check("504, the PR reads queued on the next read: carries on, deploys and reports green, the report naming the error",
+      s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and "the merge call errored (HTTP 504: We couldn't respond to your request in time.) but the PR was OPEN, in the merge queue (QUEUED position 1)" in s["msg"]
+      and "FAILED" not in s["msg"], (s["out"], s["msg"]))
+check("504: the log says the call errored and the PR is in the queue; the head branch still there is deleted",
+      "the merge call errored: HTTP 504" in s["log"] and "carrying on" in s["log"] and deletes(s) == [f"api -X DELETE repos/{R}/git/refs/heads/agent/topic"] and "deleted the head branch agent/topic" in s["log"], (s["log"], s["gh"]))
+s = scenario("recovered-merged", merge="fail", gq="merged")
+check("504, the PR reads MERGED already: carries on, deploys, the report names the error", s["rc"] == 0 and s["deployed"] and "the merge call errored" in s["msg"] and "but the PR was MERGED" in s["msg"], (s["out"], s["msg"]))
+s = scenario("recovered-late", merge="fail", gq="open,open,queued,merged")
+check("504, the PR shows in the queue on the third read (GitHub's answer is eventually consistent): two sleeps of 10 s, then it carries on",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["10", "10"], (s["sleeps"], s["out"]))
+s = scenario("open", merge="fail", gq="open", branch="present")
+check("504 and the PR stays plainly open: exits 1, never deploys", s["rc"] == 1 and not s["deployed"], s["out"])
+check("504 and open: FAILED at merge with the original error's last line, no deploy report",
+      "PR #23 FAILED at merge: HTTP 504: We couldn't respond to your request in time." in s["msg"] and "merged and deployed" not in s["msg"], s["msg"])
+check("504 and open: six reads over five 10 s sleeps (about 50 s), one enqueue call", s["gq_reads"] == 6 and s["sleeps"] == ["10"] * 5 and len(enqueues(s)) == 1, (s["gq_reads"], s["sleeps"]))
+check("504 and open: the branch is left alone, the red report goes without --release", not refchecks(s) and not deletes(s) and s["msg"].rstrip("\n").endswith("| --sender | release") and "--release" not in s["msg"], (s["gh"], s["msg"]))
 
-# ---- 4. MERGED and the branch already gone: no delete call
-s = scenario("gone", merge="fail", after="merged", branch="absent")
+# ---- 3. MERGED, but the branch deletion fails: still green; the branch already gone; a cross-repository PR
+s = scenario("delfail", merge="ok", branch="present", delete="fail")
+check("deletion fails: still exits 0, deploys and reports green, the log says the branch is still there",
+      s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and "the head branch agent/topic is still there" in s["log"], (s["out"], s["log"]))
+s = scenario("gone", merge="ok", branch="absent")
 check("branch gone: green, the ref looked up once, no delete", s["rc"] == 0 and "merged and deployed" in s["msg"] and len(refchecks(s)) == 1 and not deletes(s), (s["gh"], s["msg"]))
-
-# ---- 5. a cross-repository PR: its branch lives in the fork, never touched here
-s = scenario("cross", merge="fail", after="merged", branch="present", cross="1")
+s = scenario("cross", merge="ok", branch="present", cross="1")
 check("cross-repository: green, no branch call at all", s["rc"] == 0 and "merged and deployed" in s["msg"] and not refchecks(s) and not deletes(s), (s["gh"], s["msg"]))
 
-# ---- 5b. stacked PRs (GitHub closes a stacked PR when its base merges and the base branch is deleted): they are retargeted to main BEFORE the branch is deleted
-def gl(s): return s["gh"].splitlines()
-def at_gh(s, line): return gl(s).index(line) if line in gl(s) else -1
-R = "example-owner/stackshot"; LIST = f"pr list --repo {R} --base agent/topic --state open --limit 100 --json number"; DEL = f"api -X DELETE repos/{R}/git/refs/heads/agent/topic"
-MERGE_LINE = f"pr merge 23 --repo {R} --merge --match-head-commit {HEADSHA}"
+# ---- 3b. stacked PRs (GitHub closes a stacked PR when its base merges and the base branch is deleted): they are retargeted to main BEFORE the branch is deleted
+LIST = f"pr list --repo {R} --base agent/topic --state open --limit 100 --json number"; DEL = f"api -X DELETE repos/{R}/git/refs/heads/agent/topic"
 E_a, E_b = f"pr edit 32 --repo {R} --base main", f"pr edit 28 --repo {R} --base main"
-s = scenario("stacked", merge="ok", stacked="32,28", branch="present")
+s = scenario("stacked", merge="ok", gq="queued,merged", stacked="32,28", branch="present")
 check("stacked: exits 0, deploys, reports green", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"], (s["out"], s["msg"]))
-check("stacked: the merge does not delete the branch (no --delete-branch)", MERGE_LINE in gl(s) and not any("--delete-branch" in l for l in gl(s)), s["gh"])
-check("stacked: both PRs are retargeted to main, after the merge and BEFORE the branch delete (order asserted)",
-      0 <= at_gh(s, MERGE_LINE) < at_gh(s, LIST) < at_gh(s, E_a) < at_gh(s, E_b) < at_gh(s, DEL), s["gh"])
+check("stacked: both PRs are retargeted to main, after the enqueue and BEFORE the branch delete (order asserted)", 0 <= at_gh(s, ENQUEUE) < at_gh(s, LIST) < at_gh(s, E_a) < at_gh(s, E_b) < at_gh(s, DEL), s["gh"])
 check("stacked: one log line per PR, then the deletion", "PR #32 was based on agent/topic: retargeted to main" in s["log"] and "PR #28 was based on agent/topic: retargeted to main" in s["log"]
       and "deleted the head branch agent/topic" in s["log"] and s["log"].index("PR #28 was based") < s["log"].index("deleted the head branch"), s["log"])
 check("stacked: exactly one delete", deletes(s) == [DEL], s["gh"])
-s = scenario("stacked-recovered", merge="fail", after="merged", stacked="32", branch="present")
-check("stacked, the merge call errored but merged: the same order (retarget, then delete)",
-      s["rc"] == 0 and s["deployed"] and 0 <= at_gh(s, LIST) < at_gh(s, E_a) < at_gh(s, DEL), (s["out"], s["gh"]))
-
+s = scenario("stacked-recovered", merge="fail", gq="queued,merged", stacked="32", branch="present")
+check("stacked, the merge call errored but the PR was queued: the same order (retarget, then delete)", s["rc"] == 0 and s["deployed"] and 0 <= at_gh(s, LIST) < at_gh(s, E_a) < at_gh(s, DEL), (s["out"], s["gh"]))
 s = scenario("unstacked", merge="ok", branch="present")
-check("no stacked PR: green, the list is asked once, no retarget, the branch is deleted as before",
-      s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and gl(s).count(LIST) == 1 and not any(l.startswith("pr edit") for l in gl(s))
+check("no stacked PR: green, the list is asked once, no retarget, the branch is deleted", s["rc"] == 0 and s["deployed"] and gl(s).count(LIST) == 1 and not any(l.startswith("pr edit") for l in gl(s))
       and deletes(s) == [DEL] and at_gh(s, LIST) < at_gh(s, DEL) and "retarget" not in s["log"], (s["gh"], s["log"]))
 s = scenario("unstacked-gone", merge="ok", branch="absent")
 check("no stacked PR and the branch already gone: no retarget, no delete", s["rc"] == 0 and not any(l.startswith("pr edit") for l in gl(s)) and not deletes(s), s["gh"])
 s = scenario("stacked-cross", merge="ok", stacked="32", branch="present", cross="1")
 check("cross-repository: no list, no retarget, no delete", s["rc"] == 0 and LIST not in gl(s) and not any(l.startswith("pr edit") for l in gl(s)) and not deletes(s), s["gh"])
-
 s = scenario("retarget-fails", merge="ok", stacked="32,28", branch="present", retarget_fail="32")
 check("a failed retarget: the release still deploys and reports green", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and "FAILED" not in s["msg"], (s["out"], s["msg"]))
-check("a failed retarget: the other PR is still retargeted, the branch is NOT deleted (no lookup, no delete call)",
-      E_b in gl(s) and not deletes(s) and not refchecks(s), s["gh"])
+check("a failed retarget: the other PR is still retargeted, the branch is NOT deleted (no lookup, no delete call)", E_b in gl(s) and not deletes(s) and not refchecks(s), s["gh"])
 check("a failed retarget: the log says which PR failed and why, and that the branch is kept",
       "PR #32 was based on agent/topic: retargeting it to main failed (GraphQL: Could not resolve to a PullRequest" in s["log"] and "PR #28 was based on agent/topic: retargeted to main" in s["log"]
       and "the head branch agent/topic is kept: deleting it would close the PRs #32 still based on it" in s["log"] and "deleted the head branch" not in s["log"], s["log"])
 s = scenario("list-fails", merge="ok", list="fail", branch="present")
-check("a list that cannot be read: green, no retarget, the branch is kept and the log says why",
-      s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and not deletes(s) and not any(l.startswith("pr edit") for l in gl(s))
+check("a list that cannot be read: green, no retarget, the branch is kept and the log says why", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and not deletes(s) and not any(l.startswith("pr edit") for l in gl(s))
       and "the head branch agent/topic is kept: the open PRs based on it could not be listed (HTTP 502: bad gateway)" in s["log"], (s["gh"], s["log"]))
 
-# ---- 6. the merge call errors and the PR stays OPEN: fail at merge with the original error, never deploy
-s = scenario("open", merge="fail", after="open", branch="present")
-check("still open: exits 1, never deploys", s["rc"] == 1 and not s["deployed"], s["out"])
-check("still open: FAILED at merge with the original error's last line",
-      "PR #23 FAILED at merge: HTTP 504: We couldn't respond to your request in time." in s["msg"] and "merged and deployed" not in s["msg"], s["msg"])
-check("still open: six reads over five 10 s sleeps (about 50 s)", s["gh"].count("state,mergeCommit") == 6 and s["sleeps"] == ["10"] * 5, (s["gh"], s["sleeps"]))
-check("still open: the branch is left alone", not refchecks(s) and not deletes(s), s["gh"])
-check("still open: the red report goes as before, with no --release (delivered to the keeper)",
-      s["msg"].rstrip("\n").endswith("| --sender | release") and "--release" not in s["msg"], s["msg"])
+# ---- 4. leaving the queue without merging, and the other ways the wait ends badly: nothing is deployed, the failure names the reason
+s = scenario("removed", merge="ok", gq="queued,open,open", gq_reason="The merge group failed its required checks: suites (shard 2/4)", branch="present")
+check("removed from the queue: exits 1, FAILED at merge queue with GitHub's reason, nothing deployed, the branch left alone",
+      s["rc"] == 1 and not s["deployed"] and "PR #23 FAILED at merge queue: removed from the merge queue: The merge group failed its required checks: suites (shard 2/4)" in s["msg"]
+      and not refchecks(s) and not deletes(s) and "merged and deployed" not in s["msg"], (s["msg"], s["out"]))
+check("removed: believed on the second read (10 s after the first), the reason read once, the red report goes without --release", s["sleeps"] == ["60", "10"] and s["gq_reads"] == 3 and s["gq_reason_reads"] == 1
+      and "--release" not in s["msg"] and "removed from the merge queue: The merge group" in s["log"], (s["sleeps"], s["gq_reads"], s["gq_reason_reads"]))
+s = scenario("removed-flap", merge="ok", gq="queued,open,merged")
+check("the entry vanishes a moment before the PR shows merged: not a removal, deployed", s["rc"] == 0 and s["deployed"] and "FAILED" not in s["log"] and s["sleeps"] == ["60", "10"], (s["log"], s["sleeps"]))
+s = scenario("removed-noreason", merge="ok", gq="queued,open,open", gq_reason="none")
+check("removed and the timeline has no event yet: three tries 10 s apart, then FAILED at merge queue saying GitHub gives no reason",
+      s["rc"] == 1 and not s["deployed"] and "PR #23 FAILED at merge queue: left the merge queue, and GitHub's timeline gives no reason (no removal event)" in s["msg"] and s["gq_reason_reads"] == 3, (s["msg"], s["gq_reason_reads"]))
+s = scenario("removed-reason-late", merge="ok", gq="queued,open,open", gq_reason="fail")
+check("the timeline cannot be read: the same, the failure is still the removal", s["rc"] == 1 and "FAILED at merge queue: left the merge queue" in s["msg"] and s["gq_reason_reads"] == 3, (s["msg"], s["gq_reason_reads"]))
+s = scenario("removed-words", merge="ok", gq="queued,open,open", gq_reason="the run FAILED and then done: nothing")
+check("GitHub's words cannot fake a log waiter's markers (' FAILED ', ' done: ') in the log", s["rc"] == 1 and "removed from the merge queue: the run failed and then done nothing" in s["log"], s["log"])
+s = scenario("never-shows", merge="ok", gq="open", gq_reason="none")
+check("accepted but never shown in the queue and not merged: read every 10 s for the 3 min of grace, then FAILED at merge queue naming it",
+      s["rc"] == 1 and not s["deployed"] and "PR #23 FAILED at merge queue: the PR did not show in the merge queue within 3 min of the enqueue call and is not merged" in s["msg"] and s["sleeps"][:3] == ["10", "10", "10"], (s["msg"], s["sleeps"][:4]))
+s = scenario("never-shows-removed", merge="ok", gq="open", gq_reason="the PR conflicts with main")
+check("never shown, and the timeline names a removal: that reason", s["rc"] == 1 and "FAILED at merge queue: removed from the merge queue: the PR conflicts with main" in s["msg"], s["msg"])
+s = scenario("closed", merge="ok", gq="queued,closed")
+check("closed while it waited: FAILED at pr state, nothing deployed", s["rc"] == 1 and not s["deployed"] and "PR #23 FAILED at pr state: the PR was closed while it waited for the merge queue" in s["msg"], s["msg"])
+s = scenario("wait-limit", merge="ok", gq="queued", extra={"RELEASE_QUEUE_WAIT": "300"})
+check("still in the queue at the limit: FAILED at merge queue naming the limit, saying the PR may still merge; five sleeps of 60 s; nothing deployed",
+      s["rc"] == 1 and not s["deployed"] and s["sleeps"] == ["60"] * 5 and "PR #23 FAILED at merge queue: still in the merge queue (QUEUED position 1) 5 min after the enqueue, which is as long as this release waits; the PR may still merge" in s["msg"], (s["msg"], s["sleeps"]))
+s = scenario("wait-default", merge="ok", gq="queued,merged")
+check("the default limit is 3 h and the default read every 60 s (the log line names both)", "up to 180 min; reading it every 60 s" in s["log"], s["log"])
+s = scenario("unreadable", merge="ok", gq="fail,fail,queued,merged")
+check("GitHub's answer cannot be read twice: waited out like a pending one every 10 s, then the wait goes on; one log line, not one per read",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["10", "10"] and s["log"].count("could not be read") == 1, (s["sleeps"], s["log"]))
+s = scenario("garbage", merge="ok", gq="garbage,merged")
+check("an answer that is not JSON counts as unreadable", s["rc"] == 0 and s["deployed"] and s["sleeps"][:1] == ["10"], (s["sleeps"], s["out"]))
+s = scenario("unreadable-forever", merge="ok", gq="fail", extra={"RELEASE_QUEUE_WAIT": "120"})
+check("never readable: FAILED at merge queue after the limit, not a hang", s["rc"] == 1 and "FAILED at merge queue: still not merged 2 min after the enqueue" in s["msg"], (s["msg"], s["sleeps"]))
 
-# ---- 7. --recycle: a green release whose recycle is marked stays green; one whose recycle could not be asked for is delivered
+# ---- 5. a conflict that is only the generated tool-text snapshot: mended once (before the enqueue, or after a removal for a conflict), the PR's tests waited for on the new head, enqueued again
+rg = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-regenstub-")); dirs.append(rg)
+REGEN_STUB = rg / "snapshot_regen.py"
+REGEN_STUB.write_text('''import os, sys
+d = os.environ["RT_DIR"]
+open(d + "/regen.log", "a").write(" ".join(sys.argv[1:]) + "\\n")
+print("snapshot_regen: stub details on stderr", file=sys.stderr)
+print(os.environ.get("RT_REGEN", "declined: no answer"))
+sys.exit(0 if os.environ.get("RT_REGEN", "").startswith("pushed ") else 1)
+''')
+RGX = {"RELEASE_SNAPSHOT_REGEN": str(REGEN_STUB)}
+def regen_calls(s): return (s["dir"] / "regen.log").read_text().splitlines() if (s["dir"] / "regen.log").exists() else []
+ENQ_H1 = f"pr merge 23 --repo {R} --merge --match-head-commit {H1}"
+# the first look says CONFLICTING: the helper is asked, GitHub is read again (every 10 s) until the head moved and it has recomputed, the PR's tests on the new head are waited for, then it is enqueued
+s = scenario("regen-first", merge="ok", mergeable="CONFLICTING,UNKNOWN,MERGEABLE", prheads=f"{HEADSHA},{H1},{H1}", regen=f"pushed {H1}", checks="pass,pending,pass", extra=RGX)
+check("CONFLICTING at the first look and the helper pushes a merge: the helper ran once with the repo, the PR's branch and the head it was given, then the PR's tests on the new head, then the enqueue on the new head",
+      s["rc"] == 0 and s["deployed"] and regen_calls(s) == [f"--repo {s['dir']}/box --branch=agent/topic --head {HEADSHA}"] and enqueues(s) == [ENQ_H1] and "FAILED" not in s["log"] and not red(s)
+      and at(s["log"], "the PR conflicts with main; looking for a conflict in tests/tool_text.snapshot.json alone (regeneration 1 of 1)",
+             f"the only conflicted path was tests/tool_text.snapshot.json: took main's, regenerated it (tool_text.py update, check passed), and pushed the merge {H1} to agent/topic",
+             "mergeable: after the snapshot regeneration GitHub says MERGEABLE (head d00d100)", "the PR's tests pass on the pushed head d00d100", "enqueued: gh pr merge accepted the head d00d100"), (s["rc"], regen_calls(s), s["log"], s["gh"]))
+check("the regeneration costs no GitHub call of its own: only pr, api and run calls, no update-branch", all(l.split()[0] in ("pr", "api", "run") for l in gl(s)) and "update-branch" not in s["gh"] and "snapshot" not in s["gh"], s["gh"])
+check("the helper's details (its stderr) reach the log", "snapshot_regen: stub details on stderr" in s["log"], s["log"])
+s = scenario("regen-first-quiet", merge="ok", mergeable="CONFLICTING,UNKNOWN,MERGEABLE", prheads=f"{HEADSHA},{H1},{H1}", regen=f"pushed {H1}", checks="lint,lint,pass", extra=RGX)
+check("a quick check alone (lint) is not a pass on the regenerated head: waits until the tests job passed, then enqueues", s["rc"] == 0 and s["deployed"] and enqueues(s) == [ENQ_H1] and s["gh"].count("pr checks") >= 3, (s["rc"], s["log"]))
+s = scenario("regen-first-still", merge="ok", mergeable="CONFLICTING", prheads=f"{HEADSHA},{H1}", regen=f"pushed {H1}", extra=RGX)
+check("pushed, but GitHub still says CONFLICTING after the time it is given: FAILED at mergeable, nothing enqueued", s["rc"] == 1 and not enqueues(s) and "FAILED at mergeable: GitHub says CONFLICTING" in s["log"], (s["rc"], s["log"]))
+s = scenario("regen-declined", merge="ok", mergeable="CONFLICTING", regen="declined: the conflict is not only the snapshot: src/server.py", extra=RGX)
+check("CONFLICTING and the helper declines: the failure is the one of a conflict without the helper (same words, red report, nothing enqueued), the helper's reason in the log",
+      s["rc"] == 1 and "PR #23 FAILED at mergeable: GitHub says CONFLICTING: the PR has a conflict with main" in s["msg"] and not enqueues(s) and len(regen_calls(s)) == 1
+      and "the snapshot is not regenerated: declined: the conflict is not only the snapshot: src/server.py" in s["log"] and s["sleeps"] == [], (s["rc"], s["log"]))
+s = scenario("regen-nohelper", merge="ok", mergeable="CONFLICTING")
+check("CONFLICTING and no helper file (a checkout from before it): the same failure, the log says so", s["rc"] == 1 and "FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and "snapshot_regen.py is missing" in s["log"], (s["rc"], s["log"]))
+s = scenario("regen-cross", merge="ok", mergeable="CONFLICTING", cross="1", regen=f"pushed {H1}", extra=RGX)
+check("a cross-repository PR is never pushed to: the helper is not run, the failure is the old one", s["rc"] == 1 and "FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and not regen_calls(s) and "cross-repository True" in s["log"], (s["rc"], s["log"]))
+s = scenario("regen-nofetch", merge="ok", mergeable="CONFLICTING", prfetch_fail="1", regen=f"pushed {H1}", extra=RGX)
+check("the fetch of main and the PR head fails: the helper is not run, the failure is the old one", s["rc"] == 1 and "FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and not regen_calls(s) and "cannot fetch main and the PR head from origin" in s["log"], (s["rc"], s["log"]))
+# removed from the queue for a conflict that is only the snapshot (main moved while the PR waited): mended, tests on the new head, enqueued again, and merged by the second round
+s = scenario("regen-removed", merge="ok", gq="queued,open,open,queued,merged", gq_reason="a merge conflict with main", mergeable="MERGEABLE,CONFLICTING,MERGEABLE", prheads=f"{HEADSHA},{HEADSHA},{H1}",
+             regen=f"pushed {H1}", checks="pass,pass,pending,pass", extra=RGX)
+check("removed from the queue and the PR now conflicts only on the snapshot: mended, the PR's tests waited for on the new head, enqueued again on that head, merged, deployed",
+      s["rc"] == 0 and s["deployed"] and enqueues(s) == [ENQUEUE, ENQ_H1] and len(regen_calls(s)) == 1 and "FAILED" not in s["log"] and not red(s)
+      and at(s["log"], "removed from the merge queue: a merge conflict with main", "the PR conflicts with main; looking for a conflict in tests/tool_text.snapshot.json alone (regeneration 1 of 1)",
+             "the PR's tests pass on the regenerated head d00d100", "enqueueing the PR again on the regenerated head d00d100", "enqueued: gh pr merge accepted the head d00d100", "merged by the merge queue as 0106c0d"), (s["rc"], s["log"], enqueues(s)))
+s = scenario("regen-removed-declined", merge="ok", gq="queued,open,open", gq_reason="a merge conflict with main", mergeable="MERGEABLE,CONFLICTING", regen="declined: the conflict is not only the snapshot: src/server.py", extra=RGX)
+check("removed for a conflict the helper declines: FAILED at merge queue with GitHub's reason and the conflict, nothing deployed",
+      s["rc"] == 1 and not s["deployed"] and "FAILED at merge queue: removed from the merge queue: a merge conflict with main; GitHub says CONFLICTING: the PR has a conflict with main" in s["msg"] and len(enqueues(s)) == 1, (s["msg"], s["log"]))
+s = scenario("regen-removed-bound", merge="ok", gq="queued,open,open,queued,open,open", gq_reason="a merge conflict with main", mergeable="MERGEABLE,CONFLICTING,MERGEABLE,CONFLICTING",
+             prheads=f"{HEADSHA},{HEADSHA},{H1},{H1}", regen=f"pushed {H1}", extra=RGX)
+check("removed for a conflict a second time: the helper is not asked again (once per release), FAILED at merge queue naming the bound",
+      s["rc"] == 1 and len(regen_calls(s)) == 1 and len(enqueues(s)) == 2 and "was regenerated 1 time(s) in this release already (RELEASE_REGEN_MAX=1); not again" in s["log"] and "FAILED at merge queue" in s["msg"], (s["rc"], s["log"]))
+s = scenario("regen-removed-checks-fail", merge="ok", gq="queued,open,open", gq_reason="a merge conflict with main", mergeable="MERGEABLE,CONFLICTING,MERGEABLE", prheads=f"{HEADSHA},{HEADSHA},{H1}",
+             regen=f"pushed {H1}", checks="pass,fail", extra=RGX)
+check("the PR's tests fail on the regenerated head: FAILED at pr tests, no second enqueue", s["rc"] == 1 and "FAILED at pr tests: a check failed: suites=fail" in s["msg"] and len(enqueues(s)) == 1, (s["rc"], s["msg"]))
+s = scenario("regen-removed-nothing", merge="ok", gq="queued,open,open", gq_reason="the merge group failed its checks", mergeable="MERGEABLE", extra=RGX, regen=f"pushed {H1}")
+check("removed for a failed check and the PR is mergeable: the helper is not asked, FAILED at merge queue with the reason", s["rc"] == 1 and not regen_calls(s) and "FAILED at merge queue: removed from the merge queue: the merge group failed its checks" in s["msg"], (s["rc"], s["msg"]))
+s = scenario("regen-removed-closed", merge="ok", gq="queued,open,open", gq_reason="closed", viewstate="OPEN,CLOSED")
+check("removed and the PR was closed meanwhile: FAILED at pr state naming the reason", s["rc"] == 1 and "FAILED at pr state: removed from the merge queue: closed; the PR is CLOSED" in s["msg"], s["msg"])
+
+# ---- 6. --recycle: a green release whose recycle is marked stays green; one whose recycle could not be asked for is delivered
 s = scenario("recycle", args=("--recycle",), merge="ok")
 msg = [l for l in s["msg"].splitlines() if l.startswith("message |")]
 check("recycle marked: green, with --release green", s["rc"] == 0 and len(msg) == 1 and msg[0].endswith(GREEN_ARGS) and "recycle-due | --pr" in s["msg"], s["msg"])
@@ -191,39 +237,40 @@ msg = [l for l in s["msg"].splitlines() if l.startswith("message |")]
 check("recycle NOT marked with no [fleet] recycle_when_idle: the same report, and no fleet command is run",
       s["rc"] == 0 and len(msg) == 1 and "recycle NOT marked" in msg[0] and not s["dir"].joinpath("sala.log").exists(), s["msg"])
 
-
-# ---- 8. every merge is pinned to the head commit that was read, and the lock does not reach gh
+# ---- 7. every enqueue is pinned to the head commit that was read, and the lock does not reach gh
 for nm, args, kw in (("pin-normal", (), {}), ("pin-recycle", ("--recycle",), {}), ("pin-other-head", (), {"head": "0123456789abcdef0123456789abcdef01234567"})):
     s = scenario(nm, args=args, merge="ok", **kw)
     want = kw.get("head", HEADSHA)
-    check(f"{nm}: gh pr merge is pinned to the head it read (--match-head-commit {want[:7]})",
-          s["rc"] == 0 and f"pr merge 23 --repo example-owner/stackshot --merge --match-head-commit {want}" in s["gh"].splitlines(), s["gh"])
+    check(f"{nm}: gh pr merge is pinned to the head it read (--match-head-commit {want[:7]})", s["rc"] == 0 and f"pr merge 23 --repo {R} --merge --match-head-commit {want}" in gl(s), s["gh"])
     check(f"{nm}: gh pr merge gets no fd 9", s["merge_fd9"] == "closed", s["merge_fd9"])
-s = scenario("pin-moved", merge="fail", after="open")
-check("the head moved after the read (the pinned merge is refused): never deploys, FAILED at merge", s["rc"] == 1 and not s["deployed"] and "FAILED at merge" in s["msg"], s["msg"])
-
+s = scenario("pin-moved", merge="fail", gq="open")
+check("the head moved after the read (the pinned enqueue is refused): never deploys, FAILED at merge", s["rc"] == 1 and not s["deployed"] and "FAILED at merge" in s["msg"], s["msg"])
 s = scenario("lock-closed-after-deploy", args=("--recycle",), merge="ok", recycle_due="fail", idle="sala recycle --when-idle")
 check("lock: no child after the deploy (recycle, idle recycle, report) inherits fd 9", s["rc"] == 0 and s["client_fd9"] and set(s["client_fd9"]) == {"closed"}, s["client_fd9"])
 s = scenario("lock-closed-deploy-fails", merge="ok", deploy_fail="1")
 check("lock: a failed deploy releases the lock before the failure report", s["rc"] == 1 and "FAILED at deploy" in s["msg"] and s["client_fd9"] == ["closed"], (s["msg"], s["client_fd9"]))
 
-# ---- 8b. mergeable UNKNOWN (GitHub recomputes after main moves): read again every 10 s for up to 3 min
+# ---- 8. mergeable UNKNOWN (GitHub recomputes after main moves): read again every 10 s for up to 3 min
 s = scenario("mergeable-unknown-then-ok", merge="ok", mergeable="UNKNOWN,UNKNOWN,MERGEABLE")
-check("mergeable UNKNOWN then MERGEABLE: goes on, merges and deploys, reports green", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and "FAILED" not in s["msg"], (s["out"], s["msg"]))
+check("mergeable UNKNOWN then MERGEABLE: goes on, enqueues and deploys, reports green", s["rc"] == 0 and s["deployed"] and "merged and deployed" in s["msg"] and "FAILED" not in s["msg"], (s["out"], s["msg"]))
 check("mergeable UNKNOWN then MERGEABLE: one line says it waits, three reads, two 10 s sleeps",
       s["log"].count("mergeable UNKNOWN") == 1 and "every 10 s for up to 3 min" in s["log"] and s["gh"].count("state,mergeable") == 3 and s["sleeps"][:2] == ["10", "10"], (s["log"], s["sleeps"]))
 s = scenario("mergeable-unknown-throughout", merge="ok", mergeable="UNKNOWN")
-check("mergeable UNKNOWN throughout: exits 1, FAILED at mergeable naming UNKNOWN and the time, nothing merged, nothing deployed",
-      s["rc"] == 1 and "PR #23 FAILED at mergeable: GitHub still says UNKNOWN after 3 min" in s["msg"] and not merges(s) and not s["deployed"], (s["msg"], s["out"]))
-check("mergeable UNKNOWN throughout: 19 reads over 18 sleeps of 10 s (3 min), the wait logged once",
-      s["gh"].count("state,mergeable") == 19 and s["sleeps"] == ["10"] * 18 and s["log"].count("mergeable UNKNOWN") == 1, (s["gh"].count("state,mergeable"), s["sleeps"]))
+check("mergeable UNKNOWN throughout: exits 1, FAILED at mergeable naming UNKNOWN and the time, nothing enqueued, nothing deployed",
+      s["rc"] == 1 and "PR #23 FAILED at mergeable: GitHub still says UNKNOWN after 3 min" in s["msg"] and not enqueues(s) and not s["deployed"], (s["msg"], s["out"]))
+check("mergeable UNKNOWN throughout: 19 reads over 18 sleeps of 10 s (3 min), the wait logged once", s["gh"].count("state,mergeable") == 19 and s["sleeps"] == ["10"] * 18 and s["log"].count("mergeable UNKNOWN") == 1, (s["gh"].count("state,mergeable"), s["sleeps"]))
 s = scenario("mergeable-conflicting", merge="ok", mergeable="CONFLICTING")
-check("mergeable CONFLICTING: fails at once at mergeable naming CONFLICTING, no wait, nothing merged",
+check("mergeable CONFLICTING: fails at once at mergeable naming CONFLICTING, no wait, nothing enqueued",
       s["rc"] == 1 and "PR #23 FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and s["gh"].count("state,mergeable") == 1 and not s["sleeps"]
-      and "mergeable UNKNOWN" not in s["log"] and not merges(s) and not s["deployed"], (s["msg"], s["sleeps"]))
+      and "mergeable UNKNOWN" not in s["log"] and not enqueues(s) and not s["deployed"], (s["msg"], s["sleeps"]))
 s = scenario("mergeable-conflicting-after-unknown", merge="ok", mergeable="UNKNOWN,CONFLICTING")
-check("mergeable UNKNOWN then CONFLICTING: fails at mergeable as soon as it reads CONFLICTING",
-      s["rc"] == 1 and "FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and s["gh"].count("state,mergeable") == 2 and s["sleeps"] == ["10"], (s["msg"], s["sleeps"]))
+check("mergeable UNKNOWN then CONFLICTING: fails at mergeable as soon as it reads CONFLICTING", s["rc"] == 1 and "FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and s["gh"].count("state,mergeable") == 2 and s["sleeps"] == ["10"], (s["msg"], s["sleeps"]))
+s = scenario("pr-closed", merge="ok", viewstate="CLOSED")
+check("a PR closed before the release starts: FAILED at pr state, nothing enqueued", s["rc"] == 1 and "FAILED at pr state: the PR is CLOSED" in s["msg"] and not enqueues(s), s["msg"])
+s = scenario("checks-fail", merge="ok", checks="fail")
+check("a failed check: FAILED at checks before any enqueue", s["rc"] == 1 and "FAILED at checks: a check failed: suites=fail" in s["msg"] and not enqueues(s), s["msg"])
+s = scenario("checks-pending", merge="ok", checks="pending,pending,pass")
+check("checks pending: the enqueue waits for them, polled every 20 s here", s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["20", "20"] and at(s["log"], "checks pass", "enqueued"), (s["sleeps"], s["log"]))
 
 # ---- 9. the front door: --quick is gone (docs-merge.sh covers it), and an unknown option is refused before any gh call
 for nm, args in (("front-quick", ("--quick",)), ("front-unknown-option", ("--fast",))):
@@ -231,18 +278,18 @@ for nm, args in (("front-quick", ("--quick",)), ("front-unknown-option", ("--fas
     check(f"{nm}: refused with exit 2 and the usage line, nothing called, nothing deployed, no message",
           s["rc"] == 2 and "usage: release.sh <pr> [--recycle | --no-recycle]" in s["out"] and not s["gh"] and not s["deployed"] and not s["msg"], (s["rc"], s["out"], s["gh"]))
 RULES = ("Run one plain `release.sh N` per command", "pr-N.log", "` done: ` or ` FAILED `", "run_in_background", "Never chain waiters", "refuses a loop of release.sh",
-         "behind main is brought up to date first (gh pr update-branch, a merge)", "main's full run never blocks a release")   # the new path
-check("front door: the usage line is followed by the rules for running it (one plain command, wait on the log, no chained waiters, auto mode and loops) and the path of a branch behind main",
+         "queue them: `release.sh queue N [N...]`", "the merge queue builds it on main's tip")
+check("front door: the usage line is followed by the rules for running it (one plain command, wait on the log, no chained waiters, auto mode and loops) and what happens to a branch behind main",
       all(t in s["out"] for t in RULES) and "set -uo pipefail" not in s["out"], s["out"])
 home = subprocess.run(["bash", os.path.join(STACK, "release.sh"), "--help"], capture_output=True, text=True)
-check("--help: exits 2, starts at the header, carries the same four rules and the steps, and stops before the code",
-      home.returncode == 2 and home.stdout.startswith("# release.sh") and all(t in home.stdout for t in RULES) and "4. ./deploy.sh pinned" in home.stdout
-      and "2a. BEHIND MAIN?" in home.stdout and "update.lock" in home.stdout and 'fails the release "update-branch"' in home.stdout
+check("--help: exits 2, starts at the header, carries the same rules and the steps, and stops before the code",
+      home.returncode == 2 and home.stdout.startswith("# release.sh") and all(t in home.stdout for t in RULES) and "3a. WAIT FOR THE MERGE" in home.stdout
+      and "4b. DEPLOY GATE" in home.stdout and "update.lock" not in home.stdout and "update-branch" not in home.stdout
       and "set -uo pipefail" not in home.stdout and "read_view" not in home.stdout, (home.returncode, home.stdout[:300]))
 # ---- 10. the deploy lock
 s = scenario("lock-held-by-release", merge="ok")
 check("lock: the deploy runs with the lock held by the release, fd 9 closed in it", s["rc"] == 0 and s["lock_during"] == "held" and s["fd9"] == "closed", (s["lock_during"], s["fd9"], s["out"]))
-check("lock: taken after the checks pass, before the merge", 0 <= s["log"].index("checks pass") < s["log"].index("deploy lock taken") < s["log"].index("merged"), s["log"])
+check("lock: taken after the checks pass and after GitHub has merged the PR (the waits for GitHub are outside it)", 0 <= s["log"].index("checks pass") < s["log"].index("merged as") < s["log"].index("deploy lock taken"), s["log"])
 lockfile = s["dir"] / "releases/deploy.lock"
 check("lock: the file is in the release state dir", lockfile.exists())
 if lockfile.exists():
@@ -251,8 +298,8 @@ if lockfile.exists():
     except OSError: freed = False
     lk.close(); check("lock: free again after the release", freed)
 s = scenario("lock-timeout", merge="ok", hold=True, extra={"DEPLOY_LOCK_WAIT": "1"})
-check("lock held elsewhere past the timeout: exits 1, FAILED at deploy lock, nothing merged, nothing deployed",
-      s["rc"] == 1 and "PR #23 FAILED at deploy lock: another deploy held the lock" in s["msg"] and not merges(s) and not s["deployed"], (s["msg"], s["out"]))
+check("lock held elsewhere past the timeout: exits 1, FAILED at deploy lock, merged and not deployed, nothing deployed",
+      s["rc"] == 1 and "PR #23 FAILED at deploy lock: another deploy held the lock" in s["msg"] and "merged, not deployed" in s["msg"] and len(merges(s)) == 1 and not s["deployed"], (s["msg"], s["out"]))
 check("lock held elsewhere: the log says it waits", "another release holds the deploy lock; waiting" in s["log"], s["log"])
 check("lock timeout: the red report is delivered (no --release)", "--release" not in s["msg"], s["msg"])
 s = scenario("lock-released-in-time", merge="ok", hold="until-waiting", extra={"DEPLOY_LOCK_WAIT": "30"})
@@ -354,23 +401,22 @@ check("the deploy lock is free while main's run is waited for, and held again fo
 s = scenario("main-moved", merge="ok", runs=TWO_RUNS, tips="0106c0de0106c0de0106c0de0106c0de0106c0de,0107c0de0107c0de0107c0de0107c0de0107c0de", main8="pending")
 check("main moves while the tip's run is going: the release is about its own merge, so its own passing run deploys it at once, pinned to the merge, never waiting for the new tip's run",
       s["rc"] == 0 and s["deployed"] and "main's tests pass at 0106c0d (run 7)" in s["log"] and not s["sleeps"] and s["deploy_to"] == "0106c0de0106c0de0106c0de0106c0de0106c0de", (s["log"], s["deploy_to"], s["sleeps"]))
-s = scenario("main-older-run", merge="ok", tips="0107c0de0107c0de0107c0de0107c0de0107c0de", extra={"RELEASE_WAIT_MAIN": "60", "RELEASE_CAP_MAIN": "60"})
+s = scenario("main-older-run", merge="ok", runs=json.dumps([{"databaseId": 6, "headSha": BASE}]), extra={"RELEASE_WAIT_MAIN": "60", "RELEASE_CAP_MAIN": "60"})
 check("only a run of an older commit (it does not contain the merge): never read as green for it; no run in time, merged and not deployed, both limits named",
       s["rc"] == 1 and not s["deployed"] and "run view 7" not in s["gh"]
-      and "no finished run on main covers 0107c0d after 1 min since the merge (the cap is 1 min) and 0 min since a covering run started (the limit is 1 min): merged, not deployed" in s["msg"]
-      and "merge-base --is-ancestor 0107c0de0107c0de0107c0de0107c0de0107c0de 0106c0de0106c0de0106c0de0106c0de0106c0de" in (s["dir"] / "git.log").read_text(), (s["msg"], s["gh"]))
+      and "no finished run on main covers 0106c0d after 1 min since the merge (the cap is 1 min) and 0 min since a covering run started (the limit is 1 min): merged, not deployed" in s["msg"]
+      and f"merge-base --is-ancestor {MERGE} {BASE}" in (s["dir"] / "git.log").read_text(), (s["msg"], s["gh"]))
 s = scenario("main-none", merge="ok", runs="[]", extra={"RELEASE_WAIT_MAIN": "60", "RELEASE_CAP_MAIN": "60"})
 check("no run on main shows up in time: fails at main's tests, merged and not deployed", s["rc"] == 1 and not s["deployed"]
       and "no finished run on main covers 0106c0d after 1 min since the merge (the cap is 1 min)" in s["msg"] and "merged, not deployed" in s["msg"] and s["sleeps"] == ["20"] * 3, (s["msg"], s["sleeps"]))
 check("no run on main in time: the lock is free after, and the red report got no fd 9", lock_free(s), s["client_fd9"])
 s = scenario("main-fetch-race", merge="ok", fetch_fails="2")
-check("main's fetch fails twice (racing another release's fetch in the checkout): waited out, git's error in the log, then deployed",
-      s["rc"] == 0 and s["deployed"] and s["log"].count("cannot fetch main from origin (error: fetching ref refs/remotes/origin/main failed: incorrect old value provided); trying again in 20 s") == 2
-      and s["sleeps"] == ["20", "20"] and s["deploy_to"] == "0106c0de0106c0de0106c0de0106c0de0106c0de", (s["log"], s["sleeps"]))
+check("main's fetch fails twice (racing another release's fetch in the checkout): retried after 2 s each, then deployed",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"] == ["2", "2"] and s["deploy_to"] == "0106c0de0106c0de0106c0de0106c0de0106c0de", (s["log"], s["sleeps"]))
 s = scenario("main-fetch-down", merge="ok", fetch_fails="999", extra={"RELEASE_WAIT_MAIN": "60"})
-check("main cannot be fetched for the whole wait: fails at main's tests with git's error, merged and not deployed, the lock free",
-      s["rc"] == 1 and not s["deployed"] and "FAILED at main's tests: cannot fetch main from origin for 1 min (error: fetching ref refs/remotes/origin/main failed: incorrect old value provided): merged, not deployed" in s["msg"]
-      and s["sleeps"] == ["20"] * 3 and lock_free(s), (s["msg"], s["sleeps"]))
+check("main cannot be fetched after the merge: three tries over two 2 s sleeps, then FAILED at deploy, merged and not deployed, the lock free",
+      s["rc"] == 1 and not s["deployed"] and "FAILED at deploy: the PR is merged as 0106c0d, but main cannot be fetched from origin to deploy it (merged, not deployed; ./deploy.sh by hand)" in s["msg"]
+      and s["sleeps"] == ["2", "2"] and lock_free(s), (s["msg"], s["sleeps"]))
 s = scenario("main-relock-timeout", merge="ok", grab=True, extra={"DEPLOY_LOCK_WAIT": "1"})
 check("main green, then the lock held elsewhere past the timeout: exits 1, FAILED at deploy lock, merged and not deployed, nothing deployed",
       s["rc"] == 1 and not s["deployed"] and merges(s) and "FAILED at deploy lock: another deploy held the lock" in s["msg"]
@@ -546,7 +592,7 @@ s = fast("fast-pass", merge="ok")
 check("up to date: deploys the merge commit at once, pinned to it, and main's run is read after the deploy, never before",
       s["rc"] == 0 and s["deploys"] == [MERGE] and s["order"] == [f"deploy:{MERGE}", "client:message", "run-view"], (s["rc"], s["deploys"], s["order"], s["out"]))
 check("up to date: the log says why, then that main's tests passed on the commit, after the done line",
-      "up to date: the PR head abc1234 contains main's tip ba5e000" in s["log"] and "deploying 0106c0d at once" in s["log"]
+      "merged as 0106c0d" in s["log"] and "deploying 0106c0d at once: the merge queue tested it on the tree it made; main's full run follows; 600d000 is the last good commit to go back to" in s["log"]
       and 0 <= s["log"].index("done: ") < s["log"].index("main's tests passed on 0106c0d (run 7)"), s["log"])
 check("up to date: one green report at the deploy, saying main's run follows",
       len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and "deployed at the merge" in s["msgs"][0] and "main's full run follows" in s["msgs"][0], s["msgs"])
@@ -560,7 +606,7 @@ check("up to date: the lock is never held across the wait for main's run (three 
       s["rc"] == 0 and lock_views(s) == ["free"] * 3 and s["sleeps"] == ["20", "20"] and s["order"][0] == f"deploy:{MERGE}", (lock_views(s), s["sleeps"], s["order"]))
 
 # main's run fails: rolled back to the last good commit, under the lock, reported red to the builder
-s = fast("fast-fail", merge="ok", main="fail", heads=f"{BASE},{MERGE}")
+s = fast("fast-fail", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}")
 check("up to date, main fails: deploys the merge, then rolls back to the last good commit (a rollback deploy), in that order",
       s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"]
       and s["order"] == [f"deploy:{MERGE}", "client:message", "run-view", f"deploy:{GOOD}", "client:message"], (s["rc"], s["deploys"], s["order"], s["out"]))
@@ -570,43 +616,43 @@ check("main fails: FAILED at main's tests: rolled back to the sha, red (no --rel
       and "--release" not in s["msgs"][1] and s["msgs"][1].endswith("| --sender | release"), s["msgs"])
 check("main fails: the report says main still holds the merge and that no recycle was flagged",
       "main still holds the failing merge, fix forward or revert it" in s["msgs"][1] and "no recycle was flagged" in s["msgs"][1], s["msgs"][1])
-s = fast("fast-fail-notice", merge="ok", main="fail", heads=f"{BASE},{MERGE}", pickfiles="next_rules.py", notice="notify")
+s = fast("fast-fail-notice", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="next_rules.py", notice="notify")
 check("main fails after a notice went out: the rollback report says in one line that the notice had gone out and is not taken back",
       "notice: sent" in s["msgs"][0] and len(s["notice"]) == 1 and "no recycle was flagged; a notice about this release had already gone out, and a rollback does not take it back" in red(s)[0], (s["notice"], s["msgs"]))
-s = fast("fast-fail-notice-unset", merge="ok", main="fail", heads=f"{BASE},{MERGE}", pickfiles="next_rules.py")
+s = fast("fast-fail-notice-unset", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="next_rules.py")
 check("main fails when no notice was sent (no command set): the rollback report does not claim one", "no recycle was flagged" in red(s)[0] and "a notice about this release" not in red(s)[0], red(s))
-s = fast("fast-fail-notice-failed", merge="ok", main="fail", heads=f"{BASE},{MERGE}", pickfiles="next_rules.py", notice="notify", notice_fail="1")
+s = fast("fast-fail-notice-failed", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="next_rules.py", notice="notify", notice_fail="1")
 check("main fails when the notice command failed: the rollback report does not claim a notice went out", "a notice about this release" not in red(s)[0], red(s))
-s = fast("fast-fail-mixed", merge="ok", main="fail", heads=f"{BASE},{MERGE}", pickfiles="client/hooks/session-start.sh,next_rules.py", notice="notify")
+s = fast("fast-fail-mixed", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", pickfiles="client/hooks/session-start.sh,next_rules.py", notice="notify")
 check("main fails after a recycle and a notice: the rollback report names both",
       "a recycle was already flagged for this PR's items before the failure" in red(s)[0] and "a notice about this release had already gone out" in red(s)[0], red(s))
 check("main fails: the last good record is unchanged", s["lastgood"] == GOOD, s["lastgood"])
 check("main fails: no item is settled (the server is never asked)", s["released"] == [] and "items of PR" not in s["log"], (s["released"], s["log"]))
-s = fast("fast-fail-several", merge="ok", main8="fail", runs=json.dumps([{"databaseId": 8, "headSha": LATER}]), heads=f"{BASE},{LATER}",
+s = fast("fast-fail-several", merge="ok", main8="fail", runs=json.dumps([{"databaseId": 8, "headSha": LATER}]), heads=f"{BASE},{BASE},{LATER}",
          covered="9aaaaaa Merge pull request #26 from x/y;0106c0d Merge pull request #23 from agent/topic;5ec0000 Merge pull request #25 from z")
 check("the failing run covers several merges since the last good commit: the report says so and names them",
       s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and "the failing run covers 3 merges since the last good commit 600d000" in red(s)[0]
       and "9aaaaaa Merge pull request #26" in red(s)[0] and "0106c0d Merge pull request #23" in red(s)[0] and "5ec0000 Merge pull request #25" in red(s)[0], (s["deploys"], s["msgs"]))
-s = fast("fast-fail-ontop", merge="ok", main="fail", heads=f"{BASE},{LATER}", removed="5ec0000 Merge pull request #35 from agent/other")
+s = fast("fast-fail-ontop", merge="ok", main="fail", heads=f"{BASE},{BASE},{LATER}", removed="5ec0000 Merge pull request #35 from agent/other")
 check("another release deployed a commit on top meanwhile (the live checkout still contains the failing one): rolled back, the report names what the rollback also removes",
       s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and "rolled back to 600d000" in red(s)[0]
       and "the rollback also takes out the other merges between 600d000 and the live checkout" in red(s)[0] and "5ec0000 Merge pull request #35" in red(s)[0], (s["deploys"], s["msgs"]))
-s = fast("fast-fail-newer-good", merge="ok", main="fail", heads=f"{BASE},{NEWER}", newgood=NEWER)
+s = fast("fast-fail-newer-good", merge="ok", main="fail", heads=f"{BASE},{BASE},{NEWER}", newgood=NEWER)
 check("a newer commit whose run on main passed is recorded and deployed meanwhile: never rolled back past it, said in the report, nothing deployed after the merge",
       s["rc"] == 1 and s["deploys"] == [MERGE] and "FAILED at main's tests" in red(s)[0] and "NOT rolled back, a newer commit whose run on main passed, 0107c0d, contains 0106c0d: never rolled back past a newer good commit" in red(s)[0]
       and "rolled back to" not in red(s)[0] and s["lastgood"] == NEWER and lock_free(s), (s["deploys"], s["msgs"], s["lastgood"]))
-s = fast("fast-fail-gone", merge="ok", main="fail", heads=f"{BASE},{GOOD}")
+s = fast("fast-fail-gone", merge="ok", main="fail", heads=f"{BASE},{BASE},{GOOD}")
 check("the live checkout no longer contains the failing commit (rolled back by hand, say): nothing to roll back, said in the report",
       s["rc"] == 1 and s["deploys"] == [MERGE] and "NOT rolled back, the live checkout (600d000) no longer contains 0106c0d" in red(s)[0], (s["deploys"], s["msgs"]))
-s = fast("fast-fail-rbfail", merge="ok", main="fail", heads=f"{BASE},{MERGE}", rollback_fail="1")
+s = fast("fast-fail-rbfail", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", rollback_fail="1")
 check("the rollback deploy itself fails: FAILED at rollback, naming the commit to go back to by hand; the lock is free",
       s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and "FAILED at rollback: main's tests failed on 0106c0d" in red(s)[0]
       and "rollback to 600d000 failed: rollback: healthz did not answer" in red(s)[0] and f"flock {s['lockfile']} env DEPLOY_ROLLBACK=1 DEPLOY_TO={GOOD} ./deploy.sh" in red(s)[0] and lock_free(s), (s["deploys"], s["msgs"]))
-s = fast("fast-fail-lock", merge="ok", main="fail", grab=True, grab_on="fail", heads=f"{BASE},{MERGE}", extra={"DEPLOY_LOCK_WAIT": "1"})
+s = fast("fast-fail-lock", merge="ok", main="fail", grab=True, grab_on="fail", heads=f"{BASE},{BASE},{MERGE}", extra={"DEPLOY_LOCK_WAIT": "1"})
 check("main fails but the lock is held elsewhere past the timeout: FAILED at deploy lock, nothing rolled back, the report says how to do it by hand",
       s["rc"] == 1 and s["deploys"] == [MERGE] and "FAILED at deploy lock: another deploy held the lock" in red(s)[0] and "nothing was rolled back; by hand, in " in red(s)[0]
       and f"flock {s['lockfile']} env DEPLOY_ROLLBACK=1 DEPLOY_TO={GOOD} ./deploy.sh (deploy.sh refuses a rollback unless the lock is held)" in red(s)[0], (s["deploys"], s["msgs"]))
-s = fast("fast-fail-recycle", args=("--recycle",), merge="ok", main="fail", heads=f"{BASE},{MERGE}")
+s = fast("fast-fail-recycle", args=("--recycle",), merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}")
 check("--recycle: the recycle step and the green report come right after the fast deploy, before main's run; the rollback report says a recycle was flagged",
       s["order"] == [f"deploy:{MERGE}", "client:recycle-due", "client:message", "run-view", f"deploy:{GOOD}", "client:message"]
       and "recycle: " in s["msgs"][0] and s["msgs"][0].endswith(GREEN_ARGS) and "a recycle was already flagged for this PR's items before the failure" in red(s)[0], (s["order"], s["msgs"]))
@@ -624,28 +670,32 @@ s = fast("fast-deploy-fail", merge="ok", deploy_fail="1")
 check("the fast deploy fails: FAILED at deploy as before, main's run is not waited for, no rollback", s["rc"] == 1 and s["deploys"] == [MERGE] and "FAILED at deploy" in red(s)[0]
       and "run-view" not in s["order"] and lock_free(s), (s["deploys"], s["order"], s["msgs"]))
 
-# the merge-call error path still works on the fast path
-s = fast("fast-a", merge="fail", after="merged", merged_from="2", branch="present")
-check("up to date, the merge call errors (504) and the PR reads MERGED on the second read: carries on, deploys the merge commit at once, reports the error, then main passes",
-      s["rc"] == 0 and s["deploys"] == [MERGE] and s["sleeps"] == ["10"] and "the merge call errored (HTTP 504: We couldn't respond to your request in time.) but the PR was merged at 0106c0d" in s["msgs"][0]
-      and "deployed at the merge" in s["msgs"][0] and "main's tests passed on 0106c0d" in s["log"] and deletes(s) == ["api -X DELETE repos/example-owner/stackshot/git/refs/heads/agent/topic"], (s["deploys"], s["sleeps"], s["msgs"]))
-s = fast("fast-open", merge="fail", after="open")
-check("up to date, the merge call errors and the PR stays open: FAILED at merge, nothing deployed, no main wait", s["rc"] == 1 and not s["deployed"] and "FAILED at merge" in red(s)[0] and "run-view" not in s["order"], (s["msgs"], s["order"]))
+# the gate is closed, or the live checkout already holds the merge
+s = fast("gate-diverged", merge="ok", heads=B2)
+check("(a) the live checkout holds a commit the merge does not (it is not an ancestor of the merge): the gate is closed, main's tests first, the reason in the log, no deploy at the merge",
+      s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "(a) the live checkout (ba5e200) is not an ancestor of the merge 0106c0d" in s["log"]
+      and "the deploy waits for main's tests" in s["log"] and "main's full run follows" not in s["msgs"][0] and s["released"] == [RELEASED_ARGS + MERGE], (s["order"], s["log"]))
+s = fast("gate-live", merge="ok", heads=NEWER)
+check("the live checkout already contains the merge (a later release deployed past it): nothing is deployed, the log and the report say \"already live\", the report is green, main's run is read and the pass recorded",
+      s["rc"] == 0 and not s["deployed"] and s["deploys"] == [] and s["order"] == ["client:message", "run-view"] and "already live: the live checkout (0107c0d) contains the merge 0106c0d" in s["log"]
+      and "done: 0106c0d, already live, restarted nothing" in s["log"] and len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and "merged and already live" in s["msgs"][0]
+      and "restarted: nothing" in s["msgs"][0] and "nothing was deployed here" in s["msgs"][0]
+      and "main's tests passed on 0106c0d (run 7)" in s["log"] and s["lastgood"] == MERGE and s["released"] == [RELEASED_ARGS + MERGE] and lock_free(s), (s["order"], s["log"], s["msgs"], s["lastgood"]))
+check("already live: the deploy lock was taken for the check and let go before the report, and no pending-verify record was written", s["lock_at_live"] and s["client_fd9"] and set(s["client_fd9"]) == {"closed"} and s["pending_files"] == [], (s["lock_at_live"], s["pending_files"]))
+s = fast("gate-live-fail", merge="ok", main="fail", heads=NEWER)
+check("already live and main's run for the merge fails: rolled back like any deploy at the merge (the live checkout contains the failing commit)",
+      s["rc"] == 1 and s["deploys"] == [f"rollback {GOOD}"] and "FAILED at main's tests: rolled back to 600d000" in red(s)[0], (s["deploys"], s["msgs"]))
 
-# not up to date, or anything the fast path cannot vouch for: the old path (main's run first), with the reason in the log
-# (a branch that is behind main is no longer a reason for the old path: release.sh brings it up to date first, section 13g; the old path is its fallback after 3 rounds)
-s = fast("fast-moved", merge="ok", p1="0ddba11000000000000000000000000000000000")
-check("main moved between the check and the merge (the merge commit's first parent is not the tip that was checked): the old path, the reason in the log",
-      s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "not deployed at the merge: main's tip 0106c0d is not the merge of ba5e000 and abc1234 (something else landed on main meanwhile)" in s["log"], (s["order"], s["log"]))
-s = fast("fast-prfetch", merge="ok", prfetch_fail="1")
-check("the PR head cannot be fetched (three tries, 2 s apart, before the lock and again under it): the old path, the reason in the log, and the branch is not updated (it is not known to be behind)",
-      s["rc"] == 0 and s["sleeps"] == ["2", "2", "2", "2"] and "update-branch" not in s["gh"]
-      and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "cannot fetch main and the PR head from origin" in s["log"], (s["sleeps"], s["order"], s["log"]))
-s = fast("fast-nobase", merge="ok", base="")
-check("main's tip cannot be read: the old path", s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "cannot read main's tip" in s["log"], (s["order"], s["log"]))
+# the merge call errors (a 504) and the PR is in the queue or merged: carries on, on the gate's path as on the other
+s = fast("fast-a", merge="fail", gq="queued,merged", branch="present")
+check("the enqueue call errors (504) and the PR reads queued: carries on, deploys the merge commit at once, reports the error, then main passes",
+      s["rc"] == 0 and s["deploys"] == [MERGE] and "the merge call errored (HTTP 504: We couldn't respond to your request in time.) but the PR was OPEN, in the merge queue (QUEUED position 1)" in s["msgs"][0]
+      and "deployed at the merge" in s["msgs"][0] and "main's tests passed on 0106c0d" in s["log"] and deletes(s) == [f"api -X DELETE repos/{R}/git/refs/heads/agent/topic"], (s["deploys"], s["sleeps"], s["msgs"]))
+s = fast("fast-open", merge="fail", gq="open")
+check("the enqueue call errors and the PR stays plainly open: FAILED at merge, nothing deployed, no main wait", s["rc"] == 1 and not s["deployed"] and "FAILED at merge" in red(s)[0] and "run-view" not in s["order"], (s["msgs"], s["order"]))
 
 # the last-good record: seeded on first use from the deployed HEAD when its main run passed; read for the rollback; written by a pass, never moved back
-s = fast("fast-seed", merge="ok", lastgood="", main="pass,fail", heads=f"{BASE},{MERGE}")
+s = fast("fast-seed", merge="ok", lastgood="", main="pass,fail", heads=f"{BASE},{BASE},{MERGE}")
 check("no record yet: seeded from the live HEAD (main's tip) when its run on main passed, and that record is what a failing main run rolls back to",
       s["rc"] == 1 and "seeded with the deployed ba5e000, whose run 7 on main passed" in s["log"] and s["deploys"] == [MERGE, f"rollback {BASE}"] and s["lastgood"] == BASE
       and "rolled back to ba5e000" in red(s)[0], (s["log"], s["deploys"], s["lastgood"]))
@@ -655,21 +705,14 @@ check("no record, and the live HEAD's run on main did not pass: nothing to roll 
 
 # ---- 13b. what the fast path may carry along (the coordinator's review): the live HEAD is main's tip (a), and no failed run since the last good commit (b);
 # a run still pending is no reason to wait, so back-to-back releases stay fast
-s = fast("fast-after-rollback", merge="ok", heads=GOOD)
-check("(a) after a rollback main still holds the failing commit and the live HEAD is behind it: an up-to-date PR is not deployed at the merge (it would redeploy the failing commit): the old path, the reason in the log",
-      s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "(a) the live checkout (600d000) is not at main's tip ba5e000" in s["log"]
-      and "main's full run follows" not in s["msgs"][0], (s["order"], s["log"]))
-s = fast("fast-swept-x", merge="ok", heads=GOOD, runs=json.dumps([{"databaseId": 6, "headSha": BASE}, {"databaseId": 7, "headSha": MERGE}]), main6="pending")
-check("(a) an old-path release X, merged and still waiting on its own run, is not swept in by another PR's deploy at the merge: the live HEAD is behind main's tip, so the old path, and only main's run for the PR's own tip is read",
-      s["rc"] == 0 and s["deploys"] == [MERGE] and "(a) the live checkout" in s["log"] and "run view 6" not in s["gh"] and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"], (s["gh"], s["order"], s["log"]))
 FAILED_SHA = "fa11ed0000000000000000000000000000000000"
 s = fast("fast-failed-run", merge="ok", range=FAILED_SHA, runs=json.dumps([{"databaseId": 5, "headSha": FAILED_SHA, "conclusion": "failure"}, {"databaseId": 7, "headSha": MERGE}]))
 check("(b) a commit between the last good one and main's tip has a FAILED run on main: the old path, the run named in the log",
-      s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and f"(b) a commit after the last good one (600d000) has a failed run on main (run 5 on {FAILED_SHA})" in s["log"], (s["order"], s["log"]))
+      s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and f"(c) a commit after the last good one (600d000) has a failed run on main (run 5 on {FAILED_SHA})" in s["log"], (s["order"], s["log"]))
 s = fast("fast-failed-run-outside", merge="ok", range="", runs=json.dumps([{"databaseId": 5, "headSha": FAILED_SHA, "conclusion": "failure"}, {"databaseId": 7, "headSha": MERGE}]))
 check("(b) a failed run on a commit outside last-good..main's tip does not matter: the fast path", s["rc"] == 0 and s["order"][0] == f"deploy:{MERGE}", (s["order"], s["log"]))
 s = fast("fast-runs-unreadable", merge="ok", runs="not json", extra={"RELEASE_WAIT_MAIN": "60", "RELEASE_CAP_MAIN": "60"})
-check("(b) GitHub's list of runs cannot be read: nothing can be vouched for, the old path", "(b) the runs on main since the last good commit 600d000 cannot be read" in s["log"] and not s["deploys"], (s["log"], s["deploys"]))
+check("(b) GitHub's list of runs cannot be read: nothing can be vouched for, the old path", "(c) the runs on main since the last good commit 600d000 cannot be read" in s["log"] and not s["deploys"], (s["log"], s["deploys"]))
 s = fast("fast-pending-base", merge="ok", range=BASE, runs=json.dumps([{"databaseId": 6, "headSha": BASE, "conclusion": None}, {"databaseId": 7, "headSha": MERGE}]))
 check("(b) main's tip has a run that is still pending (no conclusion yet): not a failure, the fast path", s["rc"] == 0 and s["order"][0] == f"deploy:{MERGE}", (s["order"], s["log"]))
 
@@ -678,7 +721,7 @@ pair2 = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-b2b-")); dirs.append(p
 lk2 = {"DEPLOY_LOCK_FILE": str(pair2 / "deploy.lock"), "RT_TRACE": str(pair2 / "trace"), "DEPLOY_LOCK_WAIT": "60"}
 res2 = {}
 ta = threading.Thread(target=lambda: res2.update(a=fast("b2b-a", merge="ok", extra={**lk2, "RT_VIEW_AFTER": str(pair2 / "b-deployed"), "RT_VIEWING_MARK": str(pair2 / "a-waits")})))
-tb = threading.Thread(target=lambda: res2.update(b=fast("b2b-b", merge="ok", head=NEWPR, base=MERGE, heads=MERGE, history=",".join([GOOD, BASE, MERGE, NEWPR, NEWER]), tips=NEWER,
+tb = threading.Thread(target=lambda: res2.update(b=fast("b2b-b", merge="ok", merge_oid=NEWER, head=NEWPR, base=MERGE, heads=MERGE, history=",".join([GOOD, BASE, MERGE, NEWPR, NEWER]), tips=NEWER,
                                                         range=MERGE, runs=json.dumps([{"databaseId": 8, "headSha": NEWER}]), extra={**lk2, "RT_DEPLOYED_MARK": str(pair2 / "b-deployed")})))
 ta.start()
 for _ in range(600):   # B starts only once A has deployed and waits on its run
@@ -688,7 +731,7 @@ tb.start(); ta.join(); tb.join()
 a, b = res2.get("a"), res2.get("b")
 check("two up-to-date PRs back to back, the first's run still pending: both deploy at the merge, A's before B's, A's run is read only after B has deployed; both green",
       a and b and a["rc"] == 0 and b["rc"] == 0 and a["deploys"] == [MERGE] and b["deploys"] == [NEWER] and a["order"] == [f"deploy:{MERGE}", "client:message", "run-view"]
-      and b["order"][0] == f"deploy:{NEWER}" and "up to date: the PR head b0b0000 contains main's tip 0106c0d, which is what is live" in b["log"] and "main's full run follows" in b["msgs"][0],
+      and b["order"][0] == f"deploy:{NEWER}" and "deploying 0107c0d at once" in b["log"] and "main's full run follows" in b["msgs"][0],
       (a and (a["order"], a["out"]), b and (b["order"], b["log"], b["out"])))
 
 # ---- 13c. the last-good record: read, compared and written under a lock; never overwritten when unreadable; a failed write is told
@@ -709,7 +752,7 @@ check("a record that cannot be written (its lock file is unusable here: a folder
       and any("could not write" in m and "is not recorded as the last good commit" in m and "--release" not in m for m in s["msgs"]), (s["rc"], s["msgs"]))
 
 # ---- 13d. a rollback and the releases it takes out; a cancelled run; the words of the report
-s = fast("fast-fail-ontop2", merge="ok", main="fail", heads=f"{BASE},{LATER}", removed="5ec0000 Merge pull request #35 from agent/other;0107c0d Merge pull request #37 from agent/more")
+s = fast("fast-fail-ontop2", merge="ok", main="fail", heads=f"{BASE},{BASE},{LATER}", removed="5ec0000 Merge pull request #35 from agent/other;0107c0d Merge pull request #37 from agent/more")
 check("a rollback takes out releases deployed on top: each one's PR gets its own red message, and a marker for its own run",
       s["rc"] == 1 and "PR #35 was rolled back with #23's failure" in "\n".join(s["msgs"]) and "PR #37 was rolled back with #23's failure" in "\n".join(s["msgs"])
       and "it is merged but not live; it goes live with the next release once main is fixed, or ./deploy.sh once main's tip run is green" in "\n".join(s["msgs"])
@@ -721,19 +764,19 @@ s = fast("fast-rolled-back-pass", merge="ok", marker="#26 (main's tests failed o
 check("a release rolled back by another's failure while it waited: its own run passes, and it says 'passed, but not live' (not green); the last-good record does not move, the marker is gone",
       s["rc"] == 0 and any("main's tests passed on 0106c0d, but it is not live (rolled back with #26 (main's tests failed on abc1234)); it goes live with the next release once main is fixed, or ./deploy.sh once main's tip run is green" in m and "--release" not in m for m in s["msgs"])
       and "but it is not live: rolled back with #26" in s["log"] and s["lastgood"] == GOOD and not (s["dir"] / "releases/pr-23.rolledback").exists(), (s["msgs"], s["lastgood"], s["log"]))
-s = fast("fast-rolled-back-fail", merge="ok", main="fail", marker="#26 (main's tests failed on abc1234)", heads=f"{BASE},{BASE}")
+s = fast("fast-rolled-back-fail", merge="ok", main="fail", marker="#26 (main's tests failed on abc1234)", heads=f"{BASE},{BASE},{BASE}")
 check("a release already rolled back by another's failure whose own run then fails: nothing more to roll back, and the report says it was rolled back with #26",
       s["rc"] == 1 and s["deploys"] == [MERGE] and "NOT rolled back, the live checkout (ba5e000) no longer contains 0106c0d: it was rolled back or reset already (rolled back with #26 (main's tests failed on abc1234))" in red(s)[0], (s["deploys"], s["msgs"]))
-s = fast("fast-cancelled", merge="ok", main7="cancelled", heads=f"{BASE},{MERGE}", extra={"RELEASE_CAP_MAIN": "60"})
+s = fast("fast-cancelled", merge="ok", main7="cancelled", heads=f"{BASE},{BASE},{MERGE}", extra={"RELEASE_CAP_MAIN": "60"})
 check("main's only run cancelled (after its job started, the job limit or by hand), after a deploy at the merge, no later run: waited for until the cap, then unknown: no rollback, a red report naming the cancelled run",
       s["rc"] == 1 and s["deploys"] == [MERGE] and s["sleeps"] == ["20"] * 3
       and "FAILED at main's tests: no finished run on main covers 0106c0d after 1 min since the merge (the cap is 1 min) and 0 min since a covering run started (the limit is 90 min); the run 7 on 0106c0d was cancelled and no later run covers 0106c0d" in red(s)[0]
       and "deployed at 0106c0d and NOT rolled back" in red(s)[0] and "rolled back to" not in red(s)[0], (s["deploys"], s["msgs"], s["sleeps"]))
-s = fast("fast-fail-words", merge="ok", main="fail", heads=f"{BASE},{MERGE}", newunits="units/stackshot-foo.timer.in,units/stackshot-foo.service.in,units/notes.md")
+s = fast("fast-fail-words", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}", newunits="units/stackshot-foo.timer.in,units/stackshot-foo.service.in,units/notes.md")
 check("the red rollback report says a rollback does not undo data or state changes, and names the unit and timer files the rolled-back commits added as left installed",
       s["rc"] == 1 and "a rollback does not undo data or state changes the rolled-back commits made" in red(s)[0]
       and "left installed: stackshot-foo.timer, stackshot-foo.service (the rolled-back commits added them), disable by hand if needed" in red(s)[0], red(s))
-s = fast("fast-fail-nounits", merge="ok", main="fail", heads=f"{BASE},{MERGE}")
+s = fast("fast-fail-nounits", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}")
 check("no unit added: the report has no 'left installed' part", "left installed" not in red(s)[0] and s["rc"] == 1, red(s))
 s = scenario("record-not-back", merge="ok", lastgood=NEWER, history=f"{MERGE},{NEWER}")
 check("a pass on an older commit than the record never moves it back", s["rc"] == 0 and s["lastgood"] == NEWER, s["lastgood"])
@@ -742,7 +785,7 @@ check("a pass on main writes the commit it passed on, one sha, atomically (no te
       and sorted(p.name for p in (s["dir"] / "releases").iterdir() if p.name.startswith("last-good")) == ["last-good", "last-good.lock"], s["lastgood"])
 
 # the removed releases come from the last good commit up to the live checkout, not from the failing merge up: releases deployed BEFORE it (their runs still waiting) go too
-s = fast("fast-removed-below", merge="ok", main="fail", heads=f"{BASE},{LATER}",
+s = fast("fast-removed-below", merge="ok", main="fail", heads=f"{BASE},{BASE},{LATER}",
          removed=f"9aaaaaa Merge pull request #26 from x/y;{MERGE} Merge pull request #23 from agent/topic;5ec0000 Merge pull request #35 from agent/other")
 allm = "\n".join(s["msgs"])
 check("a rollback also takes out a release deployed BEFORE the failing merge (its run still waiting): its PR gets the red message and a marker; the failing PR's own message is its report, not a second one",
@@ -759,20 +802,6 @@ s = fast("fast-chain-live", merge="ok", marker="#26 (stale)")
 check("(chain) the merge is in the live checkout, a stale marker notwithstanding: the pass counts, green as ever, the marker is removed",
       s["rc"] == 0 and s["lastgood"] == MERGE and not (s["dir"] / "releases/pr-23.rolledback").exists() and not any("not live" in m for m in s["msgs"]), (s["msgs"], s["lastgood"]))
 
-# (a) behind main's tip only by what docs-merge.sh merges without CI (docs, comments, runner settings): the fast path, the allow-list read from docs-merge.sh itself
-for fm in ("fake", "real"):
-    if fm == "real" and not os.path.exists(REAL_DM): continue
-    s = fast(f"fast-docs-{fm}", merge="ok", heads=f"{GOOD},{BASE}", docs=BASE, diff=MD, fm=fm)
-    check(f"(a, {fm} docs-merge.sh) the live checkout is behind main's tip only by a docs merge: the fast path, said in the log",
-          s["rc"] == 0 and s["order"][0] == f"deploy:{MERGE}" and "only by merges docs-merge.sh accepts" in s["log"] and "(a) the live checkout" not in s["log"], (s["order"], s["log"]))
-    s = fast(f"fast-code-{fm}", merge="ok", heads=f"{GOOD},{BASE}", docs=BASE, diff=CODE, fm=fm)
-    check(f"(a, {fm} docs-merge.sh) the commit in between changes code: the old path, the reason in the log",
-          s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "(a) the live checkout (600d000) is not at main's tip ba5e000" in s["log"], (s["order"], s["log"]))
-s = fast("fast-docs-nofm", merge="ok", heads=f"{GOOD},{BASE}", docs=BASE, diff=MD)
-check("(a) docs-merge.sh cannot be read: fails closed, the old path", s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "(a) the live checkout" in s["log"], (s["order"], s["log"]))
-s = fast("fast-docs-nocommits", merge="ok", heads=f"{GOOD},{BASE}", docs="", diff=MD, fm="fake")
-check("(a) the live checkout is not an ancestor-with-commits of main's tip (nothing to check): the old path", s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"], (s["order"], s["log"]))
-
 # (b) pages of runs until the last good commit's run; empty or crashed output is unreadable
 s = fast("fast-runs-page2", merge="ok", runs=json.dumps([{"databaseId": 7, "headSha": MERGE}]), noreach=True, runs_2=json.dumps([GOOD_RUN]))
 check("(b) the run list reaches the last good commit on its second page: read, the fast path", s["rc"] == 0 and s["order"][0] == f"deploy:{MERGE}" and "page=2" in s["gh"], (s["order"], s["log"]))
@@ -784,41 +813,13 @@ s = fast("fast-runs-crash", merge="ok", extra={"RT_GH_API_FAIL": "1"}, noreach=T
 check("(b) the call for the runs fails: unreadable, the old path", s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "cannot be read, or do not reach it" in s["log"], (s["order"], s["log"]))
 
 # a deploy replaces release.sh under the running script: nothing it appends is ever read (every arm ends in an explicit exit)
-for nm, kw in (("fast", dict(merge="ok")), ("old", dict(merge="ok", base=""))):
-    s = fast(f"exit-{nm}", clobber="1", **kw)
+for nm, mk in (("fast", fast), ("old", scenario)):
+    s = mk(f"exit-{nm}", clobber="1", merge="ok")
     check(f"({nm} path) release.sh replaced by the deploy: the running script reads nothing from the new bytes and exits cleanly", s["rc"] == 0 and not (s["dir"] / "stale-read").exists() and s["deployed"], (s["rc"], s["out"]))
 
-# ---- 13e. the third review
-QUOTED = MD + '\ndiff --git "a/\\353\\271\\204.py" "b/\\353\\271\\204.py"\nnew file mode 100644\n--- /dev/null\n+++ "b/\\353\\271\\204.py"\n@@ -0,0 +1 @@\n+x = 1'
-for fm in ("fake", "real"):
-    if fm == "real" and not os.path.exists(REAL_DM): continue
-    s = fast(f"fast-docs-quoted-{fm}", merge="ok", heads=f"{GOOD},{BASE}", docs=BASE, diff=QUOTED, fm=fm)
-    check(f"(a, {fm} docs-merge.sh) a docs file plus a code file with a quoted (non-ASCII) header: the checker's file count is short of the diff's, so the old path",
-          s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "(a) the live checkout (600d000) is not at main's tip" in s["log"], (s["order"], s["log"]))
-check("(a) the diff is read unquoted, with fixed prefixes, whatever the config says", "-c core.quotePath=false diff --no-color --no-ext-diff --no-renames --src-prefix=a/ --dst-prefix=b/" in s["git"], s["git"])
-s = fast("fast-docs-nosub", merge="ok", heads=f"{GOOD},{BASE}", docs=BASE, diff=MD, fm="nosub")
-check("(a) a checker that does not know diff-check exits 0 and says nothing: not trusted, the old path (its summary line must say files=N refused=0)",
-      s["rc"] == 0 and s["order"] == ["run-view", f"deploy:{MERGE}", "client:message"] and "(a) the live checkout" in s["log"], (s["order"], s["log"]))
-
-# the same function against a real repository and the real git: a non-ASCII code file is a file the checker sees (unquoted), a docs-only commit passes
-hd = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-docsonly-")); dirs.append(hd)
-repo = hd / "r"; g("init", "-q", "-b", "main", str(repo)); shas = []
-for n, files in enumerate((["README.md"], ["README.md", "例.py"], ["README.md"])):
-    for f in files: (repo / f).write_text(f"{n}\n")
-    g("add", "-A", cwd=repo); g("commit", "-qm", f"c{n}", cwd=repo); shas.append(g("rev-parse", "HEAD", cwd=repo))
-(hd / "fm.sh").write_text(FAKE_FM); (hd / "fm-nosub.sh").write_text(FAKE_FM_NOSUB)
-(hd / "h.sh").write_text('set -u\nREPO=x\neval "$(sed -n \'/^fm_pysrc() {/,/^fast_gate() {/p\' "$1" | sed \'$d\')"\ncd "$2"\ndocs_only_between "$3" "$4"\n')
-def dob(fmscript, a, b):
-    return subprocess.run(["bash", str(hd / "h.sh"), os.path.join(STACK, "release.sh"), str(repo), a, b], env={**genv, "DOCS_MERGE_SCRIPT": fmscript}, capture_output=True, text=True, timeout=60).returncode
-check("docs_only_between on a real repository: a commit adding a non-ASCII-named code file is not docs-only", dob(str(hd / "fm.sh"), shas[0], shas[1]) == 1)
-check("docs_only_between on a real repository: a commit that changes only README.md is docs-only", dob(str(hd / "fm.sh"), shas[1], shas[2]) == 0)
-check("docs_only_between on a real repository: a checker that does not know diff-check passes nothing", dob(str(hd / "fm-nosub.sh"), shas[1], shas[2]) == 1)
-if os.path.exists(REAL_DM):
-    check("docs_only_between on a real repository, the real docs-merge.sh: the non-ASCII code file is refused, README.md alone passes",
-          dob(REAL_DM, shas[0], shas[1]) == 1 and dob(REAL_DM, shas[1], shas[2]) == 0)
-
+# ---- 13e. the rollback, the live check and the pending-verify record
 # the rollback's lists are full shas (%H), never an abbreviation that lengthens with the repository
-s = fast("fast-removed-full", merge="ok", main="fail", heads=f"{BASE},{LATER}", removed=f"{MERGE} Merge pull request #23 from agent/topic;5ec0000 Merge pull request #35 from agent/other")
+s = fast("fast-removed-full", merge="ok", main="fail", heads=f"{BASE},{BASE},{LATER}", removed=f"{MERGE} Merge pull request #23 from agent/topic;5ec0000 Merge pull request #35 from agent/other")
 check("the rollback reads the merges between last-good and the live checkout as full shas (--format=%H) and names a PR other than the failing one by its short sha",
       "log --first-parent --reverse --format=%H %s" in s["git"] and "--format=%h" not in s["git"] and "PR #35 was rolled back" in "\n".join(s["msgs"]) and "PR #23 was rolled back" not in "\n".join(s["msgs"]), (s["git"], s["msgs"]))
 
@@ -832,7 +833,7 @@ check("the deploy lock not free in time at main's pass: not recorded as the last
 # failed_runs: a run cancelled after its job started is unknown, as run_state reads it; one cancelled while queued was replaced
 s = fast("fast-cancelled-run", merge="ok", range=FAILED_SHA, runs=json.dumps([{"databaseId": 5, "headSha": FAILED_SHA, "conclusion": "cancelled"}, {"databaseId": 7, "headSha": MERGE}]), main5="cancelled")
 check("(b) a run in the range cancelled after its job started is unknown, not clean: the old path, said in the log",
-      s["rc"] == 0 and "deploying 0106c0d at once" not in s["log"] and f"(b) a commit after the last good one (600d000) has a run on main cancelled after its job started (5 {FAILED_SHA}" in s["log"], (s["order"], s["log"]))
+      s["rc"] == 0 and "deploying 0106c0d at once" not in s["log"] and f"(c) a commit after the last good one (600d000) has a run on main cancelled after its job started (5 {FAILED_SHA}" in s["log"], (s["order"], s["log"]))
 s = fast("fast-replaced-run", merge="ok", range=FAILED_SHA, runs=json.dumps([{"databaseId": 5, "headSha": FAILED_SHA, "conclusion": "cancelled"}, {"databaseId": 7, "headSha": MERGE}]), main5="replaced")
 check("(b) a run in the range cancelled while queued (no step ran) was replaced by a newer run: not a reason, the fast path", s["rc"] == 0 and "deploying 0106c0d at once" in s["log"] and "not up to date" not in s["log"], (s["order"], s["log"]))
 
@@ -840,9 +841,9 @@ check("(b) a run in the range cancelled while queued (no step ran) was replaced 
 s = fast("pv-live", merge="ok")
 check("a fast deploy writes a pending-verify record, its lock held by the running release while it waits on main's run, and clears it when the run passes",
       s["rc"] == 0 and s["pending_at_view"] == ["pr-23:locked"] and s["pending_files"] == [], (s["pending_at_view"], s["pending_files"]))
-s = fast("pv-live-old", merge="ok", base="")
+s = scenario("pv-live-old", merge="ok")
 check("the old path writes none", s["rc"] == 0 and s["pending_at_view"] == [] and s["pending_files"] == [], (s["pending_at_view"], s["pending_files"]))
-s = fast("pv-live-fail", merge="ok", main="fail", heads=f"{BASE},{MERGE}")
+s = fast("pv-live-fail", merge="ok", main="fail", heads=f"{BASE},{BASE},{MERGE}")
 check("a failing run: the record is cleared once the rollback has been acted on", s["rc"] == 1 and s["deploys"] == [MERGE, f"rollback {GOOD}"] and s["pending_files"] == [], (s["pending_files"], s["deploys"]))
 
 # a stale record (its release process is gone) is looked at by the next release to start
@@ -859,7 +860,7 @@ check("a stale record whose commit's main run failed: rolled back as a live watc
       s["rc"] == 0 and s["deploys"][0] == f"rollback {GOOD}" and red(s) and "PR #26 FAILED at main's tests: rolled back to 600d000" in red(s)[0] and "the run on main for ba5e000 failed" in red(s)[0]
       and "whether a recycle was flagged for this PR is not known" in red(s)[0] and s["pending_files"] == [], (s["deploys"], s["msgs"], s["pending_files"]))
 check("…and the release that found it takes the old path (the fast path refused, the reason in the log) and deploys its own merge, pinned",
-      s["deploys"] == [f"rollback {GOOD}", MERGE] and "not up to date for a deploy at the merge: the deploy of PR #26 at ba5e000 failed main's run" in s["log"], (s["deploys"], s["log"]))
+      s["deploys"] == [f"rollback {GOOD}", MERGE] and "not deployed at the merge yet: the deploy of PR #26 at ba5e000 failed main's run" in s["log"], (s["deploys"], s["log"]))
 s = fast("pv-stale-unknown", merge="ok", runs=json.dumps([{"databaseId": 7, "headSha": MERGE}]), pending={"sha": NEWER, "pr": "26", "age": 3600 * 4})
 check("a stale record whose commit's main run cannot be found after the cap (3 h): a red report for that PR (look at it, not rolled back), the record gone, the fast path refused",
       s["rc"] == 0 and len(red(s)) == 1 and "PR #26 FAILED at main's tests: deployed at 0107c0d and NOT rolled back, main's run was not read" in red(s)[0] and s["pending_files"] == []
@@ -901,8 +902,8 @@ check("…and the next release to start reads that commit's main run first: a pa
       and s2["pending_files"] == [] and s2["lastgood"] == MERGE, (s2["log"], s2["pending_files"], s2["lastgood"]))
 sk = fast("pv-kill-f", merge="ok", kill_at=True)
 s2 = fast("pv-kill-f2", merge="ok", pr="25", reuse=sk, main7="pass,fail,pass", heads=MERGE)
-check("…a fail is a red report for the killed PR, a rollback to the last good commit, the record gone; the new release itself carries on (old path)",
-      s2["rc"] == 0 and s2["deploys"] == [MERGE, f"rollback {GOOD}", MERGE] and any("PR #23 FAILED at main's tests: rolled back to 600d000" in m for m in red(s2)) and s2["pending_files"] == [], (s2["deploys"], s2["msgs"], s2["pending_files"]))
+check("…a fail is a red report for the killed PR, a rollback to the last good commit, the record gone; the new release itself carries on",
+      s2["rc"] == 0 and s2["deploys"][:2] == [MERGE, f"rollback {GOOD}"] and any("PR #23 FAILED at main's tests: rolled back to 600d000" in m for m in red(s2)) and s2["pending_files"] == [], (s2["deploys"], s2["msgs"], s2["pending_files"]))
 
 # ---- 13f. the fourth review
 def reap(s):   # the background children a scenario started end by themselves; do not wait for them
@@ -915,7 +916,7 @@ check("the pending-verify record is written and locked BEFORE deploy.sh runs (pr
       s["rc"] == 0 and s["pending_at_deploy"] == ["pr-23:locked"] and s["fd7"] == "closed" and s["pending_files"] == [], (s["pending_at_deploy"], s["fd7"], s["pending_files"]))
 s = fast("pv-deploy-fails", merge="ok", deploy_fail="1")
 check("a fast deploy that fails is reported red there and its record is cleared (nothing to verify)", s["rc"] == 1 and s["pending_at_deploy"] == ["pr-23:locked"] and s["pending_files"] == [] and "FAILED at deploy" in s["log"], (s["pending_at_deploy"], s["pending_files"], s["log"]))
-s = fast("pv-old-nodeploy-record", merge="ok", base="")
+s = scenario("pv-old-nodeploy-record", merge="ok")
 check("the old path writes no record before its deploy either", s["rc"] == 0 and s["pending_at_deploy"] == [], s["pending_at_deploy"])
 
 # "none" is not a verdict
@@ -958,240 +959,6 @@ for _ in range(60 if lk else 0):
 if lk: lk.close()
 dl = lock_free(sk); reap(sk)
 check("…nor the pending-verify record's lock, after the release is killed (the children are alive: they started their own sessions)", len(sk["bgpids"]) >= 3 and lock_gone and dl, (sk["bgpids"], lock_gone, dl))
-
-# ---- 13g. a branch behind main (Oliver: main's full run never blocks a release). Before, a PR behind main fell to the old path and waited for main's full run
-# (a long wait), so in a burst only the first PR was fast. Now release.sh brings it up to date (gh pr update-branch, a merge), waits for the PR's own tests on the new head and
-# deploys at the merge; main having moved meanwhile is another round (3 at most, then the old path); a conflict or failing tests fail the release. One release at a time, under the update lock.
-
-# behind, update, the PR's tests pass, fast deploy
-s = fast("upd-pass", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,pending,pass")
-check("behind: update-branch (a merge, no --rebase), then the deploy at the merge, pinned to the new head, main's run read after the deploy",
-      s["rc"] == 0 and s["deploys"] == [MERGE] and s["order"] == ["update-branch", f"deploy:{MERGE}", "client:message", "run-view"]
-      and UPD_LINE in s["gh"].splitlines() and "--rebase" not in s["gh"]
-      and f"pr merge 23 --repo example-owner/stackshot --merge --match-head-commit {H1}" in s["gh"].splitlines(), (s["rc"], s["order"], s["gh"], s["out"]))
-check("behind: the PR's tests are polled every 20 s on the new head (one pending read), the log tells each step in order",
-      s["sleeps"] == ["20"] and at(s["log"], "checks pass", "update lock taken", "update-branch round 1 of 3: main's tip ba5e000 is not in the PR head abc1234",
-                                   "the PR head is now d00d100; waiting for the PR's tests on d00d100 (up to 50 min)", "waiting for the PR's tests on d00d100 (pending); 0 min of up to 50",
-                                   "the PR's tests pass on the updated head d00d100", "update-branch: the PR head d00d100 contains main's tip ba5e000", "deploy lock taken",
-                                   "up to date: the PR head d00d100 contains main's tip ba5e000, which is what is live", "deploying 0106c0d at once", "done: ", "main's tests passed on 0106c0d"), (s["sleeps"], s["log"]))
-check("behind: one green report at the deploy, naming the update and that main's run follows; the last good commit moves to the merge",
-      len(s["msgs"]) == 1 and s["msgs"][0].endswith(GREEN_ARGS) and "brought it up to date with update-branch (1 round(s))" in s["msgs"][0] and "main's full run follows" in s["msgs"][0]
-      and s["lastgood"] == MERGE, (s["msgs"], s["lastgood"]))
-check("behind: the update lock is taken before the deploy lock, the deploy ran under the deploy lock, and nothing holds either at the end",
-      s["lock_during"] == "held" and lock_free(s) and upd_lock_free(s) and s["log"].index("update lock taken") < s["log"].index("deploy lock taken"), (s["log"], s["lock_during"]))
-check("behind: the update lock is held while gh updates the branch and merges and is let go at the merge (free in the deploy); fd 5 is closed in gh (update-branch, merge), git and client.py",
-      s["ulock"] == ["held", "held", "free"] and s["upd_fd5"] == "closed" and s["merge_fd5"] == "closed" and s["git_fd5"] and set(s["git_fd5"]) == {"closed"}
-      and s["client_fd5"] and set(s["client_fd5"]) == {"closed"}, (s["ulock"], s["upd_fd5"], s["merge_fd5"], set(s["git_fd5"]), s["client_fd5"]))
-check("behind: the pass on the new head is confirmed in the check-runs of that very commit", f"api repos/example-owner/stackshot/commits/{H1}/check-runs?per_page=100" in s["gh"].splitlines(), s["gh"])
-s = fast("upd-pass-stale", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass", checkruns="none,none,pass")
-check("behind: gh pr checks says pass at once, but the tests job has no passed run on the new head yet (a pass read from the old head): pending, two polls, then the deploy",
-      s["rc"] == 0 and s["sleeps"] == ["20", "20"] and s["deploys"] == [MERGE] and s["gh"].count("/check-runs?per_page=100") == 3 and at(s["log"], "waiting for the PR's tests on d00d100 (pending)", "the PR's tests pass on the updated head d00d100"), (s["sleeps"], s["gh"], s["log"]))
-s = fast("upd-pass-quiet", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,lint,lint,pass")
-check("behind: a quick check alone on the new head is no verdict: the tests job (suites) must be reported, so the release waits (two more reads) before it merges",
-      s["rc"] == 0 and s["sleeps"] == ["20", "20"] and s["deploys"] == [MERGE] and s["gh"].count("pr checks") == 4, (s["sleeps"], s["gh"], s["log"]))
-
-# behind, update, main moves meanwhile (a merge from outside the lock), a second update, pass
-HIST_2 = ",".join([GOOD, HEADSHA, BASE, H1, B2, H2, *TAIL])
-s = fast("upd-moves", merge="ok", history=HIST_2, bases=f"{BASE},{BASE},{B2}", base=B2, heads=B2, prheads=f"{HEADSHA},{HEADSHA},{H1},{H2}", p2=H2)
-check("behind, main moves during the wait: updated again and waited for again (two rounds), then the fast deploy of the merge, pinned to the second head",
-      s["rc"] == 0 and s["gh"].count(UPD_LINE) == 2 and s["order"] == ["update-branch", "update-branch", f"deploy:{MERGE}", "client:message", "run-view"] and s["deploys"] == [MERGE]
-      and at(s["log"], "update-branch round 1 of 3: main's tip ba5e000", "update-branch round 2 of 3: main's tip ba5e200 is not in the PR head d00d100",
-             "the PR's tests pass on the updated head d00d200", "up to date: the PR head d00d200 contains main's tip ba5e200")
-      and f"--match-head-commit {H2}" in s["gh"] and "(2 round(s))" in s["msgs"][0], (s["order"], s["log"], s["gh"], s["out"]))
-
-# main moves during every round: three rounds, then the old path, the reason in the log
-HIST_3 = ",".join([GOOD, HEADSHA, BASE, H1, B2, H2, B3, H3, B4, *TAIL])
-s = fast("upd-3-rounds", merge="ok", history=HIST_3, bases=f"{BASE},{BASE},{B2},{B3},{B4}", base=B4, prheads=f"{HEADSHA},{HEADSHA},{H1},{H2},{H3}", p2=H3)
-check("main moves during each of 3 rounds: three update-branch calls and no fourth, then the old path (main's run first, then the deploy), the reason in the log",
-      s["rc"] == 0 and s["gh"].count(UPD_LINE) == 3 and s["order"] == ["update-branch"] * 3 + ["run-view", f"deploy:{MERGE}", "client:message"] and s["deploys"] == [MERGE]
-      and at(s["log"], "update-branch round 3 of 3", "update-branch: main moved again during each of 3 rounds and the branch is behind it still (main's tip ba5e400): the old path (main's run first)",
-             "not up to date for a deploy at the merge: the branch is behind main", "(the old path)", "merged", "main's tests pass at 0106c0d")
-      and f"--match-head-commit {H3}" in s["gh"], (s["order"], s["log"], s["gh"]))
-check("the 3 rounds then the old path: the report says the branch was updated but then main moved again during each of the rounds, it is not the fast path's, and the merge's pass is the last good commit",
-      len(s["msgs"]) == 1 and "brought up to date with update-branch (3 round(s)" in s["msgs"][0] and "but then main moved again during each of 3 rounds, so it took the old path" in s["msgs"][0]
-      and "main's full run follows" not in s["msgs"][0] and s["lastgood"] == MERGE and lock_free(s) and upd_lock_free(s), (s["msgs"], s["lastgood"]))
-
-# update-branch errors (a conflict): FAILED at update-branch, never the old path, nothing merged
-s = fast("upd-conflict", merge="ok", history=HIST_B, update="fail")
-check("update-branch conflicts: exit 1, FAILED at update-branch with GitHub's words, in the log and as the red report; nothing merged, nothing deployed, no fallback to the old path",
-      s["rc"] == 1 and "FAILED at update-branch: HTTP 422: merge conflict between base and head" in s["log"] and len(red(s)) == 1 and "FAILED at update-branch: HTTP 422: merge conflict between base and head" in red(s)[0]
-      and "--release" not in s["msgs"][0] and not merges(s) and not s["deployed"] and "run-view" not in s["order"] and s["gh"].count(UPD_LINE) == 1 and "the old path" not in s["log"]
-      and lock_free(s) and upd_lock_free(s), (s["rc"], s["msgs"], s["log"], s["gh"]))
-s = fast("upd-head-stuck", merge="ok", history=HIST_B)
-check("update-branch is accepted but the PR head never moves: FAILED at update-branch after 3 min of reads every 10 s, nothing merged",
-      s["rc"] == 1 and "FAILED at update-branch: update-branch was accepted but the PR head is still abc1234 after 3 min" in s["log"] and s["sleeps"] == ["10"] * 18 and not merges(s) and not s["deployed"], (s["sleeps"], s["log"]))
-
-# A conflict that is only the generated tool-text snapshot (section 13i): tools/snapshot_regen.py decides and pushes (stubbed here: its own test is snapshot_regen_scenario.py);
-# release.sh runs it where update-branch errors or GitHub says CONFLICTING, and goes back to the PR's tests on the new head. The stub answers RT_REGEN ("pushed <sha>" or "declined: <why>").
-rg = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-regenstub-")); dirs.append(rg)
-REGEN_STUB = rg / "snapshot_regen.py"
-REGEN_STUB.write_text('''import os, sys
-d = os.environ["RT_DIR"]
-import fcntl
-lf = open(os.environ.get("UPDATE_LOCK_FILE", d + "/releases/update.lock"), "a")
-try: fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB); fcntl.flock(lf, fcntl.LOCK_UN); lock = "free"
-except OSError: lock = "held"
-open(d + "/regen.log", "a").write(" ".join(sys.argv[1:]) + " | update lock " + lock + " | fd5 " + ("open" if os.path.lexists("/proc/%d/fd/5" % os.getpid()) else "closed") + "\\n")
-print("snapshot_regen: stub details on stderr", file=sys.stderr)
-print(os.environ.get("RT_REGEN", "declined: no answer"))
-sys.exit(0 if os.environ.get("RT_REGEN", "").startswith("pushed ") else 1)
-''')
-RGX = {"RELEASE_SNAPSHOT_REGEN": str(REGEN_STUB)}
-def regen_calls(s): return (s["dir"] / "regen.log").read_text().splitlines() if (s["dir"] / "regen.log").exists() else []
-s = fast("regen-update", merge="ok", history=HIST_1, update="fail", prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,pending,pass", regen=f"pushed {H1}", extra=RGX)
-check("update-branch conflicts but the helper pushes a merge: no FAILED, the helper ran once with the repo, the PR's branch and the head it was given, under the update lock with fd 5 closed in it; then the PR's tests on the new head and the fast deploy",
-      s["rc"] == 0 and s["deploys"] == [MERGE] and regen_calls(s) == [f"--repo {s['dir']}/box --branch=agent/topic --head {HEADSHA} | update lock held | fd5 closed"]
-      and s["gh"].count(UPD_LINE) == 1 and f"--match-head-commit {H1}" in s["gh"] and "FAILED" not in s["log"] and not red(s)
-      and at(s["log"], "update-branch round 1 of 3", "update-branch: the PR conflicts with main; looking for a conflict in tests/tool_text.snapshot.json alone (regeneration 1 of 2)",
-             f"update-branch: the only conflicted path was tests/tool_text.snapshot.json: took main's, regenerated it (tool_text.py update, check passed), and pushed the merge {H1} to agent/topic",
-             "the PR head is now d00d100; waiting for the PR's tests on d00d100", "the PR's tests pass on the updated head d00d100", "up to date: the PR head d00d100 contains main's tip ba5e000", "deploying 0106c0d at once")
-      and lock_free(s) and upd_lock_free(s), (s["rc"], regen_calls(s), s["log"], s["gh"]))
-check("the regeneration costs no GitHub call of its own: the gh calls are those of an ordinary update (one update-branch, the views and checks), nothing else",
-      all(l.split()[0] in ("pr", "api", "run") for l in s["gh"].splitlines()) and "snapshot" not in s["gh"] and s["gh"].count("pr update-branch") == 1, s["gh"])
-check("the helper's details (its stderr) reach the log", "snapshot_regen: stub details on stderr" in s["log"], s["log"])
-
-s = fast("regen-update-declined", merge="ok", history=HIST_B, update="fail", regen="declined: the conflict is not only the snapshot: src/server.py, tests/tool_text.snapshot.json", extra=RGX)
-check("update-branch conflicts and the helper declines (another path conflicts too): the failure is exactly the one of a conflict without the helper (same words, same exit, red report, nothing merged), with the helper's reason in the log",
-      s["rc"] == 1 and "FAILED at update-branch: HTTP 422: merge conflict between base and head; the branch could not be brought up to date, nothing was merged (a conflict with main is for the PR's author to resolve)" in s["log"]
-      and len(red(s)) == 1 and not merges(s) and not s["deployed"] and "run-view" not in s["order"] and s["gh"].count(UPD_LINE) == 1 and len(regen_calls(s)) == 1
-      and "update-branch: the snapshot is not regenerated: declined: the conflict is not only the snapshot: src/server.py, tests/tool_text.snapshot.json" in s["log"]
-      and lock_free(s) and upd_lock_free(s), (s["rc"], s["log"], s["msgs"]))
-s = fast("upd-conflict-nohelper", merge="ok", history=HIST_B, update="fail")
-check("update-branch conflicts and there is no helper file (a checkout from before it): the same failure, the log says so, nothing else changes",
-      s["rc"] == 1 and "FAILED at update-branch: HTTP 422: merge conflict between base and head; the branch could not be brought up to date" in s["log"] and "snapshot_regen.py is missing" in s["log"]
-      and not merges(s) and not s["deployed"] and s["gh"].count(UPD_LINE) == 1, (s["rc"], s["log"]))
-s = fast("regen-update-cross", merge="ok", history=HIST_B, update="fail", cross="1", regen=f"pushed {H1}", extra=RGX)
-check("a cross-repository PR is never pushed to: the helper is not run, the failure is the old one",
-      s["rc"] == 1 and "FAILED at update-branch: HTTP 422" in s["log"] and not regen_calls(s) and "cross-repository True" in s["log"], (s["rc"], s["log"]))
-s = fast("regen-update-nofetch", merge="ok", history=HIST_B, update="fail", prfetch_fail="1", prfetch_from="3", regen=f"pushed {H1}", extra=RGX)   # the first two fetches (up_to_date's, then its look again under the update lock) work, the helper's own (the third) fails
-check("the fetch of main and the PR head fails: the helper is not run, the failure is the old one",
-      s["rc"] == 1 and "FAILED at update-branch: HTTP 422" in s["log"] and not regen_calls(s) and "cannot fetch main and the PR head from origin" in s["log"], (s["rc"], s["log"]))
-
-# bounded: main moves during every round and every update-branch conflicts, so the helper is asked each round; RELEASE_REGEN_MAX (2) of them are made, the third conflict fails as before
-s = fast("regen-bound", merge="ok", history=HIST_3, update="fail", bases=f"{BASE},{BASE},{B2},{B3},{B4}", base=B4, prheads=f"{HEADSHA},{HEADSHA},{H1},{H2},{H3}", p2=H3, regen=f"pushed {H1}", extra=RGX)
-check("the helper is run at most twice per release: two regenerations (rounds 1 and 2), then the third conflict says so and fails at update-branch exactly as before; no merge, no deploy",
-      s["rc"] == 1 and len(regen_calls(s)) == 2 and s["gh"].count(UPD_LINE) == 3 and not merges(s) and not s["deployed"]
-      and "update-branch: the tool-text snapshot was regenerated 2 time(s) in this release already (RELEASE_REGEN_MAX=2); not again" in s["log"]
-      and "FAILED at update-branch: HTTP 422: merge conflict between base and head; the branch could not be brought up to date" in s["log"]
-      and "(regeneration 1 of 2)" in s["log"] and "(regeneration 2 of 2)" in s["log"] and "(regeneration 3" not in s["log"], (s["rc"], regen_calls(s), s["log"]))
-s = fast("regen-bound-one", merge="ok", history=HIST_3, update="fail", bases=f"{BASE},{BASE},{B2},{B3},{B4}", base=B4, prheads=f"{HEADSHA},{HEADSHA},{H1},{H2},{H3}", p2=H3, regen=f"pushed {H1}",
-         extra={**RGX, "RELEASE_REGEN_MAX": "1"})
-check("RELEASE_REGEN_MAX=1: one regeneration, the second conflict fails", s["rc"] == 1 and len(regen_calls(s)) == 1 and "(RELEASE_REGEN_MAX=1); not again" in s["log"], (s["rc"], regen_calls(s), s["log"]))
-
-# the first look at the PR says CONFLICTING (before any update): the helper is asked, GitHub is read again (every 10 s) until the head moved and it has recomputed, then the release goes on
-s = scenario("regen-mergeable", merge="ok", mergeable="CONFLICTING,UNKNOWN,MERGEABLE", prheads=f"{HEADSHA},{H1},{H1}", regen=f"pushed {H1}", extra=RGX)
-check("mergeable CONFLICTING and the helper pushes: no FAILED; GitHub is read every 10 s until the head moved and mergeable is not UNKNOWN or CONFLICTING (3 reads, 2 sleeps), then the release goes on to the PR's tests on the new head and deploys",
-      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["10", "10"] and len(regen_calls(s)) == 1 and regen_calls(s)[0].startswith(f"--repo {s['dir']}/box --branch=agent/topic --head {HEADSHA} |")
-      and s["gh"].count("state,mergeable") >= 3 and "FAILED" not in s["log"]
-      and at(s["log"], "mergeable: the PR conflicts with main; looking for a conflict in tests/tool_text.snapshot.json alone (regeneration 1 of 2)", "mergeable: the only conflicted path was tests/tool_text.snapshot.json",
-             "mergeable: after the snapshot regeneration GitHub says MERGEABLE (head d00d100)", "PR #23: a change (head d00d100)"), (s["rc"], s["sleeps"], regen_calls(s), s["log"]))
-s = scenario("regen-mergeable-quiet", merge="ok", mergeable="CONFLICTING,UNKNOWN,MERGEABLE", prheads=f"{HEADSHA},{H1},{H1}", regen=f"pushed {H1}", checks="lint,lint,pass", extra=RGX)
-check("mergeable CONFLICTING, the helper pushes, and only a quick check (lint) is reported on the new head: not a pass, the release keeps waiting (two more reads) until suites is reported, and names it as the PR's tests on the pushed head",
-      s["rc"] == 0 and s["deployed"] and s["gh"].count("pr checks") == 3 and s["sleeps"][2:4] == ["20", "20"] and "FAILED" not in s["log"]
-      and at(s["log"], "mergeable: after the snapshot regeneration GitHub says MERGEABLE (head d00d100)", "waiting for the PR's tests on d00d100", "the PR's tests pass on the pushed head d00d100"), (s["rc"], s["sleeps"], s["gh"], s["log"]))
-check("mergeable CONFLICTING, the helper pushes: the pass on the pushed head is confirmed in the check-runs of that very commit before the merge",
-      f"api repos/example-owner/stackshot/commits/{H1}/check-runs?per_page=100" in s["gh"].splitlines(), s["gh"])
-s = scenario("regen-mergeable-still",merge="ok", mergeable="CONFLICTING", prheads=f"{HEADSHA},{H1}", regen=f"pushed {H1}", extra=RGX)
-check("mergeable CONFLICTING, the helper pushes, but GitHub still says CONFLICTING after 3 min: FAILED at mergeable as before (one regeneration only)",
-      s["rc"] == 1 and "PR #23 FAILED at mergeable: GitHub says CONFLICTING" in s["msg"] and len(regen_calls(s)) == 1 and s["sleeps"] == ["10"] * 18 and not merges(s) and not s["deployed"], (s["rc"], s["sleeps"], s["msg"]))
-s = scenario("regen-mergeable-declined", merge="ok", mergeable="CONFLICTING", regen="declined: the conflict is not only the snapshot: src/server.py", extra=RGX)
-check("mergeable CONFLICTING and the helper declines: FAILED at mergeable with the old words at once, no wait, nothing merged",
-      s["rc"] == 1 and "PR #23 FAILED at mergeable: GitHub says CONFLICTING: the PR has a conflict with main" in s["msg"] and s["gh"].count("state,mergeable") == 1 and not s["sleeps"]
-      and len(regen_calls(s)) == 1 and "mergeable: the snapshot is not regenerated: declined: the conflict is not only the snapshot: src/server.py" in s["log"] and not merges(s) and not s["deployed"], (s["rc"], s["log"], s["msg"]))
-
-# the PR's tests fail (or never finish) on the updated head
-s = fast("upd-tests-fail", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,pending,fail")
-check("the PR's run fails on the updated head: FAILED at pr tests naming the check, red report, nothing merged or deployed; the locks are free",
-      s["rc"] == 1 and "FAILED at pr tests: a check failed: suites=fail" in s["log"] and len(red(s)) == 1 and "FAILED at pr tests: a check failed: suites=fail" in red(s)[0] and "--release" not in s["msgs"][0]
-      and not merges(s) and not s["deployed"] and "FAILED at checks" not in s["log"] and lock_free(s) and upd_lock_free(s), (s["rc"], s["msgs"], s["log"]))
-s = fast("upd-tests-toolfail", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,toolfail")
-check("another check (tool-text) fails on the new head while suites is still queued: FAILED at pr tests at once, naming it, without waiting for suites",
-      s["rc"] == 1 and "FAILED at pr tests: a check failed: tool-text=fail" in s["log"] and "suites=" not in s["log"].split("FAILED at pr tests")[1] and not s["sleeps"] and not merges(s) and not s["deployed"], (s["sleeps"], s["log"]))
-s = fast("upd-tests-cap", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,pending", extra={"RELEASE_WAIT_CHECKS": "600"})
-check("the wait for the PR's tests is capped like the first one (10 min of 20 s polls, 30 sleeps; the default is 50 min), with a progress line every 5 min for --status; then FAILED at pr tests",
-      s["rc"] == 1 and "FAILED at pr tests: still pending after 10 min" in s["log"] and len(s["sleeps"]) == 30 and s["log"].count("min of up to 10") == 3 and not merges(s), (len(s["sleeps"]), s["log"][-600:]))
-
-# a head pushed while the release waited for the update lock: its tests are waited for; already up to date, no update is made; still behind, it is updated on top
-HX = "d00d9000000000000000000000000000000000d9"
-s = fast("upd-pushed-uptodate", merge="ok", history=",".join([GOOD, HEADSHA, BASE, HX, *TAIL]), prheads=f"{HEADSHA},{HX}", p2=HX, checks="pass,pending,pass")
-check("a head pushed while waiting for the lock (and already containing main's tip): its tests are waited for, no update-branch, the merge is pinned to the pushed head, fast deploy",
-      s["rc"] == 0 and UPD_LINE not in s["gh"] and s["deploys"] == [MERGE] and s["sleeps"] == ["20"] and f"--match-head-commit {HX}" in s["gh"]
-      and at(s["log"], "update lock taken", "the PR head moved while this release waited for the update lock (abc1234 -> d00d900)", "the PR's tests pass on the pushed head d00d900",
-             "update-branch: the PR head d00d900 contains main's tip ba5e000; no update is needed", "up to date: the PR head d00d900")
-      and "needed no update once this release had the update lock" in s["msgs"][0], (s["log"], s["gh"], s["msgs"]))
-s = fast("upd-pushed-behind", merge="ok", history=",".join([GOOD, HEADSHA, HX, BASE, H1, *TAIL]), prheads=f"{HEADSHA},{HX},{H1}", p2=H1, checks="pass,pass,pending,pass")
-check("a head pushed while waiting for the lock that is still behind main: its tests first, then one update on top of it",
-      s["rc"] == 0 and s["gh"].count(UPD_LINE) == 1 and at(s["log"], "the PR head moved while this release waited", "the PR's tests pass on the pushed head d00d900", "update-branch round 1 of 3: main's tip ba5e000 is not in the PR head d00d900")
-      and f"--match-head-commit {H1}" in s["gh"] and s["deploys"] == [MERGE], (s["log"], s["gh"]))
-# the re-check after the rounds cannot read (the fetch fails): the report says so, not "main moved on"
-s = fast("upd-recheck-fetch", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, prfetch_fail="1", prfetch_from="3")
-check("the re-check after a round cannot fetch: the old path, and the report says the re-check could not be made, not that main moved on",
-      s["rc"] == 0 and s["gh"].count(UPD_LINE) == 1 and s["order"] == ["update-branch", "run-view", f"deploy:{MERGE}", "client:message"]
-      and "update-branch: stopped after 1 round(s), cannot fetch main and the PR head from origin: the old path" in s["log"]
-      and "then the re-check could not be made (cannot fetch main and the PR head from origin), so it took the old path" in s["msgs"][0]
-      and "main moved" not in s["msgs"][0], (s["order"], s["log"], s["msgs"]))
-
-# two releases contend: the update, the wait and the merge of one finish before the other's update starts
-ud = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-update-")); dirs.append(ud)
-ushared = {"UPDATE_LOCK_FILE": str(ud / "update.lock"), "DEPLOY_LOCK_FILE": str(ud / "deploy.lock"), "RT_UTRACE": str(ud / "trace"), "UPDATE_LOCK_WAIT": "60", "DEPLOY_LOCK_WAIT": "60"}
-ures = {}
-def uthread(k): ures[k] = fast(f"upd-lock-{k}", merge="ok", history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, extra=ushared)
-ta = threading.Thread(target=uthread, args=("a",)); tb = threading.Thread(target=uthread, args=("b",))
-ta.start()
-for _ in range(600):   # B starts once A's update-branch is running (it takes 2 real seconds in the stub), so B meets the lock held
-    if (ud / "trace").exists(): break
-    threading.Event().wait(0.05)
-tb.start(); ta.join(); tb.join()
-ua, ub = ures.get("a"), ures.get("b")
-utr = (ud / "trace").read_text().splitlines() if (ud / "trace").exists() else []
-check("two behind releases on one update lock: both go through, and one's update-branch and merge come before the other's update-branch (never interleaved)",
-      ua and ub and ua["rc"] == 0 and ub["rc"] == 0 and len(utr) == 4 and [l.split()[0] for l in utr] == ["update-branch", "merge", "update-branch", "merge"]
-      and utr[0].split()[1] == utr[1].split()[1] and utr[2].split()[1] == utr[3].split()[1] and utr[0].split()[1] != utr[2].split()[1], (utr, ua and ua["out"], ub and ub["out"]))
-check("two behind releases: the second says it waits for the update lock, the first does not, and both deploy their merge",
-      bool(ua and ub) and "another release holds the update lock (it is bringing its branch up to date, waiting for its tests or merging); waiting up to 120 min (7200 s)" not in ua["log"]
-      and "another release holds the update lock" not in ua["log"] and "another release holds the update lock" in ub["log"] and "update lock taken" in ub["log"]
-      and ua["deploys"] == [MERGE] and ub["deploys"] == [MERGE], (ua and ua["log"], ub and ub["log"]))
-check("two behind releases: nothing holds the update lock or the deploy lock after", file_free(ud / "update.lock") and file_free(ud / "deploy.lock"))
-ul = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-updtimeout-")); dirs.append(ul)
-uheld = open(ul / "update.lock", "w"); fcntl.flock(uheld, fcntl.LOCK_EX)   # another release is bringing its branch up to date, and stays at it past the timeout
-try: s = fast("upd-lock-timeout", merge="ok", history=HIST_B, extra={"UPDATE_LOCK_FILE": str(ul / "update.lock"), "UPDATE_LOCK_WAIT": "1"})
-finally: uheld.close()
-check("the update lock held elsewhere past the timeout: FAILED at update lock before anything is merged or updated (release.sh again once it is free)",
-      s["rc"] == 1 and "FAILED at update lock: another release held the update lock" in s["log"] and "release.sh 23 again once it is free" in s["log"]
-      and UPD_LINE not in s["gh"] and not merges(s) and not s["deployed"], (s["rc"], s["log"]))
-
-# the default wait for the update lock is what its holder can take: 3 x (50 + 3 min) + 15 min = 174 min (10440 s); the lock is released while the second release waits, and it goes through
-ud2 = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-updwait-")); dirs.append(ud2); (ud2 / "releases").mkdir()
-held2 = open(ud2 / "releases/update.lock", "w"); fcntl.flock(held2, fcntl.LOCK_EX)
-def unhold2():
-    try:
-        end = time.time() + 60; lg = ud2 / "releases/pr-23.log"
-        while time.time() < end and "another release holds the update lock" not in (lg.read_text() if lg.exists() else ""): time.sleep(0.05)
-        time.sleep(0.3)
-    finally: fcntl.flock(held2, fcntl.LOCK_UN)
-t2 = threading.Thread(target=unhold2); t2.start()
-try: s = fast("upd-lock-default-wait", merge="ok", reuse={"dir": ud2}, history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1)
-finally: t2.join(); held2.close()
-check("the update lock's default wait is 3 x (50 + 3 min) + 15 min: the log says 174 min (10440 s), and the release goes on when the lock is let go",
-      s["rc"] == 0 and "waiting up to 174 min (10440 s)" in s["log"] and s["deploys"] == [MERGE] and upd_lock_free(s), (s["rc"], s["log"]))
-
-# --status shows what the release waits for: the newest log line of a release parked on the PR's tests
-sd = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-status-")); dirs.append(sd)
-(sd / "bin").mkdir(); (sd / "bin/systemctl").write_text("#!/bin/sh\necho active\n"); (sd / "bin/systemctl").chmod(0o755)   # the unit is running; never the host's systemctl
-sres = {}
-tp = threading.Thread(target=lambda: sres.update(s=fast("upd-status", merge="ok", reuse={"dir": sd}, history=HIST_1, prheads=f"{HEADSHA},{HEADSHA},{H1}", p2=H1, checks="pass,pending,pass", park_at="2")))
-tp.start()
-try:
-    for _ in range(600):
-        if (sd / "parked").exists(): break
-        threading.Event().wait(0.05)
-    st = subprocess.run(["bash", str(sd / "box/release.sh"), "--status", "23"], env={**os.environ, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
-finally:
-    (sd / "unpark").touch(); tp.join()
-stl = st.stdout.rstrip("\n").splitlines()
-check("--status of a release waiting for the PR's tests on the updated head: the unit is active and the newest log line says what is waited for",
-      st.returncode == 0 and stl[0] == "unit stackshot-release-23: active" and "waiting for the PR's tests on d00d100" in stl[-1] and "update-branch round 1 of 3" in st.stdout, st.stdout)
-check("--status: the same release then finishes with the deploy", sres.get("s") and sres["s"]["rc"] == 0 and sres["s"]["deploys"] == [MERGE], sres.get("s") and sres["s"]["out"])
 
 # ---- 16. the session pick: what the running sessions need, from the files the merged PR changed (nothing, a notice or a recycle; the highest wins)
 def recycled(s): return "recycle-due | --pr" in s["msg"]
@@ -1312,15 +1079,13 @@ REPORTS = "projects/example-reports"
 s = scenario("report-to-set", merge="ok", report_to=REPORTS)
 check("report_to: a configured page receives the green report (the same arguments), and the stand-in page receives nothing",
       len(s["msgs"]) == 1 and s["msgs"][0].startswith(f"message | {REPORTS} | [release] PR #23 merged and deployed") and s["msgs"][0].rstrip("\n").endswith(GREEN_ARGS) and "projects/example |" not in s["msg"], s["msg"])
-s = scenario("report-to-set-red", merge="fail", after="open", report_to=REPORTS)
+s = scenario("report-to-set-red", merge="fail", gq="open", report_to=REPORTS)
 check("report_to: a failed release reports to the configured page too, once", s["rc"] != 0 and len(s["msgs"]) == 1 and s["msgs"][0].startswith(f"message | {REPORTS} | ") and "projects/example |" not in s["msg"], (s["rc"], s["msg"]))
 s = scenario("report-to-unset", merge="ok")
 check("report_to: unset (the config gives nothing), the report goes to the stand-in page", len(s["msgs"]) == 1 and s["msgs"][0].startswith("message | projects/example | [release] PR #23"), s["msg"])
 for nm, kw, want in (("unset", {}, "projects/example"), ("set", {"report_to": REPORTS}, REPORTS)):
     s = scenario(f"start-{nm}", front=True, units="", **kw)
     check(f"report_to ({nm}): the line printed when a release starts names the page the report will go to", s["rc"] == 0 and f"and reports to {want} · log " in s["out"] and (nm == "set") == (want != "projects/example") and (nm != "set" or "projects/example ·" not in s["out"]), s["out"])
-    s = scenario(f"start-group-{nm}", raw=["--group", "23", "24"], units="", **kw)
-    check(f"report_to ({nm}): so does the line printed when a group starts", s["rc"] == 0 and f"and reports to {want} · log " in s["out"] and (nm != "set" or "projects/example ·" not in s["out"]), s["out"])
 
 wf = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text()
 check("the step names main_green reads are tests.yml's own", all(f"- name: {n}\n" in wf for n in ("run every suite, measured", "audit the selection")))
