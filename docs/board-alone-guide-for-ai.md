@@ -96,7 +96,7 @@ Do not pass `--yes` unless every answer is given as a flag. `--yes` fills gaps w
 | `[portal] account_id` | `""` | No portal-sync unit |
 | `[router] *` | defaults | Needs Claude Code signed in on the box |
 | `[machines_panel] latest_lookups` | `true` | Asks npm for the latest Claude Code version. Shows `?` without `npm` |
-| `[runners]` | empty | Lists nothing until `owner` and `repos` are set |
+| `[runners]` | empty | Optional: no table, or empty `repos`, = the board does not use runners; the page and side panel say so and nothing is read |
 | `[fleet] *`, `[steps] *`, `[terminal] *` | empty | No fleet tool |
 | `[client] session_links / session_view / lanes_file` | `""` | No fleet tool |
 
