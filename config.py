@@ -146,6 +146,12 @@ def page_flavor() -> str:
     return v if v in ("plain", "gbrain") else "plain"
 
 
+def ask_leaves_on() -> bool:
+    """[ask] leaves: true (the default) lets the server take an ask off the owner's move when its author says in a write that it is wrong, or the record shows it moot (ask_leaves.py). false = never: the
+    reminder and the ask-time check on the owner's notes still show, nothing is taken off his move."""
+    return get("ask", "leaves", default=True) is not False
+
+
 def ask_refuse_after() -> str:
     """[ask] refuse_after: the date (YYYY-MM-DD in the instance timezone) from which a needs=decision item without an ask
     line is refused rather than nagged. "" (the default) = never refuse, nag only. A value

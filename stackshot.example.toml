@@ -203,6 +203,9 @@ enabled = false                                     # (audit.py scan, after the 
 [ask]                                               # the ask line on a needs=decision item (metadata.ask): "Decide: … · Recommend: … · Stakes: … · By: …", one line, ≤ 240 chars
 refuse_after = ""                                   # YYYY-MM-DD ([instance] timezone): from this date a needs=decision item without an ask line is refused;
                                                     # before it (and with "", the default) it is accepted and the reply nags. A misshaped ask is always refused
+leaves = true                                       # true: the server takes an ask off the owner's move only on its author's own plain sentence (a write whose whole new text is "The ask is wrong.",
+                                                    # "My question is moot." or "This ask is no longer needed."); a dropped dependency only reminds the author, on his next write, when the ask's text names the
+                                                    # item after/once/when/until/waiting for/depends on; anything else stands; false: never removes (the reminder and the check on his notes still show)
 
 [freshness]                                         # an active open item reads stale when it has gone this many days without being confirmed (computed, never sent):
 call_days = 1                                       # needs decision (your call)
