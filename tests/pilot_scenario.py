@@ -2185,8 +2185,9 @@ L = ui_render._LIVE_JS
 check("errors: the poll script is on the page, polls /render-stamp uncached, every 60 s and on focus / visibility / online / bfcache",
       L in he and "fetch('/render-stamp',{cache:'no-store'" in L and "setTimeout(poll,down?15000:60000)" in L
       and all(f"addEventListener('{e}'" in L for e in ("focus", "online", "offline", "visibilitychange", "pageshow")), L[:300])
-check("errors: a redirect (sign-in), a non-OK answer or a body that is not the stamp counts as unreachable",
-      "if(!r.ok||r.redirected)throw 0" in L and "typeof d.ts!=='number')throw 0" in L and ".catch(function(){down=true})" in L)
+check("errors: a redirect (sign-in), a non-OK answer or a body that is not the stamp counts as unreachable; a 401 (signed out) is not a retry (the sign-in suite runs the script)",
+      "if(!r.ok||r.redirected)throw 0" in L and "typeof d.ts!=='number')throw 0" in L and ".catch(function(){if(!out)down=true})" in L
+      and "if(r.status===401){out=true;throw 0}" in L and "function poll(){if(out)return;" in L)
 check("errors: a newer render updates the page in place unless a field has focus, text is selected or the panel's menu is open — then the banner",
       "if(busy()||tried===ts){newer=true;return}return update(ts)" in L and "if(busy())return 'busy'" in L and "else if(k==='busy')newer=true" in L
       and "#panel[data-pbusy],#panel-menu:not([hidden])" in L and "INPUT|TEXTAREA|SELECT" in L)

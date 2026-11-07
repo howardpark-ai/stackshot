@@ -198,14 +198,14 @@ tr.isoff td{opacity:.6}[data-stale]{opacity:.55}.rstale,.rstale-js{color:var(--w
 @media(max-width:600px){.rcards{grid-template-columns:repeat(3,minmax(0,1fr))}.rtab,.rtab thead,.rtab tbody,.rtab tr,.rtab th,.rtab td{display:block}.rtab thead,.rtab colgroup{display:none}
 .rtab tbody th{border-bottom:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}.mstate{margin:0}.rtab tbody th form.mact{margin:0 0 0 auto}}
 """
-_JS = """<script>(function(){var box=document.getElementById('rn-body'),note=document.getElementById('rn-note'),res=document.getElementById('rn-result'),TZ=%s,last=+box.getAttribute('data-ts')||0,busy=false,quick=0;
+_JS = """<script>(function(){var box=document.getElementById('rn-body'),note=document.getElementById('rn-note'),res=document.getElementById('rn-result'),TZ=%s,last=+box.getAttribute('data-ts')||0,busy=false,quick=0,gone=false;
 function hm(t){try{return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:TZ}).format(new Date(t*1000))}catch(e){return new Date(t*1000).toTimeString().slice(0,5)}}
 function bad(why){box.setAttribute('data-stale','1');note.textContent=why==='login'?'Not refreshed: sign in again.':'Not refreshed since '+hm(last)+' '+%s+'.';note.className='rstale-js on'}
-function load(){if(busy)return;busy=true;var ac=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ac)ac.abort();busy=false},15000);
+function load(){if(busy||gone)return;busy=true;var ac=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ac)ac.abort();busy=false},15000);
 fetch('@RUNNERS_JSON@',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'},signal:ac?ac.signal:undefined})
-.then(function(r){if(!r.ok)throw 'http';if((r.headers.get('content-type')||'').indexOf('json')<0)throw 'login';return r.json()})
+.then(function(r){if(r.status===401)throw 'login';if(!r.ok)throw 'http';if((r.headers.get('content-type')||'').indexOf('json')<0)throw 'login';return r.json()})
 .then(function(d){box.innerHTML=d.html;last=d.ts;box.setAttribute('data-ts',d.ts);if(d.stale)box.setAttribute('data-stale','1');else box.removeAttribute('data-stale');note.className='rstale-js';if(d.refreshing||d.pending){if(quick++<10)setTimeout(load,3000)}else quick=0})
-.catch(function(e){bad(e==='login'?'login':'net')}).then(function(){clearTimeout(tm);busy=false})}
+.catch(function(e){if(e==='login')gone=true;bad(e==='login'?'login':'net')}).then(function(){clearTimeout(tm);busy=false})}
 function show(t,ok){res.textContent=t;res.className=t?(ok?'ok':'err'):''}
 document.addEventListener('submit',function(e){var f=e.target;if(!f.classList||!f.classList.contains('mact'))return;e.preventDefault();
 var b=f.querySelector('button'),was=b.textContent,off=f.elements['act'].value==='off',ac=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ac)ac.abort()},150000);
