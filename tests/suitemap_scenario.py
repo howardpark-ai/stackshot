@@ -356,7 +356,7 @@ if use_strace:
     git("checkout", "-q", "main")
 
     # a suite that fails only when measured (the release suite, which timed out at the measuring limit while it passes plainly) is `ok: false`: it keeps its last clean measurement beside the
-    # new one as `carry`, with the commit that measurement was made at, and a second such run keeps the same carry (tools/retest_skip.py reads it; the selection above still runs the suite)
+    # new one as `carry`, with the commit that measurement was made at, and a second such run keeps the same carry (the retest skip that read it is gone; the selection above still runs the suite)
     git("checkout", "-q", "-B", "carry", base)
     write("tests/m_scenario.py", '''
         import os, time

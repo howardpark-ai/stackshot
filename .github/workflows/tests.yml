@@ -252,8 +252,8 @@ jobs:
         with:
           path: .suitemap/map.json
           key: suitemap-${{ github.sha }}
-      # release.sh reads the map to decide whether a PR that is behind main needs its tests again (tools/retest_skip.py): the Actions cache cannot be read from outside a run, an artifact can.
-      # A failed upload costs release.sh its skip (it retests, as ever), never main's run: continue-on-error. overwrite: a re-run of the same run (same artifact name) replaces the artifact instead of failing on it
+      # The map is also published as an artifact: the Actions cache cannot be read from outside a run, an artifact can. release.sh no longer reads it (the retest skip that did, tools/retest_skip.py, is gone with the catch-up rounds).
+      # A failed upload never turns main's run red: continue-on-error. overwrite: a re-run of the same run (same artifact name) replaces the artifact instead of failing on it
       - name: publish the map for release.sh
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('.suitemap/new.json') != ''
         continue-on-error: true
