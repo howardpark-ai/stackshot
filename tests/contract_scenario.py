@@ -567,6 +567,37 @@ with TestClient(app) as c:
     check("updates: a poll without the key leaves the last list", len(rd(V / "b/machine.json").get("updates") or []) == 4)
     c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"updates": []}, "wait": 0}, headers=HB)
     check("updates: an empty list clears it, and the column with it", "updates" not in rd(V / "b/machine.json") and 'class="mf"' not in mcol("b"), rd(V / "b/machine.json"))
+    # the box's own checkout is judged by where it is (its reported commit against the server's), not by its last attempt: the card clears itself
+    SC1, SC2 = "c" * 40, "d" * 40
+    CKF = [{"what": "stackshot checkout", "from": SC1[:12], "to": SC2[:12], "ok": False, "at": "2026-11-06T00:00:00Z", "reason": "the server's commit is not on origin"}]
+    real_sc = ui_render.server_commit
+    try:
+        ui_render.server_commit = lambda: SC2
+        c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"stackshot": SC1, "updates": CKF}, "wait": 0}, headers=HB)
+        check("checkout card: the box reports a commit other than the server's and its last attempt failed: red, with the reason in the tooltip",
+              rd(V / "b/machine.json").get("stackshot") == SC1 and 'stackshot checkout ' + SC2[:12] in mcol("b") and "failed ✗" in mcol("b") and "is not on origin" in mcol("b"), mcol("b"))
+        c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"stackshot": SC2}, "wait": 0}, headers=HB)
+        check("checkout card: the box reports the server's commit: green by itself, with the failed attempt still on record (no new attempt, no hand step)",
+              rd(V / "b/machine.json").get("stackshot") == SC2 and (rd(V / "b/machine.json").get("updates") or [{}])[-1].get("ok") is False and 'class="mf"' not in mcol("b") and "failed" not in mcol("b"), mcol("b"))
+        ui_render.server_commit = lambda: SC1
+        check("checkout card: the server moves on: the same failed attempt is red again until the box catches up", 'stackshot checkout ' + SC2[:12] in mcol("b") and "failed ✗" in mcol("b"), mcol("b"))
+        ui_render.server_commit = lambda: ""
+        check("checkout card: the server's commit unknown: the last attempt decides, as before", "failed ✗" in mcol("b"), mcol("b"))
+        c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"stackshot": SC2, "updates": CKF + [{"what": "stackshot puller", "from": "5", "to": "6", "ok": False, "at": "2026-11-06T00:00:00Z", "reason": "x"}]}, "wait": 0}, headers=HB)
+        ui_render.server_commit = lambda: SC2
+        check("checkout card: only the checkout is judged by commit: another package's failed attempt stays red", 'class="mf"' in mcol("b") and "stackshot puller 6" in mcol("b") and 'stackshot checkout' not in mcol("b"), mcol("b"))
+        # the commit matches but the new code did not load: the puller records "reload failed" with `to` = the commit it is running now, and that stays red
+        RLF = [{"what": "stackshot checkout", "from": SC1[:12], "to": SC2[:12], "ok": False, "at": "2026-11-06T00:00:00Z", "reason": "reload failed: the new code did not start"}]
+        c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"stackshot": SC2, "updates": RLF}, "wait": 0}, headers=HB)
+        check("checkout card: a reload failure of the box's current commit stays red although the box is at the server's commit",
+              'stackshot checkout ' + SC2[:12] in mcol("b") and "failed ✗" in mcol("b") and "reload failed" in mcol("b"), mcol("b"))
+        c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"stackshot": SC2, "updates": [dict(RLF[0], to=SC1[:12])]}, "wait": 0}, headers=HB)
+        check("checkout card: a reload failure of an older commit than the box's current one clears with the match", 'class="mf"' not in mcol("b") and "failed" not in mcol("b"), mcol("b"))
+        c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"stackshot": SC2, "updates": [dict(RLF[0], reason="the server's commit is not on origin")]}, "wait": 0}, headers=HB)
+        check("checkout card: a reload-less failure at the same commit (it names the commit as its target) clears with the match", 'class="mf"' not in mcol("b"), mcol("b"))
+    finally:
+        ui_render.server_commit = real_sc
+    c.post("/client/poll", json={"sessions": [{"uuid": U(10), "name": "work-http"}], "facts": {"updates": []}, "wait": 0}, headers=HB)
     m = rd(V / "b/machine.json"); m["updates"] = "not a list"; m["setup"] = ["nor this"]; (V / "b/machine.json").write_text(json.dumps(m))
     check("updates and setup: a malformed view draws no alert and does not break the board", 'class="mf"' not in mcol("b") and ">box-far</b>" in mcol("b"), mcol("b"))
     cl.tick()

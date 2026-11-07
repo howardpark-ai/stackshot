@@ -669,6 +669,10 @@ self_update = true                                  # true: a client box's pulle
                                                     # (facts.updates, on the machine's card). The puller never touches the Claude CLI (the machine's own provisioning does).
                                                     # In the server's config it speaks for every box, and the server never says yes to its own box (deploy.sh
                                                     # keeps that checkout); in a client box's own config, false is that box's veto. Live
+repo_url = ""                                       # the repository address the server tells every box's puller to follow (puller 10, in each poll's answer as `repo`). ""
+                                                    # = this server checkout's origin as https with no user or password (git@github.com:o/r.git -> https://github.com/o/r.git).
+                                                    # Set it when that is not an address the boxes can fetch from (an ssh alias). A clean, idle box whose origin is another
+                                                    # repository takes it (fetching from it first); the same repository in another form (ssh or https) is no move. Server's config. Live
 session_links = ""                                  # the fleet tool's live store of session links, <letter>/sessions.json: a session's link is the url the
                                                     # tool writes for its transcript id there (stackshot builds none; no row or an empty url = no link, a
                                                     # missing store is logged once). e.g. "~/.local/state/salamander/fleet" (sala's heartbeat store).
