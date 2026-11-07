@@ -162,6 +162,10 @@ ATTRIBUTION = {   # each refused shape: what, the line
     "a generated-with Claude Code footer after other text, with a bracket": "Made by hand. " + GW + " [Claude Code]",
     "a generated-by Claude Code footer after other text": "Made by hand. " + GB + " Claude Code",
     "a generated-using Claude Code footer after other text": "Made by hand. " + GU + " Claude Code",
+    "a generated-with Claude Code footer after other text, with an underscore between the words": "Made by hand. " + GW + " Claude_Code",
+    "a generated-with Claude Code footer after other text, with a closing bracket between the words": "Made by hand. " + GW + " [Claude] Code",
+    "a generated-with Claude Code footer after other text, in upper case": ("Made by hand. " + GW + " Claude Code").upper(),
+    "a generated-with line behind a long HTML tag": '<span class="note">' + GW + " Claude</span>",
     "the product link after other text": "Made by hand. [Claude " + "Code](https://claude.com/claude-" + "code)",
 }
 
