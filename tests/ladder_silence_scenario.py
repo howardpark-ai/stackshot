@@ -14,6 +14,10 @@ folder, messages recorded by a fake push, a fake clock (every pass is given its 
   7  the dates pass: an item past its expected time with no write since is sent its message and put on the same ladder
   8  the switch turned off in the middle of a ladder, and the whole one-ladder flag turned off: the entry is read in the old table (nothing is repeated, the builder rung stays reachable)
   9  pure: ladder.enter_quiet, quiet_over, via_of, unwind, action
+ 10  a background mover whose pane is busy (or shows a background shell) is still chased past the ask: the look is sent in the "nothing written for N minutes" wording; a work line in progress changed
+     within 90 minutes holds the ladder; a live pane stops at the look, a pane that is not live goes on to the cold call and the builder (never the builder itself); one notice per agent per pass;
+     a front agent keeps the pane rule; ladder.action for a background mover;
+     only the mover's own work line holds the ladder; an empty or unreadable heartbeat is unknown (live); a gone entry reaches the cold call whatever the heartbeat shows
 
     tests/run-suite ladder_silence       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -95,7 +99,7 @@ def drain():
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
-def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing has been written to it" in p[1]]
+def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
 def ladder_cfg(enabled=True, silence=True, **kw):
@@ -196,7 +200,7 @@ no_msgs = lambda: not look_notices("home-peer", 10)
 check("3 look: 29 minutes after the ask nothing is sent", "a10" not in stk(now0 + 29 * MIN) and no_msgs(), pushes_to("home-peer", "a10"))
 done = stk(now0 + 31 * MIN)
 check("3 look: 31 minutes after the ask, the pane having no turn running, the mover is told once more, in the silence wording, with the step on the item and the ladder on the cold call",
-      "a10" in done and len(look_notices("home-peer", 10)) == 1 and "no turn running" in look_notices("home-peer", 10)[0][1] and entry(10)["step"] == 2 and entry(10)["last"] == now0 + 31 * MIN
+      "a10" in done and len(look_notices("home-peer", 10)) == 1 and "nothing written for" in look_notices("home-peer", 10)[0][1] and entry(10)["step"] == 2 and entry(10)["last"] == now0 + 31 * MIN
       and len(log_of(10)) == 2 and "nothing was written to it" in log_of(10)[1]["text"] and not stall_notices("home-peer", 10), (done, pushes_to("home-peer", "a10"), entry(10), log_of(10)))
 check("3 look: …the stall wording (a pane with no turn for N minutes) is not used for an item the silence audit brought", not stall_notices("home-peer", 10), pushes_to("home-peer", "a10"))
 # a pane with a turn running at the look is left alone; the look comes when the turn ends
@@ -314,6 +318,128 @@ check("9 via_of: silence, handoff, and anything else is stall", LD.via_of({"via"
 check("9 unwind: the old table reads a silence entry without its marks (the look maps to the cold call)", LD.unwind(ent) == {"mover": "m", "ver": [1.0, 2.0], "conf": 3.0, "step": 1, "last": 500.0}, LD.unwind(ent))
 check("9 action: the look is due 30 minutes after the ask when the pane is idle, not before; the cold call 10 minutes after the look", LD.action(ent, "idle", 1.0, 0.0, 500.0 + 29 * 60, 10.0) == "" and LD.action(ent, "idle", 1.0, 0.0, 500.0 + 30 * 60, 10.0) == "look"
       and LD.action(ent, "busy", 1.0, 0.0, 500.0 + 3600, 10.0) == "" and LD.action({**ent, "step": 2, "last": 3000.0}, "idle", 1.0, 0.0, 3000.0 + 599, 10.0) == "" and LD.action({**ent, "step": 2, "last": 3000.0}, "idle", 1.0, 0.0, 3000.0 + 600, 10.0) == "cold", None)
+
+# ================================================================ 10. a background mover whose pane is busy is still chased: the evidence is the item's work line, not the pane
+def set_gone(name, hours=2):
+    """The heartbeat shows `name` gone for `hours` on an online machine: its pane is dead, not live (the other rows are as they were)."""
+    d_ = json.loads((T / "fleet/a/sessions.json").read_text()); d_[U[name]]["gone"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * H))
+    (T / "fleet/a/sessions.json").write_text(json.dumps(d_))
+def set_live(name):
+    d_ = json.loads((T / "fleet/a/sessions.json").read_text()); d_[U[name]].pop("gone", None); (T / "fleet/a/sessions.json").write_text(json.dumps(d_))
+def work_line(i, state, ts, agent="x"):
+    d_ = rd(i); d_["metadata"]["work"] = [{"id": "build", "text": "building the fix", "state": state, "agent": agent, "ts": ts}]; (T / f"store/a/{i}.json").write_text(json.dumps(d_))
+set_live("home-docs"); set_live("team-back")
+ladder_cfg(True, True)
+# 10a. the builder's pane is busy (a turn, or subagents, running) and the item is past due: the look is sent all the same, in the new wording
+clear_records(); put(50, act=300, mover="team-back", wake=local(now0 - 2 * H)); d = rd(50); d["written_at"] = now0 - 5 * H; (T / "store/a/50.json").write_text(json.dumps(d)); cli_row("team-back", "busy", now0 - 20 * MIN)
+AR.dates_pass(now=now0, items=load(50), anchors={}, env=env(), entered=server._ladder_enter_quiet)
+check("10a busy builder: the past-due item is on the ladder at the look", (entry(50) or {}).get("step") == 1 and LD.quiet(entry(50)), entry(50))
+check("10a busy builder: 29 minutes after the ask nothing is sent", "a50" not in stk(now0 + 29 * MIN) and not look_notices("team-back", 50), pushes_to("team-back", "a50"))
+done = stk(now0 + 31 * MIN)
+n50 = look_notices("team-back", 50)
+check("10a busy builder: 31 minutes after the ask, with the pane busy, the look is sent and the entry goes on to the cold call", "a50" in done and len(n50) == 1 and entry(50)["step"] == 2, (done, pushes_to("team-back", "a50"), entry(50)))
+check("10a look wording: it says nothing was written for N minutes (since the item's last write) and does not claim the pane has no turn running",
+      bool(n50) and "nothing written for 5 hours 31 minutes" in n50[0][1] and "no turn running" not in n50[0][1], n50)
+check("10a look wording: …and the History line says the same", any("nothing was written to it for 5 hours 31 minutes" in x["text"] and "no turn running" not in x["text"] for x in log_of(50)[1:]), log_of(50))
+# a live background pane stops at the look: no cold call, no builder, however long it stays busy
+n_cold = len(COLD_MSGS)
+check("10c live pane: 10 minutes after the look the cold call is not made, and not 5 hours later either (the pane is live)", "a50" not in stk(now0 + 42 * MIN) and "a50" not in stk(now0 + 5 * H) and len(COLD_MSGS) == n_cold and mt(50).get("mover") == "team-back", (COLD_MSGS[n_cold:], mt(50)))
+close(50)
+# 10b. a CI watch (a background shell) does not exempt the builder either
+clear_records(); put(51, act=60, mover="team-back"); cli_row("team-back", "idle", IDLE_SINCE)
+silence_pass([51]); cli_row("team-back", "shell", now0 + 5 * MIN)
+done = stk(now0 + 31 * MIN)
+check("10b shell builder: a builder whose pane shows a background shell (a CI watch) gets the look", "a51" in done and len(look_notices("team-back", 51)) == 1, (done, pushes_to("team-back", "a51")))
+close(51)
+# 10d. the evidence: a work line in progress changed within 90 minutes holds the ladder; an older line, or one not in progress, does not
+clear_records(); put(52, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+silence_pass([52]); work_line(52, "in progress", now0 + 20 * MIN, "home-docs")
+check("10d work line: a work line in progress changed 11 minutes before the look: the look is not sent", "a52" not in stk(now0 + 31 * MIN) and not look_notices("home-docs", 52) and entry(52)["step"] == 1, (entry(52), pushes_to("home-docs", "a52")))
+check("10d work line: …still held 89 minutes after the line was changed", "a52" not in stk(now0 + 20 * MIN + 89 * MIN) and not look_notices("home-docs", 52), pushes_to("home-docs", "a52"))
+check("10d work line: …91 minutes after the line was changed the look is sent", "a52" in stk(now0 + 20 * MIN + 91 * MIN) and len(look_notices("home-docs", 52)) == 1, pushes_to("home-docs", "a52"))
+close(52)
+clear_records(); put(53, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+silence_pass([53]); work_line(53, "assigned", now0 + 20 * MIN, "home-docs")
+check("10d work line: a line that is only assigned is no evidence of work: the look is sent", "a53" in stk(now0 + 31 * MIN) and len(look_notices("home-docs", 53)) == 1, pushes_to("home-docs", "a53"))
+close(53)
+# 10e. a background mover whose pane is not live is chased on: the cold call, then the builder
+clear_records(); put(54, act=60, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
+silence_pass([54]); stk(now0 + 31 * MIN); no_row("home-docs"); set_gone("home-docs")
+n_cold = len(COLD_MSGS)
+done = stk(now0 + 41 * MIN + 1)
+check("10e dead pane: with the pane gone (no registry row, the heartbeat shows it gone for hours) the cold call is made 10 minutes after the look and the item falls to the builder", "a54" in done and len(COLD_MSGS) == n_cold + 1 and mt(54).get("mover") == "team-back", (done, COLD_MSGS[n_cold:], mt(54)))
+close(54); set_live("home-docs")
+# 10f. a builder is never handed its own item: the last rung is the one message to the fleet's builder
+clear_records(); set_cfg(cold_call=False); put(55, act=60, mover="team-back"); cli_row("team-back", "idle", IDLE_SINCE)
+silence_pass([55]); stk(now0 + 31 * MIN); no_row("team-back"); set_gone("team-back")
+done = stk(now0 + 41 * MIN + 1)
+check("10f builder mover: with its pane gone, the builder rung does not hand the item to the builder itself: ONE message asks the fleet's builder and the item stays with its mover",
+      "a55" in done and mt(55).get("mover") == "team-back" and len(recovery_pushes("a55")) == 1 and bool(ho(55).get("recovery_at")) and not [x for x in pushes_to("team-back", "a55") if "is handed to you by" in x[1]], (done, ho(55), recovery_pushes("a55"), mt(55).get("mover")))
+close(55); set_live("team-back"); set_cfg()
+# 10g. one notice per agent per pass: two items of one background agent due for the look at once get one notice a pass
+clear_records(); put(56, act=60, mover="home-docs"); put(57, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+silence_pass([56, 57]); n0 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
+done1 = stk(now0 + 31 * MIN); n1 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
+done2 = stk(now0 + 31 * MIN + 60); n2 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
+check("10g one notice a pass: the first pass sends one look to the agent, the next pass the other, and no item gets two", n0 == 0 and len(done1) == 1 and n1 == 1 and len(done2) == 1 and n2 == 2 and len(look_notices("home-docs", 56)) == 1 and len(look_notices("home-docs", 57)) == 1, (done1, done2, pushes_to("home-docs")))
+close(56, 57)
+# 10h. a front agent is as before: a pane with a turn running waits
+clear_records(); put(58, act=60, mover="home-front"); cli_row("home-front", "idle", IDLE_SINCE)
+silence_pass([58]); cli_row("home-front", "busy", now0 + 20 * MIN)
+check("10h front agent: a front agent with a turn running at the look is left alone", "a58" not in stk(now0 + 35 * MIN) and entry(58)["step"] == 1, entry(58))
+close(58)
+# 10i. the ladder a pane with no turn running brought (`silence` off): the ask waits for the pane, the look after it does not, and a background agent's look is in the same wording
+ladder_cfg(True, None); clear_records()
+put(59, act=30, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
+done = stk(now0 + 1)
+check("10i pane-triggered: the ask is the stall notice, sent to an idle pane", "a59" in done and len(stall_notices("home-docs", 59)) == 1 and LD.via_of(entry(59)) == "stall" and entry(59)["step"] == 1, (done, entry(59)))
+cli_row("home-docs", "busy", now0 + 5 * MIN)
+check("10i pane-triggered: 29 minutes after the ask the busy pane is left alone", "a59" not in stk(now0 + 1 + 29 * MIN), entry(59))
+done = stk(now0 + 1 + 31 * MIN)
+check("10i pane-triggered: 31 minutes after the ask, the pane busy, the background agent's look is sent in the item's wording (nothing written), not the pane's",
+      "a59" in done and len(look_notices("home-docs", 59)) == 1 and len(stall_notices("home-docs", 59)) == 1 and entry(59)["step"] == 2, (done, pushes_to("home-docs", "a59"), entry(59)))
+close(59); ladder_cfg(True, True)
+# 10k. the hold is the mover's own work line: a line in progress that another agent left on the item holds nothing
+clear_records(); put(60, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+silence_pass([60]); work_line(60, "in progress", now0 + 20 * MIN, "team-back")
+check("10k other agent's line: a recent line in progress written by another agent does not hold the ladder: the look is sent", "a60" in stk(now0 + 31 * MIN) and len(look_notices("home-docs", 60)) == 1, (entry(60), pushes_to("home-docs", "a60")))
+close(60)
+clear_records(); put(61, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+silence_pass([61]); work_line(61, "in progress", now0 + 20 * MIN, "home-docs")
+check("10k mover's own line: the same line written by the mover holds it", "a61" not in stk(now0 + 31 * MIN) and not look_notices("home-docs", 61) and entry(61)["step"] == 1, (entry(61), pushes_to("home-docs", "a61")))
+close(61)
+import silence as SLN
+it_ = {"metadata": {"work": [{"id": "w", "text": "t", "state": "in progress", "agent": "team-back", "ts": 1000.0}]}}
+check("10k pure: subagent_running counts a line of any agent without a mover, and only the mover's own line with one",
+      SLN.subagent_running(it_, 1100.0) and SLN.subagent_running(it_, 1100.0, "team-back", server._ho_same) and not SLN.subagent_running(it_, 1100.0, "home-docs", server._ho_same), None)
+# 10l. a heartbeat that is empty or unreadable says nothing about the pane: a background mover with no registry row is taken as live (not cold-called, not handed on)
+clear_records(); put(62, act=60, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
+silence_pass([62]); stk(now0 + 31 * MIN); no_row("home-docs")
+hb_ = (T / "fleet/a/sessions.json").read_text(); (T / "fleet/a/sessions.json").write_text("{}")
+n_cold = len(COLD_MSGS)
+try:
+    done = stk(now0 + 41 * MIN + 1); done2 = stk(now0 + 5 * H)
+    check("10l empty heartbeat: with no registry row and an empty heartbeat the cold call is not made and the item stays with its mover", "a62" not in done and "a62" not in done2 and len(COLD_MSGS) == n_cold and mt(62).get("mover") == "home-docs", (done, done2, COLD_MSGS[n_cold:], mt(62)))
+    (T / "fleet/a/sessions.json").write_text("not json")
+    check("10l unreadable heartbeat: the same", "a62" not in stk(now0 + 6 * H) and len(COLD_MSGS) == n_cold and mt(62).get("mover") == "home-docs", (COLD_MSGS[n_cold:], mt(62)))
+finally:
+    (T / "fleet/a/sessions.json").write_text(hb_)
+close(62)
+# 10j. pure: ladder.action for a background mover
+ent2 = LD.enter_quiet(None, "m", [1.0, 2.0], 3.0, 100.0, 500.0)
+bg = lambda rec, st, now, **kw: LD.action(rec, st, 1.0, 0.0, now, 10.0, 30.0, background=True, **kw)
+check("10j action: a background mover's look is due 30 minutes after the ask whatever its pane shows (busy, shell, idle, none), not before",
+      all(bg(ent2, st, 500.0 + 29 * 60, live=True) == "" for st in ("busy", "shell", "idle", "")) and all(bg(ent2, st, 500.0 + 30 * 60, live=True) == "look" for st in ("busy", "shell", "idle", "")), None)
+cold_rec = {**ent2, "step": 2, "last": 3000.0}
+check("10j action: …a live pane stops there (no cold call, no builder); a pane that is not live goes on, whatever the registry shows",
+      bg(cold_rec, "busy", 3000.0 + 600, live=True) == "" and bg({**ent2, "step": 3, "last": 3000.0}, "idle", 3000.0 + 600, live=True) == ""
+      and bg(cold_rec, "", 3000.0 + 599, live=False) == "" and bg(cold_rec, "", 3000.0 + 600, live=False) == "cold" and bg({**ent2, "step": 3, "last": 3000.0}, "busy", 3000.0 + 600, live=False) == "builder", None)
+check("10m action: an entry the hand-off audit marked gone (two failed pushes, no delivery) reaches the cold call and the builder even when the heartbeat shows the pane live",
+      bg({**cold_rec, "gone": True}, "idle", 3000.0 + 600, live=True) == "cold" and bg({**ent2, "step": 3, "last": 3000.0, "gone": True}, "idle", 3000.0 + 600, live=True) == "builder"
+      and bg({**cold_rec, "gone": True}, "idle", 3000.0 + 599, live=True) == "" and bg(cold_rec, "idle", 3000.0 + 600, live=True) == "", None)
+check("10j action: a mover that is not background keeps the pane rule (busy waits)", LD.action(ent2, "busy", 1.0, 0.0, 500.0 + 3600, 10.0) == "" and LD.action(ent2, "busy", 1.0, 0.0, 500.0 + 3600, 10.0, 30.0, live=True) == "", None)
+check("10j action: the first rung of a pane-triggered ladder (the ask) still waits for the pane to have no turn running, background or not",
+      LD.action({"mover": "m", "step": 0, "last": 0.0}, "busy", 1.0, 0.0, 5000.0, 10.0, 30.0, background=True, live=True) == "" and LD.action({"mover": "m", "step": 0, "last": 0.0}, "idle", 1.0, 0.0, 5000.0, 10.0, 30.0, background=True, live=True) == "ask", None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

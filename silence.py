@@ -16,7 +16,7 @@ so the pass does not read the pane and a busy pane hides no silent item. What co
 run); a subagent's work that writes nothing to the item is not activity, so a builder keeps a long job visible by writing it onto the item (a `work` line, an update). One signal is read beyond the
 clock: an item whose mover is its project's builder and which carries a `work` line in progress (`subagent_running`, last changed within `SUBAGENT_S`, 90 minutes) has a build subagent running on it and
 counts as taken, however long since its last write (the server's `skip` decides it, `server._silence_skip`). A builder's item with no such line and no event in 45 minutes is silent whatever its pane shows. Whether a session is idle is the stall pass's job and only the
-rungs that need an idle pane (the ladder's look, cold call and builder steps) wait for one. The pass asks one view before it sends: an item the stall ladder is already on is left alone (`skip`, given by the server).
+rungs that need an idle pane (the ladder's look, cold call and builder steps of a front agent or a session no page lists as a background agent) wait for one; a background agent's rungs go by this work line alone (`server._stall_tick`). The pass asks one view before it sends: an item the stall ladder is already on is left alone (`skip`, given by the server).
 
 A finding is the daily run's `stale` finding in the daily run's wording (the same category, evidence line and fix, the time given in minutes), so the two see one finding by `audit_run.finding_key`.
 It goes to the recipient the daily run's finding goes to (`deliver_findings`: the mover, else the project's -main agent), once per silence episode: an episode ends when the item has activity again, and the
@@ -119,11 +119,14 @@ def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: A
     return ""
 
 
-def subagent_running(item: dict[str, Any], now: float) -> bool:
+def subagent_running(item: dict[str, Any], now: float, mover: str = "", same: Any = None) -> bool:
     """Is a build subagent running on this item, by the item's own `work` lines? A line in progress, last changed within `SUBAGENT_S`, is a build subagent the mover started on it. The server asks
-    this only of an item whose mover is the project's builder (`skip`); a line that is only defined or assigned, a done one, and one older than the bound are not a subagent running."""
+    this only of an item whose mover is the project's builder (`skip`); a line that is only defined or assigned, a done one, and one older than the bound are not a subagent running.
+    With `mover` given (the stall pass's hold of a background agent's ladder), only a line whose `agent` is that session counts, `same(a, b)` saying whether two names are one session: a stale line
+    another agent left in progress says nothing about the mover being chased. A line in progress takes the writer as its agent, so the mover's own lines carry its name."""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    return any(0 < now - l["ts"] <= SUBAGENT_S for l in _work.in_progress(meta) if l["ts"] > 0)
+    own = (lambda l: bool(same(l["agent"], mover)) if same else str(l["agent"]).casefold() == str(mover).casefold()) if mover else (lambda l: True)
+    return any(0 < now - l["ts"] <= SUBAGENT_S for l in _work.in_progress(meta) if l["ts"] > 0 and own(l))
 
 
 def findings(items: dict[str, dict[str, Any]], now: float, env: Any = None, skip: Any = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
