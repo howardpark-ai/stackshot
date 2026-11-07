@@ -128,7 +128,7 @@ others, so CI runs it when a change reaches it, and main always) fails on a suit
 
 ## Suite selection
 
-A pull request (and a push to a release-queue branch, `queue/**`) runs only the suites its change reaches; a push to main runs every suite and measures them. `tests/suitemap.py`
+A pull request (and a push to a release-queue branch, `queue/**`, and an entry of GitHub's merge queue, `merge_group`) runs only the suites its change reaches; a push to main runs every suite and measures them. `tests/suitemap.py`
 does both (its docstring has the rules in full):
 
 - **On main**, `measure` runs every suite under coverage.py (every Python process of a suite, subprocesses included) and, for
@@ -142,7 +142,7 @@ does both (its docstring has the rules in full):
   on as job outputs; the `measure` job is a matrix of 6 jobs on the labels the run used before, each measuring the list it is given and planning nothing (so a cache miss in one of them cannot make it
   double-run or skip a suite), and the `suites` job merges their maps (`tests/suitemap.py merge`), keeps and saves the map and audits as before. Its step `run every suite, measured`, the one
   `release.sh` reads, passes only when every shard passed and the merged map holds every suite exactly once, so `release.sh` and the CI-run poller read main's run as before;
-  on a push to main the `suites` job runs on the light pool, since it only merges and audits. A pull request, a queue branch's push and a manual run do not use the shards (a queue branch's `suites` job runs the selection, on the heavy pool). `tests/suitemap_scenario.py` checks
+  on a push to main the `suites` job runs on the light pool, since it only merges and audits. A pull request, a queue branch's push, a merge-queue entry and a manual run do not use the shards (a queue branch's `suites` job runs the selection, on the heavy pool). `tests/suitemap_scenario.py` checks
   that every suite is in exactly one list, that every shard reads the one plan, and that the matrix and `--of` agree with `SHARDS` in `tests/suitemap.py`. A suite that fails measured but passes on a plain rerun is a warning, not a failure: the map
   marks it `ok: false`, so every PR runs it until it measures clean, and `release.sh` names it in its report (which then goes
   to the keeper, not green), so a flaky suite stays in sight.
@@ -151,6 +151,7 @@ does both (its docstring has the rules in full):
   The job keeps its name `suites`, the check mq reads on an entry's head, and its result is read by the commit (`salamander ci-runs howardpark-ai/stackshot --sha <sha>`). `.github/mergequeue.toml` says so with `suites = "select"`, and `tests/suitemap_scenario.py` fails when the file and the workflow disagree.
   What a queue run no longer gives is the measured map and the selection audit: only a push to main does those (it measures every suite in the shards, saves and publishes the map and audits the selection, unchanged). The risk is a selection that misses a suite, which a PR's run accepts as well, and main's full run after the merge catches it by name.
   The poller's window is the newest 30 runs of the repository, which queue pushes share with main's.
+- **A GitHub merge-queue entry gets the same run** (`merge_group`). The repository has a `merge_queue` ruleset on main, disabled for now, and `tests.yml` is ready for it: it triggers on `merge_group` (types `checks_requested`) so that the job `suites`, the check the ruleset requires, reports for an entry (a check that never reports makes the queue wait until it times out). An entry (branch `gh-readonly-queue/main/pr-<n>-<sha>`) runs exactly what a `queue/**` push runs: the selection, no plan, no shards, no measured map, no audit. The entry's branch is not in the `push` list (the `merge_group` event is the trigger; a push trigger too would run every entry twice). The event has no pull-request context, so the `tool-text` jobs skip on it, and the map's cache key uses the entry's `base_sha` where a PR uses its base commit (the restore falls back to the newest map). A run of an entry is never cancelled by another (the concurrency group holds the ref, and `cancel-in-progress` is true for a pull request only). `clean-text.yml` is left out: it is not a required check, and its inputs are all the pull request's title, body and branch, which an entry does not have; if it is ever made a required check of the queue, it needs a `merge_group` trigger and its own handling of those inputs. Our own queue (`queue/**`, `salamander mq`) stays live until the switch. Unproven until the ruleset is active: a real `merge_group` run (`tests/suitemap_scenario.py` pins the workflow's shape for the event, GitHub's own behavior it cannot).
 - **On a PR**, `select` reads the newest map and runs the suites whose measured functions or files the change reaches: a
   function body reaches the suites that ran it; a module-level binding (a constant, a def, a class, the docstring) the code
   that reads the name, followed across imports and through the bindings that use it, and the suites whose own file names it;
