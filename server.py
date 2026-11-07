@@ -14631,9 +14631,9 @@ _SITE_DIR = _cfg.state("site")
 _SITE_TYPES = {".html": "text/html", ".svg": "image/svg+xml", ".txt": "text/plain", ".json": "application/json", ".md": "text/markdown", ".css": "text/css", ".png": "image/png"}
 
 
-@mcp.tool(name="bump_versions", description=_lead("Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."))
+@mcp.tool(name="bump_versions", description=_lead("Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board at once. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."))
 def stackshot_bump_versions(host: str = "") -> str:
-    """Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."""
+    """Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board at once. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."""
     _who()
     return "published: " + _publish_now(force_versions=True, host=host)
 

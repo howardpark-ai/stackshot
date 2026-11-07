@@ -87,7 +87,7 @@
       "parameters": {}
     },
     "bump_versions": {
-      "description": "If your session did not load the owner's standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it; it overrides defaults. Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored.",
+      "description": "If your session did not load the owner's standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it; it overrides defaults. Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board at once. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored.",
       "parameters": {
         "host": {
           "default": "",
