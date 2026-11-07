@@ -7094,7 +7094,7 @@ def _silence_skip() -> "Callable[[str, dict[str, Any], str], bool]":
     chasing the mover), or when its mover is its project's builder (`_handoff_builder`) and a build subagent is running on it by the item's own `work` line (`silence.subagent_running`: a line in
     progress, changed within 90 minutes). The mover's pane is NOT read: silence is judged per item (the item's own activity clock, an event on its anchored pull request included), so a busy pane, a
     background agent's `shell` pane or a pane this box does not show says nothing about one item, and a builder directing subagents (a pane that is nearly always busy) no longer hides its silent
-    items; only a subagent the item itself shows counts as taken. The rungs that need a pane with no turn running (the ladder's look, cold call and builder steps) stay in the stall pass and ladder.py.
+    items; only a subagent the item itself shows counts as taken. The rungs that need a pane with no turn running (the ladder's look, cold call and builder steps of a front agent or a session no page lists as a background agent) stay in the stall pass and ladder.py; a background agent's rungs go by the work line alone.
     The ladder's items are read once per pass, and so is each project's builder."""
     import silence as _silence
     active = _stall_active()
@@ -10919,8 +10919,9 @@ def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> boo
 
 
 def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
-    """The look of an item the silence audit brought: its mover's pane has no turn running and the item still has no activity, so the mover is told once more (a front agent gets the History line alone:
-    no item notice wakes one). → whether the rung was taken."""
+    """The look of an item the silence audit brought: the item still has no activity, so the mover is told once more (a front agent gets the History line alone: no item notice wakes one). The pane is
+    not described: a background agent's is busy or showing a background shell nearly always, so the notice says what the item shows (nothing written for N minutes, N from its last write) and no more.
+    → whether the rung was taken."""
     import silence as _silence
     with _ITEM_LOCK:
         item = _load(gid)
@@ -10929,14 +10930,14 @@ def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
         meta = item.setdefault("metadata", {})
         front = _front_keeper(who, str(meta.get("project") or ""))[0]
         span = _silence.minutes(now - _silence.clock(item, who))
-        _stall.note(meta, now, f"{_session_label(who)} had no turn running and nothing was written to it for {span}" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
+        _stall.note(meta, now, f"{_session_label(who)}: nothing was written to it for {span}" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
         _save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
         subject = str(item.get("subject") or "")
     if not front:
+        tail = "" if _stall_background(who) else (f" If nothing is written to it and your pane stays quiet for {minutes:g} more minutes, a fresh session is asked who takes it.")
         _tell_woken(gid, _session_id(who) or who,
-                    f"[stackshot] {_gh.shown(gid)} \"{subject}\" is still yours: nothing has been written to it for {span} and your pane has no turn running. Work it, hand it on (update sender=<you>) or close it. "
-                    f"If you are waiting on something to happen, store the wait so the server watches it. If nothing is written to it and your pane stays quiet for {minutes:g} more minutes, a fresh session is asked who takes it. "
-                    f"→ {_notice_link(gid)}", tag="stall")
+                    f"[stackshot] {_gh.shown(gid)} \"{subject}\" is still yours: nothing written for {span}. Work it, hand it on (update sender=<you>) or close it. "
+                    f"If you are waiting on something to happen, store the wait so the server watches it.{tail} → {_notice_link(gid)}", tag="stall")
     print(f"ladder: {gid} {who} still silent after the ask: " + ("front agent, history line only" if front else "notice sent again"), file=sys.stderr, flush=True)
     return True
 
@@ -10990,7 +10991,7 @@ def _ladder_do(act: str, gid: str, who: str, rec: dict[str, Any], now: float, mi
     if act in ("ask", "look"):
         if _ladder.via_of(rec) == "handoff":
             return _ladder_ask(gid, who, now, act)
-        if _ladder.quiet(rec):
+        if _ladder.quiet(rec) or (act == "look" and _stall_background(who)):      # a background agent's look says what the item shows, never what its pane does
             return act if _ladder_quiet_look(gid, who, now, minutes) else ""
         return act if _stall_resend(gid, who, now, minutes, lines) else ""
     if act == "cold":
@@ -11034,8 +11035,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
     minutes = _stall_minutes()
     ladder_on, look = _ladder_on(), _ladder_look()
     silence_on = ladder_on and _ladder_silence_on()      # the silence audit brings the items: a pane with no turn running starts nothing
-    if silence_on:
-        import silence as _silence
+    import silence as _silence      # the clocks of the silence audit, and `subagent_running`, the work line a background mover's ladder is held by
     since = _stall_since(now)          # no clock starts before the pass first ran (a deploy must not step every long-idle pane at once)
     cap = max(1, int(_stall_num("max_per_tick", _stall.MAX_PER_TICK)))
     old_st = _stall_load()
@@ -11073,10 +11073,16 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 continue                 # an untaken hand-off is the hand-off audit's alone (silence does not start it); once that audit has brought it to the one ladder, the ladder takes its rungs here
             # review: the registry row shows background work in its status. A pane whose turn is over but which has a run_in_background Bash task running (a CI watch, a release) shows
             # `shell`, not `idle`, and stall.action counts `shell` as idle; a pane with a background subagent running shows `busy` and is left alone. A background agent's `shell` pane is
-            # working on that job, so it is not quiet. A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
+            # working on that job, so it is not quiet (with `[ladder] enabled` the pane is not read for a background agent at all: its item's own work line decides, below). A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
             # carries no expected time: a mover with no background work running is chased by the minutes of its pane alone.
             status, at = _handoff_status(who, idx)
-            if not front and status == "shell" and _stall_background(who):
+            back = bool(ladder_on and not front and _stall_background(who))
+            if back:
+                # the one ladder: a background agent's pane says nothing about this item (it is nearly always busy, or shows a background shell for a CI watch or a release), so the pane no longer holds
+                # the rungs after the ask; the item's own work line does: a line in progress, changed within 90 minutes, is a subagent at work on it. A live pane stops at the look (ladder.action).
+                if _silence.subagent_running(it, now, who, _ho_same):      # only the mover's own line: another agent's stale one holds nothing
+                    continue
+            elif not front and status == "shell" and _stall_background(who):
                 continue
             mine = _stall_confirm(it, who)      # only the mover's own confirm says it still has the item
             rec = (old if quiet else
@@ -11093,7 +11099,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
             floor = max(floor, _stall.due_at(it))    # an item whose wake has just passed has its minutes first
             if quiet:
                 floor = 0.0              # the silence entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
-            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
+            live = bool(back and (status or not idx or not _handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
+            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
             if act == "cold" and not _cold_call_on():
                 act = "builder"
             if act:
@@ -11103,8 +11110,11 @@ def _stall_tick(now: float | None = None) -> list[str]:
     acted: list[str] = []
     lines: list[tuple[str, str, str]] = []
     sent = 0
+    told: set[str] = set()      # background agents sent a notice this pass: one each, the next item's follows on the next pass
     for act, gid, who, rec in todo:
         try:
+            if ladder_on and act in ("ask", "look") and who in told:
+                continue             # one notice per agent per pass: its other items wait for the next
             if act in ("resend", "ask"):         # not the look: it comes 30 minutes after an ask that was counted, so it cannot pile up in one tick the way a deploy's first asks do
                 if sent >= cap:
                     continue             # the rest of the first steps wait for the next tick (a deploy or a restart must not send a flood); their episodes are kept as they are
@@ -11121,6 +11131,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 acted.append(gid)
                 (_ladder if ladder_on else _stall).advance(rec, did, now)
                 keep[gid] = rec
+                if ladder_on and did in ("ask", "look") and _stall_background(who):
+                    told.add(who)
         except Exception as e:  # noqa: BLE001
             print(f"stall: {gid} step {act} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     with _STALL_LOCK:
@@ -11486,7 +11498,7 @@ def _notice_report(nid: str) -> str:
 
 # What an agent does when the stall pass takes a wrong step; the same path is in stall.py's docstring and the README.
 _STALL_FORM = (
-    f" A `stall:` line is a step the stall pass took because the item's mover had no turn running: resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
+    f" A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as mover, follow-ups after the first notice go by the item's work line, not its pane): resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
     f"recovery (nobody could take it: the fleet's builder is sent one message, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
