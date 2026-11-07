@@ -6556,6 +6556,44 @@ def _evw_live_why(sha: str, good: str, head: str) -> str:
     return _proof_git(("live", good, head, sha), lambda: _released_is_live(sha, good, head))
 
 
+def _evw_boxes() -> dict[str, tuple[str, dict[str, Any]]]:
+    """The machines a box_online wait may name: lower-cased hostname or fleet name → (fleet name, the machine's record in the clients state, {} while it has never checked in). The union of the names
+    table (paths.fleet_names) and the machines the server holds a record of, read from files (no network)."""
+    out: dict[str, tuple[str, dict[str, Any]]] = {}
+    machines = _clients.load().get("machines")
+    best: dict[str, tuple[str, dict[str, Any]]] = {}        # fleet name (lower-cased) → the record with the newest check-in: two records of one fleet name are one machine, and a stale one must not speak for it
+    hosts: list[tuple[str, str]] = []
+    for host, rec in (machines.items() if isinstance(machines, dict) else ()):        # a state that is not a table of records knows no machine
+        if not isinstance(rec, dict):
+            continue
+        fleet = str(rec.get("fleet") or host)
+        hosts.append((str(host).lower(), fleet.lower()))
+        if fleet.lower() not in best or _lv.ts(rec.get("puller")) > _lv.ts(best[fleet.lower()][1].get("puller")):
+            best[fleet.lower()] = (fleet, rec)
+    for host, fkey in hosts:
+        out[host] = out[fkey] = best[fkey]
+    for key, (fleet, _letter) in _clients.names_table().items():          # a machine the table names that has not checked in yet is known, and offline
+        out.setdefault(key, (fleet, out.get(fleet.lower(), (fleet, {}))[1]))
+    return out
+
+
+def _evw_box_spec(sp: "_ew.Spec") -> "_ew.Spec":
+    """A box_online spec with the machine as the fleet names it; ToolError naming the known machines when it is none, and when it is online now (nothing to wait for: the precedent of a pr_merged wait
+    on a pull request already merged)."""
+    boxes = _evw_boxes()
+    hit = boxes.get(sp.machine.lower())
+    if hit is None:
+        known = sorted({f for f, _r in boxes.values()}, key=str.lower)
+        raise ToolError(f"Refused: box_online names a machine of the fleet and {sp.machine!r} is not one" + (f"; the machines are {', '.join(known)}" if known else "; the server knows no machine yet"))
+    fleet, rec = hit
+    if rec and _lv.puller_online(rec):
+        seen, mins = _lv.ts(rec["puller"]), _lv.online_window() / 60.0
+        shown = lambda t: dt.datetime.fromtimestamp(t, ZONE).strftime("%Y-%m-%d %H:%M %Z")
+        raise ToolError(f"Refused: {fleet} is online now (its puller last checked in at {shown(seen)}), so there is nothing to wait for. If it is really down, the same write is accepted once {mins:g} minutes have passed since that "
+                        f"check-in, that is after {shown(seen + _lv.online_window())}; otherwise hand the item to the step that follows, or wait for something that has not happened")
+    return _ew.Spec(sp.kind, "", fleet)
+
+
 def _evwait_preread(kind: Any, phrase: Any) -> None:
     """Before the item lock: the facts an event wait's write gate reads (_evwait_gate), so the gate itself makes no GitHub call and no git log under the lock every other write waits on. A pr_merged
     wait reads its pull request on GitHub (paced like the done check: _pr_merged, kept in _EVW_GH); a pr_released wait warms the git answers for the last-good commit. A failure is the gate's
@@ -6597,6 +6635,8 @@ def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = Fal
         sp = _evw_spec(meta.get("wait_event"))
     except _ew.EventWaitError as e:
         raise ToolError(f"Refused: {e}")
+    if sp.kind == _ew.BOX_ONLINE:
+        sp = _evw_box_spec(sp)
     meta["wait_event"] = _ew.text(sp)
     n = _ew.pr_number(sp)
     if sp.kind == _ew.PR_RELEASED:
@@ -6621,8 +6661,8 @@ def _evwait_gate(old: dict[str, Any], meta: dict[str, Any], creating: bool = Fal
             raise ToolError(f"Refused: {sp.key} is already merged, so there is nothing to wait for. Hand the item to the step that follows it")
         if rec.get("dead"):
             raise ToolError(f"Refused: {sp.key} {rec['dead']}, so it will never merge")
-    who = "the server reads it" if sp.kind in _ew.PR_KINDS else "the fleet tool reports it at the end of a recycle (client.py recycled)" if sp.kind == _ew.RECYCLE else "the fleet tool reports the end of each op with client.py event" if sp.kind == _ew.FLEET_OP else "it is reported with client.py event"
-    quiet = "" if _ew.live(sp) else (f" Nothing tells the server of this event yet (nothing posts `client.py event` for it); only the PR kinds, recycle and fleet_op are live today, so this wait turns on its backstop {meta.get('ask_by') or meta.get('wake')}, not on the event.")
+    who = "the server reads it" if sp.kind in _ew.PR_KINDS else "the server reads the machine's puller check-ins" if sp.kind == _ew.BOX_ONLINE else "the fleet tool reports it at the end of a recycle (client.py recycled)" if sp.kind == _ew.RECYCLE else "the fleet tool reports the end of each op with client.py event" if sp.kind == _ew.FLEET_OP else "it is reported with client.py event"
+    quiet = "" if _ew.live(sp) else (f" Nothing tells the server of this event yet (nothing posts `client.py event` for it); only the PR kinds, box_online, recycle and fleet_op are live today, so this wait turns on its backstop {meta.get('ask_by') or meta.get('wake')}, not on the event.")
     return f"\n(event wait: the server watches for {_ew.words(_ew.text(sp))}; {who}. The stall pass does not run for it while it is open; the item comes back to its post-wake mover when the event arrives, or on its backstop date if it never does.{quiet})"
 
 
@@ -6668,7 +6708,42 @@ def _evwait_pr_event(kind: str, repo: str, n: int, what: str = "") -> dict[str, 
     return _ew.event(kind, f"{_cfg.canon_repo(repo)}#{n}", what=what)
 
 
+def _evwait_box_poll(now: float, told: dict[str, str]) -> list[str]:
+    """The pass for box_online waits, which are a state like a pull request's merge: each open wait whose machine is online now (its puller checked in within [client] online_minutes) turns its item to
+    its post-wake mover, with the machine named. A wait set while the machine was online is refused at the write, so a wait that is open and finds its machine online means the machine came back. → the gids turned."""
+    waits: list[tuple[str, "_ew.Spec"]] = []
+    for gid, _p in _item_files():
+        try:
+            it = _load(gid)
+            m = it.get("metadata") or {}
+            if _watch.stored_kind(m) != "event" or not _watch.watches(it):
+                continue
+            sp = _evw_spec(m.get("wait_event"))
+            if sp.kind == _ew.BOX_ONLINE:
+                waits.append((gid, sp))
+        except Exception:  # noqa: BLE001
+            continue
+    fired: list[str] = []
+    for machine in sorted({sp.machine.lower() for _g, sp in waits}):
+        try:
+            hit = _evw_boxes().get(machine)
+            if hit and hit[1] and _lv.puller_online(hit[1], now):
+                fired += _evwait_report(_ew.event(_ew.BOX_ONLINE, machine=hit[0], what=f"{hit[0]} is online again: its puller checked in"), now, told)
+        except Exception as e:  # noqa: BLE001  — one machine's read never stops the others
+            print(f"event wait: box_online {machine} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return fired
+
+
 def _evwait_poll(now: float | None = None, told: dict[str, str] | None = None) -> list[str]:
+    """The catch-up pass of the event waits that are states: a machine coming online (_evwait_box_poll) and the pull-request events (_evwait_poll_prs). → the gids turned."""
+    if not _watch.enabled() or _watch.paused():
+        return []
+    now = time.time() if now is None else now
+    told = _told_recent() if told is None else told
+    return _evwait_box_poll(now, told) + _evwait_poll_prs(now, told)
+
+
+def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
     """The catch-up for the pull-request events, which are states: an event wait on a PR's release or merge whose event happened while the server was down or was not told (the release hook is best
     effort) turns now. pr_released reads the checkout (last-good and HEAD, as sweep-released does; a [released.repos] repository's checkout HEAD); pr_merged reads GitHub at the done check's pace (_pr_merged). → the gids turned."""
     if not _watch.enabled() or _watch.paused():
@@ -11666,11 +11741,12 @@ _MODEL_FORM = (
     f"then=<who takes it after {OWNER}'s answer or step; then=<front agent> from another session gets the builder the same way>; wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches; or scope an anchor to the item>, which must be on the project's anchors list first (add it with the anchors tool, scoped to this item), else the write is refused; "
     f"wait_event=<what must happen there (an anchor wait), or the party or event {OWNER} relays (a relay wait), or the fleet event an event wait watches: {_ew.FORMS}>, which the server asks for when a waiting item waits on an anchor event, a relay or an event without it; "
     f"ask_by=YYYY-MM-DD (a relay wait's end day; an event, item or anchor wait's backstop day, as a wake is); post_wake_mover=<who moves it when the wait ends; a front agent only by itself, as for mover>. "
-    "An event wait is how an item whose mover waits in the background for something the fleet does (a release running, a PR's merge, a recycle or a fleet op finishing, a scheduled job's next run) says so: "
+    "An event wait is how an item whose mover waits in the background for something the fleet does (a release running, a PR's merge, a recycle or a fleet op finishing, a scheduled job's next run, a machine coming back online) says so: "
     "update(wait_kind=\"event\", wait_event=\"pr_released <n>\" (this repository's pull request number), ask_by=<the day it comes back anyway, required>, post_wake_mover=<who takes it then>). "
-    "Live for now: pr_released, pr_merged, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day. "
+    "Live for now: pr_released, pr_merged, box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day. "
+    "box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item parked on a date check-back for an offline machine says wait_event=\"box_online <machine>\" with the check-back day as ask_by instead; the machine must be one the fleet knows (an unknown name is refused with the known ones). "
     "The backstop must be after now, and a day (ask_by=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already past: give tomorrow at the earliest, or a wake time later today. "
-    "A wait for something that has already happened (a PR already merged or live) is refused; a recycle wait never asks for a recycle (it waits for the next one). "
+    "A wait for something that has already happened (a PR already merged or live, a machine already online) is refused; a recycle wait never asks for a recycle (it waits for the next one). "
     f"A step of his, or needs holding decision, makes him the mover: a write that names a session as mover beside it is refused (leave mover out, or mover={OWNER}, and put the session in then). "
     f"The mirror is refused too: a write that leaves an open item with mover={OWNER} but in none of his states, so it has no step and no ask, "
     f"is refused: pass step=<one line>, or needs=[\"decision\"] with ask=…, or give the item to a session (mover=<session>) and write his part in a next line that starts `{OWNER}:`. "
@@ -11790,7 +11866,7 @@ _STEP_FORM = (
 _STEP_PROOF_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=f"The event that finishes a step, so the server ticks it: [{{step: its 1-based position or exact first line, proof: pr_merged|pr_released <owner>/<repo>#<n> (or none to clear that step's)}}], or the string none to clear them all; the step must be open and not {OWNER}'s own.")]
 
 _WAIT_KIND_PARAM = Annotated[str, Field(description="What a waiting item waits on: time | anchor | item | relay | event. A time wait is its wake; an item wait its after; an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (a wake is the backstop); a relay wait its wait_event and ask_by; an event wait its wait_event (a fleet event) and a backstop day (ask_by or a wake). \"none\" clears it.")]
-_WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what must happen at the anchor. A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, recycle and every fleet_op form; job_run turns only on the backstop day). \"none\" clears it.")]
+_WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what must happen at the anchor. A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused); message the front agent for a check or an answer only it can give.")]

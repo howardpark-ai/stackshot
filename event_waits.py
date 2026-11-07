@@ -15,9 +15,11 @@ is told of once, by code:
     fleet_op <verb|any|many> [<machine>]   a fleet op ended: sala's result (client.py event --kind fleet_op). `verb` is the op (lane, provision, update …), `any` every op, `many` every op over
                                       more than one session (the event carries its session count)
     job_run <name>                    a scheduled job ran: its own report (client.py event --kind job_run --name <name>)
+    box_online <machine>              the machine is online: its puller checked in within [client] online_minutes (liveness.puller_online). A state the server reads for itself, like the PR kinds
 
-A bare #n or n names a pull request of this repository. The wait needs a backstop date beside the event (ask_by or a wake) that is after now (a day falls due at 00:00 in the instance timezone): the day the item comes back anyway if the event never came.
-Live today (`live`): the PR kinds, recycle, and every fleet_op form (any verb, `any`, `many`): the fleet tool reports the end of every op with `client.py event --kind fleet_op`. Nothing posts `client.py event --kind job_run` yet, so a job_run wait turns only on its backstop.
+A bare #n or n names a pull request of this repository. A box_online wait names a machine of the fleet (an unknown name is refused with the known ones) and, like a wait on a PR already merged, is refused while that machine is
+online now: there would be nothing to wait for. It turns on the first pass after the machine's puller checks in again. The wait needs a backstop date beside the event (ask_by or a wake) that is after now (a day falls due at 00:00 in the instance timezone): the day the item comes back anyway if the event never came.
+Live today (`live`): the PR kinds, box_online, recycle, and every fleet_op form (any verb, `any`, `many`): the fleet tool reports the end of every op with `client.py event --kind fleet_op`. Nothing posts `client.py event --kind job_run` yet, so a job_run wait turns only on its backstop.
 
 Pure functions of strings and dicts: no server import, no clock read, so the server, the guards, the renderer and the tests share one copy of what an event is."""
 from __future__ import annotations
@@ -25,11 +27,11 @@ from __future__ import annotations
 import re
 from typing import Any, NamedTuple
 
-PR_RELEASED, PR_MERGED, RECYCLE, FLEET_OP, JOB_RUN = "pr_released", "pr_merged", "recycle", "fleet_op", "job_run"
-KINDS = (PR_RELEASED, PR_MERGED, RECYCLE, FLEET_OP, JOB_RUN)
+PR_RELEASED, PR_MERGED, RECYCLE, FLEET_OP, JOB_RUN, BOX_ONLINE = "pr_released", "pr_merged", "recycle", "fleet_op", "job_run", "box_online"
+KINDS = (PR_RELEASED, PR_MERGED, RECYCLE, FLEET_OP, JOB_RUN, BOX_ONLINE)
 PR_KINDS = (PR_RELEASED, PR_MERGED)
-REPORTED = (RECYCLE, FLEET_OP, JOB_RUN)             # the kinds a machine may report with client.py event (the PR kinds the server verifies for itself)
-FORMS = "pr_released <owner/repo#n> | pr_merged <owner/repo#n> | recycle [<machine>] | fleet_op <verb | any | many> [<machine>] | job_run <name>"
+REPORTED = (RECYCLE, FLEET_OP, JOB_RUN)             # the kinds a machine may report with client.py event (the PR kinds and box_online the server verifies for itself)
+FORMS = "pr_released <owner/repo#n> | pr_merged <owner/repo#n> | recycle [<machine>] | fleet_op <verb | any | many> [<machine>] | job_run <name> | box_online <machine>"
 ANY, MANY = "any", "many"
 
 _NAME = re.compile(r"[A-Za-z0-9][\w.@:-]{0,79}")
@@ -66,6 +68,10 @@ def parse(text: Any) -> Spec:
         repo = (m.group("repo") or "").lower()
         return Spec(kind, f"{repo}#{int(m.group('n'))}")
     parts = arg.split()
+    if kind == BOX_ONLINE:
+        if len(parts) != 1 or not _NAME.fullmatch(parts[0]):
+            raise EventWaitError(f"box_online names the machine to wait for: box_online <machine>; got {arg[:60]!r}")
+        return Spec(kind, "", parts[0])
     if kind == RECYCLE:
         if len(parts) > 1 or (parts and not _NAME.fullmatch(parts[0])):
             raise EventWaitError(f"recycle takes at most a machine: recycle [<machine>]; got {arg[:60]!r}")
@@ -105,9 +111,9 @@ def text(spec: Spec) -> str:
 
 
 def live(spec: Spec) -> bool:
-    """Does something tell the server of this event today? The PR kinds (the server reads them), a recycle (the fleet tool's end-of-recycle hook) and every fleet op (the fleet tool reports the end of each
+    """Does something tell the server of this event today? The PR kinds and box_online (the server reads them), a recycle (the fleet tool's end-of-recycle hook) and every fleet op (the fleet tool reports the end of each
     with `client.py event --kind fleet_op`: any verb, `any`, `many`). `job_run` needs a `client.py event` that nothing posts yet: such a wait turns only on its backstop."""
-    return spec.kind in PR_KINDS or spec.kind in (RECYCLE, FLEET_OP)
+    return spec.kind in PR_KINDS or spec.kind in (RECYCLE, FLEET_OP, BOX_ONLINE)
 
 
 def pr_number(spec: Spec) -> int:
@@ -127,6 +133,8 @@ def words(phrase: Any) -> str:
     if sp.kind == FLEET_OP:
         what = {ANY: "the next fleet op", MANY: "the next fleet op over more than one session"}.get(sp.key, f"the next fleet {sp.key}")
         return what + (f" on {sp.machine}" if sp.machine else "")
+    if sp.kind == BOX_ONLINE:
+        return f"{sp.machine} coming online"
     return f"the next run of job {sp.key}"
 
 
@@ -143,6 +151,8 @@ def matches(spec: Spec, ev: dict[str, Any]) -> bool:
         return False
     if spec.kind in PR_KINDS:
         return ev.get("key") == spec.key
+    if spec.kind == BOX_ONLINE:
+        return str(ev.get("machine") or "").lower() == spec.machine.lower()
     if spec.machine and ev.get("machine") != spec.machine:
         return False
     if spec.kind == RECYCLE:
@@ -170,6 +180,8 @@ def arrival(ev: dict[str, Any]) -> str:
     if k == FLEET_OP:
         n = ev.get("sessions")
         return f"fleet op {ev.get('verb') or ''} finished" + (f" on {ev['machine']}" if ev.get("machine") else "") + (f", {n} sessions" if isinstance(n, int) else "") + (f" ({ev['result']})" if ev.get("result") else "")
+    if k == BOX_ONLINE:
+        return f"{ev.get('machine') or 'the machine'} is online"
     return f"job {ev.get('name') or ''} ran" + (f" ({ev['result']})" if ev.get("result") else "")
 
 
@@ -178,7 +190,7 @@ def event_from_report(body: dict[str, Any]) -> dict[str, Any]:
     kind = str(body.get("kind") or "").strip().lower()
     kind = FLEET_OP if kind == "sala_op" else kind          # the first name of the kind, still accepted
     if kind not in REPORTED:
-        raise EventWaitError(f"kind is one of {' | '.join(REPORTED)} (a pull request's merge and release the server sees for itself); got {kind[:40]!r}")
+        raise EventWaitError(f"kind is one of {' | '.join(REPORTED)} (a pull request's merge and release, and a machine coming online, the server sees for itself); got {kind[:40]!r}")
     machine = str(body.get("machine") or "").strip()
     verb, name = str(body.get("verb") or "").strip().lower(), str(body.get("name") or "").strip()
     if machine and not _NAME.fullmatch(machine):
