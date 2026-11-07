@@ -10,6 +10,7 @@ import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines pane
 import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
 import routing as _routing   # the routing log: what came in per project and how it was ruled (the pilot)
+import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
 import ghsync as _gh   # how an id is written for a person (board-tmp-<machine>#3) and its page address (/items/<n>)
 import work as _work   # an item's work lines, what is in motion on it (a row's "engineer: migrating", the item page's list, the History)
 import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
@@ -304,15 +305,19 @@ def parse_ask(text):
 # pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended. The server validates
 # (server._gate_options); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
 OPTIONS_MIN, OPTIONS_MAX, OPTION_LABEL_MAX, OPTION_LINE_MAX = 2, 6, 40, 160
-def options_of(r):
-    """An item's options as stored → [{"label", "line", "recommended"}], [] when it has none or they are misshaped."""
+def options_of(r, raw=False):
+    """An item's options → [{"label", "line", "recommended"}], [] when it has none or they are misshaped. The labels are as the card shows them: with three or more options whose labels all open
+    with their own place's letter, that letter is dropped (option_labels.strip_letters; the badge draws it). `raw=True` gives the labels as stored. Nothing is written."""
     v = (r.get("metadata") or {}).get("options")
     if not isinstance(v, list) or not OPTIONS_MIN <= len(v) <= OPTIONS_MAX: return []
     out = []
     for o in v:
         if not isinstance(o, dict) or not str(o.get("label") or "").strip() or not str(o.get("line") or "").strip(): return []
         out.append({"label": str(o["label"]).strip(), "line": str(o["line"]).strip(), "recommended": o.get("recommended") is True})
-    return out if sum(o["recommended"] for o in out) == 1 else []
+    if sum(o["recommended"] for o in out) != 1: return []
+    if not raw:
+        for o, label in zip(out, _ol.strip_letters([o["label"] for o in out])): o["label"] = label
+    return out
 def answers_of(r):
     """The owner's answers from the board as stored (metadata.answers), oldest first; [] when none or misshaped."""
     v = (r.get("metadata") or {}).get("answers")
@@ -332,7 +337,7 @@ def yesno_options(r):
     return [dict(o) for o in YESNO_OPTIONS]
 def option_lines(r):
     """The options as plain lines, "label (recommended): line", for a tool reply or a tooltip."""
-    return [f'{o["label"]}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for o in options_of(r)]
+    return [f'{_ol.listed(o["label"], i)}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for i, o in enumerate(options_of(r))]
 def when_words(t, clock=True):
     """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"): the rulebook's form for a date a person reads. t = an aware datetime
     (drawn in its own zone) or a date (no clock). Board.when and the server's replies use it."""
@@ -1310,7 +1315,7 @@ class Board:
                         pk = ((parse_ask(pk) or {}).get("decide") or pk) if pk else ""
                         ev.append(("needs", f"whose move: {e(WHOSE[a])} → <b>{e(WHOSE[b])}</b>"))
                         if pk: ev.append(("needs", f"the ask was: {e(_ip.clip(pk, 160))}", None, f'<details class="ehold"><summary class="more">the whole ask</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
-                        if po: ev.append(("needs", "the options were: " + "; ".join(f'{e(o["label"])}{" (recommended)" if o["recommended"] else ""}' for o in po)))
+                        if po: ev.append(("needs", "the options were: " + "; ".join(f'{e(_ol.listed(o["label"], i))}{" (recommended)" if o["recommended"] else ""}' for i, o in enumerate(po))))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
                         ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", "needs: <b>" + e(", ".join(ns)) + "</b>" if ns else "needs: no session named any more"))
                 elif is_held(v) and is_held(prev) and wake_of(prev) != wake_of(v):
@@ -1490,7 +1495,7 @@ class Board:
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
             out.append("- " + " · ".join(meta))
             if k == "call" and options_of(r):        # the options under the ask, the recommended one marked
-                out.append("- options:\n" + "\n".join(f'  - **{o["label"]}**{" (recommended)" if o["recommended"] else ""}: {m_link(o["line"])}' for o in options_of(r)))
+                out.append("- options:\n" + "\n".join(f'  - **{_ol.listed(o["label"], i)}**{" (recommended)" if o["recommended"] else ""}: {m_link(o["line"])}' for i, o in enumerate(options_of(r))))
             out.append("- mover: " + m_sref(r))      # step 4b: board.md names the mover
             if needs_sessions(r): out.append("- needs: " + ", ".join(f"`{shown_ref(s)}`" for s in needs_sessions(r)))   # the sessions whose move it is
             if after_of(r): out.append("- after: " + ", ".join(f"[{shown_full(g)}](#task-{g[0]}-{g[1:]})" + ("" if g in after_open(r) else " (closed)") for g in after_of(r)))

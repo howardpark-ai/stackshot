@@ -352,6 +352,101 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("_split_letter in the stored order: a letter past the options, or at another option's place, is left for the stale check", server._split_letter(rd(30), "D · Gamma") == ("D · Gamma", "")
           and server._split_letter(rd(30), "A · Beta") == ("A · Beta", "") and server._split_letter(rd(30), "B · Beta") == ("Beta", "B") and server._split_letter(rd(30), "Beta") == ("Beta", ""))
 
+    # ---- 2c. a label that repeats its own badge letter ("A Report" under the badge A) is read without it, everywhere, and a pick that names it still lands
+    import option_labels as ol
+    def opts_of(*labels, rec=1): return [{"label": lb, "line": f"Line {i}", "recommended": i == rec} for i, lb in enumerate(labels)]
+    FORMS = ["{L} {w}", "{L}. {w}", "{L}: {w}", "{L}) {w}", "({L}) {w}", "{L} - {w}", "{L} · {w}", "Option {L}: {w}", "{L}:{w}", "{L} – {w}"]
+    WORDS = ["Report", "Plan", "Fix"]
+    for form in FORMS:
+        check(f"option_labels: {form.replace('{L}', 'A').replace('{w}', 'Report')!r} loses its letter at each place", ol.strip_letters([form.format(L=chr(65 + i), w=w) for i, w in enumerate(WORDS)]) == WORDS, form)
+        check(f"option_labels: …with the letters in lower case ({form!r})", ol.strip_letters([form.format(L=chr(97 + i), w=w) for i, w in enumerate(WORDS)]) == WORDS, form)
+    check("option_labels: four to six options strip too, and an extra space around the rest is dropped", ol.strip_letters(["A  Report", "B Plan", "C Fix", "D Test"]) == ["Report", "Plan", "Fix", "Test"]
+          and len(ol.strip_letters([f"{chr(65 + i)} word{i}" for i in range(6)])) == 6 and ol.strip_letters([f"{chr(65 + i)} word{i}" for i in range(6)])[5] == "word5")
+    WAKE = ["A wake alone", "A dropped step", "A third thing"]
+    check("option_labels: labels that only start with the word \"A\" are kept whole (the order test: option 2 must open with B)", ol.strip_letters(WAKE) == WAKE, ol.strip_letters(WAKE))
+    check("option_labels: letters out of order (A, C, B) are kept whole", ol.strip_letters(["A Report", "C Plan", "B Fix"]) == ["A Report", "C Plan", "B Fix"])
+    check("option_labels: a mix where only some labels carry their letter is kept whole", ol.strip_letters(["A Report", "Plan", "C Fix"]) == ["A Report", "Plan", "C Fix"]
+          and ol.strip_letters(["A Report", "B Plan", "Fix"]) == ["A Report", "B Plan", "Fix"] and ol.strip_letters(["Report", "B Plan", "C Fix"]) == ["Report", "B Plan", "C Fix"])
+    check("option_labels: two options are kept as they are (no badge is drawn there)", ol.strip_letters(["A Report", "B Plan"]) == ["A Report", "B Plan"] and ol.strip_letters(["A"]) == ["A"])
+    check("option_labels: a letter inside a word is no letter (Apple, Banana, Cherry stay whole)", ol.strip_letters(["Apple", "Banana", "Cherry"]) == ["Apple", "Banana", "Cherry"]
+          and ol.strip_letters(["A.pdf", "B.pdf", "C.pdf"]) == ["A.pdf", "B.pdf", "C.pdf"])
+    check("option_labels: a label that is only its letter strips to nothing; the plain list names it by the letter", ol.strip_letters(["A", "B Plan", "C Fix"]) == ["", "Plan", "Fix"]
+          and ol.strip_letters(["A", "B", "C"]) == ["", "", ""] and ol.strip_letters(["Option A", "(B)", "C."]) == ["", "", ""] and ol.listed("", 2) == "C" and ol.listed("Plan", 2) == "Plan")
+    check("option_labels: pick_words reads \"B · Plan\", the letter alone for a letter-only option, the bare label with no letter", ol.pick_words("Plan", "B") == "B · Plan" and ol.pick_words("A", "A") == "A"
+          and ol.pick_words("Plan", "") == "Plan" and ol.pick_words("", "B") == "")
+    LAB = ["A Report", "B Plan", "C Fix"]
+    check("options_of in both renderers: the labels as the card shows them, and as stored with raw=True; the line and the recommended flag do not move",
+          all([o["label"] for o in m.options_of({"metadata": {"options": opts_of(*LAB)}})] == WORDS and [o["label"] for o in m.options_of({"metadata": {"options": opts_of(*LAB)}}, raw=True)] == LAB
+              and [o["recommended"] for o in m.options_of({"metadata": {"options": opts_of(*LAB)}})] == [False, True, False]
+              and m.options_of({"metadata": {"options": opts_of(*LAB)}})[0]["line"] == "Line 0" for m in (render, r2)))
+    check("options_of: a list that was misshaped still draws nothing (two recommended), and a card of whole labels is unchanged", all(m.options_of({"metadata": {"options": [dict(o, recommended=True) for o in opts_of(*LAB)]}}) == []
+          and [o["label"] for o in m.options_of({"metadata": {"options": opts_of(*WAKE)}})] == WAKE for m in (render, r2)))
+    check("the plain option lines (tool replies, board.md, the brief) read the same", render.option_lines({"metadata": {"options": opts_of(*LAB)}})[1] == "Plan (recommended): Line 1"
+          and r2.option_lines({"metadata": {"options": opts_of(*LAB)}})[0] == "Report: Line 0" and r2.option_lines({"metadata": {"options": opts_of("A", "B Plan", "C Fix")}})[0] == "A: Line 0")
+    import ghsync, ask_read
+    check("the History line of an options edit (ghsync._options_text) lists the shown labels", ghsync._options_text(opts_of(*LAB)).splitlines()[0] == "- Report: Line 0"
+          and ghsync._options_text(opts_of(*WAKE)).splitlines()[0] == "- A wake alone: Line 0" and ghsync._options_text(None) == "")
+    check("the audit reads the recommended option by its shown label: a Recommend part that names \"Plan\" names it", ask_read.recommend_missing({"ask": "Decide: which · Recommend: Plan · Stakes: a day · By: no date", "options": opts_of(*LAB)}) == ""
+          and ask_read.recommend_missing({"ask": "Decide: which · Recommend: Report · Stakes: a day · By: no date", "options": opts_of(*LAB)}) == "Plan"
+          and ask_read.recommend_missing({"ask": "Decide: which · Recommend: B Plan · Stakes: a day · By: no date", "options": opts_of(*LAB)}) == "")
+    ASKL = "Decide: which · Recommend: B, Plan · Stakes: a day · By: no date"
+    item(60, needs=["decision"], ask=ASKL, options=opts_of(*LAB)); item(61, needs=["decision"], ask=ASKL, options=opts_of(*WAKE)); item(62, needs=["decision"], ask=ASKL, options=opts_of("A", "B Plan", "C Fix"))
+    b60, b61, b62 = (box(get(f"/items/a{i}").text) for i in (60, 61, 62))
+    check("a card whose labels repeat their letters reads \"[A] Report\", never \"[A] A Report\"", re.findall(r'<span class="akey">(.)</span>([^<]*)</span>', b60) == [("A", "Report"), ("B", "Plan"), ("C", "Fix")]
+          and vals(b60) == ["A · Report", "B · Plan", "C · Fix"] and "A Report" not in b60, b60[:500])
+    check("…a card of words that start with \"A\" keeps them whole under the badge", re.findall(r'<span class="akey">(.)</span>([^<]*)</span>', b61) == [("A", "A wake alone"), ("B", "A dropped step"), ("C", "A third thing")]
+          and vals(b61) == ["A · A wake alone", "B · A dropped step", "C · A third thing"], b61[:500])
+    check("…a label that was only its letter draws the badge alone and posts the letter", re.findall(r'<span class="akey">(.)</span>([^<]*)</span>', b62) == [("A", ""), ("B", "Plan"), ("C", "Fix")] and vals(b62) == ["A", "B · Plan", "C · Fix"], b62[:500])
+    server._board_home_drop(); hm60 = get("/").text
+    hrow60 = re.search(r'<form class="hanswer" data-cards method="post" action="/items/a60/answer".*?</form>', hm60, re.S)
+    check("the home row draws the same stripped cards", bool(hrow60) and re.findall(r'name="choice" value="([^"]*)"', hrow60.group(0)) == ["A · Report", "B · Plan", "C · Fix"] and "A Report" not in hrow60.group(0), hm60[:200])
+    # a pick lands on a stripped card whichever form the answer comes in: the card's own "A · Report", the bare shown label, the label as stored, a page loaded before the change ("A · A Report")
+    for pick in ("A · Report", "Report", "A Report", "A · A Report"):
+        check(f"_split_letter on a stripped card: {pick!r} is the first option", server._split_letter(rd(60), pick) == ("Report", "A" if "·" in pick else ""), server._split_letter(rd(60), pick))
+    check("_split_letter on a stripped card: a letter at another place, or past the options, is still left for the stale check", server._split_letter(rd(60), "B · Report") == ("B · Report", "")
+          and server._split_letter(rd(60), "D · Fix") == ("D · Fix", "") and server._split_letter(rd(60), "Nowhere") == ("Nowhere", "") and server._split_letter(rd(60), "A") == ("A", ""))
+    check("_split_letter on a card of whole labels: unchanged (\"A · A wake alone\" is its first option, the bare label has no letter)", server._split_letter(rd(61), "A · A wake alone") == ("A wake alone", "A")
+          and server._split_letter(rd(61), "A wake alone") == ("A wake alone", "") and server._split_letter(rd(61), "B · A dropped step") == ("A dropped step", "B") and server._split_letter(rd(61), "A") == ("A", ""))
+    check("_split_letter on a card with a letter-only option: the letter alone, \"A · A\" or the stored label", all(server._split_letter(rd(62), p) == ("A", "A") for p in ("A", "a", "A · A"))
+          and server._split_letter(rd(62), "A · Plan") == ("A · Plan", "") and server._split_letter(rd(62), "B · Plan") == ("Plan", "B") and server._split_letter(rd(62), "B") == ("B", ""))
+    check("…and the same cards with only two options (no badge) keep their labels: \"A · Report\" is no option", server._split_letter({"metadata": {"options": opts_of("A Report", "B Plan")}}, "A · Report") == ("A · Report", "")
+          and server._split_letter({"metadata": {"options": opts_of("A Report", "B Plan")}}, "A Report") == ("A Report", ""))
+    for n, (src, pick, want_choice, want_letter) in enumerate((("A · Report", "A · Report", "Report", "A"), ("the shown label", "Plan", "Plan", ""), ("the stored label", "C Fix", "Fix", ""), ("an old page", "C · C Fix", "Fix", "C"))):
+        g = 63 + n; item(g, needs=["decision"], ask=ASKL, options=opts_of(*LAB))
+        r = post(f"/items/a{g}/answer", {"token": tok(f"a{g}"), "choice": pick})
+        am = rd(g)["metadata"]; a_ = (am.get("answers") or [{}])[-1]
+        check(f"a pick of {src} ({pick!r}) lands: stored under the shown label, the option's line kept, the letter beside it only when the box drew it",
+              "sent=decision" in r.headers["location"] and a_.get("choice") == want_choice and a_.get("letter", "") == want_letter and a_.get("choice_line") == f"Line {WORDS.index(want_choice)}" and "options" not in am, (r.headers["location"], a_))
+        check(f"…the answer keeps the options as stored (read again, they strip again: no letter lost twice) ({pick!r})", [o["label"] for o in a_.get("options") or []] == LAB
+              and [o["label"] for o in r2.options_of({"metadata": {"options": a_["options"]}})] == WORDS, a_.get("options"))
+    a63 = rd(63)["metadata"]["answers"][-1]
+    check("…its words read \"A · Report\" in the notice and the saved note (never \"A · A Report\")", server._answer_words(a63).startswith("A · Report") and "**A · Report**" in server._answer_note(a63) and "A · A Report" not in get("/items/a63").text
+          and "A · Report" in get("/items/a63").text, server._answer_words(a63))
+    item(67, needs=["decision"], ask=ASKL, options=opts_of("A", "B Plan", "C Fix"))
+    r = post("/items/a67/answer", {"token": tok("a67"), "choice": "A"}); a67 = rd(67)["metadata"].get("answers", [{}])[-1]
+    check("a pick of the letter-only card (\"A\") lands on the first option, stored under its label as stored", "sent=decision" in r.headers["location"] and a67.get("choice") == "A" and a67.get("letter") == "A" and a67.get("choice_line") == "Line 0", (r.headers["location"], a67))
+    check("…and it reads as the letter alone in the notice, the note and the History", server._answer_words(a67).startswith("A") and not server._answer_words(a67).startswith("A ·") and "**A**" in server._answer_note(a67) and "A · A" not in get("/items/a67").text)
+    item(68, needs=["decision"], ask=ASKL, options=opts_of(*WAKE)); r = post("/items/a68/answer", {"token": tok("a68"), "choice": "B · A dropped step"}); a68 = rd(68)["metadata"].get("answers", [{}])[-1]
+    check("a pick on a card of whole labels lands as before (the label whole, the letter beside it)", "sent=decision" in r.headers["location"] and a68.get("choice") == "A dropped step" and a68.get("letter") == "B" and [o["label"] for o in a68.get("options", [])] == WAKE, a68)
+    item(69, needs=["decision"], ask=ASKL, options=opts_of(*LAB)); r = post("/items/a69/answer", {"token": tok("a69"), "choice": "B · Report"})
+    check("a letter at another option's place is stale on a stripped card too, nothing recorded", "sent=stale" in r.headers["location"] and not rd(69)["metadata"].get("answers"), r.headers["location"])
+
+    # two labels that would read the same once their letters are dropped ("A Report", "B Report") stay whole, so a pick by letter lands on the option it names
+    COLL = ["A Report", "B Report", "C Fix"]
+    check("option_labels: labels that would collide once stripped (case aside) are kept whole; a label that is only its letter does not count as a collision",
+          ol.strip_letters(COLL) == COLL and ol.strip_letters(["A Plan", "B plan", "C Fix"]) == ["A Plan", "B plan", "C Fix"] and ol.strip_letters(["A", "B", "C Fix"]) == ["", "", "Fix"])
+    LCOLL = ["A", "B A", "C X"]      # option A strips to "" and is stored under "A"; option B would strip to "A" too
+    check("option_labels: a letter-only label collides with another label's stripped rest by the name it is stored under, so the list is kept whole", ol.strip_letters(LCOLL) == LCOLL and ol.strip_letters(["a", "B A", "C X"]) == ["a", "B A", "C X"])
+    item(71, needs=["decision"], ask=ASKL, options=opts_of(*LCOLL))
+    r = post("/items/a71/answer", {"token": tok("a71"), "choice": "B · B A"}); a71 = rd(71)["metadata"].get("answers", [{}])[-1]
+    check("a pick of option B on [A, B A, C X] lands on option B, not on option A", "sent=decision" in r.headers["location"] and a71.get("choice") == "B A" and a71.get("letter") == "B" and a71.get("choice_line") == "Line 1", (r.headers["location"], a71))
+    check("options_of in both renderers: colliding labels draw whole", all([o["label"] for o in m.options_of({"metadata": {"options": opts_of(*COLL)}})] == COLL for m in (render, r2)))
+    item(70, needs=["decision"], ask=ASKL, options=opts_of(*COLL))
+    check("_split_letter on colliding labels: the letter picks its own place", server._split_letter(rd(70), "B · B Report") == ("B Report", "B") and server._split_letter(rd(70), "A · A Report") == ("A Report", "A"))
+    r = post("/items/a70/answer", {"token": tok("a70"), "choice": "B · B Report"}); a70 = rd(70)["metadata"].get("answers", [{}])[-1]
+    check("a pick of the second of two colliding labels lands on the second option, not the first", "sent=decision" in r.headers["location"] and a70.get("choice") == "B Report" and a70.get("letter") == "B"
+          and a70.get("choice_line") == "Line 1", (r.headers["location"], a70))
+
     # ---- 3. the home is drawn on request; a write from shows at the next read
     h0 = get("/").text
     item(10, subject="[work] fresh item ten")

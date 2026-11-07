@@ -17,6 +17,7 @@ import unicodedata
 from typing import Any
 
 import config as _cfg  # [keywords.ask_options]: the refusal words and particles of the instance's own language
+import option_labels as _ol  # the letter an option's label repeats from its badge, dropped on read
 import render
 
 
@@ -205,7 +206,8 @@ def recommend_mismatch(meta: dict[str, Any]) -> str:
 def recommend_missing(meta: dict[str, Any]) -> str:
     """The recommended option's label when the ask's Recommend part does not name it (substring, case-insensitive and NFC-normalized as recommend_mismatch reads it), "" when it does, or when there is no option, no recommended one or no ask in form.
     A label that stands in the text only right after a word of [keywords.ask_options] `refusals`, or right before a word of `refusals_after`, is not named (with none set, nothing changes: the substring alone decides; a particle after the label is a substring match already)."""
-    rec = next((o["label"] for o in meta.get("options") or [] if isinstance(o, dict) and o.get("recommended") is True), "")
+    shown = valid_options(meta)      # the labels as the card shows them (a letter its badge draws is not part of the name), a letter-only label by that letter
+    rec = next((_ol.listed(o["label"], i) for i, o in enumerate(shown) if o["recommended"]), "") or next((o["label"] for o in meta.get("options") or [] if isinstance(o, dict) and o.get("recommended") is True), "")
     pa = render.parse_ask(str(meta.get("ask") or ""))
     if not rec or not pa or (_norm(rec).casefold() in _norm(pa["recommend"]).casefold() and not _refused_only(rec, pa["recommend"])):
         return ""
