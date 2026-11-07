@@ -4,6 +4,7 @@ A project is defined by its entry in the project record (project_registry.py). E
 record is always the one that is right and the page is a copy stackshot writes from it:
 
     create       a new project: name, scope, and optionally a page (made from the template only when asked to)
+    adopt        a project from a page that never had one: the page is read once, the entry is written from it (`how: adopted`, with the page revision read), and from then on the page is only a pointer
     rename       the project's name: the id stays, the old name goes to `former_names`, the pending agents under the old name are dropped
     move_page    the project's page moves to another key (rename_page.py does the page half): the old key goes to `former_keys`
     archive      status archived, with who, when and how; reopen puts it back to active
@@ -395,6 +396,25 @@ def mirror_text(content: str, e: dict, retired: set | None = None) -> tuple[str 
     return out, ""
 
 
+def mirror_drift(content: str, e: dict, retired: set | None = None) -> list[str]:
+    """Which of the three mirrored lines of the page text `content` do not read as the entry `e` says: a subset of ["display-name", "status", "agents"], in that order ([] = the page mirrors the record).
+    The same comparisons `mirror_text` makes before it writes, so a page this lists is one the next mirror write changes. Never raises."""
+    try:
+        retired = prj.retired_statuses() if retired is None else retired
+        fm = _pg.frontmatter_text(content)
+        out = []
+        if e.get("name") and str(fm.get("display-name") or "").strip() != e["name"]:
+            out.append("display-name")
+        word = pr._status_word(fm.get("status", ""), e.get("status") or "active", retired)
+        if word and word.lower() != str(fm.get("status") or "").strip().lower():
+            out.append("status")
+        if "agents" in e and _page_agents(fm) != _want_agents(e["agents"]):
+            out.append("agents")
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _entry_now(pid: str) -> dict | None:
     e = pr.entries().get(pid)
     return copy.deepcopy(e) if isinstance(e, dict) else None
@@ -533,14 +553,17 @@ def _finish(pid: str, ents: dict, changed: bool, dry: bool, io: Any, make_page: 
 
 
 # ----------------------------------------------------------------------------- the verbs
-def _name_taken(ctx: Ctx, name: str, pid: str) -> str:
-    """Why `name` cannot be the name of project `pid` ("" when it can): another project's name or former name, or the name line of another project's page."""
+def _name_taken(ctx: Ctx, name: str, pid: str, own: str = "") -> str:
+    """Why `name` cannot be the name of project `pid` ("" when it can): another project's name or former name, or the name line of another project's page. `own` = the page key the project is made
+    from (adopt): that page and the pages that belong to it (a sub-page that carries its project's name line) are not another project's."""
     fold = name.casefold()
     for p2, e2 in ctx.ents.items():
         if p2 != pid and (str(e2.get("name") or "").casefold() == fold or any(str(x).casefold() == fold for x in e2.get("former_names") or [])):
             return f"{name} is the name of project {p2}"
     for k2, row in ctx.raw.items():
         if isinstance(row, dict) and row.get("role") in prj._NAME_ROLES and str(row.get("session") or "").casefold() == fold and row.get("id") != pid and k2 not in ctx.ents:
+            if own and (k2 == own or ctx.owner(k2) == own):
+                continue
             return f"{name} is the name line of {k2}"
     return ""
 
@@ -645,6 +668,97 @@ def _forget_created(pid: str, made: dict, fresh: bool = True) -> None:
             if fresh:
                 ctx.d["ids"].pop(pid, None); ctx.d["marks"].pop(pid, None)
     txn(work)
+
+
+def adopt(page: str, *, name: str = "", scope: str = "", by: str = "", io: Any = None, now: str | None = None, dry: bool = False) -> dict:
+    """Make a project from a page that never had one: read the page once, from the page store, and write its entry from what it says (the name from its `display-name:` line, the scope the registry derives
+    from it, the status, the agents map with the front and background split, the hub), with `made` = who, when, `how: adopted` and the `revision` of the page that was read. From then on the entry is
+    the project and the page is only a copy the mirror writes: the page is not read for those fields again. The project's pending agents are folded into the entry, as at any first verb, and the project is listed on
+    purpose (adopting is deliberate). `name` and `scope` override what the page says (a name the page gives that another project has, or none at all: the scope's name for the slug).
+    Refused: a link or a key that is not a top-level page of this instance's page store (400), a sub-page, which is never a project (400), a page that is not `type: project` (400: set the type on the page first,
+    then adopt), a page that does not exist (404), a page some project already points at or once had (409, naming the project), a name another project has (409). The page store is read before the record's
+    lock is taken. → {project, key, changed, entry, mirror, adopted, revision}."""
+    key = _norm_key(page)
+    if not key or "://" in key or re.search(r"\s", key):
+        raise VerbError(400, "adopt takes the key of a page of this instance's page store, not a link: " + (f"{page[:80]!r}" if page else "no page given"))
+    top, _, slug = key.partition("/")
+    if top not in _cfg.page_dirs() or not slug or "/" in slug:
+        raise VerbError(400, f"page = {' or '.join(d + '/<slug>' for d in _cfg.page_dirs())}, one level: a page below another page is a sub-page, and a sub-page is never a project; got {key[:80]!r}")
+    scope = str(scope or "").strip().lower()
+    if scope and scope not in prj.scopes():
+        raise VerbError(400, f"scope = {' | '.join(prj.scopes())}")
+    name = " ".join(str(name or "").split())
+    if name and not NAME_RE.fullmatch(name):
+        raise VerbError(400, "name = letters, digits, . _ - (at most 64), starting with a letter or digit: the prefix of the project's agents' names")
+    if io is None:
+        import page_debt as _pd
+        io = _pd.page_io()
+    content, rev = io.get(key)
+    if content is None or not rev:
+        raise VerbError(404, f"{key} is not in the page store: there is no page to make a project from")
+    fm = _pg.frontmatter_text(content)
+    if str(fm.get("type") or "").strip().lower() != "project":
+        raise VerbError(400, f"{key} is `type: {str(fm.get('type') or '').strip() or '(none)'}`, not `type: project`: set the page's type, then adopt it")
+    own = str(fm.get("display-name") or "").strip()
+    if not name and own and not NAME_RE.fullmatch(own):
+        raise VerbError(400, f"the page's display-name: {own[:64]!r} is not a name an agent can be called after (letters, digits, . _ -, at most 64): change the line on the page, or give the name with --name")
+    agents, back = _pg.split_agents(fm.get("agents"))
+    base = {"title": str(fm.get("title") or key), "type": "project", "status": str(fm.get("status") or ""), "org": str(fm.get("org") or ""), "tags": fm.get("tags") or []}
+    if own:
+        base.update(session=own, role="name")
+    if agents:
+        base["agents"] = agents
+    if back:
+        base["back_agents"] = back
+
+    def work(ctx: Ctx) -> dict:
+        up = ctx.owner(key)
+        if up:
+            raise VerbError(400, f"{key} is a sub-page of {up}: a sub-page is never a project; adopt {up}, the project's own page")
+        h = str(fm.get("hub") or "").strip().strip("'\"").strip("/")
+        if h:
+            h = "/".join((h if "/" in h else _cfg.page_dirs()[0] + "/" + h).split("/")[:2])
+            if h != key and (h in ctx.raw or h in pr.by_page(ctx.ents)):
+                raise VerbError(400, f"{key} has a `hub: {h}` line, which makes it a sub-page of {h}: a sub-page is never a project; adopt {h}")
+        cur = pr.by_page(ctx.ents)
+        if key in cur:
+            raise VerbError(409, f"{key} is already the page of project {cur[key]}: a page belongs to one project")
+        former = pr.by_former_key(ctx.ents)
+        if key in former:
+            raise VerbError(409, f"{key} is a former page of project {former[key]}: that project moved away from it; adopt the page it points at now")
+        pid = ctx.key_ids().get(key, "")
+        if pid and pid in ctx.ents:
+            raise VerbError(409, f"{key} is already the page of project {pid}: a page belongs to one project")
+        if not pid:
+            while True:
+                pid = "prj_" + secrets.token_hex(4)
+                if pid not in ctx.d["ids"] and pid not in ctx.ents:
+                    break
+        row = base
+        mark = dict(ctx.d["marks"].get(pid) or {})
+        if scope:
+            mark["scope"] = scope
+        ent = derive_entry(pid, key, row, ctx.raw, mark, ctx.now, by=by or "stackshot", how="adopted")
+        ent["made"]["revision"] = rev
+        if name:
+            ent["name"] = name
+        elif not ent.get("name"):
+            ent["name"] = prj.display_name_for(key, ent["scope"])
+        why = _name_taken(ctx, ent["name"], pid, own=key)
+        if why:
+            raise VerbError(409, f"{why}: a name belongs to one project; give the project another with --name (the page's display-name: line follows it)")
+        if ent["status"] != "archived":
+            fold_pending(ent, ctx.d["pending_agents"].get(pid) or {})
+        ctx.d["pending_agents"].pop(pid, None)
+        ctx.d["ids"][pid] = key
+        ctx.ents[pid] = ent
+        if not dry:
+            m = ctx.d["marks"].setdefault(pid, {})
+            m.update({"on_purpose": ctx.now, "at": ctx.now, "by": by or "stackshot", **({"scope": scope} if scope else {})})
+        return {"pid": pid}
+
+    out, ents, changed = txn(work, by=by, now=now, dry=dry)
+    return _finish(out["pid"], ents, changed, dry, io, extra={"adopted": True, "revision": rev}, by=by)
 
 
 def rename(project: str, new_name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:

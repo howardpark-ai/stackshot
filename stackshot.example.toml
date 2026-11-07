@@ -170,6 +170,10 @@ pattern_review = "shadow"                           # mode "script": the pattern
                                                     # pattern (a hook, a mod, a tool's text, a rulebook line, or a new audit or an edit to one). "shadow" (the default) = the drafts only go onto the run record and the
                                                     # summary line; nothing is sent, opened or edited. "off" = no review, no call, no findings log. A pattern drafted in the last 7 days is not drafted again; at most 5 a run
 
+[registry_audit]                                    # the project registry check of the daily audit (tools/registry_report.py, `audit.py registry`): what is wrong with the project record and the pages it points at
+send = false                                        # false (the default): the findings go on the run record and `audit.py registry` prints them; nobody is messaged. true: each run also sends every agent
+                                                    # its project's findings in one message, at most once a day per agent (a second run the same day sends nothing the first sent)
+
 [wait_guard]                                        # a wait a session sets on its own item (self_wait.py): a wake, or a line of its own next whose step is dated later than today, must carry
                                                     # wait_reason (what the step waits on); one model call (the [router] command and lane, no tools) then asks whether the step could be done now,
                                                     # and a yes refuses the write. Every failure of the call (no model, a timeout, an unreadable answer) lets the write through and is logged on stderr.

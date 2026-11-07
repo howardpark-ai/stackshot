@@ -16,7 +16,7 @@ An entry (every field optional unless said):
     former_keys    page keys the project's page had before ("projects/old-name"), so a stored key still finds the project
     former_names   names the project had before
     former_agents  names of agents a retire or a rename took off the agents map (the page may list them until its mirror is written; the mirror does not take that for a line added by hand)
-    made, retired  {"at": ISO time, "by": who, "how": "made" | "adopted" | "migrated"}; `retired` only once the status is archived
+    made, retired  {"at": ISO time, "by": who, "how": "made" | "adopted" | "migrated"}; `retired` only once the status is archived. `made.revision` (adopted only) is the revision of the page the entry was read from
 
 The section is versioned (`projects_schema`, 1) and sits beside the older tables of the file (`ids`, `pending_agents`, `marks`) whose schema stays 1: a code that
 does not know the section keeps it untouched when it rewrites the file (projects.py `_read` keeps every other top-level field).

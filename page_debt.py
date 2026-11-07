@@ -227,6 +227,23 @@ class GbrainIO:
         except Exception:  # noqa: BLE001
             return None, None
 
+    _ABSENT = re.compile(r"not[ _-]?found|no such page|does not exist|unknown page", re.I)
+
+    def get_strict(self, slug: str) -> tuple[str | None, str | None]:
+        """`get`, but a call that failed raises OSError instead of reading as "no page": (None, None) only when gbrain answered that the page is not there. For a reader that must tell a page that is
+        gone from a read that did not work (the audit's registry check)."""
+        import rename_page as _rp
+        try:
+            rc, out = _rp.gb(["call", "get_page", json.dumps({"slug": slug, "include_content": True, "content_only": True})])
+        except Exception as e:  # noqa: BLE001
+            raise OSError(f"gbrain get_page {slug}: {type(e).__name__}: {e}") from e
+        d = _rp._json(out)
+        if "content" in d and "revision" in d:
+            return d["content"], d["revision"]
+        if d and self._ABSENT.search(json.dumps(d)):
+            return None, None
+        raise OSError(f"gbrain get_page {slug}: no page and no clean 'not found' answer (exit {rc}): {out[:120]!r}")
+
     def put(self, slug: str, content: str, rev: str) -> tuple[str, str]:
         """→ (state, note). state: "ok" = gbrain accepted the page; "refused" = it answered with an error (a stale revision, any error
         in its answer, a non-zero exit): the page was not written; "unknown" = the put timed out or the call failed in a way that says
@@ -305,6 +322,16 @@ class PlainIO:
         except (OSError, ValueError, UnicodeDecodeError):
             return None, None
 
+    def get_strict(self, slug: str) -> tuple[str | None, str | None]:
+        """`get`, but a file that cannot be read raises OSError instead of reading as "no page": (None, None) only when the file is not there."""
+        try:
+            raw = self._file(slug).read_bytes()
+            return raw.decode("utf-8"), self._rev(raw)
+        except FileNotFoundError:
+            return None, None
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            raise OSError(f"{slug}: {type(e).__name__}: {e}") from e
+
     def _write(self, f: Path, content: str) -> None:
         import os
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -373,6 +400,10 @@ class BrainIO:
 
     def get(self, slug: str) -> tuple[str | None, str | None]:
         return self._io(slug).get(slug)
+
+    def get_strict(self, slug: str) -> tuple[str | None, str | None]:
+        io = self._io(slug)
+        return getattr(io, "get_strict", io.get)(slug)
 
     def put(self, slug: str, content: str, rev: str) -> tuple[str, str]:
         return self._io(slug).put(slug, content, rev)

@@ -287,6 +287,12 @@ def audit_orphan_handover() -> str:
     return v if v in AUDIT_ORPHAN_MODES else "report"
 
 
+def registry_audit_send() -> bool:
+    """[registry_audit] send: whether the daily run sends the project registry check's findings (tools/registry_report.py) to the agents they are for, one message per agent a day. False (the default, and the
+    reading of any value that is not the boolean true): the findings are on the run record and `audit.py registry` prints them, nobody is messaged."""
+    return get("registry_audit", "send") is True
+
+
 def audit_builder() -> str:
     """[audit] builder: the session a tripped threshold, and an unmoved finding of a project with no builder of its own, is sent to. Default "my-engineer"."""
     return str(get("audit", "builder") or "").strip() or AUDIT_BUILDER
