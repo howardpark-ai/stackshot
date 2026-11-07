@@ -30,12 +30,12 @@ from ui import under as _under
 
 LIB_FILE = _Path(__file__).resolve().parent.parent / "shared" / "colortool.js"
 LIB = LIB_FILE.read_text(encoding="utf-8")
-assert LIB.startswith("/* colortool v2 */") and "</" not in LIB and "<!--" not in LIB, "shared/colortool.js is inlined in a script element: no closing tag or comment opener in it"
+assert LIB.startswith("/* colortool v3 */") and "</" not in LIB and "<!--" not in LIB, "shared/colortool.js is inlined in a script element: no closing tag or comment opener in it"
 
 KEY = "stackshot-color-trial"             # the one localStorage key: the flat map {key: "#rrggbb"} of the fields that are set; an older {"bg", "text", "solid", "tint"} is read ("text" as "link", "tint" ignored)
 API = _under("/colors/combos")            # the saved list's address (the delete is API + "/delete")
 MOUNT = "#panel-colors"                   # the side panel's mount for the button (ui/render.py _panel_frame)
-# the dark theme as shipped (ui/render.py :root[data-theme=dark], ui/kit.py), the 14 values in use with nothing set: the Old orange look with the small labels flipped (orange text on a dark brown fill). The 'old' preset of shared/colortool.js is the same look but for those three label fields (tests/dark_default_scenario.py pins both).
+# the dark theme as shipped (ui/render.py :root[data-theme=dark], ui/kit.py), the 14 values in use with nothing set: the original orange look (orange text on a dark brown fill for the small labels; tests/dark_default_scenario.py pins it against its own 14 fields).
 # The last five follow others once one of those is set (the tool reads them as stackshot's own values until then): the three small-label fields follow the text orange, the page and cards; the disabled pair the solid fill, its label and the page.
 # The stylesheet carries the shipped value of each as a dark token (--lab-bg --lab-fg --lab-bd --dis-bg --dis-fg), and ON_APPLY sets the whole group inline once a field of it, or one it follows, is set. ifill is the input fill (--ifill), which is not a field.
 SHIPPED = {"bg": "#161617", "card": "#1f1f21", "line": "#2c2c2e", "fg": "#ececea", "mut": "#a3a29d", "link": "#f0a06a", "ibd": "#929190", "solid": "#f0a06a", "onsolid": "#1f1f21",

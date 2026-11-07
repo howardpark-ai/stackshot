@@ -14,7 +14,7 @@ Covers:
   * the contrast, recomputed (WCAG 2.x) from the stylesheet's own tokens in both themes: a link (the accent) on the page, the card and the picked card at 4.5:1 or more; the main Send label on its fill at rest, hover and
     pressed at 4.5:1 or more, the label being whichever of white and the near-black page colour reads better; the secondary button's outline 3:1 or more on the page and the card; the "Your move" chip text on its tint 4.5:1 or more.
 
-  * the one exclusion: the shared color tool (shared/colortool.js, and its script blocks inlined in the pages), which carries preset oranges to try, is left out of the source scan and cut out of the rendered pages before the scan (tests/_colors.py without_colortool); nothing else is.
+  * the one exclusion: the shared color tool (shared/colortool.js, and its script blocks inlined in the pages), which carries the presets to try, is left out of the source scan and cut out of the rendered pages before the scan (tests/_colors.py without_colortool); nothing else is.
 
     tests/run-suite orange        → exit 0 / 1       ORANGE_LIST=1 tests/run-suite orange  also prints every orange-band literal found and how it was handled"""
 import base64, json, logging, os, pathlib, re, sys, time, urllib.parse
@@ -77,7 +77,7 @@ BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 css = bd._css()
 PAGES = {"stylesheet": css, "home": bd.html(), "closed": bd.landed_html(), "for-you": bd.for_you_html(), "search box": search.box("x"),
          **{f"item {g}": bd.item_html(g, answer=BOX) for g in ("a1", "a3", "a4")}}
-PAGES = {k: C.without_colortool(v) for k, v in PAGES.items()}      # the shared color tool's script blocks hold the preset oranges and are not scanned
+PAGES = {k: C.without_colortool(v) for k, v in PAGES.items()}      # the shared color tool's script blocks hold the presets and are not scanned
 
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -116,7 +116,7 @@ def sources():
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in files:
             p = pathlib.Path(root, f)
-            if p.suffix in SKIP_EXT or p.stat().st_size > 3_000_000 or p.relative_to(STACK).as_posix() == "shared/colortool.js": continue      # the shared color tool holds the preset oranges to try: not scanned
+            if p.suffix in SKIP_EXT or p.stat().st_size > 3_000_000 or p.relative_to(STACK).as_posix() == "shared/colortool.js": continue      # the shared color tool holds the presets to try: not scanned
             try: yield str(p.relative_to(STACK)), p.read_text(encoding="utf-8")
             except UnicodeDecodeError: continue
 DATA_URI = re.compile(r"data:image/svg\+xml(;base64)?,([A-Za-z0-9+/=%._~\-]+)")
