@@ -11,6 +11,7 @@ from ui import kit as _ui   # the one item system: the state words and tags, the
 from ui import groups as _grp   # rows in one foldable subsection per scope: home's four lists and the Closed page (groups.py)
 from ui import releasing as _rel   # which pull requests are in the release script's queue (an item anchored to one is Queued for release)
 RELEASE_LIST = "release"   # the home page's fourth list, beside home.py's three: the agents' items whose pull request is in the release queue (Board.home_lists)
+import option_labels as _ol   # the letter an option's label repeats from its badge, dropped on read (option_labels.py)
 import config as _cfg  # stackshot.toml: paths, fleet, scopes, the Machines panel, branding
 import legacy_owner as _lo   # an old version of an item (from the store's history) read as the current code reads it: History only, never written back
 import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
@@ -373,15 +374,19 @@ def parse_ask(text):
 # pick, a list of OPTIONS_MIN to OPTIONS_MAX entries {label, line, recommended}, exactly one recommended. The server validates
 # (server._gate_options); the renderer draws what options_of returns, so a hand-edited list that broke the shape draws nothing.
 OPTIONS_MIN, OPTIONS_MAX, OPTION_LABEL_MAX, OPTION_LINE_MAX = 2, 6, 40, 160
-def options_of(r):
-    """An item's options as stored → [{"label", "line", "recommended"}], [] when it has none or they are misshaped."""
+def options_of(r, raw=False):
+    """An item's options → [{"label", "line", "recommended"}], [] when it has none or they are misshaped. The labels are as the card shows them: with three or more options whose labels all open
+    with their own place's letter, that letter is dropped (option_labels.strip_letters; the badge draws it). `raw=True` gives the labels as stored. Nothing is written."""
     v = (r.get("metadata") or {}).get("options")
     if not isinstance(v, list) or not OPTIONS_MIN <= len(v) <= OPTIONS_MAX: return []
     out = []
     for o in v:
         if not isinstance(o, dict) or not str(o.get("label") or "").strip() or not str(o.get("line") or "").strip(): return []
         out.append({"label": str(o["label"]).strip(), "line": str(o["line"]).strip(), "recommended": o.get("recommended") is True})
-    return out if sum(o["recommended"] for o in out) == 1 else []
+    if sum(o["recommended"] for o in out) != 1: return []
+    if not raw:
+        for o, label in zip(out, _ol.strip_letters([o["label"] for o in out])): o["label"] = label
+    return out
 def answers_of(r):
     """The owner's answers from the board as stored (metadata.answers), oldest first; [] when none or misshaped."""
     v = (r.get("metadata") or {}).get("answers")
@@ -401,7 +406,7 @@ def yesno_options(r):
     return [dict(o) for o in YESNO_OPTIONS]
 def option_lines(r):
     """The options as plain lines, "label (recommended): line", for a tool reply or a tooltip."""
-    return [f'{o["label"]}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for o in options_of(r)]
+    return [f'{_ol.listed(o["label"], i)}{" (recommended)" if o["recommended"] else ""}: {o["line"]}' for i, o in enumerate(options_of(r))]
 def when_words(t, clock=True):
     """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"): the rulebook's form for a date a person reads. t = an aware datetime
     (drawn in its own zone) or a date (no clock). Board.when and the server's replies use it."""
@@ -1229,7 +1234,7 @@ def _cards_html(opts) -> str:
     cards = []
     for i, o in enumerate(opts):
         key = f'<span class="akey">{chr(65 + i)}</span>' if lettered else ""
-        val = f"{chr(65 + i)} · {o['label']}" if lettered else o["label"]
+        val = (f"{chr(65 + i)} · {o['label']}" if o["label"] else chr(65 + i)) if lettered else o["label"]      # a label that was only its letter (option_labels) posts the letter alone
         cards.append(f'<label class="acard"><input type="radio" name="choice" value="{esc(val)}">'
                      f'<span class="adot" aria-hidden="true"></span><span class="abody"><span class="alab">{key}{esc(o["label"])}</span>'
                      + (' <span class="badge rec">recommended</span>' if o["recommended"] else "") + f'<span class="adesc">{esc(o["line"])}</span></span></label>')
@@ -2268,12 +2273,13 @@ class Board:
                         ev.append(("needs", f"moved to <b>{e(list_word(m.get('state'), b))}</b>"))
                         if pk: ev.append(("needs", f"the ask was: {e(_ip.clip(pk, 160))}", None, f'<details class="ehold"><summary class="more">the whole ask</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
                         dec = self.decision_made(prev, v)                # his answer written with this change, when it is one
-                        po = options_of({"metadata": {"options": (dec or {}).get("options")}}) or po      # the options he was shown, kept on his answer (a record from before that has them from the version before)
+                        kept = {"metadata": {"options": (dec or {}).get("options")}}
+                        po, rpo = (options_of(kept), options_of(kept, raw=True)) if options_of(kept) else (po, options_of(prev, raw=True) if a == "call" else [])      # the options he was shown, kept on his answer (a record from before that has them from the version before); rpo = their labels as stored
                         if po:
                             ev.append(("needs", "the options were:"))
-                            for o in po:
-                                taken = bool(dec and dec.get("choice") and dec["choice"] == o["label"])
-                                ev.append(("needs", f'<b>{e(o["label"])}</b>{" (recommended)" if o["recommended"] else ""}: {e(o["line"])}' + (" · <b>picked</b>" if taken else ""), None, "", "osub"))
+                            for i, (o, ro) in enumerate(zip(po, rpo)):
+                                taken = bool(dec and dec.get("choice") and dec["choice"] in (o["label"], ro["label"]))      # the label as shown, or as stored (an answer from before the letter was dropped on read)
+                                ev.append(("needs", f'<b>{e(_ol.listed(o["label"], i))}</b>{" (recommended)" if o["recommended"] else ""}: {e(o["line"])}' + (" · <b>picked</b>" if taken else ""), None, "", "osub"))
                             if dec and not dec.get("choice"): ev.append(("needs", "no option was picked"))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
                         ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", "needs: <b>" + e(", ".join(ns)) + "</b>" if ns else "needs: no session named any more"))
@@ -2322,7 +2328,7 @@ class Board:
                 if len(na_) > len(pa_) and na_[:len(pa_)] == pa_:        # phase 3: his answer from the board, one line each
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or "")
-                        if ch and a.get("letter"): ch = f"{a['letter']} · {ch}"      # the letter the answer box drew beside the option
+                        if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
                         ev.append(("answer", f"{e(_OWNER)} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.changes(pm, m): ev.append(("work", e(w)))   # a work line added, moved, reassigned or removed, one line each
@@ -2551,9 +2557,9 @@ class Board:
         opts = open_options(r)                        # the options, one line each, the recommended one marked; only while his decision is open
         ol = ""
         if opts:                                      # in the root UI the answer box's cards show each option with its whole text, so the Ask block lists them only when no box is drawn (below)
-            ol = ('<ol class="iopts">' + "".join(f'<li{" class=rec" if o["recommended"] else ""}><b>{e(o["label"])}</b>'
+            ol = ('<ol class="iopts">' + "".join(f'<li{" class=rec" if o["recommended"] else ""}><b>{e(_ol.listed(o["label"], i))}</b>'
                                                   + (' <span class="badge rec">recommended</span>' if o["recommended"] else "") + f'<span class="oline">{L(o["line"])}</span></li>'
-                                                  for o in opts) + '</ol>')
+                                                  for i, o in enumerate(opts)) + '</ol>')
         asked = bool(ask_html) or bool(ol)            # the item asks something (an ask line or options), whether or not the options are listed in the Ask block
         # his answer is asked while the item is open and his: the model says he moves it, or its needs still hold his decision (old data, until the step 4 migration)
         his = (not done) and (mod.owner_moves or "decision" in [x.lower() for x in needs_of(r)])
@@ -2844,7 +2850,7 @@ class Board:
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
             out.append("- " + " · ".join(meta))
             if k == "call" and options_of(r):        # the options under the ask, the recommended one marked
-                out.append("- options:\n" + "\n".join(f'  - **{o["label"]}**{" (recommended)" if o["recommended"] else ""}: {m_link(o["line"])}' for o in options_of(r)))
+                out.append("- options:\n" + "\n".join(f'  - **{_ol.listed(o["label"], i)}**{" (recommended)" if o["recommended"] else ""}: {m_link(o["line"])}' for i, o in enumerate(options_of(r))))
             out.append("- mover: " + m_sref(r))      # step 4b: board.md names the mover
             if needs_sessions(r): out.append("- needs: " + ", ".join(f"`{shown_ref(s)}`" for s in needs_sessions(r)))   # the sessions whose move it is
             if after_of(r): out.append("- after: " + ", ".join(f"[{shown_full(g)}](#task-{g[0]}-{g[1:]})" + ("" if g in after_open(r) else " (closed)") for g in after_of(r)))
@@ -3241,7 +3247,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             except (TypeError, ValueError): ts = 0.0
             if a.get("step") and any(s["status"] == _steps.DONE and ts and abs(float(s.get("at") or 0) - ts) < 1 for s in steps): continue
             ch, ln, tx = (" ".join(str(a.get(k) or "").split()) for k in ("choice", "choice_line", "text"))
-            if ch and a.get("letter"): ch = f"{a['letter']} · {ch}"
+            if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])
             if ch: body = f"picked {ch}" + (f" ({ln})" if ln else "")
             elif tx: body = tx if len(tx) <= 160 else tx[:159].rstrip() + "…"
             else: continue

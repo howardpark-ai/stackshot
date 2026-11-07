@@ -905,7 +905,30 @@ check("History after a note with no pick: the options are listed, none is marked
       and '<div class="eb osub"><b>Wait</b>: Hold it until the review.</div>' in h_e, h_e[:1400])
 check("History after an answer stored without the options: they come from the version before it, the pick is still marked", '<div class="eb osub"><b>Ship</b> (recommended): Ship it now. · <b>picked</b></div>' in h_f
       and '<div class="eb osub"><b>Wait</b>: Hold it until the review.</div>' in h_f and "no option was picked" not in h_f, h_f[:1400])
-LJ = r2._LIVE_JS.split("function apply(t)")[1].split("function update")[0]
+# options whose labels repeat their badge letters ("A Report"): the History lists and marks them as the card showed them, for an answer as the server stores it now (the shown label), one stored before
+# (the label as stored), and one with no options of its own (read from the version before); a letter-only option is listed by its letter
+OPTL = [{"label": "A Report", "line": "Write the report.", "recommended": False}, {"label": "B Plan", "line": "Plan it first.", "recommended": True}, {"label": "C Fix", "line": "Fix it now.", "recommended": False}]
+OPTLO = [{"label": "A", "line": "The first way.", "recommended": False}, {"label": "B Plan", "line": "Plan it first.", "recommended": True}, {"label": "C Fix", "line": "Fix it now.", "recommended": False}]
+def decidedL(i, ans, before, **left):
+    rev14(i, 3 * H_, subject="[home] answered item", needs=["decision"], ask=ASK14, options=before, next="beta-main: wait for the answer")
+    rev14(i, 1 * H_, subject="[home] answered item", needs=[], state="doing", next="beta-main: carry out the answer", answers=[ans], **left)
+    bd = Bd(); return (lambda h: h[h.find('data-fold="item.history"'):])(bd.item_html(f"a{i}", answer=None, watch=None)), [x for _t, _k, x in bd.item_events(bd.item(f"a{i}"))[0]]
+h_l1, e_l1 = decidedL(194, ans14(choice="Report", choice_line="Write the report.", letter="A", options=OPTL), OPTL)
+h_l2, e_l2 = decidedL(195, ans14(choice="B Plan", choice_line="Plan it first.", options=OPTL), OPTL)
+h_l3, e_l3 = decidedL(196, ans14(choice="Fix", choice_line="Fix it now.", letter="C"), OPTL)
+h_l4, e_l4 = decidedL(197, ans14(choice="A", choice_line="The first way.", letter="A", options=OPTLO), OPTLO)
+h_l5, e_l5 = decidedL(198, ans14(text="none of them", options=OPTL), OPTL, options=OPTL)
+LBL = '<div class="eb">the options were:</div><div class="eb osub"><b>Report</b>: Write the report.{m0}</div><div class="eb osub"><b>Plan</b> (recommended): Plan it first.{m1}</div><div class="eb osub"><b>Fix</b>: Fix it now.{m2}</div>'
+PK = " · <b>picked</b>"
+check("History, options that repeat their letters: the labels are listed without them and the pick (stored under the shown label) is marked; his line reads \"A · Report\"",
+      LBL.format(m0=PK, m1="", m2="") in h_l1 and h_l1.count("<b>picked</b>") == 1 and "(board): <b>A · Report</b>" in h_l1 and "A Report" not in h_l1, h_l1[:1600])
+check("…an answer stored with the label as it was stored (\"B Plan\", before the letter was dropped on read) is marked picked too", LBL.format(m0="", m1=PK, m2="") in h_l2 and h_l2.count("<b>picked</b>") == 1, h_l2[:1600])
+check("…an answer with no options of its own reads them from the version before it, stripped, the pick marked", LBL.format(m0="", m1="", m2=PK) in h_l3 and "(board): <b>C · Fix</b>" in h_l3, h_l3[:1600])
+check("…a letter-only option is listed by its letter and its pick reads as the letter alone", '<div class="eb osub"><b>A</b>: The first way. · <b>picked</b></div><div class="eb osub"><b>Plan</b> (recommended): Plan it first.</div>' in h_l4
+      and "(board): <b>A</b>" in h_l4 and "A · A" not in h_l4, h_l4[:1600])
+check("…a note with no pick lists them stripped, none marked", LBL.format(m0="", m1="", m2="") in h_l5 and "<b>picked</b>" not in h_l5 and '<div class="eb">no option was picked</div>' in h_l5, h_l5[:1600])
+check("the search text of that History reads the same", "Report: Write the report. · picked" in [re.sub(r"<[^>]+>", "", x) for x in e_l1] and "Plan (recommended): Plan it first." in [re.sub(r"<[^>]+>", "", x) for x in e_l1])
+LJ =r2._LIVE_JS.split("function apply(t)")[1].split("function update")[0]
 check("the live refresh asks whether an answer form holds a pick or a note before it compares frames, so a refresh under way when he picks never reloads the page under the pick",
       LJ.index("if(busy())return 'busy'") < LJ.index("sh.content!==SH.content") and "input[name=choice]:checked" in r2._LIVE_JS, LJ[:500])
 plain_g = [re.sub(r"<[^>]+>", "", x) for x in e_a]
