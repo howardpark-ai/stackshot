@@ -1,4 +1,4 @@
-/* colortool v2 */
+/* colortool v3 */
 /*
  * SHARED SOURCE. This file is the one color tool that more than one app draws. The app that owns it keeps the original; another app pins a
  * VERBATIM copy of it (not an edited one) and passes its own settings in a cfg object. Change this file only with a version bump (the first
@@ -10,7 +10,7 @@
  * properties set inline on <html> and kept in this browser (localStorage); whether the fields are open is kept there too, under storageKey + ':fields'. Dark theme only: in the light theme nothing is drawn and no stored look is applied (onApply still runs, with nothing stored).
  *
  * Entries (window.ColorTool):
- *   version                 the number of the line above (2).
+ *   version                 the number of the line above (3).
  *   applyStored(cfg)        put in the head: injects cfg.css once and applies the stored look before the first paint; re-applies when the
  *                           page's data-theme or the system color scheme changes. Draws nothing.
  *   init(cfg)               put at the end of the body: calls applyStored first if it has not run, then builds the button in cfg.mount and
@@ -28,8 +28,8 @@
  *   vars        {field: [css custom properties]}: set inline to that field's resolved value whenever the field is set (Cards and Lines also when
  *               the page background is set, because they follow it).
  *   onApply     optional hook (resolved, stored, set, addClass, engine) run on every apply, after the tracked properties and classes were
- *               removed: Reset and Live now included (stored is then {}) and the light theme too (resolved and stored are then {}, so it sets
- *               nothing unless it ignores them); set(prop, value) and addClass(name) are tracked, so Reset and Live now remove everything set through them.
+ *               removed: Reset and Original orange theme included (stored is then {}) and the light theme too (resolved and stored are then {}, so it sets
+ *               nothing unless it ignores them); set(prop, value) and addClass(name) are tracked, so Reset and Original orange theme remove everything set through them.
  *   isDark      optional function; the default reads data-theme, else prefers-color-scheme.
  *   gate        "refuse" (default: a change that breaks a readability pair is not applied) or "warn" (every pair is only a note with its ratio).
  *   text        optional {signIn, note, example}: the line shown when the saved list answers 403, the small note at the end of the panel, and
@@ -44,7 +44,7 @@
  */
 (function () {
   'use strict';
-  var VERSION = 2;
+  var VERSION = 3;
 
   /* ---- constants ---- */
   /* the 14 fields in the order the panel lists them: [key, the row's name, its group] */
@@ -68,12 +68,12 @@
     var p = {}; Object.keys(NEUTRAL).forEach(function (k) { p[k] = NEUTRAL[k]; });
     p.link = link; p.solid = solid; p.onsolid = onsolid; p.labbg = labbg; p.labfg = labfg; p.labbd = labbg; return p;
   }
-  /* [id, name, the combination]; Live now is the empty map: nothing set, what the page ships */
-  var PRESETS = [['live', 'Live now', {}],
-    ['old', 'Old orange', preset('#f0a06a', '#f0a06a', '#1f1f21', '#f0a06a', '#1f1f21')],
-    ['two', 'Two oranges', preset('#f0a06a', '#bd561d', '#ffffff', '#3a2619', '#f0a06a')],
-    ['radix', 'Radix', preset('#ffa057', '#f76b15', '#ffffff', '#462100', '#ffa057')],
-    ['primer', 'Primer', preset('#ffa657', '#bd561d', '#ffffff', '#2a1f19', '#db6d28')]];
+  /* [id, name, the combination]; the first is the empty map: nothing set, what the page ships (the original orange theme) */
+  var PRESETS = [['live', 'Original orange theme', {}],
+    ['sky', 'Sky', preset('#7cb7ff', '#2a6fd0', '#ffffff', '#14283f', '#7cb7ff')],
+    ['mint', 'Mint', preset('#5fd3a6', '#18805d', '#ffffff', '#10302a', '#5fd3a6')],
+    ['violet', 'Violet', preset('#b79cff', '#7a52e0', '#ffffff', '#251c46', '#b79cff')],
+    ['rose', 'Rose', preset('#ff8fb0', '#d6336c', '#ffffff', '#40182a', '#ff8fb0')]];
   var PRE = {}; PRESETS.forEach(function (p) { PRE[p[0]] = p[2]; });
 
   /* ---- pure functions ---- */
@@ -334,7 +334,7 @@
       var fields = el('div', { className: 'ct-fields', id: 'ct-fields' }, boxes);
       fields.hidden = true;
       var foldBtn = el('button', { type: 'button', className: 'ct-b ct-fold', id: 'ct-fold', 'aria-expanded': 'false', 'aria-controls': 'ct-fields', text: 'Fields' });
-      var secs = [el('div', { className: 'ct-sec', role: 'group', 'aria-labelledby': 'ct-g-presets' }, [el('div', { className: 'ct-gh', id: 'ct-g-presets', text: 'Presets' }), presets, live('ct-n-presets'), live('ct-cur', 'ct-cur', 'Now: Live now'), live('ct-n-store')])];
+      var secs = [el('div', { className: 'ct-sec', role: 'group', 'aria-labelledby': 'ct-g-presets' }, [el('div', { className: 'ct-gh', id: 'ct-g-presets', text: 'Presets' }), presets, live('ct-n-presets'), live('ct-cur', 'ct-cur', 'Now: Original orange theme'), live('ct-n-store')])];
       if (API) {
         var cnt = el('span', { id: 'ct-cnt' });
         var head = el('div', { className: 'ct-gh', id: 'ct-g-saved' }, ['Saved combinations ', cnt]);
