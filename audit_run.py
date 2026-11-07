@@ -44,7 +44,7 @@ Output, as the agent reported: one message per recipient per run, `<id> · <cate
 (`recipient`); a front agent's, a retired, an outside or no mover's finding goes to the project's page key (`projects/<slug>`, unmarked), never to a front agent; the owner's own item (he is the mover) goes to the
 project's -main agent with `[for <owner>]` first (a second marked path: a finding that went to a builder and stayed unanswered through its reminders and the builder-level send goes once to -main, marked for its owner; see split_sent). A finding already sent (same item, same check) whose item has not been written since is not sent again: it stays on the record with its `sent` time and counts in
 `repeats`. The unmoved digest below names an item once per unmoved stretch (`stuck[].chased`); a finding on the previous run's record whose item has had no write since goes, as a job, to the project's builder and onto the record's `stuck`
-list (`first_flagged` kept); a summary to `projects/example`; and ONE message to `[audit] builder` when a check has at least `[audit] threshold` findings or the run trips a tightening
+list (`first_flagged` kept); a summary to `[audit] summary_to` (default `projects/example`); and ONE message to `[audit] builder` when a check has at least `[audit] threshold` findings or the run trips a tightening
 condition (more than 20% of the open items flagged, the same session or the same category on top three days running). The record is `<paths.state>/audit/run-<date>-<HHMMSS>.json` (the start time, so a
 second run the same day keeps the first one's record), as audit.py reads it, with `idle_pass`, `judged`, `calls` and `messages` beside the agent's keys. A run that dies finishes its record with `error`
 and puts a line in cues.jsonl, so it never holds the next cue back. A run begins no new model call once `[audit] max_minutes` (default 100) have passed since it started (`calls.timed_out`). A finding
@@ -1341,8 +1341,9 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
                + (" · ".join(f"{c} {n}" for c, n in sorted(by_cat.items(), key=lambda kv: -kv[1])) or "no findings") + f" · {calls['made'] + pr['called']} model call(s) of {cap}" +(f" · stopped at the {_cfg.audit_max_minutes()}-minute limit" if calls.get("timed_out") else "") + orphan_text(orph) + proof_text(pw) + pages_text(pg) + pattern_text(pr) + (f" · unmoved: {', '.join(s['id'] for s in stuck)}" if stuck else "") + (f" · {len(repeats)} unchanged since sent, not sent again" if repeats else "")
                + (f" · page agent lines {len(pa['findings'])}" if pa["checked"] else f" · page agent lines not checked ({pa['note']})"))
     fsc, fsc_line = front_step_count(hist, items, env, t0)       # once a calendar month: front agents' steps closed by someone else, and the open ones the write check would refuse now
-    ok, said = _send(env, "projects/example", "\n".join([summary, *orphan_lines(orph), *pattern_lines(pr), *([fsc_line] if fsc_line else [])]), True)
-    sent.append({"to": "projects/example", "lines": 1, "delivered": ok, "said": _clip(said, 120), "kind": "summary"})
+    summary_to = _cfg.audit_summary_to()
+    ok, said = _send(env, summary_to, "\n".join([summary, *orphan_lines(orph), *pattern_lines(pr), *([fsc_line] if fsc_line else [])]), True)
+    sent.append({"to": summary_to, "lines": 1, "delivered": ok, "said": _clip(said, 120), "kind": "summary"})
 
     # the run's end, taken after its last send: a finding is quiet from here on, and the next run reads a write after this time as a write. Every message that cites an item has gone by now, so a save the server makes
     # while delivering one (a message that names an item may write it) is no write of the item's

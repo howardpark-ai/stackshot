@@ -249,7 +249,8 @@ DATE = ('#!/bin/sh\nif [ "$1" = "+%s" ]; then\n  [ -f "$RT_DIR/clock-base" ] || 
         '  add=$(cat "$RT_DIR/sleep.log" "$RT_DIR/clock-extra" 2>/dev/null | awk \'{s+=$1} END{print s+0}\')\n  echo $(( $(cat "$RT_DIR/clock-base") + add ))\nelse exec /usr/bin/date "$@"; fi\n')
 CONFIG = ('import os, sys\nif sys.argv[1:] == ["state", "releases"]: print(os.environ["RT_DIR"] + "/releases")\n'
           'def recycle_when_idle(): return os.environ.get("RT_IDLE", "").split()\n'   # [fleet] recycle_when_idle: RT_IDLE, unset = none
-          'def notice_cmd(): return os.environ.get("RT_NOTICE", "").split()\n')       # [fleet] notice_cmd: RT_NOTICE, unset = none
+          'def notice_cmd(): return os.environ.get("RT_NOTICE", "").split()\n'       # [fleet] notice_cmd: RT_NOTICE, unset = none
+          'def release_report_to(): return os.environ.get("RT_REPORT_TO", "")\n')     # [release] report_to: RT_REPORT_TO, unset = "" (release.sh then falls back to the stand-in page)
 CLIENT = ('import os, sys\nif sys.argv[1:2] == ["released"]: open(os.environ["RT_DIR"] + "/released.log", "a").write(" | ".join(sys.argv[1:]) + "\\n"); print("stackshot: closed a1"); sys.exit(1 if os.environ.get("RT_RELEASED") == "fail" else 0)\n'   # the items call is logged apart: the report order below is about deploys and reports
           'open(os.environ["RT_DIR"] + "/messages.log", "a").write(" | ".join(sys.argv[1:]) + "\\n")\n'
           'open(os.environ["RT_DIR"] + "/order.log", "a").write("client:" + sys.argv[1] + "\\n")\n'

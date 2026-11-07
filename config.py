@@ -219,6 +219,7 @@ AUDIT_REMIND_HOURS = 6.0               # a ten-minute finding nobody answered is
 AUDIT_FRONT_STEP_MOVE_HOURS = 3.0      # a front agent's step that stays stuck-elsewhere this long moves to the item's mover (front_step.py)
 AUDIT_BUILDER = "my-engineer"
 AUDIT_MAIN = "my-main"
+REPORT_TO = "projects/example"        # the stand-in page the audit's summary and a release's report go to until an instance names its own
 
 
 def audit_mode() -> str:
@@ -294,6 +295,40 @@ def audit_builder() -> str:
 def audit_main() -> str:
     """[audit] main: the -main agent that receives the findings addressed to the owner (marked `[for <owner>]`) and the run's summary. Default "my-main"."""
     return str(get("audit", "main") or "").strip() or AUDIT_MAIN
+
+
+_REPORT_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*")
+
+
+def _report_slug(section: str, key: str) -> str:
+    """The page key (or session name) set at [section] key, or REPORT_TO when the key is absent, empty or not shaped like one (letters, digits, dots, hyphens and underscores, "/" between the parts)."""
+    v = get(section, key)
+    v = v.strip() if isinstance(v, str) else ""
+    return v if _REPORT_SLUG.fullmatch(v) else REPORT_TO
+
+
+def audit_summary_to() -> str:
+    """[audit] summary_to: the page key (or session name) the summary of each audit run is sent to (audit_run). Default "projects/example", the stand-in; a value that is not
+    a page key or session name reads as the default (notes() says so)."""
+    return _report_slug("audit", "summary_to")
+
+
+def release_report_to() -> str:
+    """[release] report_to: the page key (or session name) release.sh sends its report of each release to (green or red, the PR, the commit, what was restarted), and names in the line it prints when
+    a release starts. Default "projects/example", the stand-in; a value that is not a page key or session name reads as the default (notes() says so)."""
+    return _report_slug("release", "report_to")
+
+
+def report_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """Lines for a [audit] summary_to or [release] report_to that is set and cannot be used (see _report_slug): the default stands in its place, so the reports would go to the stand-in page."""
+    out: list[str] = []
+    for section, key in (("audit", "summary_to"), ("release", "report_to")):
+        v = get(section, key, cfg=cfg)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        if not isinstance(v, str) or not _REPORT_SLUG.fullmatch(v.strip()):
+            out.append(f"[{section}] {key} = {v!r} is not a page key or session name (letters, digits, \".\", \"-\" and \"_\", with \"/\" between the parts), so {REPORT_TO} is used: set a page key such as \"projects/example-reports\"")
+    return out
 
 
 def audit_model() -> str:
@@ -894,6 +929,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
         if not str(b.get("home") or "").strip() and not b.get("remote"):
             out.append(f"[[brains]] {name} has no home, so its pages are neither read nor written through the gbrain CLI (the CLI would run on the default brain): set home = \"<its GBRAIN_HOME folder>\" on that entry")
     out.extend(released_notes(cfg))
+    out.extend(report_notes(cfg))
     pm = get("presence", "minutes", cfg=cfg)
     if pm is not None:
         try:
