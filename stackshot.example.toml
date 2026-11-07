@@ -373,6 +373,8 @@ mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 # with it) or whose `prefixes` it starts with (plain prefixes of the page key). Fail open: when an entry's copy is missing or stale, or its CLI
 # call fails, the board never blocks on it (a copy with no .git or no page counts as missing): create's page check and the page hook accept the item and log a warning naming the brain; pages owed
 # and the audit's page call skip that brain's pages for the run and say so once per outage; the registry keeps that brain's pages as it last read them.
+# A brain whose CLI is a thin client of a remote gbrain (it refuses `gbrain call`) needs no extra key: a read or a timeline line that `call` refuses is
+# retried as the named command (`gbrain get`, `gbrain timeline-add`), and a read that fails is reported with the CLI's own error, never as "no page".
 # [[brains]]
 # name = "second"                                   # a short name the warnings use ("default" is the brain above)
 # path = "~/brain-second"                           # its local git copy (read only)

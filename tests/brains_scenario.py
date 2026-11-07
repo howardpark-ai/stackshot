@@ -58,6 +58,23 @@ stdin = "" if sys.stdin.isatty() else sys.stdin.read()
 open({str(CALLS)!r}, "a").write(json.dumps({{"argv": sys.argv[1:], "home": os.environ.get("GBRAIN_HOME"), "secret": os.environ.get("GBRAIN_REMOTE_CLIENT_SECRET"), "stdin": stdin}}) + "\\n")
 if os.environ.get("GBRAIN_HOME") == {str(T / "home-echo")!r}: sys.stderr.write("failed with " + str(os.environ.get("GBRAIN_REMOTE_CLIENT_SECRET"))); sys.exit(2)
 if os.environ.get("GBRAIN_HOME") == {str(T / "home-broken")!r}: sys.stderr.write("not signed in"); sys.exit(2)
+HOME_ = os.environ.get("GBRAIN_HOME")
+if HOME_ in ({str(T / "home-thin")!r}, {str(T / "home-refuse")!r}):      # a thin-client brain: `call` is refused, the named commands are forwarded (home-refuse refuses those too)
+    def refuse(cmd):
+        sys.stderr.write(json.dumps({{"error": "requires_local_engine", "message": "`gbrain " + cmd + "` is not routable (thin-client of https://example.invalid/mcp); run it on the brain host."}}))
+        sys.exit(1)
+    if sys.argv[1] == "call" or HOME_ == {str(T / "home-refuse")!r}: refuse(sys.argv[1])
+    PG = {str(T / "thin-page.md")!r}; cur = open(PG).read() if os.path.exists(PG) else None
+    rev = lambda t: "rev-" + str(len(t))
+    if sys.argv[1] == "get":
+        if sys.argv[2] != "projects/thin-page" or cur is None:
+            print(json.dumps({{"error": "page_not_found", "message": "Page not found: " + sys.argv[2]}})); sys.exit(1)
+        print(json.dumps({{"content": cur, "revision": rev(cur)}})); sys.exit(0)
+    if sys.argv[1] == "put" and sys.argv[2] == "projects/thin-page":
+        want = sys.argv[sys.argv.index("--expected-revision") + 1] if "--expected-revision" in sys.argv else None
+        if want is not None and cur is not None and want != rev(cur):
+            print(json.dumps({{"error": "revision_conflict"}})); sys.exit(1)
+        open(PG, "w").write(stdin); print(json.dumps({{"status": "ok"}})); sys.exit(0)
 if sys.argv[1:3] == ["call", "get_page"]: print(json.dumps({{"content": "page from " + str(os.environ.get("GBRAIN_HOME")), "revision": "r1"}}))
 else: print(json.dumps({{"status": "ok"}}))
 ''')
@@ -832,6 +849,95 @@ check("18 keep with an unusable new_prefixes item still gets the keep note", "ke
 set_brains()
 for _f in ("brain/projects/zeta-old.md", "second/projects/zeta-seen.md", "brain/projects/zeta-stub.md", "second/projects/zeta-stub.md", "brain/projects/zeta-parent.md"):
     (T / _f).unlink(missing_ok=True)
+
+# ---- 19. a thin-client brain: `gbrain call` is refused, so a read and a timeline line go by the named commands; a refusal is never "no page"
+import project_verbs as pv
+THIN = {"name": "thin", "path": str(T / "thin"), "home": str(T / "home-thin"), "slugs": ["projects/thin-page"], "stale_hours": 0}
+REFUSE = {"name": "refuse", "path": str(T / "refuse"), "home": str(T / "home-refuse"), "slugs": ["projects/refused-page"], "stale_hours": 0}
+THIN_PAGE = "---\ntype: project\ntitle: Thin\ndisplay-name: thin-old\nstatus: active\n---\n\n# Thin\n"
+set_brains(THIN, REFUSE); rename_page._THIN.clear(); calls()
+store = page_debt.page_io()
+(T / "thin-page.md").write_text(THIN_PAGE)
+got = store.get("projects/thin-page"); c = calls()
+check("19 a thin-client brain: the read is the named `get` after the refused `call`, both with its home, and gives the page and its revision",
+      got == (THIN_PAGE, "rev-" + str(len(THIN_PAGE))) and [x["argv"][0] for x in c] == ["call", "get"] and {x["home"] for x in c} == {str(T / "home-thin")}
+      and c[1]["argv"][1:] == ["projects/thin-page", "--include-content", "--content-only", "--json"], (got, c))
+got2 = store.get("projects/thin-page"); c = calls()
+check("19 ...and the brain is remembered: the next read goes straight to `get`", got2 == got and [x["argv"][0] for x in c] == ["get"] and "thin" in rename_page._THIN, (got2, c))
+check("19 the default brain is not marked thin by that", "default" not in rename_page._THIN)
+os.unlink(T / "thin-page.md"); calls()
+check("19 a page the thin brain lacks: get and get_strict say (None, None), not an error", store.get("projects/thin-page") == (None, None) and store.get_strict("projects/thin-page") == (None, None))
+(T / "thin-page.md").write_text(THIN_PAGE); calls()
+note_t = store.add_timeline("projects/thin-page", "2026-11-02", "a line", "some detail", "test", "rid-1"); c = calls()
+check("19 a timeline line goes by `timeline-add` with its detail, source and request id once the brain is known to be thin",
+      note_t == "" and len(c) == 1 and c[0]["argv"] == ["timeline-add", "--detail", "some detail", "--source", "test", "--request-id", "rid-1", "--", "projects/thin-page", "2026-11-02", "a line"]
+      and c[0]["home"] == str(T / "home-thin"), (note_t, c))
+rename_page._THIN.clear(); calls()
+note_t2 = store.add_timeline("projects/thin-page", "2026-11-02", "a line", "", "test"); c = calls()
+check("19 ...and a fresh process tries `call` first, then the named command (no detail or request id flags when there are none)",
+      note_t2 == "" and [x["argv"][0] for x in c] == ["call", "timeline-add"] and c[1]["argv"] == ["timeline-add", "--source", "test", "--", "projects/thin-page", "2026-11-02", "a line"], (note_t2, c))
+ENT = {"name": "thin-new", "status": "active", "page": "projects/thin-page"}
+m = pv.mirror("p-thin", store, entry=ENT); c = calls()
+check("19 the page mirror of a thin-client brain's project reads and writes the page (the record's name lands on the page)",
+      m["state"] == "written" and "display-name: thin-new" in (T / "thin-page.md").read_text() and any(x["argv"][0] == "put" and x["home"] == str(T / "home-thin") for x in c), (m, c))
+check("19 ...and said again it is unchanged", pv.mirror("p-thin", store, entry=ENT)["state"] == "unchanged")
+# a refusal that no named command can answer is the real error, not 'no page'
+calls(); rename_page._THIN.clear()
+try:
+    store.get_strict("projects/refused-page"); raised = ""
+except OSError as e:
+    raised = str(e)
+check("19 a brain that refuses the named command too: get_strict raises with the refusal's code and the slug in the text", "requires_local_engine" in raised and "projects/refused-page" in raised, raised)
+check("19 ...the lenient get still reads it as (None, None)", store.get("projects/refused-page") == (None, None))
+mr = pv.mirror("p-refuse", store, entry={"name": "x", "status": "active", "page": "projects/refused-page"}); c = calls()
+check("19 the page mirror says failed with the real error, never no-page, and writes nothing", mr["state"] == "failed" and "requires_local_engine" in mr["note"] and not any(x["argv"][0] == "put" for x in c), (mr, c))
+class LenientOnly:
+    """A page store with only `get` (as the test stand-ins have): a miss is still no-page."""
+    def get(self, k): return None, None
+check("19 a store with no get_strict keeps the old answer: a miss is no-page", pv.mirror("p-x", LenientOnly(), entry={"name": "x", "status": "active", "page": "projects/nowhere"})["state"] == "no-page")
+try:
+    pv.adopt("projects/refused-page", io=store); adopt_code = None
+except pv.VerbError as e:
+    adopt_code = (e.status, str(e))
+check("19 adopt of a page whose read was refused is a 502 with the error, not a 404 'not in the page store'", adopt_code is not None and adopt_code[0] == 502 and "requires_local_engine" in adopt_code[1], adopt_code)
+# a summary that starts with dashes is a positional (flags first, then `--`), and still runs with the thin brain's home
+rename_page._THIN.add("thin"); calls()
+note_d = store.add_timeline("projects/thin-page", "2026-11-02", "--x starts with dashes", "", "test"); c = calls()
+check("19 a timeline summary starting with dashes goes after `--` and the call still finds the brain's home", note_d == "" and len(c) == 1 and c[0]["home"] == str(T / "home-thin")
+      and c[0]["argv"] == ["timeline-add", "--source", "test", "--", "projects/thin-page", "2026-11-02", "--x starts with dashes"], (note_d, c))
+# the refusal is the structured code, not words anywhere in the output
+check("19 thin_refused: the code requires_local_engine (JSON envelope, or the human Error line) is a refusal; the words alone in a short answer with no code too",
+      rename_page.thin_refused(1, '{"code": "requires_local_engine", "message": "m"}') and rename_page.thin_refused(1, '{"error": "requires_local_engine"}')
+      and rename_page.thin_refused(1, "Error [requires_local_engine]: `gbrain call` is not routable\nFix: run it on the host") and rename_page.thin_refused(1, "`gbrain call` is not routable (thin-client of https://example.invalid/mcp)"))
+check("19 thin_refused: another code that echoes the words, a long answer with the words, a zero exit and a plain failure are not",
+      not rename_page.thin_refused(1, '{"code": "revision_conflict", "message": "summary: the call is not routable, requires_local_engine"}')
+      and not rename_page.thin_refused(1, "Error [revision_conflict]: a summary said requires_local_engine") and not rename_page.thin_refused(1, "x " * 300 + " is not routable")
+      and not rename_page.thin_refused(0, '{"code": "requires_local_engine"}') and not rename_page.thin_refused(1, "not signed in"))
+rename_page._THIN.clear()
+seen_calls = []; real_gb = rename_page.gb
+rename_page.gb = lambda args, stdin=None, slug=None: (seen_calls.append(args), (1, "not signed in"))[1]
+try:
+    got_f = store.get("projects/thin-page")
+finally:
+    rename_page.gb = real_gb
+check("19 a plain failure (non-zero exit, 'not signed in') makes exactly one call and marks no brain thin", len(seen_calls) == 1 and seen_calls[0][:2] == ["call", "get_page"] and not rename_page._THIN and got_f == (None, None), (seen_calls, rename_page._THIN))
+# only the page_not_found code is 'no page'; any other not-found text is a read that failed
+def strict_with(answer, rc=1):
+    real = rename_page.gb
+    rename_page.gb = lambda args, stdin=None, slug=None: (rc, answer)
+    try:
+        return page_debt.GbrainIO().get_strict("projects/x")
+    except OSError:
+        return "raised"
+    finally:
+        rename_page.gb = real
+check("19 get_strict: an HTTP 404 'Not Found', 'client not found' and ENOTFOUND are failed reads, not a missing page",
+      all(strict_with(a) == "raised" for a in ('{"code": "x", "message": "404 Not Found"}', '{"error": "client not found"}', '{"code": "unauthorized", "message": "source not found"}',
+                                                '{"message": "getaddrinfo ENOTFOUND mcp.example.invalid"}', "Error [x]: 404 Not Found")))
+check("19 get_strict: a page_not_found envelope (code or error, string or object) and the older 'Page not found' error text are (None, None)",
+      all(strict_with(a) == (None, None) for a in ('{"code": "page_not_found", "message": "Page not found"}', '{"error": "page_not_found", "message": "m"}',
+                                                    '{"error": {"code": "page_not_found"}}', '{"error": "Page not found: projects/x"}')))
+set_brains(); rename_page._THIN.clear(); (T / "thin-page.md").unlink(missing_ok=True)
 
 print(f"brains: {len(ran) - len(fails)}/{len(ran)} passed", flush=True)
 sys.stdout.flush(); sys.stderr.flush()

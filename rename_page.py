@@ -46,8 +46,11 @@ class PlainPages(RuntimeError):
     """A gbrain call asked for under plain pages: the message says what to do instead."""
 
 def _slug_of(args):
-    """The page a gbrain call is about: `put <slug> …`, or the `slug` of a `call <tool> '<json>'`; "" when it names none."""
-    if len(args) > 1 and args[0] == "put": return str(args[1])
+    """The page a gbrain call is about: `put <slug> …` (also `get` and `timeline-add`, the named commands a thin-client brain is reached by), or the `slug` of a `call <tool> '<json>'`; "" when it names none."""
+    if args and args[0] == "timeline-add" and "--" in args[1:]:      # flags first, then `--`, then the positionals (a summary may start with a dash)
+        i = args.index("--", 1)
+        return str(args[i + 1]) if i + 1 < len(args) else ""
+    if len(args) > 1 and args[0] in ("put", "get", "timeline-add"): return str(args[1])
     if len(args) > 2 and args[0] == "call":
         try: return str((json.loads(args[2]) or {}).get("slug") or "")
         except Exception: return ""
@@ -73,8 +76,46 @@ def _json(out):
     except Exception: d = {}
     return d if isinstance(d, dict) else {}
 
+# A brain that is a thin client of a remote gbrain (its CLI forwards to the brain's MCP server) refuses `gbrain call <tool>` with the code
+# requires_local_engine ("not routable"), while the named commands (`get`, `put`, `timeline-add`) are forwarded. A refused `call` is retried once as
+# the named command, and the brain is remembered (by name, per process) so its later reads go straight to the named form.
+_THIN: set[str] = set()      # keyed by brain NAME, for the life of the process: a brain that becomes local again is noticed at the next process start
+_CODE_LINE = re.compile(r"(?m)^Error \[([\w.-]+)\]")      # the CLI's human error line, `Error [<code>]: <message>`
+
+def error_code(out):
+    """The error code a CLI answer carries: `code` of its JSON envelope (or `error`, a string or an object with a `code`), else the code of the human `Error [<code>]` line; "" when it names none."""
+    d = _json(out)
+    for v in (d.get("code"), d.get("error")):
+        if isinstance(v, dict): v = v.get("code")
+        if isinstance(v, str) and v.strip(): return v.strip()
+    m = _CODE_LINE.search(out or "")
+    return m.group(1) if m else ""
+
+def thin_refused(rc, out):
+    """True when the answer is a thin-client brain's refusal of `gbrain call`: a non-zero exit with the code requires_local_engine. The words "is not routable" count only in a short answer that names no
+    code at all (an older CLI), never in a longer one or one with another code (a failed write may echo text that holds the words)."""
+    if rc == 0: return False
+    code = error_code(out)
+    if code: return code == "requires_local_engine"
+    return len((out or "").strip()) < 400 and "is not routable" in out
+
+def gb_routed(call_args, named_args, stdin=None):
+    """`gb(call_args)`, or `gb(named_args)` for a brain whose CLI refuses `call` (a thin client). Both forms name the slug where _slug_of finds it, so both run with that brain's home."""
+    slug = _slug_of(call_args)
+    name = (_brains.for_key(slug) if slug else _brains.default()).name
+    if name not in _THIN:
+        rc, out = gb(call_args, stdin=stdin)
+        if not thin_refused(rc, out): return rc, out
+        _THIN.add(name)
+    return gb(named_args, stdin=stdin)
+
+def read_page(slug):
+    """The CLI's answer for one page read (content and revision) → (exit code, output): `call get_page`, or `get` for a thin-client brain."""
+    return gb_routed(["call", "get_page", json.dumps({"slug": slug, "include_content": True, "content_only": True})],
+                     ["get", slug, "--include-content", "--content-only", "--json"])
+
 def get(slug):
-    rc, out = gb(["call", "get_page", json.dumps({"slug": slug, "include_content": True, "content_only": True})])
+    rc, out = read_page(slug)
     d = _json(out)
     return (d["content"], d["revision"]) if "content" in d and "revision" in d else (None, None)
 

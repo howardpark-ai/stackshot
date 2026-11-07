@@ -291,6 +291,12 @@ def txn(fn: Callable[[Ctx], Any], by: str = "", now: str | None = None, dry: boo
 
 
 # ----------------------------------------------------------------------------- the page mirror
+def _read_strict(io: Any, key: str) -> tuple[str | None, str | None]:
+    """The page store's read for a verb that must tell a page that is not there from a read that did not work: its `get_strict` (an OSError carries the real error), else its `get`
+    (a store without one, such as a test's stand-in). (None, None) means the page is not there; a read that failed raises OSError, and is never told as "no page"."""
+    return getattr(io, "get_strict", io.get)(key)
+
+
 def _fm_end(lines: list[str]) -> int | None:
     if not lines or lines[0].strip() != "---":
         return None
@@ -466,7 +472,10 @@ def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bo
         for attempt in range(1, max(1, tries) + 1):
             if attempt > 1 and not dry:
                 e = _entry_now(pid) or e
-            content, rev = io.get(key)
+            try:
+                content, rev = _read_strict(io, key)
+            except OSError as ex:
+                return {"state": "failed", "key": key, "note": f"the page {key} could not be read, so nothing was written to it: {str(ex)[:300]}"}
             if content is None or not rev:
                 if not make_page:
                     return {"state": "no-page", "key": key, "note": f"{key} is not in the page store: the record points at it and nothing was written there"}
@@ -600,7 +609,11 @@ def create(name: str, scope: str, page: str = "", *, make_page: bool = False, ti
     if make_page and key:
         import page_debt as _pd
         io = io if io is not None else _pd.page_io()
-        if io.get(key)[0] is not None:
+        try:
+            made = _read_strict(io, key)[0] is not None
+        except OSError as ex:
+            raise VerbError(502, f"the page {key} could not be read, so it is not known whether it exists: {str(ex)[:300]}")
+        if made:
             raise VerbError(409, f"{key} already exists as a page: point the project at it without make_page")
     if len(title) > 120 or any(ord(c) < 32 or c in '"\\' for c in title):
         raise VerbError(400, "title = one line of at most 120 characters, with no quotation marks or backslashes")
@@ -693,7 +706,10 @@ def adopt(page: str, *, name: str = "", scope: str = "", by: str = "", io: Any =
     if io is None:
         import page_debt as _pd
         io = _pd.page_io()
-    content, rev = io.get(key)
+    try:
+        content, rev = _read_strict(io, key)
+    except OSError as ex:
+        raise VerbError(502, f"the page {key} could not be read: {str(ex)[:300]}")
     if content is None or not rev:
         raise VerbError(404, f"{key} is not in the page store: there is no page to make a project from")
     fm = _pg.frontmatter_text(content)
