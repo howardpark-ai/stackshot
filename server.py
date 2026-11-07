@@ -4674,6 +4674,7 @@ import anchor_scope as _ascope  # noqa: E402  — which anchors count for an ite
 import fleet as _fleet  # noqa: E402
 import cloud as _cloud  # noqa: E402
 import render as _rmod  # noqa: E402
+import option_labels as _option_labels  # noqa: E402  — the letter an option label repeats from its badge: dropped on read, the pick that names it still lands (option_labels.py)
 import ask_read as _ar  # noqa: E402  — how an ask and its options are read (open question, alternatives, Yes/No pair, Recommend), shared with the audit (ask_read.py)
 import routing as _routing  # noqa: E402  — the routing log (the pilot)
 import router as _router  # noqa: E402  — the router's judging half: the rules in code and the thin call (router_live.py acts on them)
@@ -6048,7 +6049,7 @@ def _watch_label(who: str) -> str:
 def _watch_ask(gid: str, meta: dict[str, Any], what: str) -> tuple[str, list[dict[str, Any]]]:
     """The question the owner gets when HE is the post-wake mover of a time, item or anchor wait: the ask and options the item already carries when they are valid, else one in the
     ask's shape with two buttons (take it up, drop it)."""
-    ask, opts = str(meta.get("ask") or ""), _rmod.options_of({"metadata": meta})
+    ask, opts = str(meta.get("ask") or ""), _rmod.options_of({"metadata": meta}, raw=True)
     if _rmod.parse_ask(ask) is not None and opts:
         return ask, opts
     ask = (f"Decide: what to do with {_gh.shown(gid)}, whose wait ended · Recommend: Take it up · Stakes: {_clip_line(what, 90)} · By: no date")
@@ -18131,18 +18132,30 @@ def _split_letter(item: dict[str, Any], choice: str) -> tuple[str, str]:
     """(label, letter) for the `choice` a form posted. The answer box of the board letters a question's options A, B, C when it has three or more, by their place in the order the owner
     stored them (the order a session writes its ask in: "Recommend: B, …"), and posts "B · <label>"; every other form posts the bare label. The lettered form is tried first: a
     "<letter> · <label>" whose letter is the label's stored place among three or more options gives (label, letter), so an option whose label is itself "B · X" cannot capture
-    the card for "X" at place B. Otherwise a choice that is one of the stored labels (or Yes/No) comes back as it is with no letter, and anything else unchanged, for the caller's stale check."""
-    opts = _rmod.options_of(item)
+    the card for "X" at place B. Otherwise a choice that is one of the stored labels (or Yes/No) comes back as it is with no letter, and anything else unchanged, for the caller's stale check.
+    An option whose stored label repeats its own letter ("A Report", all of a card's labels in order: option_labels.strip_letters) is drawn without it, so the label a pick may name at a place is the
+    shown one or the stored one (a page loaded before the change still posts "A · A Report"); a label that was only its letter is posted as that letter alone, and the pick is stored under the label as stored."""
+    forms = _option_forms(item)
     m = _LETTERED_CHOICE.fullmatch(choice)
-    if m and len(opts) >= 3 and ord(m[1]) - 65 < len(opts) and opts[ord(m[1]) - 65]["label"] == m[2]:
-        return m[2], m[1]
+    if m and len(forms) >= 3 and ord(m[1]) - 65 < len(forms) and m[2] in forms[ord(m[1]) - 65][1:]:
+        return forms[ord(m[1]) - 65][0], m[1]
+    if len(forms) >= 3 and len(choice) == 1 and choice.isascii() and choice.isalpha() and ord(choice.upper()) - 65 < len(forms) and not forms[ord(choice.upper()) - 65][1]:
+        return forms[ord(choice.upper()) - 65][0], choice.upper()      # the card of a label that was only its letter posts the letter (ASCII only: "ß".upper() is two characters)
+    for name, shown, raw in (forms if choice else []):
+        if choice in (shown, raw):
+            return name, ""
     return choice, ""
 
 
+def _option_forms(item: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Per stored option, in the stored order: (the name a pick is stored under, the label as the card shows it, the label as stored). [] when the item has no readable options."""
+    shown, raw = _rmod.options_of(item), _rmod.options_of(item, raw=True)
+    return list(zip(_option_labels.pick_names([o["label"] for o in raw], [o["label"] for o in shown]), [o["label"] for o in shown], [o["label"] for o in raw]))
+
+
 def _choice_words(rec: dict[str, Any]) -> str:
-    """The option an answer picked as a person reads it: "B · <label>" when the box lettered it, else the label."""
-    choice = str(rec.get("choice") or "")
-    return f"{rec['letter']} · {choice}" if choice and rec.get("letter") else choice
+    """The option an answer picked as a person reads it: "B · <label>" when the box lettered it, the letter alone when the option was only its letter, else the label."""
+    return _option_labels.pick_words(str(rec.get("choice") or ""), str(rec.get("letter") or ""))
 
 
 def _answer_words(rec: dict[str, Any], limit: int = 600) -> str:
@@ -18365,7 +18378,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         if choice:
             choice, letter = _split_letter(item, choice)      # the board's box posts "B · <label>": the label is the choice, the letter is kept beside it
         if choice:                      # an option's button: only while the item needs his decision, and only one of the item's stored options (Approve and Decline are no fallback); with none stored, Yes or No (the same two the page draws)
-            valid = [o["label"] for o in (_rmod.options_of(item) or _rmod.yesno_options(item))]
+            valid = [f[0] for f in _option_forms(item)] or [o["label"] for o in _rmod.yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
                 return "stale"
             kind = "decision"
@@ -18394,11 +18407,15 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         if text:
             rec["text"] = text
         rec["via"] = "board"
-        picked = next((o for o in meta.get("options") or [] if isinstance(o, dict) and str(o.get("label") or "").strip() == choice), {}) if choice and not stepped else {}     # a Done is no option: a stale option named Done (with a wake) is not his pick
-        shown = _rmod.options_of(item)      # the item's valid options, as the page drew them
-        matched = bool(choice) and not stepped and choice in [o["label"] for o in shown]   # his pick is one of the item's (valid) options, by label
-        if kind == "decision" and not stepped and shown:      # the options he was shown stay on his answer (the History lists them whole, the picked one marked, though a pick takes them off the item)
-            rec["options"] = shown
+        forms = _option_forms(item)         # the item's valid options, as the page drew them: (the name a pick is stored under, the label shown, the label stored)
+        names = [f[0] for f in forms]
+        if choice and not stepped and choice in names:      # the option picked, by the name it is stored under (the list is valid, so its places are the stored list's)
+            picked = meta["options"][names.index(choice)]
+        else:
+            picked = next((o for o in meta.get("options") or [] if isinstance(o, dict) and str(o.get("label") or "").strip() == choice), {}) if choice and not stepped else {}     # a Done is no option: a stale option named Done (with a wake) is not his pick
+        matched = bool(choice) and not stepped and choice in names   # his pick is one of the item's (valid) options, by label
+        if kind == "decision" and not stepped and forms:      # the options he was shown stay on his answer (the History lists them whole, the picked one marked, though a pick takes them off the item); as stored, the card's letter is dropped again on read
+            rec["options"] = _rmod.options_of(item, raw=True)
         if matched:                     # the record keeps what he chose: the clear below takes the options off the item
             rec["choice_line"] = str(picked.get("line") or "").strip()
             if letter:
