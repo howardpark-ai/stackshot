@@ -1257,9 +1257,15 @@ check("timed wake: the T form is accepted as given", rd("a9")["metadata"].get("w
 e0 = refusal(lambda: server._update("a9", wake=(now_ - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"), sender="home-beta"))
 e1 = refusal(lambda: server._update("a9", wake=now_.strftime("%Y-%m-%d %H:%M"), sender="home-beta"))
 check("timed wake: an hour ago and this minute refused, nothing saved", e0 == e1 == "Refused: wake must be in the future (+04)" and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", (e0, e1))
-bad = [refusal(lambda w=w: server._update("a9", wake=w, sender="home-beta")) for w in ("2026-02-24T12:00:30", f"{d2}T12:00+04:00", f"{d2}T24:00", f"{d2}T12")]
-check("timed wake: seconds, an offset, 24:00 and a bare hour refused with the two forms named", all(x.startswith("Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM (+04) — got ") for x in bad)
-      and "'2026-02-24T12:00:30'" in bad[0] and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", bad)
+bad = [refusal(lambda w=w: server._update("a9", wake=w, sender="home-beta")) for w in (f"{d2}T24:00", f"{d2}T12", f"{d2}T12:00+25:00", "2026/12/01")]
+check("timed wake: 24:00, a bare hour, an impossible offset and a slashed date refused with the two forms named", all(x.startswith("Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM (+04) — got ") for x in bad)
+      and f"'{d2}T24:00'" in bad[0] and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", bad)
+old_past = refusal(lambda: server._update("a9", wake="2026-02-24T12:00:30", sender="home-beta"))
+check("timed wake: seconds are read as the minute they fall in, then the wake is judged as any other (a past one is refused as past)", old_past == "Refused: wake must be in the future (+04)" and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", old_past)
+for w_, want_ in ((f"{d2}T12:00:30", f"{d2}T12:00"), (f"{d2}T12:00+04:00", f"{d2}T12:00"), (f"{d2}T08:00:59Z", f"{d2}T12:00")):
+    res = server._update("a9", wake=w_, sender="home-beta")
+    check(f"timed wake: {w_} is stored as {want_} (the instance time) and the update says it", rd("a9")["metadata"]["wake"] == want_, (rd("a9")["metadata"].get("wake"), res))
+server._update("a9", wake=f"{d2}T13:30", sender="home-beta")
 at9 = server._wake_at(f"{d2}T13:30")
 check("timed wake: _wake_at reads both forms in the instance zone", at9 == datetime.datetime.fromisoformat(f"{d2}T13:30").replace(tzinfo=tz_)
       and server._wake_at(d2) == datetime.datetime.fromisoformat(f"{d2}T00:00").replace(tzinfo=tz_) and at9.utcoffset() == datetime.timedelta(hours=4), at9)

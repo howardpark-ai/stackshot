@@ -120,6 +120,7 @@ import waiting as _wt  # noqa: E402  — the one rule for an item that waits: it
 import model as _model  # noqa: E402  — the item model of the redesign: dead | alive | waiting, the mover and the wait, derived from the fields (model.py)
 import dated_wait as _dw  # noqa: E402  — a doing item the board lists as waiting for its wake (dated_wait.py; the end-of-turn question skips a basis wait)
 import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
+import call_log as _calls  # noqa: E402  — the count of refused writes and the corrections the server made instead (call_log.py)
 import model_guards as _mg  # noqa: E402  — the item model's write guards and the report on existing items (model_guards.py)
 import self_wait as _selfwait  # noqa: E402  — a wait a session sets on its own item names its blocker, and a model says whether the step could be done now (self_wait.py)
 import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
@@ -282,12 +283,22 @@ def _next_id() -> str:
     return f"{LETTER}{nxt}"
 
 
-def _norm_id(item_id: str | int) -> str:
+def _bare_id_ok(status: str | None) -> bool:
+    """An update reads a bare item number unless it closes the item (status=completed): a close takes the same shown id the complete tool does."""
+    return str(status or "").strip().lower() != "completed"
+
+
+def _norm_id(item_id: str | int, bare: bool = False) -> str:
     """An id as a session writes it → the store's: a store id, c1; board#N and #7 → the issue-numbered item (ghsync.norm);
     board-tmp-<machine>#3 and board-tmp-<machine>-3 → l3, the temporary id of an item created while GitHub was down or the hour's writes were spent; a
-    migrated or re-keyed item's old id → its id now (the alias map)."""
+    migrated or re-keyed item's old id → its id now (the alias map). `bare=True` (the id of get, confirm and an update that does not close, the item a call is about) also reads a plain number N
+    as board#N and notes the correction; anywhere else (complete, an update with status=completed, after, items, a link) a bare number stays a bad id, since a close or a link is not undone by a resend."""
     s = str(item_id).strip().lower()
     g = _gh.norm(s)
+    if not g and bare and re.fullmatch(r"[0-9]+", s):            # a bare number is the issue number of a board item: board#N (ASCII digits only: int() takes them all)
+        g = _gh.norm(f"board#{int(s)}")
+        if g:
+            _calls.fixed("item-id", f"item {s} read as {_gh.shown(g)}")
     if not g:
         m = _GID.match(s)
         if not m:
@@ -1100,6 +1111,25 @@ def _fit(text: str, limit: int) -> str:
     room = max(limit - 2, 1)
     cut = t[:room].rsplit(" ", 1)[0] if " " in t[:room] else t[:room]
     return cut.rstrip(" ,;:") + " …"
+
+
+# a subject that already opens with a bracketed tag or a "word:" (`[Work] x`, `[work]x`, ` [work] x`, `work: x`) is somebody's attempt at a prefix, not a missing one: it is refused as ever, the list named
+_SUBJECT_TAGGED = re.compile(r"[\s​-‏⁠﻿]*(?:\[[^\]]*\]|\w+:)")
+
+
+def _project_subject_prefix(project: str) -> str:
+    """The scope prefix a subject for `project` takes: "[<scope>] " of the project's scope when the instance has that prefix, else [subject] fallback_prefix when it is one of the prefixes;
+    "" when the project does not name one record, the record has no scope, or neither applies (the subject is then refused for its missing prefix, as before)."""
+    try:
+        recs = _prj.refs(project, _registry("projects"))
+    except Exception:  # noqa: BLE001 — a project record that cannot be read: the gate refuses the subject as it always did
+        return ""
+    if len(recs) != 1:
+        return ""
+    prefixes = list(_cfg.CFG["subject"]["prefixes"])
+    fallback = str(_cfg.get("subject", "fallback_prefix") or "")
+    scope = str(recs[0].get("scope") or "")
+    return next((p for p in (f"[{scope}] " if scope else "", fallback) if p and p in prefixes), "")
 
 
 def _gate_subject(subject: str, current: str | None = None) -> None:
@@ -5241,13 +5271,46 @@ def _wake_at(value: Any) -> dt.datetime:
     return at.replace(tzinfo=_pages.zone_now().tzinfo)
 
 
+_WAKE_ISO_RE = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})[T ]([0-9]{2}:[0-9]{2})(?::([0-9]{2})(?:[.,][0-9]+)?)?(Z|[+-][0-9]{2}(?::?[0-9]{2})?)?", re.I)
+
+
+def _wake_iso(text: str) -> str:
+    """A full ISO 8601 time (seconds, a fraction, `Z` or a UTC offset, any of them) → the minute it falls on in the instance timezone, as YYYY-MM-DDTHH:MM; "" for anything else, and for
+    a time that is already in the plain form (nothing to correct). Seconds are dropped, not rounded; a time with no offset is read as the instance's own. (The stored wake is a wall-clock minute with no
+    offset, so a converted time in the hour a DST fall-back repeats is stored as that minute and later read as the hour's first pass.)"""
+    m = _WAKE_ISO_RE.fullmatch(text.strip())
+    if not m or (m[3] is None and m[4] is None):
+        return ""
+    try:
+        at = dt.datetime.strptime(m[1] + "T" + m[2], "%Y-%m-%dT%H:%M")
+        if m[4]:
+            off = m[4].upper()
+            if off == "Z":
+                delta = dt.timedelta(0)
+            else:
+                digits = off[1:].replace(":", "")
+                hours, minutes = int(digits[:2]), int(digits[2:4] or 0)
+                if hours > 23 or minutes > 59:
+                    return ""
+                delta = dt.timedelta(hours=hours, minutes=minutes) * (-1 if off[0] == "-" else 1)
+            at = at.replace(tzinfo=dt.timezone(delta)).astimezone(_pages.zone_now().tzinfo)
+        return at.strftime("%Y-%m-%dT%H:%M")
+    except ValueError:
+        return ""
+
+
 def _parse_wake(text: str) -> str:
-    """A wake as given (YYYY-MM-DD, or YYYY-MM-DDTHH:MM with a space allowed for the T; no seconds, no offset) → its stored
-    form, the T form for a time of day; ToolError naming the two forms otherwise."""
+    """A wake as given (YYYY-MM-DD, or YYYY-MM-DDTHH:MM with a space allowed for the T) → its stored form, the T form for a time of day; ToolError naming the two forms otherwise. A full ISO
+    time (seconds, a fraction, Z or a UTC offset) is read as the minute it falls on in the instance timezone, and the reply says so (call_log.fixed)."""
     m = _WAKE_RE.fullmatch(text.strip())
     try:
         if not m:
-            raise ValueError(text)
+            iso = _wake_iso(text)
+            if not iso:
+                raise ValueError(text)
+            _wake_at(iso)                    # a real date and a real time of day
+            _calls.fixed("wake", f"wake {text.strip()} read as {iso} {_cfg.tz_abbr()}")
+            return iso
         stored = m[1] + ("T" + m[2] if m[2] else "")
         _wake_at(stored)                     # a real date and a real time of day (2026-02-30 and 24:00 fail here)
         return stored
@@ -7884,7 +7947,7 @@ def _main_agent(project: str) -> str:
 def _off_map_note_item(sender: str, item_id: str, project: str = "") -> str:
     """_off_map_note for a write to an item: the project the write names, else the item's own."""
     try:
-        proj = project or str((_load(_norm_id(item_id)).get("metadata") or {}).get("project") or "")
+        proj = project or str((_load(_norm_id(item_id, bare=True)).get("metadata") or {}).get("project") or "")
     except Exception:  # noqa: BLE001  — an item that does not read had no write to note
         return ""
     return _off_map_note(sender, proj)
@@ -8445,17 +8508,47 @@ def _refusal_line(tool: str, args: Any, err: BaseException) -> str:
 
 class _RefusalLog(_MW):
     """a write refused inside a Code Mode script shows its reason only if the script returns it, so the server keeps it too: one stderr line (the journal)
-    for every ToolError a tool call ends in, innermost of the middleware so the reason is the tool's own text, before _LinkIds rewrites its ids."""
+    for every ToolError a tool call ends in, innermost of the middleware so the reason is the tool's own text, before _LinkIds rewrites its ids. The same
+    middleware counts the call (call_log.py: one line per counted write, went through or refused, for the weekly refused count) and adds the one reply line
+    for a correction the server made itself instead of refusing (call_log.fixed)."""
     async def on_call_tool(self, context, call_next):  # type: ignore[override]
+        msg = context.message
+        name = str(getattr(msg, "name", "") or "?")
+        counted = name in _calls.COUNTED
+        token = _calls.begin() if counted else None
         try:
-            return await call_next(context)
+            result = await call_next(context)
         except ToolError as e:
+            if token is not None:
+                _calls.end(token)             # a refused write stored nothing: no correction stands
             try:
-                msg = context.message
-                print(_refusal_line(str(getattr(msg, "name", "") or "?"), getattr(msg, "arguments", None), e), file=sys.stderr, flush=True)
+                args = getattr(msg, "arguments", None)
+                print(_refusal_line(name, args, e), file=sys.stderr, flush=True)
+                a = args if isinstance(args, dict) else {}
+                _calls.record(name, False, item=a.get("item_id"), sender=a.get("sender"), why=str(e))
             except Exception as le:  # noqa: BLE001  — a log line is never worth losing the refusal
                 print(f"mcp refusal log failed: {le}", file=sys.stderr, flush=True)
             raise
+        except BaseException:
+            if token is not None:
+                _calls.end(token)
+            raise
+        if token is not None:
+            fixes = _calls.end(token)
+            try:
+                note = _calls.reply_note(fixes)
+                if note:
+                    for c in getattr(result, "content", None) or []:
+                        if getattr(c, "type", "") == "text" and isinstance(getattr(c, "text", None), str):
+                            c.text += note
+                            break
+                    sc = getattr(result, "structured_content", None)
+                    if isinstance(sc, dict) and isinstance(sc.get("result"), str):
+                        sc["result"] += note
+                _calls.record(name, True, fixes=fixes)
+            except Exception as le:  # noqa: BLE001
+                print(f"mcp call log failed: {le}", file=sys.stderr, flush=True)
+        return result
 
 
 mcp.add_middleware(_RefusalLog())
@@ -11034,13 +11127,13 @@ _STALL_SHORT = f" A wrong `stall:` step is undone with update (mover, next, clea
                                          "item_id can also be a notice id, the six hex characters a message to a project returns (\"notice a1b2c3\"): get then shows the notice instead of an item, with its `sender:`, `sent:` and `project:`, a one-line `text:` excerpt, "
                                          "the router's `ruling:` (passed to whom, merged, held or dropped) with its `reason:`, its `rule:` (a rule in code, or the router's call) and who it was `ruled by:`, the `item:` it went onto and when it was `ruled:`; a repeat dropped by the rule in code also names the notice it repeats on a `repeat of:` line; "
                                          "a notice not ruled yet shows that it is still held for the router and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router gave up on shows `ruling: none, stuck` and its `reason:`); an id no routing log holds answers \"no notice <id>\"." + _STALL_FORM))
-def stackshot_get(item_id: Annotated[str, Field(description="An item id (board#N, or <letter><n> for an older item), or a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\"), which shows the router's ruling of that notice.")]) -> str:
+def stackshot_get(item_id: Annotated[str, Field(description="An item id (board#N; a bare number N is read as board#N; <letter><n> for an older item), or a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\"), which shows the router's ruling of that notice.")]) -> str:
     """Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), `after:` (the items that must close first, each with its state), and `observers:`. It leads with `mover:` (who moves the item now) and `then:` (who takes it after the answer or the wait); History says who created it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)` (stored as doing, but its wake is more than an hour away and every open step is dated for that day or later, or its wake carries a wait_basis and is still ahead; a wake alone, with no wait_basis, shows no wait), so it is listed as waiting until then. After `next:` a `named in next:` block gives each board#N the next names with its live state (closed with the time and outcome, open with its mover, waiting, or not found), so a status is never relayed from the words of next. The item model is on docs/design. item_id can also be a notice id (the six hex characters a message to a project returns): it then shows who sent the notice and when, its project, a one-line excerpt, the router's ruling with its reason, rule and item, when it was ruled, or that it is still held and when the router rules it."""
     _who()
     nid = _notice_asked(item_id)
     if nid:
         return _notice_report(nid)
-    gid = _norm_id(item_id); it = _load(gid); it["gid"] = gid
+    gid = _norm_id(item_id, bare=True); it = _load(gid); it["gid"] = gid
     return _fmt(it) + _nag()
 
 
@@ -11332,7 +11425,7 @@ _CONTACT_FORM = (f" Parameter contact (a filing field: it moves no state clock, 
                  "A front agent that creates an item is its contact, wherever the item is filed. When the contact retires, or the item is re-filed under another project, it falls to the (new) project's -main agent, unless it is also a front agent there or is the item's creator and a front agent of any project (it stays). ")
 
 
-@mcp.tool(name="create", description=_lead(f"Create a board item: something {OWNER} would ask \"is X done?\" about (a deliverable a session owns, a decision or input he must give, a blocker on someone outside, a handoff between sessions), never a working step. A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. subject: {_PFX}, then the outcome wanted as a task, never a topic or a symptom (right: subject=\"{_PFX0}Make the export finish in under a minute\"; the length limit is below). project: the item's gbrain page (required, must exist: create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID), required: the server records the sender as the item's creator (a fact of History, \"created by\"; a background agent may create items too).{_OFF_MAP_NOTE}. Name who moves the item with mover= (and then=); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent is refused (hand build work to the project's builder; message the front agent for a check or answer only it can give); with no mover= an alive item is moved by the project's builder, else its -main agent, never by its creator; an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`); an item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`); owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. " + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM + "Right call: create(project=\"projects/widgets\", subject=\"" + _PFX0 + "Make the export finish in under a minute\", sender=\"my-x\", mover=\"my-x\", description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\", next=\"my-x: profile the nightly run\"). "
+@mcp.tool(name="create", description=_lead(f"Create a board item: something {OWNER} would ask \"is X done?\" about (a deliverable a session owns, a decision or input he must give, a blocker on someone outside, a handoff between sessions), never a working step. A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. subject: {_PFX}, then the outcome wanted as a task (a subject with no scope prefix is given the one its project's scope names, and the reply says so), never a topic or a symptom (right: subject=\"{_PFX0}Make the export finish in under a minute\"; the length limit is below). project: the item's gbrain page (required, must exist: create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID), required: the server records the sender as the item's creator (a fact of History, \"created by\"; a background agent may create items too).{_OFF_MAP_NOTE}. Name who moves the item with mover= (and then=); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent is refused (hand build work to the project's builder; message the front agent for a check or answer only it can give); with no mover= an alive item is moved by the project's builder, else its -main agent, never by its creator; an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`); an item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`); owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. " + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM + "Right call: create(project=\"projects/widgets\", subject=\"" + _PFX0 + "Make the export finish in under a minute\", sender=\"my-x\", mover=\"my-x\", description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\", next=\"my-x: profile the nightly run\"). "
                                                           "The reply may end with a line listing up to 3 similar open or recently completed items: the create always goes through, so check them for a duplicate before working the new item. request_id: any random string of yours; a retry with the same one returns the item already created."))
 def stackshot_create(
     subject: str,
@@ -11466,6 +11559,11 @@ def _create_item(
             it = _load(prev); it["gid"] = prev
             return prev, f"already created as {_gh.shown(prev)} (same request_id).\n" + _fmt(it) + _nag()
     subject, description, next, ask = (_shown_ids(x) for x in (subject, description, next, ask))   # g7 →
+    if subject.strip() and not by and not any(subject.startswith(pfx) for pfx in _cfg.CFG["subject"]["prefixes"]) and not _SUBJECT_TAGGED.match(subject):
+        pfx_ = _project_subject_prefix(project)        # a subject with no scope prefix takes its project's (a pure fact; the reply says so)
+        if pfx_:
+            subject = pfx_ + subject.lstrip()
+            _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it")
     _gate_subject(subject)
     _gate_recycle_item(subject)
     _gate_description(description)
@@ -11770,7 +11868,8 @@ _UPDATE_DESC = (
     "ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: a week's delay misses the demo · By: <a date in words, or no date>\" (one line, at most 240 characters, with needs=[\"decision\"]). "
     "status: open | completed (`needs` says whose move it is; complete rather than delete). " + _CLOSE_FORM + " A new or reworded open step that opens with a front agent is refused on an item another session moves: open it with the mover's name, or message the front agent (a step it already holds stays). " + _ITEM_FORM + " " + _NEXT_FORM + f" ask=\"none\" clears it (so does clear_ask=true). The ask's mockup rule above also holds on an update that sets the ask, description, next, needs or options or puts the item on needs=decision. options=[] (or \"none\", or clear_options=true) clears the options, which need no recommended one then (refused while the ask is an open question; a non-empty list still takes 2 to 6 entries, exactly one recommended). When {OWNER} answers by picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the first line of next: it replaces the stored ask and leaves next. When this work settles or changes a premise of another open "
     "item, update that one too, in the same turn. "
-    f"wake (YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {_cfg.tz_abbr()}) alone is a reminder, never a hold, on an item you keep moving: the item stays active in its lane, and at that "
+    "item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. "
+    f"wake (YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {_cfg.tz_abbr()}; a full ISO time with seconds or a UTC offset is converted to that minute in {_cfg.tz_abbr()}, and the reply says so) alone is a reminder, never a hold, on an item you keep moving: the item stays active in its lane, and at that "
     "moment the server tells its mover and the sessions in its needs once and drops the wake. Use it for a real check-back on your own work, not for a window the work itself waits through (that is a park, below). "
     "A doing item whose wake is over an hour away and whose every open step waits for a later date (\"after Mar 2\", \"until Mar 2\"; a deadline such as \"by Mar 2\" or \"due Mar 2\" is no wait) is listed as waiting, and the audit asks why the step cannot run now. "
     "A front agent's reminder wake on an alive item another session moves is refused (the result lands through stackshot when the mover closes the item or hands it back to you; watch_reason=<why no push reaches you> lets a real exception through; a park's wake with hold=true is not a reminder and stays allowed). "
@@ -13188,7 +13287,7 @@ def _update_unlocked(
         if opts:
             raise ToolError("Refused: clear_options drops the options; it does not go with a new list")
         opts = []
-    gid = _norm_id(item_id)
+    gid = _norm_id(item_id, bare=_bare_id_ok(status))
     item = _load(gid)
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
     meta = dict(item.get("metadata") or {})
@@ -13850,13 +13949,13 @@ def stackshot_update(
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
     if _model.clean(mover) or _model.clean(then) or _model.clean(post_wake_mover):
         try:
-            meta_ = (_load(_norm_id(item_id)).get("metadata") or {})
+            meta_ = (_load(_norm_id(item_id, bare=_bare_id_ok(status))).get("metadata") or {})
         except Exception:  # noqa: BLE001
             meta_ = {}      # an unknown item is _update's to refuse
         proj_ = project or str(meta_.get("project") or "")
         for f_, v_ in (("mover", mover), ("then", then), ("post_wake_mover", post_wake_mover)):
             _gate_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""))    # a front agent gets no hand-off notice: another session may not make it the mover (the value the item already holds changes nothing)
-    _gate_self_wait(_norm_id(item_id), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
+    _gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
     with _session_write():
         return _update(item_id, subject, description, status, next, needs, priority, due, anchors, owner, owner_name, clear_needs, project, sender, clear_due, wake, clear_wake,
@@ -13906,13 +14005,13 @@ _FD = _cfg.freshness_days()
                                              f"without a state change or a confirm when it needs {OWNER}'s call, {_FD['agent_days']:g} d on agent, {_FD['external_days']:g} d "
                                              "when it waits on others; an item on hold never does. Changes nothing else: no field, no state clock, no page owed, nobody "
                                              "told. Stale means unverified, not wrong: re-read the item against its project page, then confirm, update or complete it. "
-                                             "sender = your own session (name or cse_… id). " + _SENDER_MIRROR.strip()))
+                                             "sender = your own session (name or cse_… id). item_id = board#N (a bare number N is read as board#N). " + _SENDER_MIRROR.strip()))
 def stackshot_confirm(item_id: str, sender: str = "") -> str:
-    """Mark an item still true: sets its `confirmed` clock only."""
+    """Mark an item still true: sets its `confirmed` clock only. item_id: board#N (a bare number N is read as board#N)."""
     _who()
     _sender_required(sender)
     _sender_not_owner(sender)
-    gid = _norm_id(item_id)
+    gid = _norm_id(item_id, bare=True)
     item = _load(gid)
     item["confirmed"] = time.time()
     was_no_settle = getattr(_NO_SETTLE, "on", False)
