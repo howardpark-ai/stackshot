@@ -94,6 +94,21 @@ runs on every box.
                                 list a hidden project again: it is marked listed on purpose (and given the scope, when one is passed). Prints
                                 {"project": <the record>, "changed": bool, "note"}, exit 0; a sub-page is refused (400, naming the page to
                                 list), an unknown project (404), an ambiguous slug (400).
+  client.py post project-agent-mandate <project> <name> --mandate "<one line>" [--sender <session id>]
+                                change the mandate line of an agent already listed on the project (<project> = its id, page key or bare slug);
+                                `post project-agent` refuses another line for a listed name (409), and a hand edit of the page's line is not read
+                                (the record wins, and the next page write restores it), so this is the way to change it. The server changes the line in
+                                the project's agents map in the project record, then writes the page's `agents:` block from the record, so the page and
+                                the record agree and the line stays. The agent keeps its side (front or background), its place in the map and who
+                                listed it. Same gate as `post project-agent`: the asking session's id ($CLAUDE_CODE_SESSION_ID, or --sender
+                                <transcript id | cse_ id>; a bare name is refused) must resolve to the project's keeper or a front agent its page lists;
+                                the New session form's label does not apply. Prints the server's JSON, exit 0: {"project", "key", "agent": {name:
+                                {front, role, mandate_line}}, "previous", "mirror" {state, key, note}, "note"}; the same line again is 200 "nothing
+                                changed". "mirror" state "failed" = the page was not written (the record is right; the project's next change writes it).
+                                Refused, reason on stderr, exit 1, nothing changed: 400 a missing field, a bad name, an empty line (to remove the agent use
+                                post project-agent-retire), a line over 600 characters or with a control character or a backslash, an ambiguous slug, a page that is not
+                                a hub · 403 a name as --sender, or a session that is neither the keeper nor a front agent · 404 unknown project, or <name>
+                                not listed (list it first with post project-agent) · 503 the record cannot be written.
   client.py post project-agent-rename <project> <OLD> <NEW> [--sender <label>]
                                 rename an agent's entry in the project's agents map in the project record (<project> = its id, page key or bare
                                 slug), in place: the entry keeps its mandate text, its place in the map and its front or background side. The page's
@@ -680,6 +695,26 @@ def project_list(argv: list[str]) -> int:
     return _post_json("project-list", {k: v for k, v in opt.items() if v.strip()}, "project not listed", 30.0)
 
 
+PROJECT_AGENT_MANDATE_USAGE = 'usage: client.py post project-agent-mandate <project> <name> --mandate "<one line>" [--sender <session id>]'
+
+
+def project_agent_mandate(argv: list[str]) -> int:
+    """`post project-agent-mandate <project> <name> --mandate "…" [--sender ID]`: change the mandate line of a listed agent in the project record (the page follows) → the server's JSON on
+    stdout, exit 0; 1 and the reason on stderr when refused, not reached or misused. The server allows the project's keeper and its front agents, told by the asking session's id: --sender,
+    else $CLAUDE_CODE_SESSION_ID."""
+    a, opt = list(argv), {}
+    for k in ("mandate", "sender"):
+        if "--" + k in a:
+            i = a.index("--" + k)
+            if i + 1 >= len(a): print(f"--{k} needs a value\n{PROJECT_AGENT_MANDATE_USAGE}", file=sys.stderr); return 1
+            opt[k] = a[i + 1]; del a[i:i + 2]
+    sender = (opt.get("sender") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
+    if len(a) != 2 or not all(x.strip() for x in a) or any(x.startswith("--") for x in a) or not opt.get("mandate", "").strip():
+        print(PROJECT_AGENT_MANDATE_USAGE, file=sys.stderr); return 1
+    if not sender: print("no asking session: pass --sender <transcript id | cse_ id>, or run it where $CLAUDE_CODE_SESSION_ID is set (a name is not accepted)", file=sys.stderr); return 1
+    return _post_json("project-agent-mandate", {"project": a[0].strip(), "name": a[1].strip(), "mandate": opt["mandate"], "sender": sender}, "mandate not changed", 120.0)     # the page's gbrain read, write and read back
+
+
 PROJECT_AGENT_RENAME_USAGE = "usage: client.py post project-agent-rename <project> <OLD> <NEW> [--sender <label>]"
 
 
@@ -996,6 +1031,7 @@ def main(argv: list[str]) -> int:
         try: return project_agent(argv[3:])
         except Exception as e: print(f"stackshot: agent not listed ({type(e).__name__}: {str(e)[:160]})"); return 1
     for verb, fn, what in (("project", project_new, "project not made"), ("project-list", project_list, "project not listed"),
+                          ("project-agent-mandate", project_agent_mandate, "mandate not changed"),
                           ("project-agent-rename", project_agent_rename, "agent not renamed"), ("project-agent-retire", project_agent_retire, "agent not retired"), ("for-you-seen", for_you_seen, "not marked seen"), ("watch", watch, "flag not set")):
         if cmd == "post" and len(argv) > 2 and argv[2] == verb:
             try: return fn(argv[3:])

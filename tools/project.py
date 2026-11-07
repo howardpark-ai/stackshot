@@ -8,6 +8,7 @@
     tools/project.py archive PROJECT [--why W]                                            status archived (by, at, how); the page's status: line follows
     tools/project.py reopen PROJECT                                                       status active again
     tools/project.py agent-add PROJECT NAME (--front | --back) --mandate "one line"        the agent on the project's agents map, then the page's agents: block
+    tools/project.py agent-mandate PROJECT NAME --mandate "one line"                      the mandate line of an agent already on the map changed (record first, then the page's agents: block)
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
     tools/project.py mirror PROJECT [--make-page]                                         writes the page's three mirror lines (display-name:, agents:, status:) from the record again
@@ -50,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     o = sub.add_parser("reopen"); o.add_argument("project")
     aa = sub.add_parser("agent-add"); aa.add_argument("project"); aa.add_argument("name"); g = aa.add_mutually_exclusive_group(required=True)
     g.add_argument("--front", action="store_true"); g.add_argument("--back", action="store_true"); aa.add_argument("--mandate", required=True)
+    am = sub.add_parser("agent-mandate"); am.add_argument("project"); am.add_argument("name"); am.add_argument("--mandate", required=True)
     ar = sub.add_parser("agent-retire"); ar.add_argument("project"); ar.add_argument("name")
     an = sub.add_parser("agent-rename"); an.add_argument("project"); an.add_argument("old"); an.add_argument("new")
     mi = sub.add_parser("mirror"); mi.add_argument("project"); mi.add_argument("--make-page", action="store_true")
@@ -67,7 +69,7 @@ def run(a: argparse.Namespace) -> dict:
     import project_verbs as pv
     import page_debt
     io = None
-    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-retire", "agent-rename", "mirror", "move-page"):
+    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-mandate", "agent-retire", "agent-rename", "mirror", "move-page"):
         io = page_debt.page_io()
     kw = {"by": a.by, "io": io}
     dry = {"dry": a.dry_run}
@@ -86,6 +88,8 @@ def run(a: argparse.Namespace) -> dict:
         return pv.reopen(a.project, **kw, **dry)
     if a.cmd == "agent-add":
         return pv.agent_add(a.project, a.name, a.front, a.mandate, **kw, **dry)
+    if a.cmd == "agent-mandate":
+        return pv.agent_mandate(a.project, a.name, a.mandate, **kw, **dry)
     if a.cmd == "agent-retire":
         res = pv.agent_retire(a.project, a.name, **kw, **dry)
         if not a.dry_run and res["result"] in ("line removed", "dropped"):

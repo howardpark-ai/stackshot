@@ -41,7 +41,7 @@ toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', t
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "brain/infra", "secrets"): (T / d).mkdir(parents=True)
-NAMES = ("home-sparrow", "home-sparrow-main", "home-sparrow-docs", "home-outsider", "ops-tool", "home-fresh")
+NAMES = ("home-sparrow", "home-sparrow-main", "home-sparrow-docs", "home-outsider", "ops-tool", "home-fresh", "home-mand", "home-mand-main")
 U = {n: f"00000000-0000-4000-8000-00000000000{i}" for i, n in enumerate(NAMES, 1)}
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({**{u: {"name": n, "machine": "a", "url": "", "seen": "x"} for n, u in U.items()},
@@ -438,6 +438,48 @@ pverbs.agent_add = real_add
 page("ops/tool.md", "type: project\ntitle: A tool box\ndisplay-name: ops-tool\nagents:\n  ops-tool-other: a page edit"); p.cmd_registry(quiet=True)
 server._projects_sync(now=NOW + 1, force=True)
 check("project-agent: …a page edit made after the project has its entry is not read: the record's agents stay (the entry wins), the page's own line is not an agent", list(rec("ops/tool")["agents"]) == ["ops-tool-main"] and rec("ops/tool")["listed_by"] == "agents", rec("ops/tool")["agents"])
+
+# ---- 6c. post project-agent-mandate: the keeper or a front agent changes a listed agent's mandate line; the record first, the page from it, and the page cannot undo it
+st, out = mk("projects/mand", "home")
+MD = out.get("project", {}).get("id", "")
+OLD_B = "builds, via subagents"
+NEW_B = "builds the server; reviews each change; releases for every builder"
+st1, _o = pa("projects/mand", "home-mand-main", U["home-mand"])
+st2, _o = pa("projects/mand", "home-mand-builder", U["home-mand"], role="builder", front=False, mandate=OLD_B)
+def pam(project, name, sender, mandate=NEW_B): return server._client_post("box-c", "project-agent-mandate", {"project": project, "name": name, "mandate": mandate, "sender": sender})
+check("agent mandate: (setup) a project with a front agent and a background builder, both on the page", st == 200 and st1 == 200 and st2 == 200 and page_agents("projects/mand") == ({"home-mand-main": "the main agent", "home-mand-builder": OLD_B}, {"home-mand-builder": OLD_B}), page_agents("projects/mand"))
+st, out = pam("projects/mand", "home-mand-builder", "home-mand-main")
+check("agent mandate: a name as sender proves nothing -> 403, the old line stays", st == 403 and "name" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == OLD_B, (st, out))
+st, out = pam("projects/mand", "home-mand-builder", U["home-outsider"])
+check("agent mandate: a session that is neither the keeper nor a front agent -> 403 naming the rule, the old line stays", st == 403 and "keeper" in out["error"] and "front agent" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == OLD_B and page_agents("projects/mand")[1]["home-mand-builder"] == OLD_B, (st, out))
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand"])
+check("agent mandate: the keeper's session id changes the line -> 200; the record holds it, the side and role stay, the answer carries the previous line", st == 200 and rec(MD)["agents"]["home-mand-builder"] == {"front": False, "role": "builder", "mandate_line": NEW_B}
+      and out["previous"] == OLD_B and out["agent"] == {"home-mand-builder": {"front": False, "role": "builder", "mandate_line": NEW_B}}, (st, out))
+check("agent mandate: ...the page's agents block was written from the record (the new line under background:, the front agent's line untouched)", out["mirror"]["state"] == "written" and page_agents("projects/mand") == ({"home-mand-main": "the main agent", "home-mand-builder": NEW_B}, {"home-mand-builder": NEW_B}), (out["mirror"], page_agents("projects/mand")))
+st3, _o = pa("projects/mand", "home-mand-extra", U["home-mand"], role="extra", front=False, mandate="another")
+check("agent mandate: a later mirror write (the next agent added) does not undo it", st3 == 200 and page_agents("projects/mand")[1]["home-mand-builder"] == NEW_B and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == NEW_B, (st3, page_agents("projects/mand")))
+n_puts = len(gio.puts)
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand"])
+check("agent mandate: the same line again -> 200 'nothing changed', no page write", st == 200 and "nothing changed" in out["note"] and len(gio.puts) == n_puts, (st, out))
+gio.pages["projects/mand"] = gio.pages["projects/mand"].replace(NEW_B, "edited on the page by hand")
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand"])
+check("agent mandate: the same line again while the page is out of step -> 200, the page is written from the record, and the note does not say nothing changed", st == 200 and out["mirror"]["state"] == "written" and "nothing changed" not in out["note"]
+      and page_agents("projects/mand")[1]["home-mand-builder"] == NEW_B, (st, out))
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"], mandate="  builds   the server;  reviews each change;  releases for every builder  ")
+check("agent mandate: a front agent's own session id may change a line; the answer carries the stored, whitespace-folded line, not the raw input", st == 200 and out["agent"]["home-mand-builder"]["mandate_line"] == rec(MD)["agents"]["home-mand-builder"]["mandate_line"]
+      and "  " not in out["agent"]["home-mand-builder"]["mandate_line"] and " " not in out["agent"]["home-mand-builder"]["mandate_line"] and out["agent"]["home-mand-builder"]["mandate_line"] == NEW_B, (st, out))
+st, out = pam("projects/mand", "home-mand-builder", U["home-mand-main"], mandate="uses a back\\slash")
+check("agent mandate: a line with a backslash -> 400 saying to write it without; the line stays and the page still reads", st == 400 and "cannot contain a backslash" in out["error"] and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == NEW_B and page_agents("projects/mand")[1]["home-mand-builder"] == NEW_B, (st, out))
+st, out = pam("projects/mand", "home-mand-main", "00000000-0000-4000-8000-0000000000ee")
+check("agent mandate: an id that is no session of the fleet -> 403 saying it names nobody", st == 403 and "heartbeat" in out["error"], (st, out))
+st, out = pam("projects/mand", "home-mand-ghost", U["home-mand"])
+check("agent mandate: an agent that is not listed -> 404 naming it and pointing at agent_add; nothing written", st == 404 and "home-mand-ghost is not listed" in out["error"] and "agent_add" in out["error"] and "home-mand-ghost" not in rec(MD)["agents"], (st, out))
+for bad_ in ("", "   ", "a\nb", "x" * 601):
+    st, out = pam("projects/mand", "home-mand-builder", U["home-mand"], mandate=bad_)
+    check(f"agent mandate: a bad line ({bad_[:8]!r}) -> 400 with a text that says what to change; the line stays", st == 400 and ("empty" in out["error"] or "one line" in out["error"]) and rec(MD)["agents"]["home-mand-builder"]["mandate_line"] == NEW_B, (st, out))
+check("agent mandate: no such project -> 404; a missing sender -> 400", pam("projects/nowhere", "home-x-main", U["home-mand"])[0] == 404 and server._client_post("box-c", "project-agent-mandate", {"project": "projects/mand", "name": "home-mand-builder", "mandate": NEW_B})[0] == 400)
+st, out = pa("projects/mand", "home-mand-builder", U["home-mand"], role="builder", front=False, mandate="something else")
+check("agent mandate: project-agent with another line for a listed name is still a 409, and the text now names project-agent-mandate", st == 409 and "project-agent-mandate" in out["error"], (st, out))
 
 # ---- 6a. the form call: a trusted label AND a trusted machine (the token's, never the body's) may add a pending agent to any LISTED project
 page("projects/lambda.md", "type: project\ntitle: Lambda\norg: home\ndisplay-name: home-lambda\nagents:\n  home-lambda-main: talks to Oliver"); p.cmd_registry(quiet=True)

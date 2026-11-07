@@ -8,7 +8,7 @@ record is always the one that is right and the page is a copy stackshot writes f
     rename       the project's name: the id stays, the old name goes to `former_names`, the pending agents under the old name are dropped
     move_page    the project's page moves to another key (rename_page.py does the page half): the old key goes to `former_keys`
     archive      status archived, with who, when and how; reopen puts it back to active
-    agent_add / agent_retire / agent_rename   the project's agents map, with its mandate lines
+    agent_add / agent_mandate / agent_retire / agent_rename   the project's agents map, with its mandate lines (agent_mandate changes the line of an agent already listed)
 
 Each verb is one atomic change of the record under the record's own lock (projects.locked: the same flock every writer of the file takes), then a write of the page mirror if
 the project has a page in this instance's page store. The mirror is three lines of the page's frontmatter and nothing else: `display-name:` (the project's name), `agents:` (the
@@ -873,7 +873,7 @@ def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "
                 e["agents"] = ag
                 return {"pid": pid, "name": have}
             raise VerbError(409, f"{have} is already listed on the project as {'front' if cur.get('front') else 'background'}: {str(cur.get('mandate_line', ''))[:120]!r}; "
-                                 "retire it or rename it, then list it again")
+                                 "to change its mandate line use agent_mandate; to change its side, retire it or rename it, then list it again")
         ag[name] = {"front": bool(front), "mandate_line": mandate, **({"by": by} if by else {}), "at": ctx.now}
         e["agents"] = ag
         _former_agent(e, name, False)
@@ -885,6 +885,36 @@ def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "
     pages = pages if pages is not None else preread(project, io)
     out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
     return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": bool(front), "mandate": mandate}, by=by, mirror_now=mirror_now)
+
+
+def agent_mandate(project: str, name: str, mandate: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, mirror_now: bool = True, pages: dict | None = None) -> dict:
+    """Change the mandate line of an agent already on the project's agents map: its side (front or background), its place in the map and who listed it stay as they are. The record first, then the
+    page's `agents:` block (mirror), so the page cannot undo the change: a hand edit of the page is not read and the next mirror write restores the record's line. The same line again changes nothing.
+    Refused: an empty line (400: the agent would have no mandate), a line with a backslash (400), a name that is not listed (404: list it with agent_add first; a pending entry only is not listed). → {project, key, changed, entry,
+    mirror, name, front, mandate, previous}."""
+    mandate = " ".join(str(mandate or "").split())
+    if "\\" in mandate:
+        raise VerbError(400, "a mandate line cannot contain a backslash; write it without (the page's agents block could not be read back with one)")
+    if not mandate:
+        raise VerbError(400, "the mandate line is empty: give the agent's new line in words (what it does, in one line); to take the agent off the map use agent_retire")
+
+    def work(ctx: Ctx) -> dict:
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        ag = copy.deepcopy(ctx.agents(pid))
+        have = _find(ag, name)
+        if have is None:
+            raise VerbError(404, f"{name} is not listed on {pr.page_key(e) or pid}: list it first with agent_add (this verb changes the line of an agent that is on the map)")
+        previous = ag[have].get("mandate_line", "")
+        ag[have] = {**ag[have], "mandate_line": mandate}
+        e["agents"] = ag
+        return {"pid": pid, "name": have, "front": bool(ag[have].get("front")), "previous": previous}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": out["front"], "mandate": mandate, "previous": out["previous"]}, by=by, mirror_now=mirror_now)
 
 
 def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
