@@ -18879,7 +18879,7 @@ def _details_page(request: Request, key: str):
     if g is not None:
         return g
     try:
-        return HTMLResponse(_ui_mods()[0].Board(str(STORE)).routing_html(key), headers={"Cache-Control": "no-store"})
+        return HTMLResponse(_ui_mods()[0].Board(str(STORE), contact_of=_contact_label).routing_html(key), headers={"Cache-Control": "no-store"})
     except KeyError:
         return PlainTextResponse("no such project", status_code=404)
 
@@ -18922,7 +18922,7 @@ async def landed_page(request: Request):
     kw = {"page": request.query_params.get("page")}        # the Closed page pages its Completed section (?page=N)
 
     def page() -> str:
-        return rmod.Board(str(STORE)).landed_html(**kw)
+        return rmod.Board(str(STORE), contact_of=_contact_label).landed_html(**kw)
     return HTMLResponse(await run_in_threadpool(page), headers={"Cache-Control": "no-store"})
 
 
@@ -19193,7 +19193,7 @@ def _board_home_draw_locked() -> None:
         gen = _BOARD_HOME["gen"]
     try:
         from ui import render as r2
-        page = r2.Board(str(STORE)).html()
+        page = r2.Board(str(STORE), contact_of=_contact_label).html()
         _BOARD_HOME["drawn"] = int(now)
         _BOARD_HOME["html"] = page
         _BOARD_HOME["failed"] = 0.0
