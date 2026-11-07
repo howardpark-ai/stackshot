@@ -259,6 +259,7 @@ jobs:
   # The tool's text changes in the same release as the tool: a pull request that changes the body of an MCP tool
   # function or of an output helper (tools/tool_text.py HELPERS) while tests/tool_text.snapshot.json is unchanged fails here, unless its body has the line
   # `tool-text: unchanged: <reason>`. The other two gates run in the suites job as suites: tool_text (the live registry equals the snapshot) and retired_terms.
+  # No model reads the text in CI: whether the words still say what the code does is read before the merge by the maintainer's reviewer subagent (CONTRIBUTING.md, "The tool-text gates", item 4).
   # It needs no token beyond the job's own: the body is read with `gh pr view` (so a re-run after the author added the line sees it; the event's copy, with a
   # warning, when gh cannot), and every value of the event goes in through env, never into the shell text. The job asks for `pull-requests: read`: the
   # repository's default token has no pull-request access, so on a repository with that default the read failed every time, unseen, and a re-run judged the body
@@ -295,67 +296,3 @@ jobs:
             printf '%s' "$PR_BODY" > "$body"
           fi
           uv run --no-project python tools/tool_text.py touched --base "$BASE_SHA" --head "$HEAD_SHA" --body-file "$body"
-  # On a pull request that touches a tool function or an output helper, ONE Claude Haiku call reads the diff and
-  # the affected tools' text (tests/tool_text.snapshot.json) and says whether the text still matches what the code takes, says and returns (tools/text_check.py; the
-  # rules, the switch and the sign-in are in its docstring). Behind a switch: the repository variable TOOL_TEXT_MODEL_CHECK must be `on`; the job-level `if` keeps the job from
-  # starting otherwise (it shows as skipped, which counts as passing, and takes no runner time: the runner is shared and loaded). With it on, the script skips (and passes)
-  # when nothing relevant is touched or no AWS credentials are there; once the script runs, a model or network error (or any other failure on its
-  # model path) is a warning and a pass, never a block, and only a parsed "the text and the code disagree" fails. A uv or PyPI failure while the job starts the script can still fail it.
-  # The call goes to Amazon Bedrock: bedrock-runtime in the region named by the repository variable TOOL_TEXT_AWS_REGION (required: with none set the script skips), signed in with the
-  # role named by the repository secret TOOL_TEXT_AWS_ROLE (see the sign-in below), so there is no access key in GitHub, none in this file, and no workspace id. The model defaults to the inference profile
-  # global.anthropic.claude-haiku-5-5 (repository variable TOOL_TEXT_MODEL to change it). The PR's text (diff, body)
-  # is data: the diff is read by git inside the script, the body goes through a file, and every value of the event goes in through env, never into the shell text.
-  tool-text-model:
-    # skipped for pull requests from forks: the model call is paid (a pull_request event is the only trigger this job has; a pushed commit on main starts none)
-    # THE SIGN-IN ON A HOSTED RUNNER. A hosted runner has no AWS profile in a home folder, so the job signs in through GitHub's OIDC token instead
-    # (aws-actions/configure-aws-credentials, below): the repository secret TOOL_TEXT_AWS_ROLE holds the ARN of an IAM role (a secret, not a variable: a `with:` value prints unmasked in a public run log, and the ARN holds the AWS account number; a secret is masked) that trusts this repository's
-    # token (the OIDC provider token.actions.githubusercontent.com, sub `repo:<owner>/<repo>:pull_request`) and may call bedrock:InvokeModel and
-    # bedrock:InvokeModelWithResponseStream on the inference profile and the foundation model behind it, nothing else. No key lives in GitHub. A secret cannot be read
-    # in an `if`, so the job-level condition holds only the switch. When the secret is NOT set the sign-in step fails (it is continue-on-error), no credentials are there and
-    # text_check.py skips with a warning: a missing role is a skipped check, never a failure (the job does start and takes a short runner minute). The role is created outside
-    # this repository (your AWS account); this file only reads its name. CONTRIBUTING.md, "The tool-text gates", item 4.
-    if: >-
-      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.TOOL_TEXT_MODEL_CHECK == 'on'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read        # the checkout
-      pull-requests: read   # gh pr view: the PR body as it is now (see the tool-text job)
-      id-token: write       # the OIDC token configure-aws-credentials exchanges for the role's credentials; this job only, and a fork's pull request is kept out by the `if` above
-    env:
-      TOOL_TEXT_MODEL_CHECK: ${{ vars.TOOL_TEXT_MODEL_CHECK }}
-      TOOL_TEXT_MODEL: ${{ vars.TOOL_TEXT_MODEL }}
-      TOOL_TEXT_AWS_REGION: ${{ vars.TOOL_TEXT_AWS_REGION }}
-      TOOL_TEXT_AWS_PROFILE: ''   # a hosted runner has no AWS profile: empty, so boto3's default chain reads the role's credentials from the environment
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      PR_BODY: ${{ github.event.pull_request.body }}
-    steps:
-      - name: scratch goes to the runner's temp folder
-        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"   # scratch goes to the runner's temp folder, which the runner empties after each job. The runner context is not available in a job-level env, so this is a step
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0     # the fork point of the PR and main is the base of the comparison
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.14"
-      - name: sign in to AWS through GitHub's OIDC token
-        continue-on-error: true   # a wrong role ARN or trust policy is a skipped check with a warning (no credentials: text_check.py skips), never a red PR, as for its other AWS problems
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd   # v6.3.0, pinned by commit
-        with:
-          role-to-assume: ${{ secrets.TOOL_TEXT_AWS_ROLE }}
-          aws-region: ${{ vars.TOOL_TEXT_AWS_REGION }}     # required: the script has no default and skips when it is unset
-          role-session-name: tool-text-model-${{ github.run_id }}
-          role-duration-seconds: 900
-      - name: the tools' text still matches the code (one model call)
-        run: |
-          body="$RUNNER_TEMP/pr-body.txt"
-          trap 'rm -f "$body" "$body.err"' EXIT   # remove them pass or fail
-          if ! gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq .body > "$body" 2> "$body.err"; then
-            echo "::warning::the PR body could not be read now ($(head -n 1 "$body.err")): this run uses the copy from the event that started it, so an edit since then is not seen"
-            printf '%s' "$PR_BODY" > "$body"
-          fi
-          uv run --locked --script tools/text_check.py run --base "$BASE_SHA" --head "$HEAD_SHA" --body-file "$body"
