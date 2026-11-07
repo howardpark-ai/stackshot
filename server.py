@@ -5050,11 +5050,11 @@ _yes_no_options = _ar.yes_no_options
 
 def _own_action_lines(meta: dict[str, Any]) -> list[str]:
     """The `<owner>:` lines of next a session wrote: the server's own step for an ask or a your-step is left out."""
-    mine = {_steps.clean(_hs.recorded(meta))}
+    mine = {_steps.owner_key(_hs.recorded(meta))}
     pa = _rmod.parse_ask(str(meta.get("ask") or ""))
     if pa:
-        mine.add(_steps.clean(_hs.line_of(pa["decide"])))
-    return [ln for ln in _nl.split(meta.get("next")) if _hs.is_named(ln) and _steps.clean(ln) not in mine]
+        mine.add(_steps.owner_key(_hs.line_of(pa["decide"])))
+    return [ln for ln in _nl.split(meta.get("next")) if _hs.is_named(ln) and _steps.owner_key(ln) not in mine]
 
 
 def _own_line_named(words: set[str], line: str) -> bool:

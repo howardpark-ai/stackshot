@@ -52,7 +52,7 @@ def item(i, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item a{i}", "description": DESC, "status": status,
                                                      "updated": now - 3600, "state_updated": now - 3600, "confirmed": now - 3600,
                                                      "metadata": {"owner": OWNER, "project": "projects/alpha", "needs": ["home-agent"], "next": "home-agent: build it", **meta}}))
-for i in (*range(1, 20), 23, 24, 25, 26, 27, 28, 29, 30, 31, 32):
+for i in (*range(1, 20), 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, *range(35, 40), *range(60, 74)):
     item(i)                                                       # items in the agent's hands
 item(20, needs=["decision"], ask=ASK, options=OPTS)               # asked before the server made his steps: the list holds no step of his
 item(21, needs=["decision"], ask=ASK, options=OPTS, next="home-agent: build it\nOliver: pick the release path")      # …with a `Oliver:` line a session wrote
@@ -71,7 +71,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
-import server, steps as S, nextlines as NL, owner_steps as HS
+import server, steps as S, nextlines as NL, owner_steps as HS, itempage as IP, next_backfill as NB
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
@@ -279,6 +279,89 @@ server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
 a = rd(11)
 check("a wake pass over a held item makes no step of his and ticks none", not a["metadata"].get("hold") and his(11) == [], (his(11), told[-1:] if told else None))
 check("the router and its live pass never write an item (no save, no update call in either)", not re.search(r"\b_save\(|stackshot_update\(|_update_unlocked\(", pathlib.Path(STACK, "router.py").read_text() + pathlib.Path(STACK, "router_live.py").read_text()))
+
+# ---- 10. his name once: a text written with his name at the front and one without read the same, and a line stored with it twice still matches
+SPELLINGS = [f"Oliver: {STEP}", f"oliver: {STEP}", f"OLIVER: {STEP}", f"Oliver (builder): {STEP}", f"**Oliver:** {STEP}", f"- Oliver: {STEP}", f"Oliver: Oliver: {STEP}", f"Oliver:  Oliver (lead): {STEP}", STEP]
+ONE = f"Oliver: {STEP}"
+check("line_of: every spelling is_named accepts (any case, a role, a marker, bold marks, the name twice) and the text without the name make one and the same line", all(HS.line_of(t) == ONE for t in SPELLINGS) and all(HS.is_named(t) for t in SPELLINGS[:-1]) and not HS.is_named(STEP), [HS.line_of(t) for t in SPELLINGS])
+check("line_of: another name stays in the text, and only a leading opener of his goes", HS.line_of("home-agent: build it") == "Oliver: home-agent: build it" and HS.line_of("Oliver: ask Oliver: now") == "Oliver: ask Oliver: now", (HS.line_of("home-agent: build it"), HS.line_of("Oliver: ask Oliver: now")))
+check("same_line: the name once, twice, in another case or with a role is one step; another action is not", HS.same_line(f"Oliver: Oliver: {STEP}", ONE) and HS.same_line(f"oliver (lead): {STEP}", ONE) and not HS.same_line(f"Oliver: {STEP} now", ONE) and not HS.same_line(f"home-agent: {STEP}", ONE))
+for n, spelling in zip((35, 36, 37, 38, 39, 72, 73), SPELLINGS[:7]):
+    r = upd(n, step=spelling)
+    check(f"a step= written as {spelling!r} makes the one line `{ONE}` (the stored line, its record and next hold his name once)", his(n) == [OPEN(ONE)] and mt(n).get("owner_step") == ONE and mt(n)["next"].count("Oliver:") == 1, (st(n), mt(n)))
+r = upd(60, step=STEP)
+check("(setup) a step= written without his name makes the same line", his(60) == [OPEN(ONE)] and mt(60).get("owner_step") == ONE, st(60))
+check("…so the shown line is the same for the text with the name and without it", [t for _, t in his(35)] == [t for _, t in his(60)], (his(35), his(60)))
+ASK_NAMED = "Decide: Oliver: whether to ship it now · Recommend: ship · Stakes: a day either way · By: no date"
+r = upd(61, needs="decision", ask=ASK_NAMED, options=OPTS)
+check("an ask whose Decide part opens with his name makes `Oliver: <the Decide part>` once, the same line as the ask without the name", his(61) == [OPEN(H1)] and mt(61).get("owner_step") == H1, (st(61), mt(61)))
+r = server._answer("a61", "Ship", "", "")
+check("…and his answer ticks it with the option after the arrow", r == "decision" and his(61) == [("done", f"{H1} → Ship")], his(61))
+
+# a step stored with his name twice (before the server stopped doubling it): later saves keep it as the one step, a session's done cannot tick it by any spelling, his answer ticks it
+DBL = f"Oliver: Oliver: {STEP}"
+def double(n):
+    p = T / f"store/a/{n}.json"; j = json.loads(p.read_text()); m = j["metadata"]
+    m["next"] = m["next"].replace(ONE, DBL); m["owner_step"] = DBL
+    for x in m["steps"]: x["text"] = x["text"].replace(ONE, DBL)
+    p.write_text(json.dumps(j))
+for n in (62, 63, 64):
+    upd(n, step=STEP); double(n)
+check("(setup) the stored step reads with his name twice", his(62) == [OPEN(DBL)] and mt(62)["owner_step"] == DBL and DBL in mt(62)["next"], st(62))
+upd(62, description="- Goal: A thing, finished when it works\n- one more fact")
+check("a save over the step stored twice adds no second step and leaves the line as stored", his(62) == [OPEN(DBL)] and len([ln for ln in mt(62)["next"].splitlines() if ln.startswith("Oliver:")]) == 1 and mt(62)["owner_step"] == DBL, (st(62), mt(62)))
+for ref in (2, DBL, ONE, STEP, f"oliver: {STEP}"):
+    refused(f"a session's done by {ref!r} on the step stored twice is refused (only his answer ticks it)", lambda ref=ref: upd(62, done=[ref]), "only his answer", i=62)
+r = upd(62, step=f"Oliver: {STEP}, then say so")
+check("a reworded step= drops the step stored twice and adds the new one with his name once", [s for s, _ in his(62)] == ["dropped", "open"] and his(62)[1][1] == f"{ONE}, then say so" and mt(62)["owner_step"] == f"{ONE}, then say so", st(62))
+r = upd(63, step="none")
+check("withdrawing the step stored twice drops it", [s for s, _ in his(63)] == ["dropped"] and "owner_step" not in mt(63), (st(63), mt(63)))
+r = server._answer("a64", "", "", "done")
+check("Done on the step stored twice ticks that step, once, and makes none beside it", r == "done" and his(64) == [("done", DBL)] and mt(64)["steps"][-1]["by"] == "Oliver", (r, st(64)))
+
+# a session's own line of his, stored with his name twice or once: done and dropped find it by position or exact first line, with the name, without it, or written twice
+for n, line in ((65, "Oliver: Oliver: review PR 12"), (66, "Oliver: Oliver: review PR 12"), (67, "Oliver: Oliver: review PR 12"), (68, "Oliver: review PR 12"), (69, "Oliver: review PR 12"), (70, "Oliver: Oliver: review PR 12"), (71, "Oliver: review PR 12")):
+    upd(n, next=f"home-agent: build it\n{line}")
+check("(setup) a session's line of his is stored as it wrote it, twice or once", his(65) == [OPEN("Oliver: Oliver: review PR 12")] and his(68) == [OPEN("Oliver: review PR 12")], (his(65), his(68)))
+upd(65, done=["Oliver: review PR 12"])
+check("done by the line with his name once finds the line stored twice", his(65) == [("done", "Oliver: Oliver: review PR 12")] and "review PR 12" not in mt(65)["next"], (st(65), mt(65)["next"]))
+upd(66, done=["review PR 12"])
+check("done by the line without his name finds the line stored twice", his(66) == [("done", "Oliver: Oliver: review PR 12")], st(66))
+upd(67, done=["Oliver: Oliver: review PR 12"])
+check("done by the line written twice finds the line stored twice", his(67) == [("done", "Oliver: Oliver: review PR 12")], st(67))
+upd(70, dropped=[2])
+check("dropped by position finds the line stored twice", his(70) == [("dropped", "Oliver: Oliver: review PR 12")], st(70))
+upd(68, done=["Oliver: Oliver: review PR 12"])
+check("done by the line written twice finds the line stored once", his(68) == [("done", "Oliver: review PR 12")], st(68))
+upd(69, dropped=["review PR 12"])
+check("dropped by the line without his name finds the line stored once", his(69) == [("dropped", "Oliver: review PR 12")], st(69))
+upd(71, done=["oliver (lead): review PR 12"])
+check("done by the line with another case and a role finds the line stored once", his(71) == [("done", "Oliver: review PR 12")], st(71))
+
+steps_ = [{"text": "home-agent: build it", "status": "open", "by": "", "at": 0}, {"text": "Oliver: Oliver: review PR 12", "status": "open", "by": "", "at": 0}, {"text": "Oliver: review PR 13", "status": "open", "by": "", "at": 0}]
+check("steps.resolve: a ref with his name, without it, written twice, or by position finds his step", all(S.resolve(steps_, [r_], "done") == [1] for r_ in ("Oliver: review PR 12", "review PR 12", "Oliver: Oliver: review PR 12", 2, "oliver: review PR 12")) and S.resolve(steps_, ["review PR 13"], "done") == [2])
+try:
+    S.resolve(steps_, ["build it"], "done"); check("steps.resolve: another session's step is not found by its words without its name", False)
+except S.StepError:
+    check("steps.resolve: another session's step is not found by its words without its name", True)
+dup_ = steps_ + [{"text": "Oliver: review PR 12", "status": "open", "by": "", "at": 0}]
+try:
+    S.resolve(dup_, ["review PR 12"], "done"); check("steps.resolve: a ref that fits two of his steps is refused and asks for the position", False)
+except S.StepError as e_:
+    check("steps.resolve: a ref that fits two of his steps is refused and asks for the position", "matches steps 2, 4" in str(e_), str(e_))
+check("steps.resolve: the exact text wins over the looser reading", S.resolve(dup_, ["Oliver: review PR 12"], "done") == [3], S.resolve(dup_, ["Oliver: review PR 12"], "done"))
+
+# how it is shown: a line stored twice reads with his name once on the item page's lists
+check("the Next list's lines and the Your step block show his name once for a line stored twice", IP.next_lines("Oliver: Oliver: review PR 12", "home-agent")[0].text == "Oliver: review PR 12" and IP.next_lines("Oliver: review PR 12", "home-agent")[0].text == "Oliver: review PR 12"
+      and S.strip_owner("Oliver: Oliver: review PR 12") == "review PR 12" and S.strip_owner("Oliver: review PR 12") == "review PR 12", IP.next_lines("Oliver: Oliver: review PR 12", "home-agent")[0].text)
+
+# the fill-in of his past decisions finds a done step stored with his name twice
+bf_meta = {"answers": [{"kind": "decision", "ts": 1000.0, "choice": "Ship", "text": "", "ask": ASK}],
+           "steps": [{"text": f"Oliver: Oliver: {D1} → Ship", "status": "done", "by": "Oliver", "at": 9000.0}]}
+add_, have_ = NB.audit(bf_meta, "open", OWNER)
+bf_meta["steps"][0]["text"] = f"{H1} → Ship"
+add2_, have2_ = NB.audit(bf_meta, "open", OWNER)
+check("next_backfill finds a done step of his stored with his name twice or once, and adds none", add_ == [] and add2_ == [] and len(have_) == 1 and len(have2_) == 1 and have_[0]["why"].startswith("ticked by"), (add_, have_, add2_, have2_))
 
 # ---- 9. the pure helpers
 check("decide_of: the Decide part; a leading `Decide:` stripped; a watcher's ask cut at its first ` · `; plain words kept",
