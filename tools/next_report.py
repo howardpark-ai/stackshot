@@ -47,7 +47,8 @@ PART1_LIVE = 1700000000.0       # (epoch): part 1 of the next rules went live; N
 RULES = ("N1", "N2", "N3", "N4", "N5", "N6", "N7")
 
 
-def load_all(store: Path | None = None) -> dict[str, dict[str, Any]]:
+def load_all(store: Path | None = None, skipped: list[Path] | None = None) -> dict[str, dict[str, Any]]:
+    """The items of the store by id. A file that cannot be read or parsed, or holds no JSON object, is left out; with `skipped` given (a list) its path is appended there, so a caller that must not miss an item can count them. Without it the behavior is unchanged."""
     out: dict[str, dict[str, Any]] = {}
     for p in sorted((store or _cfg.path("paths", "store")).glob("*/*.json")):
         gid = p.parent.name + p.stem
@@ -56,9 +57,13 @@ def load_all(store: Path | None = None) -> dict[str, dict[str, Any]]:
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            if skipped is not None:
+                skipped.append(p)
             continue
         if isinstance(d, dict):
             out[gid] = d
+        elif skipped is not None:
+            skipped.append(p)
     return out
 
 
