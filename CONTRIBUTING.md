@@ -203,6 +203,12 @@ the tool and leaving the text behind. The first three are deterministic checks t
    `nothing to read: <why>` line. The script uses the standard library only, calls no model, needs no AWS credentials, and **no workflow runs it**; `tests/run-suite text_pack` tests it. There is no switch, no repository variable and no
    PR-body escape line for this read: the reviewer's finding is answered in the PR.
 
+**`python3 tools/tool_text.py check` alone does not catch every tool-text rule.** `tests/waiting_scenario.py` also bans a regex (ladder, stuck list, "step N of", grace) in the `get` and `brief` descriptions and requires some phrases there.
+A change to a tool's text therefore also runs `tests/run-suite waiting`, plus the suites the change reaches. `select` prints `all` or a list of suite names, and `run` with no names runs nothing, so pass one to the other, as `tests.yml` does:
+`sel=$(uv run --locked --project tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD)`, then (if `all`, use `suitemap.py list` instead)
+`uv run --locked --project tests python tests/suitemap.py run -T 600 $sel`.
+`.suitemap/map.json` is gitignored and CI restores it from the Actions cache; with no map, `select` prints `all`.
+
 **The brief's what-changed line is generated from the snapshot.** The server's start (`whatschanged.record`) compares the snapshot of its checkout with the copy kept
 at the last start that changed it, `<paths.state>/tool_text.released.json`; a difference is appended, dated that day with a generated summary (tools added or
 removed, parameters added, removed, renamed or changed, description and label changes by tool), to `<paths.state>/tool_text.history.json`. A deploy restarts the
