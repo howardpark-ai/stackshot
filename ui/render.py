@@ -310,14 +310,32 @@ def _fact_time(v):
     except Exception: return None
 
 
-def machine_alerts(m):
+CHECKOUT_WHAT = "stackshot checkout"      # the puller's `what` for the box's own stackshot checkout (puller.py): the one update judged by where the box is
+def server_commit():
+    """The commit the boxes follow (clients.checkout_commit), "" when it cannot be told (a fixture, git away): machine_alerts then
+    judges a checkout by its last attempt alone, as before."""
+    try:
+        import clients as _cl
+        return _cl.checkout_commit() or ""
+    except Exception:
+        return ""
+def machine_alerts(m, server=""):
     """What a machine's view (machine.json) says went wrong, for its column in the Machines panel: the last setup run when it
     failed, and every package whose latest update attempt failed (facts.updates, ok false; the last one listed for a `what` wins, and
-    an absent or malformed list is none). → (setup or None, [failed updates]), each a dict as reported."""
+    an absent or malformed list is none). The box's own stackshot checkout is judged by where it is, not by its last attempt: when
+    the box reports its checkout commit (`stackshot`) and the server's commit `server` is known, the failed attempt shows only while
+    the two differ, and the card is clear again the moment they match (the box got there another way, a later attempt, a hand fix),
+    except a failed reload of that very commit (reason "reload failed…", `to` the box's commit: the code there does not load);
+    with either unknown the last attempt decides. → (setup or None, [failed updates]), each a dict as reported."""
     s = m.get("setup") if isinstance(m.get("setup"), dict) else None
     latest = {}
     for u in m.get("updates") if isinstance(m.get("updates"), list) else []:
         if isinstance(u, dict) and str(u.get("what") or "").strip(): latest[str(u["what"]).strip()] = u
+    here, want = str(m.get("stackshot") or "").strip().lower(), str(server or "").strip().lower()
+    ck = latest.get(CHECKOUT_WHAT)
+    if here and want and here == want and ck is not None:
+        reload_of_here = str(ck.get("reason") or "").startswith("reload failed") and str(ck.get("to") or "") == here[:12]
+        if not reload_of_here: latest.pop(CHECKOUT_WHAT)    # a reload that failed on the code at the box's own commit is true there: the box is at the commit and not running it
     return (s if s and s.get("ok") is False else None), [u for u in latest.values() if u.get("ok") is False]
 
 
@@ -1641,7 +1659,8 @@ class Board:
         self.basis_waits = sorted([r for r in open_w if _wt.basis_of(r["metadata"])], key=lambda r: (wake_key(r), sort_key(r)))   # waits that stand on a real-world date (wait_basis): listed once a week in the head
         self.nodate = [r for r in open_w if r["_wait"].get("nodate")]    # held with no wake, after or recycle: given now + the cap, reported here, never rewritten
         self.provision = provision_lag(now)            # [(hostname, online)] of the boxes whose stackshot puller is behind
-        self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.letters()}   # each machine's view: its last setup run and update attempts (machine_alerts)
+        self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.letters()}   # each machine's view: its last setup run, update attempts and checkout commit (machine_alerts)
+        self.server_commit = server_commit()           # the commit the boxes follow: a box's checkout is judged against it (machine_alerts)
         self._sc = (_SC_DEFAULT, _SC_ORG, _SC_TAG, _SC_PRE)
 
     # ---------------- the model ----------------
@@ -3619,7 +3638,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def failures(L, who=""):
             """Machine L's failed setup run and failed update attempts, each as (kind, detail, tip): kind is "setup" or "update", detail the step, or the package and the version it tried,
             tip the raw reason for the hover text (prefixed with `who` for a machine that has no card). An empty list when all went well."""
-            s, ups = machine_alerts(self.mfacts.get(L) or {})
+            s, ups = machine_alerts(self.mfacts.get(L) or {}, self.server_commit)
             out = []
             if s:
                 tip = f"setup failed at step {s.get('step') or '?'} {when_tip(s.get('at'))}: {s.get('reason') or 'no reason given'}"

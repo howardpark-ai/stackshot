@@ -9,7 +9,7 @@ points the readers there, so the server, the hub, the renderer, the version trac
 view holds the server's own clients alone: the fleet-state store and the merge with it were removed in an earlier change (a session's
 link excepted: it is the fleet tool's, see "Session links" below).
 
-machine.json   {letter, fleet, claude, checked, master, master_session, online: {ok, since}, source[, setup, updates]}   (below)
+machine.json   {letter, fleet, claude, checked, master, master_session, online: {ok, since}, source[, setup, updates, stackshot]}   (below)
 sessions.json  {uuid: {name, url, seen, machine[, previous_name, renamed_at, status, gone]}}   (url: the fleet tool's link, below)
 The files are rewritten only when a fact changes (the times alone never do it), because a new mtime republishes the board.
 
@@ -200,14 +200,57 @@ def checkout_commit() -> str:
     return _COMMIT["v"]
 
 
+_REPO = {"at": 0.0, "v": ""}
+_SCP_URL = re.compile(r"(?:[^@/\\:\s]+@)?([A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]):(?![:\\]|//)(\S+)")   # git@host:owner/repo (never a drive letter)
+
+
+def canonical_url(u: str) -> str:
+    """A repository address as the boxes are told it: https, with no user or password (the repository is fetched anonymously), whatever form
+    this checkout's origin has (`git@host:owner/repo.git`, `ssh://git@host/owner/repo`, `https://user:token@host/owner/repo`). Another
+    shape (a local path, a file:// URL) stays as it is; "" for an empty or unreadable address."""
+    u = str(u or "").strip()
+    if not u or any(c.isspace() for c in u) or u.startswith("-"):
+        return ""
+    m = re.match(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*)://(?P<rest>.+)", u)
+    if m:
+        scheme = m["scheme"].lower()
+        if scheme not in ("http", "https", "ssh", "git"):
+            return u if scheme == "file" else ""
+        netloc, _, path = m["rest"].partition("/")
+        host = netloc.rsplit("@", 1)[-1]
+        if scheme in ("ssh", "git"):
+            host = host.split(":", 1)[0]               # an ssh port is no https port
+        return f"https://{host}/{path}" if host and path else ""
+    m = _SCP_URL.fullmatch(u)
+    return f"https://{m.group(1)}/{m.group(2).lstrip('/')}" if m else u
+
+
+def repo_url() -> str:
+    """The canonical address of the repository every box's checkout follows (puller 10): [client] repo_url when the server's config
+    names one, else this checkout's origin as `canonical_url` writes it; "" when neither is known. Asked of git at most every minute."""
+    cfg = str(_cfg.get("client", "repo_url", default="") or "").strip()
+    if cfg:
+        return canonical_url(cfg)
+    if time.time() - _REPO["at"] > 60:
+        rc, v = _git_out("remote", "get-url", "origin")
+        _REPO.update(at=time.time(), v=canonical_url(v) if rc == 0 else "")
+    return _REPO["v"]
+
+
 def current(machine: str) -> dict[str, Any]:
     """What is current, in every poll's answer (puller 9, "keeping the box current"): the puller's VERSION in this checkout, this
     checkout's commit, and whether that machine's puller may update itself: [client] self_update (default true), and never the
-    server box's own (its token is the hostname's, as client.py mint installs it: deploy.sh keeps that checkout). The puller
-    reports back with its poll's facts: `stackshot`, its checkout commit (kept on the machine's record like `claude`), and
-    `updates`, its attempts [{what, from, to, ok, at, reason}], which the Machines panel keeps and draws."""
+    server box's own (its token is the hostname's, as client.py mint installs it: deploy.sh keeps that checkout). Since puller 10
+    also `repo`, the repository's canonical address (repo_url; absent when unknown), which a clean, idle box takes for its origin.
+    The puller reports back with its poll's facts: `stackshot`, its checkout commit (kept on the machine's record like `claude`),
+    and `updates`, its attempts [{what, from, to, ok, at, reason}], which the Machines panel keeps; the card judges the checkout
+    from `stackshot` against this answer's commit, not from the attempts alone."""
     on = _cfg.get("client", "self_update", default=True) is not False and machine != socket.gethostname()
-    return {"puller": puller_current(), "stackshot": checkout_commit(), "self_update": bool(on)}
+    out: dict[str, Any] = {"puller": puller_current(), "stackshot": checkout_commit(), "self_update": bool(on)}
+    repo = repo_url()
+    if repo:
+        out["repo"] = repo
+    return out
 
 
 def puller_lag(st: dict[str, Any] | None = None) -> list[tuple[str, str, str]]:
@@ -565,7 +608,7 @@ def _view(st: dict[str, Any], now: float) -> dict[str, tuple[dict[str, Any], dic
                               "checked": m.get("seen") or _iso(now)}
         if m.get("puller"):
             mj["online"] = {"ok": on, "since": m.get("online_since") if on else m["puller"]}
-        for k in ("setup", "updates"):                    # the last setup run and update attempts (setup_result, checkin), when reported
+        for k in ("setup", "updates", "stackshot"):       # the last setup run, update attempts (setup_result, checkin) and the box's checkout commit, when reported
             if m.get(k):
                 mj[k] = m[k]
         if operator:                                      # the running session of that name first, else the one gone most recently

@@ -193,14 +193,16 @@ rc, out = quiet(puller.keep_current, CUR(D), [])
 check("after the backoff: fast-forwarded", rc == puller.RELOAD and head() == D and puller.attempts()[-1]["ok"] is True, (out, head()))
 (BOX / "local.txt").write_text("mine\n"); git(BOX, "add", "local.txt"); git(BOX, "commit", "-q", "-m", "a local commit"); L = git(BOX, "rev-parse", "HEAD")
 E = commit("after the local one", **{"README.md": "four\n"})
+(BOX / "README.md").write_text("edited on the box\n")
 rc, out = quiet(puller.keep_current, CUR(E), [])
-check("a diverged checkout is refused, reported", rc is None and head() == L and puller.attempts()[-1]["reason"].startswith("diverged"), (out, puller.attempts()[-1]))
+check("a diverged checkout with a local edit is refused, reported; no rollback branch is made for a move that did not happen", rc is None and head() == L and puller.attempts()[-1]["reason"] == "local changes in the checkout"
+      and git(BOX, "branch", "--list", "legacy-*") == "", (out, puller.attempts()[-1]))
 git(BOX, "reset", "-q", "--hard", D); puller._STATE["tried"].pop("stackshot checkout", None); head()   # (the checkout moved by hand: the 5-min cache of HEAD is refreshed here)
 rc, out = quiet(puller.keep_current, CUR(D), [])
 check("a checkout put back at the server's commit by hand: nothing to update; the diverged failure is answered by one ok attempt, so the panel stops drawing it", rc is None and head() == D
-      and puller.attempts()[-1]["ok"] is True and puller.attempts()[-1]["reason"] == "already at the server's commit" and puller.attempts()[-2]["reason"].startswith("diverged"), (rc, out, puller.attempts()[-2:]))
+      and puller.attempts()[-1]["ok"] is True and puller.attempts()[-1]["reason"] == "already at the server's commit" and puller.attempts()[-2]["reason"] == "local changes in the checkout", (rc, out, puller.attempts()[-2:]))
 rc, out = quiet(puller.keep_current, CUR(D), [])
-check("…and a second poll there records nothing", rc is None and out == "" and puller.attempts()[-1]["reason"] == "already at the server's commit" and puller.attempts()[-2]["reason"].startswith("diverged"), (out, puller.attempts()[-2:]))
+check("…and a second poll there records nothing", rc is None and out == "" and puller.attempts()[-1]["reason"] == "already at the server's commit" and puller.attempts()[-2]["reason"] == "local changes in the checkout", (out, puller.attempts()[-2:]))
 rc, out = quiet(puller.keep_current, CUR(E), [])
 check("back on the server's line: fast-forwarded", rc == puller.RELOAD and head() == E and puller.attempts()[-1]["ok"] is True, (out, head()))
 F = commit("broken", **{"puller.py": 'def (:\n'})
@@ -310,11 +312,11 @@ check("an untracked file in the way: the merge fails, the checkout is as it was,
       and puller.attempts()[-1]["ok"] is False and puller.attempts()[-1]["reason"].startswith("git merge --ff-only: error: ") and "untracked" in puller.attempts()[-1]["reason"], (out, puller.attempts()[-1]))
 (BOX / "newfile.txt").unlink()
 _g = puller._git
-def half_merge(args, timeout=60):
+def half_merge(args, timeout=60, **kw):
     if args and args[0] == "merge":            # the merge moves HEAD and the files, then fails (a locked file, a virus scanner)
-        _g(args, timeout); (BOX / "README.md").write_text("half done\n"); (BOX / "pages.py").write_text("half done\n")
+        _g(args, timeout, **kw); (BOX / "README.md").write_text("half done\n"); (BOX / "pages.py").write_text("half done\n")
         return 1, "", "error: unable to unlink old 'pages.py': Permission denied"
-    return _g(args, timeout)
+    return _g(args, timeout, **kw)
 puller._git = half_merge
 puller._STATE["tried"].pop("stackshot checkout", None)
 rc, out = quiet(puller.keep_current, CUR(K7), [])
@@ -345,11 +347,11 @@ check("…and the next poll, idle, updates it (the busy abort did not use up the
 
 # ---- a rollback that git refuses (a file it must change has a local edit) leaves HEAD where it is, keeps the edit, says so
 K9 = commit("adds file2", **{"file2.txt": "from origin\n"})
-def half_merge2(args, timeout=60):
+def half_merge2(args, timeout=60, **kw):
     if args and args[0] == "merge":
-        _g(args, timeout); (BOX / "file2.txt").write_text("someone's edit\n")
+        _g(args, timeout, **kw); (BOX / "file2.txt").write_text("someone's edit\n")
         return 1, "", "error: unable to unlink old 'pages.py': Permission denied"
-    return _g(args, timeout)
+    return _g(args, timeout, **kw)
 puller._git = half_merge2
 rc, out = quiet(puller.keep_current, CUR(K9), [])
 puller._git = _g
@@ -624,14 +626,15 @@ check("stranded: an untracked file that the move would overwrite is refused by g
 rc, out = quiet(puller.keep_current, CUR(M2), [])
 check("stranded: the same box recovers once the edit and the file are gone", rc == puller.RELOAD and head() == M2, (out, head()))
 
-# a HEAD the puller did not move to is refused, as before
+# a HEAD the puller did not move to (no record of it) is moved all the same: the rollback branch is what keeps it
 git(ORIGIN, "checkout", "-q", "-b", "pr3"); Z = commit("pr3 only", **{"README.md": "pr3\n"})
 git(ORIGIN, "checkout", "-q", "main"); M3 = commit("main third", **{"README.md": "m3\n"})
 box_to(Z); fresh_record()
 check("stranded: Z is no commit the puller moved to", Z not in puller._state()["moved"] and all(a["to"] != Z[:12] for a in puller._state()["attempts"]))
 rc, out = quiet(puller.keep_current, CUR(M3), [])
-check("stranded: a HEAD the puller did not move to (a branch put there by hand) is refused as diverged, HEAD stays", rc is None and head() == Z
-      and puller.attempts()[-1]["ok"] is False and puller.attempts()[-1]["reason"].startswith("diverged"), (out, puller.attempts()[-1], head()))
+check("stranded: a HEAD the puller did not move to (a branch put there by hand) is moved too, after its rollback branch is saved at it", rc == puller.RELOAD and head() == M3
+      and puller.attempts()[-1]["ok"] is True and puller.attempts()[-1]["reason"] == f"recovered: left {Z[:12]}, which is not in origin/main (saved as legacy-{Z[:12]})"
+      and git(BOX, "rev-parse", f"legacy-{Z[:12]}") == Z, (out, puller.attempts()[-1], head()))
 git(ORIGIN, "checkout", "-q", "main")
 
 # ---- this shape: the box's HEAD descends from the advertised commit (the server went back to main), is off main, and recovers
@@ -651,18 +654,19 @@ git(ORIGIN, "checkout", "-q", "main"); M6 = commit("main six", **{"README.md": "
 box_to(X5); fresh_record(); moved_now = puller._state().pop("moved"); stamp = "2026-11-02T00:00:00Z"
 puller._state()["attempts"].append({"what": "stackshot checkout", "from": M5[:12], "to": X5[:12], "ok": False, "reason": "x", "at": stamp})
 rc, out = quiet(puller.keep_current, CUR(M6), [])
-check("old record: a failed attempt at the commit does not make it the puller's own: refused as diverged", rc is None and head() == X5 and puller.attempts()[-1]["reason"].startswith("diverged"), (out, puller.attempts()[-1]))
+check("old record: a failed attempt at the commit is no reason to refuse (the record does not matter any more): recovered", rc == puller.RELOAD and head() == M6 and puller.attempts()[-1]["reason"].startswith("recovered"), (out, puller.attempts()[-1]))
+box_to(X5)
 puller._state()["attempts"].append({"what": "stackshot checkout", "from": M5[:12], "to": X5[:12], "ok": True, "reason": "", "at": stamp}); fresh_record()
 rc, out = quiet(puller.keep_current, CUR(M6), [])
-check("old record: an ok attempt naming the commit short (a record from before 'moved') makes it the puller's own: recovered", rc == puller.RELOAD and head() == M6
+check("old record: an ok attempt naming the commit short (a record from before 'moved'): recovered too", rc == puller.RELOAD and head() == M6
       and puller.attempts()[-1]["reason"].startswith("recovered"), (out, head(), puller.attempts()[-1]))
 
 # ---- a fetch failure on the ahead-and-in-main path is silent: no fetch, no failed attempt
 M7 = commit("main seven", **{"README.md": "m7\n"}); M8 = commit("main eight", **{"README.md": "m8\n"})
 fresh_record(); rc, out = quiet(puller.keep_current, CUR(M8), [])
 git(BOX, "remote", "set-url", "origin", str(T / "nowhere")); n_before = len(puller.attempts()); calls = []
-def spy(args, timeout=60):
-    calls.append(list(args)); return _g(args, timeout)
+def spy(args, timeout=60, **kw):
+    calls.append(list(args)); return _g(args, timeout, **kw)
 puller._git = spy; puller._AHEAD.discard(M7); fresh_record()
 rc, out = quiet(puller.keep_current, CUR(M7), [])
 puller._git = _g
@@ -680,10 +684,10 @@ check("unknown: the local ref says off main and the fetch fails: 'could not tell
       and M8 not in puller._AHEAD, (out, puller.attempts()[-1], head()))
 git(BOX, "remote", "set-url", "origin", str(ORIGIN))
 for bad_rc in (128, 124):
-    def rc_git(args, timeout=60, bad_rc=bad_rc):
+    def rc_git(args, timeout=60, bad_rc=bad_rc, **kw):
         if args[:2] == ["merge-base", "--is-ancestor"] and args[3] == "refs/remotes/origin/main":
             return bad_rc, "", ""
-        return _g(args, timeout)
+        return _g(args, timeout, **kw)
     puller._git = rc_git; fresh_record()
     rc, out = quiet(puller.keep_current, CUR(M8), [])
     puller._git = _g
@@ -737,9 +741,9 @@ P1 = commit("p1", **{"README.md": "p1\n"})
 # the finding is no claim that the puller moved the box: a HEAD off main whose only ok attempt is the "already there" one is not the puller's own
 git(ORIGIN, "checkout", "-q", "-b", "pr9"); X9 = commit("pr9 only", **{"README.md": "pr9\n"}); git(ORIGIN, "checkout", "-q", "main")
 box_to(X9); puller._state()["moved"] = []; puller._state()["attempts"] = [{"what": "stackshot checkout", "from": X9[:12], "to": X9[:12], "ok": True, "reason": puller._REACHED, "at": "2026-11-02T00:00:00Z"}]
-check("settle: a commit reached another way is not one the puller moved to: the stranded check does not take it for its own", puller._stranded(P1)[0] == "no")
+check("settle: a commit reached another way, off main, is moved off like any other (the record of how the box got there does not matter)", puller._stranded(P1)[0] == "yes", puller._stranded(P1))
 puller._state()["attempts"][0]["reason"] = ""
-check("settle: …while an ordinary ok attempt at it does (the check is the reason, nothing else)", puller._stranded(P1)[0] == "yes", puller._stranded(P1))
+check("settle: …an ordinary ok attempt at it makes no difference", puller._stranded(P1)[0] == "yes", puller._stranded(P1))
 box_to(M8); puller._state()["attempts"] = []; puller._state()["moved"] = []; fresh_record()
 puller._state()["attempts"] += [{"what": "claude cli", "from": "2.0.0", "to": "2.1.0", "ok": False, "reason": "the installer failed", "at": "2026-11-01T00:01:00Z"}]
 puller._state()["attempts"].append({"what": "stackshot checkout", "from": M8[:12], "to": P1[:12], "ok": False, "reason": "local changes in the checkout", "at": "2026-11-03T00:00:00Z"})
@@ -791,7 +795,8 @@ def moving(here):                                   # a bare reset, no head() ca
 head(); puller._compiles = moving; was = snap()
 rc, out = quiet(puller.keep_current, CUR(M8), [])
 puller._compiles = real_compiles
-check("settle: HEAD moved while the compile check ran: nothing is recorded", snap() == was and puller.attempts()[-1]["ok"] is False, (out, puller.attempts()))
+check("settle: HEAD moved while the compile check ran: it is not recorded as at the server's commit (the box, now off main, is moved by the update, which says so)",
+      puller.attempts()[0]["ok"] is False and all(a["reason"] != puller._REACHED for a in puller.attempts()) and puller.attempts()[-1]["reason"].startswith("recovered: left " + KA[:12]), (out, puller.attempts()))
 box_to(M8); fresh_record()
 
 # no attempt at all, or an ok one: nothing; other `what`s alone: nothing for the checkout
