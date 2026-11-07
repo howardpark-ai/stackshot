@@ -16506,7 +16506,7 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
         if (cur["front"], cur["mandate_line"]) == (front, mandate):          # the role is read from the name: the one asked for is no part of "the same"
             return 200, {"project": rec["id"], "key": key, "agent": {name: cur}, "page_owed": False, "page_yaml": "", "note": f"{name} is already listed on {where}: nothing changed"}
         return 409, {"error": f"{name} is already listed on {where} as {'front' if cur['front'] else 'background'} ({cur['role']}): {cur['mandate_line'][:120]!r}; "
-                              "retire it, or rename it, then list it again"}
+                              "to change its mandate line use `client.py post project-agent-mandate`; to change its side, retire it, or rename it, then list it again"}
     name = next((n for n in _prj._pending_all().get(rec["id"], {}) if str(n).casefold() == fold), name)     # a pending entry under another spelling is the same agent
     pend = _prj.pending_entry(rec["id"], name)
     if pend and pend.get("by") != sender and (pend.get("front"), pend.get("role"), pend.get("mandate_line")) != (front, role, mandate):
@@ -16524,6 +16524,66 @@ def _project_agent_locked(machine: str, body: dict[str, Any], pages: dict | None
     return 200, {"project": rec["id"], "key": key, "agent": {res["name"]: new}, "page_owed": False, "page_yaml": "", "_mirror": rec["id"] if has_page else "",
                  "note": f"Listed {res['name']} on {where} in the project record" + (f"; its page {key} gets the agents line from the record." if has_page else " (the project has no page).")
                  + (f" Note: {res['warning']}." if res.get("warning") else "")}
+
+
+def _project_agent_mandate(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """`client.py post project-agent-mandate <project> <name> --mandate "…" [--sender <session id>]`: change the mandate line of an agent already on the project's agents map (the record,
+    project_verbs.agent_mandate), then the page's `agents:` block is written from it (the mirror, after _PROJECT_LOCK is released), so a later mirror write keeps the new line: the record is the
+    authority and a page edit to the line is not read. Who: the project's keeper and its front agents, as `post project-agent` (`sender` is the asking session's id, never a name; no label
+    path: the New session form lists agents, it does not rewrite their lines). The agent keeps its side (front or background), its place in the map and who listed it.
+    Answers: 200 {project, key, agent: {name: {front, role, mandate_line}}, previous, mirror, note} (the same line again: 200, "nothing changed") · 400 a missing field, a bad name, a backslash in the line, an empty
+    or over-long mandate, a control character or a backslash in it, an ambiguous slug, a page that is not a hub · 403 a name as sender, or a session that is neither the keeper nor a front agent · 404 unknown
+    project, or `name` not listed on it (list it first with `post project-agent`) · 503 the record cannot be written. A mirror that cannot be written is told in the answer: the record is right."""
+    project, name, mandate, sender = (str(body.get(k) or "").strip() for k in ("project", "name", "mandate", "sender"))
+    if not (project and name and sender):
+        return 400, {"error": "project, name and sender are required: the project, the listed agent's name and the asking session's id; the new line goes in `mandate`"}
+    if not _AGENT_NAME.fullmatch(name):
+        return 400, {"error": "name = the session's name: letters, digits, . _ - (at most 64), starting with a letter or digit"}
+    if not mandate:
+        return 400, {"error": "mandate is empty: give the agent's new line (one line of at most 600 characters, what it does); to take the agent off the map use `post project-agent-retire`"}
+    if "\n" in mandate or "\r" in mandate or len(mandate) > 600 or _MANDATE_CONTROL.search(mandate):
+        return 400, {"error": "mandate = one line of at most 600 characters, with no control characters"}
+    if "\\" in mandate:
+        return 400, {"error": "a mandate line cannot contain a backslash; write it without (the page's agents block could not be read back with one)"}
+    pages = _verbs.preread(project, _page_io())          # the page of a project with no entry yet is read BEFORE the lock, as `post project-agent` does
+    with _PROJECT_LOCK:
+        reg = _prj.with_made(_registry("projects"))
+        recs = _prj.refs(project, reg) or [r for r in [_verbs.pageless_rec(project)] if r]
+        if not recs:
+            return 404, {"error": f"no project {project!r}: an id (prj_<8 hex>), a page key or a bare slug of a page in the registry"}
+        if len(recs) > 1:
+            return 400, {"error": f"{project!r} is ambiguous: it names {' and '.join(r['key'] for r in recs)}; write the full key or the id"}
+        rec = recs[0]; key = rec["key"]; entry = reg.get(key) or {}
+        top = "/".join(key.split("/")[:2]); hub = str(entry.get("hub") or "")
+        if key != top or hub:
+            return 400, {"error": f"{key} is not a hub page: the agents map is kept on {hub or top}; change the line there"}
+        if not _anc.is_id(sender):
+            return 403, {"error": f"refused: sender {sender!r} is a name, and a name proves nothing. Send the asking session's id: its transcript id "
+                                  "($CLAUDE_CODE_SESSION_ID, which Claude Code sets in every Bash command) or a cloud session's cse_ id"}
+        nm = _anc.names(); sname = nm.get(sender, "")
+        listed_front = sorted(n for n, a in rec["agents"].items() if a["front"] and not a.get("page_owed"))
+        allowed = {rec["keeper"], *listed_front}; allowed.discard("")
+        if not sname and sender not in allowed:
+            return 403, {"error": f"refused: {sender!r} is not a session in the fleet's heartbeat, so it names nobody; run this from the keeper's or a front agent's own session"}
+        if not ({sender, sname} & allowed):
+            return 403, {"error": f"refused: session {sname or sender!r} is neither the keeper ({rec['keeper'] or 'none'}) nor a front agent of {key or rec['id']} "
+                                  f"({', '.join(listed_front) or 'none'}); one of them changes an agent's mandate line"}
+        where = key or rec["id"]
+        try:
+            res = _verbs.agent_mandate(rec["id"], name, mandate, by=sender, io=_page_io(), mirror_now=False, pages=pages)
+        except _verbs.VerbError as e:
+            return e.status, {"error": e.message}
+        except ValueError as e:
+            return 503, {"error": f"the project record cannot be read or written right now, nothing was changed: {e}"}
+    _projects_sync_safe(force=True)
+    m = _verbs.mirror(rec["id"], _page_io()) if key else {"state": "none", "key": "", "note": ""}
+    role = _prj.role_of(res["name"], [rec["keeper"]] if rec.get("pageless") else (_prj._name_prefixes(key, entry, reg) or [key.split("/")[-1]]))
+    tail = (f" The page's agents block was not updated ({m['note']}); the record holds the new line, and the next change to this project writes the page again." if m["state"] == "failed" else "")
+    return 200, {"project": rec["id"], "key": key, "agent": {res["name"]: {"front": res["front"], "role": role, "mandate_line": res["mandate"]}}, "previous": res["previous"], "mirror": m,
+                 "note": (f"{res['name']} on {where} already has this mandate line: nothing changed." if not res["changed"] and m["state"] in ("none", "unchanged") else
+                          f"{res['name']} on {where} already had this mandate line in the project record; the page {key} was written from the record." if not res["changed"] and m["state"] == "written" else
+                          f"{res['name']} on {where} already has this mandate line in the project record." if not res["changed"] else
+                          f"Changed the mandate line of {res['name']} on {where} in the project record" + (f"; the page {key} gets it from the record." if key else " (the project has no page).")) + tail}
 
 
 _RENAME_NOT_FORM = ("refused: only the web form may rename an agent's entry on a page: `sender` must be a label in [project_agent] form_senders "
@@ -17471,6 +17531,11 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             return _project_agent(machine, body)
         except ValueError as e:         # the id file is damaged (projects.py raises, mints nothing and writes nothing): not recorded, say so
             return 503, {"error": f"the project record cannot be read or written right now, nothing was recorded: {e}"}
+    if what == "project-agent-mandate":     # the keeper or a front agent changes the mandate line of a listed agent (client.py post project-agent-mandate)
+        try:
+            return _project_agent_mandate(machine, body)
+        except ValueError as e:         # the id file is damaged (projects.py raises): nothing was changed
+            return 503, {"error": f"the project record cannot be read right now, nothing was changed: {e}"}
     if what == "project-agent-rename":      # the form renames an agent's entry on the project's page, in place (client.py post project-agent-rename)
         try:
             return _project_agent_rename(machine, body)
@@ -17574,7 +17639,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         else:
             _clients.seen(machine, uuid)
         return 200, {"deliveries": _inbox.take({uuid: str(rec.get("name") or "")})}
-    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
+    return 404, {"error": "no such write: message | handover | held | project-agent | project-agent-mandate | project-agent-rename | project-agent-retire | project | project-list | question | terminal-prompt | job-gap | cap-words | state | rebullet | register | seen | poll | ack | drain | recycled | recycle-due | released | sweep-released | sweep-step-proof | page-debt | backfill-contact | event | setup-result"}
 
 
 @mcp.custom_route("/client/{what}", methods=["POST"])

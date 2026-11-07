@@ -237,9 +237,9 @@ python3 tools/project.py --by you create Acme --scope general
 
 That project has no page and none is made; add `--make-page --page projects/acme` for a page, or
 `--page https://example.com/acme` for a pointer. The other commands are `rename`, `move-page` (needs
-`[pages] flavor = "gbrain"`, so it refuses on plain pages), `archive` and `reopen`, `agent-add`, `agent-retire`,
+`[pages] flavor = "gbrain"`, so it refuses on plain pages), `archive` and `reopen`, `agent-add`, `agent-mandate`, `agent-retire`,
 `agent-rename`, `mirror` and `show`; `--dry-run` writes nothing. `README.md` ("Projects: the record first")
-has the table (so does the docstring at the top of `tools/project.py`; `--help` lists only the command names, and `<command> -h` the flags). The client API has the same verbs as `client.py post project`, `post project-agent`, `post project-agent-rename` and `post project-agent-retire`; `client.py post project -h` prints only a one-line usage. Each verb writes the record
+has the table (so does the docstring at the top of `tools/project.py`; `--help` lists only the command names, and `<command> -h` the flags). The client API has the same verbs as `client.py post project`, `post project-agent`, `post project-agent-mandate`, `post project-agent-rename` and `post project-agent-retire`; `client.py post project -h` prints only a one-line usage. Each verb writes the record
 first and then, for a project with a page here, three lines of the page's frontmatter (`display-name:`,
 `agents:`, `status:`). On plain pages the server writes a page file into `paths.brain` and does not commit or
 push it. A project with a page and an agent (`agent-add`) gets a default mover from that agent. A project with no page does not: every item filed on it needs an explicit mover, or `create` is refused with "names no mover".

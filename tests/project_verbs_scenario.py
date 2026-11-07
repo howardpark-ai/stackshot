@@ -178,6 +178,60 @@ check("mirror: a project with no page is 'none', and one whose page reads as the
 gone = pv.create("home-gone", "home", page="projects/gone-page", io=IO)
 check("mirror: …create without make_page only points at the page: state no-page, the record holds the pointer, no page made", gone["mirror"]["state"] == "no-page" and ents()[gone["project"]]["page"] == "projects/gone-page" and not (BRAIN / "projects/gone-page.md").exists(), gone["mirror"])
 
+# ---- 4b. agent_mandate: the mandate line of a listed agent changes in the record, the page follows, and the page cannot undo it
+OLD_ENG = "builds, merges and deploys"; OLD_UI = "builds the board pages"; OLD_PLAT = "builds hosting"
+NEW_ENG = "builds the server; reviews each change; releases for every builder"
+NEW_UI = "builds the pages and the side panel, via subagents; a reviewer reads each change; releases through demo-builder-a"
+NEW_PLAT = "builds and runs hosting and CI, via subagents, no decisions; a reviewer reads each change; releases through demo-builder-a"
+MP = pv.create("demo-app", "home", page="projects/demo-app", make_page=True, io=IO)["project"]
+for n_, f_, m_ in (("demo-main", True, "talks to the owner"), ("demo-builder-a", False, OLD_ENG), ("demo-builder-b", False, OLD_UI), ("demo-builder-c", False, OLD_PLAT)):
+    pv.agent_add(MP, n_, f_, m_, io=IO)
+order0 = list(agents(MP)); who0 = {n: a.get("by") for n, a in ents()[MP]["agents"].items()}
+res = pv.agent_mandate(MP, "demo-builder-a", NEW_ENG, by="demo-main", io=IO)
+check("agent mandate: the record holds the new line, the side (background) and the place in the map stay, the answer names the previous line", res["changed"] is True and agents(MP)["demo-builder-a"] == (False, NEW_ENG)
+      and list(agents(MP)) == order0 and res["previous"] == OLD_ENG and res["front"] is False and res["name"] == "demo-builder-a", (res, agents(MP)))
+check("agent mandate: …the page's agents block was written from the record (state written), the new line under background:", res["mirror"]["state"] == "written" and dict(fmagents("projects/demo-app")[1])["demo-builder-a"] == NEW_ENG
+      and dict(fmagents("projects/demo-app")[0])["demo-main"] == "talks to the owner", (res["mirror"], fmagents("projects/demo-app")))
+check("agent mandate: …the other agents' lines, who listed each agent and the project's front agent are untouched", agents(MP)["demo-builder-b"] == (False, OLD_UI) and agents(MP)["demo-main"] == (True, "talks to the owner")
+      and {n: a.get("by") for n, a in ents()[MP]["agents"].items()} == who0, agents(MP))
+res = pv.agent_mandate(MP, "DEMO-BUILDER-B", NEW_UI, io=IO)
+check("agent mandate: a name compares case-folded (the stored spelling is kept)", res["changed"] is True and res["name"] == "demo-builder-b" and agents(MP)["demo-builder-b"] == (False, NEW_UI) and "DEMO-BUILDER-B" not in agents(MP))
+res = pv.agent_mandate(MP, "demo-builder-c", "  " + NEW_PLAT.replace(", via", ",\n   via") + "  ", io=IO)
+check("agent mandate: a line is stored on one line with its whitespace folded", agents(MP)["demo-builder-c"] == (False, NEW_PLAT), agents(MP)["demo-builder-c"])
+txt0 = text("projects/demo-app")
+gio_t = txt0.replace(NEW_ENG, "the old line put back by hand")
+(BRAIN / "projects/demo-app.md").write_text(gio_t, encoding="utf-8")
+check("agent mandate: (setup) a hand edit of the page's line puts the old text back there", dict(fmagents("projects/demo-app")[1])["demo-builder-a"] == "the old line put back by hand")
+m1 = pv.mirror(MP, IO)
+check("agent mandate: a mirror write from the record restores the new line (the page cannot undo the change)", m1["state"] == "written" and text("projects/demo-app") == txt0 and agents(MP)["demo-builder-a"] == (False, NEW_ENG), (m1, text("projects/demo-app")[:500]))
+pv.agent_add(MP, "demo-extra", False, "a later agent", io=IO)
+check("agent mandate: a second mirror write (another verb's, and mirror() again) keeps all three new lines", pv.mirror(MP, IO)["state"] == "unchanged" and {n: l for n, l in fmagents("projects/demo-app")[1]} ==
+      {"demo-builder-a": NEW_ENG, "demo-builder-b": NEW_UI, "demo-builder-c": NEW_PLAT, "demo-extra": "a later agent"}, fmagents("projects/demo-app"))
+rb = recsha(); tb = text("projects/demo-app")
+res = pv.agent_mandate(MP, "demo-builder-a", NEW_ENG, io=IO)
+check("agent mandate: the same line again changes nothing (no write to the record, the page unchanged)", res["changed"] is False and res["mirror"]["state"] == "unchanged" and recsha() == rb and text("projects/demo-app") == tb, res)
+def pv_err_msg(fn):
+    try: fn(); return (0, "")
+    except pv.VerbError as e: return (e.status, e.message)
+st_, msg_ = pv_err_msg(lambda: pv.agent_mandate(MP, "demo-ghost", "something", io=IO))
+check("agent mandate: an agent that is not listed → 404 naming it and saying to list it first with agent_add; nothing written", st_ == 404 and "demo-ghost is not listed" in msg_ and "agent_add" in msg_ and recsha() == rb and text("projects/demo-app") == tb, (st_, msg_))
+for empty_ in ("", "   ", "\n\t "):
+    st_, msg_ = pv_err_msg(lambda: pv.agent_mandate(MP, "demo-builder-a", empty_, io=IO))
+    check(f"agent mandate: an empty line ({empty_!r}) → 400 saying the line is empty and how to remove an agent; nothing written, the old line stays", st_ == 400 and "empty" in msg_ and "agent_retire" in msg_ and recsha() == rb and agents(MP)["demo-builder-a"] == (False, NEW_ENG), (st_, msg_))
+st_, msg_ = pv_err_msg(lambda: pv.agent_mandate(MP, "demo-builder-a", "uses a back\\slash", io=IO))
+check("agent mandate: a line with a backslash → 400 saying to write it without; nothing written, the old line stays", st_ == 400 and "cannot contain a backslash" in msg_ and recsha() == rb and agents(MP)["demo-builder-a"] == (False, NEW_ENG), (st_, msg_))
+check("agent mandate: no such project → 404",pv_err(lambda: pv.agent_mandate("projects/nowhere", "home-n-main", "m", io=IO)) == 404)
+prj.add_pending(MP, "demo-pend", {"front": False, "role": "pend", "mandate_line": "pending only"}, by="x")
+check("agent mandate: a pending entry only is not a listed agent (404)", pv_err(lambda: pv.agent_mandate(MP, "demo-pend", "changed", io=IO)) == 404 and recfile()["pending_agents"][MP]["demo-pend"]["mandate_line"] == "pending only")
+check("agent mandate: a sub-page key names the top-level project", pv.agent_mandate(SUB, "home-sparrow-docs", "keeps the docs and the notes", io=IO)["project"] == A and agents(A)["home-sparrow-docs"] == (True, "keeps the docs and the notes"))
+rb = recsha(); res = pv.agent_mandate(MP, "demo-extra", "a line that is only tried", io=IO, dry=True)
+check("agent mandate: a dry run says what would change and writes nothing to the record or the page", res["dry"] is True and res["changed"] is True and recsha() == rb and text("projects/demo-app") == tb and agents(MP)["demo-extra"] == (False, "a later agent"), res)
+bad_io2 = Counting(IO, "refused")
+res = pv.agent_mandate(MP, "demo-extra", "changed while the store is down", io=bad_io2)
+check("agent mandate: a page store that refuses: the record holds the new line, the mirror says failed, and mirror() writes it later", agents(MP)["demo-extra"] == (False, "changed while the store is down") and res["mirror"]["state"] == "failed"
+      and text("projects/demo-app") == tb and pv.mirror(MP, IO)["state"] == "written" and dict(fmagents("projects/demo-app")[1])["demo-extra"] == "changed while the store is down", res["mirror"])
+check("agent mandate: agent_add of another line for a listed name still refuses (409) and the text names agent_mandate", "agent_mandate" in pv_err_msg(lambda: pv.agent_add(MP, "demo-builder-a", False, "x", io=IO))[1])
+
 # ---- 5. a project with no entry yet: its first verb makes the entry from the page, folds its pending agents
 page("projects/eps.md", "type: project\ntitle: Eps\ndisplay-name: home-eps\nagents:\n  home-eps-main: talks\nstatus: active"); p.cmd_registry(quiet=True)
 EPS = {k: e["id"] for k, e in reg().items()}["projects/eps"]
@@ -462,6 +516,12 @@ rc, out, err = tool("tools/project.py", "--dry-run", "agent-add", "home-sparrow"
 check("cli: --dry-run says what it would do and writes nothing", rc == 0 and recsha() == rb and "home-sparrow-cli" not in agents(A), (rc, out[:300], err[:300]))
 rc, out, err = tool("tools/project.py", "agent-add", "home-sparrow", "home-sparrow-cli", "--front", "--mandate", "added by the cli")
 check("cli: agent-add writes the record and the page", rc == 0 and agents(A).get("home-sparrow-cli") == (True, "added by the cli") and "home-sparrow-cli" in text("projects/alpha"), (rc, out[:300], err[:300]))
+rc, out, err = tool("tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-cli", "--mandate", "changed by the cli")
+check("cli: agent-mandate changes the record's line and the page follows", rc == 0 and agents(A).get("home-sparrow-cli") == (True, "changed by the cli") and "home-sparrow-cli: changed by the cli" in text("projects/alpha"), (rc, out[:300], err[:300]))
+rc, out, err = tool("tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-cli", "--mandate", "  ")
+check("cli: agent-mandate with an empty line exits non-zero and says it is empty", rc != 0 and "empty" in (out + err) and agents(A).get("home-sparrow-cli") == (True, "changed by the cli"), (rc, out[:300], err[:300]))
+rc, out, err = tool("tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-nobody", "--mandate", "x")
+check("cli: agent-mandate for an unlisted agent exits non-zero and says it is not listed", rc != 0 and "not listed" in (out + err), (rc, out[:300], err[:300]))
 rc, out, err = tool("tools/project.py", "create", "home-clip", "--scope", "home")
 check("cli: create with no page makes a project with no page", rc == 0 and any(e.get("name") == "home-clip" and "page" not in e for e in ents().values()), (rc, out[:300], err[:300]))
 rc, out, err = tool("tools/project.py", "create", "home-clis", "--scope", "home", "--page", SUB)
