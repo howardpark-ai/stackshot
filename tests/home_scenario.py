@@ -148,7 +148,7 @@ OPEN = {1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 2
 
 # ---- the five counts and the lists ----
 import html as _html
-CARD = r'<a class="hcard[^"]*" href="([^"]+)"[^>]*><b>(\d+)</b><span>(.*?)</span>(?:<i class="hnew[^"]*">.*?</i>)?</a>'
+CARD = r'<a class="hcard[^"]*" href="([^"]+)"[^>]*><b>(\d+)</b><span>(.*?)(?: <i class="hnew[^"]*">.*?</i>)?</span></a>'
 cards_of = lambda nav: [(href, n, _html.unescape(re.sub(r"<[^>]+>", "", lab))) for href, n, lab in re.findall(CARD, nav)]
 cn = h[h.find('<nav class="hcards"'):h.find("</nav>", h.find('<nav class="hcards"'))]
 ND = len(render.Board(str(T / "store"), now=NOW).done)

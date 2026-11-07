@@ -6,8 +6,9 @@ local port from fixture data (no live store, no network) and measures the five c
   - no label wraps (each is one line) and none is cut: the label's text fits its box;
   - the label "Queued for release" is shown in full where the cards' column is wide enough and as "Queued" where it is not, by the column's width (a container query on the
     cards' nav), not the window's; the column, the cards' size and the wording are the same with the panel closed as with it pinned (a closed panel's column is capped to the pinned one's);
-  - the fifth card is Closed: the items closed in the last 14 days, with a badge "N new" beside the number for the closes not cleared yet (no badge at 0; "N" alone where the column is
-    narrow), also 60 px tall, with the badge inside the card and not cut, in three cases (3 new of 40 closed, 12 new of 123, none new);
+  - the fifth card is Closed: the items closed in the last 14 days, the number alone on the top line and, on the label line right after the word "Closed", the count of closes not cleared yet
+    as green text "N new" ("N" alone where the card is narrow; nothing at 0), also 60 px tall, with the count inside the card and not cut, in four cases (3 new of 40 closed, 12 new of 123,
+    123 new of 130, none new), at 1280, 800 and 390 px and in a 120 px card;
   - nothing runs past the screen's width;
   - the header and panel layout of every page (home, an item, a project, Projects, Closed, Search, runners), at 1280, 1010, 1000 and 390 px (1010: with a classic scrollbar a pinned panel's column is under 680 px and a closed one's over it), with the panel pinned and closed, without and with a classic
     15 px scrollbar (a taller page in a browser that keeps its scrollbars): the cards' column, every card's width and the third card's wording are the same pinned and closed; the title (the h1) of every page
@@ -94,13 +95,14 @@ MEASURE = """() => {
   const natural = (e) => { const c = e.cloneNode(true), m = c.querySelector('.more'); if (m) m.removeAttribute('class'); c.style.cssText = 'position:absolute;visibility:hidden;width:auto;white-space:nowrap;overflow:visible'; e.parentNode.appendChild(c); const w = c.getBoundingClientRect().width; c.remove(); return w; };
   return {navw: Math.round(nav.getBoundingClientRect().width * 10) / 10, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth,
     cards: cs.map(a => { const r = a.getBoundingClientRect(), sp = a.querySelector('span'), more = sp.querySelector('.more'), lines = new Set(shown(sp).map(q => Math.round(q.top))),
-        b = a.querySelector('b').getBoundingClientRect(), bd = a.querySelector('i.hnew'), br = bd ? bd.getBoundingClientRect() : null, em = bd ? bd.querySelector('em').getBoundingClientRect() : null;
-      return {label: sp.textContent, num: a.querySelector('b').textContent, bfs: getComputedStyle(a.querySelector('b')).fontSize, h: r.height, top: Math.round(r.top), left: r.left, right: r.right, lines: lines.size, nat: Math.round(natural(sp) * 10) / 10, room: Math.round((sp.clientWidth) * 10) / 10,
+        b = a.querySelector('b').getBoundingClientRect(), bd = a.querySelector('i.hnew'), br = bd ? bd.getBoundingClientRect() : null, em = bd ? bd.querySelector('em').getBoundingClientRect() : null, spr = sp.getBoundingClientRect(),
+        tn = [...sp.childNodes].find(x => x.nodeType === 3), lr = document.createRange(); if (tn) lr.selectNodeContents(tn);
+      return {label: [...sp.childNodes].filter(x => !(x.nodeType === 1 && x.matches('i.hnew'))).map(x => x.textContent).join('').trim(), num: a.querySelector('b').textContent, bfs: getComputedStyle(a.querySelector('b')).fontSize, h: r.height, top: Math.round(r.top), left: r.left, right: r.right, lines: lines.size, nat: Math.round(natural(sp) * 10) / 10, room: Math.round((sp.clientWidth) * 10) / 10,
               cut: sp.scrollWidth > sp.clientWidth + 0.5, short: more ? more.getBoundingClientRect().width <= 1 : null,
-              badge: bd ? {text: bd.textContent, word: em.width > 1, left: br.left, right: br.right, top: br.top, bottom: br.bottom, cut: bd.scrollWidth > bd.clientWidth + 0.5, numRight: b.right, numTop: b.top, numBottom: b.bottom} : null}; })};
+              inNum: !!a.querySelector('b i'), cw: r.width - 2 * parseFloat(getComputedStyle(a).borderLeftWidth) - 2 * parseFloat(getComputedStyle(a).paddingLeft), badge: bd ? {text: bd.textContent, word: em.width > 1, left: br.left, right: br.right, top: br.top, bottom: br.bottom, cut: br.right > spr.right + 0.5, color: getComputedStyle(bd).color, border: getComputedStyle(bd).borderTopWidth, lblRight: tn ? lr.getBoundingClientRect().right : null, lblTop: tn ? lr.getBoundingClientRect().top : null, lblBottom: tn ? lr.getBoundingClientRect().bottom : null, numRight: b.right, numTop: b.top, numBottom: b.bottom} : null}; })};
 }"""
 SHORT_PX = 680     # the column width (the cards' nav) under which the card says "Queued": the same number as the container query in ui/render.py
-WORD_PX = (70, 92)  # the card's content width under which the badge says "3" and not "3 new" (a wide badge, four digits or more in its two numbers, the second): likewise
+WORD_PX = (79, 85, 92, 98)  # the card's content width up to which the count says "3" and not "3 new", by the count's digits (one, two, three, four or more): the same numbers as the container queries in ui/render.py
 def png_px(path, pts):
     """The (r, g, b) of the screenshot's pixels at pts [(x, y)] (an 8-bit PNG as Chromium writes it; no image library on the box)."""
     d = open(path, "rb").read(); pos = 8; idat = b""
@@ -122,7 +124,7 @@ def png_px(path, pts):
     return [tuple(rows[y][x * bpp:x * bpp + 3]) for x, y in pts]
 def settle(pg, ms=250): pg.wait_for_timeout(ms)
 seen = {}
-CASES = (("new", 40, 3), ("many", 123, 12), ("none", 7, 0))      # (name, closed in 14 days, closes not cleared yet): the badge shown, the widest it gets, hidden
+CASES = (("new", 40, 3), ("many", 123, 12), ("wide", 130, 123), ("none", 7, 0))      # (name, closed in 14 days, closes not cleared yet): the count shown, two digits, three digits, hidden
 from playwright.sync_api import sync_playwright
 try:
   with sync_playwright() as p:
@@ -154,14 +156,14 @@ try:
                     bd = cl["badge"]
                     check(f"{tag}: the last card is Closed with the 14-day count {n_closed}", cl["label"] == "Closed" and cl["num"] == str(n_closed), cl)
                     if n_new:
-                        inner = cl["right"] - cl["left"] - 26                       # the card's content width: its width less 12 px padding and 1 px border on each side
-                        word = inner >= WORD_PX[1 if len(str(n_closed)) + len(str(n_new)) >= 4 else 0]
-                        check(f"{tag}: the badge reads {'%d new' % n_new if word else str(n_new)} beside the number (same line, to its right), inside the card and not cut (content {inner:.0f} px)",
-                              bd and bd["text"] == f"{n_new} new" and bd["word"] == word and bd["left"] >= bd["numRight"] - 0.5 and bd["right"] <= cl["right"] - 1 and not bd["cut"]
-                              and bd["top"] >= bd["numTop"] - 4 and bd["bottom"] <= bd["numBottom"] + 4, cl)
+                        inner = cl["cw"]                                          # the card's content width, which the container queries measure
+                        word = inner > WORD_PX[min(len(str(n_new)), 4) - 1]
+                        check(f"{tag}: the count reads {'%d new' % n_new if word else str(n_new)} in green text on the label line, right after Closed (same line, to its right), the number line above holds the number alone, inside the card and not cut (content {inner:.0f} px)",
+                              bd and not cl["inNum"] and bd["text"] == f"{n_new} new" and bd["word"] == word and bd["left"] >= bd["lblRight"] - 0.5 and bd["top"] >= bd["numBottom"] - 1 and abs(bd["top"] - bd["lblTop"]) <= 3
+                              and bd["right"] <= cl["right"] - 1 and not bd["cut"] and bd["border"] == "0px" and bd["color"] != "rgba(0, 0, 0, 0)", cl)
                     else:
                         check(f"{tag}: no badge when no close is new", bd is None, cl)
-                    print(f"  {tag}: column {m['navw']} px, heights {hs}, rows at {sorted({c['top'] for c in cs})}, queued {'Queued' if q['short'] else 'Queued for release'}, closed {cl['num']} ({cl['bfs']}) badge {bd and bd['text']}")
+                    print(f"  {tag}: column {m['navw']} px, card {cl['right'] - cl['left']:.0f} px (content {cl['cw']:.0f}), line {cl['nat']} px, heights {hs}, rows at {sorted({c['top'] for c in cs})}, queued {'Queued' if q['short'] else 'Queued for release'}, closed {cl['num']} ({cl['bfs']}) count {bd and bd['text']} (word {bd and bd['word']})")
                     shot(pg, f"hcards-{case}-{w}-{scheme}-panel-{panel}"); ctx.close()
     # the page the Closed card links to: titled Closed, with New (the badge's count) and Last 14 days (the big number); the old Landed address lands on it
     fixture(40, 3)

@@ -87,7 +87,7 @@ def hdr(b=None):
 def txt(h): return re.sub(r"<[^>]+>", "", h)
 def recs(): return {r["gid"]: r for r in ld.records()}
 def agents(): return sum(1 for f in (T / "store/a").glob("*.json") if json.loads(f.read_text())["status"] == "open")      # the open items: Agents at work, all of them here
-CARD = r'<a class="hcard[^"]*" href="([^"]+)"[^>]*><b>(\d+)</b><span>(.*?)</span>(?:<i class="hnew[^"]*">(\d+)<em> new</em></i>)?</a>'      # the header's count cards, the number over its label; the Closed card's fourth item is its new badge
+CARD = r'<a class="hcard[^"]*" href="([^"]+)"[^>]*><b>(\d+)</b><span>(.*?)(?: <i class="hnew[^"]*">(\d+)<em> new</em></i>)?</span></a>'      # the header's count cards, the number over its label; the Closed card's fourth item is its new count, on the label line
 def cards(h=None): return [(href, n, re.sub(r"<[^>]+>", "", lab)) + ((int(new or 0),) if href == "/closed" else ()) for href, n, lab, new in re.findall(CARD, h or hdr())]
 def base(n=0, b=None): return [("#your-move", "0", "Your move"), ("#agents-at-work", str(agents()), "On agent"), ("#queued-release", "0", "Queued for release"), ("#waiting-list", "0", "Waiting"), ("/closed", str(len((b or board()).done)), "Closed", n)]
 def ids_of(h): return re.findall(r'<a class="ir-link" href="/items/(a?\d+)"', newsec(h) if '<section id="new"' in h else h)      # the item ids the lines of the New section link, in page order

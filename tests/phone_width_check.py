@@ -493,6 +493,14 @@ with sync_playwright() as p:
       if (c.textContent.split('\\n').length < 6) o.push('lines lost');
       const k = document.querySelector('li.hrow .cmd pre code'); if (k && !/mono/i.test(getComputedStyle(k).fontFamily)) o.push('a command block is not monospace: ' + getComputedStyle(k).fontFamily);
       return o; }"""
+    NEW_WORD_PX = 79          # the card's content width up to which the Closed card's one-digit count reads "5" and not "5 new": the number of the container query in ui/render.py (ui_kit_scenario checks it)
+    CARDS_JS = """[...document.querySelectorAll('#counts a.hcard')].map(a => { const r = a.getBoundingClientRect(), bb = a.querySelector('b'), b = bb.getBoundingClientRect(), sp = a.querySelector('span'), spr = sp.getBoundingClientRect(), nw = a.querySelector('i.hnew'),
+        nr = nw ? nw.getBoundingClientRect() : null, em = nw ? nw.querySelector('em').getBoundingClientRect() : null, tn = [...sp.childNodes].find(x => x.nodeType === 3), lr = document.createRange(); if (tn) lr.selectNodeContents(tn);
+        const label = [...sp.childNodes].filter(x => !(x.nodeType === 1 && x.matches('i.hnew'))).map(x => x.textContent).join('').trim(), cs = nw ? getComputedStyle(nw) : null, cw = r.width - 2 * parseFloat(getComputedStyle(a).borderLeftWidth) - 2 * parseFloat(getComputedStyle(a).paddingLeft);
+        return {href: a.getAttribute('href'), n: bb.textContent, label: label, top: Math.round(r.top), w: Math.round(r.width), cw: Math.round(cw * 10) / 10, h: Math.round(r.height), bh: Math.round(b.height), new: nw ? nw.textContent : '', hdr: !!a.closest('header.top'),
+                numOnly: !!nw && !bb.querySelector('i') && bb.textContent === a.querySelector('b').textContent, onLabelLine: !!nw && nr.top >= b.bottom - 1 && nr.left >= lr.getBoundingClientRect().right - 0.5 && Math.abs(nr.top - lr.getBoundingClientRect().top) <= 3,
+                inside: !!nw && nr.right <= spr.right + 0.5 && nr.right <= r.right - 1 && nr.left >= r.left, cut: !!nw && (sp.scrollWidth > sp.clientWidth + 0.5 || nr.width < 5), word: !!nw && em.width > 1,
+                plain: !!nw && cs.borderTopWidth === '0px' && cs.backgroundColor === 'rgba(0, 0, 0, 0)', green: !!nw && cs.color !== getComputedStyle(sp).color}; })"""
     BASE = {"your-move", "queued-release"}      # the main column's sections that render open (Queued for release is empty here); On agent and Waiting render closed
     for scheme in ("light", "dark"):
         for w in (360, 412, 1440):
@@ -576,10 +584,12 @@ with sync_playwright() as p:
             check(f"{tag}: the count cards, then the four lists, top to bottom", order == sorted(order) and len(set(order)) == 5, order)
             cl = pg.evaluate("[...document.querySelectorAll('#counts a')].map(a => a.getBoundingClientRect().left >= -0.5 && a.getBoundingClientRect().right <= document.documentElement.clientWidth + 0.5 && a.getBoundingClientRect().width > 0)")
             check(f"{tag}: the five count cards (Your move, On agent, Queued for release, Waiting, Closed) are inside the screen, with no sideways scroll", cl == [True] * 5 and pg.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), cl)
-            cd = pg.evaluate("[...document.querySelectorAll('#counts a.hcard')].map(a => { const r = a.getBoundingClientRect(), b = a.querySelector('b').getBoundingClientRect(), sp = a.querySelector('span'), nw = a.querySelector('i.hnew'); return {href: a.getAttribute('href'), n: a.querySelector('b').textContent, label: sp.textContent, top: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), bh: Math.round(b.height), new: nw ? nw.textContent : '', hdr: !!a.closest('header.top')}; })")
+            cd = pg.evaluate(CARDS_JS)
             check(f"{tag}: the cards in order, each the number over its label and a link: #your-move, #agents-at-work, #queued-release, #waiting-list, /closed (with its 5 new closes); each 60 px tall, the number on one line",
                   [(c['href'], c['label']) for c in cd] == [('#your-move', 'Your move'), ('#agents-at-work', 'On agent'), ('#queued-release', 'Queued for release'), ('#waiting-list', 'Waiting'), ('/closed', 'Closed')]
                   and cd[4]['new'] == '5 new' and all(c['hdr'] and c['h'] == 60 and c['bh'] <= 32 for c in cd), cd)
+            check(f"{tag}: the Closed card's count is green text on the label line, right after the word Closed and under the number (the number line holds the number alone), whole inside the card, never clipped: the digit always shows, and the word 'new' with it where the card's content is over {NEW_WORD_PX} px ({cd[4]['cw']} px here)",
+                  cd[4]['numOnly'] and cd[4]['onLabelLine'] and cd[4]['inside'] and not cd[4]['cut'] and cd[4]['plain'] and cd[4]['green'] and cd[4]['word'] == (cd[4]['cw'] > NEW_WORD_PX), cd[4])
             check(f"{tag}: the cards are one width, on one row (two rows of three and two on a phone), and the header holds title, rendered line, cards and search in that order",
                   len({c['w'] for c in cd}) == 1 and len({c['top'] for c in cd}) == (2 if w < 481 else 1) and pg.evaluate("(() => { const t = s => document.querySelector(s).getBoundingClientRect().top; return t('header.top .site') <= t('header.top .rline') && t('header.top .rline') < t('#counts') && t('#counts') < t('header.top .sbox'); })()"), cd)
             pg.click('#counts a[href="#waiting-list"]'); pg.wait_for_timeout(100)
@@ -672,7 +682,7 @@ with sync_playwright() as p:
       res.again = {dim: all.every(l => l.classList.contains('lcleared')), undos: all.every(l => !!l.querySelector('form.lundo')), hidden: document.querySelector('#new form.lmark').hidden, enabled: !document.querySelector('#new form.lmark .b').disabled};
       return res; }"""
     STUB = "window.fetch = (u, o) => Promise.resolve(new Response(JSON.stringify({ok: true, changed: 1}), {status: 200, headers: {'Content-Type': 'application/json'}}));"
-    _card = int(re.search(r'href="/closed"[^>]*><b>\d+</b><span>Closed</span><i class="hnew">(\d+)<em', PAGES["board"].read_text(encoding="utf-8")).group(1))
+    _card = int(re.search(r'href="/closed"[^>]*><b>\d+</b><span>Closed <i class="hnew">(\d+)<em', PAGES["board"].read_text(encoding="utf-8")).group(1))
     for scheme in ("light", "dark"):
         for w in (360, 412):
             ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme); pg = ctx.new_page(); pg.goto(PAGES["landed page"].as_uri()); pg.wait_for_timeout(100)
@@ -704,6 +714,15 @@ with sync_playwright() as p:
         cc = pg.evaluate("[...document.querySelectorAll('#counts a.hcard')].map(a => { const r = a.getBoundingClientRect(); return {top: Math.round(r.top), right: Math.round(r.right), w: Math.round(r.width), over: a.scrollWidth > a.clientWidth + 1}; })")
         check(f"home counts {w}: all five cards on one row, each inside the screen and none cut", len(cc) == 5 and len({c['top'] for c in cc}) == 1 and all(c['right'] <= w and not c['over'] and c['w'] >= 80 for c in cc), cc)
         ctx.close()
+    # ---- a card as narrow as 120 px (a narrow column of the cards) shows the Closed card's count in full: "5 new" on the label line, whole, never clipped, the number alone above it ----
+    ctx = br.new_context(viewport={"width": 1300, "height": 900}); pg = ctx.new_page(); pg.goto(PAGES["board"].as_uri()); pg.wait_for_timeout(150)
+    pg.evaluate("document.querySelector('nav#counts').style.cssText = 'grid-template-columns:repeat(5,120px);width:max-content;max-width:none;gap:6px'"); pg.wait_for_timeout(100)
+    c120 = pg.evaluate(CARDS_JS)
+    check("120 px cards: five cards of 120 px, 60 px tall; the Closed card reads Closed and, after it on the same line, the green count '5 new' in full inside the card, with the number alone on the line above; the other four labels are unchanged",
+          [c['w'] for c in c120] == [120] * 5 and all(c['h'] == 60 for c in c120) and [c['label'] for c in c120] == ['Your move', 'On agent', 'Queued for release', 'Waiting', 'Closed']
+          and c120[4]['new'] == '5 new' and c120[4]['word'] and c120[4]['numOnly'] and c120[4]['onLabelLine'] and c120[4]['inside'] and not c120[4]['cut'] and c120[4]['plain'] and c120[4]['green']
+          and all(not c['new'] for c in c120[:4]), c120)
+    ctx.close()
     # ---- an answer sent from the home page stays on it: the server's redirect brings ?sent=<code>&item=&name= back to the board; the page shows the item page's notice naming the item,
     # then drops the query from the address; the form's `back` is the page's own path and the row's id as the form is sent ----
     for w in (360, 1440):
@@ -1480,7 +1499,7 @@ with sync_playwright() as p:
     HSHOTS = os.environ.get("PHONE_WIDTH_HEADER_SHOTS", "")
     if HSHOTS: os.makedirs(HSHOTS, exist_ok=True)
     HDR = """() => { const q = s => document.querySelector(s), H = q('header.top'), r = e => e.getBoundingClientRect(), vw = document.documentElement.clientWidth;
-      const cards = [...document.querySelectorAll('header.top #counts a.hcard')].map(a => { const b = r(a); return {href: a.getAttribute('href'), label: a.querySelector('span').textContent, h: Math.round(b.height), l: b.left, r: b.right, top: Math.round(b.top)}; });
+      const cards = [...document.querySelectorAll('header.top #counts a.hcard')].map(a => { const b = r(a); return {href: a.getAttribute('href'), label: [...a.querySelector('span').childNodes].filter(x => !(x.nodeType === 1 && x.matches('i.hnew'))).map(x => x.textContent).join('').trim(), h: Math.round(b.height), l: b.left, r: b.right, top: Math.round(b.top)}; });
       return {n: document.querySelectorAll('header.top').length, boxes: document.querySelectorAll('form.sbox').length, cards, vw, hdrw: r(H).width, hl: r(H).left, hr: r(H).right,
               site: r(q('header.top .site')).top, counts: r(q('#counts')).top, box: r(q('header.top .sbox')).top, boxb: r(q('header.top .sbox')).bottom, hb: r(H).bottom, pos: getComputedStyle(H).position,
               hdrvar: document.documentElement.style.getPropertyValue('--hdr'), hh: H.offsetHeight, theme: r(q('#theme')), title: r(q('header.top .site a')), over: document.documentElement.scrollWidth - vw}; }"""
