@@ -1231,19 +1231,12 @@ server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"
 check("…the page's tag names and links the front session to its view, like other session names (no [fleet] tool_name: the title names none)", f'<span class="smeta">{OWN} in <a href="https://sala.example.org/#s=home-front" target="_blank" rel="noopener" title="open this session&#x27;s view">home-front</a> · Tue Jun 16th {9 + ZONE_HOURS:02d}:57 · checked against the transcript</span>' in page(g_t),
       re.findall(r'<details class="said" id="said-9".*?</details>', page(g_t)))
 server._cfg.CFG["client"]["session_view"] = ""
-# the item page's Discuss button, a link to the fleet tool's side conversation about the item (its address is [client] session_view up to the "#")
-DISC = lambda t: re.findall(r'<a class="b idiscuss"[^>]*>.*?</a>', t)
-check("Discuss: no [client] session_view (no fleet tool): an open item's page draws no button", DISC(page(g_t)) == [], DISC(page(g_t)))
-server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"
-p_d = page(g_t)
-check("Discuss: an open issue-numbered item's page links https://sala.example.org/#side=board#<n> (the id as shown, nothing else), in a new tab, in the status line",
-      DISC(p_d) == [f'<a class="b idiscuss" href="https://sala.example.org/#side=board#{n_t}" target="_blank" rel="noopener" title="discuss this item in the fleet tool">Discuss ↗</a>']
-      and re.findall(r'<div class="istat">.*?</div>', p_d, re.S)[0].count("idiscuss") == 1, (n_t, DISC(p_d)))
-B_d = ui_render.Board(str(STORE))
-check("Discuss: the link carries the id as the page shows it: an older item's s64, a temporary item's board-tmp-<machine>#3",
-      B_d.discuss_href("s64") == "https://sala.example.org/#side=s64" and B_d.discuss_href("l3") == f"https://sala.example.org/#side={G.shown('l3')}" and "board-tmp-" in B_d.discuss_href("l3"),
-      (B_d.discuss_href("s64"), B_d.discuss_href("l3")))
-check("Discuss: a completed item's page draws no button (done, dropped)", DISC(page("s22")) == [] and DISC(page("g2")) == [], (DISC(page("s22")), DISC(page("g2"))))
+# the item page draws no Discuss button (a link to the fleet tool's side conversation), with a fleet tool's address configured or not
+for sv_ in ("", "https://sala.example.org/#s={name}"):
+    server._cfg.CFG["client"]["session_view"] = sv_
+    pg_d = {t_: page(t_) for t_ in (g_t, "s22", "g2")}
+    check(f"no Discuss button: with [client] session_view {'set' if sv_ else 'unset'}, an open item's page and a completed one draw no idiscuss link, no #side= address and no Discuss text",
+          all("idiscuss" not in p_ and "#side=" not in p_ and "Discuss" not in p_ for p_ in pg_d.values()), {t_: ("idiscuss" in p_, "#side=" in p_) for t_, p_ in pg_d.items()})
 server._cfg.CFG["client"]["session_view"] = ""
 refused("relayed with the wrong session: the message is not in that transcript", lambda: server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21)}]), f"no message {U(21)} in the transcript of home-here")
 server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": FRONT}]); G.drain(GH, STORE, say=lambda s: None)
