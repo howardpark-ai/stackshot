@@ -170,6 +170,10 @@ pattern_review = "shadow"                           # mode "script": the pattern
                                                     # pattern (a hook, a mod, a tool's text, a rulebook line, or a new audit or an edit to one). "shadow" (the default) = the drafts only go onto the run record and the
                                                     # summary line; nothing is sent, opened or edited. "off" = no review, no call, no findings log. A pattern drafted in the last 7 days is not drafted again; at most 5 a run
 
+[registry_audit]                                    # the project registry check of the daily audit (tools/registry_report.py, `audit.py registry`): what is wrong with the project record and the pages it points at
+send = false                                        # false (the default): the findings go on the run record and `audit.py registry` prints them; nobody is messaged. true: each run also sends every agent
+                                                    # its project's findings in one message, at most once a day per agent (a second run the same day sends nothing the first sent)
+
 [wait_guard]                                        # a wait a session sets on its own item (self_wait.py): a wake, or a line of its own next whose step is dated later than today, must carry
                                                     # wait_reason (what the step waits on); one model call (the [router] command and lane, no tools) then asks whether the step could be done now,
                                                     # and a yes refuses the write. Every failure of the call (no model, a timeout, an unreadable answer) lets the write through and is logged on stderr.
@@ -466,7 +470,7 @@ allowed_emails = ["you@example.com"]
 allowed_client_redirect_uris = ["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"]
 ui_open = true                                      # true: the web UI is served to whoever reaches it and the edge decides who that is (an access proxy in front);
                                                     # false: the server asks for a sign-in itself (the same Google sign-in as /mcp), allowed_emails only
-ui_session_days = 30
+ui_session_days = 30                                # days a board sign-in lasts; each visit (a browser opening a page) starts them again, so only a machine not opened for this long asks again
 portal_identity = ""                                # who the portal's machine token (STACKSHOT_PORTAL_TOKEN in secrets/oauth.env) acts as
 
 [board]                                             # what the server tells a session about its items
@@ -669,6 +673,10 @@ self_update = true                                  # true: a client box's pulle
                                                     # (facts.updates, on the machine's card). The puller never touches the Claude CLI (the machine's own provisioning does).
                                                     # In the server's config it speaks for every box, and the server never says yes to its own box (deploy.sh
                                                     # keeps that checkout); in a client box's own config, false is that box's veto. Live
+repo_url = ""                                       # the repository address the server tells every box's puller to follow (puller 10, in each poll's answer as `repo`). ""
+                                                    # = this server checkout's origin as https with no user or password (git@github.com:o/r.git -> https://github.com/o/r.git).
+                                                    # Set it when that is not an address the boxes can fetch from (an ssh alias). A clean, idle box whose origin is another
+                                                    # repository takes it (fetching from it first); the same repository in another form (ssh or https) is no move. Server's config. Live
 session_links = ""                                  # the fleet tool's live store of session links, <letter>/sessions.json: a session's link is the url the
                                                     # tool writes for its transcript id there (stackshot builds none; no row or an empty url = no link, a
                                                     # missing store is logged once). e.g. "~/.local/state/salamander/fleet" (sala's heartbeat store).
@@ -765,6 +773,7 @@ park_words = []                                     # (words) other-language wor
 [keywords.ask_options]
 particles = []                                      # (words) the suffixes that may follow the last word of an option's label in a Recommend sentence (a language that glues them on): the label still counts as named. Example: ["zz"] reads "Widezz" as naming the option "Wide"
 refusals = []                                       # (words) other-language words or phrases that say 'not this option' right before a label, letter or place (the English ones are not, no, avoid, never, skip, except, don't, instead of, rather than). Example: ["nope"] turns away the option in "nope Wide"
+refusals_after = []                                 # (words) other-language words that say 'not this option' right after a label (a language that puts the refusing word after it): the option right before one is turned away; an optional particle and spaces may sit between, and the word needs no word boundary after it. Example: ["nay"] turns away the option in "Wide nay Narrow"
 
 [keywords.server]
 command_cues = []                                   # (words) other-language words that say an item waits on the owner running or pasting a command

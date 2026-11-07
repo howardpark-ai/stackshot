@@ -1701,6 +1701,89 @@ finally:
     _au.pop("summary_to", None)
     if _was is not None: _au["summary_to"] = _was
 
+# ---- 33. the project registry stage (tools/registry_report.py): one message per agent listing the record's problems with the fix of each; silent when the record has no projects; a check that fails is a check not made
+ROLES["falcon-main"] = {"role": "front"}
+def rgf(page, line, name, to, project="prj_0000b001"): return {"page": page, "line": line, "name": name, "fix": f"run `tools/project.py mirror {project}`", "project": project, "to": to}
+RG = {"checked": True, "note": "", "projects": 3, "pages": 5, "findings": [rgf("projects/alpha", "page lines differ", "display-name", "alpha-main"), rgf("projects/beta", "page with no project", "Beta", "alpha-main", ""),
+                                                                              rgf("projects/gamma", "project's page is gone", "home-gamma", "alpha-builder"), rgf("projects/delta", "two projects on one page", "prj_a, prj_b", "")]}
+f33 = build(clean(1))
+def rg_env(answer, **kw): return env(registry_check=lambda items, at: answer(items, at) if callable(answer) else answer, **kw)
+try:
+    _cfg.CFG.pop("registry_audit", None)
+    rec_clear(); fake(); rec = go(f33, env_=rg_env(RG))
+    rg_off = [t for to, t, fy in sent if "Project registry" in t and to != "projects/example"]
+    check("registry, [registry_audit] send unset (the default): the findings are on the record and the summary, and nobody is messaged", rg_off == [] and not [m for m in rec["messages"] if m.get("kind") == "registry"]
+          and len(rec["registry"]["findings"]) == 4 and rec["registry"]["send"] is False and any("registry problems 4" in t for to, t, fy in sent if to == "projects/example"), (rg_off, rec["registry"]))
+    out = []; AR.run(dry=True, now=now, items=f33, anchors={}, env=rg_env(RG), rubric=RUBRIC_TEXT, out=out.append)
+    check("registry, …a dry run says sending is off, and still lists the problems", any("[registry · sending off: [registry_audit] send = false] 4 problem(s)" in l for l in out) and any("[registry] projects/alpha" in l for l in out), out)
+    for bad in (False, "true", 1, "yes", None):
+        _cfg.CFG["registry_audit"] = {"send": bad}
+        rec_clear(); rec = go(f33, env_=rg_env(RG))
+        check(f"registry, …send = {bad!r} (anything but the boolean true) sends nothing either", not [1 for to, t, fy in sent if "Project registry" in t and to != "projects/example"], sent)
+    _cfg.CFG["registry_audit"] = {"send": True}
+    check("registry, config.registry_audit_send() reads the boolean true only", _cfg.registry_audit_send() is True and tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))["registry_audit"]["send"] is False)
+    rec_clear(); fake(); rec = go(f33, env_=rg_env(RG))
+    rg_msgs = {to: (text, fyi) for to, text, fyi in sent if "Project registry" in text and to != "projects/example"}
+    check("registry: one message to each agent the problems go to (a finding with nobody live goes to the audit's -main agent), not fyi, kind registry on the record",
+          sorted(rg_msgs) == ["alpha-builder", "alpha-main", "falcon-main"] and all(fyi is False for _, fyi in rg_msgs.values())
+          and sorted((m["to"], m["lines"]) for m in rec["messages"] if m.get("kind") == "registry") == [("alpha-builder", 1), ("alpha-main", 2), ("falcon-main", 1)], (sorted(rg_msgs), rec["messages"]))
+    check("...a front agent's message starts with [for Oliver], a background agent's does not; each line is '<page> · <problem> · <name> · <fix>' and the head says each line names its fix",
+          rg_msgs["alpha-main"][0].startswith("[for Oliver]") and rg_msgs["falcon-main"][0].startswith("[for Oliver]") and not rg_msgs["alpha-builder"][0].startswith("[for Oliver]")
+          and "projects/alpha · page lines differ · display-name · run `tools/project.py mirror prj_0000b001`" in rg_msgs["alpha-main"][0] and "each line says the fix" in rg_msgs["alpha-main"][0]
+          and all(len(l.split(" · ")) == 4 for t, _ in rg_msgs.values() for l in t.splitlines() if l.startswith("projects/")), rg_msgs)
+    check("...the record carries them apart from the item findings: registry, no finding and no category count; the summary says how many",
+          rec["registry"]["checked"] is True and len(rec["registry"]["findings"]) == 4 and rec["registry"]["findings"][0].keys() >= {"page", "line", "name", "project", "to"} and rec["findings"] == []
+          and "registry" not in " ".join(rec["by_category"]) and any("registry problems 4" in t for to, t, fy in sent if to == "projects/example"), (rec["registry"], rec["by_category"]))
+    check("...it is no page agent line: those two checks send their own messages", not [1 for to, t, fy in sent if "Page agent lines" in t and to != "projects/example"])
+
+    rec_clear(); rec = go(f33, env_=rg_env({"checked": False, "note": "the project record has no projects", "silent": True, "projects": 0, "pages": 0, "findings": []}))
+    check("registry, empty record: nothing is sent, the summary says nothing about it, the record says not checked", not [1 for to, t, fy in sent if "Project registry" in t]
+          and not any("registry" in t for to, t, fy in sent if to == "projects/example") and rec["registry"]["checked"] is False and not [m for m in rec["messages"] if m.get("kind") == "registry"], (sent, rec["registry"]))
+    rec_clear(); rec = go(f33, env_=rg_env({"checked": False, "note": "something", "projects": 0, "pages": 0, "findings": []}))
+    check("registry, a check not made without being silent: the summary says not checked and why, and nothing is sent", any("registry not checked (something)" in t for to, t, fy in sent if to == "projects/example")
+          and not [1 for to, t, fy in sent if "Project registry" in t], [t for to, t, fy in sent if to == "projects/example"])
+    rec_clear(); rec = go(f33, env_=rg_env({**RG, "findings": [], "note": ""}))
+    check("registry, no problem: nothing is sent and the summary says 0", not [1 for to, t, fy in sent if "Project registry" in t] and any("registry problems 0" in t for to, t, fy in sent if to == "projects/example"))
+    def rg_boom(items, at): raise RuntimeError("registry exploded")
+    rec_clear(); rec = go(f33, env_=rg_env(rg_boom))
+    check("registry, a check that raises is a check not made: the run goes on and finishes its record", rec["finished"] is not None and rec["registry"]["checked"] is False and "failed" in rec["registry"]["note"], rec["registry"])
+    seen33 = []
+    rec_clear(); rec = go(f33, env_=rg_env(lambda items, at: seen33.append((sorted(items), at)) or RG))
+    check("registry: the check is given the run's items and its time", seen33 and seen33[0][0] == sorted(f33) and seen33[0][1] == now, seen33)
+    rec_clear(); sent.clear(); out = []
+    res = AR.run(dry=True, now=now, items=f33, anchors={}, env=rg_env(RG), rubric=RUBRIC_TEXT, out=out.append)
+    check("registry, a dry run lists the problems with their recipients, sends nothing and writes no record", any("[registry · sending on] 4 problem(s) on 4 page(s)" in l for l in out) and any("[registry] projects/alpha" in l and "(to alpha-main)" in l for l in out)
+          and any("[registry] projects/delta" in l and "(to falcon-main)" in l for l in out) and res["registry"]["checked"] is True and sent == [] and list((T / "state/audit").glob("run-*.json")) == [], (out, sent))
+    out = []
+    AR.run(dry=True, now=now, items=f33, anchors={}, env=rg_env({"checked": False, "note": "x", "silent": True, "projects": 0, "pages": 0, "findings": []}), rubric=RUBRIC_TEXT, out=out.append)
+    check("registry, a dry run on an empty record says nothing about it", not any("[registry]" in l for l in out), out)
+    # once a day: a second run of the date sends an agent nothing a delivered message of the date already told it; a message that was not delivered is tried again; the next date sends again
+    rec_clear(); rec1 = go(f33, env_=rg_env(RG)); first = sorted(to for to, t, fy in sent if "Project registry" in t and to != "projects/example")
+    rec2 = go(f33, env_=rg_env(RG), now=now + 600); second = [to for to, t, fy in sent if "Project registry" in t and to != "projects/example"]
+    check("registry, once a day: the first run of a date tells three agents, a second run of the same date tells none and the record names who was told earlier", first == ["alpha-builder", "alpha-main", "falcon-main"] and second == []
+          and sorted(rec2["registry"]["told_earlier_today"]) == first and not [m for m in rec2["messages"] if m.get("kind") == "registry"] and len(rec2["registry"]["findings"]) == 4, (first, second, rec2["registry"]))
+    rec3 = go(f33, env_=rg_env(RG), now=now + 86400 + 600); third = sorted(to for to, t, fy in sent if "Project registry" in t and to != "projects/example")
+    check("registry, …the next date tells them again (until the problem is fixed)", third == first and rec3["registry"]["told_earlier_today"] == [], third)
+    rec_clear()
+    def flaky(to, text, fyi=False):
+        sent.append((to, text, fyi)); return (to != "alpha-main"), "[500] no"
+    rec_a = go(f33, env_=rg_env(RG, deliver=flaky)); rec_b = go(f33, env_=rg_env(RG), now=now + 600); retried = [to for to, t, fy in sent if "Project registry" in t and to != "projects/example"]
+    check("registry, …a message that was not delivered does not count as told: the second run of the date sends it again, and only it", retried == ["alpha-main"] and sorted(rec_b["registry"]["told_earlier_today"]) == ["alpha-builder", "falcon-main"], (retried, rec_b["registry"]))
+    rec_clear(); rec = go(f33, env_=rg_env({**RG, "unrouted": True}))
+    check("registry, sala's list unreadable (the result is unrouted): nothing is sent even with send on, the findings stay on the record", not [1 for to, t, fy in sent if "Project registry" in t and to != "projects/example"]
+          and len(rec["registry"]["findings"]) == 4, rec["registry"])
+    import registry_report as _rr
+    longkey = "projects/" + "very-long-page-key-" * 5 + "end"
+    npf = _rr.no_project({}, {longkey: {"type": "project", "title": "Long"}})
+    check("registry, the real 'page with no project' finding for a long key (" + str(len(longkey)) + " characters) keeps its --name hint and its closing parenthesis in the message line",
+          len(npf) == 1 and f"adopt {longkey}" in AR.par_line(npf[0]) and "--name <name>" in AR.par_line(npf[0]) and AR.par_line(npf[0]).endswith("(409))"), AR.par_line(npf[0]) if npf else npf)
+    rec_clear(); rec = go(f33)
+    check("registry, no hook handed in: the default reads the store's record (empty here) and is silent, the run is as before", rec["registry"]["checked"] is False and not [1 for to, t, fy in sent if "Project registry" in t], rec["registry"])
+finally:
+    ROLES.pop("falcon-main", None)
+    _cfg.CFG.pop("registry_audit", None)
+rec_clear()
+
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)
 print(f"ok: audit_run scenario, {len(ran)} checks")

@@ -15,6 +15,7 @@ refuse such an ask now; this finds the ones written before them, or that got thr
      ("Wide, not Narrow" names Wide)
   3b4 [keywords.ask_options] (invented stand-ins: particle "zz", refusal "nope"): a label followed by the particle names its option, and a label right after the refusal word is turned away, in the audit and the
      write-time note; with the settings empty nothing changes
+  3b5 [keywords.ask_options] `refusals_after` (invented stand-ins: "nay", "instead"; particles "xa", "xo"): the label right before the word is turned away, with an optional particle and spaces between and no word boundary after it
   3c options the page cannot read (one option, no single recommended, a non-boolean recommended) count as Yes / No, so an open question over them is found and the detail says so
   3d an ask that cannot be split into Decide and Recommend is not read
   4  the pass: the finding is a filing-pass finding, sent once to where the daily run's findings go (the project's -main agent, marked for the owner, for the owner's own item) with the fix line; sent again after a write
@@ -216,8 +217,8 @@ check("3b3 …and the label stored decomposed against a composed Recommend, and 
 
 # ---- 3b4. [keywords.ask_options]: a particle glued to a label, and a refusal word of another language (invented ASCII stand-ins: particle "zz", refusal "nope")
 import config as _cfg
-def kw_set(particles=(), refusals=()):
-    sec = _cfg.CFG.setdefault("keywords", {}).setdefault("ask_options", {}); sec["particles"] = list(particles); sec["refusals"] = list(refusals)
+def kw_set(particles=(), refusals=(), after=()):
+    sec = _cfg.CFG.setdefault("keywords", {}).setdefault("ask_options", {}); sec["particles"] = list(particles); sec["refusals"] = list(refusals); sec["refusals_after"] = list(after)
 def kw_off(): _cfg.CFG.get("keywords", {}).pop("ask_options", None)
 PART = lambda rec, o=WNT, r="Narrow": ask_read.recommend_mismatch(LAYOUT(rec, opts(*o, rec=r)))
 def found_for(rec, labels=WNT, recommended="Narrow"):
@@ -254,6 +255,55 @@ try:
     check("3b4 …the English refusals are not a note either way ('not Narrow' stays as it was)", NOTE("not Narrow") == "")
     kw_set(particles=["zz"], refusals=["nope"])
     check("3b4 …and with a setting on 'not Narrow' is still no note (only the configured words reach the note)", NOTE("not Narrow") == "", NOTE("not Narrow"))
+finally:
+    kw_off()
+
+# ---- 3b5. [keywords.ask_options] `refusals_after`: a word that turns away the label right before it (invented stand-ins: "nay", "instead"; particles "xa", "xo"; labels Keep and Remove)
+KR = ("Keep", "Remove")
+KRM = lambda rec, r="Remove": ask_read.recommend_mismatch(LAYOUT(rec, opts(*KR, rec=r)))
+KRN = lambda rec, r="Remove": server._options_note(LAYOUT(rec, opts(*KR, rec=r)))
+def found_kr(rec, recommended="Remove"):
+    got, _all = found(build(asking(9310, ask("which of the two the item page does", rec), opts(*KR, rec=recommended))))
+    return bool(got)
+try:
+    kw_off()
+    check("3b5 with the setting empty 'nay' turns nothing away: 'Remove nay Keep' recommending Remove is no mismatch (a substring read, as before), and nothing changes",
+          KRM("Keep nay Remove") == "" and KRM("Remove nay Keep") == "" and ask_read._mention("Remove", "Remove nay Keep") == (True, False) and KRN("Remove nay Keep") == "",
+          (KRM("Keep nay Remove"), KRM("Remove nay Keep"), ask_read._mention("Remove", "Remove nay Keep")))
+    kw_set(after=["nay", "instead"])
+    check("3b5 the label before the word is turned away: 'Keep nay Remove' recommending Remove is no mismatch; 'Remove nay Keep' recommending Remove names Keep (mismatch)",
+          KRM("Keep nay Remove") == "" and KRM("Remove nay Keep") == "Keep" and KRM("Keep instead Remove") == "" and KRM("Remove instead Keep") == "Keep"
+          and ask_read._mention("Keep", "Keep nay Remove") == (True, True) and ask_read._mention("Remove", "Keep nay Remove") == (True, False),
+          [KRM(x) for x in ("Keep nay Remove", "Remove nay Keep", "Keep instead Remove", "Remove instead Keep")])
+    check("3b5 …the same through the audit: 'Remove nay Keep' is a finding for Remove, 'Keep nay Remove' is not, and the word is read case-insensitively",
+          found_kr("Remove nay Keep") and not found_kr("Keep nay Remove") and found_kr("REMOVE NAY keep") and not found_kr("KEEP NAY remove"),
+          (found_kr("Remove nay Keep"), found_kr("Keep nay Remove"), found_kr("REMOVE NAY keep"), found_kr("KEEP NAY remove")))
+    check("3b5 no right word boundary after the word: 'Remove nayyy Keep' and 'Remove insteadof Keep' are turned away too; the word needs no space before it ('Removenay Keep') and any run of spaces will do",
+          KRM("Remove nayyy Keep") == "Keep" and KRM("Keep nayyy Remove") == "" and KRM("Remove insteadof Keep") == "Keep" and KRM("Removenay Keep") == "Keep" and KRM("Remove   nay Keep") == "Keep",
+          [KRM(x) for x in ("Remove nayyy Keep", "Keep nayyy Remove", "Remove insteadof Keep", "Removenay Keep", "Remove   nay Keep")])
+    check("3b5 a word that merely contains the refusal word at its start is not enough on the left: 'Remove xnay Keep' turns nothing away, and the word must follow the label right away ('Remove, nay Keep' is not)",
+          KRM("Remove xnay Keep") == "" and KRM("Remove, nay Keep") == "", (KRM("Remove xnay Keep"), KRM("Remove, nay Keep")))
+    check("3b5 a label that stands in the text only where it is turned away names nothing: 'Remove nay' alone is 'none', and the write-time note speaks for it",
+          KRM("Remove nay") == "none" and KRM("Keep nay") == "none" and "“Remove”" in KRN("Remove nay") and KRN("Keep nay Remove") == "" and KRN("Remove nay Keep") != "",
+          (KRM("Remove nay"), KRM("Keep nay"), KRN("Remove nay"), KRN("Keep nay Remove"), KRN("Remove nay Keep")))
+    check("3b5 both orders in one sentence: a place that is accepted still names the label ('Remove nay Keep, Remove' names Remove); every place turned away does not ('Keep nay Remove, Keep nay')",
+          ask_read._mention("Remove", "Remove nay Keep, Remove") == (True, False) and KRM("Remove nay Keep, Remove") == "" and KRM("Keep nay Remove, Keep nay") == ""
+          and ask_read._mention("Keep", "Keep nay Remove, Keep nay") == (True, True) and ask_read._mention("Keep", "Keep nay Remove, nay Keep") == (True, False) and KRN("Remove nay Keep, Remove") == "" and "“Remove”" in KRN("Remove nay Keep, Remove nay Keep"),
+          (KRM("Remove nay Keep, Remove"), KRM("Keep nay Remove, Keep nay"), KRN("Remove nay Keep, Remove"), KRN("Remove nay Keep, Remove nay Keep")))
+    check("3b5 …a refusal word before the label ('refusals') and one after it ('refusals_after') work together, and the English words still work: 'not Keep, Remove' names Remove, 'not Remove nay Keep' names Keep, 'Remove nay, not Keep' names none",
+          KRM("not Keep, Remove") == "" and KRM("not Remove nay Keep") == "Keep" and KRM("Remove nay, not Keep") == "none", (KRM("not Keep, Remove"), KRM("not Remove nay Keep"), KRM("Remove nay, not Keep")))
+    kw_set(particles=["xa", "xo"], after=["nay", "instead"])
+    check("3b5 with particles set the label, an optional particle (glued or spaced), optional spaces and the word turn it away: 'Remove xo nay Keep', 'Removexo nay Keep', 'Remove xa instead Keep'",
+          KRM("Remove xo nay Keep") == "Keep" and KRM("Removexo nay Keep") == "Keep" and KRM("Remove xa instead Keep") == "Keep" and KRM("Remove xonay Keep") == "Keep" and KRM("Keep xo nay Remove") == "" and KRM("Keep xa nayyy Remove") == "",
+          [KRM(x) for x in ("Remove xo nay Keep", "Removexo nay Keep", "Remove xa instead Keep", "Remove xonay Keep", "Keep xo nay Remove", "Keep xa nayyy Remove")])
+    check("3b5 …a particle alone turns nothing away ('Remove xo Keep' is a plain mention of both), and a word that is not a particle between the label and the word breaks the shape ('Remove xe nay Keep')",
+          KRM("Remove xo, Keep") == "" and ask_read._mention("Remove", "Remove xo Keep") == (True, False) and KRM("Remove xe nay Keep") == "" , (KRM("Remove xo, Keep"), ask_read._mention("Remove", "Remove xo Keep"), KRM("Remove xe nay Keep")))
+    kw_set(particles=["xa", "xo"], refusals=["nope"], after=["nay"])
+    check("3b5 …it runs beside the particles and the before-words: 'nope Keep' and 'Remove xa nay' both turn a label away, and 'nope Keep nay Remove' names Remove",
+          KRM("nope Keep, Remove") == "" and KRM("Keep nay Remove") == "" and KRM("nope Keep xa nay Remove") == "" and KRN("Remove xa nay") != "", [KRM(x) for x in ("nope Keep, Remove", "Keep nay Remove", "nope Keep xa nay Remove")])
+    kw_off()
+    check("3b5 …and with the setting off again nothing is turned away (the English behavior): the 'Remove nay Keep' read is the plain substring one",
+          KRM("Remove nay Keep") == "" and KRN("Remove nay") == "" and ask_read._mention("Remove", "Remove nay Keep") == (True, False), (KRM("Remove nay Keep"), KRN("Remove nay")))
 finally:
     kw_off()
 

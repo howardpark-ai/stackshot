@@ -265,7 +265,7 @@ def body(path, tag="0"):   # a made-up file's text: valid Python for a .py (with
 SCRIPT_BLOCK = '# /// script\n# dependencies = []\n# ///\n'
 for path in ("tests/alpha_scenario.py", "tests/beta_scenario.py", "mod_b.py", "lib_one.txt", "lib_two.txt", "lib_shared.txt", "notes_plain.txt", "pkg/gone.txt", "pkg/stay.txt",
              ".github/workflows/ci.yml", "release.sh", "deploy.sh", "tests/run-suite", "tests/suitemap.py", "tools/retest_skip.py", "api_mod.py", "units/u.service", "LICENSE", "Makefile", "scripts/run_one.sh", "sub/tool_x.py.lock",
-             "tests/pyproject.toml", "tests/uv.lock", "tools/tool_text.py", "tools/text_check.py", "tests/tool_text.snapshot.json", "tools/clean_text.py"):
+             "tests/pyproject.toml", "tests/uv.lock", "tools/tool_text.py", "tests/tool_text.snapshot.json", "tools/clean_text.py"):
     put(rp, path, body(path))
 put(rp, "sub/tool_x.py", SCRIPT_BLOCK + body("sub/tool_x.py"))
 g("add", "-A", cwd=rp); g("commit", "-qm", "c0", cwd=rp); C0 = g("rev-parse", "HEAD", cwd=rp)
@@ -398,7 +398,7 @@ rc, out, err = verdict("blk-gone", {TOOLX: body(TOOLX)}, chg("lib_two.txt"))
 check("helper: a script block removed from a Python file: retest", rc == 1 and "`# /// script` block" in out, (rc, out, err))
 rc, out, err = verdict("blk-body", {TOOLX: SCRIPT_BLOCK + body(TOOLX, "9")}, chg("lib_two.txt"))
 check("helper: an edit to the body of a Python file with a script block, the block as it was: not a lock matter (skip)", rc == 0 and out.startswith("skip: "), (rc, out, err))
-for path in ("tools/tool_text.py", "tools/text_check.py", "tests/tool_text.snapshot.json", "tools/clean_text.py", "tests/pyproject.toml", "tests/uv.lock"):
+for path in ("tools/tool_text.py", "tests/tool_text.snapshot.json", "tools/clean_text.py", "tests/pyproject.toml", "tests/uv.lock"):
     nm = path.replace("/", "-").replace(".", "_")
     rc, out, err = verdict("chk-pr-" + nm, chg(path), chg("lib_two.txt"))
     rc2, out2, err2 = verdict("chk-main-" + nm, chg("lib_one.txt"), chg(path))
@@ -408,7 +408,7 @@ for wf in pathlib.Path(STACK, ".github/workflows").glob("*.yml"):
     named |= {n for n in re.findall(r"(?:tools|tests)/[\w./-]*\w\.(?:py|json|toml|lock)\b", wf.read_text()) if not n.endswith("_scenario.py")}   # a suite named in a comment (tests.yml names tests/suitemap_scenario.py) is in the map, not a check outside the suites
 spec = importlib.util.spec_from_file_location("retest_skip_under_test", HELPER); RS = importlib.util.module_from_spec(spec); spec.loader.exec_module(RS)
 check("the always-retest set holds every tools/ and tests/ file the workflows name (a check outside the suites reads its inputs from the tree); the scan found the ones expected",
-      {"tools/tool_text.py", "tools/text_check.py", "tools/clean_text.py", "tests/uv.lock", "tests/suitemap.py", "tests/tool_text.snapshot.json"} <= named
+      {"tools/tool_text.py", "tools/clean_text.py", "tests/uv.lock", "tests/suitemap.py", "tests/tool_text.snapshot.json"} <= named
       and not [n for n in sorted(named) if not RS.always_reason(n)] and RS.always_reason("any/dir/x.lock") and not RS.always_reason("lib_one.txt") and not RS.always_reason("tools/snapshot_regen.py"), (sorted(n for n in named if not RS.always_reason(n)), sorted(named)))
 
 # the map

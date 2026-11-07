@@ -123,8 +123,13 @@ the box is behind and idle (no live session in `%USERPROFILE%\.claude\sessions`,
 hooks run from the checkout under a session, so it is never moved under one), the puller fast-forwards the whole of
 `~\stackshot` to the server's commit (`git fetch origin`, then `git merge --ff-only`: the puller, `pages.py`, the hooks
 under `client\hooks` and everything else the box runs from the checkout; a checkout with local changes or commits of its
-own is left alone and the refusal reported; the one exception is a clean checkout stranded on a commit the puller itself moved to that is no longer in `origin/main`, which `git reset --keep` puts back on the server's commit when that is in `origin/main`, the recovery recorded in the update record), then reloads itself the way described above (`RELOAD`, whether or not the
-`VERSION` changed, and without the 10-minute hold-back), so the new `puller.py` runs in the same process. The scheduled
+own is left alone and the refusal reported; the one exception is a clean checkout whose HEAD is not in `origin/main` while the server's commit is (history rewritten, a branch never merged, its own commits): the puller saves the rollback branch `legacy-<first 12 characters of its HEAD>` at that HEAD, and only then `git reset --keep` moves it onto the server's commit, the recovery recorded in the update record; an ignored untracked file that the server's commit tracks refuses the move instead, since git would replace it without a word), then reloads itself the way described above (`RELOAD`, whether or not the
+`VERSION` changed, and without the 10-minute hold-back), so the new `puller.py` runs in the same process. Since puller 10 a clean, idle box
+also takes the repository address the server publishes (`repo` in the poll's answer) when its origin is another repository (the repo moved;
+the new address is fetched from first, and ssh and https forms of one repository are no move); all of it is `git` commands only, the same on
+Windows and Linux. The one thing a box cannot do for itself is a move it cannot start: a puller older than 10 whose origin address no longer
+answers cannot fetch the update that teaches it to follow, so its `~\stackshot` origin is set once by hand
+(`git -C ~\stackshot remote set-url origin <the new address>`); every later move follows by itself. The scheduled
 task's instance never ends: an exec would end it, and the task's repetition trigger would start a second puller beside the
 orphan. The log shows `puller <v>: the checkout was updated, reloading` and then the new `puller <v>: polling` line, so
 provisioning's own `VERSION` check finds the task current.
@@ -147,7 +152,7 @@ checkout changes.
 
 A target commit is tried once, then again after 1 h, 4 h and daily; each attempt, ok or failed with its reason, is
 written to `%USERPROFILE%\.local\state\stackshot\puller-updates.json` and reported to the server with the next poll
-(`facts.updates`), where the machine's card shows it. A checkout moved to the server's commit by hand is settled on the next poll with one ok attempt (`already at the server's commit`), so an older failure stops showing; do not edit `puller-updates.json` for that. `python puller.py --dry-run` prints what the puller would update
+(`facts.updates`), where the machine's card shows a failed one only while the box's reported commit (`facts.stackshot`) is not the server's: a box that is where it should be shows green by itself, whatever put it there. A checkout moved to the server's commit by hand is also settled on the next poll with one ok attempt (`already at the server's commit`); do not edit `puller-updates.json` for that. `python puller.py --dry-run` prints what the puller would update
 now, or why not (a live session, the backoff). To switch it off for one box, set `self_update = false` under `[client]`
 in `%USERPROFILE%\.config\stackshot\stackshot.toml`.
 

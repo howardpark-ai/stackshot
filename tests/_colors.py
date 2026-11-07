@@ -170,6 +170,6 @@ _COLORTOOL_BLOCKS = (re.compile(r"<script>/\* colortool v\d+ \*/.*?</script>", r
 
 def without_colortool(text):
     """A page (or a source file) without the shared color tool's script blocks: the library (shared/colortool.js, inlined once in the head), stackshot's settings for it and its init call.
-    The tool carries the trial presets, whose oranges are its own and not the board's, so the orange scan reads pages without it; the checks on a page's head scripts read it too, since the tool watches data-theme."""
+    The tool carries the presets, whose colors are its own and not the board's, so the orange scan reads pages without it; the checks on a page's head scripts read it too, since the tool watches data-theme."""
     for rx in _COLORTOOL_BLOCKS: text = rx.sub("", text)
     return text

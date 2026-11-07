@@ -36,6 +36,11 @@ reported to the server with the next poll (facts.updates); a checkout that reach
 answered by one ok attempt ("settle" below). This replaces sala's heartbeat pull of the Windows boxes' stackshot
 checkout. The puller never updates the Claude CLI: that is the PC's own provisioning. Details at "keeping the box current" below.
 
+Puller 10: the box follows the server through a repo move and a history rewrite with no hand step. The poll's `current` also
+carries `repo`, the canonical address of the stackshot repository; a clean, idle box whose origin is another repository takes that
+address (fetching from it first), and a clean, idle box whose history is not the server's (a rewrite) saves a rollback branch
+`legacy-<short sha>` at its HEAD and moves to the server's commit with `git reset --keep`. A dirty or busy box is still refused.
+
 Options: --registry DIR (the CLI's session registry; default ~/.claude/sessions) · --only NAME|UUID (repeatable: serve
 only these sessions, and tell the server the list is partial) · --wait S (how long a poll may be held, default 50) ·
 --dry-run (fetch and confirm nothing; print what would be delivered, and what the puller would update now and why not).
@@ -68,7 +73,7 @@ import said as _said  # noqa: E402  (stdlib only: the transcript's last error, f
 # Provision on the Windows boxes restarts the puller task when this differs from the log's last `puller <v>: polling` line: bump it whenever running pullers must pick a change up.
 # From 8 on a running puller notices the change itself and reloads (see "Reloading"); a puller older than 8 still needs that one restart.
 # A change to _entry, _fresh, RELOAD or _RELOAD_FILES itself takes effect only after a real restart (the running loop is the old one).
-VERSION = "9"
+VERSION = "10"
 WINDOWS = os.name == "nt"
 RELOAD = "reload"          # main()'s answer when the checkout's VERSION is not the one loaded: _entry runs the file afresh
 RELOAD_MIN_GAP = 600.0     # a reload at most this often (s): a file that keeps differing cannot make a loop
@@ -425,11 +430,15 @@ def cli_version(recs: list[dict]) -> str:
 #            Asked again right before the merge: a box that became busy in the meantime is left alone, and no failure is recorded.
 #   once     a target commit is tried once, then again after 1 h, 4 h, and once a day (_BACKOFF): a failure is reported, never
 #            looped; a new target starts afresh.
-#   how      `git fetch origin`, then `git merge --ff-only <the server's commit>` (a dirty or diverged checkout is refused). The
-#            server advertises its checkout's HEAD only while origin/main contains it (clients.checkout_commit). A clean box whose HEAD
-#            is a commit this puller moved to (puller-updates.json "moved") but that is not in origin/main (it followed a branch that was
-#            never merged) is put back with `git reset --keep <the server's commit>` when that commit is in origin/main, recorded as an
-#            attempt (reason "recovered: ...") and under "recovered"; any other diverged HEAD is refused as before. The
+#   how      `git fetch origin`, then `git merge --ff-only <the server's commit>` (a dirty checkout is refused). The
+#            server advertises its checkout's HEAD only while origin/main contains it (clients.checkout_commit). Before the fetch, a
+#            clean box whose origin is another repository than the one the server publishes (current.repo: a repo move) takes the
+#            server's address: the new address is fetched from first (a failure leaves the configuration alone and is the attempt's
+#            reason), then `git remote set-url origin`. A clean box whose HEAD is not in origin/main while the server's commit is
+#            (history rewritten, a commit never merged, the box's own commits) is moved with `git reset --keep <the server's commit>`,
+#            recorded as an attempt (reason "recovered: ...") and under "recovered". The rollback branch `legacy-<short sha>` is
+#            created at the old HEAD and must exist BEFORE the reset (a branch that cannot be saved refuses the move). A HEAD that is
+#            in origin/main (a box ahead of the server on main) is left alone, one that diverged inside it is refused. The
 #            files the puller runs from (_RELOAD_FILES and the modules of the checkout they import) are compiled from git at the
 #            target BEFORE the tree is touched, and a target that fails is refused with HEAD where it was. A merge that fails, or
 #            whose tree does not compile, is rolled back to the old HEAD with `git reset --keep` (local edits stay; if git
@@ -437,8 +446,10 @@ def cli_version(recs: list[dict]) -> str:
 #   report   every attempt goes to the server with the next poll as facts.updates, [{what, from, to, ok, at, reason}] (the last
 #            10, oldest first; what = "stackshot checkout"; from/to the commits' first 12 characters; at in UTC; reason "" on
 #            success), beside facts.stackshot (this checkout's commit, in full): the server keeps the commit on the machine's
-#            record beside its CLI version, and the Machines panel keeps the attempts and draws a failed one on its column.
-#   settle   the panel draws the LATEST attempt of a `what`, so a failure stays on the card for as long as nothing newer is recorded.
+#            record beside its CLI version, and the Machines panel keeps the attempts. The card judges the checkout from facts.stackshot
+#            against the server's commit (ui.render.machine_alerts): a failed latest attempt shows only while they differ, so the card
+#            clears itself when the box is where it should be, whoever or whatever put it there.
+#   settle   (the box's own record) the latest attempt of a `what` is what an older puller's card drew, so a failure stayed for as long as nothing newer was recorded.
 #            A checkout that reaches the server's commit by another route (a swap for a fresh clone, a checkout or reset by hand)
 #            plans nothing, hence records nothing, and would keep showing the failure of an older target. So every poll, when HEAD
 #            is the server's commit and the latest attempt for the checkout is a failure, one ok attempt is recorded with the
@@ -471,10 +482,10 @@ _SAID: dict = {}                               # what was logged last for a defe
 _AHEAD: set = set()                            # the server commits this checkout was found to contain already
 
 
-def _git(args: list[str], timeout: float = 60) -> tuple[int, str, str]:
+def _git(args: list[str], timeout: float = 60, strip: bool = True) -> tuple[int, str, str]:
     """git in CHECKOUT → (exit code, stdout, git's own error line: the first "error:" or "fatal:" line of stderr, else the last line).
     It never prompts (GIT_TERMINAL_PROMPT, and Git Credential Manager's own window: GCM_INTERACTIVE): a credential prompt from a
-    scheduled task would hang for ever."""
+    scheduled task would hang for ever. `strip=False` returns stdout untouched (for NUL-separated output, whose first path may start with a blank)."""
     git = shutil.which("git")
     if not git:
         return 127, "", "git not found"
@@ -487,7 +498,7 @@ def _git(args: list[str], timeout: float = 60) -> tuple[int, str, str]:
         return 126, "", f"git {args[0]}: {e}"
     err = [x.strip() for x in r.stderr.strip().splitlines() if x.strip()]
     line = next((x for x in err if x.startswith(("error:", "fatal:"))), err[-1] if err else "")
-    return r.returncode, r.stdout.strip(), line
+    return r.returncode, (r.stdout.strip() if strip else r.stdout), line
 
 
 def head() -> str:
@@ -725,18 +736,218 @@ def _rollback(old: str) -> str:
     return "" if rc == 0 else f"rollback refused: {err or 'exit ' + str(rc)}"
 
 
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+_SCP = re.compile(r"(?:[^@/\\:\s]+@)?([A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]):(?![:\\]|//)([^\s]+)")      # git@host:owner/repo (two or more characters before the colon: never a drive letter)
+
+
+def _address_ok(url: str) -> bool:
+    """Whether the server's repo address is one this box will hand to git: one line, no leading dash, and an http(s)/ssh/git/file URL,
+    an scp-style address or an absolute path (git's `ext::` and other helpers are no address)."""
+    u = str(url or "")
+    if not u or u != u.strip() or u.startswith("-") or any(c.isspace() or ord(c) < 32 for c in u):
+        return False
+    if _SCHEME.match(u):
+        return u.split("://", 1)[0].lower() in ("http", "https", "ssh", "git", "file")
+    return bool(_SCP.fullmatch(u)) or os.path.isabs(u) or bool(re.match(r"[A-Za-z]:[\\/]", u))
+
+
+def _repo_id(url: str) -> str:
+    """Which repository an address names, the same for its https, ssh and scp forms (host/owner/repo, case folded, no `.git`, no user,
+    no port), so a box that reaches the same repository another way is not "moved"; a local path is its absolute, normalised path."""
+    u = str(url or "").strip()
+    host, path = "", ""
+    if _SCHEME.match(u):
+        scheme, rest = u.split("://", 1)
+        if scheme.lower() == "file":
+            return "path:" + os.path.normcase(os.path.abspath(rest.lstrip("/") if re.match(r"/[A-Za-z]:", rest) else rest)).rstrip("/\\")
+        netloc, _, path = rest.partition("/")
+        host = netloc.rsplit("@", 1)[-1].split(":", 1)[0].lower()
+    elif (m := _SCP.fullmatch(u)):
+        host, path = m.group(1).lower(), m.group(2)
+    else:
+        return "path:" + os.path.normcase(os.path.abspath(u)).rstrip("/\\")
+    path = path.strip("/")
+    path = path[:-4] if path.lower().endswith(".git") else path
+    return f"{host}/{path.lower()}"
+
+
+def _origin_url() -> str:
+    rc, out, _ = _git(["remote", "get-url", "origin"], 20)
+    return out if rc == 0 else ""
+
+
+def _clean() -> str:
+    """Why the checkout is not clean, "" when it is: a tracked file edited, or a merge, rebase, cherry-pick, revert or bisect in progress
+    (read-only: never the index lock from under a session's git). Untracked files are git's to refuse at the move."""
+    rc, out, err = _git(["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"], 30)
+    if rc != 0:
+        return err or "git status failed"
+    if out:
+        return "local changes in the checkout"
+    rc, gd, _ = _git(["rev-parse", "--absolute-git-dir"], 20)
+    if rc == 0 and gd:
+        for mark in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "rebase-merge", "rebase-apply"):
+            if os.path.exists(os.path.join(gd, mark)):
+                return f"a git operation is in progress in the checkout ({mark})"
+    return ""
+
+
+_REPO_WHAT = "repo address"                    # the key of the address change in the try bookkeeping (_due): once, then after 1 h, 4 h, daily
+_INCOMING = "refs/stackshot-incoming"          # where a new address is fetched to, before the box has it for its origin
+
+
+def _drop_incoming() -> None:
+    """Remove every ref of the private namespace (a leftover of a run that was killed between its fetch and its cleanup)."""
+    rc, out, _ = _git(["for-each-ref", "--format=%(refname)", _INCOMING + "/"], 30)
+    for ref in out.split() if rc == 0 else []:
+        _git(["update-ref", "-d", ref], 20)
+
+
+def _switch_origin(want: str, have: str, to: str) -> str:
+    """Fetch `want` into a private ref namespace, check that it holds the server's commit `to`, and only then make it origin's address and
+    carry the fetched branches over to origin's remote-tracking refs (local ref updates, no second fetch) → "" when done, else why not.
+    Nothing of origin's changes before the checks passed. The namespace is emptied before the fetch too, so a leftover ref of a killed run
+    cannot make an address look as if it held the commit, and again afterwards. Without a `to` the fetch must still have produced a branch:
+    an empty repository is no address to move to."""
+    _drop_incoming()
+    try:
+        rc, _, err = _git(["fetch", "--quiet", "--no-tags", want, f"+refs/heads/*:{_INCOMING}/*"], 180)
+        if rc != 0:
+            return f"repo address {want}: git fetch: {err or 'exit ' + str(rc)}"
+        if to:
+            rc, held, _ = _git(["for-each-ref", "--contains", to, "--format=%(refname)", _INCOMING + "/"], 30)
+            if rc != 0 or not held:
+                return f"repo address {want}: it does not hold the server's commit {_short(to)}"
+        else:
+            rc, any_ref, _ = _git(["for-each-ref", "--count=1", "--format=%(refname)", _INCOMING + "/"], 30)
+            if rc != 0 or not any_ref:
+                return f"repo address {want}: it has no branches"
+        rc, _, err = _git(["remote", "set-url", "origin", want] if have else ["remote", "add", "origin", want], 20)
+        if rc != 0:
+            return f"repo address {want}: git remote: {err or 'exit ' + str(rc)}"
+        rc, out, _ = _git(["for-each-ref", "--format=%(objectname) %(refname)", _INCOMING + "/"], 30)
+        for line in out.splitlines() if rc == 0 else []:
+            sha, _, ref = line.partition(" ")
+            _git(["update-ref", "refs/remotes/origin/" + ref[len(_INCOMING) + 1:], sha], 20)
+        return ""
+    finally:
+        _drop_incoming()
+
+
+def _take_repo(want: str, to: str = "") -> tuple[bool, str]:
+    """Make this checkout's origin the repository the server publishes (`want`) → (changed, why not): (False, "") when it is that
+    repository already, in any form of its address, or the server published none. The new address is fetched from FIRST and must hold the
+    server's commit `to` (_switch_origin); only then does it become origin's address, so an address that does not answer, or holds
+    another history, leaves the box as it was and the reason is git's or says so. A failure is tried again only after the backoff
+    (_BACKOFF, keyed on this address: once, then 1 h, 4 h, daily), also when the failure is an authentication error: until then the
+    last reason is the answer, with no network call. The caller has checked that the box is clean and idle."""
+    want = str(want or "").strip()
+    if not want or not _address_ok(want):
+        return False, ""
+    have = _origin_url()
+    if have and _repo_id(have) == _repo_id(want):
+        return False, ""
+    tried = _state()["tried"]
+    if not _due(_REPO_WHAT, want):
+        return False, str((tried.get(_REPO_WHAT) or {}).get("why") or f"repo address {want}: waiting out the backoff after an earlier try")
+    why = _switch_origin(want, have, to if re.fullmatch(r"[0-9a-f]{40}", str(to or "")) else "")
+    if why:
+        t = tried.get(_REPO_WHAT) or {}
+        tried[_REPO_WHAT] = {"to": want, "at": time.time(), "n": int(t.get("n") or 0) + 1 if t.get("to") == want else 1, "why": why[:300]}
+    else:
+        tried.pop(_REPO_WHAT, None)
+    try:
+        _save_state()
+    except Exception as e:
+        print(f"could not save {_cfg.state('puller-updates.json')}: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
+    return (not why), why
+
+
+def _keep_address(current: dict, recs: list[dict], dry: bool = False) -> None:
+    """A box whose origin is not the repository the server publishes (the repo moved) takes the new address while it is clean and idle,
+    also when it is at the server's commit already (its next update would otherwise fail on the old address). Said in the log, once
+    per reason; a failure here is no update attempt (the next update names it in its own reason if it still matters). Never raises."""
+    try:
+        want = str(current.get("repo") or "").strip()
+        if not want or not _address_ok(want):
+            return
+        have = _origin_url()
+        if not have or _repo_id(have) == _repo_id(want):
+            _SAID.pop("repo", None)
+            return
+        if not dry and not _due(_REPO_WHAT, want):         # a failed try waits out its backoff: no process scan, no network call
+            return
+        why = busy(recs) or _clean()
+        if dry:
+            print(f"would take the repo address {want} (now {have})" + (f", but not now: {why}" if why else " now (the box is clean and idle)"), flush=True)
+            return
+        if why:
+            if _SAID.get("repo") != why:
+                _SAID["repo"] = why; print(f"repo address {have} → {want}: waiting, {why}", flush=True)
+            return
+        changed, why = _take_repo(want, str(current.get("stackshot") or ""))
+        _HEAD["at"] = 0.0
+        said = why or "taken"
+        if _SAID.get("repo") != said:
+            _SAID["repo"] = said
+            print(f"repo address {have} → {want}: " + (f"FAILED, {why}" if why else "ok"), file=sys.stderr if why else sys.stdout, flush=True)
+        if changed:
+            _SAID.pop("repo", None)
+    except Exception as e:
+        print(f"repo address check failed: {type(e).__name__}: {str(e)[:160]}", file=sys.stderr, flush=True)
+
+
+def _save_legacy(old: str) -> tuple[str, str]:
+    """The rollback branch for a move off `old`: `legacy-<first 12 characters>` at `old`, made and read back BEFORE anything is reset
+    → (branch, why not). An existing branch of that name at `old` is the same save, left as it is; one at another commit (a clash of
+    12 characters) gets a time suffix. A branch that cannot be made or read back refuses the move: the old commits stay reachable."""
+    name = "legacy-" + old[:12]
+    rc, cur, _ = _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}^{{commit}}"], 20)
+    if rc == 0 and cur == old:
+        return name, ""
+    if rc == 0:
+        name += f"-{int(time.time())}"
+    rc, _, err = _git(["branch", "--", name, old], 20)
+    if rc != 0:
+        return "", f"could not save the rollback branch {name}: {err or 'exit ' + str(rc)}"
+    rc, cur, err = _git(["rev-parse", "--verify", "--quiet", f"refs/heads/{name}^{{commit}}"], 20)
+    if rc != 0 or cur != old:
+        return "", f"could not save the rollback branch {name}: it does not read back"
+    return name, ""
+
+
+def _ignored_in_the_way(to: str) -> str:
+    """Why the move to `to` would overwrite a file git does not guard, "" when none: an untracked file that .gitignore hides and that
+    `to` tracks (git refuses an untracked file in the way, but `reset --keep` and a fast-forward replace an ignored one without a word,
+    and it is no commit that a rollback branch could hold). Read-only; a git that cannot answer refuses the move."""
+    rc, ign, err = _git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard"], 60, strip=False)
+    if rc != 0:
+        return f"git ls-files: {err or 'exit ' + str(rc)}"
+    if not ign:
+        return ""
+    rc, diff, err = _git(["diff", "-z", "--name-only", "HEAD", to], 60, strip=False)
+    if rc != 0:
+        return f"git diff: {err or 'exit ' + str(rc)}"
+    guarded = set()                                    # the ignored files, and every folder that holds one (a file of `to` where a folder of ignored files is)
+    for f in filter(None, ign.split("\0")):          # -z: a path with a tab, a quote or a newline is one name
+        guarded.add(f)
+        while "/" in f:
+            f = f.rsplit("/", 1)[0]; guarded.add(f)
+    hit = sorted(set(filter(None, diff.split("\0"))) & guarded)
+    return ("untracked ignored file(s) in the way: " + ", ".join(hit[:5]) + (" …" if len(hit) > 5 else "")) if hit else ""
+
+
 def _stranded(to: str) -> tuple[str, str]:
-    """Whether a clean checkout whose HEAD is not on the server's line is a box this puller stranded → ("yes" | "no" | "unknown", why):
-    HEAD is a commit the puller itself moved to (its record's "moved"), HEAD is not in origin/main, and the server's commit `to`
-    is. A box whose HEAD the puller did not put there (someone's own commits, a branch checked out by hand) is "no", refused as
-    before. HEAD is tested against the local origin/main first, with no network call: in it (an ordinary lag, or a box ahead of the
-    server on main) is "no". Only when the local ref says HEAD is off main is origin fetched, so the ref is current before the box
-    is moved. "unknown" (a fetch that failed, or git answering something other than yes or no, a timeout included) comes with a
-    "could not tell" reason: the attempt fails, nothing is cached as ahead, and the normal backoff tries again."""
+    """Whether a clean checkout whose HEAD is not on the server's line is a box to move onto it → ("yes" | "no" | "unknown", why):
+    HEAD is not in origin/main and the server's commit `to` is (history rewritten, a branch that was never merged, the box's own
+    commits: the old HEAD is saved as a rollback branch before the move). HEAD is tested against the local origin/main first, with
+    no network call: in it (an ordinary lag, or a box ahead of the server on main) is "no". Only when the local ref says HEAD is off
+    main is origin fetched, so the ref is current before the box is moved. "unknown" (a fetch that failed, or git answering something
+    other than yes or no, a timeout included) comes with a "could not tell" reason: the attempt fails, nothing is cached as ahead,
+    and the normal backoff tries again. A shallow checkout has its history cut, so ancestry cannot be proved beyond the cut: it is
+    refused (red, with the reason) for a server commit that is not the tip of a fetched branch."""
     _HEAD["at"] = 0.0; have = head()
-    st = _state()
-    mine = have in (st.get("moved") or []) or any(a.get("ok") is True and a.get("what") == "stackshot checkout" and a.get("to") == _short(have) and a.get("reason") != _REACHED for a in st["attempts"])   # (a record from before "moved" existed names the commit short)
-    if not have or not mine:
+    if not have:
         return "no", ""
     def ancestor(c: str) -> int:
         return _git(["merge-base", "--is-ancestor", c, "refs/remotes/origin/main"], 20)[0]
@@ -763,17 +974,20 @@ def _stranded(to: str) -> tuple[str, str]:
     return "no", ""
 
 
-def _update_checkout(to: str, still_idle=None) -> tuple[bool | None, str, bool]:
-    """Fast-forward the whole of CHECKOUT to the server's commit → (ok, reason, restart needed: True after every update); ok
-    None when there is nothing to do (the checkout is ahead already). A dirty or diverged checkout is refused: a box someone
-    works on is not moved under them. The target is compiled from git before the tree is touched (a commit whose puller code does
+def _update_checkout(to: str, still_idle=None, repo: str = "") -> tuple[bool | None, str, bool]:
+    """Move the whole of CHECKOUT to the server's commit → (ok, reason, restart needed: True after every update); ok
+    None when there is nothing to do (the checkout is ahead already, on main). A dirty checkout is refused: a box someone
+    works on is not moved under them. `repo`: the address the server publishes; a box whose origin is another repository takes it
+    first (_take_repo). A checkout whose history is not the server's (not in origin/main) is saved as a rollback branch and moved
+    with `reset --keep` (_stranded, _save_legacy); one that diverged inside origin/main is refused. The target is compiled from git before the tree is touched (a commit whose puller code does
     not compile is refused, HEAD untouched); `still_idle()` (→ why not, "" when idle) is asked right before the merge, and a box
     that became busy raises _Busy; a merge that fails, or whose result does not compile, is rolled back to the old HEAD (reset --keep: local edits stay)."""
-    rc, out, err = _git(["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"], 30)   # never the index lock from under a session's git
-    if rc != 0:
-        return False, err or "git status failed", False
-    if out:
-        return False, "local changes in the checkout", False
+    why = _clean()                             # never the index lock from under a session's git
+    if why:
+        return False, why, False
+    _, why = _take_repo(repo, to)              # the repo moved: the new address, fetched from before it is kept
+    if why:
+        return False, why, False
     if _git(["cat-file", "-e", to + "^{commit}"], 20)[0] != 0:
         rc, out, err = _git(["fetch", "--quiet", "origin"], 120)
         if rc != 0:
@@ -783,7 +997,7 @@ def _update_checkout(to: str, still_idle=None) -> tuple[bool | None, str, bool]:
     ahead = _git(["merge-base", "--is-ancestor", to, "HEAD"], 20)[0] == 0
     lagging = not ahead and _git(["merge-base", "--is-ancestor", "HEAD", to], 20)[0] == 0
     recover = False
-    if not lagging:                            # ahead of the server's commit, or diverged from it: refused, unless this puller stranded the box itself
+    if not lagging:                            # ahead of the server's commit, or diverged from it: left alone on main, moved onto the server's line when off main
         state, why = _stranded(to)
         if state == "unknown":                 # nothing is remembered as ahead: the backoff tries again
             return False, why, False
@@ -802,7 +1016,15 @@ def _update_checkout(to: str, still_idle=None) -> tuple[bool | None, str, bool]:
     why = still_idle() if still_idle else ""
     if why:                                    # the status, the fetch and the checks above took time: a session may have started since
         raise _Busy(why)
-    # recovery: HEAD is off main, so no fast-forward exists; reset --keep moves HEAD and refuses (touching nothing) what would lose an edit or an untracked file
+    why = _ignored_in_the_way(to)              # before the rollback branch and the move: nothing is changed for a file the move would silently replace
+    if why:
+        return False, why, False
+    # recovery: HEAD is off main, so no fast-forward exists; the rollback branch is made first, then reset --keep moves HEAD and refuses (touching nothing) what would lose an edit or an untracked file
+    legacy = ""
+    if recover:
+        legacy, why = _save_legacy(old)
+        if why:
+            return False, why, False
     rc, out, err = _git(["reset", "--keep", to] if recover else ["merge", "--ff-only", to], 60)
     if rc != 0:
         reason = f"git {'reset --keep' if recover else 'merge --ff-only'}: {err or 'exit ' + str(rc)}"
@@ -820,7 +1042,7 @@ def _update_checkout(to: str, still_idle=None) -> tuple[bool | None, str, bool]:
         _AHEAD.discard(to)
         st = _state(); st.setdefault("recovered", []).append({"from": old, "to": to, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
         st["recovered"] = st["recovered"][-_UPDATES_KEEP:]
-        return True, f"recovered: left {_short(old)}, which is not in origin/main", True
+        return True, f"recovered: left {_short(old)}, which is not in origin/main (saved as {legacy})", True
     return True, "", True
 
 
@@ -838,6 +1060,7 @@ def keep_current(current, recs: list[dict], dry: bool = False, recheck=None) -> 
             _SAID["mode"] = on; print(f"keeping this box current: {'on' if on else 'off'}", flush=True)
         if not on:
             return None
+        _keep_address(current, recs, dry)          # the repo moved: a clean, idle box takes the new address, also when it is at the server's commit
         todo = plan(current, recs)
         if not todo:
             return None
@@ -856,7 +1079,7 @@ def keep_current(current, recs: list[dict], dry: bool = False, recheck=None) -> 
                     _SAID[(what, to)] = why; print(f"update {what} {_short(frm)} → {_short(to)}: waiting, {why}", flush=True)
                 continue
             try:
-                ok, reason, restart = _update_checkout(to, lambda: busy(recheck() if recheck else recs))
+                ok, reason, restart = _update_checkout(to, lambda: busy(recheck() if recheck else recs), str(current.get("repo") or ""))
             except _Busy as b:                 # not a failure: nothing was done, no attempt is recorded, the next poll asks again
                 if _SAID.get((what, to)) != str(b):
                     _SAID[(what, to)] = str(b); print(f"update {what} {_short(frm)} → {_short(to)}: waiting, {b} (became busy before the merge)", flush=True)

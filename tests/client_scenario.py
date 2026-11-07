@@ -298,8 +298,8 @@ async def _held_poll_cancelled():
     except asyncio.CancelledError: return held, None
 held, resp = asyncio.run(_held_poll_cancelled())
 _pb = json.loads(resp.body) if resp is not None else {}
-check("poll: a held poll cancelled by the server's shutdown answers 200 with no deliveries (and what is current, puller 9)", held and resp is not None and resp.status_code == 200
-      and _pb.get("deliveries") == [] and _pb.get("machine") == "box-far" and set(_pb.get("current") or {}) == {"puller", "stackshot", "self_update"}, (held, resp and resp.status_code, resp and resp.body))
+check("poll: a held poll cancelled by the server's shutdown answers 200 with no deliveries (and what is current, puller 9, and the repo address, puller 10)", held and resp is not None and resp.status_code == 200
+      and _pb.get("deliveries") == [] and _pb.get("machine") == "box-far" and {"puller", "stackshot", "self_update"} <= set(_pb.get("current") or {}) <= {"puller", "stackshot", "self_update", "repo"}, (held, resp and resp.status_code, resp and resp.body))
 
 # ---- 6. the puller's CLI version probe starts no window on Windows (2026-10-05): pythonw has no console, so a console child
 # would get a fresh one, which Windows 11 shows as a terminal flashing every ten minutes

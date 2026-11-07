@@ -287,6 +287,12 @@ def audit_orphan_handover() -> str:
     return v if v in AUDIT_ORPHAN_MODES else "report"
 
 
+def registry_audit_send() -> bool:
+    """[registry_audit] send: whether the daily run sends the project registry check's findings (tools/registry_report.py) to the agents they are for, one message per agent a day. False (the default, and the
+    reading of any value that is not the boolean true): the findings are on the run record and `audit.py registry` prints them, nobody is messaged."""
+    return get("registry_audit", "send") is True
+
+
 def audit_builder() -> str:
     """[audit] builder: the session a tripped threshold, and an unmoved finding of a project with no builder of its own, is sent to. Default "my-engineer"."""
     return str(get("audit", "builder") or "").strip() or AUDIT_BUILDER
@@ -552,6 +558,7 @@ KEYWORDS: dict[str, dict[str, tuple[str, str]]] = {
     "ask_options": {
         "particles": ("words", "the suffixes that may follow the last word of an option's label in a Recommend sentence (a language that glues them on): the label still counts as named"),
         "refusals": ("words", "other-language words or phrases that say 'not this option' right before a label, letter or place (the English ones are not, no, avoid, never, skip, except, don't, instead of, rather than): the option after one is turned away"),
+        "refusals_after": ("words", "other-language words that say 'not this option' right after a label (a language that puts the refusing word after it): the option right before one is turned away"),
     },
     "server": {
         "command_cues": ("words", "other-language words that say an item waits on the owner running or pasting a command"),

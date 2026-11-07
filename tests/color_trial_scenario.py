@@ -11,13 +11,13 @@ small label fill, text and outline), five presets, and saved combinations, in TH
   * the requests: the library has one fetch, to the saved list's address from the page's own origin (the address comes from the settings), a GET or a POST of JSON and nothing else; no cookie, no form, no link; one localStorage key and
     every call on it; applyStored and init make no request in node; no other file names the tool;
   * the fields: resolve() (nothing set is exactly the shipped dark theme; Cards and Lines follow a set background by 4% and 10% of the body text, a field set wins, nothing is derived at the shipped background), norm() (invalid, shipped and
-    default values dropped), apply() (the custom properties and classes each field sets, in node over a stub page; Live now and a saved copy of it apply nothing; the status colors and --orange are never set); the dark theme only;
+    default values dropped), apply() (the custom properties and classes each field sets, in node over a stub page; the original orange theme and a saved copy of it apply nothing; the status colors and --orange are never set); the dark theme only;
   * the rules: the label rule covers every shipped selector that paints the orange label (and fails loudly when a new one appears), the disabled rule covers every shipped disabled button look it replaces (opacity gone, busy and pressed kept)
     and nothing else, and no shipped rule is edited;
-  * the contrast gate, recomputed with tests/_colors.py in Python and compared with the library's own numbers: every preset passes every REFUSE pair, the WARN list of each preset is exactly the expected one (Live now: the shipped idle Send's
-    disabled pair; Radix: its white label), the edge of the background gate (#303030 passes, #313131 is refused) and, for every background that passes it, all six REFUSE pairs; a stored value that fails the gate is cleared at load;
+  * the contrast gate, recomputed with tests/_colors.py in Python and compared with the library's own numbers: every preset passes every REFUSE pair, the WARN list of each preset is exactly the expected one (none for any preset: the original orange theme
+    is the shipped look and the four colored ones read clean), the edge of the background gate (#303030 passes, #313131 is refused) and, for every background that passes it, all six REFUSE pairs; a stored value that fails the gate is cleared at load;
   * a second app: the same file with other settings (its own storage key, property names, shipped values given by a function, onApply, isDark, no saved list and no preview, and the "warn" gate) in the same node page as stackshot's: its
-    look is applied under its own names, Reset and Live now take off everything set through onApply too, onApply runs on every apply (stored = {} included) after the tracked properties were removed, a function for the shipped values is
+    look is applied under its own names, Reset and the original orange theme take off everything set through onApply too, onApply runs on every apply (stored = {} included) after the tracked properties were removed, a function for the shipped values is
     called on every apply and never cached, isDark is asked on every apply and at init, the "warn" gate turns the REFUSE pairs into warnings with their ratio and never refuses, stores no refusal and never clears a stored look, and the
     two apps do not touch each other's properties;
   * what the tests of the other files rely on: the pages without the tool's script blocks (tests/_colors.py without_colortool) carry none of the preset colors, and no source file names the retired temporary feature.
@@ -76,7 +76,7 @@ m_css = re.search(r"var CSS = \[(.*?)\]\.join\('\\n'\);", LIB, re.S)
 CSS_LIB = "\n".join(re.findall(r"'((?:[^'\\]|\\.)*)'", m_css.group(1))) if m_css else ""
 
 # ---- 1. the shared source
-check("the file starts with its version line, /* colortool v2 */, and ColorTool.version is that number", LIB.split("\n", 1)[0] == "/* colortool v2 */" and "var VERSION = 2;" in LIB and "version: VERSION" in LIB, LIB[:40])
+check("the file starts with its version line, /* colortool v3 */, and ColorTool.version is that number", LIB.split("\n", 1)[0] == "/* colortool v3 */" and "var VERSION = 3;" in LIB and "version: VERSION" in LIB, LIB[:40])
 check("the file has no templating placeholder (no __NAME__ to fill in), no closing tag and no comment opener (it is inlined in a script element)", not re.search(r"__[A-Za-z0-9]+__", LIB) and "</" not in LIB and "<!--" not in LIB)
 # the words a shared file must not carry: the apps that pin a copy, and a person and machines of the fixtures
 NAMES = re.compile("|".join(["stackshot", "salamander", r"\bsala\b", "oliver", r"\bbox-[a-z]\b"]), re.I)
@@ -98,8 +98,8 @@ check("the page set is the board's: home, an item page, a project page, Projects
 for nm, pg in PAGES.items():
     head, body = pg.split("</head>", 1)
     check(f"{nm}: the library is inline once, verbatim, in the head, after the theme script and before the page's own first <style>; the settings and ColorTool.applyStored follow it",
-          pg.count("/* colortool v2 */") == 1 and LIB in head and head.find("stackshot-theme") > 0 and head.find("stackshot-theme") < head.find("/* colortool v2 */") < head.find("window.stackshotColors=") < head.find("ColorTool.applyStored(window.stackshotColors);") < head.find("<style>")
-          and "<style>" not in ct.HEAD and ":root{--bg:" in head[head.find("<style>"):head.find("<style>") + 3000], pg.count("/* colortool v2 */"))
+          pg.count("/* colortool v3 */") == 1 and LIB in head and head.find("stackshot-theme") > 0 and head.find("stackshot-theme") < head.find("/* colortool v3 */") < head.find("window.stackshotColors=") < head.find("ColorTool.applyStored(window.stackshotColors);") < head.find("<style>")
+          and "<style>" not in ct.HEAD and ":root{--bg:" in head[head.find("<style>"):head.find("<style>") + 3000], pg.count("/* colortool v3 */"))
     check(f"{nm}: the init call is at the end of the body, after Back to top; the page carries no markup of the tool (no button, no panel: the script draws them)",
           body.count("ColorTool.init(window.stackshotColors);") == 1 and body.find('id="totop"') < body.find("ColorTool.init(") < body.rfind("</body>") and 'id="ct-btn"' not in pg and 'id="ct-pop"' not in pg and 'class="ct-' not in pg, None)
     check(f"{nm}: one empty mount at the end of the side panel, after its sections, with the gap element before it (the tool draws the button there)",
@@ -196,9 +196,12 @@ console.log(JSON.stringify(out));
     case("background only", {"bg": "#1a1a1b"}); case("card only", {"card": "#222224"}); case("body text only", {"fg": "#ffffff"}); case("muted only", {"mut": "#b8b7b2"}); case("outlines only", {"ibd": "#a0a09b"}); case("lines only", {"line": "#3a3a3d"})
     case("link only", {"link": "#ffa057"}); case("solid, dark label", {"solid": "#d9722e"}); case("solid, white label", {"solid": "#bd561d"}); case("text on solid only", {"onsolid": "#ffffff"})
     case("label fill only", {"labbg": "#2e1d12"}); case("label all three", {"labbg": "#2e1d12", "labfg": "#ffa057", "labbd": "#ffa057"}); case("disabled fill only", {"disbg": "#303034"}); case("disabled text only", {"disfg": "#c0bfba"})
-    for pid in ("live", "old", "two", "radix", "primer"): case(f"preset {pid}", expr=None, setup=STACK_SETUP + "T.save(T.norm(T.PRE[%s]));T.apply();" % js(pid))
-    case("Live now, saved as a snapshot of every shipped value", dict(SH))
+    for pid in ("live", "sky", "mint", "violet", "rose"): case(f"preset {pid}", expr=None, setup=STACK_SETUP + "T.save(T.norm(T.PRE[%s]));T.apply();" % js(pid))
+    case("Original orange theme, saved as a snapshot of every shipped value", dict(SH))
     case("an older look: bg, text, solid, tint", {"bg": "#1f1f21", "text": "#ffa057", "solid": "#bd561d", "tint": True})
+    STORED_A = {"link": "#ffa057", "solid": "#f76b15", "onsolid": "#ffffff", "labbg": "#462100", "labfg": "#ffa057", "labbd": "#462100"}      # what a removed orange preset stored; a stored look is a map of fields, not a preset id
+    case("a look stored by a preset that was later removed (a map of six fields)", STORED_A)
+    case("a snapshot of all 14 fields saved from a preset that was later removed", {**SH, "link": "#ffa657", "solid": "#bd561d", "onsolid": "#ffffff", "labbg": "#2a1f19", "labfg": "#db6d28", "labbd": "#2a1f19"})
     for nm_, v in (("white", {"bg": "#ffffff"}), ("edge, passes", {"bg": "#303030"}), ("edge, one step lighter", {"bg": "#313131"}), ("old 7:1 gate", {"bg": "#4c4c4c"}), ("muted text unreadable", {"mut": "#222224"}),
                    ("body text dim", {"fg": "#555555"}), ("outlines vanish", {"ibd": "#222224"}), ("white with an orange", {"bg": "#ffffff", "link": "#ffa057", "labbg": "#3a2619"}), ("junk", {"bg": "red", "link": "#abc", "solid": 5, "x": "#ffffff"})):
         case(nm_, v)
@@ -223,7 +226,7 @@ console.log(JSON.stringify(out));
          setup=FAKE_START + "var d0=window.faLog.dark;snap('darkByApp');window.faDark=false;F.apply();snap('lightByApp');var d1=window.faLog.dark;ColorTool.init(window.fa);var d2=window.faLog.dark;window.faDark=true;F.apply();snap('darkAgain');",
          expr="{d:[d0,d1,d2],isDark:F.isDark()}")
     case("fake: isDark false beats a dark page", data={"fake-app-look": json.dumps(SEED_F)}, theme="dark", setup=fake_cfg("fa", "fake-app-look") + "window.faDark=false;ColorTool.applyStored(window.fa);var F=ColorTool.engine(window.fa);", expr="window.faLog")
-    case("fake: onApply runs on every apply, Reset and Live now included, stored = {} then", data={"fake-app-look": json.dumps(SEED_F)}, setup=FAKE_START + "F.apply();F.save({});F.apply();F.save(F.norm(F.PRE.live));F.apply();", expr="window.faLog.on")
+    case("fake: onApply runs on every apply, Reset and Original orange theme included, stored = {} then", data={"fake-app-look": json.dumps(SEED_F)}, setup=FAKE_START + "F.apply();F.save({});F.apply();F.save(F.norm(F.PRE.live));F.apply();", expr="window.faLog.on")
     BAD_F = {"bg": "#ffffff"}
     case("fake: the refuse gate (the default) does not apply a stored white page and clears it", data={"fake-app-look": json.dumps(BAD_F)}, setup=FAKE_START, expr="{gate:F.GATE,refuse:F.refuse(F.resolve(%s)),warn:F.warn(F.resolve(%s),%s)}" % (js(BAD_F), js(BAD_F), js(BAD_F)))
     WARN_START = fake_cfg("fw", "fake-warn-look", gate="warn") + "ColorTool.applyStored(window.fw);var W=ColorTool.engine(window.fw);"
@@ -274,16 +277,17 @@ if res:
     CONST = res["constants"]["val"]
     FIELDS = CONST["FIELDS"]; FIELD_KEYS = [f[0] for f in FIELDS]; PRESETS = CONST["PRESETS"]; PRE = {p[0]: p[2] for p in PRESETS}; LIM = CONST["LIM"]
     GROUPS = [("surfaces", ["bg", "card", "line"]), ("text", ["fg", "mut", "link"]), ("buttons", ["ibd", "solid", "onsolid", "disbg", "disfg"]), ("small-labels", ["labbg", "labfg", "labbd"])]
-    check("the entries are version, applyStored, init, remount and engine; the version is 2; the gate of stackshot is the default, refuse", CONST["entries"] == ["applyStored", "engine", "init", "remount", "version"] and CONST["version"] == 2 and CONST["GATE"] == "refuse" and CONST["KEY"] == ct.KEY, CONST["entries"])
+    check("the entries are version, applyStored, init, remount and engine; the version is 3; the gate of stackshot is the default, refuse", CONST["entries"] == ["applyStored", "engine", "init", "remount", "version"] and CONST["version"] == 3 and CONST["GATE"] == "refuse" and CONST["KEY"] == ct.KEY, CONST["entries"])
     check("the fields are the saved list's 14 keys, in the panel's order, four groups (Surfaces, Text, Buttons, Small labels), named as the panel names them", sorted(FIELD_KEYS) == sorted(__import__("colorcombos").KEYS) and len(FIELD_KEYS) == 14 and sum(len(k) for _, k in GROUPS) == 14
           and [k for _, ks in GROUPS for k in ks] == FIELD_KEYS and CONST["GROUPS"] == ["Surfaces", "Text", "Buttons", "Small labels"] and sorted(CONST["KEYS"]) == sorted(FIELD_KEYS)
           and [f[1] for f in FIELDS] == ["Page background", "Cards", "Lines", "Body text", "Muted text", "Text and links", "Button outlines", "Solid fills", "Text on solid fills", "Disabled fill", "Disabled text", "Fill", "Text", "Outline"], FIELD_KEYS)
-    check("the presets are Live now (empty: what the page ships), Old orange, Two oranges, Radix and Primer, each a full 14-key combination of #rrggbb, the neutrals the same in every preset but Live now, the label outline equal to the label fill",
-          [p[0] for p in PRESETS] == ["live", "old", "two", "radix", "primer"] and [p[1] for p in PRESETS] == ["Live now", "Old orange", "Two oranges", "Radix", "Primer"] and PRESETS[0][2] == {}
+    check("the presets are the original orange theme (empty: what the page ships), Sky, Mint, Violet and Rose in that order, each a full 14-key combination of #rrggbb, the neutrals the same in every preset but the first, the label outline equal to the label fill; the four retired presets (old, two, radix, primer) are gone",
+          [p[0] for p in PRESETS] == ["live", "sky", "mint", "violet", "rose"] and [p[1] for p in PRESETS] == ["Original orange theme", "Sky", "Mint", "Violet", "Rose"] and PRESETS[0][2] == {}
+          and not {"old", "two", "radix", "primer"} & set(PRE)
           and all(sorted(p) == sorted(FIELD_KEYS) and all(re.fullmatch(r"#[0-9a-f]{6}", v) for v in p.values()) and p["labbd"] == p["labbg"]
                   and {k: p[k] for k in ("bg", "card", "line", "fg", "mut", "ibd", "disbg", "disfg")} == {"bg": "#161617", "card": "#1f1f21", "line": "#2c2c2e", "fg": "#ececea", "mut": "#a3a29d", "ibd": "#929190", "disbg": "#2a2a2c", "disfg": "#a3a29d"} for p in [q[2] for q in PRESETS[1:]]), None)
-    check("the presets' oranges are the stated ones: text / solid / on solid / label fill / label text", [(PRE[i]["link"], PRE[i]["solid"], PRE[i]["onsolid"], PRE[i]["labbg"], PRE[i]["labfg"]) for i in ("old", "two", "radix", "primer")] == [
-          ("#f0a06a", "#f0a06a", "#1f1f21", "#f0a06a", "#1f1f21"), ("#f0a06a", "#bd561d", "#ffffff", "#3a2619", "#f0a06a"), ("#ffa057", "#f76b15", "#ffffff", "#462100", "#ffa057"), ("#ffa657", "#bd561d", "#ffffff", "#2a1f19", "#db6d28")])
+    check("the presets' colors are the stated ones: text / solid / on solid / label fill / label text", [(PRE[i]["link"], PRE[i]["solid"], PRE[i]["onsolid"], PRE[i]["labbg"], PRE[i]["labfg"]) for i in ("sky", "mint", "violet", "rose")] == [
+          ("#7cb7ff", "#2a6fd0", "#ffffff", "#14283f", "#7cb7ff"), ("#5fd3a6", "#18805d", "#ffffff", "#10302a", "#5fd3a6"), ("#b79cff", "#7a52e0", "#ffffff", "#251c46", "#b79cff"), ("#ff8fb0", "#d6336c", "#ffffff", "#40182a", "#ff8fb0")])
     check("the limits, the hover and pressed blends and the label colors are the stated ones", LIM == {"fg_bg": 11, "fg_card": 7, "mut": 4.5, "ibd": 3, "link": 4.5, "solid": 3, "onsolid": 4.5, "lab": 4.5, "labbd": 3, "dis": 3, "line": 1.15}
           and CONST["HOVER"] == 14 and CONST["PRESSED"] == 24 and CONST["DK"] == "#161617" and CONST["WH"] == "#ffffff" and SH["fg"] == tk["--fg"], CONST["LIM"])
 
@@ -365,16 +369,19 @@ if res:
     check("disabled: either field sets BOTH properties, the one not set resolved to the shipped value, so a half-set pair never mixes two looks; no class (the stylesheet draws them)",
           P("disabled fill only") == {"--dis-bg": "#303034", "--dis-fg": SH["disfg"]} and P("disabled text only") == {"--dis-bg": SH["disbg"], "--dis-fg": "#c0bfba"} and res["disabled fill only"]["cls"] == [] and res["disabled text only"]["cls"] == [])
     pre = {r["id"]: r for r in res["pure: presets"]["val"]}
-    EXPECT_CLS = {"live": [], "old": [], "two": ["ct-on", "ct-wl"], "radix": ["ct-on", "ct-wl"], "primer": ["ct-on", "ct-wl"]}
-    check("applying each preset sets the classes expected (Live now and Old orange none; the others ct-on, and ct-wl under a white label); Live now applies nothing at all and Old orange only the three small-label tokens (it is the shipped look but for dark text on orange labels)",
-          all(res[f"preset {i}"]["cls"] == EXPECT_CLS[i] for i in EXPECT_CLS) and P("preset live") == {} and P("preset old") == {"--lab-bg": "#f0a06a", "--lab-fg": "#1f1f21", "--lab-bd": "#f0a06a"}, {i: res[f"preset {i}"]["cls"] for i in EXPECT_CLS})
-    check("a preset applies every field that differs from shipped and no other: Old orange the three label tokens only; the other three the oranges as stated (Two oranges shares the shipped text orange and the shipped small labels, so it sets neither of them: it sets the solid fill, its label and the disabled pair) and the label and disabled tokens together (a label text or outline equal to the text orange is not set: it follows it), not the outlines, which equal the shipped ones; no background, card, body text, muted text, line or outline property",
-          all(set(P(f"preset {i}")) >= ({"--orange-solid", "--on-solid", "--dis-bg", "--dis-fg"} | (set() if i == "two" else {"--lab-bg", "--lab-fg", "--lab-bd"})) and not (i == "two" and set(P(f"preset {i}")) & {"--lab-bg", "--lab-fg", "--lab-bd"})
-              and ("--orange-text" in P(f"preset {i}")) == (i != "two") and not set(P(f"preset {i}")) & {"--bg", "--card", "--line", "--fg", "--mut", "--ifill", "--ibd"} for i in ("two", "radix", "primer"))
-          and P("preset radix")["--orange-text"] == "#ffa057" and P("preset radix")["--orange-solid"] == "#f76b15" and P("preset radix")["--on-solid"] == "#ffffff" and P("preset radix")["--lab-bg"] == "#462100" and P("preset radix")["--lab-bd"] == "#462100", P("preset radix"))
+    EXPECT_CLS = {"live": [], "sky": ["ct-on", "ct-wl"], "mint": ["ct-on", "ct-wl"], "violet": ["ct-on", "ct-wl"], "rose": ["ct-on", "ct-wl"]}
+    check("applying each preset sets the classes expected (the original orange theme none and nothing at all; the four colored ones ct-on, and ct-wl under their white label)",
+          all(res[f"preset {i}"]["cls"] == EXPECT_CLS[i] for i in EXPECT_CLS) and P("preset live") == {}, {i: res[f"preset {i}"]["cls"] for i in EXPECT_CLS})
+    check("a colored preset applies every field that differs from shipped and no other: the text color (and what reads it), the solid fill, its label, the small labels' three tokens and the disabled pair; no background, card, body text, muted text, line, input fill or outline property (those are the shipped ones)",
+          all(set(P(f"preset {i}")) >= {"--orange-text", "--orange-solid", "--on-solid", "--lab-bg", "--lab-fg", "--lab-bd", "--dis-bg", "--dis-fg"} and not set(P(f"preset {i}")) & {"--bg", "--card", "--line", "--fg", "--mut", "--ifill", "--ibd"} for i in ("sky", "mint", "violet", "rose"))
+          and P("preset sky")["--orange-text"] == "#7cb7ff" and P("preset sky")["--orange-solid"] == "#2a6fd0" and P("preset sky")["--on-solid"] == "#ffffff" and P("preset sky")["--lab-bg"] == "#14283f" and P("preset sky")["--lab-bd"] == "#14283f", P("preset sky"))
     check("every preset normalises to a smaller map that resolves to the same 14 values again, and the resolved snapshot a save sends normalises back to the same map (a saved combination applies as the preset did)", all(pre[i]["again"] == pre[i]["n"] for i in pre)
           and all({k: pre[i]["r"][k] for k in FIELD_KEYS} == ({k: {**SH, **PRE[i]}[k] for k in FIELD_KEYS} if i != "live" else {k: SH[k] for k in FIELD_KEYS}) for i in pre), {i: (pre[i]["n"], pre[i]["again"]) for i in pre})
-    check("Live now saved as a snapshot of every shipped value (a combination saved with nothing set) applies nothing", P("Live now, saved as a snapshot of every shipped value") == {} and res["Live now, saved as a snapshot of every shipped value"]["cls"] == [])
+    check("the original orange theme saved as a snapshot of every shipped value (a combination saved with nothing set) applies nothing", P("Original orange theme, saved as a snapshot of every shipped value") == {} and res["Original orange theme, saved as a snapshot of every shipped value"]["cls"] == [])
+    RS = "a look stored by a preset that was later removed (a map of six fields)"; PS = "a snapshot of all 14 fields saved from a preset that was later removed"
+    check("a look stored before the retired presets were removed still applies: the map of fields a removed preset stored is applied as it was (text, solid fill, white label, small labels, ct-on and ct-wl) and kept in storage untouched, and a full 14-field snapshot saved from another removed preset applies by the fields that differ from shipped",
+          P(RS)["--orange-text"] == "#ffa057" and P(RS)["--orange-solid"] == "#f76b15" and P(RS)["--on-solid"] == "#ffffff" and P(RS)["--lab-bg"] == "#462100" and P(RS)["--lab-fg"] == "#ffa057" and P(RS)["--lab-bd"] == "#462100" and res[RS]["cls"] == ["ct-on", "ct-wl"]
+          and json.loads(res[RS]["data"][ct.KEY]) == STORED_A and P(PS)["--orange-text"] == "#ffa657" and P(PS)["--orange-solid"] == "#bd561d" and P(PS)["--lab-bg"] == "#2a1f19" and P(PS)["--lab-fg"] == "#db6d28" and res[PS]["cls"] == ["ct-on", "ct-wl"], (P(RS), P(PS)))
     old = "an older look: bg, text, solid, tint"
     check("an older look {bg, text, solid, tint} is read: the text as Text and links, the tint ignored, and it is applied", P(old).get("--orange-text") == "#ffa057" and P(old).get("--bg") == "#1f1f21" and P(old).get("--orange-solid") == "#bd561d"
           and res[old]["cls"] == ["ct-on", "ct-wl"] and "ct-tint" not in res[old]["cls"] and json.loads(res[old]["data"][ct.KEY])["tint"] is True)
@@ -402,12 +409,12 @@ if res:
           and r["props"]["--on-cta"] in ("#161617", "#ffffff") and r["cls"] == ["fake-solid"] and not set(r["props"]) & set(EXPECT_PROPS) and r["val"]["key"] == "fake-app-look" and r["val"]["gate"] == "refuse"
           and r["created"] == 0 and r["fetches"] == 0 and r["val"]["res"]["bg"] == "#0b1218" and r["val"]["res"]["fg"] == FAKE_SHIP["fg"], r)
     r = res[FK + "Reset takes off everything, onApply's properties and class too"]; sn = r["snaps"]
-    check("a second app: Reset and Live now take off every inline property and class the app's settings and onApply set (the extras included), and a new apply puts them back",
+    check("a second app: Reset and the original orange theme take off every inline property and class the app's settings and onApply set (the extras included), and a new apply puts them back",
           "--cta-hover" in sn["before"]["props"] and sn["before"]["cls"] == ["fake-solid"] and sn["after"]["props"] == {} and sn["after"]["cls"] == [] and sn["again"]["props"] == sn["before"]["props"] and sn["again"]["cls"] == ["fake-solid"]
           and r["props"] == {} and r["cls"] == [] and r["data"].get("fake-app-look") is None, sn)
-    r = res[FK + "onApply runs on every apply, Reset and Live now included, stored = {} then"]; on = r["val"]
+    r = res[FK + "onApply runs on every apply, Reset and Original orange theme included, stored = {} then"]; on = r["val"]
     SIX = ["--accent", "--cta", "--page", "--panel", "--panel-2", "--rule"]
-    check("a second app: onApply runs on every apply (at start, a plain apply, Reset, Live now) and for Reset and Live now with stored = {}; at its call everything the earlier apply set (onApply's own extras too) was already taken off: it sees only this apply's properties",
+    check("a second app: onApply runs on every apply (at start, a plain apply, Reset, the original orange theme) and for Reset and the original orange theme with stored = {}; at its call everything the earlier apply set (onApply's own extras too) was already taken off: it sees only this apply's properties",
           len(on) == 4 and [o["stored"] for o in on] == [["bg", "link", "solid"], ["bg", "link", "solid"], [], []] and [o["before"] for o in on] == [SIX, SIX, [], []], on)
     r = res[FK + "the shipped function is called on every apply, never cached, after the tracked properties were removed"]; v = r["val"]
     check("a second app: the function for the shipped values is called on every apply (once for each), never cached, and at its call the tracked inline properties were already taken off; a changed answer is what the next apply resolves against",
@@ -472,8 +479,8 @@ if res:
     check("a second app that ships its followers in uppercase hex is read as if it shipped them in lowercase: the values in use are lowercase, the shipped set as a whole is still no set field, and a stored lowercase copy of one of them is dropped by norm",
           r["err"] is None and v["none"]["labbg"] == "#173046" and v["none"]["disbg"] == "#2a3a4a" and v["none"]["disfg"] == "#9fb0c0" and v["snap"] == {} and v["lower"] == {} and v["link"]["disbg"] == "#2a3a4a", r)
     r = res["stackshot: its five shipped followers against what the engine works out from the live fields"]; v = r["val"]
-    check("stackshot's five shipped followers (labbg labfg labbd disbg disfg) are its own values (the small labels orange text on a dark brown fill, the disabled pair flat grey; the Old orange preset has dark text on the orange labels, the same disabled pair), which the follow rule would not give: the panel shows them while nothing they follow is set, and they differ from what the engine works out from the live fields with those five left out",
-          r["err"] is None and {k: v["shipped"][k] for k in ("labbg", "labfg", "labbd", "disbg", "disfg")} == {"labbg": "#3a2619", "labfg": "#f0a06a", "labbd": "#3a2619", "disbg": PRE["old"]["disbg"], "disfg": PRE["old"]["disfg"]}
+    check("stackshot's five shipped followers (labbg labfg labbd disbg disfg) are its own values (the small labels orange text on a dark brown fill, the disabled pair flat grey, the neutral pair every preset carries), which the follow rule would not give: the panel shows them while nothing they follow is set, and they differ from what the engine works out from the live fields with those five left out",
+          r["err"] is None and {k: v["shipped"][k] for k in ("labbg", "labfg", "labbd", "disbg", "disfg")} == {"labbg": "#3a2619", "labfg": "#f0a06a", "labbd": "#3a2619", "disbg": "#2a2a2c", "disfg": "#a3a29d"}
           and all(v["shipped"][k] != v["worked"][k] for k in ("labbg", "disbg", "disfg")) and v["worked"]["labbg"] == mixp(SH["link"], SH["card"], 16), r)
     check("the shared file names no screen, route or wording of the app that owns it: no 'board', no 'fleet', no example color of the app; the three lines the app may replace are in cfg.text with neutral defaults",
           not re.search(r"\bboard\b|fleet|#ec8a47", LIB, re.I) and "cfg.text" in LIB and "signIn: 'Sign in to use saved combinations.'" in LIB and "note: 'Dark theme only. The look you apply is kept in this browser.'" in LIB and "example: '#4a90d9'" in LIB
@@ -516,7 +523,7 @@ check("keyboard: every control is a button or an input, a visible focus ring on 
 check("a click outside the button and the panel closes it, and the panel and button are not printed", "path.indexOf(pop) >= 0 || path.indexOf(wrap) >= 0" in LIB and "document.addEventListener('click', function (e) {" in LIB and "@media print{.ct,.ct-pop{display:none}}" in CSS_LIB)
 check("a coarse pointer gets 44 px targets: the buttons, the picker and the hex box", "@media(pointer:coarse){.ct-b{min-height:44px}.ct-btn{min-width:44px}.ct-pick{width:44px;height:44px}.ct-hex{min-height:44px}}" in CSS_LIB)
 check("the hex box is 16 px so a phone does not zoom on it, and the notes and the Now line are polite live regions (only the library's helper writes the role and aria-live; the settings' script has none)",
-      re.search(r"\.ct-hex\{[^}]*font:16px ui-monospace", CSS_LIB) and LIB.count("'aria-live'") == 1 and LIB.count("role: 'status'") == 1 and "function live(id, cls, text)" in LIB and "live('ct-n-presets')" in LIB and "live('ct-cur', 'ct-cur', 'Now: Live now')" in LIB
+      re.search(r"\.ct-hex\{[^}]*font:16px ui-monospace", CSS_LIB) and LIB.count("'aria-live'") == 1 and LIB.count("role: 'status'") == 1 and "function live(id, cls, text)" in LIB and "live('ct-n-presets')" in LIB and "live('ct-cur', 'ct-cur', 'Now: Original orange theme')" in LIB
       and "live('ct-n-store')" in LIB and "live('ct-n-' + k)" in LIB and "live('ct-n-saved')" in LIB and "aria-live" not in CFG_ONLY)
 check("a row's name is a real label for its hex box (label for=ct-h-<key>), in a div of its own class ct-rl, which is not the html class ct-lab the settings use (html.ct-lab must not pick up the row's bold weight)",
       "el('label', { for: 'ct-h-' + k, id: 'ct-l-' + k, text: f[1] })" in LIB and "className: 'ct-rl'" in LIB and ".ct-rl{font-weight:600" in CSS_LIB and "ct-lab" not in LIB, None)
@@ -566,11 +573,19 @@ if res:
         full = {**SH, **vals}
         check(f"preset {nm_}: every REFUSE pair passes (body text 11:1 on the page and 7:1 on cards, muted text 4.5:1 and button outlines 3:1 on both), in the library and in Python", pre[pid]["refuse"] == [] and py_refuse(full) == [], (pre[pid]["refuse"], py_refuse(full)))
         check(f"preset {nm_}: the library's WARN list is the independent computation's: " + (", ".join(w["t"] for w in py_warn(full)) or "none"), pre[pid]["warn"] == py_warn(full), (pre[pid]["warn"], py_warn(full)))
-    EXPECT_WARN = {"live": [], "old": [], "two": [], "radix": ["onsolid", "onsolid"], "primer": []}
-    check("the WARN list per preset is exactly the expected one: Live now and Old orange none (the shipped look passes every pair), Radix its white label at rest and hovered (2.97:1, 3.93:1), the rest none; a changed preset or a changed shipped token fails here",
-          {i: [w["k"] for w in pre[i]["warn"]] for i in pre} == EXPECT_WARN and pre["radix"]["warn"][0]["t"].startswith("2.97:1") and pre["radix"]["warn"][1]["t"].startswith("3.93:1"), {i: pre[i]["warn"] for i in pre})
-    check("Radix text on solid fills is below 4.5:1 at rest and hovered (white on the fill, the hover toward black) but passes pressed, and a dark label on its fill would read 6.09:1 on the page and 5.54:1 on cards", C.ratio("#ffffff", "#f76b15") < 3 and C.ratio("#ffffff", mixp("#000000", "#f76b15", 24)) >= 4.5
-          and f"{C.ratio('#161617', '#f76b15'):.2f}" == "6.09" and f"{C.ratio('#1f1f21', '#f76b15'):.2f}" == "5.54", C.ratio("#ffffff", "#f76b15"))
+    EXPECT_WARN = {"live": [], "sky": [], "mint": [], "violet": [], "rose": []}
+    check("the WARN list per preset is exactly the expected one: none for the original orange theme (the shipped look passes every pair) and none for Sky, Mint, Violet and Rose (every pair of the gate, the white label at rest, hovered and pressed included); a changed preset or a changed shipped token fails here",
+          {i: [w["k"] for w in pre[i]["warn"]] for i in pre} == EXPECT_WARN and all(pre[i]["refuse"] == [] for i in pre), {i: pre[i]["warn"] for i in pre})
+    # the readability gate of the four colored presets, pair by pair with the independent contrast function (the limits of the tool, LIM): none is only a warning, none is refused
+    for pid in ("sky", "mint", "violet", "rose"):
+        pv = {**SH, **PRE[pid]}; far = "#000000" if C.lum(pv["onsolid"]) > C.lum(pv["solid"]) else pv["fg"]
+        pairs_ = {"text on the page": (pv["fg"], pv["bg"], LIM["fg_bg"]), "text on cards": (pv["fg"], pv["card"], LIM["fg_card"]), "muted on the page": (pv["mut"], pv["bg"], LIM["mut"]), "muted on cards": (pv["mut"], pv["card"], LIM["mut"]),
+                  "outlines on the page": (pv["ibd"], pv["bg"], LIM["ibd"]), "outlines on cards": (pv["ibd"], pv["card"], LIM["ibd"]), "link on the page": (pv["link"], pv["bg"], LIM["link"]), "link on cards": (pv["link"], pv["card"], LIM["link"]),
+                  "solid against the page": (pv["solid"], pv["bg"], LIM["solid"]), "solid against cards": (pv["solid"], pv["card"], LIM["solid"]), "label on the solid fill at rest": (pv["onsolid"], pv["solid"], LIM["onsolid"]),
+                  "label on the solid fill hovered": (pv["onsolid"], mixp(far, pv["solid"], CONST["HOVER"]), LIM["onsolid"]), "label on the solid fill pressed": (pv["onsolid"], mixp(far, pv["solid"], CONST["PRESSED"]), LIM["onsolid"]),
+                  "small-label text on its fill": (pv["labfg"], pv["labbg"], LIM["lab"]), "disabled text on its fill": (pv["disfg"], pv["disbg"], LIM["dis"]), "lines against cards": (pv["line"], pv["card"], LIM["line"])}
+        low = {k: f"{C.ratio(a, b):.2f}" for k, (a, b, mn) in pairs_.items() if C.ratio(a, b) < mn}
+        check(f"preset {pid}: every pair of the readability gate reads at or above its limit (text 11:1 and 7:1, muted 4.5:1, outlines 3:1, link 4.5:1, solid fill 3:1, label on the fill 4.5:1 at rest, hovered and pressed, small-label text 4.5:1, disabled text 3:1, lines 1.15:1)", not low and pv["labbd"] == pv["labbg"], low)
     # the "warn" gate's list is the independent computation's too: the first six pairs first, then the rest, for a look the refuse gate would turn down
     wlook = res["fake: the warn gate applies a stored white page, keeps it and refuses nothing"]["val"]["res"]
     wv = res["fake: the warn gate applies a stored white page, keeps it and refuses nothing"]["val"]["warn"]
@@ -597,12 +612,11 @@ if os.environ.get("COLOR_TRIAL_LIST") and res:
     for pid in pre: print(f"  {pid}: refuse {pre[pid]['refuse']}  warn {[w['t'] for w in pre[pid]['warn']]}")
 
 # ---- 7. what the other tests rely on, and no trace of the retired temporary feature
-PRESET_HEX = ({v for p in PRESETS for v in p[2].values()} | set(SH.values())) - {SH["link"], SH["bg"], SH["card"], SH["onsolid"]} if res else set()
+PRESET_HEX = {v for p in PRESETS[1:] for v in p[2].values()} - set(SH.values()) - {"#ffffff"} if res else set()      # the colors only the four colored presets carry
 band = lambda hx: 8.0 <= C.hsl(hx)[0] <= 38.0 and C.hsl(hx)[1] >= 0.20 and 0.06 <= C.hsl(hx)[2] <= 0.98
-in_band = sorted(h for h in PRESET_HEX if band(h))
-check("the preset oranges are in the orange scan's band (so the scan reads the pages without the tool's script blocks and skips the shared file): " + " ".join(in_band), len(in_band) >= 8 and all(h in LIB for h in in_band if h != SH["disbg"]), in_band)
-check("with the tool in place the pages carry the preset oranges; with its script blocks cut out not one is left (pages and the shared file's own text aside)", all(any(h in p for p in PAGES.values()) for h in in_band) and
-      not [h for h in in_band if h != SH["labbg"] for p in PAGES.values() if h in C.without_colortool(p)], [h for h in in_band if h != SH["labbg"] for p in PAGES.values() if h in C.without_colortool(p)][:3])      # the shipped small-label fill is in the stylesheet itself
+check("the colored presets carry no orange (none of their own colors is in the orange scan's band), so the original orange theme is the one orange the pages ship", len(PRESET_HEX) >= 12 and not [h for h in PRESET_HEX if band(h)], sorted(PRESET_HEX))
+check("with the tool in place the pages carry the preset colors; with its script blocks cut out not one is left (pages and the shared file's own text aside)", all(any(h in p for p in PAGES.values()) for h in PRESET_HEX) and
+      not [h for h in PRESET_HEX for p in PAGES.values() if h in C.without_colortool(p)], [h for h in PRESET_HEX for p in PAGES.values() if h in C.without_colortool(p)][:3])
 OLD = ("SAMPLE-RETIRED-BUTTON", "sampleRetiredTool", "retiredsample", "strip_sample_button", "sr-btn", "sr-pop", "html.sr-", "'sr-", '"sr-', "retired sample panel", "Retired: a sample panel", "sample retirement")
 skip_dirs = {"__pycache__", "node_modules", "screenshots"}      # and every folder whose name starts with a dot (.git, .claude, .venv, .suitemap: a checkout's tools and generated records, not sources)
 def stale_in(top, skip_self=True):

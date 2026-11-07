@@ -1,15 +1,14 @@
-"""Scenario test for the shipped dark look: the dark theme every page starts from is the 'Old orange' preset of the color tool (shared/colortool.js) with its three small-label fields flipped (orange text on a dark brown fill), and the light theme is as it was.
+"""Scenario test for the shipped dark look: the dark theme every page starts from is the original orange look (stackshot's shipped values for the color tool, ui/colortool.py SHIPPED: orange text and fills, orange text on a dark brown fill for the small labels), and the light theme is as it was.
 
-No server, no network, no browser: the pages are rendered straight from the Board, the stylesheet is read from them as the cascade resolves it (tests/_colors.py), and the preset is read from the shared
-file. tests/dark_default_check.py is the same proof in a real browser (computed styles on the rendered page, the Colors panel's Reset and the Old orange button); it is run by hand like the other
+No server, no network, no browser: the pages are rendered straight from the Board and the stylesheet is read from them as the cascade resolves it (tests/_colors.py). The shipped look is checked against its own 14 fields, written out
+below (no preset stands in for it). tests/dark_default_check.py is the same proof in a real browser (computed styles on the rendered page, the Colors panel's Reset and the Original orange theme button); it is run by hand like the other
 checks. Covers:
-  * the preset: shared/colortool.js defines 'old' as its neutrals plus five oranges; the 14 fields are read from that text, so a change to the preset fails here (it stays a preset, unchanged);
-  * stackshot's shipped values (ui/colortool.py SHIPPED), the Colors tool's Reset and Live now, are those 14 fields with labbg #3a2619, labfg #f0a06a and labbd #3a2619 (SHIPPED_LABELS) and nothing else changed,
-    so the Old orange preset differs from the shipped look in those three fields only, and every page carries the shipped values for the tool;
+  * the shipped look: the 14 fields of ui/colortool.py SHIPPED are exactly the ones written here (SHIPPED_FIELDS), the three small-label fields are the dark brown fill #3a2619 with the orange text #f0a06a (and the same brown outline),
+    the neutrals are the ones the shared file gives every preset (its NEUTRAL map), the first preset of shared/colortool.js, the original orange theme, is the empty map (nothing set, so Reset and it return to the shipped look),
+    and every page carries the shipped values for the tool;
   * the stylesheet of every page, in the dark theme, resolves the fields to the shipped look: the page, cards, lines, text, muted text, outlines, the one orange (links, the main button's fill), the label on it,
     the small labels' fill, text and outline, the disabled fill and text, in both dark forms (the chosen theme and the system scheme), and the dark rules that draw the labels and the disabled buttons from them;
   * the tool applies nothing of its own when nothing is set (every set and class in its onApply is behind a field being set), so Reset, which removes what it set, leaves the shipped look;
-    the Old orange preset differs from the shipped look in the three label fields, so it normalises to exactly those three;
   * the light theme is unchanged: the light token block of the home page and of an item page (page, text, lines, cards, the orange and the label on it, the input tokens) has the values it had before the dark default moved (LIGHT_TOKENS), and carries no label or disabled token. The whole light stylesheet is not hashed: that would fail on every unrelated change to a light rule.
 
     tests/run-suite dark_default        → exit 0 / 1"""
@@ -56,22 +55,18 @@ def check(name, cond, got=None):
 LIB = pathlib.Path(STACK, "shared", "colortool.js").read_text(encoding="utf-8")
 KEYS = ["bg", "card", "line", "fg", "mut", "link", "ibd", "solid", "onsolid", "labbg", "labfg", "labbd", "disbg", "disfg"]
 
-# ---- 1. the preset, read from the shared file's own text
+# ---- 1. the shipped look, checked against its own 14 fields
+SHIPPED_FIELDS = {"bg": "#161617", "card": "#1f1f21", "line": "#2c2c2e", "fg": "#ececea", "mut": "#a3a29d", "link": "#f0a06a", "ibd": "#929190", "solid": "#f0a06a", "onsolid": "#1f1f21",
+                  "labbg": "#3a2619", "labfg": "#f0a06a", "labbd": "#3a2619", "disbg": "#2a2a2c", "disfg": "#a3a29d"}
+NEW = SHIPPED_FIELDS
+check("stackshot's shipped values for the tool (what Reset and the original orange theme return to) are exactly these 14 fields, each #rrggbb", sorted(SHIPPED_FIELDS) == sorted(KEYS) and all(re.fullmatch(r"#[0-9a-f]{6}", v) for v in SHIPPED_FIELDS.values())
+      and {k: ct.SHIPPED.get(k) for k in KEYS} == SHIPPED_FIELDS, {k: (ct.SHIPPED.get(k), SHIPPED_FIELDS.get(k)) for k in KEYS if ct.SHIPPED.get(k) != SHIPPED_FIELDS.get(k)})
+check("the three small-label fields are orange text (the one orange, #f0a06a) on a dark brown fill with the same brown outline, and the text on the solid orange is the near-black #1f1f21",
+      (ct.SHIPPED["labbg"], ct.SHIPPED["labbd"]) == ("#3a2619",) * 2 and ct.SHIPPED["labfg"] == ct.SHIPPED["link"] == ct.SHIPPED["solid"] == "#f0a06a" and ct.SHIPPED["onsolid"] == "#1f1f21")
 neutral = re.search(r"var NEUTRAL = \{(.*?)\};", LIB, re.S)
-old_call = re.search(r"\['old', 'Old orange', preset\('(#[0-9a-f]{6})', '(#[0-9a-f]{6})', '(#[0-9a-f]{6})', '(#[0-9a-f]{6})', '(#[0-9a-f]{6})'\)\]", LIB)
-check("shared/colortool.js defines the 'old' preset (Old orange) as its neutrals and five oranges", bool(neutral) and bool(old_call), None)
-OLD = {}
-if neutral and old_call:
-    OLD = dict(re.findall(r"(\w+): '(#[0-9a-f]{6})'", neutral.group(1)))
-    OLD.update(link=old_call.group(1), solid=old_call.group(2), onsolid=old_call.group(3), labbg=old_call.group(4), labfg=old_call.group(5), labbd=old_call.group(4))
-check("the preset is 14 fields, each #rrggbb; one orange #f0a06a for the text, the solid fill and the small label fill and outline, the near-black #1f1f21 on the solid fill and on the small label", sorted(OLD) == sorted(KEYS) and all(re.fullmatch(r"#[0-9a-f]{6}", v) for v in OLD.values())
-      and (OLD.get("link"), OLD.get("solid"), OLD.get("labbg"), OLD.get("labbd")) == ("#f0a06a",) * 4 and (OLD.get("onsolid"), OLD.get("labfg")) == ("#1f1f21",) * 2, OLD)
-
-# ---- 2. what stackshot ships to the tool
-SHIPPED_LABELS = {"labbg": "#3a2619", "labfg": "#f0a06a", "labbd": "#3a2619"}       # the small labels as shipped: orange text on a dark brown fill (the Old orange preset has dark text on the orange)
-NEW = {**OLD, **SHIPPED_LABELS}
-check("stackshot's shipped values for the tool (what Reset and Live now return to) are the 14 fields of the Old orange preset with the three small-label fields flipped, exactly", {k: ct.SHIPPED.get(k) for k in KEYS} == NEW, {k: (ct.SHIPPED.get(k), NEW.get(k)) for k in KEYS if ct.SHIPPED.get(k) != NEW.get(k)})
-check("the Old orange preset differs from the shipped look in the three small-label fields and no other", sorted(k for k in KEYS if ct.SHIPPED.get(k) != OLD.get(k)) == sorted(SHIPPED_LABELS) and all(OLD[k] != v for k, v in SHIPPED_LABELS.items()))
+NEUTRAL = dict(re.findall(r"(\w+): '(#[0-9a-f]{6})'", neutral.group(1))) if neutral else {}
+check("the neutrals the shared file gives every preset are the shipped look's own (page, cards, lines, text, muted text, outlines and the disabled pair)", bool(NEUTRAL) and {k: ct.SHIPPED[k] for k in NEUTRAL} == NEUTRAL and sorted(NEUTRAL) == sorted(("bg", "card", "line", "fg", "mut", "ibd", "disbg", "disfg")), NEUTRAL)
+check("the first preset of the shared file, the original orange theme, is the empty map: it sets nothing, so applying it is the shipped look", "['live', 'Original orange theme', {}]" in LIB)
 check("the shipped input fill stays the stylesheet's own (it is not a field)", ct.SHIPPED.get("ifill") == "#2b2b2f")
 for nm, pg in PAGES.items():
     m = re.search(r"window\.stackshotColors=\{storageKey:\"[^\"]*\",shipped:(\{[^}]*\}),", pg)

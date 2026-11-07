@@ -310,14 +310,32 @@ def _fact_time(v):
     except Exception: return None
 
 
-def machine_alerts(m):
+CHECKOUT_WHAT = "stackshot checkout"      # the puller's `what` for the box's own stackshot checkout (puller.py): the one update judged by where the box is
+def server_commit():
+    """The commit the boxes follow (clients.checkout_commit), "" when it cannot be told (a fixture, git away): machine_alerts then
+    judges a checkout by its last attempt alone, as before."""
+    try:
+        import clients as _cl
+        return _cl.checkout_commit() or ""
+    except Exception:
+        return ""
+def machine_alerts(m, server=""):
     """What a machine's view (machine.json) says went wrong, for its column in the Machines panel: the last setup run when it
     failed, and every package whose latest update attempt failed (facts.updates, ok false; the last one listed for a `what` wins, and
-    an absent or malformed list is none). → (setup or None, [failed updates]), each a dict as reported."""
+    an absent or malformed list is none). The box's own stackshot checkout is judged by where it is, not by its last attempt: when
+    the box reports its checkout commit (`stackshot`) and the server's commit `server` is known, the failed attempt shows only while
+    the two differ, and the card is clear again the moment they match (the box got there another way, a later attempt, a hand fix),
+    except a failed reload of that very commit (reason "reload failed…", `to` the box's commit: the code there does not load);
+    with either unknown the last attempt decides. → (setup or None, [failed updates]), each a dict as reported."""
     s = m.get("setup") if isinstance(m.get("setup"), dict) else None
     latest = {}
     for u in m.get("updates") if isinstance(m.get("updates"), list) else []:
         if isinstance(u, dict) and str(u.get("what") or "").strip(): latest[str(u["what"]).strip()] = u
+    here, want = str(m.get("stackshot") or "").strip().lower(), str(server or "").strip().lower()
+    ck = latest.get(CHECKOUT_WHAT)
+    if here and want and here == want and ck is not None:
+        reload_of_here = str(ck.get("reason") or "").startswith("reload failed") and str(ck.get("to") or "") == here[:12]
+        if not reload_of_here: latest.pop(CHECKOUT_WHAT)    # a reload that failed on the code at the box's own commit is true there: the box is at the commit and not running it
     return (s if s and s.get("ok") is False else None), [u for u in latest.values() if u.get("ok") is False]
 
 
@@ -1066,7 +1084,7 @@ function save(b){next=b;if(!busy)flush()}
 function flush(){var b=next;next=null;if(!b)return;busy=true;
 fetch(URL,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(b)})
 .then(function(r){if(!r.ok)throw r.status;return r.json()})
-.then(null,function(e){say('The order is changed on this page but was not saved'+(e===403?': sign in to the board to keep it.':'. Check the connection and move it again.'))})
+.then(null,function(e){say('The order is changed on this page but was not saved'+(e===403||e===401?': sign in to the board to keep it.':'. Check the connection and move it again.'))})
 .then(function(){busy=false;flush()})}
 function moved(id,refocus){var o=order();say(label(id)+' moved to position '+(o.indexOf(id)+1)+' of '+o.length);save({order:o});
 if(refocus){var g=grip(id);if(g)g.focus()}}
@@ -1380,12 +1398,12 @@ _BFCACHE_JS = "<script>window.addEventListener('pageshow',function(e){if(e.persi
 def _every_m() -> float: return float(_cfg.get("publish", "every_minutes") or 10)   # read at each render: a reload is live
 def _stale_s() -> int: return int(_every_m() * 60 * 1.5)
 _LIVE_JS = r"""(function(){var M=document.querySelector('meta[name="stackshot-rendered"]'),R=M?+M.content:0,B=document.getElementById('conn');if(!B)return;
-var SH=document.querySelector('meta[name="stackshot-shell"]'),BM=document.querySelector('meta[name="stackshot-blocks"]'),V=bl(document),KY='stackshot.reload.y',KF='stackshot.reload.for',down=false,newer=false,timer=null,last=0,tried=0,inflight=null;
+var SH=document.querySelector('meta[name="stackshot-shell"]'),BM=document.querySelector('meta[name="stackshot-blocks"]'),V=bl(document),KY='stackshot.reload.y',KF='stackshot.reload.for',down=false,newer=false,out=false,told=false,timer=null,last=0,tried=0,inflight=null;
 function ss(k,v){try{if(v===undefined)return sessionStorage.getItem(k);if(v===null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,v)}catch(e){return null}}
 var y=ss(KY);if(y!==null){ss(KY,null);window.addEventListener('load',function(){window.scrollTo(0,+y)})}
 function typed(){var l=document.querySelectorAll('form.hanswer textarea,form.hanswer input[type=text],form.hanswer input:not([type])');for(var i=0;i<l.length;i++)if(l[i].value)return true;return !!document.querySelector('form.hanswer input[name=choice]:checked')}
 function busy(){var a=document.activeElement,s=window.getSelection?String(window.getSelection()):'';return !!((a&&(/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)||(a.matches&&a.matches('.rsz'))))||document.querySelector('.rsz.drag')||document.querySelector('#panel[data-pbusy],#panel-menu:not([hidden])')||s||typed())}
-function draw(){var k=down?'down':newer?'new':'';B.className='conn'+(k?' '+k:'');B.hidden=!k}
+function draw(){var k=out?'out':down?'down':newer?'new':'';if(out&&!told){told=true;var a=B.querySelector('#conn-signin');if(a)a.setAttribute('href',location.pathname+location.search);document.dispatchEvent(new Event('stackshot:signedout'))}B.className='conn'+(k?' '+k:'');B.hidden=!k}
 function reload(){ss(KY,String(window.scrollY||0));location.reload()}
 function fallback(ts){if(ss(KF)!==String(ts)){ss(KF,String(ts));reload()}else newer=true}
 function bl(d){var m=d.querySelector('meta[name="stackshot-blocks"]'),o={};if(m)String(m.content).split(' ').forEach(function(p){var i=p.indexOf('=');if(i>0)o[p.slice(0,i)]=p.slice(i+1)});return o}
@@ -1412,16 +1430,16 @@ if(window.scrollY!==y)window.scrollTo(0,y);
 if(did)document.dispatchEvent(new Event('stackshot:swapped'));return later?'later':'done'}
 function update(ts){if(inflight)return inflight;
 inflight=fetch(location.pathname+location.search,{cache:'no-store',credentials:'same-origin',headers:{'Accept':'text/html'}})
-.then(function(r){if(!r.ok||r.redirected)throw 0;return r.text()})
+.then(function(r){if(r.status===401){out=true;throw 0}if(!r.ok||r.redirected)throw 0;return r.text()})
 .then(function(t){var k;try{k=apply(t)}catch(e){k='fail'}
 if(k==='fail')fallback(ts);else if(k==='old'){tried=ts;newer=true}else if(k==='busy')newer=true;else{newer=false;ss(KF,null)}})
 .then(function(){inflight=null},function(e){inflight=null;throw e});return inflight}
 function seen(ts){if(!R||ts<=R){newer=false;ss(KF,null);return}
 if(busy()||tried===ts){newer=true;return}return update(ts)}
-function poll(){var t=Date.now();if(t-last<2000)return;last=t;clearTimeout(timer);document.dispatchEvent(new Event('stackshot:poll'));
-fetch('@ROOT@/render-stamp',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(r){if(!r.ok||r.redirected)throw 0;return r.json()})
-.then(function(d){if(!d||typeof d.ts!=='number')throw 0;down=false;return seen(d.ts)}).catch(function(){down=true})
-.then(function(){draw();timer=setTimeout(poll,down?15000:60000)})}
+function poll(){if(out)return;var t=Date.now();if(t-last<2000)return;last=t;clearTimeout(timer);document.dispatchEvent(new Event('stackshot:poll'));
+fetch('@ROOT@/render-stamp',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(r){if(r.status===401){out=true;throw 0}if(!r.ok||r.redirected)throw 0;return r.json()})
+.then(function(d){if(!d||typeof d.ts!=='number')throw 0;down=false;return seen(d.ts)}).catch(function(){if(!out)down=true})
+.then(function(){draw();if(!out)timer=setTimeout(poll,down?15000:60000)})}
 document.getElementById('conn-reload').addEventListener('click',reload);
 window.addEventListener('focus',poll);window.addEventListener('online',poll);
 window.addEventListener('offline',function(){down=true;draw()});
@@ -1466,7 +1484,7 @@ function refresh(){fetch('@ROOT@/audit/status',{cache:'no-store',credentials:'sa
 function say(t,warn){G.textContent=t;G.className='a-msg'+(warn?' warn':'');clearTimeout(mt);mt=setTimeout(function(){G.textContent='';hold=0;btn()},10000)}
 N.addEventListener('click',function(){if(N.disabled)return;inflight=true;btn();
 fetch('@ROOT@/audit/now',{method:'POST',cache:'no-store',credentials:'same-origin'})
-.then(function(r){if(r.redirected)return[0,''];return r.text().then(function(t){return[r.status,t]})})
+.then(function(r){if(r.redirected||r.status===401)return[0,''];return r.text().then(function(t){return[r.status,t]})})
 .then(function(a){var s=a[0],t=String(a[1]||'').trim().slice(0,200);
 if(s===404){E.hidden=true;return}
 if(s===202){hold=Date.now()+10000;say(t||'audit cued',false)}
@@ -1641,7 +1659,8 @@ class Board:
         self.basis_waits = sorted([r for r in open_w if _wt.basis_of(r["metadata"])], key=lambda r: (wake_key(r), sort_key(r)))   # waits that stand on a real-world date (wait_basis): listed once a week in the head
         self.nodate = [r for r in open_w if r["_wait"].get("nodate")]    # held with no wake, after or recycle: given now + the cap, reported here, never rewritten
         self.provision = provision_lag(now)            # [(hostname, online)] of the boxes whose stackshot puller is behind
-        self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.letters()}   # each machine's view: its last setup run and update attempts (machine_alerts)
+        self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.letters()}   # each machine's view: its last setup run, update attempts and checkout commit (machine_alerts)
+        self.server_commit = server_commit()           # the commit the boxes follow: a box's checkout is judged against it (machine_alerts)
         self._sc = (_SC_DEFAULT, _SC_ORG, _SC_TAG, _SC_PRE)
 
     # ---------------- the model ----------------
@@ -3015,7 +3034,7 @@ details.fold>summary{list-style:none;cursor:pointer}details.fold>summary::-webki
 .mnote{margin:-4px 0 8px;font-size:12px;line-height:1.4;color:var(--mut);overflow-wrap:anywhere}.mnote a.r-id{color:var(--fg);font-weight:600;white-space:nowrap}.mnote a.r-id:hover{color:var(--acc)}
 main.itempage{overflow-wrap:anywhere}main.itempage h1{font-size:22px;line-height:1.3;margin:6px 0 8px}.istat{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 14px;font-size:13px}.istat .badge{margin:0}main.itempage h1 .hid{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600;color:var(--mut);white-space:nowrap}main.itempage h1 .hsep{color:var(--mut);font-weight:400}.ilayout{display:grid;grid-template-columns:minmax(0,1fr) 256px;column-gap:32px;align-items:start;margin-top:8px}.imain{grid-column:1;grid-row:1;min-width:0}.iside{grid-column:2;grid-row:1;min-width:0;font-size:13px;line-height:1.45}.iside dl.sgrp{margin:0;padding:14px 0;border-top:1px solid var(--line)}.iside dl.sgrp:first-child{border-top:0;padding-top:2px}.iside dt{font-size:12px;font-weight:600;color:var(--mut);margin:0 0 6px}.iside dt .count{font-size:12px}.iside dd{margin:0 0 12px;min-width:0}.iside dd:last-child{margin-bottom:0}.iside .badge{margin:0 4px 0 0}.iside .sneeds{display:block;margin-top:4px;color:var(--fg)}.iside .iwarn.stw{font-size:12px;margin-left:0;font-weight:600}.iside ul.iwork{font-size:13px;margin:0}.iside ul.iwork li{gap:2px 6px;margin:0 0 8px}.iside ul.iwork li:last-child{margin-bottom:0}.iside ul.iwork .wtext{flex:1 1 100%}.iside ul.alist{margin:0;padding-left:16px;font-size:13px}.iside ul.alist li{margin:0 0 4px}.iside a.hgh{white-space:nowrap}@media(max-width:767px){__ISTRIP__}@media(min-width:__DOCK__px) and (max-width:__ISPIN__px){__ISTRIP_PIN__}.iask{margin:0 0 16px;padding:8px 12px;border-left:3px solid var(--call);background:var(--card);border-radius:0 8px 8px 0;font-size:14px}.iask>b{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin-bottom:4px}.iask dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 14px;margin:0}.iask dt{color:var(--mut);font-weight:600}.iask dd{margin:0;min-width:0}.iask p{margin:0;line-height:1.5}.iask b.osub{margin-top:10px}ol.iopts{margin:0;padding-left:22px}ol.iopts li{margin:3px 0;line-height:1.5}ol.iopts li.rec::marker{color:var(--call);font-weight:600}ol.iopts .oline{display:block}ol.inext{margin:0;padding-left:22px;font-size:14px}ol.inext li{margin:3px 0;line-height:1.5}ol.inext ul{padding-left:18px;list-style:disc}.cmd{position:relative;margin:6px 0 4px}.cmd pre{margin:0;padding:8px 78px 8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}.cmd pre code{border:0;padding:0;background:none;color:var(--fg)}.cmd button.copy{position:absolute;top:5px;right:5px}main.itempage .desc{opacity:1;margin-top:0}ul.hist{list-style:none;margin:0 0 0 5px;padding:0 0 0 16px;border-left:2px solid var(--line);font-size:14px}ul.hist li{position:relative;margin:0 0 12px;line-height:1.45}ul.hist>li::before{content:'';position:absolute;left:-23px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--bg);border:2px solid var(--mut)}ul.hist li.ev-completed::before{background:var(--run);border-color:var(--run)}ul.hist li.ev-created::before{background:var(--ok);border-color:var(--ok)}ul.hist li.ev-needs::before{border-color:var(--call)}ul.hist li.ev-hold::before{border-color:var(--warn)}ul.hist li.ev-answer::before{background:var(--call);border-color:var(--call)}.ianswer{margin:0 0 16px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:14px}.ianswer>b{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--call);font-weight:600;margin-bottom:6px}.ianswer label{display:block;color:var(--mut);font-size:13px;margin:8px 0 4px}.ianswer textarea{display:block;box-sizing:border-box;width:100%;min-height:4.5em;padding:8px 10px;font:inherit;font-size:15px;color:var(--fg);background:var(--ifill);border:1px solid var(--ibd);border-radius:6px;resize:none}.ianswer textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}.abtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.abtns-opt{margin-top:0}header.top+.isent{margin-top:32px}.isent{margin:0 0 12px;padding:6px 10px;border-radius:6px;font-size:14px;border:1px solid var(--line);background:var(--card)}.isent.ok{border-color:var(--ok);color:var(--ok)}.isent.warn{border-color:var(--warn);color:var(--warn)}.ianswer .aerr{margin:8px 0 0}ul.hist .eh{font-size:13px;margin:0 0 2px}ul.hist .t{color:var(--mut);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}ul.hist .eb{position:relative;padding-left:14px;margin:1px 0 0;font-size:14px}ul.hist .eb::before{content:"•";position:absolute;left:3px;color:var(--mut)}ul.hist .eb.osub{padding-left:30px}ul.hist .eb.osub::before{left:19px}ul.hist .ehold{margin:2px 0 0;font-size:13px}ul.hist .ehold summary{cursor:pointer;color:var(--mut)}ul.hist .ehold .md{margin:4px 0 0;padding-left:10px;border-left:2px solid var(--line)}ul.hist .w{min-width:0}ul.hist b{font-weight:600}ul.hist .body{display:block;white-space:pre-wrap;margin:2px 0 0;font-size:13px;line-height:1.45;opacity:.92}ul.hist .ed{color:var(--mut);font-size:12px}ul.hist li.ev-comment::before{border-color:var(--call)}ul.hist li.ev-reopened::before{border-color:var(--run)}
 h3.sgrp{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:16px 0 6px}ul.slist{list-style:none;padding-left:0;margin:0 0 4px}ul.slist li{margin:0 0 9px;line-height:1.45}ul.slist .sn{font-weight:600}ul.slist .own{color:var(--mut);font-size:13px}ul.slist .mand{display:block;color:var(--mut);font-size:13px}
-.pc{grid-template-columns:minmax(0,max-content) minmax(0,1fr);min-width:0}.pc>*{min-width:0;white-space:nowrap}.pc>:not(.tip){overflow:hidden;text-overflow:ellipsis}.pc.rcv{grid-template-columns:minmax(0,max-content) minmax(min-content,1fr)}.pc.rcv>:nth-child(2){contain:inline-size}.pc.warn{border-color:var(--warn)}.pc .val.warn,.pc .lbl.warn{color:var(--warn);font-weight:600}.pc .st{cursor:help}.pc.alert>.val{white-space:normal;overflow-wrap:anywhere}.pc.alert>.wide{grid-column:1/-1}.conn{display:flex;align-items:center;gap:8px;margin:0 calc(24px + 2 * var(--ico, 32px)) 8px 0;padding:6px 12px;border:1px solid var(--warn);border-radius:8px;background:color-mix(in srgb,var(--warn) 14%,var(--card));color:var(--fg);font-size:13px;line-height:1.4}.conn[hidden]{display:none}.conn>span{display:none}.conn.down .c-down,.conn.new .c-new{display:inline}#rendered.old{color:var(--warn);font-weight:600}
+.pc{grid-template-columns:minmax(0,max-content) minmax(0,1fr);min-width:0}.pc>*{min-width:0;white-space:nowrap}.pc>:not(.tip){overflow:hidden;text-overflow:ellipsis}.pc.rcv{grid-template-columns:minmax(0,max-content) minmax(min-content,1fr)}.pc.rcv>:nth-child(2){contain:inline-size}.pc.warn{border-color:var(--warn)}.pc .val.warn,.pc .lbl.warn{color:var(--warn);font-weight:600}.pc .st{cursor:help}.pc.alert>.val{white-space:normal;overflow-wrap:anywhere}.pc.alert>.wide{grid-column:1/-1}.conn{display:flex;align-items:center;gap:8px;margin:0 calc(24px + 2 * var(--ico, 32px)) 8px 0;padding:6px 12px;border:1px solid var(--warn);border-radius:8px;background:color-mix(in srgb,var(--warn) 14%,var(--card));color:var(--fg);font-size:13px;line-height:1.4}.conn[hidden]{display:none}.conn>span{display:none}.conn.down .c-down,.conn.new .c-new,.conn.out .c-out{display:inline}#rendered.old{color:var(--warn);font-weight:600}
 .audit{margin:0;font-size:12px}.audit[hidden]{display:none}.audit .a-txt{display:contents}.audit .lbl,.audit .val{min-width:0}.audit .val{white-space:normal;overflow-wrap:anywhere}.audit .a-run,.audit .a-msg{grid-column:1/-1;white-space:normal;overflow-wrap:anywhere}.audit .a-run{color:var(--mut)}.audit .a-f[title]:not([title='']){justify-self:start;cursor:help;border-bottom:1px dotted var(--mut)}.audit .a-bad,.audit .a-msg.warn{color:var(--warn);font-weight:600}.audit .a-msg{color:var(--fg)}.audit .a-msg:empty{display:none}
 li.iline .imeta .iwork{color:var(--fg);cursor:default}.iwork b{font-weight:600}ul.iwork{list-style:none;margin:0 0 4px;padding:0;font-size:14px}ul.iwork li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:0 0 6px;line-height:1.45}ul.iwork .badge{margin:0}ul.iwork li.w-done .wtext{color:var(--mut);text-decoration:line-through}ul.iwork .wagent{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut)}ul.hist li.ev-work::before{border-color:var(--ok)}
 ul.hist details.said{display:inline-block;vertical-align:baseline;max-width:100%}ul.hist details.said>summary{list-style:none;cursor:pointer;display:inline}ul.hist details.said>summary::-webkit-details-marker{display:none}ul.hist details.said>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:999px}ul.hist details.said[open]>summary .badge{background:color-mix(in srgb,var(--bc) 30%,transparent)}ul.hist details.said .sbody{display:block;margin:4px 0 2px;padding:6px 10px;border-left:3px solid var(--line);background:var(--card);border-radius:0 8px 8px 0;font-size:13px;line-height:1.45;white-space:normal}ul.hist details.said blockquote{margin:0 0 4px;white-space:pre-wrap;color:var(--fg)}ul.hist details.said .smeta{color:var(--mut);font-size:12px}ul.hist details.said:target{background:color-mix(in srgb,var(--acc) 12%,transparent);border-radius:8px}ul.hist li.ev-said::before{border-color:var(--ok)}
@@ -3611,7 +3630,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def failures(L, who=""):
             """Machine L's failed setup run and failed update attempts, each as (kind, detail, tip): kind is "setup" or "update", detail the step, or the package and the version it tried,
             tip the raw reason for the hover text (prefixed with `who` for a machine that has no card). An empty list when all went well."""
-            s, ups = machine_alerts(self.mfacts.get(L) or {})
+            s, ups = machine_alerts(self.mfacts.get(L) or {}, self.server_commit)
             out = []
             if s:
                 tip = f"setup failed at step {s.get('step') or '?'} {when_tip(s.get('at'))}: {s.get('reason') or 'no reason given'}"
@@ -3876,7 +3895,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The board page around its blocks BL (Board.html); ts / as_of / rstamp are the per-render values, shell and blocks
         the fingerprints _LIVE_JS reads."""
         TITLE = self.title
-        conn = f'''<div id="conn" class="conn" role="status" aria-live="polite" hidden><span class="c-down">Can't reach stackshot — showing the board as of {as_of}. Retrying…</span><span class="c-new">A newer board is available — <button type="button" id="conn-reload" class="b warn">Reload</button></span></div>\n'''
+        conn = f'''<div id="conn" class="conn" role="status" aria-live="polite" hidden><span class="c-down">Can't reach stackshot — showing the board as of {as_of}. Retrying…</span><span class="c-new">A newer board is available — <button type="button" id="conn-reload" class="b warn">Reload</button></span><span class="c-out">Signed out — <a href="{under('/')}" id="conn-signin">sign in again</a></span></div>\n'''
         _h = io.StringIO()
         with contextlib.redirect_stdout(_h):
             print(f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><meta name="stackshot-rendered" content="{ts}"><meta name="stackshot-shell" content="{shell}"><meta name="stackshot-blocks" content="{blocks}"><title>{esc(TITLE)}</title><link rel="icon" href="{icon_href('favicon.svg')}" type="image/svg+xml">{_font_link}{_THEME_HEAD}{_APP_HEAD}<style>{css}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">
@@ -3909,7 +3928,8 @@ document.querySelectorAll('[data-wait]').forEach(function(e){{e.textContent='wai
 var g=document.getElementById('rendered'),gs=g&&g.querySelector('[data-ts]');if(gs)g.classList.toggle('old',n-(+gs.getAttribute('data-ts'))>+g.getAttribute('data-stale'))}}
 tick();setInterval(tick,30000);
 var NET=new RegExp({json.dumps(_NET_ERR)},'i');
-function rcv(){{fetch('{PREFIX}/receivers.json',{{cache:'no-store'}}).then(function(r){{return r.ok?r.json():null}}).then(function(d){{if(!d)return;
+var gone=false;document.addEventListener('stackshot:signedout',function(){{gone=true}});
+function rcv(){{if(gone)return;fetch('{PREFIX}/receivers.json',{{cache:'no-store'}}).then(function(r){{if(r.status===401)gone=true;return r.ok?r.json():null}}).then(function(d){{if(!d)return;
 document.querySelectorAll('[data-rcv]').forEach(function(c){{var v=d[c.getAttribute('data-rcv')];if(!v)return;
 var raw=String(v.error||(v.ok?'healthy':'down')).slice(0,500),k=v.ok?'ok':NET.test(raw)?'warn':'bad';
 ['ok','warn','bad'].forEach(function(x){{c.classList.toggle(x,x===k)}});c.title=raw+' · checked '+v.checked+' {_cfg.tz_abbr()}';

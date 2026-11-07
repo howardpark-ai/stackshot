@@ -1596,7 +1596,7 @@ with sync_playwright() as p:
     # (colorcombos): the list is read when the panel opens, a save, an apply, a replace under the same name and a delete round-trip, an empty name is not sent, and a refusal (403, 409, 400 with the route's text, 503, offline) shows its
     # message and never loses the applied look. The light theme draws no button and applies nothing; storage that is off says so; a page without scripts has no button; an idle page's Send and disabled buttons compute as on a page without the tool.
     # Last, the same file in a page of another app (other settings: its own key, mount and property names, a function for the shipped values, onApply, isDark, no saved list, no preview, the "warn" gate): applyStored alone draws nothing,
-    # init draws the button in that app's mount and the panel in the body, Reset and Live now take off every property including onApply's, a light page draws nothing, "warn" lets a white page stand with notes and keeps it across a reload, and
+    # init draws the button in that app's mount and the panel in the body, Reset and the original orange theme take off every property including onApply's, a light page draws nothing, "warn" lets a white page stand with notes and keeps it across a reload, and
     # remount moves the button into a new mount while the open panel stays open.
     import urllib.parse
     import colorcombos as _cc
@@ -1720,8 +1720,8 @@ with sync_playwright() as p:
     ring = pg.evaluate("() => { const s = getComputedStyle(document.activeElement); return [document.activeElement.id, s.outlineStyle, parseFloat(s.outlineWidth)]; }")
     check("colors: the keyboard reaches the button and its focus ring shows (2 px outline)", ring[0] == "ct-btn" and ring[1] != "none" and ring[2] >= 2, ring)
     pg.keyboard.press("Enter"); pg.wait_for_timeout(80)
-    check("colors: Enter opens the panel, which starts on the shipped look with every field shipped: Live now is pressed (Old orange differs in the small labels) and the line names it", pg.evaluate(CT_RECT, "#ct-pop") is not None and pg.get_attribute("#ct-btn", "aria-expanded") == "true"
-          and pg.inner_text("#ct-cur") == "Now: Live now" and pg.input_value("#ct-h-bg") == "#161617" and pg.input_value("#ct-p-card") == "#1f1f21" and pg.get_attribute('.ct-preset[data-p=live]', "aria-pressed") == "true" and pg.get_attribute('.ct-preset[data-p=old]', "aria-pressed") == "false"
+    check("colors: Enter opens the panel, which starts on the shipped look with every field shipped: the original orange theme is pressed (Sky differs) and the line names it", pg.evaluate(CT_RECT, "#ct-pop") is not None and pg.get_attribute("#ct-btn", "aria-expanded") == "true"
+          and pg.inner_text("#ct-cur") == "Now: Original orange theme" and pg.input_value("#ct-h-bg") == "#161617" and pg.input_value("#ct-p-card") == "#1f1f21" and pg.get_attribute('.ct-preset[data-p=live]', "aria-pressed") == "true" and pg.get_attribute('.ct-preset[data-p=sky]', "aria-pressed") == "false"
           and pg.input_value("#ct-h-solid") == "#f0a06a" and pg.input_value("#ct-h-labbg") == "#3a2619" and pg.input_value("#ct-h-labfg") == "#f0a06a" and pg.input_value("#ct-h-onsolid") == "#1f1f21" and pg.input_value("#ct-h-disbg") == "#2a2a2c", pg.inner_text("#ct-cur"))
     fd = pg.evaluate(CT_FOLDED)
     check("colors: Enter opens the panel with the fields folded: the Fields button says closed, the presets and the saved box are in view", fd["fold"] == "false" and not fd["fieldsShown"] and pg.evaluate(CT_RECT, "#ct-g-presets") is not None and pg.evaluate(CT_RECT, "#ct-g-saved") is not None, fd)
@@ -1768,25 +1768,24 @@ with sync_playwright() as p:
     ct_fields(pg)
     pg.click("#ct-reset"); pg.wait_for_timeout(60); st3 = pg.evaluate(CT_STATE)
     check("colors: Reset returns everything to the shipped look: no inline property, no class, no stored key, every hex box shipped", st3["inline"] == "" and st3["cls"] == [] and st3["key"] is None and st3["bg"] == "rgb(22, 22, 23)"
-          and pg.input_value("#ct-h-bg") == "#161617" and pg.input_value("#ct-h-solid") == pg.evaluate("window.ColorTool.engine(window.stackshotColors).ship().solid") and pg.inner_text("#ct-cur") == "Now: Live now", st3)
-    PRE_SOLID = {"old": "rgb(240, 160, 106)", "two": "rgb(189, 86, 29)", "radix": "rgb(247, 107, 21)", "primer": "rgb(189, 86, 29)"}
-    PRE_ON = {"old": "rgb(31, 31, 33)", "two": "rgb(255, 255, 255)", "radix": "rgb(255, 255, 255)", "primer": "rgb(255, 255, 255)"}
-    PRE_LAB = {"old": "rgb(240, 160, 106)", "two": "rgb(58, 38, 25)", "radix": "rgb(70, 33, 0)", "primer": "rgb(42, 31, 25)"}
-    for pid in ("old", "two", "radix", "primer"):
+          and pg.input_value("#ct-h-bg") == "#161617" and pg.input_value("#ct-h-solid") == pg.evaluate("window.ColorTool.engine(window.stackshotColors).ship().solid") and pg.inner_text("#ct-cur") == "Now: Original orange theme", st3)
+    PRE_SOLID = {"sky": "rgb(42, 111, 208)", "mint": "rgb(24, 128, 93)", "violet": "rgb(122, 82, 224)", "rose": "rgb(214, 51, 108)"}
+    PRE_ON = {k: "rgb(255, 255, 255)" for k in PRE_SOLID}
+    PRE_LAB = {"sky": "rgb(20, 40, 63)", "mint": "rgb(16, 48, 42)", "violet": "rgb(37, 28, 70)", "rose": "rgb(64, 24, 42)"}
+    for pid in ("sky", "mint", "violet", "rose"):
         pg.click(f".ct-preset[data-p={pid}]"); pg.wait_for_timeout(450)      # the buttons' colors fade over a few hundred ms
         sd, dd, lab = (pg.eval_on_selector("#ct-pop .ct-prev .b.main:not(:disabled)", CT_PROPS), pg.eval_on_selector("#ct-pop .ct-prev .b:disabled:not(.main)", CT_PROPS), pg.eval_on_selector("#ct-pop .ct-prev .badge.rec", CT_PROPS))
         st = pg.evaluate(CT_STATE); dotp = pg.evaluate(CT_DOT)
-        check(f"colors: the {pid} preset applies at once: pressed, 'Now' names it, the page keeps its neutrals, the solid Send shows its solid and label, the disabled Undo its flat fill and text at full opacity (the stylesheet's dark disabled rule), the small label its fill, the circle's right half its solid; Old orange sets no class (it differs from the shipped look in the small labels only)",
+        check(f"colors: the {pid} preset applies at once: pressed, 'Now' names it, the page keeps its neutrals, the solid Send shows its solid and label, the disabled Undo its flat fill and text at full opacity (the stylesheet's dark disabled rule), the small label its fill, the circle's right half its solid",
               pg.get_attribute(f".ct-preset[data-p={pid}]", "aria-pressed") == "true" and pg.locator(".ct-preset[aria-pressed=true]").count() == 1 and pg.inner_text("#ct-cur") == "Now: " + pg.get_attribute(f".ct-preset[data-p={pid}]", "data-n")
               and st["bg"] == "rgb(22, 22, 23)" and sd[0] == PRE_SOLID[pid] and sd[1] == PRE_ON[pid] and dd[0] == "rgb(42, 42, 44)" and dd[1] == "rgb(163, 162, 157)" and dd[3] == "1" and lab[0] == PRE_LAB[pid]
-              and (st["cls"] == [] if pid == "old" else "ct-on" in st["cls"] and "ct-dis" not in st["cls"] and "ct-lab" not in st["cls"]) and dotp["b"] == PRE_SOLID[pid], (pid, sd, dd, lab, st["cls"], dotp))
-    pg.click(".ct-preset[data-p=radix]")
-    check("colors: the Radix preset is applied as given and marked: its white label is under 4.5:1 on the solid fill, so the button says 'pair below their limit' and the field's note names the ratio",
-          "below their limit" in pg.get_attribute(".ct-preset[data-p=radix]", "aria-label") and "Below its limit" in pg.inner_text("#ct-n-onsolid") and "2.97:1" in pg.inner_text("#ct-n-onsolid"), pg.inner_text("#ct-n-onsolid"))
-    check("colors: the other presets read clean except the Radix label (no mark on Live now, Old orange, Two oranges, Primer)",
-          [pg.get_attribute(f".ct-preset[data-p={p}]", "aria-label") for p in ("live", "old", "two", "primer")] == ["Live now", "Old orange", "Two oranges", "Primer"], [pg.get_attribute(f".ct-preset[data-p={p}]", "aria-label") for p in ("live", "old", "two", "primer")])
+              and "ct-on" in st["cls"] and "ct-dis" not in st["cls"] and "ct-lab" not in st["cls"] and dotp["b"] == PRE_SOLID[pid], (pid, sd, dd, lab, st["cls"], dotp))
+    PRE_NAMES = ["Original orange theme", "Sky", "Mint", "Violet", "Rose"]
+    check("colors: every preset reads clean, so no button carries the 'pair below their limit' mark: the buttons' names are the presets' names, and no note shows a ratio below a limit",
+          [pg.get_attribute(f".ct-preset[data-p={p}]", "aria-label") for p in ("live", "sky", "mint", "violet", "rose")] == PRE_NAMES and pg.locator(".ct-preset").count() == 5 and "Below its limit" not in pg.inner_text("#ct-pop"),
+          [pg.get_attribute(f".ct-preset[data-p={p}]", "aria-label") for p in ("live", "sky", "mint", "violet", "rose")])
     pg.click(".ct-preset[data-p=live]"); pg.wait_for_timeout(80); st = pg.evaluate(CT_STATE)
-    check("colors: Live now applies the shipped look: nothing stored, no class, no inline property (the same as Reset: every property the tool set, onApply's too, is taken off)", st["key"] is None and st["cls"] == [] and st["inline"] == "" and pg.inner_text("#ct-cur") == "Now: Live now", st)
+    check("colors: the Original orange theme applies the shipped look: nothing stored, no class, no inline property (the same as Reset: every property the tool set, onApply's too, is taken off)", st["key"] is None and st["cls"] == [] and st["inline"] == "" and pg.inner_text("#ct-cur") == "Now: Original orange theme", st)
     pg.click("#ct-reset")
     saved_note = pg.inner_text("#ct-n-saved")
     check("colors: on a page that is not served by the board (file) the saved list says it is not available and the panel still works", "not available" in saved_note and pg.evaluate(CT_RECT, "#ct-reset") is not None, saved_note)
@@ -1815,12 +1814,12 @@ with sync_playwright() as p:
     ctx = br.new_context(viewport={"width": 1100, "height": 800}, color_scheme="dark"); ctx.route(re.compile(r"^http://board\.test/"), ct_handler); pg = ctx.new_page()
     pg.goto("http://board.test/"); pg.wait_for_timeout(150); ct_show(pg); pg.click("#ct-btn"); pg.wait_for_timeout(250)
     check("colors: opening the panel reads the saved list once (a GET of the board's own address) and shows the count", ct_mode["calls"] == [("GET", "/colors/combos")] and pg.text_content("#ct-cnt") == "0 of 50 saved" and pg.locator("#ct-list li").count() == 0, (ct_mode["calls"], pg.text_content("#ct-cnt")))
-    pg.click(".ct-preset[data-p=radix]"); pg.fill("#ct-name", "Trial A"); pg.click("#ct-save"); pg.wait_for_timeout(250); got = _cc.listing()
+    pg.click(".ct-preset[data-p=rose]"); pg.fill("#ct-name", "Trial A"); pg.click("#ct-save"); pg.wait_for_timeout(250); got = _cc.listing()
     check("colors: Save under a name stores the 14 resolved values on the server (via board) and lists it; the note says Saved", len(got) == 1 and got[0]["name"] == "Trial A" and got[0]["via"] == "board" and len(got[0]["values"]) == 14
-          and got[0]["values"]["solid"] == "#f76b15" and got[0]["values"]["bg"] == "#161617" and pg.inner_text("#ct-n-saved") == "Saved Trial A." and pg.locator("#ct-list .ct-use").all_inner_texts() == ["Trial A"] and pg.text_content("#ct-cnt") == "1 of 50 saved", (got, pg.inner_text("#ct-n-saved")))
+          and got[0]["values"]["solid"] == "#d6336c" and got[0]["values"]["bg"] == "#161617" and pg.inner_text("#ct-n-saved") == "Saved Trial A." and pg.locator("#ct-list .ct-use").all_inner_texts() == ["Trial A"] and pg.text_content("#ct-cnt") == "1 of 50 saved", (got, pg.inner_text("#ct-n-saved")))
     first_id = got[0]["id"]; look = pg.evaluate(CT_STATE)
     pg.click("#ct-reset"); pg.wait_for_timeout(60); pg.click("#ct-list .ct-use"); pg.wait_for_timeout(100); st = pg.evaluate(CT_STATE)
-    check("colors: a saved combination applies at once (and is the Radix look again: 'Now' says so), the note says Applied; the stored look is the same map the preset made", st == look and pg.inner_text("#ct-n-saved") == "Applied Trial A." and pg.inner_text("#ct-cur") == "Now: Radix", (st, look))
+    check("colors: a saved combination applies at once (and is the Rose look again: 'Now' says so), the note says Applied; the stored look is the same map the preset made", st == look and pg.inner_text("#ct-n-saved") == "Applied Trial A." and pg.inner_text("#ct-cur") == "Now: Rose", (st, look))
     pg.fill("#ct-name", "trial a"); pg.click("#ct-save"); pg.wait_for_timeout(250); got = _cc.listing()
     check("colors: a save under the same name (case ignored) replaces it in place: still one entry, the same id, the new spelling; the note says Replaced", len(got) == 1 and got[0]["id"] == first_id and got[0]["name"] == "trial a" and pg.inner_text("#ct-n-saved") == "Replaced trial a." and pg.text_content("#ct-cnt") == "1 of 50 saved", got)
     pg.reload(); pg.wait_for_timeout(150); st = pg.evaluate(CT_STATE); ct_show(pg); pg.click("#ct-btn"); pg.wait_for_timeout(250)
@@ -1976,7 +1975,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui}main{padd
     pg.fill("#ct-h-solid", "#d9722e"); pg.wait_for_timeout(60); s = pg.evaluate(FS)
     check("another app: a new pick sets the app's properties again", "--cta" in s["inline"].split() and "--cta-text" in s["inline"].split() and s["cls"] == "fake-solid", s)
     pg.click(".ct-preset[data-p=live]"); pg.wait_for_timeout(60); s = pg.evaluate(FS)
-    check("another app: Live now (stored = nothing) takes off the same properties, the extras included, and runs onApply once more", s["inline"] == "" and s["cls"] == "" and s["key"] is None and pg.evaluate("window.fakeApplies") >= 4, (s, pg.evaluate("window.fakeApplies")))
+    check("another app: the original orange theme (stored = nothing) takes off the same properties, the extras included, and runs onApply once more", s["inline"] == "" and s["cls"] == "" and s["key"] is None and pg.evaluate("window.fakeApplies") >= 4, (s, pg.evaluate("window.fakeApplies")))
     pg.fill("#ct-h-bg", "#ffffff"); pg.wait_for_timeout(60); s = pg.evaluate(FS)
     check("another app on the default gate: a white page is turned down with the 'Not applied' note and nothing changes", s["key"] is None and s["bg"] == "rgb(16, 24, 32)" and pg.inner_text("#ct-n-bg").startswith("Not applied: body text would read"), (s, pg.inner_text("#ct-n-bg")))
     ctx.close()
@@ -2009,12 +2008,12 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui}main{padd
     for w, h, touch in ((1100, 800, False), (390, 800, True)):
         ctx = br.new_context(viewport={"width": w, "height": h}, color_scheme="dark", has_touch=touch); pg = ctx.new_page(); pg.goto(CT_FILES["board"].as_uri()); pg.wait_for_timeout(150); ct_show(pg)
         pg.click("#ct-btn"); pg.wait_for_timeout(100)
-        ids = pg.evaluate("window.__dots = [...document.querySelectorAll('.ct-preset[data-p=radix] .ct-dots i')]; window.__dots.length")
+        ids = pg.evaluate("window.__dots = [...document.querySelectorAll('.ct-preset[data-p=rose] .ct-dots i')]; window.__dots.length")
         for j in (0, 3):
-            box = pg.locator(".ct-preset[data-p=radix] .ct-dots i").nth(j)
+            box = pg.locator(".ct-preset[data-p=rose] .ct-dots i").nth(j)
             (box.tap if touch else box.click)(); pg.wait_for_timeout(450)
             check(f"colors {w}{' touch' if touch else ''}: a click on dot {j + 1} of a preset applies the preset (pressed, its solid fill on the page) and the panel stays open", pg.evaluate(CT_RECT, "#ct-pop") is not None and pg.get_attribute("#ct-btn", "aria-expanded") == "true"
-                  and pg.get_attribute(".ct-preset[data-p=radix]", "aria-pressed") == "true" and json.loads(pg.evaluate(CT_STATE)["key"]).get("solid") == "#f76b15", (pg.get_attribute("#ct-btn", "aria-expanded"), pg.evaluate(CT_STATE)["key"]))
+                  and pg.get_attribute(".ct-preset[data-p=rose]", "aria-pressed") == "true" and json.loads(pg.evaluate(CT_STATE)["key"]).get("solid") == "#d6336c", (pg.get_attribute("#ct-btn", "aria-expanded"), pg.evaluate(CT_STATE)["key"]))
         check(f"colors {w}{' touch' if touch else ''}: the dots are the same four elements after the apply (built once, only their color changes)", ids == 4 and pg.evaluate("window.__dots.every(e => e.isConnected)"), ids)
         pg.click(".ct-preset[data-p=live]"); pg.wait_for_timeout(100)
         pg.mouse.click(2, 2) if not touch else pg.touchscreen.tap(2, 2); pg.wait_for_timeout(150)

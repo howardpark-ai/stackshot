@@ -1,5 +1,5 @@
-"""Browser check of the shipped dark look: on a rendered page in a real browser, the dark theme with nothing stored computes to the shipped look (the 'Old orange' preset of the color tool with its small labels flipped: orange text on a dark brown fill), the light theme computes as it
-did, the Old orange button of the Colors panel changes the small labels only, and Reset in the panel returns a changed look to the shipped one. The static proof (the stylesheet's tokens against the preset, the
+"""Browser check of the shipped dark look: on a rendered page in a real browser, the dark theme with nothing stored computes to the shipped look (the original orange look: orange text on a dark brown fill for the small labels, checked against its own 14 fields), the light theme computes as it
+did, a colored preset of the Colors panel changes the look, and Reset in the panel returns a changed look to the shipped one. The static proof (the stylesheet's tokens against the 14 fields, the
 light theme's token block) is tests/dark_default_scenario.py, which CI runs; this one needs the browser (once per machine: uvx playwright@1.63.0 install chromium) and is run by hand, like the other checks.
 
 The page is the item page of the Board, rendered with no server; a row of the elements that show each of the 14 fields is added to it (a card, a line, muted text, a link, a secondary button, the main
@@ -47,8 +47,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 def rgb(h): return "rgb(%d, %d, %d)" % tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
-OLD = ct.SHIPPED                                    # the shipped look, which tests/dark_default_scenario.py pins against the Old orange preset of shared/colortool.js (the three small-label fields differ)
-OLD_PRESET_LABELS = ("#f0a06a", "#1f1f21", "#f0a06a")   # the Old orange preset's small labels: dark text on the orange fill
+OLD = ct.SHIPPED                                    # the shipped look, whose 14 fields tests/dark_default_scenario.py pins
 
 PROBE = """() => {
   const old = document.getElementById('dd-probe'); if (old) old.remove();
@@ -82,25 +81,21 @@ with sync_playwright() as p:
     try:
         ctx = br.new_context(viewport={"width": 1000, "height": 900}, color_scheme="dark"); pg = ctx.new_page(); pg.goto(PAGE.as_uri()); pg.wait_for_timeout(200)
         d0 = pg.evaluate(PROBE)
-        check("dark, nothing stored: the page background is the preset's, the body text, a card and its line, muted text, a link are the preset's", pg.evaluate("matchMedia('(prefers-color-scheme: dark)').matches") and d0["html"][1] == rgb(OLD["bg"])
+        check("dark, nothing stored: the page background is the shipped one, and so are the body text, a card and its line, muted text and a link", pg.evaluate("matchMedia('(prefers-color-scheme: dark)').matches") and d0["html"][1] == rgb(OLD["bg"])
               and not cmp(d0, {k: v for k, v in want_dark().items() if k in ("body", "card", "mut", "link")}), (d0["html"], cmp(d0, want_dark())))
-        check("dark, nothing stored: a secondary button's outline and text, the main button's fill and label, the disabled buttons' flat fill and text at full opacity, the orange badges and the Your move tag are the preset's", not cmp(d0, {k: v for k, v in want_dark().items() if k in ("sec", "main", "dsec", "dmain", "call", "rec", "you")}), cmp(d0, want_dark()))
+        check("dark, nothing stored: a secondary button's outline and text, the main button's fill and label, the disabled buttons' flat fill and text at full opacity, the orange badges and the Your move tag are the shipped ones", not cmp(d0, {k: v for k, v in want_dark().items() if k in ("sec", "main", "dsec", "dmain", "call", "rec", "you")}), cmp(d0, want_dark()))
         check("dark, nothing stored: nothing is set inline on the page and no tool class is on it (the look is the stylesheet's)", TOOL_PROPS(d0) == [] and "ct-" not in d0["cls"], (d0["inline"], d0["cls"]))
         check("dark, nothing stored: a status badge (open) keeps its own tint, not the label look", d0["ok"][0] != rgb(OLD["labbg"]) and d0["ok"][1] != rgb(OLD["labfg"]), d0["ok"])
-        # the Colors panel: Old orange changes the small labels only; a changed look is undone by Reset
+        # the Colors panel: a colored preset changes the look; a changed look is undone by Reset
         pg.evaluate("document.getElementById('ct-btn').click()"); pg.wait_for_timeout(100)
-        pg.evaluate("document.querySelector('.ct-preset[data-p=old]').click()"); pg.wait_for_timeout(80)
-        d1 = pg.evaluate(PROBE)
-        ch = sorted(k for k in d1 if d1[k] != d0[k]); ol = [rgb(v) for v in OLD_PRESET_LABELS]
-        check("the Old orange preset button changes the small labels only (the orange badges and the Your move tag: orange fill, dark text); everything else computes as the default, no class is set", ch == ["call", "inline", "rec", "you"] and d1["call"] == ol and d1["rec"] == ol and d1["you"][:2] == ol[:2] and "ct-" not in d1["cls"], {k: (d1[k], d0[k]) for k in d1 if d1[k] != d0[k]})
-        pg.evaluate("document.querySelector('.ct-preset[data-p=radix]').click()"); pg.wait_for_timeout(80)
+        pg.evaluate("document.querySelector('.ct-preset[data-p=sky]').click()"); pg.wait_for_timeout(80)
         d2 = pg.evaluate(PROBE)
-        check("another preset (Radix) does change the look: a different main fill, label fill and link", d2["main"][0] != d0["main"][0] and d2["call"][0] != d0["call"][0] and d2["link"] != d0["link"], (d2["main"], d2["call"], d2["link"]))
+        check("a colored preset (Sky) does change the look: a different main fill, label fill and link, and the page background stays", d2["main"][0] != d0["main"][0] and d2["call"][0] != d0["call"][0] and d2["link"] != d0["link"] and d2["html"] == d0["html"] and d2["link"] == [rgb("#7cb7ff")], (d2["main"], d2["call"], d2["link"]))
         pg.evaluate("document.getElementById('ct-reset').click()"); pg.wait_for_timeout(80)
         d3 = pg.evaluate(PROBE)
         check("Reset returns the look to the shipped one: the same computed styles as the default, nothing stored, nothing set inline, no class", d3 == d0 and pg.evaluate("localStorage.getItem('stackshot-color-trial')") is None and TOOL_PROPS(d3) == [] and "ct-" not in d3["cls"], {k: (d3[k], d0[k]) for k in d3 if d3[k] != d0[k]})
         pg.evaluate("document.querySelector('.ct-preset[data-p=live]').click()"); pg.wait_for_timeout(80)
-        check("Live now is the same shipped look", pg.evaluate(PROBE) == d0)
+        check("the Original orange theme button is the same shipped look", pg.evaluate(PROBE) == d0)
         pg.evaluate("document.getElementById('ct-fold').click()"); pg.wait_for_timeout(60)
         pg.fill("#ct-h-link", "#ffa057"); pg.press("#ct-h-link", "Tab"); pg.wait_for_timeout(80)
         d4 = pg.evaluate(PROBE)

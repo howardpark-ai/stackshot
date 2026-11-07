@@ -110,6 +110,8 @@ item("a", 32, needs=["decision"], ask=YESNO)                               # Yes
 item("a", 33, needs=["decision"], ask=YESNO)                               # Yes after the decision has left the item (stale)
 item("a", 40, state="your-step", step=STEP, needs=["home-agent"])                # Send with an empty box = Done
 item("a", 41, state="your-step", step=STEP, needs=["home-agent"])                # Send with a note = his note on the step, handed to the then-mover to judge
+item("a", 45, state="your-step", step=STEP, needs=["home-agent"])                # Send with a note that names a later time: the item waits until then
+item("a", 46, state="your-step", step=STEP, needs=["home-agent"])                # a later-time note whose time is past the wait cap
 item("a", 42)                                                              # Send on an item that has no step any more
 item("a", 43, state="your-step", step=STEP, owner="")                         # Send with a note, nobody to take it
 item("a", 50, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent")              # the decision hand-over: a decision with a stored mover and then (no options: Yes / No)
@@ -122,7 +124,9 @@ item("a", 56, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent") 
 item("a", 57, needs=["decision"], ask=YESNO, mover="Oliver", then="Oliver")               # the decision hand-over: a then that names him is no then
 item("a", 58, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent", hold=True, wake="2099-01-01", hold_set={"by": "t", "at": now})   # the hand-over, F1: still on hold with a wake after the answer
 item("a", 59, needs=["decision", "external"], ask=YESNO, mover="Oliver", then="home-agent", party="the vendor", chase="2099-01-01")           # the hand-over, F1: external stays in needs
-item("a", 62)                                                                                                                              # the hand-over: a prerequisite that is open now and closed in the test
+item("a", 90, needs=["home-agent"], next="home-agent: confirm the runs are gone")                  # a session sets the your-step and names the mover in one update, then his note
+item("a", 91, needs=["home-agent"], next="home-agent: confirm the runs are gone")                  # the same, with its own Oliver line in next saying the step
+item("a", 62)                                                                                                                            # the hand-over: a prerequisite that is open now and closed in the test
 item("a", 60, needs=["decision"], ask=YESNO, mover="Oliver", then="home-agent", after=["a62"])                                               # the hand-over, F1: an open after link
 item("a", 67)                                                                                                                              # the prerequisite of, closed in the test
 item("a", 63, needs=["decision"], ask=ASK, mover="Oliver", then="home-agent", after=["a67"],
@@ -577,7 +581,11 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and not server._model.is_owner(server._model.derive(rd("a", 41)).mover) and rd("a", 41)["status"] == "open", (r_s41.headers.get("location"), m41))
     check("Send with a note: recorded as his note on the step (kind step-reply, his words, via board, the step he did), not as a Done",
           [(a["kind"], a.get("choice"), a["text"], a["via"], a["step"]) for a in m41["answers"]] == [("step-reply", None, "which box do I run it on?", "board", _STEPN)], m41["answers"])
-    _judge = ". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to Oliver with a new step (step=…)."
+    _tz, _minreason = server._cfg.tz_abbr(), server._cfg.WAIT_GUARD_REASON_MIN
+    _judge_old = ". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to Oliver with a new step (step=…)"
+    _judge_later = (f"; if it says he will do the step at a later time, put the item on hold until then (update hold=true, wake=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
+                    f"wait_reason=<what it waits on, at least {_minreason} characters>), leave his step open and hand no new step back.")
+    _judge = _judge_old + _judge_later
     check("Send with a note: the then-mover alone is told, with his note and the instruction to judge it (the creator is not told)",
           sorted((t[1], t[3]) for t in told) == [(AGENT, "answer")]
           and {t[1]: t[2] for t in told}[AGENT] == f"[stackshot] Oliver sent a note on his step on a41: {_STEPN}. It's yours now with his note: “which box do I run it on?”{_judge} → {BOARD}/items/a41", told)
@@ -586,6 +594,32 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("History and `get` show the note as his note on the step, never as Done",
           "note on his step" in ui_render.Board(str(STORE)).item_html("a41") and "<b>Done</b>" not in ui_render.Board(str(STORE)).item_html("a41")
           and "note on his step: which box do I run it on?" in server.stackshot_get("a41"), None)
+    # a note that names a later time: the notice carries the third branch, and the tools it names put the item on hold with a wake
+    told.clear(); r_s45 = post("/items/a45/answer", {"token": tok("a45"), "act": "send", "text": "I will do this tomorrow evening", "back": "/#task-a-45"}); m45 = rd("a", 45)["metadata"]
+    n45 = {t[1]: t[2] for t in told}[AGENT]
+    check("a later-time note: the then-mover alone is told, and its notice keeps both earlier branches word for word and adds the wait branch after them",
+          sorted(t[1] for t in told) == [AGENT] and _judge_old + "; if it says he will do the step at a later time" in n45 and n45.endswith(_judge_later + f" → {BOARD}/items/a45")
+          and "if it finishes the step, carry on as after a Done" in n45 and "then hand the item back to Oliver with a new step (step=…)" in n45, n45)
+    check("the wait branch names the exact tool form: hold=true, a wake as YYYY-MM-DDTHH:MM in the instance zone, a wait_reason with its minimum length, his step left open, no new step handed back",
+          "update hold=true" in n45 and f"wake=<that time, YYYY-MM-DDTHH:MM {_tz}>" in n45 and f"wait_reason=<what it waits on, at least {_minreason} characters>" in n45
+          and "leave his step open and hand no new step back" in n45 and _minreason >= 15, n45)
+    check("the server itself does not read the time in the note: the item is with the then-mover, not on hold, no wake (the instruction is the notice's text, carried out by the mover's update)",
+          r_s45.headers["location"] == "/?sent=stepreply&item=a45&then=home-agent#task-a-45" and m45.get("mover") == "home-agent" and "hold" not in m45 and "wake" not in m45
+          and [a["kind"] for a in m45["answers"]] == ["step-reply"], m45)
+    _when = (server.dt.datetime.now(server.ZONE) + server.dt.timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    r_u45 = server.stackshot_update("a45", hold=True, wake=_when, wait_reason="Oliver said he will do the step tomorrow evening", sender="home-agent")
+    i45 = rd("a", 45); m45 = i45["metadata"]
+    check("following the notice (update hold=true, wake, wait_reason) is accepted: the item is on hold with that wake, the same mover, and no step handed back to him",
+          r_u45.startswith("updated a45") and m45.get("hold") is True and m45.get("wake") == _when and m45.get("mover") == "home-agent" and "step" not in m45 and m45.get("state") != "your-step"
+          and server._model.derive(i45).state == "waiting" and not server._model.is_owner(server._model.derive(i45).mover), (r_u45, m45))
+    check("the wake stands on his note: it is recorded as the words behind the hold (cap_ok quote)", "tomorrow evening" in str((m45.get("cap_ok") or {}).get("quote")), m45.get("cap_ok"))
+    # a wake past the cap: his note, given since the item's last move, is the words that let it stand
+    told.clear(); post("/items/a46/answer", {"token": tok("a46"), "act": "send", "text": "after the trip, next month", "back": "/#task-a-46"})
+    _far = (server.dt.datetime.now(server.ZONE) + server.dt.timedelta(days=server._wt.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    r_u46 = server.stackshot_update("a46", hold=True, wake=_far, wait_reason="Oliver said he will do the step after the trip", sender="home-agent")
+    i46 = rd("a", 46); m46 = i46["metadata"]
+    check("a note that names a time beyond the usual wait cap: the same update is accepted on his note's words, and the item waits until then",
+          r_u46.startswith("updated a46") and m46.get("hold") is True and m46.get("wake") == _far and "after the trip" in str((m46.get("cap_ok") or {}).get("quote")) and server._model.derive(i46).state == "waiting", (r_u46[:300], m46))
     r_s41b = post("/items/a41/answer", {"token": tok("a41"), "act": "send", "text": "again"})
     check("Send with a note twice: the second finds no step any more, so it is a comment (the board item's rule), the first note stays", r_s41b.headers["location"] == "/items/a41?sent=comment" and [a["kind"] for a in rd("a", 41)["metadata"]["answers"]] == ["step-reply", "comment"])
     r_s42 = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": ""}); r_s42c = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": "late note"})
@@ -621,7 +655,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear()
 
     st_ = server._answers_load()
-    for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42"): st_.pop(g, None)
+    for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42", "a45", "a46"): st_.pop(g, None)
     server._answers_save(st_)
     for p in G.pending(): p.unlink()
     told.clear()
@@ -858,5 +892,24 @@ try:
           and not b(85).conflicts and any(t[0] == "a85" and t[1] == AGENT for t in told), (rd("a", 85)["metadata"], b(85), told))
 finally:
     server._watch.enabled = _real_enabled
+
+# ---- a your-step set by an update that also names the mover (mover=Oliver) still gets the server's step, so his note ticks it
+STEP90 = "Run the 8 run deletions yourself: my gh DELETE call is refused by the permission layer"
+_ol = lambda g: [(x["status"], x["text"]) for x in server._hs._steps.view(rd("a", g)["metadata"], keeper=OWNER) if x["text"].startswith("Oliver:")]
+server.stackshot_update("a90", sender="home-agent", step=STEP90, mover="Oliver", next="home-agent: confirm the runs are gone\nOliver: `for id in 1 2; do gh api -X DELETE runs/$id; done`")
+_m90 = rd("a", 90)["metadata"]
+check("named mover, setup: step= and mover=Oliver in one update: his step is on the list as the server's own (owner_step), beside the session's own Oliver line",
+      _m90.get("state") == "your-step" and _m90.get("mover") == "Oliver" and _m90.get("owner_step") == f"Oliver: {STEP90}"
+      and [(s_, t_.startswith("Oliver: `for id")) for s_, t_ in _ol(90)] == [("open", True), ("open", False)] and _ol(90)[1][1] == f"Oliver: {STEP90}", (_m90.get("owner_step"), _ol(90)))
+told.clear(); r_s90 = server._answer("a90", "", "tried it, it says forbidden", "send"); _m90 = rd("a", 90)["metadata"]
+check("named mover: his note on that step ticks the server's step (done, his words after the arrow), leaves the session's own Oliver line open, and the then-mover is still told to judge the note",
+      r_s90 == "stepreply" and "owner_step" not in _m90
+      and [s_ for s_, t_ in _ol(90) if t_.startswith(f"Oliver: {STEP90}")] == ["done"] and [s_ for s_, t_ in _ol(90) if t_.startswith("Oliver: `for id")] == ["open"]
+      and any("Judge the note" in t[2] for t in told), (r_s90, _ol(90), _m90.get("owner_step"), [t[2][:80] for t in told]))
+# a session that wrote its own Oliver line saying the same as the step: the equality rule adopts it (no second step), and his note ticks it
+server.stackshot_update("a91", sender="home-agent", step=STEP90, mover="Oliver", next=f"home-agent: confirm the runs are gone\nOliver: {STEP90}")
+check("named mover: the session's own `Oliver: <step>` line equal to the step is his one step (adopted, none added beside it)", len(_ol(91)) == 1 and rd("a", 91)["metadata"].get("owner_step") == f"Oliver: {STEP90}", (_ol(91), rd("a", 91)["metadata"].get("owner_step")))
+server._answer("a91", "", "why does this fail?", "send")
+check("named mover: his note ticks that one line by equality", [s_ for s_, _ in _ol(91)] == ["done"], _ol(91))
 
 print(("ok" if not fails else "FAILED") + f": answer scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
