@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# anchor-hub-hook — anchor-hub's participant in the fleet tool's reboot (contract: salamander docs/reboot-contract.md, version 1).
+#   pause --at <ISO>                          queue-only from now on; persisted in <state>/anchor-hub/paused-hub.json (survives a reboot)
+#   flush-stop                                stop the unit; the hub's SIGTERM path waits for running deliveries, queues pending
+#                                             follow-ups and saves every read position (cursors.json) — verified here
+#   start                                     start the unit and wait until all four receivers are healthy (paused if it was)
+#   status                                    exit 0 running and healthy · 3 stopped · 1 broken
+#   resume --since <ISO> --sessions <file>    deliver queued notices to the verified sessions (reboot-queue.py), clear the pause,
+#                                             then catch up Slack and Notion from --since ("(caught up)" notices)
+# anchor-hub is a user unit (systemctl --user): no sudo. The fleet tool may run this from its boot restore with no login session, so an
+# unset XDG_RUNTIME_DIR is pointed at /run/user/<uid> (units/scope.sh's xdg_repair). The last stdout line is the one-line
+# summary; details: <state>/anchor-hub/hook.log.
+set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"; Q="$HERE/reboot-queue.py"
+if ! A=$(python3 "$HERE/../config.py" state anchor-hub 2>&1); then echo "anchor-hub ${1:-} failed: ${A##*$'\n'}"; exit 1; fi   # a removed mode in the config: config.py's line is the summary
+. "$(cd "$HERE/.." && pwd)/units/scope.sh"   # xdg_repair on source
+LOG="$A/hook.log"; PAUSED="$A/paused-hub.json"; UNIT=anchor-hub.service
+mkdir -p "$A"
+log() { echo "$(date -u +%FT%TZ) anchor-hub-hook $*" >> "$LOG"; }
+say() { log "$1"; echo "$1"; }
+arg() { local k="$1"; shift; while [ $# -gt 0 ]; do [ "$1" = "$k" ] && { echo "${2:-}"; return; }; shift; done; }
+epoch() { date -u -d "$1" +%s 2>/dev/null; }
+jget() { python3 -c 'import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: d={}
+for k in sys.argv[2].split("."): d=(d or {}).get(k) if isinstance(d,dict) else None
+print("" if d is None else (json.dumps(d) if isinstance(d,(dict,list,bool)) else d))' "$1" "$2"; }
+paused_note() { [ -f "$PAUSED" ] && echo ", paused since $(jget "$PAUSED" at)"; }
+queued_note() { python3 "$Q" count --source hub | python3 -c 'import json,sys; d=json.load(sys.stdin); n,s=d["items"],d["sessions"]; print(", %d queued for %d session(s)" % (n, s) if n else "")'; }
+healthy() { python3 - "$A/status.json" "${1:-0}" "$(python3 "$HERE/../config.py" get instance.timezone 2>/dev/null)" <<'PY'
+import json,sys,datetime,zoneinfo
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+r=d.get("receivers") or {}
+started=datetime.datetime.strptime(d.get("started","1970-01-01 00:00:00"),"%Y-%m-%d %H:%M:%S").replace(tzinfo=zoneinfo.ZoneInfo(sys.argv[3] or "UTC")).timestamp()
+ok = len(r) >= 4 and all(v.get("ok") for v in r.values()) and started >= float(sys.argv[2]) and not d.get("stopped")
+sys.exit(0 if ok else 1)
+PY
+}
+verb="${1:-}"; shift || true
+case "$verb" in
+    pause)
+        at=$(arg --at "$@"); [ -n "$at" ] && [ -n "$(epoch "$at")" ] || { say "anchor-hub pause failed: --at <ISO-8601 UTC> missing or unreadable"; exit 1; }
+        python3 -c 'import json,sys,time; json.dump({"at":sys.argv[1],"set":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())},open(sys.argv[2]+".tmp","w")); import os; os.replace(sys.argv[2]+".tmp",sys.argv[2])' "$at" "$PAUSED"
+        [ "$(jget "$PAUSED" at)" = "$at" ] || { say "anchor-hub pause failed: could not write $PAUSED"; exit 1; }
+        say "anchor-hub paused at $at: notices are recorded and queued, none delivered"; exit 0 ;;
+    status)
+        if ! systemctl --user is-active -q "$UNIT"; then say "anchor-hub stopped$(paused_note)$(queued_note)"; exit 3; fi
+        if healthy 0; then say "anchor-hub running, 4 receivers healthy$(paused_note)$(queued_note)"; exit 0; fi
+        say "anchor-hub running but not healthy: $(jget "$A/status.json" receivers | cut -c1-80)"; exit 1 ;;
+    flush-stop)
+        t=$(date +%s)
+        systemctl --user is-active -q "$UNIT" || { say "anchor-hub already stopped$(paused_note)$(queued_note)"; exit 0; }
+        log "stopping $UNIT"
+        systemctl --user stop "$UNIT" 2>>"$LOG"
+        systemctl --user is-active -q "$UNIT" && { say "anchor-hub flush-stop failed: the unit is still running"; exit 1; }
+        saved=$(jget "$A/cursors.json" saved); stopped=$(jget "$A/status.json" stopped)
+        s_ep=$(date -d "$saved" +%s 2>/dev/null || echo 0); p_ep=$(date -d "$stopped" +%s 2>/dev/null || echo 0)
+        if [ "$s_ep" -lt $((t - 5)) ] || [ "$p_ep" -lt $((t - 5)) ]; then
+            say "anchor-hub stopped, but its clean-stop record is missing (cursors saved ${saved:-never}, stopped ${stopped:-never})"; exit 1
+        fi
+        say "anchor-hub stopped cleanly; read positions saved at ${saved:11:5}$(queued_note)"; exit 0 ;;
+    start)
+        t=$(date +%s)
+        systemctl --user is-active -q "$UNIT" && healthy 0 && { say "anchor-hub already running, 4 receivers healthy$(paused_note)"; exit 0; }
+        systemctl --user start "$UNIT" 2>>"$LOG" || { say "anchor-hub start failed: systemctl could not start $UNIT"; exit 1; }
+        for _ in $(seq 55); do healthy "$((t - 2))" && { say "anchor-hub running, 4 receivers healthy$(paused_note)$(queued_note)"; exit 0; }; sleep 2; done
+        say "anchor-hub started but not healthy after 110 s: $(jget "$A/status.json" receivers | cut -c1-70)"; exit 1 ;;
+    resume)
+        since=$(arg --since "$@"); sess=$(arg --sessions "$@")
+        [ -n "$since" ] && [ -n "$(epoch "$since")" ] && [ -r "$sess" ] || { say "anchor-hub resume failed: needs --since <ISO> and a readable --sessions file"; exit 1; }
+        q=$(python3 "$Q" resume --source hub --sessions "$sess"); qrc=$?; log "queue: $q"
+        rm -f "$PAUSED"
+        systemctl --user is-active -q "$UNIT" || { say "anchor-hub resume: queue done but the hub is not running, no catch-up ($q)"; exit 1; }
+        id="resume-$(date +%s%N)"; mkdir -p "$A/ctl"
+        printf '{"verb":"catchup","since":%s}' "$(epoch "$since")" > "$A/ctl/$id.req.json.tmp" && mv "$A/ctl/$id.req.json.tmp" "$A/ctl/$id.req.json"
+        for _ in $(seq 270); do [ -f "$A/ctl/$id.res.json" ] && break; sleep 2; done
+        [ -f "$A/ctl/$id.res.json" ] || { say "anchor-hub resume: catch-up did not answer within 540 s"; exit 1; }
+        res=$(cat "$A/ctl/$id.res.json"); rm -f "$A/ctl/$id.res.json"; log "catch-up: $res"
+        python3 - "$q" "$res" "$qrc" <<'PY'
+import json,sys
+q=json.loads(sys.argv[1] or "{}"); r=json.loads(sys.argv[2] or "{}"); f=r.get("found") or {}
+parts=[f"delivered {q.get('delivered',0)} queued to {q.get('sessions',0)} session(s)"]
+if q.get("held"): parts.append(f"held {q['held']} for {len(q.get('held_sessions') or [])}")
+if q.get("failed"): parts.append(f"FAILED {q['failed']} for {len(q.get('failed_sessions') or [])}")
+parts.append("catch-up " + ", ".join(f"{k.capitalize()} {v}" for k, v in sorted(f.items())) if f else "catch-up none")
+ok = r.get("ok") and sys.argv[3] == "0"
+print(("anchor-hub resumed: " if ok else "anchor-hub resume incomplete: ") + "; ".join(parts) + ("" if r.get("ok") else f" (catch-up errors: {r.get('errors') or r.get('error')})"))
+sys.exit(0 if ok else 1)
+PY
+        rc=$?; log "resume exit $rc"; exit $rc ;;
+    *) sed -n 2,9p "$0"; exit 2 ;;
+esac

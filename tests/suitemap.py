@@ -1,0 +1,1280 @@
+#!/usr/bin/env python3
+"""tests/suitemap.py — which scenario suites a change needs (Tue Oct 27th 2026). A tool, not a suite.
+
+Until every pull request ran all the tests/*_scenario.py suites, about 8 min of the one CI turn on box-a, for
+a docs fix as for a change to server.py. Now a push to main runs every suite MEASURED and keeps what each one touched (a
+"map", in GitHub's Actions cache); a pull request runs only the suites whose touched code or files its change reaches, and
+the next main run checks that choice against the merged code's own measurement (`audit`). The map is measured, never written:
+nobody keeps it by hand.
+
+What a suite touches, at two grains:
+  * Python code, by function. coverage.py records the lines every Python process of the suite runs (its subprocesses too);
+    a line belongs to the innermost function whose body holds it, to `<main>` in a top-level `if __name__ == "__main__":`,
+    or to the module (imports, constants, class bodies, the def lines themselves). A change inside a function body reaches
+    the suites that ran that function. A change at module level that only binds names (a def or class, a constant, the
+    docstring, an import) reaches the code that READS them, by name (see *names* below): the functions whose bodies name
+    them, followed across imports and through the bindings that use them, and the suites whose own file names them. One
+    with effects at import (an unknown decorator, a call statement) reaches every suite that ran the file. A registered
+    function (@mcp.tool on the module's own object) reaches its callers and whatever lists the registry. A change that is
+    only comments and blank lines reaches no suite by code.
+  * Files, whole. strace records every tracked file a process of the suite opens, stats, runs or looks for (a failed lookup
+    counts: a suite can depend on a file being absent), and the directories it lists. A non-Python file (a shell script,
+    stackshot.example.toml, an icon) reaches the suites that touched it; a .py file reaches, whole, the suites that read it
+    as text (inspect.getsource, a test that greps server.py) or that loaded it in a Python coverage did not measure (the hooks
+    run the system python3). The bytecode is compiled before measuring, so a measured Python opening a .py is a text read.
+
+Usage (run from the checkout; `measure` in the test environment, which has coverage; the rest need only git):
+  tests/suitemap.py list                                  every suite, one per line (tests/*_scenario.py)
+  tests/suitemap.py measure --map OUT [--prev MAP] [-T secs] [suite…]
+                                                          run the suites measured (all when none is named), write the map
+                                                          (SUITEMAP_STRACE=0: coverage only, so files are not measured; with
+                                                          --prev, strace only the suites the change since that map reaches
+                                                          and those traced over 24 h ago, the rest keep their file half);
+                                                          exit 1 when a suite fails (a suite that fails only when measured
+                                                          passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
+                                                          earlier clean measurement beside it as `carry` for tools/retest_skip.py)
+  tests/suitemap.py run [-T secs] suite…                  run the suites plainly; exit 1 when one fails
+  tests/suitemap.py plan --of N [--map MAP]               the whole plan of main's measured run, made once: `shard0=a b c`, `shard1=…`
+                                                          lines (the format of $GITHUB_OUTPUT) for the N shards (see *Shards*)
+  tests/suitemap.py shard --of N --index I [--map MAP]   one line of that plan: the suites of shard I (0 to N-1), one per line
+  tests/suitemap.py merge --map OUT SHARD…                one map out of the shards' maps (one commit); exit 1 when a suite is
+                                                          in two of them or a suite of the checkout is in none (the map is
+                                                          still written: a suite it lacks has no clean measurement, so it runs)
+  tests/suitemap.py select --map MAP [--to REV]           print `all`, or the suites to run separated by spaces (empty: none);
+                                                          the reason for each changed file goes to stderr, and to
+                                                          $GITHUB_STEP_SUMMARY when set. The change is git diff <map's commit> <REV>
+  tests/suitemap.py audit --old OLD --new NEW --to B     the suites the new map says <old map's commit>..B reaches that the
+                                                          old map's choice for the same range skipped, and the suites that
+                                                          failed on main that it skipped: exit 1 when there is one, or when
+                                                          a commit does not resolve (nothing was checked). A suite the
+                                                          new map has no clean measurement for (`ok: false`) is not counted:
+                                                          the selection runs it always, so it says nothing about reach
+
+The rules, per changed file F (git diff --name-status -M), the first that applies:
+  1. no map, a map of another format, a commit that does not resolve           → all
+  2. F is the harness: .github/, tests/run-suite, tests/pyproject.toml, tests/uv.lock, tests/suitemap.py → all
+  3. F = tests/<suite>_scenario.py                                              → that suite
+  4. F ends in .lock (a script's lock: the lock step checks every one)          → none;
+     F is tests/*_check.py (a manual check, not in CI)                         → none
+  5. F is a new path (added, or a rename's new side) in a directory no measured suite lists, or the map has no strace →
+     all: a new path is read by code that names it (its own change selects) or that lists the directory; one no suite
+     lists may still be looked up by a name nobody tried before (the import machinery lists the sys.path directories, the
+     checkout and tests/, so those are listed by every suite)
+  6. F is a .py file → the suites that read it whole, the suites that ran the functions its changed lines are in, and
+     those that read the names its module-level changes bind (a new file: whoever imports it changed too; one named like a
+     module the suites import, which it could shadow → all)
+  7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory
+  A suite the map has no clean measurement for (new since, or `ok: false`) always runs. When the union is every suite: all.
+  INNER names the suites that run other suites as their own checks (scratch runs rename, redact, lead and migration to see
+  that they leave no folder behind): they pass or fail with them, but the code those inner runs ran is not in the outer
+  suite's measurement when the inner suite runs it in a child that coverage does not follow, and a change to that code (a
+  scenario that now runs a module in process) shows up in the outer suite's measurement only after the merge. So
+  a change that selects an inner suite selects its outer suite too.
+  release.sh's retest skip (tools/retest_skip.py) reads this map for what each suite reads and used to refuse the whole map for
+  one `ok: false` suite. A suite that fails only when measured (the release suite, 4 to 9 times slower measured than plain, timed
+  out at the 2400 s limit once, and the map of that run was refused for every PR it served) keeps its last clean measurement
+  beside the new one as `carry` (the read sets, when it was traced, and `at`, the commit it was measured at): the skip reads the
+  union of the two, takes the drift since `at` as main's news, and refuses a carry older than its own age limit. `ok` stays
+  false, so the selection above still runs the suite on every PR.
+
+Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
+and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
+`shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
+merged map has every suite exactly once. `shard_plan` puts every suite in exactly one shard: with a map, the longest suites
+first, each into the shard with the least measured time so far (a suite the map does not know counts as the median; ties go by
+name and then the lower shard), so the shards end at about the same time; without a map (or one with no times), a stable hash
+of the name. The plan is made ONCE per run, by the `shards` job (`plan`, with the map from the cache, or none: a cache miss gives the hash
+plan, for all six lists alike), and handed to the `measure` matrix as job outputs; each shard runs the list it is given and
+does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
+is in none or in two, and the run fails.
+"""
+import argparse, ast, atexit, collections, datetime, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time
+
+FORMAT = 1
+TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
+INNER = {"scratch": ("rename", "redact", "lead", "migration")}   # outer suite -> the suites it runs itself (rule above)
+HARNESS = (".github/", "tests/run-suite", "tests/pyproject.toml", "tests/uv.lock", "tests/suitemap.py")
+SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
+# what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
+TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"
+         "readlinkat,clone,clone3,fork,vfork")
+
+
+def git(*a, check=False):
+    r = subprocess.run(["git", "-C", ROOT, *a], capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError(f"git {' '.join(a)}: {r.stderr.strip()}")
+    return r.stdout if r.returncode == 0 else None
+
+
+def suites():
+    return sorted(SUITE_RE.match(f).group(1) for f in (git("ls-files", "tests/") or "").split("\n") if SUITE_RE.match(f))
+
+
+# ---------------------------------------------------------------- scopes
+MAIN = "<main>"
+
+
+def is_main_guard(node):
+    t = getattr(node, "test", None)
+    return (isinstance(node, ast.If) and isinstance(t, ast.Compare) and isinstance(t.left, ast.Name) and t.left.id == "__name__"
+            and len(t.comparators) == 1 and isinstance(t.comparators[0], ast.Constant) and t.comparators[0].value == "__main__")
+
+
+def scopes(src):
+    """(body_of, header, ddoc, tree) for a module's source, or None when it does not parse. body_of[line] is the qualified
+    name of the innermost function whose body holds the line, '<main>' in the body of a top-level `if __name__ ==
+    "__main__":` (only a suite that runs the file as a program runs it), '' at module level (imports, constants, class
+    bodies, def lines); header[line] = (qualname, decorated) for a function's decorator, def and signature lines; ddoc holds
+    the docstring lines of functions with a decorator that may read them (any but PURE_DECORATORS)."""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return None
+    n = src.count("\n") + 2
+    body_of, header, ddoc = [""] * (n + 1), {}, set()
+
+    def walk(node, prefix, top):
+        for ch in ast.iter_child_nodes(node):
+            if top and is_main_guard(ch):
+                for st in ch.body:
+                    for ln in range(st.lineno, min(st.end_lineno or st.lineno, n) + 1):
+                        body_of[ln] = MAIN
+                walk(ch, f"{MAIN}.", False)
+            elif isinstance(ch, ast.ClassDef):
+                walk(ch, f"{prefix}{ch.name}.", False)
+            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                q, b0 = f"{prefix}{ch.name}", ch.body[0]
+                for ln in range(b0.lineno, min(ch.end_lineno or b0.lineno, n) + 1):
+                    body_of[ln] = q
+                for ln in range(min([d.lineno for d in ch.decorator_list] + [ch.lineno]), b0.lineno):
+                    header[ln] = (q, bool(ch.decorator_list))
+                # a decorator that only wraps (@staticmethod, @functools.wraps) never reads the docstring: it stays the body's
+                if any(dotted(d.func if isinstance(d, ast.Call) else d) not in PURE_DECORATORS for d in ch.decorator_list) \
+                        and isinstance(b0, ast.Expr) and isinstance(b0.value, ast.Constant) and isinstance(b0.value.value, str):
+                    ddoc.update(range(b0.lineno, (b0.end_lineno or b0.lineno) + 1))
+                walk(ch, f"{q}.<locals>.", False)
+            else:
+                walk(ch, prefix, False)
+
+    walk(tree, "", True)
+    return body_of, header, ddoc, tree
+
+
+# ---------------------------------------------------------------- names
+# A module-level change that only binds names (a def or class without decorators, an assignment to plain names whose value
+# only computes, the module docstring, an import of a library) reaches the code that READS those names, not every suite
+# that imported the file: the functions whose bodies name them (followed across `import x` and `from x import y`, and on
+# through the module-level bindings that use them), what the bound function or class itself runs, and the suites whose own
+# file names them (server._start_background). Anything else at module level runs at import with effects no name shows (a
+# decorator we do not know, a call statement, an import of one of ours that runs more than bindings): every suite that ran
+# the file. Reads no name shows are taken wide: globals() in a module (any of its names), getattr(module, <not a literal>)
+# and vars(module) (any of that module's), a module loaded by path (any name of the files it can be).
+# A tool parameter constant (Annotated[…, Field(…)]) and HERE = Path(__file__).resolve().parent only bind a name (Field and the
+# Path methods are pure on a receiver that starts at Path(…) or __file__: PATH_METHODS); the headers (a def's, a method's) that
+# annotate with a constant read it at import. A FastMCP(…) server object, an unknown call, a Path method on any other receiver,
+# or a Field(…) holding an impure call stays an effect. The calls inside a function header are not checked.
+PURE_CALLS = {
+    "re.compile", "frozenset", "set", "dict", "tuple", "list", "str", "int", "float", "bool", "bytes", "len", "sorted", "range",
+    "enumerate", "zip", "max", "min", "sum", "any", "all", "repr", "ord", "chr", "object", "isinstance", "pathlib.Path", "Path",
+    "Path.home", "pathlib.Path.home", "os.path.join", "os.path.expanduser", "os.path.dirname", "os.path.abspath", "os.path.realpath",
+    "os.path.basename", "os.environ.get", "os.getenv", "textwrap.dedent", "dedent", "json.dumps", "json.loads", "threading.Lock",
+    "threading.RLock", "threading.Event", "threading.local", "threading.Condition", "queue.Queue", "collections.defaultdict",
+    "defaultdict", "collections.OrderedDict", "OrderedDict", "collections.Counter", "Counter", "collections.namedtuple",
+    "namedtuple", "logging.getLogger", "datetime.timedelta", "timedelta", "datetime.timezone", "ZoneInfo", "zoneinfo.ZoneInfo",
+    "hashlib.sha256", "functools.partial", "partial", "string.Template", "contextvars.ContextVar", "asyncio.Lock", "asyncio.Event",
+    "Field", "pydantic.Field"}
+PURE_METHODS = {"get", "replace", "split", "rsplit", "join", "strip", "lstrip", "rstrip", "format", "lower", "upper", "title",
+                "encode", "decode", "splitlines", "startswith", "endswith", "items", "keys", "values", "copy", "removeprefix",
+                "removesuffix", "casefold", "partition", "rpartition", "zfill", "ljust", "rjust", "center", "count", "find"}
+# Path methods that only compute a path are pure only on a receiver that is a path: a chain that starts at Path(…), Path.home()
+# or __file__. On any other receiver the name says nothing (`_r.resolve()` may be our own method that prints or sets state).
+PATH_METHODS = {"resolve", "absolute", "expanduser", "joinpath", "with_name", "with_suffix", "as_posix"}
+PATH_ROOTS = {"Path", "pathlib.Path", "Path.home", "pathlib.Path.home"}
+# a call to one of our own functions in a module-level assignment computes the value from our code (what that code runs at
+# import is the callee's, measured); its effects are its body's, which a change to the call's arguments does not touch
+REPO_CALLS_BIND = True
+DYN_LOAD = {"spec_from_file_location", "importlib.util.spec_from_file_location", "run_path", "runpy.run_path"}
+# decorators that only wrap or describe what they decorate: a change under them is the function's own
+PURE_DECORATORS = {"functools.wraps", "wraps", "functools.lru_cache", "lru_cache", "functools.cache", "cache",
+                   "functools.cached_property", "cached_property", "property", "staticmethod", "classmethod",
+                   "contextlib.contextmanager", "contextmanager", "contextlib.asynccontextmanager", "asynccontextmanager",
+                   "dataclasses.dataclass", "dataclass", "typing.overload", "overload", "functools.total_ordering",
+                   "total_ordering", "abc.abstractmethod", "abstractmethod", "functools.singledispatch", "singledispatch"}
+# A decorator on one of the module's own objects (@mcp.tool, @mcp.custom_route) registers the function there: its name,
+# signature and description are read by whoever calls it (it ran the body: measured) and by whatever lists the registry.
+# Listing is a call of one of these, on any object (a suite lists tools through its MCP client): the key (*, <enumerate>).
+ENUMERATE = "<enumerate>"
+ENUMERATE_ATTRS = {"list_tools", "get_tools", "_list_tools", "list_resources", "get_resources", "list_prompts", "get_prompts",
+                   "list_resource_templates", "_tool_manager", "http_app", "routes"}
+
+
+def modname(path):
+    """the name a repo .py file is imported as; tests/ helpers by their bare name (the suites put tests/ on sys.path)"""
+    p = path.removesuffix(".py")
+    p = p[len("tests/"):] if p.startswith("tests/") else p
+    p = p[: -len("/__init__")] if p.endswith("/__init__") else p
+    return p.replace("/", ".")
+
+
+def dotted(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+class ModNames:
+    """what one Python file binds at module level and which names each of its scopes reads, as (module, name) keys;
+    (module, '*') reads every name of the module"""
+
+    def __init__(self, path, src, repo_mods):
+        self.path, self.mod, self.repo = path, modname(path), repo_mods
+        sc = scopes(src)
+        self.ok = sc is not None
+        self.refs = collections.defaultdict(set)   # scope → keys read
+        self.stmts = []                             # (first, last, kind, names, keys read by the statement at import)
+        self.functions, self.classes = set(), set()
+        self.effect_targets = {}                    # first line of an effect-mod statement → the modules it sets state in
+        self.text, self.ddoc, self.body_of = [], set(), []
+        if not self.ok:
+            return
+        self.body_of, _, self.ddoc, tree = sc
+        self.text = src.split("\n")
+        self.aliases, self.froms = {}, {}
+        pkg = self.mod if path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
+        self.repo_tops = {r.split(".")[0] for r in repo_mods}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.asname:
+                        self.aliases[a.asname] = a.name
+                    else:
+                        self.aliases[a.name.split(".")[0]] = a.name.split(".")[0]
+            elif isinstance(node, ast.ImportFrom):
+                base = node.module or ""
+                if node.level:
+                    up = pkg.split(".") if pkg else []
+                    up = up[: len(up) - (node.level - 1)] if node.level > 1 else up
+                    base = ".".join([*up, base] if base else up)
+                for a in node.names:
+                    local = a.asname or a.name
+                    if f"{base}.{a.name}" in self.repo:
+                        self.aliases[local] = f"{base}.{a.name}"
+                    else:
+                        self.froms[local] = (base, a.name)
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                m = self.literal_import(node.value)
+                if m:
+                    self.aliases[node.targets[0].id] = m
+        self.toplevel = set()
+        for st in tree.body:
+            for t in (st.targets if isinstance(st, ast.Assign) else [getattr(st, "target", None)]):
+                if isinstance(t, ast.Name):
+                    self.toplevel.add(t.id)
+        for st in tree.body:
+            self.stmts.append(self.statement(st, st is tree.body[0]))
+        for node in ast.walk(tree):
+            self.read(node)
+
+    def literal_import(self, call):
+        if isinstance(call, ast.Call) and dotted(call.func) in ("__import__", "importlib.import_module") and call.args \
+                and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
+            return call.args[0].value
+        return None
+
+    def scope(self, node):
+        ln = getattr(node, "lineno", 0)
+        return self.body_of[ln] if 0 < ln < len(self.body_of) else ""
+
+    def keys(self, node):
+        """the keys an expression reading a name stands for"""
+        if isinstance(node, ast.Call):
+            m = self.literal_import(node)
+            return {(m, "*")} if m else set()
+        d = dotted(node)
+        if not d:
+            return set()
+        chain = d.split(".")
+        out = {(self.mod, chain[0])}
+        mod = None
+        if chain[0] in self.froms:
+            fm, fa = self.froms[chain[0]]
+            out.add((fm, fa))
+        elif chain[0] in self.aliases:
+            mod = self.aliases[chain[0]]
+        if mod is not None:
+            rest = chain[1:]
+            while rest and f"{mod}.{rest[0]}" in self.repo:
+                mod = f"{mod}.{rest[0]}"
+                rest = rest[1:]
+            out.add((mod, rest[0]) if rest else (mod, "<module>"))   # <module>: the module object itself
+            if len(rest) > 1:
+                out.add(("~", mod, tuple(rest)))  # server._cfg.CFG: Names follows _cfg through server's own imports
+        return out
+
+    def read(self, node):
+        sc = None
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            sc, ks = self.scope(node), self.keys(node)
+            if node.id == "globals":   # locals() is the function's own; vars(module) is the call below
+                ks = ks | {(self.mod, "*")}
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            sc, ks = self.scope(node), (self.keys(node) if dotted(node) else set())
+            if node.attr in ENUMERATE_ATTRS:
+                ks = ks | {("*", ENUMERATE)}
+        elif isinstance(node, ast.Call):
+            f = dotted(node.func)
+            ks = set()
+            if f == "getattr" and node.args and (len(node.args) < 2 or not isinstance(node.args[1], ast.Constant)):
+                ks = {(m, "*") for m, n in self.keys(node.args[0]) if n == "<module>"}
+            elif f in ("vars", "dir", "inspect.getmembers") and node.args:
+                ks = {(m, "*") for m, n in self.keys(node.args[0]) if n == "<module>"}
+            elif f and (f in DYN_LOAD or f.split(".")[-1] in DYN_LOAD):
+                # a module loaded by path: every name of the files the call's literal file name can be ("tools",
+                # "state_from_fields.py"); no literal .py name: any name at all
+                lit = [a.value for a in ast.walk(node) if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value.endswith(".py")]
+                ks = {(m, "*") for m in self.repo if lit and m.split(".")[-1] == os.path.basename(lit[-1]).removesuffix(".py")} or {("*", "*")}
+            else:
+                m = self.literal_import(node)
+                ks = {(m, "*")} if m else set()
+            sc = self.scope(node)
+        if sc is not None and ks:
+            self.refs[sc] |= ks
+
+    def statement(self, st, first):
+        """(first line, last line, kind, names bound, keys it reads at import); kind: bind (only binds names), effect"""
+        a, b = min([d.lineno for d in getattr(st, "decorator_list", [])] + [st.lineno]), st.end_lineno or st.lineno
+        reads = set()
+        if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            self.functions.add(st.name)
+            bound = {st.name}
+            reads |= self.header_reads(st)
+            kind, extra = self.decorators(st, reads)
+            return a, b, kind, bound | extra, reads
+        if isinstance(st, ast.ClassDef):
+            self.classes.add(st.name)
+            kind, extra = self.decorators(st, reads)
+            if kind != "bind":
+                return a, b, kind, {st.name}, reads
+            # a method's header runs when the class body does: its defaults and annotations are the class statement's reads
+            # (as a module-level def's are); the calls in a header are not checked for purity, as for a def
+            for x in st.body:
+                if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    reads |= self.header_reads(x)
+            for part in [*st.bases, *[k.value for k in st.keywords],
+                         *[x for x in st.body if not isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))]]:
+                for x in ast.walk(part):
+                    if isinstance(x, ast.Call) and not self.pure_call(x):
+                        return a, b, "effect", {st.name}, reads
+                    reads |= self.keys(x) if isinstance(x, (ast.Name, ast.Attribute)) else set()
+            return a, b, "bind", {st.name} | extra, reads
+        if isinstance(st, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            targets = st.targets if isinstance(st, ast.Assign) else [st.target]
+            names = set()
+            for t in targets:
+                for x in ([t] if isinstance(t, (ast.Name, ast.Attribute)) else t.elts if isinstance(t, (ast.Tuple, ast.List)) else [None]):
+                    if isinstance(x, ast.Name):
+                        names.add(x.id)
+                        continue
+                    # _ho.SERVER = NAME: a name of another of our modules, bound from here
+                    other = [k for k in (self.keys(x) if isinstance(x, ast.Attribute) else ()) if k[0] != self.mod and k[0] in self.repo and k[1] != "<module>" and len(k) == 2]
+                    if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name) and other:
+                        names |= set(other)
+                        continue
+                    return a, b, "effect", names, reads
+            if isinstance(st, ast.AnnAssign):
+                for x in ast.walk(st.annotation):
+                    if isinstance(x, (ast.Name, ast.Attribute)):
+                        reads |= self.keys(x)
+            if st.value is not None:
+                for x in ast.walk(st.value):
+                    if isinstance(x, ast.Call) and not self.pure_call(x):
+                        return a, b, "effect", names, reads
+                    if isinstance(x, (ast.Name, ast.Attribute)):
+                        reads |= self.keys(x)
+            if isinstance(st, ast.AugAssign):
+                reads |= {(self.mod, n) for n in names}
+            return a, b, "bind", names, reads
+        if first and isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant) and isinstance(st.value.value, str):
+            return a, b, "bind", {"__doc__"}, reads
+        if isinstance(st, (ast.Import, ast.ImportFrom)):
+            names = {(x.asname or x.name).split(".")[0] for x in st.names}
+            ours = [m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
+            if ours:
+                # one of ours: importing it runs its module level in every importer; `selection` decides (import-repo)
+                return a, b, "import-repo", names, set(ours)
+            return a, b, "bind", names, reads
+        if is_main_guard(st):
+            return a, b, "main", set(), reads
+        if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
+            # _router_live.configure(…): a call into one of our modules sets that module's state: its file, whole
+            ks = self.keys(st.value.func) if dotted(st.value.func) else set()
+            mods = {k[0] for k in ks if len(k) == 2 and k[0] != self.mod and k[0] in self.repo}
+            if mods and isinstance(st.value.func, ast.Attribute) and dotted(st.value.func.value) in self.aliases:
+                for x in ast.walk(st.value):
+                    if isinstance(x, (ast.Name, ast.Attribute)):
+                        reads |= self.keys(x)
+                self.effect_targets[a] = mods
+                return a, b, "effect-mod", set(), reads
+        return a, b, "effect", set(), reads
+
+    def header_reads(self, fn):
+        """the keys a function's header reads when its def runs: the defaults and the annotations (a tool parameter's
+        Annotated[…, Field(…)] constant is read there)"""
+        ar, reads = fn.args, set()
+        for d in [*ar.defaults, *ar.kw_defaults, fn.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
+            if d is not None:
+                for x in ast.walk(d):
+                    reads |= self.keys(x) if isinstance(x, (ast.Name, ast.Attribute)) else set()
+        return reads
+
+    def decorators(self, st, reads):
+        """('bind', extra names) when every decorator only wraps (PURE_DECORATORS) or registers on one of this module's
+        own objects (@mcp.tool: extra = <enumerate>); ('effect', set()) for any other"""
+        extra = set()
+        for d in st.decorator_list:
+            for x in ast.walk(d):
+                if isinstance(x, (ast.Name, ast.Attribute)):
+                    reads |= self.keys(x)
+            f = dotted(d.func if isinstance(d, ast.Call) else d)
+            if f in PURE_DECORATORS:
+                continue
+            if f and "." in f and f.split(".")[0] in self.toplevel:
+                extra.add(ENUMERATE)
+                continue
+            return "effect", set()
+        return "bind", extra
+
+    def stmt_at(self, ln):
+        for st in self.stmts:
+            if st[0] <= ln <= st[1]:
+                return st
+        return None
+
+    def imported(self, st):
+        """the modules an import statement loads, resolved against this file's package"""
+        if isinstance(st, ast.Import):
+            return [x.name for x in st.names]
+        base = st.module or ""
+        if st.level:
+            pkg = self.mod if self.path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
+            up = pkg.split(".") if pkg else []
+            up = up[: len(up) - (st.level - 1)] if st.level > 1 else up
+            base = ".".join([*up, base] if base else up)
+        return [f"{base}.{x.name}" if f"{base}.{x.name}" in self.repo else base for x in st.names]
+
+    def only_binds(self):
+        """True when importing this module only binds names (every module-level statement does)"""
+        return self.ok and all(k in ("bind", "main") for _, _, k, _, _ in self.stmts)
+
+    def pure_call(self, call):
+        f = dotted(call.func)
+        if f in PURE_CALLS:
+            return True
+        if isinstance(call.func, ast.Attribute):
+            if call.func.attr in PURE_METHODS:
+                return True
+            if call.func.attr in PATH_METHODS and self.path_receiver(call.func.value):
+                return True
+        if f is None:
+            return False
+        if REPO_CALLS_BIND:
+            head = f.split(".")[0]
+            if head in self.functions or head in self.classes:
+                return True
+            if head in self.aliases and self.aliases[head] in self.repo or head in self.froms and self.froms[head][0] in self.repo:
+                return True
+        return False
+
+    def path_receiver(self, node):
+        """True when an expression is a path by its root: Path(…), pathlib.Path(…), Path.home() or __file__, through attributes
+        (.parent), subscripts (.parents[1]) and method calls on it (those calls are checked as the walk reaches them)"""
+        while True:
+            if isinstance(node, (ast.Attribute, ast.Subscript)):
+                node = node.value
+            elif isinstance(node, ast.Call):
+                if dotted(node.func) in PATH_ROOTS:
+                    return True
+                if not isinstance(node.func, ast.Attribute):
+                    return False
+                node = node.func.value
+            else:
+                return isinstance(node, ast.Name) and node.id == "__file__"
+
+
+class Names:
+    """the name index of one revision: every repo Python file and every suite's file"""
+
+    def __init__(self, rev):
+        files = [f for f in (git("ls-tree", "-r", "--name-only", rev) or "").split("\n") if f.endswith(".py")]
+        self.repo = {modname(f) for f in files if not SUITE_RE.match(f) and not f.endswith("_check.py")}
+        srcs = cat_files(rev, files)
+        self.files = {f: ModNames(f, srcs[f], self.repo) for f in files if f in srcs}
+        self.by_mod = {m.mod: m for f, m in self.files.items() if not SUITE_RE.match(f)}
+        for m in self.files.values():
+            for sc in m.refs:
+                m.refs[sc] = self.resolve(m.refs[sc])
+            m.stmts = [(a, b, k, n, r if k == "import-repo" else self.resolve(r)) for a, b, k, n, r in m.stmts]
+
+    def resolve(self, keys):
+        """keys with each attribute chain on a module ("~", module, (a, b, …)) followed through that module's own imports"""
+        out = set()
+        for k in keys:
+            if k[0] != "~":
+                out.add(k)
+                continue
+            mod, rest = k[1], list(k[2])
+            while rest:
+                out.add((mod, rest[0]))
+                m = self.by_mod.get(mod)
+                nxt = None
+                if m is not None and rest[0] in m.aliases:
+                    nxt = m.aliases[rest[0]]
+                elif m is not None and rest[0] in m.froms:
+                    fm, fa = m.froms[rest[0]]
+                    out.add((fm, fa))
+                    nxt = f"{fm}.{fa}" if f"{fm}.{fa}" in self.repo else None
+                if nxt is None:
+                    break
+                mod, rest = nxt, rest[1:]
+                while rest and f"{mod}.{rest[0]}" in self.repo:
+                    mod, rest = f"{mod}.{rest[0]}", rest[1:]
+        return out
+
+
+def cat_files(rev, paths):
+    """{path: text} for many files of one revision in one git process"""
+    if not paths:
+        return {}
+    r = subprocess.run(["git", "-C", ROOT, "cat-file", "--batch"], input="".join(f"{rev}:{p}\n" for p in paths).encode(),
+                       capture_output=True)
+    out, data, i = {}, r.stdout, 0
+    for p in paths:
+        nl = data.index(b"\n", i)
+        head = data[i:nl].split()
+        i = nl + 1
+        if len(head) < 3 or head[1] != b"blob":
+            continue
+        size = int(head[2])
+        out[p] = data[i:i + size].decode("utf-8", "replace")
+        i += size + 1
+    return out
+
+
+def touches(reads, hit):
+    """True when a set of keys read meets the keys hit: the same key, a read of every name of a module with a hit
+    (module, *), or a read of one name in any module (*, name)"""
+    mods, names = {k[0] for k in hit}, {k[1] for k in hit}
+    return any(k in hit or (k[1] == "*" and (k[0] in mods or k[0] == "*")) or (k[0] == "*" and k[1] in names) for k in reads)
+
+
+def reach(names_list, seeds, ran=None):
+    """(keys, whole): the keys a change to the seed keys reaches through module-level bindings that read them, to a fixed
+    point; and the files where a module-level statement with effects (a decorator, a call) reads one: whole files. Only the
+    files some suite ran (ran: the map's measured files) count: one no suite imports (a manual check, a script run by hand)
+    sets nothing at import in any suite, and a module that imported it would have run it"""
+    hit, whole = set(seeds), set()
+    while True:
+        grew = False
+        for N in names_list:
+            for m in N.files.values():
+                if SUITE_RE.match(m.path) or (ran is not None and m.path not in ran):
+                    continue
+                # from x import n (as k): a name re-exported from here is the same object under (this module, k)
+                for local, src in m.froms.items():
+                    if src in hit and (m.mod, local) not in hit:
+                        hit.add((m.mod, local))
+                        grew = True
+                for a, b, kind, bound, reads in m.stmts:
+                    if kind == "import-repo" or not reads or not touches(reads, hit):
+                        continue
+                    if kind == "effect":
+                        whole.add(m.path)
+                    if kind == "effect-mod":
+                        whole |= {N.by_mod[x].path for x in m.effect_targets.get(a, ()) if x in N.by_mod}
+                    for n in bound:
+                        k = n if isinstance(n, tuple) else (m.mod, n)
+                        if k not in hit:
+                            hit.add(k)
+                            grew = True
+        if not grew:
+            return hit, whole
+
+
+def readers(names_list, hit):
+    """(scopes, suites): the (file, scope) pairs of our code whose function bodies read a key in hit (module level is
+    reach's), and the suites whose own file reads one anywhere"""
+    scopes_, suites_ = set(), set()
+    for N in names_list:
+        for f, m in N.files.items():
+            ms = SUITE_RE.match(f)
+            for sc, ks in m.refs.items():
+                if (ms or sc) and touches(ks, hit):
+                    if ms:
+                        suites_.add(ms.group(1))
+                    else:
+                        scopes_.add((f, sc))
+    return scopes_, suites_
+
+
+# ---------------------------------------------------------------- measure
+def coveragerc(datadir):
+    rc = os.path.join(datadir, "coveragerc")
+    with open(rc, "w") as f:
+        f.write(f"""[run]
+parallel = true
+patch = subprocess, _exit, execv, fork
+sigterm = true
+include = {ROOT}/*
+omit = {ROOT}/tests/*_scenario.py
+    {ROOT}/tests/*_check.py
+disable_warnings = no-data-collected, module-not-imported, module-not-measured, include-ignored, couldnt-parse, already-imported
+""")
+    return rc
+
+
+def run_suite(name, timeout, env=None, wrap=()):
+    """run one suite through the checkout's tests/run-suite. A hung suite gets SIGINT at its limit, so it fails on its own
+    with the traceback of where it sat, and the suites after it still run (github's pacer waiting out the hour).
+    A CI cancel signals the step's top process alone, never its process group (actions/runner ProcessInvoker.cs: SIGINT,
+    SIGTERM 7.5 s later, a kill 2.5 s after that); the step execs uv, which forwards both here. The suite runs in a process
+    group of its own (timeout, strace, run-suite, uv, the suite). The first INT, TERM or HUP that comes while it runs goes to
+    `timeout`, which passes it to that group once; any later one goes to the group from here, since uutils' timeout (Ubuntu
+    26.04's) passes on only the first signal it gets and then waits with the rest blocked. So the suite and run-suite end and
+    clean up now, not at the job's orphan sweep; then no further suite runs. strace (`wrap`) sits inside timeout and blocks
+    fatal signals itself (-o FILE: its -I3), which leaves the traced suite to get them from the group.
+    timeout ends once its child has, and run-suite once its suite has (its traps wait), so the wait here outlasts the suite;
+    a last TERM to the group, and up to 2 s for it to be gone, cover a timeout that ended first all the same."""
+    t0 = time.monotonic()
+    p, stopped, sent = None, [], 0
+
+    def pass_on(sig=None, _frame=None):
+        nonlocal sent
+        if sig is not None:
+            stopped.append(sig)
+        while p is not None and sent < len(stopped):   # one that came before Popen returned is passed on once it has
+            first, sig = sent == 0, stopped[sent]
+            sent += 1
+            try:
+                p.send_signal(sig) if first else os.killpg(p.pid, sig)
+            except ProcessLookupError:
+                pass
+    old = {s: signal.signal(s, pass_on) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    try:
+        p = subprocess.Popen(["timeout", "-s", "INT", str(timeout), *wrap, os.path.join(ROOT, "tests", "run-suite"), name],
+                             cwd=ROOT, env=env, process_group=0)
+        pass_on()
+        rc = p.wait()
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+    if stopped:
+        end = time.monotonic() + 2
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+            while time.monotonic() < end:
+                time.sleep(0.05)
+                os.killpg(p.pid, 0)
+        except ProcessLookupError:
+            pass
+        print(f"== {name}: stopped by {signal.Signals(stopped[0]).name} (a cancel); no further suite runs", flush=True)
+        sys.exit(128 + stopped[0])
+    if rc == 124:
+        print(f"== {name}: timed out after {timeout}s", flush=True)
+    return rc, time.monotonic() - t0
+
+
+def read_coverage(datadir):
+    """{repo-relative file: set of lines run} over every data file of the suite, and the pids that left data."""
+    import coverage
+    lines, pids = collections.defaultdict(set), set()
+    for f in os.listdir(datadir):
+        m = re.match(r"\.coverage\..*?\.pid(\d+)\.", f)
+        if not m:
+            continue
+        pids.add(m.group(1))
+        d = coverage.CoverageData(basename=os.path.join(datadir, f))
+        try:
+            d.read()
+        except Exception as e:  # a data file cut off by a killed process: what it holds is lost, its pid is not measured
+            print(f"suitemap: unreadable coverage data {f}: {e}", file=sys.stderr)
+            pids.discard(m.group(1))
+            continue
+        for mf in d.measured_files():
+            rel = os.path.relpath(os.path.realpath(mf), ROOT)
+            if not rel.startswith(".."):
+                lines[rel] |= set(d.lines(mf) or ())
+    return lines, pids
+
+
+def read_strace(path, tracked, tdirs, datapids):
+    """(files, whole, dirs, unmeasured) from one suite's strace log: the tracked non-Python files touched; the .py files
+    a process read as text or loaded unmeasured (whole); the tracked directories listed; the pids of unmeasured Pythons."""
+    prog, tg, pending = {}, {}, {}
+    files, whole, dirs = set(), set(), set()
+    pyopen, pystat = collections.defaultdict(set), collections.defaultdict(set)
+    first = None
+    with open(path, errors="replace") as f:
+        for line in f:
+            m = re.match(r"(\d+) +(\w+)\((.*)", line)
+            if not m:
+                # a call cut in two by another process's: `<pid> <... clone3 resumed>…) = <child>`; the flags were on the first half
+                r = re.match(r"(\d+) +<\.\.\. (clone3?|fork|vfork) resumed>.*= (\d+)", line)
+                if r and r.group(1) in pending:
+                    pid, c = r.group(1), r.group(3)
+                    g = tg.get(pid, pid)
+                    if "CLONE_THREAD" in pending.pop(pid):
+                        tg[c] = g
+                    else:
+                        tg[c] = c
+                        prog[c] = prog.get(g, "")
+                continue
+            pid, call, rest = m.groups()
+            if first is None:
+                first = pid
+            g = tg.get(pid, pid)
+            if call in ("clone", "clone3", "fork", "vfork"):
+                if "<unfinished ...>" in line:
+                    pending[pid] = line
+                    continue
+                r = re.search(r"= (\d+)(?:<[^>]*>)?\s*$", line)
+                if r:
+                    c = r.group(1)
+                    if "CLONE_THREAD" in line:
+                        tg[c] = g
+                    else:
+                        tg[c] = c
+                        prog[c] = prog.get(g, "")
+                continue
+            r = re.match(r'(?:(?:AT_FDCWD|-?\d+)<([^>]*)>, )?"((?:[^"\\]|\\.)*)"', rest)
+            if not r:
+                continue
+            base, p = r.groups()
+            full = os.path.normpath(p if p.startswith("/") else os.path.join(base or "/", p))
+            rel = os.path.relpath(full, ROOT)
+            if call in ("execve", "execveat") and re.search(r"= 0\s*$", line):
+                prog[g] = full
+            if rel.startswith(".."):
+                continue
+            rel = "" if rel == "." else rel
+            if call.startswith("open") and "O_DIRECTORY" in rest:
+                if rel in tdirs:
+                    dirs.add(rel)
+                continue
+            if rel not in tracked:
+                continue
+            if rel.endswith(".py"):
+                (pyopen if call.startswith(("open", "creat")) else pystat)[g].add(rel)
+            else:
+                files.add(rel)
+    unmeasured = []
+    for g in set(pyopen) | set(pystat):
+        exe = os.path.basename(prog.get(g, ""))
+        if g in datapids:
+            whole |= pyopen[g]  # a measured Python opened the source: a text read (the bytecode was compiled beforehand)
+        elif exe.startswith("python"):
+            whole |= pyopen[g] | pystat[g]  # a Python that left no coverage data (system python3, or killed): whole files
+            unmeasured.append(g)
+        else:
+            whole |= pyopen[g]  # read by another program (cat, grep, bash -n)
+    return files, whole, dirs, unmeasured
+
+
+CARRY_KEYS = ("py", "files", "whole", "dirs", "traced")
+
+
+def carried(prev, name):
+    """what the earlier map knew of suite `name` that is worth keeping beside a measurement that is not clean: its last clean
+    measurement ({py, files, whole, dirs, traced} and `at`, the commit it was made at), or the carry it already had; else None"""
+    e = ((prev or {}).get("suites") or {}).get(name)
+    if not isinstance(e, dict):
+        return None
+    if e.get("ok") and not e.get("failed") and all(k in e for k in CARRY_KEYS) and prev.get("commit"):
+        return {**{k: e[k] for k in CARRY_KEYS}, "at": prev["commit"]}
+    c = e.get("carry")
+    return c if isinstance(c, dict) and all(k in c for k in (*CARRY_KEYS, "at")) else None
+
+
+def measure(args):
+    names = args.suites or suites()
+    commit = git("rev-parse", "HEAD").strip()
+    tracked = set((git("ls-files") or "").split("\n")) - {""}
+    tdirs = {os.path.dirname(f) for f in tracked} | {""}
+    use_strace = shutil.which("strace") is not None and os.environ.get("SUITEMAP_STRACE", "1") != "0"
+    if not use_strace:
+        print("suitemap: strace off or missing: files are not measured, so every non-Python change runs every suite", file=sys.stderr)
+    # strace is the cost of measuring (coverage on Python 3.14 is close to free; strace makes a suite up to twice as slow).
+    # So with an earlier map, only the suites this commit's change reaches are traced again, and any suite traced more than
+    # TRACE_MAX_AGE ago; the others keep the file half of their earlier measurement.
+    prev = load_map(args.prev) if args.prev else None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    trace = set(names) if use_strace else set()
+    if use_strace and prev and prev.get("strace") and have(prev["commit"]):
+        reached, _ = selection(prev, prev["commit"], commit)
+        trace = set(names) if reached == "all" else set(reached)
+        for n in names:
+            e = prev["suites"].get(n, {})
+            try:
+                old = now - datetime.datetime.fromisoformat(e["traced"]) > datetime.timedelta(hours=TRACE_MAX_AGE)
+            except (KeyError, ValueError, TypeError):
+                old = True
+            if old or "files" not in e:
+                trace.add(n)
+        print(f"suitemap: tracing {len(trace)} of {len(names)} suites (the change since {prev['commit'][:12]} reaches them, or "
+              f"their files were traced over {TRACE_MAX_AGE} h ago); the others keep their earlier file measurement", file=sys.stderr)
+    # compile the bytecode first: a measured Python then opens a .py only to read it as text
+    subprocess.run([sys.executable, "-m", "compileall", "-q", "-x", r"/tests/.*_(scenario|check)\.py$", ROOT],
+                   capture_output=True)
+    out = {"format": FORMAT, "commit": commit, "strace": use_strace,
+           "measured": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "suites": {}}
+    fail = 0
+    for name in names:
+        print(f"== {name}", flush=True)
+        d = tempfile.mkdtemp(prefix=f"suitemap-{name}-")
+        atexit.register(shutil.rmtree, d, True)   # also when the run ends early (an exception, a signal that raises); removed again below when the suite is read
+        # a measurement of its own: nothing of an outer coverage run (this tool's self-test is measured on main) carries over
+        env = {k: v for k, v in os.environ.items() if not k.startswith("COVERAGE_")}
+        env.update(COVERAGE_PROCESS_START=coveragerc(d), COVERAGE_FILE=os.path.join(d, ".coverage"))
+        wrap = ("strace", "-f", "-y", "-qq", "--seccomp-bpf", "-e", f"trace={TRACE}", "-o", os.path.join(d, "strace")) if name in trace else ()
+        rc, secs = run_suite(name, args.timeout, env, wrap)
+        entry = {"ok": rc == 0, "seconds": round(secs, 1)}
+        if rc != 0:
+            prc, psecs = run_suite(name, args.timeout)
+            if prc != 0:
+                print(f"== {name}: FAILED", flush=True)
+                fail = 1
+                entry["failed"] = True
+            else:
+                print(f"::warning::{name} failed only when measured; it passes plainly. The map runs it on every PR until a clean measurement.", flush=True)
+            entry["seconds"] = round(psecs, 1)
+            entry["measured_seconds"] = round(secs, 1)   # what the measured run took (the limit, when it timed out): the shard plan balances by this, not by the plain time
+        lines, pids = read_coverage(d)
+        py = {}
+        for rel, ls in sorted(lines.items()):
+            try:
+                src = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            sc = scopes(src)
+            if sc is not None:
+                py[rel] = sorted({sc[0][l] if l < len(sc[0]) else "" for l in ls})
+        entry["py"] = py
+        if not entry["ok"] and not entry.get("failed") and carried(prev, name):
+            entry["carry"] = carried(prev, name)   # failed only when measured (a timeout of a slow suite): this measurement is partial, the last clean one is not lost
+        if name in trace:
+            files, whole, dirs, unm = read_strace(os.path.join(d, "strace"), tracked, tdirs, pids)
+            entry.update(files=sorted(files), whole=sorted(whole), dirs=sorted(dirs), unmeasured=len(unm),
+                         traced=now.isoformat(timespec="seconds"))
+        elif use_strace:
+            e = prev["suites"][name]
+            entry.update({k: e[k] for k in ("files", "whole", "dirs", "unmeasured", "traced") if k in e})
+        out["suites"][name] = entry
+        shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.map)), exist_ok=True)
+    with open(args.map, "w") as f:
+        json.dump(out, f, separators=(",", ":"))
+    print(f"suitemap: wrote {args.map} for {commit[:12]} ({len(names)} suites, strace {'on' if use_strace else 'off'})", file=sys.stderr)
+    return fail
+
+
+def have(commit):
+    """True when the commit is in the checkout, fetching it once when it is not (CI checks out one commit)"""
+    if git("cat-file", "-e", f"{commit}^{{commit}}") is None:
+        git("fetch", "--quiet", "--no-tags", "--depth=1", "origin", commit)
+    return git("cat-file", "-e", f"{commit}^{{commit}}") is not None
+
+
+def run(args):
+    fail = 0
+    for name in args.suites:
+        print(f"== {name}", flush=True)
+        rc, _ = run_suite(name, args.timeout)
+        if rc != 0:
+            print(f"== {name}: FAILED", flush=True)
+            fail = 1
+    return fail
+
+
+# ---------------------------------------------------------------- shards
+SHARDS = 6   # main's measured run: the matrix in tests.yml lists 0 .. SHARDS-1 and passes --of SHARDS (suitemap_scenario.py checks both)
+
+
+def shard_plan(names, n, m=None):
+    """names split into n lists, every name in exactly one; balanced by the map's measured seconds when it has any, else by a stable hash"""
+    if n < 1:
+        raise ValueError("a shard plan needs at least one shard")
+    names = sorted(set(names))
+    secs = {}
+    for k, e in ((m or {}).get("suites") or {}).items():
+        try:
+            v = max(float(e.get("seconds") or 0), float(e.get("measured_seconds") or 0))   # a suite that failed only when measured: the plain time is far under what its shard spends on it
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if v > 0:
+            secs[k] = v
+    known = sorted(secs[k] for k in names if k in secs)
+    out = [[] for _ in range(n)]
+    if not known:
+        for k in names:
+            out[int(hashlib.sha256(k.encode()).hexdigest(), 16) % n].append(k)
+        return out
+    median = known[len(known) // 2]
+    load = [0.0] * n
+    for k in sorted(names, key=lambda k: (-secs.get(k, median), k)):
+        i = min(range(n), key=lambda i: (load[i], i))
+        out[i].append(k)
+        load[i] += secs.get(k, median)
+    return [sorted(x) for x in out]
+
+
+def shard(args):
+    if not 0 <= args.index < args.of:
+        print(f"suitemap: --index {args.index} is not a shard of {args.of}", file=sys.stderr)
+        return 2
+    plan = shard_plan(suites(), args.of, load_map(args.map) if args.map else None)
+    if plan[args.index]:
+        print("\n".join(plan[args.index]))
+    return 0
+
+
+def plan(args):
+    """the whole plan, one `shardI=names` line a shard (names separated by spaces: a suite's name has none), as a job's outputs"""
+    if args.of < 1:
+        print("suitemap: --of must be at least 1", file=sys.stderr)
+        return 2
+    for i, names in enumerate(shard_plan(suites(), args.of, load_map(args.map) if args.map else None)):
+        print(f"shard{i}={' '.join(names)}")
+    return 0
+
+
+def merge(args):
+    maps = []
+    for p in args.shards:
+        m = load_map(p)
+        if m is None:
+            print(f"::error::suitemap merge: {p} is not a map", flush=True)
+            return 2
+        maps.append(m)
+    if not maps or len({m["commit"] for m in maps}) != 1:
+        print(f"::error::suitemap merge: the shards' maps are not of one commit ({', '.join(sorted({m['commit'][:12] for m in maps})) or 'none'})", flush=True)
+        return 2
+    out = {"format": FORMAT, "commit": maps[0]["commit"], "strace": all(m.get("strace") for m in maps),
+           "measured": max(m.get("measured") or "" for m in maps), "suites": {}}
+    twice = set()
+    for m in maps:
+        for k, e in m["suites"].items():
+            if k in out["suites"]:
+                twice.add(k)
+            out["suites"][k] = e
+    missing = sorted(set(suites()) - set(out["suites"]))
+    os.makedirs(os.path.dirname(os.path.abspath(args.map)), exist_ok=True)
+    with open(args.map, "w") as f:
+        json.dump(out, f, separators=(",", ":"))
+    print(f"suitemap: merged {len(maps)} shard map(s) of {out['commit'][:12]} into {args.map} ({len(out['suites'])} suites)", file=sys.stderr)
+    rc = 0
+    if twice:
+        print(f"::error::suitemap merge: in more than one shard: {', '.join(sorted(twice))}", flush=True)
+        rc = 1
+    if missing:
+        print(f"::error::suitemap merge: in no shard's map (not measured): {', '.join(missing)}", flush=True)
+        rc = 1
+    return rc
+
+
+# ---------------------------------------------------------------- select
+def load_map(path):
+    try:
+        with open(path) as f:
+            m = json.load(f)
+        return m if m.get("format") == FORMAT and isinstance(m.get("suites"), dict) and m.get("commit") else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def show(rev, path):
+    return git("show", f"{rev}:{path}")
+
+
+def changed_lines(a, b, old, new):
+    d = git("diff", "-U0", "--no-color", a, b, "--", *sorted({p for p in (old, new) if p})) or ""
+    ol, nl = set(), set()
+    for h in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", d, re.M):
+        x, xl, y, yl = int(h.group(1)), int(h.group(2) or 1), int(h.group(3)), int(h.group(4) or 1)
+        ol.update(range(x, x + xl))
+        nl.update(range(y, y + yl))
+    return ol, nl
+
+
+def shadowable():
+    """the top-level names a new module at an import root could shadow: the stdlib's and the installed packages'"""
+    import importlib.metadata
+    names = set(sys.stdlib_module_names)
+    try:
+        names |= set(importlib.metadata.packages_distributions())
+    except Exception:
+        pass
+    return names
+
+
+def py_change(names, S, a, b, old, new):
+    """(fns, bound, own, whole) for one changed Python file: the (file, scope) pairs whose bodies changed, the (module,
+    name) keys whose module-level binding changed, the (file, name) defs and classes among them (what they run counts),
+    and the files to take whole (a module-level change with effects, a file that does not parse, an added, deleted or
+    renamed file: whoever ran it)"""
+    fns, bound, own, whole = set(), set(), set(), set()
+    ol, nl = changed_lines(a, b, old, new)
+    if not old or not new or old != new:
+        whole |= {p for p in (old, new) if p}
+    for N, p, ls in ((names[0], old, ol), (names[1], new, nl)):
+        mn = N.files.get(p) if p else None
+        if p is None:
+            continue
+        if mn is None or not mn.ok:
+            whole.add(p)
+            continue
+        dyn = any((mn.mod, "*") in ks for ks in mn.refs.values())  # globals(): any of its names may be looked up by string
+        for ln in sorted(ls):
+            t = mn.text[ln - 1].strip() if 0 < ln <= len(mn.text) else ""
+            if not t or t.startswith("#"):
+                continue
+            sc = mn.body_of[ln] if ln < len(mn.body_of) else ""
+            if ln in mn.ddoc:
+                # a decorated function's docstring: its decorator reads it at import, so it counts as the def statement's
+                st = mn.stmt_at(ln)
+                sc = "" if st is not None and st[3] and sc in {n for n in st[3] if isinstance(n, str)} else None
+                if sc is None:
+                    whole.add(p)
+                    continue
+            if sc:
+                fns.add((p, sc))
+                continue
+            st = mn.stmt_at(ln)
+            if st is None or dyn:
+                whole.add(p)
+                continue
+            _, _, kind, bnames, extra = st
+            if kind == "import-repo" and all(quiet_import(N, S, p, mod) for mod in extra):
+                kind = "bind"
+            if kind == "effect-mod":
+                if any(p in e.get("py", {}) for e in S.values()):   # a file no suite ran sets no state in one
+                    whole |= {N.by_mod[x].path for x in mn.effect_targets.get(st[0], ()) if x in N.by_mod}
+                continue
+            if kind != "bind":
+                whole.add(p)
+                continue
+            bound |= {n if isinstance(n, tuple) else (mn.mod, n) for n in bnames}
+            own |= {(p, n) for n in bnames if isinstance(n, str) and n in mn.functions | mn.classes}
+    return fns, bound, own, whole
+
+
+def quiet_import(N, S, path, mod):
+    """True when a changed import of one of our modules adds nothing at import: the module only binds names and some suite
+    ran it already, or every suite that runs the importing file runs the imported one already"""
+    m = N.by_mod.get(mod)
+    if m is None:
+        return False
+    if m.only_binds():
+        # only binds names, but a module no suite ran yet is new to every importer: its calls (a local function at module
+        # level) now run there, so the importer's own suites must run (readonly.py reached connectors this way)
+        return any(m.path in e.get("py", {}) for e in S.values())
+    return all(m.path in e.get("py", {}) for e in S.values() if path in e.get("py", {}))
+
+
+def selection(m, a, b, pathspec=()):
+    """(set of suites or 'all', [(file, reason)]) for the change a..b under map m"""
+    if m is None:
+        return "all", [("-", "no usable map")]
+    if git("rev-parse", "--verify", "--quiet", f"{a}^{{commit}}") is None or git("rev-parse", "--verify", "--quiet", f"{b}^{{commit}}") is None:
+        return "all", [("-", f"cannot resolve {a[:12]}..{b[:12]}")]
+    S = m["suites"]
+    now = set(suites_at(b))
+    always = {s for s in now if s not in S or not S[s].get("ok")}
+    sel, why = set(always), [(s, "no clean measurement: runs always") for s in sorted(always)]
+    ns = git("diff", "--name-status", "-M", "--no-color", a, b, "--", *pathspec)
+    if ns is None:
+        return "all", [("-", "git diff failed")]
+    shadow = names = None
+    for row in ns.strip().split("\n"):
+        if not row:
+            continue
+        st, *paths = row.split("\t")
+        old, new = (None, paths[0]) if st[0] == "A" else (paths[0], None) if st[0] == "D" else (paths[0], paths[-1])
+        f = new or old
+        if any(p.startswith(HARNESS[0]) or p in HARNESS[1:] for p in (old, new) if p):
+            return "all", why + [(f, "the harness or the gate itself")]
+        ms = SUITE_RE.match(f)
+        if ms:
+            if ms.group(1) in now:
+                sel.add(ms.group(1))
+            why.append((f, "the suite itself"))
+            continue
+        if f.endswith(".lock"):
+            why.append((f, "a script's lock: the lock step checks it"))
+            continue
+        if re.match(r"tests/\w+_check\.py$", f):
+            why.append((f, "a manual check, not a CI suite"))
+            continue
+        added = new if st[0] == "A" or (st[0] == "R" and new != old) else None
+        if added:
+            # a new path is read only by code that names it (whose own change selects) or lists its directory (the listers,
+            # below); a directory no measured suite lists may still be read by a name we never saw tried: fail open
+            if not m.get("strace"):
+                return "all", why + [(f, "a new file, and the map has no file measurement (no strace)")]
+            d = os.path.dirname(added)
+            if not any(d in e.get("dirs", ()) for e in S.values()):
+                return "all", why + [(f, f"a new file in a directory no measured suite lists ({d + '/' if d else 'the top'})")]
+        hit = set()
+        if f.endswith(".py"):
+            hit |= {s for s, e in S.items() if any(p in e.get("whole", ()) for p in (old, new) if p)}
+            if names is None:
+                names = (Names(a), Names(b))
+            fns, bound, own, whole = py_change(names, S, a, b, old, new)
+            reached = 0
+            if bound:
+                keys, w = reach(names, bound, {p for e in S.values() for p in e.get("py", {})})
+                whole |= w
+                sc, direct = readers(names, keys)
+                fns |= sc
+                hit |= direct
+                reached = len(keys)
+            for s, e in S.items():
+                py = e.get("py", {})
+                if any(p in py for p in whole) or any(q in py.get(p, ()) for p, q in fns) \
+                        or any(r == n or r.startswith(f"{n}.") for p, n in own for r in py.get(p, ())):
+                    hit.add(s)
+            if new and not old:
+                # a new module at an import root (the checkout, tests/: the suites put both on sys.path) named like the
+                # stdlib's or an installed package's would shadow it for every importer
+                parts = new.removeprefix("tests/").split("/")
+                if (new.startswith("tests/") and len(parts) == 1) or "/" not in new or not git("ls-tree", a, parts[0]):
+                    if shadow is None:
+                        shadow = shadowable()
+                    top = parts[0].removesuffix(".py")
+                    if top in shadow:
+                        return "all", why + [(f, f"a new module named {top!r}, like one the suites import")]
+            why.append((f, (f"whole ({', '.join(sorted(whole))})" if whole else
+                            f"{len(fns)} function(s), {len(bound)} name(s) bound, {reached} reached") + f" → {len(hit)} suite(s)"))
+        else:
+            if not m.get("strace"):
+                return "all", why + [(f, "the map has no file measurement (no strace)")]
+            for s, e in S.items():
+                if any(p in e.get("files", ()) for p in (old, new) if p):
+                    hit.add(s)
+                if st[0] in "ADR":
+                    if any(os.path.dirname(p) in e.get("dirs", ()) for p in (old, new) if p):
+                        hit.add(s)
+            why.append((f, f"touched by {len(hit)} suite(s)" if hit else "no suite touches it"))
+        sel |= hit & now
+    for outer, inner in INNER.items():
+        if outer in now and outer not in sel and sel & set(inner):
+            sel.add(outer); why.append((outer, f"runs {', '.join(sorted(sel & set(inner)))} itself"))
+    return ("all" if sel >= now else sel), why
+
+
+def suites_at(rev):
+    out = git("ls-tree", "-r", "--name-only", rev, "tests/") or ""
+    return sorted(SUITE_RE.match(f).group(1) for f in out.split("\n") if SUITE_RE.match(f))
+
+
+def summary(lines):
+    p = os.environ.get("GITHUB_STEP_SUMMARY")
+    if p:
+        with open(p, "a") as f:
+            f.write("\n".join(lines) + "\n")
+
+
+def select(args):
+    m = load_map(args.map)
+    to = args.to
+    a = m["commit"] if m else to
+    if m:
+        have(a)
+    sel, why = selection(m, a, to)
+    total = len(suites_at(to))
+    for f, r in why:
+        print(f"suitemap: {f}: {r}", file=sys.stderr)
+    if sel == "all":
+        print("all")
+        head = f"**Suites: all {total}** (map {a[:12] if m else 'none'})"
+    else:
+        print(" ".join(sorted(sel)))
+        S = m["suites"]
+        secs = sum(S.get(s, {}).get("seconds", 0) for s in sel)
+        full = sum(S.get(s, {}).get("seconds", 0) for s in suites_at(to))
+        head = (f"**Suites: {len(sel)} of {total}** (about {secs:.0f}s of {full:.0f}s; map of {a[:12]}): "
+                + (", ".join(sorted(sel)) or "none"))
+    summary(["### Suite selection", head, "", "| changed | reason |", "|---|---|"] + [f"| `{f}` | {r} |" for f, r in why])
+    return 0
+
+
+def audit(args):
+    old, new = load_map(args.old), load_map(args.new)
+    if old is None or new is None:
+        print(f"suitemap: audit skipped: {'no earlier map' if old is None else 'no new map'}", file=sys.stderr)
+        return 0
+    # both sides over the same range, the old map's commit..to: a push's `before` can be later (a queued main run replaced
+    # by a newer one leaves no map for it), and the change in between would go unchecked
+    frm = old["commit"]
+    gone = [what for what, c in (("the old map's commit", frm), ("the pushed commit", args.to)) if not have(c)]
+    if gone:
+        msg = f"the audit could not check: {' and '.join(gone)} ({frm[:12]}..{args.to[:12]}) does not resolve"
+        print(f"::error::{msg}")
+        summary(["### Selection audit", f"**{msg}**"])
+        return 1
+    ran, _ = selection(old, frm, args.to)
+    should, why = selection(new, frm, args.to)
+    if ran == "all":
+        print("suitemap: audit: the change ran every suite", file=sys.stderr)
+        return 0
+    should = set(suites_at(args.to)) if should == "all" else should
+    # a suite the new map has no clean measurement for (it failed only when measured, or timed out) is in `should` because the
+    # selection always runs it, not because the change reaches it, and its partial measurement says nothing about reach: it is
+    # no miss of the old choice (a real failure is `broke`, below)
+    unclean = {s for s, e in new["suites"].items() if not e.get("ok")}
+    missed = sorted(should - ran - unclean)
+    # a suite that failed on main (measured, and again plainly) that the choice skipped: the miss itself, not a sign of one
+    broke = sorted({s for s, e in new["suites"].items() if e.get("failed")} - ran)
+    if broke:
+        msg = (f"selection miss: {', '.join(broke)} failed on main after {frm[:12]}..{args.to[:12]}, and the map of "
+               f"{old['commit'][:12]} did not choose it for that change")
+        print(f"::error::{msg}")
+        summary(["### Selection audit", f"**{msg}**"])
+        return 1
+    if missed:
+        msg = (f"selection miss: {frm[:12]}..{args.to[:12]} reaches {', '.join(missed)} by the merged code's own measurement, "
+               f"but the map of {old['commit'][:12]} chose {', '.join(sorted(ran)) or 'none'}")
+        print(f"::error::{msg}")
+        summary(["### Selection audit", f"**{msg}**", "", "| changed | reason (new map) |", "|---|---|"] + [f"| `{f}` | {r} |" for f, r in why])
+        return 1
+    print(f"suitemap: audit: no miss ({len(ran)} chosen, {len(should - unclean)} reached)", file=sys.stderr)
+    summary(["### Selection audit", f"No miss: the map of {old['commit'][:12]} chose {len(ran)} suite(s); the merged code reaches {len(should - unclean)}."])
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tests/suitemap.py", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("list")
+    p = sub.add_parser("measure"); p.add_argument("--map", required=True); p.add_argument("--prev"); p.add_argument("-T", "--timeout", type=int, default=900); p.add_argument("suites", nargs="*")
+    p = sub.add_parser("run"); p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("suites", nargs="*")
+    p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map")
+    p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
+    p = sub.add_parser("merge"); p.add_argument("--map", required=True); p.add_argument("shards", nargs="+")
+    p = sub.add_parser("select"); p.add_argument("--map", required=True); p.add_argument("--to", default="HEAD")
+    p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
+    args = ap.parse_args()
+    if args.cmd == "list":
+        print("\n".join(suites()))
+        return 0
+    return {"measure": measure, "run": run, "plan": plan, "shard": shard, "merge": merge, "select": select, "audit": audit}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

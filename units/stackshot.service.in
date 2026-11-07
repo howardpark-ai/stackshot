@@ -1,0 +1,22 @@
+# stackshot.service — stackshot: the board (/) and the MCP connector (/mcp).
+# Install: ./install.sh units   (renders this template for the checkout, the config file and the user, and installs it)
+# Secrets: <paths.secrets>/oauth.env (chmod 600) — STACKSHOT_GOOGLE_CLIENT_ID / _SECRET / _PORTAL_TOKEN (the older BOARD_MCP_ spelling still read). Never in the unit.
+[Unit]
+Description=stackshot — MCP connector + board publisher
+After=network-online.target
+
+[Service]
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+# caio (FastMCP's OAuth store, through aiofile) tries io_uring first. When the user's locked-memory allowance is spent by
+# other processes' rings, that setup fails with ENOMEM and board sign-in with it; Linux AIO needs none.
+Environment=CAIO_IMPL=linux
+ExecStart=@UV@ run --locked --script @CHECKOUT@/server.py
+# systemctl --user reload stackshot.service (stackshot-reload.path, on a config change): SIGHUP, the server re-reads stackshot.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

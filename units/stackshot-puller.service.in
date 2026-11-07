@@ -1,0 +1,17 @@
+# stackshot-puller.service — this machine's fetcher (user unit). It asks the stackshot server what
+# waits for the sessions live here and hands each line to the CLI's own inbox; its poll is also this machine's sign of life.
+# Install: ./install.sh units  (or ./install.sh puller on a box that only fetches)
+# Needs this machine's token (<secrets>/client.token; `client.py mint <machine>` on the server box) and the server's address.
+[Unit]
+Description=stackshot puller (fetches this machine's notices and messages from the stackshot server)
+After=network-online.target
+
+[Service]
+Environment=STACKSHOT_CONFIG=@CONFIG@
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 @CHECKOUT@/puller.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

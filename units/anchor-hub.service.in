@@ -1,0 +1,23 @@
+[Unit]
+Description=anchor-hub — push Slack/Notion/Drive changes into the owning Claude Code session
+After=network-online.target
+
+[Service]
+Environment=STACKSHOT_CONFIG=@CONFIG@
+ExecStart=@UV@ run --locked --script @CHECKOUT@/anchor-hub.py
+# systemctl --user reload anchor-hub.service (stackshot-reload.path, on a config change): SIGHUP, the hub re-reads stackshot.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1 TZ=@TZ@
+# Install: ./install.sh units
+# the clean reboot protocol: SIGTERM to the hub only — its handler lets running anchor-relay deliveries
+# finish, queues pending follow-ups and saves every read position (cursors.json); the reboot hook is stackshot/reboot-hooks/anchor-hub-hook
+KillMode=mixed
+TimeoutStopSec=60
+# boot order gbrain → stackshot → anchor-hub: a user unit cannot order itself after system units, so wait for stackshot
+# (at most 2 min; start anyway after that)
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do curl -sf -m 3 http://127.0.0.1:@PORT@/healthz >/dev/null && exit 0; sleep 2; done; exit 0'
+
+[Install]
+WantedBy=default.target

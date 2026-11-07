@@ -1,0 +1,210 @@
+# The word list: words that the text a session reads must not carry, each with what to write instead.
+# Read by tools/retired_terms.py, run by tests/retired_terms_scenario.py: `[[term]]` says what is not allowed and what to write instead, `[[scan]]` says which files carry text.
+#
+#   [[term]]
+#   retired = "<word>"      a whole word, matched case-insensitively: `owner_name`, `ownership` and `OWNER_X` are other words
+#   use     = "<what to say>"   printed with every hit
+#   allow   = [ "<phrase>", ... ]   literal phrases, case-insensitive: a hit inside an occurrence of one is a legitimate use.
+#                           Every entry has its reason in the comment above it; a new use is a reviewed line here, never a quiet edit.
+#                           A phrase that starts with `=` must be the WHOLE string (a literal, a json value, a line): `"=the owner"` excuses the default
+#                           `or "the owner"` and not the same words inside a sentence. Prefer the narrowest phrase that covers the real use.
+#
+#   [[scan]]
+#   files     = [ "<glob>", ... ]   from the repository root; `*` stays in one directory, `**` crosses them
+#   exclude   = [ "<glob>", ... ]   optional
+#   skip_keys = [ "<key>", ... ]    optional, json only: keys whose values are names, not text
+#   kind      = "python" | "json" | "text"   optional: how to read the files (default by suffix: .py python, .json json, else text)
+#
+# A python file is read by its string literals only (never a comment, a docstring or a string statement, a print to stderr, or a literal that is one
+# bare identifier or path, which is a stored key such as "owner"). A json file by its string values. Anything else line by line.
+
+# ---- owner: the item's mover is who acts next, the keeper of record is the stored creator.
+[[term]]
+retired = "owner"
+use = "mover (who moves the item next); the stored creator is only a History fact, `created by`; Oliver is named, or called `the owner` of the instance"
+allow = [
+    # Oliver, the instance's owner ([instance] owner; "the owner" is its default). These stay on purpose: the word is his title, not an item's.
+    # Code: the default itself, `_cfg.get("instance", "owner") or "the owner"` and its comparison. `=` makes the entry match the whole string literal only,
+    # so the same two words inside a sentence are still a hit.
+    "=the owner",
+    "board's owner",
+    # The tools' text and the prompts, where "the owner" is Oliver. Each entry is the phrase as it stands, so a new sentence that says "the owner"
+    # for an item's keeper or mover is a hit. Possessives first:
+    # config.py KEYWORDS: the help text of the other-language word lists, where "the owner" is Oliver.
+    "asks the owner to run something there",
+    "ask the owner to run, type or paste",
+    "command for the owner to run",
+    "runs it, not the owner",
+    "needs the owner (weak signal)",
+    "the owner's task board",
+    "a state that is the owner's",       # the model text: his state makes him the mover (Oct 28th); here "the owner" is Oliver
+    "mover=the owner",
+    "the owner's standing rule",
+    "the owner's call",
+    "the owner's own",
+    "the owner's word",
+    "the owner's GitHub account",
+    "the owner's name",
+    "the owner's Claude sessions",
+    "the owner's instruction",
+    "the owner's answer",
+    "the owner's:",
+    "the owner's Windows machine",
+    "shell command of the owner's",
+    "session on the owner's machines",
+    # then the rest:
+    "reply for the owner",
+    "[for the owner]",
+    "input the owner must give",
+    "the owner can decide",
+    "the owner would ask",
+    "the owner runs",
+    "the owner relays",
+    "the owner asks",
+    "the owner parks",
+    "the owner has to do",
+    "the owner can skim",
+    "the owner talks to",
+    "needed from the owner",
+    "the owner, a session",
+    "reaches the owner",
+    "the agent or the owner can take",      # the message tool's text on what counts as asking (a step only the reader or Oliver can take)
+    "waits on the owner",
+    "waiting on the owner",
+    "to the owner as",
+    "the owner is quoted",
+    "the owner, an outside party",
+    "line that starts `the owner:`",
+    "only the owner does",
+    "steps or commands for the owner",      # the description is the background, never steps or commands for Oliver (the tool text, where "the owner" is Oliver)
+    # tests/tool_text.snapshot.json is the tool text rendered on the example config, where the instance's person is the placeholder "the owner". Each phrase is a sentence of the tools' text as it renders, where "the owner" stands for the person the board is for.
+    "`the owner:`",
+    "`- the owner: …`",
+    "\"the owner to …\"",
+    "the owner's steps",
+    "the owner's server-made step",
+    "so the owner gets one-click",
+    "when the owner answers by picking",
+    "opens with the owner: or you:",
+    # the start, reload and doctor warning for a config with no [instance] owner (config.notes); it names the key the instance sets.
+    "[instance] has no owner, so the board names its person by a placeholder: set owner = ",
+    # the runners page names the [runners] owner key (the GitHub login of the repos) when a repo has neither it nor an ID; the key keeps its name.
+    ": no GitHub owner set; add owner = ",
+    # a template slot the code fills with the instance owner's name ([instance] owner), or with the keeper of record's name: the slot keeps its variable's name.
+    "{OWNER}",
+    "{owner}",
+    # GitHub's own naming: owner/repo, owner/name, <owner>/<repo>#<n> are the repository path a pr_merged check or a mirror setting takes.
+    "<owner>/<repo>",
+    "<owner/repo>",
+    "owner/repo",
+    "owner/name",
+    "owner/*",
+    # the stored key: the item's JSON and the config keep `metadata.owner` (the keeper of record), `github.owner_login` and the like.
+    "metadata.owner",
+    # the GitHub mirror's issue body ("**owner** <name>") is a stored format that ghsync reads back: renaming the label needs a migration of every issue.
+    "**owner**",
+    "\\*\\*owner\\*\\*",
+    # the mirror's label for an item with no stored creator, built and compared inside ghsync (the whole string is `no owner`).
+    "=no owner",
+    # a Notion integration token's owner: an outside account holder, not an item's.
+    "token's owner",
+    # the deprecated `owner` parameter of create and update: accepted with a note until [model] owner_param_until (Tue Nov 3rd 2026), refused after. The
+    # notes name the old word on purpose, so a session that still passes it learns what replaced it.
+    "owner is not a parameter",
+    "owner is going away",
+    "owner parameter",
+    "owner, the old name of mover",
+    # whatschanged.py SEED: the two hand-written brief lines of Tue Oct 27th (the two releases) say what the word was replaced by. Delete them, and the SEED, after Tue Nov 3rd 2026.
+    "never owner",
+    "owner is accepted with a note",
+    # router.py reads a notice written before the rename: its text says `mover X:`, `then X:` or, from an older server, `owner X:`.
+    "(?:mover|then|owner)",
+]
+
+# ---- keeper of record: the role is gone. An item has a mover and nothing else that acts as an owner; the creator
+# stays stored (metadata.owner) and is only a History fact, "created by X".
+[[term]]
+retired = "keeper of record"
+use = "mover (who moves the item now), `then` (who takes it after Oliver) or `created by` (the stored creator, a History fact)"
+allow = [
+    # whatschanged.py SEED: the two hand-written brief lines of Tue Oct 27th (the two releases) are the record of what those releases said. A record of a past
+    # event is not rewritten; the SEED goes after Tue Nov 3rd 2026.
+    "notices and replies say mover and keeper of record",
+    "the server stores it as the keeper of record",
+]
+
+# ---- steward: the router rules a project's notices; a page has a keeper (a front agent) and background agents.
+# Nothing live says steward in the retired sense; what is left is a prompt's history line. The names kept for sala and the hub repo were dropped.
+[[term]]
+retired = "steward"
+use = "the router (it rules a project's notices) or the project's keeper or background agent"
+allow = [
+    # router.py's RUBRIC names what the router replaced: its first sentence is history inside a prompt, and a prompt is not reworded in a rename.
+    "project's steward",
+]
+
+# ---- example-page.sh: the page script is retired; a page is written through the gbrain connector's tools.
+# Nothing live names it; the page-owed hints say add_timeline_entry, edit_page and put_page.
+[[term]]
+retired = "example-page.sh"
+use = "the gbrain connector's tools: add_timeline_entry for a dated line, get_page then edit_page with expected_revision for other edits, put_page for a whole rewrite"
+allow = []
+
+# ---- rank (the per-builder work order): retired; a builder starts every item handed to it at its next turn and releases go out in merge-queue order.
+# Only the work-order sense is retired; the word in other senses (a sort position, a registration order) carries its own allow entry below.
+[[term]]
+retired = "rank"
+use = "nothing: a builder starts every item handed to it at its next turn, and releases go out in merge-queue order (the refusal and the History say it once)"
+allow = [
+    # The refusal a stale caller gets when it still passes rank or clear_rank, and the two parameters' own description.
+    "ranks are retired",
+    "drop rank and clear_rank from the call",
+    # The History keeps the lines of the cleanup (and of the ranks set while they existed), read from the item's old revisions.
+    "rank set to",
+    "rank cleared (was",
+    # itempage.py's History splitter reads those same old lines back: its patterns name the field (rank) a revision once set or cleared.
+    "needs|after|rank|state|mover",
+    "(?:state|rank|due|after|step)",
+]
+
+[[scan]]
+files = ["*.py", "anchorhub/*.py", "tests/tool_text.snapshot.json"]
+skip_keys = ["name", "type"]
+
+[[scan]]
+files = ["stackshot"]
+kind = "python"
+
+[[scan]]
+files = ["client/hooks/*"]
+
+# ---- the waiting ladder (the mover, then the project's builder, then a stuck list): retired with its list in board.md and the brief.
+# An item past its expected-by is surfaced (the board, get, the item page); nothing escalates it by steps any more.
+[[term]]
+retired = "waiting ladder"
+use = "nothing: an item past its expected-by shows as past due on the board and in get; the stall pass and the hand-off clock move an item whose mover has gone quiet"
+allow = []
+
+[[term]]
+retired = "stuck list"
+use = "nothing: the board and the brief carry no stuck list; a hand-off nobody can take asks the fleet's builder to recover the session (one message) and the item stays with its mover"
+allow = []
+
+# ---- the stuck state: a hand-off nobody could take was marked stuck on its record, put on a list and raised to the owner with a "Nag again" button.
+# Retired: the ladder's last rung is one message to the fleet's builder (`server._recovery_tell`), the item stays with its mover, and nothing waits on the owner's click.
+# The `stuck` words that remain are other things and are not these terms: a router notice's ruling status `stuck`, a failed wait's `wait_failed` stuck mark and the
+# `stuck` notice kind, the audit's `stuck-elsewhere` finding, and the pane-error detection (`_pane_stuck`). None of them is a state of a hand-off record.
+[[term]]
+retired = "stuck state"
+use = "nothing: a hand-off nobody can take is not marked stuck; the fleet's builder is sent one `[stackshot] fleet recovery:` message and the item stays with its mover"
+allow = []
+
+[[term]]
+retired = "Nag again"
+use = "nothing: the idle and stall passes raise no question to the owner; the fleet's builder is asked to recover the session"
+allow = []
+
+[[term]]
+retired = "stuck_to"
+use = "`[fleet] operator_session` names the fleet's builder (`server._fleet_builder`); there is no `[idle] stuck_to` key"
+allow = []

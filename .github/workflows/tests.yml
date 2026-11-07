@@ -1,0 +1,363 @@
+# The scenario suites, on every pull request and on main. They run on fixture data in a temp dir: no store, no
+# network beyond what uv needs to fetch fastmcp. A PR is merged by the builder (example-engineer) only when this is green, and, unless it is a small change, after a fresh reviewer subagent has read it.
+# Dependencies are pinned: every PEP 723 script (the production scripts and tools/, not the suites) has a <script>.lock beside it, the suites run
+# with --locked against tests/uv.lock, and the first step fails when a script's inline metadata no longer matches its lock or a script with dependencies has none.
+# The suites run in ONE environment: tests/run-suite is `uv run --locked --project tests python <suite>` with
+# UV_PROJECT_ENVIRONMENT at ~/.cache/stackshot/test-venv, so a checkout path no longer builds a new
+# set of environments in uv's cache, and a stale tests/uv.lock fails the suite instead of resolving afresh.
+# Suite selection: a push to main runs EVERY suite measured (tests/suitemap.py measure:
+# coverage and strace record what each suite runs and touches) and keeps that map in the Actions cache, keyed by the commit, and as the artifact `suitemap` (release.sh reads that one);
+# a pull request, and a push to a release-queue branch (`queue/**`, see below), run only the suites their change reaches by the newest map (tests/suitemap.py select; the reasons are in the
+# job summary), and all of them when the map is missing or the change is to the harness itself. The next main run then
+# checks the choice against the merged code's own measurement (tests/suitemap.py audit): a suite the PR should have run and
+# did not fails that step by name. The suites are every tests/*_scenario.py: a new suite is a new file, not an edit here.
+# MAIN'S RUN IN SHARDS. The measured run on main was one long job on one runner (and every release waits for it) while the
+# other runners sat idle. On a push to main the `shards` job makes the plan once (tests/suitemap.py plan --of 6: every suite in exactly one of six lists, balanced by
+# the map's measured times, or by a hash of the name without a map) and hands the six lists on as outputs; the `measure` job is a matrix of 6 jobs on the same labels, each
+# measuring the list it is given (so a cache miss in one of them cannot change what it runs) and handing its map on as an
+# artifact. The `suites` job then merges them (tests/suitemap.py merge), keeps and saves the map and audits the selection as before; its step
+# "run every suite, measured" passes only when every shard passed and the merged map holds every suite exactly once. release.sh (main_green) reads
+# that step's name and the audit's, in the `suites` job, so it needs no change; a pull request, a queue branch's push and a manual run do not use the shards (both jobs are
+# skipped) and run in the `suites` job as before.
+#
+# THE RELEASE QUEUE'S BRANCHES. A push to a branch named `queue/**` (the queue's stacked group branches: main plus the waiting PRs merged on top) is a `push` event too, but it gets the run a
+# pull request gets, not main's: GitHub's merge-queue convention is that the group runs the checks a PR runs, and main's own full run follows the merge. So on a queue branch the `shards` and `measure` jobs are
+# skipped (they run on a push to main only) and the `suites` job runs the selection step ("run the suites the change reaches": `suitemap.py select --map .suitemap/map.json --to HEAD`, which compares the
+# newest map's commit with the group's head, so it sees the group's PRs and whatever main did since the map; any failure of the selection runs every suite, as for a PR). Observed, not measured here: a queue branch's full sharded run takes several times as long as a PR's selected run.
+# The job keeps its name `suites`: it is the check mq reads on the group's head (.github/mergequeue.toml: `required`; `suites = "select"` is the setting that says the workflow does this, and
+# tests/suitemap_scenario.py fails when the two disagree). Its result is read as main's is: by the commit (`salamander ci-runs howardpark-ai/stackshot --sha <sha>`; the poller file lists the run with its head_branch and event `push`).
+# What a queue run no longer gives: the measured map and the selection audit, which only main's run does (the steps that merge the shards' maps, say "run every suite, measured", keep, save and publish the map and
+# "audit the selection" run on a push to main only; so no map is saved from a queue commit, which may be rebased, force-pushed or deleted and would then be a later audit's `--old` commit that does not resolve).
+# The risk is a selection that misses a suite; a pull request's run accepts the same risk, and main's full measured run after the merge, with its audit, catches it by name. The poller keeps the newest 30 runs
+# of the repository, so a queue branch's run (three or four workflow runs a push) pushes main's older ones out of that window sooner.
+#
+# WHERE THE JOBS RUN. Every job of this file and of clean-text.yml runs on GitHub's hosted runners (`ubuntu-latest`); no repository variable is needed.
+# A step that makes sense only on a hosted runner (it installs what a machine set up by hand would already have) is gated on `runner.environment == 'github-hosted'`, which is true
+# exactly where the job runs on one. CONTRIBUTING.md, "Where CI runs", has the whole account.
+name: tests
+on:
+  pull_request:
+  push:
+    branches: [main, 'queue/**']   # queue/** : the release queue's stacked group branches (main plus the waiting PRs): a pull request's run (the selection), see THE RELEASE QUEUE'S BRANCHES above
+  workflow_dispatch:       # a manual run on a branch: gh workflow run tests.yml --ref <branch> [-f suites="pilot release"]
+    inputs:
+      suites:
+        description: suites to run, space-separated names (pilot, release …); empty runs every suite, plainly (no map, no measuring)
+        type: string
+        default: ""
+# A new push to a PR cancels that branch's older run, queued or running, so superseded runs stop holding the one runner. A run on main (or a queue branch) is never cancelled while it runs; a newer main run waiting replaces an older one waiting (GitHub keeps one pending run per group).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # Main's measured run, split in two jobs (a push to main only; a pull request and a queue branch's push skip both: skipped counts as passing). `shards` makes the plan ONCE: it reads the earlier map and
+  # puts every suite in exactly one of the 6 lists (tests/suitemap.py plan: balanced by the map's measured times, or by a stable hash of the name when the map is missing, which is
+  # also what a cache miss here gives), and hands the six lists on as job outputs. `measure` is a matrix of 6 jobs on the labels the suites job used before, each running the list
+  # it is given and nothing else, so a cache miss in one of them cannot make it plan differently from the others (a suite run twice, or by none). The shard count is in two places,
+  # the matrix and --of below; tests/suitemap_scenario.py checks that they agree with tests/suitemap.py's SHARDS, that every suite is in exactly one list, and that every shard reads the plan.
+  shards:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'   # main only: a queue branch runs the selection
+    name: main shard plan
+    runs-on: ubuntu-latest   # it only reads a map and lists suites
+    timeout-minutes: 15
+    outputs:
+      shard0: ${{ steps.plan.outputs.shard0 }}
+      shard1: ${{ steps.plan.outputs.shard1 }}
+      shard2: ${{ steps.plan.outputs.shard2 }}
+      shard3: ${{ steps.plan.outputs.shard3 }}
+      shard4: ${{ steps.plan.outputs.shard4 }}
+      shard5: ${{ steps.plan.outputs.shard5 }}
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: the one test environment
+        run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      # the earlier map, for the measured times the plan is balanced by. No map (a cache miss): the plan is the hash plan, for all six lists alike
+      - name: the suite map
+        uses: actions/cache/restore@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-${{ github.event.before }}
+          restore-keys: suitemap-
+      - name: plan the shards
+        id: plan
+        run: |
+          set -o pipefail   # the default shell has no pipefail: a failing plan must fail the step, not hide behind tee's exit status
+          uv run --locked --project tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json | tee -a "$GITHUB_OUTPUT"
+  measure:
+    needs: shards
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'   # main only
+    name: main shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false   # one failing shard must not cancel the others, whose measurement the map still needs
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    runs-on: ubuntu-latest   # the measured run's shards
+    timeout-minutes: 180   # a suite gets MEASURE_T (60 min) and its plain rerun (release: 5 min): 100 min could not hold both
+    env:
+      MEASURE_T: 3600    # seconds a suite gets traced and under coverage (see the suites job): the release suite, before it was split into release and release_queue, alone in its shard took far longer measured than plain and timed out
+      CAIO_IMPL: linux
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: strace, for the measured run
+        if: runner.environment == 'github-hosted'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends strace
+      - name: the one test environment
+        run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      # the earlier map, for measure --prev only (which suites to trace again). The list of suites is not decided from it here: it comes from the plan job, the same for every shard
+      - name: the suite map
+        uses: actions/cache/restore@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-${{ github.event.before }}
+          restore-keys: suitemap-
+      - name: run this shard's suites, measured
+        env:
+          SHARD: ${{ matrix.shard }}
+          SELECTED: ${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}
+        run: |
+          case $SELECTED in *[!a-z0-9_\ ]*) echo "the plan holds only names of suites, separated by spaces"; exit 2 ;; esac
+          [ -n "$SELECTED" ] || { echo "shard $SHARD has no suite"; exit 0; }
+          echo "shard $SHARD: $SELECTED"
+          exec uv run --locked --project tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py
+      - name: hand the shard's map on
+        if: always() && hashFiles('.suitemap/shard-*.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: suitemap-shard-${{ matrix.shard }}
+          path: .suitemap/shard-${{ matrix.shard }}.json
+          retention-days: 1
+          overwrite: true   # a re-run of the job (same run id) uploads the same artifact name again; without this the second upload fails
+  suites:
+    # On a push to main this job runs after the plan and the shards (needs; `!cancelled()` so that a failing shard still gets its verdict here) and merges their maps. On a pull request and on a queue branch
+    # the two jobs are skipped (skipped needs do not stop it) and it runs the selection itself.
+    needs: [shards, measure]
+    if: ${{ !cancelled() }}
+    # Runs on GitHub's hosted runners (ubuntu-latest, 2 cores).
+    runs-on: ubuntu-latest   # on a push to main it only merges the shards' maps and audits
+    # 180 min: a short limit once cancelled a passing run (a hosted runner is small and has no slot to wait for).
+    # Each suite has its own limit (SUITE_T below).
+    timeout-minutes: 180   # a generous limit on a hosted runner (small, no slot to wait for; to be tightened once measured)
+    env:
+      SUITE_T: 900        # seconds one suite gets on a plain run; a hosted runner has 2 cores
+      CAIO_IMPL: linux   # as stackshot.service: avoids an io_uring fault on some hosts
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"   # scratch goes to the runner's temp folder, which the runner empties after each job. The runner context is not available in a job-level env, so this is a step
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      # What ubuntu-latest does not have. strace is how tests/suitemap.py records the files a suite touches (main's measured run,
+      # now in the measure job, which installs it; without it the map has no file half and every PR runs every suite). Nothing else was missing: a manual run of every suite on ubuntu-latest passed all but the three suites that read this workflow's own text (updated with this change); a suite needs no browser (phone_width_check is manual).
+      - name: the one test environment
+        run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      - name: every script's lock is present and current
+        run: |
+          fail=0
+          for f in $(git ls-files '*.py'); do
+            grep -q '^# /// script' "$f" || continue
+            if [ ! -f "$f.lock" ]; then echo "missing lock: $f.lock (run: uv lock --script $f)"; fail=1; continue; fi
+            if ! uv lock --script "$f" --check; then echo "stale lock: $f.lock (run: uv lock --script $f)"; fail=1; fi
+          done
+          exit $fail
+      # The newest map from main: the PR's base commit's when it is there, else the latest saved (a PR reads main's cache).
+      - name: the suite map
+        uses: actions/cache/restore@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-${{ github.event.pull_request.base.sha || github.event.before }}
+          restore-keys: suitemap-
+      # One suite gets 10 minutes (900 hosted; 15 measured; the longest, pilot and page_currency, take one or two): a hung suite fails on
+      # its own with the traceback of where it sat (SIGINT), and the suites after it still run, instead of the whole job
+      # sitting until its limit cancels it with no trace (github's pacer waiting out the hour).
+      # A pull request, and a push to a queue branch (the group's head: main plus the waiting PRs): the newest map from main, `--to HEAD`. Nothing here needs the PR's fork point: select compares the map's commit
+      # with HEAD (fetching that commit when the checkout, one commit deep, lacks it), and a queue head holds main plus the group. On a queue push `github.event.before` is the branch's earlier head, which has no map, so the restore falls back to the newest `suitemap-` entry.
+      - name: run the suites the change reaches
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/queue/'))   # not a manual run on a queue ref: that runs the step below
+        run: |
+          sel=$(uv run --locked --project tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD) \
+            || { echo "::warning::the suite selection failed: running every suite"; sel=all; }
+          if [ "$sel" = all ]; then sel=$(uv run --locked --project tests python tests/suitemap.py list); fi
+          [ -n "$sel" ] || { echo "no suite is reached by this change"; exit 0; }
+          # -T 600 again (900 hosted): the stopgap 900 was for the release suite's waits starting extra Python processes, before the shell stubs and the short give-up caps
+          # exec: a cancel signals this shell alone; uv in its place forwards INT and TERM to suitemap.py, which stops the suite
+          exec uv run --locked --project tests python tests/suitemap.py run -T "$SUITE_T" $sel
+      # A manual run (gh workflow run): the suites named in the `suites` input, else every suite, plainly. No map: it is for trying a runner, not for judging a change.
+      - name: run the suites named, or every suite
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SUITES: ${{ inputs.suites }}      # data, never shell text; checked below
+        run: |
+          case $SUITES in *[!a-z0-9_\ ]*) echo "the suites input holds only names of suites, separated by spaces"; exit 2 ;; esac
+          [ -n "$SUITES" ] || SUITES=$(uv run --locked --project tests python tests/suitemap.py list)
+          exec uv run --locked --project tests python tests/suitemap.py run -T "$SUITE_T" $SUITES
+      # A push to main (only; the steps down to "audit the selection" skip on a queue branch): the shards measured every suite (the measure job; MEASURE_T there: -T 3600, as a suite traced and under coverage runs four to eight times its
+      # plain time; release, a few minutes plainly, once ran over its limit measured, which failed it only measured: the map then carries its earlier measurement, see tests/suitemap.py). Their maps come here and are merged into one.
+      - name: the shards' maps
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: suitemap-shard-*
+          path: .suitemap/shards
+          merge-multiple: true
+      - name: merge the shards' maps
+        id: merge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true   # judged by the next step, which names what is wrong; the merged map is written even when a suite is missing (it then runs on every PR)
+        run: |
+          set -- .suitemap/shards/shard-*.json
+          [ -e "$1" ] || { echo "::error::no shard handed on a map"; exit 1; }
+          uv run --locked --project tests python tests/suitemap.py merge --map .suitemap/new.json "$@"
+      # release.sh (main_green) reads this step's name and the audit's: its deploy waits for them on main. It passes only when every shard passed and the merged map holds every suite once
+      - name: run every suite, measured
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PLAN: ${{ needs.shards.result }}
+          SHARDS: ${{ needs.measure.result }}
+          MERGED: ${{ steps.merge.outcome }}
+        run: |
+          [ "$PLAN" = success ] || { echo "::error::the plan of main's measured run was not made (plan: $PLAN): see the shard plan job"; exit 1; }
+          [ "$SHARDS" = success ] || { echo "::error::a shard of main's measured run did not pass (shards: $SHARDS): see the shards' jobs"; exit 1; }
+          [ "$MERGED" = success ] || { echo "::error::the shards' maps do not hold every suite exactly once (merge: $MERGED): see the step above"; exit 1; }
+          echo "every shard passed, and the merged map holds every suite once"
+      - name: keep the map
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('.suitemap/new.json') != ''
+        run: |
+          [ ! -f .suitemap/map.json ] || mv .suitemap/map.json .suitemap/old.json
+          cp .suitemap/new.json .suitemap/map.json
+      - name: save the map
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('.suitemap/new.json') != ''   # main only: see THE RELEASE QUEUE'S BRANCHES at the top
+        uses: actions/cache/save@v4
+        with:
+          path: .suitemap/map.json
+          key: suitemap-${{ github.sha }}
+      # release.sh reads the map to decide whether a PR that is behind main needs its tests again (tools/retest_skip.py): the Actions cache cannot be read from outside a run, an artifact can.
+      # A failed upload costs release.sh its skip (it retests, as ever), never main's run: continue-on-error. overwrite: a re-run of the same run (same artifact name) replaces the artifact instead of failing on it
+      - name: publish the map for release.sh
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('.suitemap/new.json') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: suitemap
+          path: .suitemap/map.json
+          include-hidden-files: true   # the map is under a hidden folder (.suitemap): upload-artifact v4.4 and later skips hidden files without this, and the step would then upload nothing
+          retention-days: 7
+          overwrite: true
+      - name: audit the selection
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('.suitemap/new.json') != ''
+        run: uv run --locked --project tests python tests/suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}
+  # The tool's text changes in the same release as the tool: a pull request that changes the body of an MCP tool
+  # function or of an output helper (tools/tool_text.py HELPERS) while tests/tool_text.snapshot.json is unchanged fails here, unless its body has the line
+  # `tool-text: unchanged: <reason>`. The other two gates run in the suites job as suites: tool_text (the live registry equals the snapshot) and retired_terms.
+  # It needs no token beyond the job's own: the body is read with `gh pr view` (so a re-run after the author added the line sees it; the event's copy, with a
+  # warning, when gh cannot), and every value of the event goes in through env, never into the shell text. The job asks for `pull-requests: read`: the
+  # repository's default token has no pull-request access, so on a repository with that default the read failed every time, unseen, and a re-run judged the body
+  # of the push that started the run.
+  tool-text:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read        # the checkout
+      pull-requests: read   # gh pr view: the PR body as it is now (see above)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"   # scratch goes to the runner's temp folder, which the runner empties after each job. The runner context is not available in a job-level env, so this is a step
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # the fork point of the PR and main is the base of the comparison
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: a tool function or output helper changed with its text
+        run: |
+          body="$RUNNER_TEMP/pr-body.txt"
+          trap 'rm -f "$body" "$body.err"' EXIT   # remove them pass or fail
+          if ! gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq .body > "$body" 2> "$body.err"; then
+            echo "::warning::the PR body could not be read now ($(head -n 1 "$body.err")): this run uses the copy from the event that started it, so an edit since then is not seen"
+            printf '%s' "$PR_BODY" > "$body"
+          fi
+          uv run --no-project python tools/tool_text.py touched --base "$BASE_SHA" --head "$HEAD_SHA" --body-file "$body"
+  # On a pull request that touches a tool function or an output helper, ONE Claude Haiku call reads the diff and
+  # the affected tools' text (tests/tool_text.snapshot.json) and says whether the text still matches what the code takes, says and returns (tools/text_check.py; the
+  # rules, the switch and the sign-in are in its docstring). Behind a switch: the repository variable TOOL_TEXT_MODEL_CHECK must be `on`; the job-level `if` keeps the job from
+  # starting otherwise (it shows as skipped, which counts as passing, and takes no runner time: the runner is shared and loaded). With it on, the script skips (and passes)
+  # when nothing relevant is touched or no AWS credentials are there; once the script runs, a model or network error (or any other failure on its
+  # model path) is a warning and a pass, never a block, and only a parsed "the text and the code disagree" fails. A uv or PyPI failure while the job starts the script can still fail it.
+  # The call goes to Amazon Bedrock: bedrock-runtime in the region named by the repository variable TOOL_TEXT_AWS_REGION (required: with none set the script skips), signed in with the
+  # role named by the repository variable TOOL_TEXT_AWS_ROLE (see the sign-in below), so there is no secret in GitHub, none in this file, and no workspace id. The model defaults to the inference profile
+  # global.anthropic.claude-haiku-5-5 (repository variable TOOL_TEXT_MODEL to change it). The PR's text (diff, body)
+  # is data: the diff is read by git inside the script, the body goes through a file, and every value of the event goes in through env, never into the shell text.
+  tool-text-model:
+    # skipped for pull requests from forks: the model call is paid (a pull_request event is the only trigger this job has; a pushed commit on main starts none)
+    # THE SIGN-IN ON A HOSTED RUNNER. A hosted runner has no AWS profile in a home folder, so the job signs in through GitHub's OIDC token instead
+    # (aws-actions/configure-aws-credentials, below): the repository variable TOOL_TEXT_AWS_ROLE holds the ARN of an IAM role that trusts this repository's
+    # token (the OIDC provider token.actions.githubusercontent.com, sub `repo:<owner>/<repo>:pull_request`) and may call bedrock:InvokeModel and
+    # bedrock:InvokeModelWithResponseStream on the inference profile and the foundation model behind it, nothing else. No key lives in GitHub. When the role
+    # is set, the job uses it (the AWS profile variable is then not passed). When the role is NOT set there is
+    # no sign-in to be had, so the job does not start (it shows as skipped, which counts as passing, and costs no minute): a missing role is a skipped check,
+    # never a failure. The role is created outside this repository (your AWS account); this file only reads its name. CONTRIBUTING.md, "The tool-text gates", item 4.
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.TOOL_TEXT_MODEL_CHECK == 'on'
+      && vars.TOOL_TEXT_AWS_ROLE != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read        # the checkout
+      pull-requests: read   # gh pr view: the PR body as it is now (see the tool-text job)
+      id-token: write       # the OIDC token configure-aws-credentials exchanges for the role's credentials; this job only, and a fork's pull request is kept out by the `if` above
+    env:
+      TOOL_TEXT_MODEL_CHECK: ${{ vars.TOOL_TEXT_MODEL_CHECK }}
+      TOOL_TEXT_MODEL: ${{ vars.TOOL_TEXT_MODEL }}
+      TOOL_TEXT_AWS_REGION: ${{ vars.TOOL_TEXT_AWS_REGION }}
+      TOOL_TEXT_AWS_PROFILE: ${{ vars.TOOL_TEXT_AWS_ROLE == '' && vars.TOOL_TEXT_AWS_PROFILE || '' }}   # an AWS profile, only when no role is set; empty when the role signs in (boto3's default chain then reads the role's credentials from the environment)
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"   # scratch goes to the runner's temp folder, which the runner empties after each job. The runner context is not available in a job-level env, so this is a step
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # the fork point of the PR and main is the base of the comparison
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+      - name: sign in to AWS through GitHub's OIDC token
+        if: vars.TOOL_TEXT_AWS_ROLE != ''
+        continue-on-error: true   # a wrong role ARN or trust policy is a skipped check with a warning (no credentials: text_check.py skips), never a red PR, as for its other AWS problems
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd   # v6.3.0, pinned by commit
+        with:
+          role-to-assume: ${{ vars.TOOL_TEXT_AWS_ROLE }}
+          aws-region: ${{ vars.TOOL_TEXT_AWS_REGION }}     # required: the script has no default and skips when it is unset
+          role-session-name: tool-text-model-${{ github.run_id }}
+          role-duration-seconds: 900
+      - name: the tools' text still matches the code (one model call)
+        run: |
+          body="$RUNNER_TEMP/pr-body.txt"
+          trap 'rm -f "$body" "$body.err"' EXIT   # remove them pass or fail
+          if ! gh pr view "$PR_NUMBER" --repo "$REPO" --json body --jq .body > "$body" 2> "$body.err"; then
+            echo "::warning::the PR body could not be read now ($(head -n 1 "$body.err")): this run uses the copy from the event that started it, so an edit since then is not seen"
+            printf '%s' "$PR_BODY" > "$body"
+          fi
+          uv run --locked --script tools/text_check.py run --base "$BASE_SHA" --head "$HEAD_SHA" --body-file "$body"

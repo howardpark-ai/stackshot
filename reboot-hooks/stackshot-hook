@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# stackshot-hook — stackshot's participant in the fleet tool's reboot (contract: salamander docs/reboot-contract.md, version 1).
+#   pause --at <ISO>                          queue-only for the message tool (and the prompts it carries): <state>/anchor-hub/paused-msg.json,
+#                                             persisted across a reboot; a sender is told the message is queued for the reboot
+#   flush-stop                                last render and board-data commit, pushed and verified (publish.py flush), then stop
+#   start                                     start the unit and wait for /healthz (messages stay paused if they were)
+#   status                                    exit 0 running and healthy · 3 stopped · 1 broken
+#   resume --since <ISO> --sessions <file>    deliver queued messages to the verified sessions (reboot-queue.py), clear the pause.
+#                                             Nothing to catch up: a message is never lost, its sender got "queued".
+# stackshot.service is a user unit: status, start and stop go through `systemctl --user`, never sudo (the system scope was
+# removed in an earlier change; a config that still names it, or a removed [client] mode, fails every verb with its summary line). The fleet
+# tool may run this from its boot restore with no login session: units/scope.sh points an unset XDG_RUNTIME_DIR at /run/user/<uid>,
+# and a user manager still out of reach fails status, flush-stop and start with their summary line instead of reading as "stopped".
+# The last stdout line is the one-line summary; details: <state>/anchor-hub/hook.log.
+set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"; Q="$HERE/reboot-queue.py"; PUB="$HERE/../publish.py"
+if ! A=$(python3 "$HERE/../config.py" state anchor-hub 2>&1); then echo "stackshot ${1:-} failed: ${A##*$'\n'}"; exit 1; fi   # a removed mode in the config: config.py's line is the summary
+LOG="$A/hook.log"; PAUSED="$A/paused-msg.json"; UNIT=stackshot.service
+. "$(cd "$HERE/.." && pwd)/units/scope.sh"   # xdg_repair, user_manager_ok
+CTL="systemctl --user"
+HEALTH="http://$(python3 "$HERE/../config.py" get server.host):$(python3 "$HERE/../config.py" get server.port)/healthz"
+mkdir -p "$A"
+log() { echo "$(date -u +%FT%TZ) stackshot-hook $*" >> "$LOG"; }
+say() { log "$1"; echo "$1"; }
+arg() { local k="$1"; shift; while [ $# -gt 0 ]; do [ "$1" = "$k" ] && { echo "${2:-}"; return; }; shift; done; }
+epoch() { date -u -d "$1" +%s 2>/dev/null; }
+pause_at() { python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("at",""))
+except Exception: print("")' "$PAUSED"; }
+paused_note() { [ -f "$PAUSED" ] && echo ", messages paused since $(pause_at)"; }
+queued_note() { python3 "$Q" count --source msg | python3 -c 'import json,sys; d=json.load(sys.stdin); n,s=d["items"],d["sessions"]; print(", %d message(s) queued for %d session(s)" % (n, s) if n else "")'; }
+up() { curl -sf -m 5 "$HEALTH" >/dev/null 2>&1; }
+active() { systemctl --user is-active -q "$UNIT"; }
+ctl() { systemctl --user "$@" 2>>"$LOG"; }    # start/stop through the user manager
+reachable() {   # the user manager answers (else every unit verb would read it as stopped)
+    user_manager_ok 2>>"$LOG" && return 0
+    say "stackshot $1 failed: systemctl --user cannot reach the user manager (XDG_RUNTIME_DIR unset and /run/user/$(id -u) missing?)"; exit 1
+}
+verb="${1:-}"; shift || true
+case "$verb" in
+    pause)
+        at=$(arg --at "$@"); [ -n "$at" ] && [ -n "$(epoch "$at")" ] || { say "stackshot pause failed: --at <ISO-8601 UTC> missing or unreadable"; exit 1; }
+        python3 -c 'import json,sys,time,os; json.dump({"at":sys.argv[1],"set":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())},open(sys.argv[2]+".tmp","w")); os.replace(sys.argv[2]+".tmp",sys.argv[2])' "$at" "$PAUSED"
+        [ "$(pause_at)" = "$at" ] || { say "stackshot pause failed: could not write $PAUSED"; exit 1; }
+        say "stackshot messages paused at $at: queued for their sessions, none delivered"; exit 0 ;;
+    status)
+        reachable status
+        if ! active; then say "stackshot stopped$(paused_note)$(queued_note)"; exit 3; fi
+        up && { say "stackshot running and healthy$(paused_note)$(queued_note)"; exit 0; }
+        say "stackshot running but /healthz does not answer"; exit 1 ;;
+    flush-stop)
+        reachable flush-stop
+        if active; then
+            out=$(cd "$(dirname "$PUB")" && python3 "$PUB" flush 2>&1); rc=$?; log "publish.py flush: $out"
+            [ $rc -eq 0 ] || { say "stackshot flush-stop failed: $(tail -1 <<<"$out" | cut -c1-90)"; exit 1; }
+            last=$(tail -1 <<<"$out")
+            ctl stop "$UNIT" || { say "stackshot flush-stop failed: $CTL stop $UNIT failed"; exit 1; }
+        else last="already stopped"; fi
+        active && { say "stackshot flush-stop failed: the unit is still running"; exit 1; }
+        say "stackshot stopped; $last$(queued_note)"; exit 0 ;;
+    start)
+        reachable start
+        active && up && { say "stackshot already running and healthy$(paused_note)"; exit 0; }
+        ctl start "$UNIT" || { say "stackshot start failed: $CTL start $UNIT failed"; exit 1; }
+        for _ in $(seq 55); do up && { say "stackshot running and healthy$(paused_note)$(queued_note)"; exit 0; }; sleep 2; done
+        say "stackshot started but /healthz did not answer within 110 s"; exit 1 ;;
+    resume)
+        since=$(arg --since "$@"); sess=$(arg --sessions "$@")
+        [ -n "$since" ] && [ -n "$(epoch "$since")" ] && [ -r "$sess" ] || { say "stackshot resume failed: needs --since <ISO> and a readable --sessions file"; exit 1; }
+        q=$(python3 "$Q" resume --source msg --sessions "$sess"); qrc=$?; log "queue: $q"
+        rm -f "$PAUSED"
+        python3 - "$q" "$qrc" <<'PY'
+import json,sys
+q=json.loads(sys.argv[1] or "{}")
+parts=[f"delivered {q.get('delivered',0)} queued message(s) to {q.get('sessions',0)} session(s)"]
+if q.get("held"): parts.append(f"held {q['held']} for {len(q.get('held_sessions') or [])}")
+if q.get("failed"): parts.append(f"FAILED {q['failed']} for {len(q.get('failed_sessions') or [])}")
+ok = sys.argv[2] == "0"
+print(("stackshot messages resumed: " if ok else "stackshot resume incomplete: ") + "; ".join(parts))
+sys.exit(0 if ok else 1)
+PY
+        rc=$?; log "resume exit $rc"; exit $rc ;;
+    *) sed -n 2,9p "$0"; exit 2 ;;
+esac

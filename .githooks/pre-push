@@ -1,0 +1,44 @@
+#!/bin/sh
+# pre-push: refuse a push whose branch name or new commit messages carry data of the instance owner (CONTRIBUTING.md, "Commit and
+# PR text"): a push to a public repository publishes them. Turn it on once per clone:  git config core.hooksPath .githooks
+# Git passes the remote's name (or its URL, for a push by URL) and the URL as arguments and one line per ref on standard input:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# For each pushed ref it checks the remote branch name and the messages of the commits the remote does not have yet: the range
+# <remote sha>..<local sha>, or, for a new remote ref (remote sha all zeros) or one whose old tip is unknown here, the commits
+# of <local sha> that the remote being pushed to has no tracking branch for. Only that remote counts: a commit that sits on
+# another remote's tracking branch (a private one) is not published here and is checked. When the remote cannot be told (a
+# push by a URL that no configured remote has), every commit reachable from <local sha> is checked: more, not less.
+# A delete (local sha all zeros) is skipped. Merge subjects are skipped by the script, their branch names are not.
+# `git push --no-verify` skips the hook; CI checks again.
+set -u
+root=$(git rev-parse --show-toplevel) || exit 1
+command -v python3 >/dev/null 2>&1 || { echo "clean-text: python3 is not on PATH; the push was not checked" >&2; exit 1; }
+zero=0000000000000000000000000000000000000000
+remote=${1:-}
+url=${2:-}
+# The remote's name: $1 when it is one, else the configured remote whose URL is $1 or $2, else none.
+scope=
+if [ -n "$remote" ] && git remote get-url "$remote" >/dev/null 2>&1; then
+    scope=$remote
+else
+    for r in $(git remote 2>/dev/null); do
+        for u in $(git remote get-url --all "$r" 2>/dev/null) $(git remote get-url --push --all "$r" 2>/dev/null); do
+            if [ -n "$u" ] && { [ "$u" = "$remote" ] || [ "$u" = "$url" ]; }; then scope=$r; break 2; fi
+        done
+    done
+fi
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_sha:-}" ] || continue
+    case $local_sha in *[!0]*) ;; *) continue ;; esac            # all zeros: a delete
+    name=${remote_ref#refs/heads/}; name=${name#refs/tags/}
+    if [ "${remote_sha:-$zero}" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+        python3 "$root/tools/clean_text.py" --branch "$name" --commits "$remote_sha..$local_sha" </dev/null >&2 || status=1
+    elif [ -n "$scope" ]; then
+        python3 "$root/tools/clean_text.py" --branch "$name" --new-commits "$local_sha" --remote "$scope" </dev/null >&2 || status=1
+    else
+        python3 "$root/tools/clean_text.py" --branch "$name" --new-commits "$local_sha" </dev/null >&2 || status=1
+    fi
+done
+[ "$status" -eq 0 ] || echo "pre-push: the push was refused; fix the text named above (git rebase -r or git commit --amend), or rename the branch." >&2
+exit "$status"

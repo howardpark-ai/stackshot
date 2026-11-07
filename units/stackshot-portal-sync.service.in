@@ -1,0 +1,13 @@
+# stackshot-portal-sync.service — after a (re)start of the server, ask the MCP portal to re-read this instance's tool list
+# (portal-sync.sh; stackshot.toml [portal]). Static: a drop-in of stackshot.service (stackshot.service.d/portal-sync.conf,
+# installed by install.sh) starts it after every (re)start. Install: ./install.sh units
+[Unit]
+Description=stackshot — re-sync the MCP portal's copy of the tool list after a (re)start
+After=stackshot.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+ExecStart=/bin/sleep 12
+ExecStart=@CHECKOUT@/portal-sync.sh

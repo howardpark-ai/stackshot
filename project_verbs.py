@@ -1,0 +1,966 @@
+"""project_verbs.py — the verbs that write a project's identity: the record first, then the page mirror.
+
+A project is defined by its entry in the project record (project_registry.py). Every write to what a project is goes through one of these verbs, so that the
+record is always the one that is right and the page is a copy stackshot writes from it:
+
+    create       a new project: name, scope, and optionally a page (made from the template only when asked to)
+    rename       the project's name: the id stays, the old name goes to `former_names`, the pending agents under the old name are dropped
+    move_page    the project's page moves to another key (rename_page.py does the page half): the old key goes to `former_keys`
+    archive      status archived, with who, when and how; reopen puts it back to active
+    agent_add / agent_retire / agent_rename   the project's agents map, with its mandate lines
+
+Each verb is one atomic change of the record under the record's own lock (projects.locked: the same flock every writer of the file takes), then a write of the page mirror if
+the project has a page in this instance's page store. The mirror is three lines of the page's frontmatter and nothing else: `display-name:` (the project's name), `agents:` (the
+map, front agents first and a `background:` sub-map) and `status:`. It is computed from the record as it is when it is written, never from what an earlier step meant to write, so two
+verbs at once leave the same page whichever writes last; a page edit by anyone else to one of the three lines is overwritten by the next mirror write. If the mirror cannot be
+written the verb says so in its answer (`mirror.state` = "failed") and the record is already right: nothing is rolled back, and `mirror()` writes it again.
+
+A project with no entry yet (the migration has not run, or not reached it) gets its entry from the page lines the registry derives, with the migration's own function (`derive_entry`), at its
+first verb; the project's pending agents (agents the form registered before this) are folded into the entry in the same write. A project with no page has no mirror and no page store call at all.
+
+Every verb takes `dry=True`: the answer is what would be written (the new entry, the page text it would put as a diff summary), and nothing is written to the record or the page.
+
+Stdlib plus the repo's modules (config, projects, project_registry, pages, page_debt); no network, no gbrain call except through the page store the caller passes."""
+from __future__ import annotations
+
+import copy
+import datetime as dt
+import json
+import re
+import secrets
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Callable
+
+import config as _cfg
+import pages as _pg
+import project_registry as pr
+import projects as prj
+
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+MIRROR_TRIES = 3
+
+
+class VerbError(Exception):
+    """A verb that cannot go on: nothing was written. `status` is the HTTP-shaped code a caller (the server) answers with."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _hub_page(row: Any) -> str:
+    """The page a registry row's `hub:` line names ("" when it has none): a page with a hub line is a sub-page of that page."""
+    return _norm_key(row.get("hub")) if isinstance(row, dict) and str(row.get("hub") or "").strip() else ""
+
+
+def _norm_key(x: Any) -> str:
+    return pr._norm_key(x)
+
+
+# ----------------------------------------------------------------------------- the entry of a project that has none yet
+def derive_entry(pid: str, key: str, row: dict, reg: dict, mark: dict | None, now: str, by: str = "migration", how: str = "migrated", former=()) -> dict:
+    """The entry the registry's values for the page `key` come to: the page's title and type, the name (the page's own `display-name:` when it has one), the scope the registry derives
+    (a mark set on purpose first), status `archived` when the page's status is a retired word, the agents in the order the page lists them (a `background:` agent is not front), the hub, the page key,
+    `former_keys`, and `made` (and `retired` for an archived one). Reading the entry gives what reading the page gave. `agents` is left out when the page lists none (a map that was never there)."""
+    mark = mark or {}
+    scope = str(mark.get("scope") or "")
+    if scope not in prj.scopes():
+        scope = prj.derive_scope(key, row, reg)
+    archived = prj.page_status(row) in prj.retired_statuses()
+    ent: dict = {"title": str(row.get("title") or key), "type": str(row.get("type") or "project").strip(), "scope": scope, "status": "archived" if archived else "active", "page": key,
+                 "hub": str(row.get("hub") or ""), "former_keys": list(former), "former_names": [], "made": {"at": now, "by": by, "how": how}}
+    if row.get("agents"):
+        ent["agents"] = seed_agents(row)
+    if row.get("role") in prj._NAME_ROLES and str(row.get("session") or ""):
+        ent["name"] = str(row["session"])
+    if archived:
+        ent["retired"] = {"at": now, "by": by, "how": how}
+    return ent
+
+
+def seed_agents(row: dict | None) -> dict:
+    """A page registry row's agents as an entry's map: {name: {front, mandate_line}} in the page's order, a `background:` agent not front. {} for a row that lists none."""
+    if not isinstance(row, dict) or not row.get("agents"):
+        return {}
+    back = set(row.get("back_agents") or {})
+    return {str(n): {"front": str(n) not in back, "mandate_line": str(m)} for n, m in row["agents"].items()}
+
+
+def fold_pending(ent: dict, pend: dict) -> list[str]:
+    """Put the project's pending agents (`pend`: name → {front, mandate_line, by, at}) into the entry's agents after the ones it lists; a name the entry has already stays as it is. → the names added."""
+    added = []
+    for n, a in sorted(pend.items(), key=lambda kv: (str(kv[1].get("at") or ""), kv[0])):
+        ag = ent.setdefault("agents", {})
+        if any(x.casefold() == n.casefold() for x in ag):
+            continue
+        ag[n] = {"front": bool(a.get("front")), "mandate_line": str(a.get("mandate_line") or ""),
+                 **({"by": str(a["by"])} if a.get("by") else {}), **({"at": str(a["at"])} if a.get("at") else {})}
+        added.append(n)
+    return added
+
+
+# ----------------------------------------------------------------------------- the transaction
+class Ctx:
+    """What a verb sees inside the lock: the record file's tables (`d`, as projects._read gives them), the entries (`ents`, a copy it may change), and the pages-only registry."""
+
+    def __init__(self, d: dict, ents: dict, now: str, by: str, pages: dict | None = None):
+        self.d, self.ents, self.now, self.by = d, ents, now, by
+        self.pages = pages or {}                    # page key → its text as read BEFORE the lock was taken (None: the read failed); a verb never reads the page store inside the lock
+        self.warn = ""
+        self._raw: dict | None = None
+
+    @property
+    def raw(self) -> dict:
+        if self._raw is None:
+            self._raw = prj.registry_raw()
+        return self._raw
+
+    def key_ids(self) -> dict:
+        out: dict = {}
+        for i, k in sorted(self.d["ids"].items()):
+            out.setdefault(k, i)
+        return out
+
+    def pid_of(self, x: Any) -> str:
+        """The id of the project `x` names: an id, a page key (a current one, a bare slug through [registries.projects] match, a former key) or a former name. "" when it names none."""
+        x = str(x or "").strip()
+        if not x:
+            return ""
+        if prj.is_id(x):
+            if x in self.ents:
+                return x
+            if x in self.d["ids"]:
+                self.not_sub(self.d["ids"][x])         # a sub-page has an id in the table, but is no project
+                return x
+            return ""
+        k = _norm_key(x)
+        pats = (_cfg.CFG.get("registries", {}).get("projects", {}) or {}).get("match") or ["{value}"]
+        cands = list(dict.fromkeys([k] + [p.format(value=k) for p in pats]))
+        cur, old, ids = pr.by_page(self.ents), pr.by_former_key(self.ents), self.key_ids()
+        for c in cands:
+            if c in cur:
+                return cur[c]
+        for c in cands:
+            if c in ids and ids[c] not in self.ents and not self.owner(c):
+                return ids[c]                      # a project with no entry yet is known by the id table (a sub-page has an id there, but is no project)
+        for c in cands:
+            if c in old:
+                return old[c]
+        for pid, e in sorted(self.ents.items()):
+            if x and str(e.get("name") or "").casefold() == x.casefold():
+                return pid
+        for pid, e in sorted(self.ents.items()):
+            if k and k in (e.get("former_names") or []):
+                return pid
+        for c in cands:                            # a sub-page is no project: it names the top-level project that owns it
+            up = self.owner(c)
+            if up:
+                return cur.get(up) or old.get(up) or ids.get(up) or ""
+        return ""
+
+    def owner(self, key: str) -> str:
+        """The top-level page that owns the sub-page `key` (the nearest page above it, or the page its `hub:` line names, and so on up to a page that has none); "" for a key that is no sub-page."""
+        pages = {**pr.by_page(self.ents), **pr.by_former_key(self.ents), **self.raw}
+        up, seen = "", {key}
+        while True:
+            nxt = pr.top_page(up or key, pages, lambda x: _hub_page(self.raw.get(x)))
+            if not nxt or nxt in seen:
+                return up
+            up = nxt; seen.add(nxt)
+
+    def refuse_sub_key(self, project: Any) -> None:
+        """VerbError 400 when `project` is a page key of a sub-page: a verb that acts on the whole project (archive, reopen, move-page) is not done through a sub-page's key."""
+        x = str(project or "").strip()
+        if x and not prj.is_id(x):
+            self.not_sub(_norm_key(x))
+
+    def not_sub(self, key: str) -> None:
+        """VerbError 400 when `key` is a sub-page: it names the top-level page to use instead."""
+        up = self.owner(key) if key else ""
+        if up:
+            raise VerbError(400, f"{key} is a sub-page of {up}: a sub-page is never a project; name {up}, the project's own page")
+
+    def fresh_row(self, key: str, row: dict) -> dict:
+        """The registry row of page `key` with its agents, status and name line taken from the page text `pages` holds (read before the lock, see `preread`): the registry follows the pages
+        checkout minutes late, and an entry made from a stale row would have the mirror delete an agent a session has just listed on the page. Never reads the page store: this runs inside the
+        record's lock. The row as it is when the page was not pre-read; when the read failed too, `warn` says so."""
+        if key not in self.pages:
+            return row
+        content = self.pages[key]
+        if content is None:
+            self.warn = f"the page {key} could not be read before the record was written, so the entry was made from the registry's copy of its lines (minutes behind); the mirror will not write over an agent line the record lacks"
+            return row
+        fm = _pg.frontmatter_text(content)
+        row = dict(row)
+        agents, back = _pg.split_agents(fm.get("agents"))
+        row.pop("agents", None); row.pop("back_agents", None)
+        if agents:
+            row["agents"] = agents
+        if back:
+            row["back_agents"] = back
+        row["status"] = fm.get("status") or ""
+        if row.get("role") in prj._NAME_ROLES and str(fm.get("display-name") or "").strip():
+            row["session"] = str(fm["display-name"]).strip()
+        return row
+
+    def entry(self, pid: str) -> dict:
+        """The entry of project `pid`, made from the project's page as the page store has it now (its agents, status and name line; the registry's row for the rest) when it has none, and its pending agents
+        folded in. VerbError when there is nothing to make it from, and 400 for a sub-page (it has an id in the table, but is no project)."""
+        if pid in self.ents:
+            return self.ents[pid]
+        key = self.d["ids"].get(pid, "")
+        row = self.raw.get(key) if key else None
+        if not isinstance(row, dict):
+            raise VerbError(404, f"{pid} is no project the record or the registry knows: nothing was changed")
+        self.not_sub(key)
+        row = self.fresh_row(key, row)
+        ent = derive_entry(pid, key, row, self.raw, self.d["marks"].get(pid), self.now, by=self.by or "stackshot", how="migrated")
+        if ent["status"] != "archived":
+            fold_pending(ent, self.d["pending_agents"].get(pid) or {})
+        self.d["pending_agents"].pop(pid, None)
+        self.ents[pid] = ent
+        return ent
+
+    def agents(self, pid: str) -> dict:
+        """The project's agents as the readers see them now: the entry's own map, else the page's lines (an entry that has no `agents` field)."""
+        e = self.entry(pid)
+        if "agents" in e:
+            return e["agents"]
+        key = pr.page_key(e)
+        return seed_agents(self.raw.get(key) if key else None)
+
+
+def _entryless_key(ctx: Ctx, project: Any) -> str:
+    """The page key `project`'s entry would be made from, "" when it has an entry already (or none can be made)."""
+    pid = ctx.pid_of(project)
+    return "" if not pid or pid in ctx.ents else ctx.d["ids"].get(pid, "")
+
+
+def preread(project: Any, io: Any = None) -> dict:
+    """The page text a verb on `project` needs if the project has no entry yet, read here, BEFORE the record's lock (and any lock of the caller's) is taken: {page key: text}, or {key: None} when the
+    read failed, or {} when the project has an entry or none can be made. The record's lock is held only for the look at the id table, never across the page store (a gbrain read can take a minute or
+    two; every record writer and every client call waits on that lock). A caller that holds a lock of its own around a verb calls this first and passes the result as `pages`."""
+    try:
+        key = txn(lambda c: _entryless_key(c, project), dry=True)[0]
+    except (VerbError, ValueError):
+        return {}
+    if not key:
+        return {}
+    try:
+        if io is None:
+            import page_debt as _pd
+            io = _pd.page_io()
+        content, rev = io.get(key)
+        return {key: content if (content is not None and rev) else None}
+    except Exception:  # noqa: BLE001 — told in the answer's `warning`, the registry's row is the fallback
+        return {key: None}
+
+
+def _state(ctx: Ctx) -> str:
+    return json.dumps([ctx.d["ids"], ctx.d["pending_agents"], ctx.d["marks"], ctx.ents], sort_keys=False, default=str)
+
+
+def txn(fn: Callable[[Ctx], Any], by: str = "", now: str | None = None, dry: bool = False, pages: dict | None = None) -> tuple[Any, dict, bool]:
+    """Run `fn(ctx)` on the record under its lock and write the result in one atomic write → (fn's answer, the entries now, whether anything changed). A dry run runs `fn` and writes nothing.
+    ValueError (a damaged record) and VerbError leave the file as it was. `pages` = the page texts the verb read before this call (`preread`): nothing inside the lock reads the page store."""
+    with prj.locked():
+        d = prj._read()
+        cur = pr.parse({pr.SECTION: d["extra"].get(pr.SECTION, {}), pr.VERSION: d["extra"].get(pr.VERSION, pr.SCHEMA)})
+        ctx = Ctx(d, copy.deepcopy(cur), now or now_iso(), by, pages)
+        before = _state(ctx)
+        out = fn(ctx)
+        if ctx.warn and isinstance(out, dict):
+            out = {**out, "warning": ctx.warn}
+        pr.parse({pr.SECTION: ctx.ents})
+        changed = _state(ctx) != before
+        if changed and not dry:
+            if ctx.ents:
+                d["extra"][pr.SECTION] = ctx.ents; d["extra"][pr.VERSION] = pr.SCHEMA
+            else:
+                d["extra"].pop(pr.SECTION, None); d["extra"].pop(pr.VERSION, None)
+            prj._write(d)
+        return out, ctx.ents, changed
+
+
+# ----------------------------------------------------------------------------- the page mirror
+def _fm_end(lines: list[str]) -> int | None:
+    if not lines or lines[0].strip() != "---":
+        return None
+    return next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+
+
+def _set_scalar(lines: list[str], key: str, value: str) -> str:
+    """Set the frontmatter line `key: value` in place (the line is replaced; a page with none gets it just before the closing `---`). → "" or why not (a key twice, a value that goes on below)."""
+    end = _fm_end(lines)
+    if end is None:
+        return "the page has no closed frontmatter"
+    hits = [i for i in range(1, end) if re.match(rf"^{re.escape(key)}:(\s|$)", lines[i])]
+    if len(hits) > 1:
+        return f"the page has more than one {key}: line"
+    text = f"{key}: {prj._yaml_scalar(value)}"
+    if hits:
+        j = hits[0] + 1
+        if j < end and lines[j][:1] in (" ", "\t") and lines[j].strip():
+            return f"the page's {key}: line continues on the lines below it"
+        lines[hits[0]] = text
+    else:
+        lines.insert(end, text)
+    return ""
+
+
+def _agents_lines(agents: dict) -> list[str]:
+    out = ["agents:"]
+    front = [(n, a) for n, a in agents.items() if a.get("front")]
+    back = [(n, a) for n, a in agents.items() if not a.get("front")]
+    out += [f"  {n}: {prj._yaml_scalar(a.get('mandate_line', ''))}" for n, a in front]
+    if back:
+        out += ["  background:"] + [f"    {n}: {prj._yaml_scalar(a.get('mandate_line', ''))}" for n, a in back]
+    return out
+
+
+def _norm_m(s: Any) -> str:
+    return " ".join(str(s).split())
+
+
+def _page_agents(fm: dict) -> tuple[list, list]:
+    flat, back = _pg.split_agents(fm.get("agents"))
+    return [(n, _norm_m(m)) for n, m in flat.items() if n not in back], [(n, _norm_m(flat[n])) for n in back]
+
+
+def _want_agents(agents: dict) -> tuple[list, list]:
+    return ([(n, _norm_m(a.get("mandate_line", ""))) for n, a in agents.items() if a.get("front")],
+            [(n, _norm_m(a.get("mandate_line", ""))) for n, a in agents.items() if not a.get("front")])
+
+
+def mirror_text(content: str, e: dict, retired: set | None = None) -> tuple[str | None, str]:
+    """The page's text with its three mirrored lines set from the entry `e` → (new_text, "") or (None, why). A line that already reads as the entry says is left byte for byte as it is; only
+    `display-name:` (when the entry has a name), `status:` and the `agents:` block (when the entry has an `agents` field) are ever touched, and the edited page must read back with exactly
+    those values and every other field as it was, else nothing is returned."""
+    retired = prj.retired_statuses() if retired is None else retired
+    lines = str(content).split("\n")
+    if _fm_end(lines) is None:
+        return None, "the page has no closed frontmatter"
+    fm0 = _pg.frontmatter_text(content)
+    want: dict = {}
+    if e.get("name") and str(fm0.get("display-name") or "").strip() != e["name"]:
+        want["display-name"] = e["name"]
+    word = pr._status_word(fm0.get("status", ""), e.get("status") or "active", retired)
+    if word and word.lower() != str(fm0.get("status") or "").strip().lower():
+        want["status"] = word
+    for k, v in want.items():
+        why = _set_scalar(lines, k, v)
+        if why:
+            return None, why
+    if "agents" in e and _page_agents(fm0) != _want_agents(e["agents"]):
+        end = _fm_end(lines)
+        heads = [i for i in range(1, end) if re.match(r"^agents:(\s|$)", lines[i])]
+        if len(heads) > 1:
+            return None, "the page has more than one agents: key"
+        block = _agents_lines(e["agents"])
+        if heads:
+            a = heads[0]; b = a + 1
+            while b < end and (not lines[b].strip() or lines[b][:1] in (" ", "\t")):
+                b += 1
+            while b > a + 1 and not lines[b - 1].strip():
+                b -= 1                                      # blank lines after the block are not the block's
+            lines[a:b] = block
+        else:
+            at = end
+            while at > 1 and not lines[at - 1].strip():
+                at -= 1
+            lines[at:at] = block
+    out = "\n".join(lines)
+    if out == content:
+        return content, ""
+    fm1 = _pg.frontmatter_text(out)
+    bad = []
+    if e.get("name") and str(fm1.get("display-name") or "").strip() != e["name"]:
+        bad.append("display-name")
+    if "status" in want and str(fm1.get("status") or "").strip() != want["status"]:
+        bad.append("status")
+    if "agents" in e and _page_agents(fm1) != _want_agents(e["agents"]):
+        bad.append("agents")
+    if bad:
+        return None, f"the edited page does not read back with the record's {', '.join(bad)}: edit the page by hand"
+    mirrored = {"display-name", "status", "agents"}
+    if {k: v for k, v in fm0.items() if k not in mirrored} != {k: v for k, v in fm1.items() if k not in mirrored}:
+        return None, "the edited page's other fields would change: edit the page by hand"
+    return out, ""
+
+
+def _entry_now(pid: str) -> dict | None:
+    e = pr.entries().get(pid)
+    return copy.deepcopy(e) if isinstance(e, dict) else None
+
+
+def _expire_former(pid: str, content: str) -> None:
+    """A mirror has just left `content` as the page (written, or already so): the names in the entry's `former_agents` that the page no longer lists are dropped from the entry, since the guard
+    needs them only until the page is rewritten. Never raises."""
+    try:
+        names = {n.casefold() for n in _pg.split_agents(_pg.frontmatter_text(content).get("agents"))[0]}
+        gone = [x for x in (_entry_now(pid) or {}).get("former_agents") or [] if x.casefold() not in names]
+        if not gone:
+            return
+
+        def work(ctx: Ctx) -> None:
+            en = ctx.ents.get(pid)
+            if en and en.get("former_agents"):
+                keep = [x for x in en["former_agents"] if x not in gone]
+                if keep:
+                    en["former_agents"] = keep
+                else:
+                    en.pop("former_agents", None)
+        txn(work)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bool = False, dry: bool = False, tries: int = MIRROR_TRIES, now: float | None = None, exclusive: bool = False,
+           drop: tuple = ()) -> dict:
+    """Write the project's page mirror from its entry → {"state", "key", "note"}. States: "none" (the project has no page in this instance's page store: a project with no page, or a pointer
+    that is a link elsewhere), "unchanged" (the page reads as the record says), "written", "would-write" (a dry run), "no-page" (the pointer names a page the store does not have, and `make_page` was
+    not asked), "failed" (the page could not be edited or written; `note` says why), "exists" (`exclusive` only: the page store says the page the verb meant to make is there already; nothing was written to it). Never raises. The entry is the one given on the first try; on every later try, and for a write (not a dry run) in the verbs' own answers, it is read from the record again, so the last writer of either leaves the page the record describes.
+    A page that lists an agent the record lacks gets its `agents:` block left as it is ("failed", the names in `note`; the name and status lines are still written): the page was edited since the record
+    last said, and the write would delete that line for good. `drop` = the names the verb has just taken off the record on purpose (a retire, a rename), which the page may still list; the entry's
+    `former_agents` keeps them until a mirror has left the page without them."""
+    try:
+        e = entry if entry is not None else _entry_now(pid)
+        if not e:
+            return {"state": "failed", "key": "", "note": f"{pid} has no entry in the record"}
+        if not e.get("page"):
+            return {"state": "none", "key": "", "note": "the project has no page"}
+        key = pr.page_key(e)
+        if not key:
+            return {"state": "none", "key": "", "note": "its page is a link to another knowledge base: nothing is written there"}
+        import page_debt as _pd
+        if io is None:
+            io = _pd.page_io()
+        note = ""
+        for attempt in range(1, max(1, tries) + 1):
+            if attempt > 1 and not dry:
+                e = _entry_now(pid) or e
+            content, rev = io.get(key)
+            if content is None or not rev:
+                if not make_page:
+                    return {"state": "no-page", "key": key, "note": f"{key} is not in the page store: the record points at it and nothing was written there"}
+                if dry:
+                    return {"state": "would-write", "key": key, "note": f"would make {key} from the template"}
+                st, msg = io.create(key, prj.new_page(key, e.get("title") or prj.slug_title(key), e.get("scope") or prj.default_scope(), now))
+                if st == "exists":
+                    if exclusive:
+                        return {"state": "exists", "key": key, "note": f"the page store already has {key}"}
+                    continue
+                if st != "ok":
+                    return {"state": "failed", "key": key, "note": f"the page store refused the new page {key} ({msg})" if st == "refused" else
+                            f"the page store did not answer for the new page {key} ({msg}); the page may or may not have been written: ask again, and a 409 says it was"}
+                continue                                    # read it back and set the mirror lines on what was made
+            guard = ""; ew = e
+            if "agents" in e:
+                listed = {n.casefold() for n in e["agents"]} | {str(n).casefold() for n in drop} | {str(n).casefold() for n in e.get("former_agents") or []}
+                extra = [n for n in _pg.split_agents(_pg.frontmatter_text(content).get("agents"))[0] if n.casefold() not in listed]
+                if extra:
+                    guard = (f"the agents block of {key} was not written: the page lists {', '.join(extra)}, which the record does not: it was edited since the record last said, and the write would delete "
+                             f"{'that line' if len(extra) == 1 else 'those lines'}; list {'it' if len(extra) == 1 else 'them'} with agent-add (the record first), then mirror again")
+                    ew = {k: v for k, v in e.items() if k != "agents"}          # the name and status lines are still written
+            new, why = mirror_text(content, ew)
+            if new is None:
+                return {"state": "failed", "key": key, "note": why + ("; " + guard if guard else "")}
+            if new == content:
+                if guard:
+                    return {"state": "failed", "key": key, "note": guard}
+                if not dry:
+                    _expire_former(pid, content)
+                return {"state": "unchanged", "key": key, "note": ""}
+            if dry:
+                return {"state": "would-write", "key": key, "note": f"{len(new.splitlines()) - len(content.splitlines()):+d} line(s) on {key}" + ("; " + guard if guard else "")}
+            state, msg = _pd.put_state(io.put(key, new, rev))
+            seen, _r = io.get(key)
+            if seen is not None and mirror_text(seen, ew)[0] == seen and seen != content:
+                if guard:
+                    return {"state": "failed", "key": key, "note": guard + " (the name and status lines were written)"}
+                _expire_former(pid, seen)
+                return {"state": "written", "key": key, "note": ""}
+            note = f"the page store {'refused' if state == 'refused' else 'got no answer to' if state == 'unknown' else 'accepted'} the page write for {key} ({msg})" + ("" if state != "ok" else " but a read back does not show it")
+            if state != "refused":
+                break                                       # accepted but not shown, or unknown: a second write could race the first
+            e = _entry_now(pid) or e                        # the record may have moved on meanwhile: write what it says now
+        return {"state": "failed", "key": key, "note": note or f"the page {key} could not be written"}
+    except Exception as ex:  # noqa: BLE001 — the record is already right; the answer says the mirror is not
+        return {"state": "failed", "key": "", "note": f"{type(ex).__name__}: {str(ex)[:160]}"}
+
+
+def _timeline(io: Any, key: str, today: str, summary: str, by: str, tag: str) -> str:
+    """One dated line on the page's timeline → "" or why not. Never raises. The request id carries the summary and the second, so a second rename, or an archive, a
+    reopen and an archive again, on one day are not dropped as a repeat by gbrain's dedupe of request ids (a plain-markdown store drops a line it already has word for word)."""
+    try:
+        import hashlib
+        at = dt.datetime.now(_cfg.tz())
+        rid = f"stackshot-{tag}-{key}-{today}-{hashlib.sha1(summary.encode('utf-8')).hexdigest()[:6]}-{at.strftime('%H%M%S')}"
+        return io.add_timeline(key, today, summary, f"by {by}" if by else "", "stackshot", rid) or ""
+    except Exception as ex:  # noqa: BLE001
+        return f"{type(ex).__name__}: {str(ex)[:120]}"
+
+
+def _today() -> str:
+    return dt.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
+
+
+def _finish(pid: str, ents: dict, changed: bool, dry: bool, io: Any, make_page: bool = False, extra: dict | None = None, timeline: str = "", by: str = "", tag: str = "",
+            mirror_now: bool = True, exclusive: bool = False, drop: tuple = (), warn: str = "") -> dict:
+    """The common end of a verb: the page mirror from the entry just written, then the timeline line (when the page was changed and the verb has one). `mirror_now` False leaves the mirror to the
+    caller (state "deferred"; call `mirror(pid, io)` later): a server that holds a lock across the check and the record write does not hold it across the page store."""
+    e = ents.get(pid) or {}
+    if not mirror_now:
+        return {"project": pid, "key": pr.page_key(e), "changed": changed, "dry": dry, "entry": copy.deepcopy(e), "mirror": {"state": "deferred", "key": pr.page_key(e), "note": ""}, **(extra or {}), **({"warning": warn} if warn else {})}
+    if io is None and pr.page_key(e):
+        import page_debt as _pd
+        io = _pd.page_io()
+    if e and not dry:
+        e = _entry_now(pid) or e                    # the record as it is now: a verb that finished later may have changed it since this one's transaction
+    m = mirror(pid, io, entry=e, make_page=make_page, dry=dry, exclusive=exclusive, drop=drop) if e else {"state": "none", "key": "", "note": ""}
+    if timeline and not dry and m["state"] == "written":
+        why = _timeline(io, m["key"], _today(), timeline, by, tag)
+        if why:
+            m = {**m, "note": (m["note"] + "; " if m["note"] else "") + f"the timeline line was not written ({why})"}
+    return {"project": pid, "key": pr.page_key(e), "changed": changed, "dry": dry, "entry": copy.deepcopy(e), "mirror": m, **(extra or {}), **({"warning": warn} if warn else {})}
+
+
+# ----------------------------------------------------------------------------- the verbs
+def _name_taken(ctx: Ctx, name: str, pid: str) -> str:
+    """Why `name` cannot be the name of project `pid` ("" when it can): another project's name or former name, or the name line of another project's page."""
+    fold = name.casefold()
+    for p2, e2 in ctx.ents.items():
+        if p2 != pid and (str(e2.get("name") or "").casefold() == fold or any(str(x).casefold() == fold for x in e2.get("former_names") or [])):
+            return f"{name} is the name of project {p2}"
+    for k2, row in ctx.raw.items():
+        if isinstance(row, dict) and row.get("role") in prj._NAME_ROLES and str(row.get("session") or "").casefold() == fold and row.get("id") != pid and k2 not in ctx.ents:
+            return f"{name} is the name line of {k2}"
+    return ""
+
+
+def create(name: str, scope: str, page: str = "", *, make_page: bool = False, title: str = "", by: str = "", how: str = "made", io: Any = None, now: str | None = None, dry: bool = False,
+           mark: bool = True, hub: str = "") -> dict:
+    """Make a project: its entry in the record (a new permanent id, the name, the scope, status active, `made` = who and when). `page` is the pointer: a page key of this instance's page store, or
+    any link to another knowledge base, or nothing (the default: the project has no page and none is made). With a page key and `make_page` the page is made from the template (the mirror
+    creates it); without `make_page` the key is only the pointer, whether or not the page exists. `mark` also writes the listed-on-purpose mark (the form's window for a first agent). A page some
+    project already points at, or a name some project has, is a 409; a sub-page (a key under another page, or a page with a `hub:` line) is a 400: only a top-level page can be a project's. → {project, key, changed, entry, mirror, created}."""
+    name = " ".join(str(name or "").split())
+    scope = str(scope or "").strip().lower()
+    page = str(page or "").strip()
+    if not NAME_RE.fullmatch(name):
+        raise VerbError(400, "name = letters, digits, . _ - (at most 64), starting with a letter or digit: the prefix of the project's agents' names")
+    if scope not in prj.scopes():
+        raise VerbError(400, f"scope = {' | '.join(prj.scopes())}")
+    key = ""
+    if page:
+        if "://" in page or re.search(r"\s", page):
+            if make_page:
+                raise VerbError(400, "a page can be made only for a page key of this instance's page store, not a link")
+        else:
+            key = _norm_key(page)
+            top, _, slug = key.partition("/")
+            if top not in _cfg.page_dirs() or not slug:
+                raise VerbError(400, f"page = {' or '.join(d + '/<slug>' for d in _cfg.page_dirs())}, or a link to another knowledge base: got {page[:80]!r}")
+            if make_page and (not prj.SLUG_RE.fullmatch(slug) or len(slug) > 60):
+                raise VerbError(400, f"a page that is made is {' or '.join(d + '/<slug>' for d in _cfg.page_dirs())}, one level, the slug lowercase letters, digits and dashes (at most 60): got {key[:80]!r}")
+            page = key
+    elif make_page:
+        raise VerbError(400, "make_page needs a page key")
+    title = " ".join(str(title or "").split()) or (prj.slug_title(key) if key else name)
+    if make_page and key:
+        import page_debt as _pd
+        io = io if io is not None else _pd.page_io()
+        if io.get(key)[0] is not None:
+            raise VerbError(409, f"{key} already exists as a page: point the project at it without make_page")
+    if len(title) > 120 or any(ord(c) < 32 or c in '"\\' for c in title):
+        raise VerbError(400, "title = one line of at most 120 characters, with no quotation marks or backslashes")
+
+    def work(ctx: Ctx) -> dict:
+        why = _name_taken(ctx, name, "")
+        if why:
+            raise VerbError(409, f"{why}: a name belongs to one project")
+        pid = ""; fresh = True
+        if key:
+            up = ctx.owner(key)
+            if up:
+                raise VerbError(400, f"{key} is a sub-page of {up}: a sub-page is never a project; make the project on its top-level page ({up}), or on a page of its own")
+            if "/" in key.partition("/")[2]:                     # below a page that is not in the registry (yet): still no top-level page
+                raise VerbError(400, f"{key} is below another page: a project's page is {' or '.join(d + '/<slug>' for d in _cfg.page_dirs())}, one level (a page below a page is a sub-page, never a project)")
+            if key in pr.by_page(ctx.ents):
+                raise VerbError(409, f"{key} is already the page of a project ({pr.by_page(ctx.ents)[key]}): a page belongs to one project")
+            if make_page and (key in ctx.raw or any(k.startswith(key + "/") for k in ctx.raw)):
+                raise VerbError(409, f"{key} already exists as a page: point the project at it without make_page")
+            row = ctx.raw.get(key)
+            if isinstance(row, dict) and str(row.get("type") or "").strip().lower() == "project":
+                raise VerbError(409, f"{key} is a project page that has no entry in the record yet: the migration makes its entry, a new project is not made over it")
+            pid = ctx.key_ids().get(key, "")                      # an id the table reserved for this key is reused: one id per key
+            fresh = not pid
+            if pid and pid in ctx.ents:
+                raise VerbError(409, f"{key} is already the page of a project ({pid}): a page belongs to one project")
+        if not pid:
+            while True:
+                pid = "prj_" + secrets.token_hex(4)
+                if pid not in ctx.d["ids"] and pid not in ctx.ents:
+                    break
+        if key:
+            ctx.d["ids"][pid] = key
+        ent: dict = {"name": name, "title": title, "type": "project", "scope": scope, "status": "active", "former_keys": [], "former_names": [],
+                     "made": {"at": ctx.now, "by": by or "stackshot", "how": how}}
+        if page:
+            ent["page"] = page
+        if hub:
+            ent["hub"] = hub
+        ctx.ents[pid] = ent
+        if mark and not dry:
+            m = ctx.d["marks"].setdefault(pid, {})
+            m.update({"scope": scope, "on_purpose": ctx.now, "at": ctx.now, "by": by or "stackshot"})
+            if key:
+                f = prj.page_front(key, title, scope)
+                m["made"] = {"at": ctx.now, "title": title, "name": name, "org": f["org"], "tags": f["tags"], "display_name": name}
+        return {"pid": pid, "fresh": fresh}
+
+    out, ents, changed = txn(work, by=by, now=now, dry=dry)
+    res = _finish(out["pid"], ents, changed, dry, io, make_page=make_page, extra={"created": True}, by=by, exclusive=True)
+    m = res["mirror"]
+    if make_page and key and not dry and m["state"] in ("failed", "exists"):
+        _forget_created(out["pid"], ents[out["pid"]], out["fresh"])           # a project whose page was asked for and could not be made is not made: the same call can be said again
+        if m["state"] == "exists":
+            raise VerbError(409, f"{key} already exists as a page: point the project at it without make_page")
+        raise VerbError(502, f"{m['note']}; nothing was recorded")
+    return res
+
+
+def _forget_created(pid: str, made: dict, fresh: bool = True) -> None:
+    """Take back the entry `create` just wrote (its id, its marks and the entry itself) when nothing has changed it since: the create's page could not be made, so there is no project."""
+    def work(ctx: Ctx) -> None:
+        if ctx.ents.get(pid) == made:
+            del ctx.ents[pid]
+            if fresh:
+                ctx.d["ids"].pop(pid, None); ctx.d["marks"].pop(pid, None)
+    txn(work)
+
+
+def rename(project: str, new_name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
+    """Change the project's name: the id stays, the old name is appended to `former_names`, and the pending agents registered under the old name are dropped. The page's `display-name:` follows
+    (mirror). → {project, key, changed, entry, mirror, old, new, dropped}."""
+    new_name = " ".join(str(new_name or "").split())
+    if not NAME_RE.fullmatch(new_name):
+        raise VerbError(400, "name = letters, digits, . _ - (at most 64), starting with a letter or digit")
+
+    def work(ctx: Ctx) -> dict:
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        old = str(e.get("name") or "")
+        if old == new_name:
+            return {"pid": pid, "old": old, "dropped": []}
+        why = _name_taken(ctx, new_name, pid)
+        if why:
+            raise VerbError(409, f"{why}: a name belongs to one project")
+        fn = [x for x in e.get("former_names") or [] if x != new_name]
+        if old and old not in fn:
+            fn.append(old)
+        e["name"] = new_name; e["former_names"] = fn
+        dropped = []
+        pend = ctx.d["pending_agents"].get(pid) or {}
+        for n in [n for n in pend if old and str(n).casefold().startswith(old.casefold() + "-")]:
+            del pend[n]; dropped.append(n)
+        return {"pid": pid, "old": old, "dropped": dropped}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    old = out["old"]
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"old": old, "new": new_name, "dropped": out["dropped"]}, by=by,
+                   timeline=f"renamed from {old} to {new_name}" if changed and old else "", tag="rename")
+
+
+def archive(project: str, *, by: str = "", how: str = "made", why: str = "", io: Any = None, now: str | None = None, dry: bool = False, today: str | None = None, pages: dict | None = None) -> dict:
+    """Set the project's status to archived with `retired` = who (`by`), when and how (`how` is how the record entry came to say it: "made" by a verb, "migrated", "adopted"; `why` is the
+    reason in words). The page's `status:` follows (mirror), with a timeline line when the page was changed. An archived project stays archived: said again, it changes nothing. → {project, key, changed, ...}."""
+    if how not in pr.HOWS:
+        raise VerbError(400, f"how = {' | '.join(pr.HOWS)}")
+
+    def work(ctx: Ctx) -> dict:
+        ctx.refuse_sub_key(project)
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        if e.get("status") == "archived":
+            return {"pid": pid, "already": True}
+        e["status"] = "archived"
+        e["retired"] = {"at": ctx.now, "by": by or "stackshot", "how": how, **({"why": why} if why else {})}
+        return {"pid": pid, "already": False}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"already": out["already"]}, by=by,
+                   timeline=("archived" + (f"; {why}" if why else "")) if not out["already"] else "", tag="archive")
+
+
+def reopen(project: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
+    """The reverse of archive: status active, `retired` removed, the page's `status:` follows. Said of an active project it changes nothing."""
+    def work(ctx: Ctx) -> dict:
+        ctx.refuse_sub_key(project)
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        if e.get("status") != "archived":
+            return {"pid": pid}
+        e["status"] = "active"; e.pop("retired", None)
+        return {"pid": pid}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), by=by, timeline="reopened" if changed else "", tag="reopen")
+
+
+# ---- the agents map
+def _find(agents: dict, name: str) -> str | None:
+    return next((n for n in agents if n.casefold() == name.casefold()), None)
+
+
+def _former_agent(e: dict, name: str, add: bool) -> None:
+    """Note on the entry that `name` was taken off its agents map (`add`) or is listed again (not `add`); the last 50 are kept."""
+    fa = [x for x in e.get("former_agents") or [] if x.casefold() != name.casefold()]
+    if add:
+        fa.append(name)
+    if fa:
+        e["former_agents"] = fa[-50:]
+    else:
+        e.pop("former_agents", None)
+
+
+def agent_add(project: str, name: str, front: bool, mandate: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, mirror_now: bool = True, pages: dict | None = None) -> dict:
+    """List an agent on the project's agents map with its mandate line (`front` False = a background agent), at the end of the map. The record first, then the page's `agents:` block (mirror): there
+    is no state in which the page owes a line. A name already listed with the same front flag and mandate changes nothing; with another, it is a 409. A pending entry of the same name is dropped.
+    → {project, key, changed, entry, mirror, name, front, mandate}."""
+    mandate = " ".join(str(mandate or "").split())
+
+    def work(ctx: Ctx) -> dict:
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        ag = copy.deepcopy(ctx.agents(pid))
+        have = _find(ag, name)
+        if have is not None:
+            cur = ag[have]
+            if bool(cur.get("front")) == bool(front) and _norm_m(cur.get("mandate_line", "")) == _norm_m(mandate):
+                e["agents"] = ag
+                return {"pid": pid, "name": have}
+            raise VerbError(409, f"{have} is already listed on the project as {'front' if cur.get('front') else 'background'}: {str(cur.get('mandate_line', ''))[:120]!r}; "
+                                 "retire it or rename it, then list it again")
+        ag[name] = {"front": bool(front), "mandate_line": mandate, **({"by": by} if by else {}), "at": ctx.now}
+        e["agents"] = ag
+        _former_agent(e, name, False)
+        pend = ctx.d["pending_agents"].get(pid) or {}
+        for n in [n for n in pend if str(n).casefold() == name.casefold()]:
+            del pend[n]
+        return {"pid": pid, "name": name}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={"name": out["name"], "front": bool(front), "mandate": mandate}, by=by, mirror_now=mirror_now)
+
+
+def agent_retire(project: str, name: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
+    """Take an agent off the project's agents map (and any pending entry of the name). The page's block follows (mirror), with a timeline line when the page changed. The map stays present when it
+    is emptied (the project was staffed once). A name that is not listed changes nothing. → {project, key, changed, entry, mirror, result, name, front, left}, with `result` "line removed", "dropped" (it was only a pending entry) or "not listed"."""
+    def work(ctx: Ctx) -> dict:
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        ag = copy.deepcopy(ctx.agents(pid))
+        have = _find(ag, name)
+        pend = ctx.d["pending_agents"].get(pid) or {}
+        gone = [(n, bool(pend[n].get("front", True))) for n in pend if str(n).casefold() == name.casefold()]
+        for n, _f in gone:
+            del pend[n]
+        if have is None:
+            if gone:
+                return {"pid": pid, "result": "dropped", "name": gone[0][0], "front": gone[0][1], "left": len(ag)}
+            return {"pid": pid, "result": "not listed", "name": name, "front": True, "left": len(ag)}
+        front = bool(ag[have].get("front"))
+        del ag[have]
+        e["agents"] = ag
+        _former_agent(e, have, True)
+        return {"pid": pid, "result": "line removed", "name": have, "front": front, "left": len(ag)}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    removed = out["result"] == "line removed"
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "name", "front", "left")}, by=by, drop=(out["name"],),
+                   timeline=f"{out['name']} retired; its line removed from the agents map" if removed else "", tag=f"retire-{out['name']}")
+
+
+def agent_rename(project: str, old: str, new: str, *, by: str = "", io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
+    """Rename an agent's entry in place: the same place in the map, front or background, the same mandate. Refused (404) when `old` is not listed and `new` is not either; `old` gone and `new`
+    listed is "already renamed"; both listed is a 409. → {project, key, changed, entry, mirror, result, old, new, front, mandate}."""
+    def work(ctx: Ctx) -> dict:
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        e = ctx.entry(pid)
+        ag = ctx.agents(pid)
+        o, n = _find(ag, old), _find(ag, new)
+        if o is None and n is not None:
+            return {"pid": pid, "result": "already renamed", "old": old, "new": n, "front": bool(ag[n].get("front")), "mandate": ag[n].get("mandate_line", "")}
+        if o is None:
+            raise VerbError(404, f"{old} is not listed on {pr.page_key(e) or pid}")
+        if n is not None:
+            raise VerbError(409, f"{new} is already listed on {pr.page_key(e) or pid}")
+        e["agents"] = {(new if k == o else k): v for k, v in ag.items()}
+        _former_agent(e, o, True); _former_agent(e, new, False)
+        pend = ctx.d["pending_agents"].get(pid) or {}
+        for x in [x for x in pend if str(x).casefold() == o.casefold()]:
+            del pend[x]
+        return {"pid": pid, "result": "renamed", "old": o, "new": new, "front": bool(ag[o].get("front")), "mandate": ag[o].get("mandate_line", "")}
+
+    pages = pages if pages is not None else preread(project, io)
+    out, ents, changed = txn(work, by=by, now=now, dry=dry, pages=pages)
+    return _finish(out["pid"], ents, changed, dry, io, warn=out.get("warning", ""), extra={k: out[k] for k in ("result", "old", "new", "front", "mandate")}, by=by, drop=(out["old"],))
+
+
+# ---- the page moves
+def default_runner(args: list[str]) -> tuple[int, str]:
+    """rename_page.py, run as the command it is (the gbrain CLI is on the server box) → (exit code, its output)."""
+    r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "rename_page.py"), *args], capture_output=True, text=True, timeout=1800)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+def _stubbed(out: str, old: str) -> list[str]:
+    """The pages rename_page.py's output says are stubbed or were redirects already ("stub OLD → NEW" and "skip OLD: already a redirect" lines), limited to `old` and the pages under it."""
+    got = [a or b for a, b in re.findall(r"(?m)^(?:stub (\S+) \S+ \S+|skip (\S+): already a redirect)\s*$", out)]
+    return [x for x in got if x == old or x.startswith(old + "/")]
+
+
+def _stub_done(out: str, old: str, fulls: list) -> bool:
+    """True when a stub run that exited non-zero had done the whole stub: the top page is stubbed, every line that says FAIL is about the project id move (rename_page.py's last step, which the
+    record here repairs), and every page the earlier plan or copy step listed is stubbed or was a redirect already."""
+    done = set(_stubbed(out, old))
+    if old not in done:
+        return False
+    if any(ln.strip().startswith("FAIL") and not ln.strip().startswith("FAIL project id of") for ln in out.splitlines()):
+        return False
+    listed = {m.group(1) for ph, o in fulls if ph in ("plan", "copy") for m in re.finditer(r"(?m)^(?:plan|copy) (\S+) \S+ \S+", o)}
+    return listed <= done
+
+
+def move_page(project: str, new_key: str, *, by: str = "", phases: tuple = ("copy", "stub"), why: str = "", parent: str = "", no_agents_ok: bool = False,
+              runner: Callable[[list[str]], tuple[int, str]] | None = None, io: Any = None, now: str | None = None, dry: bool = False, pages: dict | None = None) -> dict:
+    """Move the project's page to `new_key`: runs rename_page.py for each of `phases` (plan | copy | stub; the default is copy then stub, and a stub refuses while an open item or an anchor still
+    names the old key: move those, then run `phases=("stub",)`; an item that stores the project's id (metadata.project_id) is read at the new key at once, and needs no move), and when the page has moved (the stub ran) writes the record: the pointer is the new key and the old key is appended to
+    `former_keys`. rename_page.py's own stub step moves the id's key and the entry's pointer in the same way; this step makes the record right whatever that step did (it does nothing twice). The page
+    mirror runs at the new key. A dry run runs only `plan`. → {project, key, changed, moved, steps, mirror}; a failed step is a VerbError(502) naming the step and its output.
+    Only a project's own page moves: `project` may not be a sub-page's key, and `new_key` may not be below another page or a sub-page's (400). A stub that was written but whose id move failed
+    (rename_page.py exits 1 after printing "stub OLD → NEW") is not an error: the record is made right here and the answer carries a `warning`."""
+    new_key = _norm_key(new_key)
+    top, _, slug = new_key.partition("/")
+    if top not in _cfg.page_dirs() or not slug or "/" in slug:
+        raise VerbError(400, f"new page key = {' or '.join(d + '/<slug>' for d in _cfg.page_dirs())}, one level: a project's page is never below another page")
+    bad = [ph for ph in phases if ph not in ("plan", "copy", "stub")]
+    if bad or not phases:
+        raise VerbError(400, "phases = plan | copy | stub")
+    runner = runner or default_runner
+
+    def read(ctx: Ctx) -> dict:
+        ctx.refuse_sub_key(project)             # a sub-page's key would move its parent's page: decided here, in the transaction, before any entry exists
+        pid = ctx.pid_of(project)
+        if not pid:
+            raise VerbError(404, f"no project {project!r}: an id (prj_<8 hex>), a page key or a name")
+        up = ctx.owner(new_key)
+        if up:
+            raise VerbError(400, f"{new_key} is a sub-page of {up}: a project's page is never a sub-page")
+        e = ctx.entry(pid)                      # the entry exists before the page moves, so the move has a record to change
+        old = pr.page_key(e)
+        if not old:
+            raise VerbError(400, f"{pid} has no page of this instance's page store to move")
+        other = ctx.pid_of(new_key)
+        if other and other != pid and (other in ctx.ents and pr.page_key(ctx.ents[other]) == new_key):
+            raise VerbError(409, f"{new_key} is already the page of project {other}")
+        return {"pid": pid, "old": old}
+
+    pages = pages if pages is not None else preread(project, io)
+    st, _e, _c = txn(read, by=by, now=now, dry=True, pages=pages) if dry else txn(read, by=by, now=now, pages=pages)
+    pid, old = st["pid"], st["old"]
+    if old == new_key:
+        raise VerbError(400, f"{pid}'s page is {new_key} already")
+    steps = []; fulls = []; warning = ""
+    for ph in (("plan",) if dry else phases):
+        args = [ph, f"{old}={new_key}"] + (["--why", why] if why else []) + (["--parent", parent] if parent and ph != "stub" else []) + (["--no-agents-ok"] if no_agents_ok else [])
+        rc, out = runner(args)
+        steps.append({"phase": ph, "rc": rc, "output": out[-2000:]}); fulls.append((ph, out))
+        if rc != 0:
+            last = out.strip().splitlines()[-1][:300] if out.strip() else ""
+            if ph == "stub" and _stub_done(out, old, fulls):
+                warning = (f"the page {old} was stubbed (it now points to {new_key}), but rename_page.py exited {rc} after that" + (f": {last}" if last else "") +
+                           "; the project's record is made right by this step, and the stub step is not to be run again (the page has changed since its copy)")
+                break
+            top_done = old in _stubbed(out, old)
+            hint = {"stub": (f"; the page {old} was stubbed, but not every page under it (see the output): run the stub step again, it skips the stubbed ones: `project move-page {project} {new_key} --phase stub`"
+                             if top_done else f"; the page {old} was not stubbed. Once what the message names is fixed, run the stub step again: `project move-page {project} {new_key} --phase stub`"),
+                    "copy": "; nothing was changed, so the same call can be said again"}.get(ph, "")
+            raise VerbError(502, f"rename_page.py {ph} failed (exit {rc}); the record was not changed by it" + hint + (": " + last if last else ""))
+    if dry or "stub" not in phases:
+        return {"project": pid, "key": old, "changed": False, "dry": dry, "moved": False, "steps": steps, "mirror": {"state": "none", "key": "", "note": "the page has not moved yet"}}
+
+    def fix(ctx: Ctx) -> dict:
+        e = ctx.entry(pid)
+        cur = pr.page_key(e)
+        if cur != new_key:
+            e["page"] = new_key
+        fk = [k for k in e.get("former_keys") or [] if _norm_key(k) != new_key]
+        if old not in fk:
+            fk.append(old)
+        e["former_keys"] = fk
+        if ctx.d["ids"].get(pid) != new_key:
+            ctx.d["ids"][pid] = new_key
+        return {"pid": pid}
+
+    _o, ents, changed = txn(fix, by=by, now=now)
+    warning = "; ".join(w for w in (st.get("warning"), warning) if w)
+    res = _finish(pid, ents, changed, False, io, by=by, extra={"moved": True, "steps": steps, **({"warning": warning} if warning else {})})
+    return res
+
+
+# ----------------------------------------------------------------------------- what the server's gates read
+def pageless_rec(x: Any) -> dict | None:
+    """The record shape `projects.ref` gives (id, key, keeper, agents, listed, retired, ...) for a project the record says has no page, else None. `key` is "" and `pageless` is true."""
+    v = pr.pageless(x)
+    if not v:
+        return None
+    pre = [v["name"]] if v["name"] else []
+    ag = {n: {"front": bool(a.get("front")), "role": prj.role_of(n, pre), "mandate_line": str(a.get("mandate_line") or "")} for n, a in v["agents"].items()}
+    return {"id": v["id"], "key": "", "keeper": v["name"], "agents": ag, "title": v["title"] or v["name"], "type": v["type"], "hub": v["hub"], "scope": v["scope"] or prj.default_scope(),
+            "listed": not v["archived"], "listed_by": "on_purpose", "sub_page": False, "items_30d": 0, "status": v["status"], "retired": v["archived"], "pageless": True}
+
+
+def pid_of(project: Any) -> str:
+    """The id of the project `project` names, the way the verbs find it (an id, a page key, a bare slug, a former key, the project's name or a former name; a sub-page key names the top-level
+    project that owns it): "" when it names none; the id of a sub-page is a VerbError 400. Reads the record under its lock and writes nothing."""
+    try:
+        return txn(lambda c: c.pid_of(project), dry=True)[0]
+    except ValueError:
+        return ""
+
+
+def one(project: Any) -> dict | None:
+    """The record shape of the project `project` (an id, a page key, a slug) names: a project with a page by projects.refs, one with none by pageless_rec; None when it names neither."""
+    try:
+        recs = prj.refs(project, prj.with_made(prj.registry()))
+    except ValueError:
+        recs = []
+    if recs:
+        return recs[0]
+    return pageless_rec(project)

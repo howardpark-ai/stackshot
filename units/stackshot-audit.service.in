@@ -1,0 +1,27 @@
+# stackshot-audit.service — one run of the board audit (audit.py cue scheduled), followed by the rulebook scan. With [audit] mode = "script" (the default)
+# it runs audit.py's script in this unit: the field checks in code, then one `claude -p` call per suspect item, at most [audit] max_calls (40) a run,
+# one after the other; with mode = "agent" it pushes one line to the audit agent's session through push.py instead, as the board's "Audit now" button did before.
+# A run already in progress, or [audit] enabled = false, refuses it. Started by stackshot-audit.timer. Install: ./install.sh units (only with [audit] enabled = true)
+[Unit]
+Description=stackshot — run the board audit now
+# model lane: bedrock — in script mode the unit runs `claude -p` for the judgment checks, on sala's bedrock lane when the instance sets [audit] lane = "bedrock"
+# (audit_run.py wraps the call in `salamander lane exec bedrock --`); the rulebook scan after it is pure Python. In agent mode the unit makes no model call (the audit
+# runs in the agent's own sala session). Without [audit] lane the calls use the [router] command's own lane, so the instance config carries the lane this label names.
+X-Model-Lane=bedrock
+X-Model-Note=script mode: up to [audit] max_calls (40) claude -p calls a run, one at a time, on the [audit] lane (bedrock); agent mode: no call from this unit
+# the job's project, as sala's Agents tab shows it (<scope>/<project>); sala job check reports a timer without it as no-project
+X-Project=@AUDIT_PROJECT@
+
+[Service]
+Type=oneshot
+# the script run makes up to 40 sequential model calls, each limited by [router] timeout_seconds; two hours is the ceiling audit.py's running record also uses
+TimeoutStartSec=2h
+WorkingDirectory=@CHECKOUT@
+Environment=STACKSHOT_CONFIG=@CONFIG@
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=@UV@ run --locked --script @CHECKOUT@/audit.py cue scheduled
+# the rulebook scan runs after the run, so after its page checks (no model; one note per instruction file with a stale tool, parameter, sala flag or retired term, to its keeper; the run
+# never reads its result; in mode = "agent" the unit only pushes a cue and exits, so the scan runs before the agent works, as it did before). ExecStartPost runs only when the run ended without error: a run that failed or was refused (one already in progress) skips the scan until the next run. The "-" keeps
+# a failed scan from failing the unit, `timeout 300` keeps a slow one from holding the unit past five minutes, and [rulebook_scan] enabled = false (the default) makes it a no-op. A note already sent
+# and still true is not sent again, so the unit running twice a day does not repeat one
+ExecStartPost=-/usr/bin/timeout 300 @UV@ run --locked --script @CHECKOUT@/tools/rulebook_scan.py run

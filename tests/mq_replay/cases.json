@@ -1,0 +1,814 @@
+{
+  "format": 1,
+  "trigger": "0112c0de0112c0de0112c0de0112c0de0112c0de",
+  "cases": [
+    {
+      "id": "c01",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 9,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0113c0de0113c0de0113c0de0113c0de0113c0de",
+          "head_mode": "peeled",
+          "queue_head": "0113c0de0113c0de0113c0de0113c0de0113c0de",
+          "base": "0114c0de0114c0de0114c0de0114c0de0114c0de",
+          "merge": "0115c0de0115c0de0115c0de0115c0de0115c0de",
+          "merge_tree": "0116c0de0116c0de0116c0de0116c0de0116c0de",
+          "peeled": 0,
+          "main_run": {
+            "result": "pass",
+            "run": 9000006,
+            "on": "0117c0de0117c0de0117c0de0117c0de0117c0de",
+            "flaky": [
+              "release"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-001",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0114c0de0114c0de0114c0de0114c0de0114c0de",
+      "known_outcome": "merged",
+      "expected_tree": "0116c0de0116c0de0116c0de0116c0de0116c0de"
+    },
+    {
+      "id": "c02",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 23,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0118c0de0118c0de0118c0de0118c0de0118c0de",
+          "head_mode": "peeled",
+          "queue_head": "0118c0de0118c0de0118c0de0118c0de0118c0de",
+          "base": "0119c0de0119c0de0119c0de0119c0de0119c0de",
+          "merge": "011ac0de011ac0de011ac0de011ac0de011ac0de",
+          "merge_tree": "011bc0de011bc0de011bc0de011bc0de011bc0de",
+          "peeled": 0,
+          "main_run": {
+            "result": "pass",
+            "run": 9000007,
+            "on": "011ac0de011ac0de011ac0de011ac0de011ac0de",
+            "flaky": [
+              "pilot"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-002",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0119c0de0119c0de0119c0de0119c0de0119c0de",
+      "known_outcome": "merged",
+      "expected_tree": "011bc0de011bc0de011bc0de011bc0de011bc0de"
+    },
+    {
+      "id": "c03",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 18,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "011cc0de011cc0de011cc0de011cc0de011cc0de",
+          "head_mode": "peeled",
+          "queue_head": "011cc0de011cc0de011cc0de011cc0de011cc0de",
+          "base": "011dc0de011dc0de011dc0de011dc0de011dc0de",
+          "merge": "011ec0de011ec0de011ec0de011ec0de011ec0de",
+          "merge_tree": "011fc0de011fc0de011fc0de011fc0de011fc0de",
+          "peeled": 0,
+          "main_run": {
+            "result": "pass",
+            "run": 9000008,
+            "on": "0120c0de0120c0de0120c0de0120c0de0120c0de",
+            "flaky": [
+              "pilot"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-003",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "011dc0de011dc0de011dc0de011dc0de011dc0de",
+      "known_outcome": "merged",
+      "expected_tree": "011fc0de011fc0de011fc0de011fc0de011fc0de"
+    },
+    {
+      "id": "c04",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 20,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0121c0de0121c0de0121c0de0121c0de0121c0de",
+          "head_mode": "peeled",
+          "queue_head": "0121c0de0121c0de0121c0de0121c0de0121c0de",
+          "base": "0122c0de0122c0de0122c0de0122c0de0122c0de",
+          "merge": "0123c0de0123c0de0123c0de0123c0de0123c0de",
+          "merge_tree": "0124c0de0124c0de0124c0de0124c0de0124c0de",
+          "peeled": 0,
+          "main_run": {
+            "result": "pass",
+            "run": 9000009,
+            "on": "0123c0de0123c0de0123c0de0123c0de0123c0de",
+            "flaky": [
+              "pilot"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-004",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0122c0de0122c0de0122c0de0122c0de0122c0de",
+      "known_outcome": "merged",
+      "expected_tree": "0124c0de0124c0de0124c0de0124c0de0124c0de"
+    },
+    {
+      "id": "c05",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 15,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0125c0de0125c0de0125c0de0125c0de0125c0de",
+          "head_mode": "peeled",
+          "queue_head": "0126c0de0126c0de0126c0de0126c0de0126c0de",
+          "base": "0112c0de0112c0de0112c0de0112c0de0112c0de",
+          "merge": "0127c0de0127c0de0127c0de0127c0de0127c0de",
+          "merge_tree": "0128c0de0128c0de0128c0de0128c0de0128c0de",
+          "peeled": 2,
+          "main_run": {
+            "result": "pass",
+            "run": 9000010,
+            "on": "0127c0de0127c0de0127c0de0127c0de0127c0de",
+            "flaky": []
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-005",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0112c0de0112c0de0112c0de0112c0de0112c0de",
+      "known_outcome": "merged",
+      "expected_tree": "0128c0de0128c0de0128c0de0128c0de0128c0de"
+    },
+    {
+      "id": "c06",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 6,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0129c0de0129c0de0129c0de0129c0de0129c0de",
+          "head_mode": "peeled",
+          "queue_head": "0129c0de0129c0de0129c0de0129c0de0129c0de",
+          "base": "011ac0de011ac0de011ac0de011ac0de011ac0de",
+          "merge": "012ac0de012ac0de012ac0de012ac0de012ac0de",
+          "merge_tree": "012bc0de012bc0de012bc0de012bc0de012bc0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000011,
+            "on": "012ac0de012ac0de012ac0de012ac0de012ac0de",
+            "flaky": [
+              "pilot",
+              "board_pages",
+              "release_queue"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-006",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "011ac0de011ac0de011ac0de011ac0de011ac0de",
+      "known_outcome": "merged",
+      "expected_tree": "012bc0de012bc0de012bc0de012bc0de012bc0de"
+    },
+    {
+      "id": "c07",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 7,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "012cc0de012cc0de012cc0de012cc0de012cc0de",
+          "head_mode": "peeled",
+          "queue_head": "012cc0de012cc0de012cc0de012cc0de012cc0de",
+          "base": "012dc0de012dc0de012dc0de012dc0de012dc0de",
+          "merge": "012ec0de012ec0de012ec0de012ec0de012ec0de",
+          "merge_tree": "012fc0de012fc0de012fc0de012fc0de012fc0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000012,
+            "on": "012ec0de012ec0de012ec0de012ec0de012ec0de",
+            "flaky": [
+              "pilot"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-007",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "012dc0de012dc0de012dc0de012dc0de012dc0de",
+      "known_outcome": "merged",
+      "expected_tree": "012fc0de012fc0de012fc0de012fc0de012fc0de"
+    },
+    {
+      "id": "c08",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 5,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0130c0de0130c0de0130c0de0130c0de0130c0de",
+          "head_mode": "queue",
+          "queue_head": "0130c0de0130c0de0130c0de0130c0de0130c0de",
+          "base": "0131c0de0131c0de0131c0de0131c0de0131c0de",
+          "merge": "0132c0de0132c0de0132c0de0132c0de0132c0de",
+          "merge_tree": "0133c0de0133c0de0133c0de0133c0de0133c0de",
+          "peeled": 0,
+          "main_run": {
+            "result": "pass",
+            "run": 9000013,
+            "on": "0134c0de0134c0de0134c0de0134c0de0134c0de",
+            "flaky": [
+              "pilot",
+              "release"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-008",
+          "offline_merge": {
+            "clean": false,
+            "conflicts": [
+              "tests/tool_text.snapshot.json"
+            ],
+            "tree_equals_merge": false
+          }
+        }
+      ],
+      "base": "0131c0de0131c0de0131c0de0131c0de0131c0de",
+      "known_outcome": "merged",
+      "expected_tree": "0133c0de0133c0de0133c0de0133c0de0133c0de"
+    },
+    {
+      "id": "c09",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 12,
+          "attempt": 1,
+          "known_outcome": "merged",
+          "head": "0135c0de0135c0de0135c0de0135c0de0135c0de",
+          "head_mode": "peeled",
+          "queue_head": "0135c0de0135c0de0135c0de0135c0de0135c0de",
+          "base": "0127c0de0127c0de0127c0de0127c0de0127c0de",
+          "merge": "0136c0de0136c0de0136c0de0136c0de0136c0de",
+          "merge_tree": "0137c0de0137c0de0137c0de0137c0de0137c0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000014,
+            "on": "0136c0de0136c0de0136c0de0136c0de0136c0de",
+            "flaky": [
+              "release"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-009",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0127c0de0127c0de0127c0de0127c0de0127c0de",
+      "known_outcome": "merged",
+      "expected_tree": "0137c0de0137c0de0137c0de0137c0de0137c0de"
+    },
+    {
+      "id": "c10",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 2,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0138c0de0138c0de0138c0de0138c0de0138c0de",
+          "head_mode": "peeled",
+          "queue_head": "0138c0de0138c0de0138c0de0138c0de0138c0de",
+          "base": "0115c0de0115c0de0115c0de0115c0de0115c0de",
+          "merge": "0117c0de0117c0de0117c0de0117c0de0117c0de",
+          "merge_tree": "0139c0de0139c0de0139c0de0139c0de0139c0de",
+          "peeled": 2,
+          "main_run": {
+            "result": "pass",
+            "run": 9000006,
+            "on": "0117c0de0117c0de0117c0de0117c0de0117c0de",
+            "flaky": [
+              "release"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-010",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0115c0de0115c0de0115c0de0115c0de0115c0de",
+      "known_outcome": "merged",
+      "expected_tree": "0139c0de0139c0de0139c0de0139c0de0139c0de"
+    },
+    {
+      "id": "c11",
+      "kind": "merged",
+      "prs": [
+        {
+          "pr": 19,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "013ac0de013ac0de013ac0de013ac0de013ac0de",
+          "head_mode": "peeled",
+          "queue_head": "013ac0de013ac0de013ac0de013ac0de013ac0de",
+          "base": "013bc0de013bc0de013bc0de013bc0de013bc0de",
+          "merge": "0114c0de0114c0de0114c0de0114c0de0114c0de",
+          "merge_tree": "013cc0de013cc0de013cc0de013cc0de013cc0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000015,
+            "on": "0114c0de0114c0de0114c0de0114c0de0114c0de",
+            "flaky": [
+              "release"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-011",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "013bc0de013bc0de013bc0de013bc0de013bc0de",
+      "known_outcome": "merged",
+      "expected_tree": "013cc0de013cc0de013cc0de013cc0de013cc0de"
+    },
+    {
+      "id": "c12",
+      "kind": "group",
+      "prs": [
+        {
+          "pr": 21,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "013dc0de013dc0de013dc0de013dc0de013dc0de",
+          "head_mode": "peeled",
+          "queue_head": "013dc0de013dc0de013dc0de013dc0de013dc0de",
+          "base": "013ec0de013ec0de013ec0de013ec0de013ec0de",
+          "merge": "013fc0de013fc0de013fc0de013fc0de013fc0de",
+          "merge_tree": "0140c0de0140c0de0140c0de0140c0de0140c0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000016,
+            "on": "0119c0de0119c0de0119c0de0119c0de0119c0de",
+            "flaky": []
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-012",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        },
+        {
+          "pr": 22,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0141c0de0141c0de0141c0de0141c0de0141c0de",
+          "head_mode": "peeled",
+          "queue_head": "0141c0de0141c0de0141c0de0141c0de0141c0de",
+          "base": "0142c0de0142c0de0142c0de0142c0de0142c0de",
+          "merge": "0143c0de0143c0de0143c0de0143c0de0143c0de",
+          "merge_tree": "0144c0de0144c0de0144c0de0144c0de0144c0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000017,
+            "on": "0143c0de0143c0de0143c0de0143c0de0143c0de",
+            "flaky": [
+              "pilot",
+              "release_queue"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-013",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        },
+        {
+          "pr": 4,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0145c0de0145c0de0145c0de0145c0de0145c0de",
+          "head_mode": "peeled",
+          "queue_head": "0146c0de0146c0de0146c0de0146c0de0146c0de",
+          "base": "0143c0de0143c0de0143c0de0143c0de0143c0de",
+          "merge": "013ec0de013ec0de013ec0de013ec0de013ec0de",
+          "merge_tree": "0147c0de0147c0de0147c0de0147c0de0147c0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000016,
+            "on": "0119c0de0119c0de0119c0de0119c0de0119c0de",
+            "flaky": []
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-014",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        }
+      ],
+      "base": "0148c0de0148c0de0148c0de0148c0de0148c0de"
+    },
+    {
+      "id": "c13",
+      "kind": "group",
+      "prs": [
+        {
+          "pr": 11,
+          "attempt": 0,
+          "known_outcome": "merged",
+          "head": "0149c0de0149c0de0149c0de0149c0de0149c0de",
+          "head_mode": "peeled",
+          "queue_head": "0149c0de0149c0de0149c0de0149c0de0149c0de",
+          "base": "014ac0de014ac0de014ac0de014ac0de014ac0de",
+          "merge": "014bc0de014bc0de014bc0de014bc0de014bc0de",
+          "merge_tree": "014cc0de014cc0de014cc0de014cc0de014cc0de",
+          "peeled": 1,
+          "main_run": {
+            "result": "pass",
+            "run": 9000018,
+            "on": "014bc0de014bc0de014bc0de014bc0de014bc0de",
+            "flaky": [
+              "pilot"
+            ]
+          },
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-015",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": [],
+            "tree_equals_merge": true
+          }
+        },
+        {
+          "pr": 10,
+          "attempt": 0,
+          "known_outcome": "refused",
+          "head": "014dc0de014dc0de014dc0de014dc0de014dc0de",
+          "queue_head": "014dc0de014dc0de014dc0de014dc0de014dc0de",
+          "base": "014ac0de014ac0de014ac0de014ac0de014ac0de",
+          "base_rule": "main's first-parent tip before 2026-06-02T15:23:21Z",
+          "refused_at": "2026-06-02T15:23:21Z",
+          "stage": "checks",
+          "reason": "a check failed: suites=fail",
+          "conflict_files": [],
+          "checks": {},
+          "checks_note": "left out on purpose: the PR shows no checks, so CI decides",
+          "expect": "fails alone: this PR is dropped as failed on its own and the others pass",
+          "branch": "feature/example-016",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": []
+          }
+        }
+      ],
+      "base": "014ac0de014ac0de014ac0de014ac0de014ac0de",
+      "note": "the refused PR shows no checks, so CI decides: expect the PR to fail on its own and the other PR to pass"
+    },
+    {
+      "id": "c14",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 13,
+          "attempt": 0,
+          "known_outcome": "refused",
+          "head": "014ec0de014ec0de014ec0de014ec0de014ec0de",
+          "queue_head": "014ec0de014ec0de014ec0de014ec0de014ec0de",
+          "base": "014fc0de014fc0de014fc0de014fc0de014fc0de",
+          "base_rule": "main's first-parent tip before 2026-06-02T14:01:46Z",
+          "refused_at": "2026-06-02T14:01:46Z",
+          "stage": "update-branch",
+          "reason": "X Cannot update PR branch due to conflicts; the branch could not be brought up to date, nothing was merged (a conflict with main is for the PR's author to resolve)",
+          "expected_reason": "refused: conflicts with main (server.py)",
+          "conflict_files": [
+            "server.py"
+          ],
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-017",
+          "offline_merge": {
+            "clean": false,
+            "conflicts": [
+              "server.py"
+            ]
+          }
+        }
+      ],
+      "base": "014fc0de014fc0de014fc0de014fc0de014fc0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    },
+    {
+      "id": "c15",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 1,
+          "attempt": 1,
+          "known_outcome": "refused",
+          "head": "0150c0de0150c0de0150c0de0150c0de0150c0de",
+          "queue_head": "0150c0de0150c0de0150c0de0150c0de0150c0de",
+          "base": "0151c0de0151c0de0151c0de0151c0de0151c0de",
+          "base_rule": "main's first-parent tip before 2026-06-02T13:42:40Z",
+          "refused_at": "2026-06-02T13:42:40Z",
+          "stage": "update-branch",
+          "reason": "X Cannot update PR branch due to conflicts; the branch could not be brought up to date, nothing was merged (a conflict with main is for the PR's author to resolve)",
+          "expected_reason": "refused: conflicts with main (server.py, tests/tool_text.snapshot.json)",
+          "conflict_files": [
+            "server.py",
+            "tests/tool_text.snapshot.json"
+          ],
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-018",
+          "offline_merge": {
+            "clean": false,
+            "conflicts": [
+              "server.py",
+              "tests/tool_text.snapshot.json"
+            ]
+          }
+        }
+      ],
+      "base": "0151c0de0151c0de0151c0de0151c0de0151c0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    },
+    {
+      "id": "c16",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 14,
+          "attempt": 1,
+          "known_outcome": "refused",
+          "head": "0152c0de0152c0de0152c0de0152c0de0152c0de",
+          "queue_head": "0152c0de0152c0de0152c0de0152c0de0152c0de",
+          "base": "0153c0de0153c0de0153c0de0153c0de0153c0de",
+          "base_rule": "main's first-parent tip before 2026-06-02T14:56:56Z",
+          "refused_at": "2026-06-02T14:56:56Z",
+          "stage": "mergeable",
+          "reason": "GitHub says CONFLICTING: the PR has a conflict with main",
+          "expected_reason": "refused: conflicts with main (README.md, tests/tool_text.snapshot.json)",
+          "conflict_files": [
+            "README.md",
+            "tests/tool_text.snapshot.json"
+          ],
+          "checks": {},
+          "branch": "feature/example-019",
+          "offline_merge": {
+            "clean": false,
+            "conflicts": [
+              "README.md",
+              "tests/tool_text.snapshot.json"
+            ]
+          }
+        }
+      ],
+      "base": "0153c0de0153c0de0153c0de0153c0de0153c0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    },
+    {
+      "id": "c17",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 16,
+          "attempt": 0,
+          "known_outcome": "refused",
+          "head": "0154c0de0154c0de0154c0de0154c0de0154c0de",
+          "queue_head": "0154c0de0154c0de0154c0de0154c0de0154c0de",
+          "base": "0155c0de0155c0de0155c0de0155c0de0155c0de",
+          "base_rule": "main's first-parent tip before 2026-06-03T00:08:20Z",
+          "refused_at": "2026-06-03T00:08:20Z",
+          "stage": "update-branch",
+          "reason": "X Cannot update PR branch due to conflicts; the branch could not be brought up to date, nothing was merged (a conflict with main is for the PR's author to resolve)",
+          "expected_reason": "refused: conflicts with main (brains.py, tests/brains_scenario.py)",
+          "conflict_files": [
+            "brains.py",
+            "tests/brains_scenario.py"
+          ],
+          "checks": {
+            "suites": "pass"
+          },
+          "branch": "feature/example-020",
+          "offline_merge": {
+            "clean": false,
+            "conflicts": [
+              "brains.py",
+              "tests/brains_scenario.py"
+            ]
+          }
+        }
+      ],
+      "base": "0155c0de0155c0de0155c0de0155c0de0155c0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    },
+    {
+      "id": "c18",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 3,
+          "attempt": 0,
+          "known_outcome": "refused",
+          "head": "0156c0de0156c0de0156c0de0156c0de0156c0de",
+          "queue_head": "0156c0de0156c0de0156c0de0156c0de0156c0de",
+          "base": "0157c0de0157c0de0157c0de0157c0de0157c0de",
+          "base_rule": "main's first-parent tip before 2026-06-03T01:09:35Z",
+          "refused_at": "2026-06-03T01:09:35Z",
+          "stage": "checks",
+          "reason": "a check failed: tool-text-model=fail",
+          "expected_reason": "refused: a check failed: tool-text-model=fail",
+          "conflict_files": [],
+          "checks": {
+            "tool-text-model": "fail"
+          },
+          "branch": "feature/example-021",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": []
+          }
+        }
+      ],
+      "base": "0157c0de0157c0de0157c0de0157c0de0157c0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    },
+    {
+      "id": "c19",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 17,
+          "attempt": 0,
+          "known_outcome": "refused",
+          "head": "0158c0de0158c0de0158c0de0158c0de0158c0de",
+          "queue_head": "0158c0de0158c0de0158c0de0158c0de0158c0de",
+          "base": "0159c0de0159c0de0159c0de0159c0de0159c0de",
+          "base_rule": "main's first-parent tip before 2026-06-02T12:31:52Z",
+          "refused_at": "2026-06-02T12:31:52Z",
+          "stage": "checks",
+          "reason": "a check failed: snapshot-check=fail",
+          "expected_reason": "refused: a check failed: snapshot-check=fail",
+          "conflict_files": [],
+          "checks": {
+            "snapshot-check": "fail"
+          },
+          "branch": "feature/example-022",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": []
+          }
+        }
+      ],
+      "base": "0159c0de0159c0de0159c0de0159c0de0159c0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    },
+    {
+      "id": "c20",
+      "kind": "refused",
+      "prs": [
+        {
+          "pr": 8,
+          "attempt": 0,
+          "known_outcome": "refused",
+          "head": "015ac0de015ac0de015ac0de015ac0de015ac0de",
+          "queue_head": "015ac0de015ac0de015ac0de015ac0de015ac0de",
+          "base": "015bc0de015bc0de015bc0de015bc0de015bc0de",
+          "base_rule": "main's first-parent tip before 2026-06-02T22:17:30Z",
+          "refused_at": "2026-06-02T22:17:30Z",
+          "stage": "checks",
+          "reason": "a check failed: suites=fail",
+          "expected_reason": "refused: a check failed: suites=fail",
+          "conflict_files": [],
+          "checks": {
+            "suites": "fail"
+          },
+          "branch": "feature/example-023",
+          "offline_merge": {
+            "clean": true,
+            "conflicts": []
+          }
+        }
+      ],
+      "base": "015bc0de015bc0de015bc0de015bc0de015bc0de",
+      "known_outcome": "refused",
+      "expected_tree": null
+    }
+  ],
+  "dropped": []
+}

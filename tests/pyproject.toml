@@ -1,0 +1,22 @@
+# The one dependency set the scenario suites run with, beside its lock, tests/uv.lock.
+#
+# Run a suite through tests/run-suite, which points uv at ONE environment outside the checkout ($UV_PROJECT_ENVIRONMENT, the
+# same for every checkout). The suites carry no PEP 723 inline metadata of their own: uv keys a script's cached environment by
+# the script's path, so a suite with metadata built a fresh set of environments in every worktree and clone (about 46 each,
+# never reused). To add or bump a test dependency, edit the list here and run `uv lock --project tests`.
+[project]
+name = "stackshot-tests"
+version = "0"
+requires-python = ">=3.12"
+dependencies = [
+    "coverage>=7.10",   # tests/suitemap.py measures the suites on main; 7.10 brought [run] patch
+    "fastmcp>=4.0,<5",
+    "httpx",
+    "markdown-it-py>=4,<5",
+    "playwright==1.63.0",
+    "pyyaml",
+]
+
+[tool.uv]
+package = false
+exclude-newer = "2026-10-03T04:00:00Z"

@@ -1,0 +1,25 @@
+# The rules of salamander's merge queue (`salamander mq`; its docs/mq.md in salamander's checkout) for this repository. It is read from main's tip at the start of each queue run, so a pull request cannot change its own rules.
+# Whether the queue runs at all is each host's choice, in ~/.config/mergequeue/<owner>__<repo>.toml (mode = "off" | "shadow" | "on"); release.sh follows that file (CONTRIBUTING.md, "The merge queue, shadow"). No host file is off.
+
+base = "main"                  # the branch PRs target and the queue's entries are built on
+
+# The queue runs as a chain, its one mode: each waiting PR is its own entry, built on the entry ahead of it (main plus the PRs ahead plus this one), and all the entries are tested at once, so the whole stack is
+# tested in one pass. The entries merge to main strictly in line order, each a fast-forward. A failing PR is dropped on its own (it is named by its position: it failed with everything ahead of it passing), and the entries behind it are rebuilt on the one ahead
+# of it and tested again. A lone PR does not go through the queue: release.sh keeps its own path and shortcuts for it. A chain costs extra runner runs: one per PR, and a rerun for each PR behind a failure (about 3 extra runs for 4 PRs).
+queue_mode = "chain"
+
+# What a queue run is tested by: a push to a branch under queue_prefix runs tests.yml (its `push` trigger lists 'queue/**') and gets the run a pull request gets: the suites its change reaches by the newest map
+# (`suitemap.py select`), in the `suites` job, with no plan and no six measuring shards (a selected run is much shorter than a full sharded run). That is GitHub's merge-queue convention: an entry runs the checks a PR runs, and
+# main's own full measured run, with the selection audit, follows the merge. The job named `suites` is the check mq reads on an entry's head, and the same job name the PR check and release.sh's main_green read.
+# What a queue run does not give is the measured map and the selection audit (main's run only); the risk is a selection that misses a suite, which a PR's run accepts as well, and main's full run after the merge catches it.
+required = ["suites"]
+queue_prefix = "queue/main/"   # must start with queue/ (tests.yml triggers on queue/**) and end with /
+suites = "select"              # mq only passes this on ("all" | "select"); tests.yml honors it: a queue branch runs the selection, never main's full sharded run. tests/suitemap_scenario.py fails when this and tests.yml disagree
+
+# Not set, on purpose: `inflight_max` (the entries tested at once, 1 to 16) takes the chain default of 6.
+# release.sh hands the queue at most 4 PRs at a time, its own number, whatever this file says.
+
+# Two PRs that both change tool text conflict on the generated snapshot and on nothing else (release.sh mends the same conflict for one PR: tools/snapshot_regen.py). Chain mode uses this hook too, at the build of an entry (against the entry ahead) and at the merge step:
+# take the merged tree's snapshot, regenerate it from the merged tree, check it. mq runs this in the entry's worktree and, on exit 0, adds the file and commits the merge; any other conflicted path, or a failure here, ejects the PR as before, and the entries behind it are rebuilt on the one ahead of it.
+on_conflict = "sh -c 'git checkout HEAD -- tests/tool_text.snapshot.json && python3 tools/tool_text.py update && python3 tools/tool_text.py check'"
+conflict_paths = ["tests/tool_text.snapshot.json"]

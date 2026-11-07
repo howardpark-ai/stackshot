@@ -1,0 +1,17 @@
+#!/bin/sh
+# commit-msg: refuse a commit whose message carries data of the instance owner (CONTRIBUTING.md, "Commit and PR text").
+# Turn it on once per clone:  git config core.hooksPath .githooks
+# The deny list is read from CLEAN_TEXT_DENY or ${XDG_CONFIG_HOME:-$HOME/.config}/stackshot/clean-text-deny, never from the tree;
+# without one only the generic patterns run, and the check says so. `git commit --no-verify` skips it; CI checks again.
+set -u
+root=$(git rev-parse --show-toplevel) || exit 1
+command -v python3 >/dev/null 2>&1 || { echo "clean-text: python3 is not on PATH; the commit message was not checked" >&2; exit 1; }
+# Every line of the file is checked, "#" lines included: `git commit -m` keeps them in the message. Only what git itself writes
+# into the editor template is dropped: everything below the scissors line (the diff of commit -v) and the status lines
+# "# On branch X", "# HEAD detached at X", "# Your branch is ... 'origin/X'" (their branch names are not message text; a push
+# checks the branch name on its own).
+if ! sed -e '/^# -\{24\} >8 -\{24\}$/,$d' -e '/^# On branch /d' -e '/^# HEAD detached /d' -e '/^# Your branch /d' "$1" \
+    | python3 "$root/tools/clean_text.py" --message-stdin >&2; then
+    echo "commit-msg: the commit was refused; reword the message and commit again." >&2
+    exit 1
+fi

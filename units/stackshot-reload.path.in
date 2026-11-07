@@ -1,0 +1,15 @@
+# stackshot-reload.path — apply a change to the config file (stackshot.toml) without a restart: stackshot-reload.service
+# sends the server and anchor-hub SIGHUP, and each re-reads the file. A valid file is live at once; a broken one is logged and
+# the running config kept; a setting only a start can apply (config.py RESTART_ONLY) is logged and waits for the next restart.
+# Code is not watched: deploy.sh restarts what a change touched, deliberately. (Until an earlier change this path restarted the server on
+# every module change as well: a server started with a broken renderer blanked the board until it was restarted.)
+# Install: ./install.sh units
+[Unit]
+Description=stackshot — reload the server and anchor-hub when the config file changes
+
+[Path]
+PathChanged=@CONFIG@
+Unit=stackshot-reload.service
+
+[Install]
+WantedBy=default.target

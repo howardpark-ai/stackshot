@@ -1,0 +1,3 @@
+[Unit]
+# every (re)start of the server pulls in the portal re-sync (stackshot-portal-sync.service; stackshot.toml [portal])
+Wants=stackshot-portal-sync.service

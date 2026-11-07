@@ -1,0 +1,14 @@
+# stackshot-audit.timer — the board audit: every day at each time of [audit] at (one time, or a list of them) in the [instance] timezone it starts
+# stackshot-audit.service, which runs the audit script ([audit] mode = "script", the default) or cues the audit agent ([audit] mode = "agent"). install.sh writes the OnCalendar line
+# once for each time. Persistent: a run missed while the box was off or asleep runs once when it is back.
+# Install: ./install.sh units — only with [audit] enabled = true; with false an installed one is disabled and removed
+[Unit]
+Description=stackshot — board audit
+
+[Timer]
+OnCalendar=*-*-* @AUDIT_AT@:00 @TZ@
+Persistent=true
+Unit=stackshot-audit.service
+
+[Install]
+WantedBy=timers.target

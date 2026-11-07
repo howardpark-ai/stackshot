@@ -1,0 +1,47 @@
+#!/bin/sh
+# Run a scenario suite in the one shared test environment (dependencies in tests/pyproject.toml, locked in tests/uv.lock).
+#
+#   tests/run-suite pilot              runs tests/pilot_scenario.py
+#   tests/run-suite phone_width_check  a name ending in _check runs tests/<name>.py
+#   tests/run-suite pilot -k foo       anything after the name goes to the suite
+#
+# uv keys a PEP 723 script's environment by its path, so a suite with inline metadata built a new set of environments in every
+# checkout (the suites carry none now: this is how they run). Here the environment is a fixed directory under the XDG cache, the same for every checkout, built on the first
+# run and reused after. `--locked` fails on a stale tests/uv.lock instead of resolving afresh.
+# UV_PROJECT_ENVIRONMENT overrides the directory (default: ${XDG_CACHE_HOME:-~/.cache}/stackshot/test-venv).
+#
+# Scratch: the suite runs with a TMPDIR of its own (rs.XXXXXX, short: a unix socket path is limited to 108 characters), made under the caller's TMPDIR (default /tmp), and that folder is
+# removed when the suite ends, whatever it left in it and however it ended (a pass, a failing check, an exception, a kill by
+# `timeout`). tests/_scratch.py removes a suite's own folders in the suite process; this removes what the suite's subprocesses and
+# the code under test left. uv itself keeps the caller's TMPDIR (its one lock file per project path, uv-<hash>.lock, must stay
+# where every run finds it). KEEP_SCRATCH=1 leaves the folder for debugging and prints its path.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+[ $# -ge 1 ] || { echo "usage: tests/run-suite <suite> [args...]   (e.g. pilot, or phone_width_check)" >&2; exit 2; }
+name=$1; shift
+case $name in
+    *_check) script=$here/$name.py ;;
+    *)       script=$here/${name}_scenario.py ;;
+esac
+[ -f "$script" ] || { echo "run-suite: no such suite: $script" >&2; exit 2; }
+UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv}
+export UV_PROJECT_ENVIRONMENT
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/rs.XXXXXX")
+exec 9<"$scratch"                # a shared lock on the folder while the suite runs: systemd-tmpfiles skips a locked folder (tmpfiles.d(5));
+flock -s 9 || :                  # it drops when this script and the suite (which inherits the descriptor) have ended, or were killed
+done_scratch() {
+    case ${KEEP_SCRATCH:-} in ""|0) rm -rf "$scratch" ;; *) echo "run-suite: scratch kept: $scratch" >&2 ;; esac
+}
+trap done_scratch EXIT
+# The suite runs in the background and is waited for, so a TERM or HUP sent to this script alone stops it (a foreground child would
+# hold the trap until it ended). A background job of a non-interactive sh ignores SIGINT, which a python inherits and then raises no
+# KeyboardInterrupt on `timeout -s INT` (the traceback of where a hung suite sat): `env --default-signal=INT` gives it back. An INT
+# reaches the suite through the process group (Ctrl-C, `timeout`, a CI cancel: suitemap.py passes it to the suite's `timeout`),
+# so the INT trap only waits for it, then exits.
+uv run --locked --project "$here" env --default-signal=INT TMPDIR="$scratch" python "$script" "$@" &
+child=$!
+trap 'kill -TERM "$child" 2>/dev/null; wait "$child" || :; exit 143' TERM HUP
+trap 'wait "$child" || :; exit 130' INT
+rc=0
+wait "$child" || rc=$?
+exit $rc

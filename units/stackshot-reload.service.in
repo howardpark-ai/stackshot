@@ -1,0 +1,10 @@
+[Unit]
+Description=stackshot — reload the server and anchor-hub after a config change (triggered by stackshot-reload.path)
+
+[Service]
+Type=oneshot
+# an editor's save can land in several writes: let it settle
+ExecStart=/bin/sleep 3
+ExecStart=/usr/bin/systemctl --user reload stackshot.service
+# anchor-hub is installed only with [anchor_hub] enabled = true: "-" lets the server's reload stand without it
+ExecStart=-/usr/bin/systemctl --user reload anchor-hub.service

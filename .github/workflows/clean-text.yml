@@ -1,0 +1,44 @@
+# Commit and PR text carries no data of the instance owner (CONTRIBUTING.md, "Commit and PR text"). On every pull request, including
+# an edit of its title or body, tools/clean_text.py checks the title, the body, the head branch name and the message of every commit
+# the PR adds to its base. The instance-specific words (machines, sessions, domains, the owner) are not in the repository: they are
+# read from the repository SECRET CLEAN_TEXT_DENY (newline-separated regexes, case-insensitive). It is a secret and not a variable
+# because the runner prints a step's env values in the log header and masks only secrets. It is given to the one step that runs the
+# script, not to the job. When it is empty or unset (a fork's pull request gets no secrets) only the generic patterns run, and the log
+# says the deny list was not available. A hit names a deny pattern by its line number in the secret, never by its text, and never
+# prints the line a deny pattern hit.
+name: clean-text
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:       # a manual run on a branch: gh workflow run clean-text.yml --ref <branch>
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  clean-text:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read        # the checkout
+    # Every value of the event goes in through env, never into the shell text: a title, a body or a branch name is data written by a stranger.
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      PR_BRANCH: ${{ github.event.pull_request.head.ref || github.ref_name }}   # the fallbacks are for a manual run (workflow_dispatch): the branch against main
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+    steps:
+      - name: scratch goes to the runner's temp folder
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"   # as in tests.yml
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # base..head is read from the history
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: title, body, branch and commit messages
+        env:
+          CLEAN_TEXT_DENY: ${{ secrets.CLEAN_TEXT_DENY }}   # this step only; empty on a fork's pull request
+        run: |
+          # The commits are the ones the PR adds to the base branch as it is now: a merge of main into the PR brings no old history in.
+          BASE_REV="origin/$BASE_REF" uv run --no-project python tools/clean_text.py --from-env
