@@ -12,8 +12,10 @@ An item is silent when it is open, in the state doing (stored or derived), on a 
 is on hold, waits on an after item, a stored wait (a release, a CI run or any other event, a relay, an outside party: the model reads it as waiting), carries a wake of its own (a wake ahead is its
 expected time; a wake that passed is the dates pass's), or has a hand-off that nobody took yet (the hand-off audit's alone, so one item never climbs two ladders at once). The count starts at the later of the item's last activity and
 the moment it left a hold, a wait or an after link (those releases carry no writer, so the activity clock does not move for them). Silence is judged per item, never per pane: the mover's pane being busy (a builder directing subagents is nearly always busy) says nothing about one item,
-so the pass does not read the pane and a busy pane hides no silent item. What counts as activity on the item is the clock's (a write, a message, an event on an anchor); a subagent's work that
-writes nothing to the item is not activity, so a builder keeps a long job visible by writing it onto the item (a `work` line, an update). Whether a session is idle is the stall pass's job and only the
+so the pass does not read the pane and a busy pane hides no silent item. What counts as activity on the item is the clock's (a write, a message, an event on an anchor, a pull request's review or CI
+run); a subagent's work that writes nothing to the item is not activity, so a builder keeps a long job visible by writing it onto the item (a `work` line, an update). One signal is read beyond the
+clock: an item whose mover is its project's builder and which carries a `work` line in progress (`subagent_running`, last changed within `SUBAGENT_S`, 90 minutes) has a build subagent running on it and
+counts as taken, however long since its last write (the server's `skip` decides it, `server._silence_skip`). A builder's item with no such line and no event in 45 minutes is silent whatever its pane shows. Whether a session is idle is the stall pass's job and only the
 rungs that need an idle pane (the ladder's look, cold call and builder steps) wait for one. The pass asks one view before it sends: an item the stall ladder is already on is left alone (`skip`, given by the server).
 
 A finding is the daily run's `stale` finding in the daily run's wording (the same category, evidence line and fix, the time given in minutes), so the two see one finding by `audit_run.finding_key`.
@@ -42,8 +44,10 @@ import handoff as _ho  # noqa: E402
 import model as _model  # noqa: E402
 import states as _states  # noqa: E402
 import waiting as _wt  # noqa: E402
+import work as _work  # noqa: E402
 
 LIMIT = 45 * 60.0          # seconds without activity on an item on an agent before it is found silent
+SUBAGENT_S = 90 * 60.0    # a `work` line in progress counts as a running build subagent for this long after it was last changed (a pane recycle stops subagents and leaves the line behind)
 FILE = "silence.json"
 STAMP_KEYS = ("id", "project", "owner", "category", "mover", "detail", "source", "sent", "sending_from", "run_started")
 
@@ -113,6 +117,13 @@ def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: A
     if last > 0 and now - last > LIMIT:
         return f"no write for {minutes(now - last)} and " + ("a wake that does not cover the step in hand (write the item, hold it, store a wait, date the step or reword it)" if overdue else "no date of its own")
     return ""
+
+
+def subagent_running(item: dict[str, Any], now: float) -> bool:
+    """Is a build subagent running on this item, by the item's own `work` lines? A line in progress, last changed within `SUBAGENT_S`, is a build subagent the mover started on it. The server asks
+    this only of an item whose mover is the project's builder (`skip`); a line that is only defined or assigned, a done one, and one older than the bound are not a subagent running."""
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return any(0 < now - l["ts"] <= SUBAGENT_S for l in _work.in_progress(meta) if l["ts"] > 0)
 
 
 def findings(items: dict[str, dict[str, Any]], now: float, env: Any = None, skip: Any = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
