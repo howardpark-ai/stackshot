@@ -177,6 +177,7 @@ check("1 mover: a cloud session (cse_ id) is accepted, and with no registry and 
 item(63, needs=[BACK])
 refused_nw("2 wait: an anchor wait names its anchor and its event, and has an end", 63, lambda: upd(63, wait_kind="anchor"), "waits on an anchor event", "names its anchor", "wait_anchor=<url>", "the event it expects", "wait_event=")
 refused_nw("2 wait: …the event is missing", 63, lambda: upd(63, wait_kind="anchor", wait_anchor="https://github.com/x/y/pull/1", ask_by=FUT), "the event it expects", none=("names its anchor",))
+server._anc.save({"projects/alpha": [{"url": "https://github.com/x/y/pull/1", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
 upd(63, wait_kind="anchor", wait_anchor="https://github.com/x/y/pull/1", wait_event="merged", ask_by=FUT)
 check("2 wait: …anchor, event and an end pass; the item reads as waiting on the anchor", model.derive(server._load("a63")).wait.kind == "anchor" and mt(63)["ask_by"] == FUT, mt(63))
 item(64, needs=[BACK])

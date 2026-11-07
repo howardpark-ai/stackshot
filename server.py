@@ -6765,6 +6765,47 @@ def _evwait_hook(kind: str, repo: str, n: int, what: str = "", told: dict[str, s
         print(f"event wait: {kind} #{n} not reported: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+_ANCHOR_SHAPES = "Slack channel/DM, Drive file/folder, Gmail thread or gmail:q:, Notion page or database, GitHub issue/PR, …/releases or a repo root"
+
+
+def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", creating: bool = False) -> None:
+    """The write guard of an anchor wait, on the metadata as the write leaves it: a write that sets or changes wait_anchor on a wait_kind=anchor wait names an anchor that must be on the
+    project's list (the anchors tool), else nothing watches it and the wait ends only at its backstop. Listed = scoped to this item (on any project's page) or project-wide on the item's
+    own project page, the same URL by `_same_anchor`. A stored wait re-saved unchanged is not judged, nor is any other wait kind. A create has no id yet, so only a project-wide anchor counts.
+    The anchors file unreadable (present but not a JSON object; a missing file is an empty list): the wait is stored as before, with a stderr line. A wait_anchor that is no anchor shape the
+    anchors tool accepts is refused with that said, not with an add that would be refused too. Raises ToolError naming the anchors call."""
+    if _watch.stored_kind(meta) != "anchor":
+        return
+    url = _model.clean(meta.get("wait_anchor"))
+    if not url:
+        return
+    if not creating and _watch.stored_kind(old) == "anchor" and _model.clean(old.get("wait_anchor")) == url:
+        return
+    project = str(meta.get("project") or "")
+    try:
+        if _anc.FILE.exists():      # anchors.load() turns a corrupt file into {}, which would refuse every anchor
+            with open(_anc.FILE, encoding="utf-8") as f:
+                if not isinstance(json.load(f), dict):
+                    raise ValueError("the anchors file is not a JSON object")
+        store = _anc.load()
+        listed = [e["url"] for e in (_ascope.anchor_scope(store, gid, project) if gid else [])]
+        listed += [e["url"] for e in _ascope.clean_entries(store.get(project)) if e["items"] is None]
+    except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
+        print(f"anchor wait: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return
+    if any(_same_anchor(u, url) for u in listed):
+        return
+    if not _anc.anchor_id(_anc.split_fragment(url)[0]):
+        raise ToolError(f"Refused: wait_anchor {url!r} is not an anchor shape the anchors tool accepts, so it can never be on the list ({_ANCHOR_SHAPES}). "
+                        "Set wait_anchor to a link of one of those shapes, add it to the anchors list, then set the wait")
+    if creating:
+        fix = (f"add it project-wide first: anchors(project=\"{project}\", add=[\"{url}\"]); or create the item without the wait, "
+               f"then anchors(project=\"{project}\", add=[\"{url}\"], items=[<its id>]), then set the wait")
+    else:
+        fix = f"anchors(project=\"{project}\", add=[\"{url}\"], items=[\"{_gh.shown(gid)}\"]), then set the wait again"
+    raise ToolError(f"Refused: wait_anchor {url} is not on {project or 'the project'}'s anchors list, so nothing watches it and the wait would end only at its backstop. Add the anchor first: {fix}")
+
+
 def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], model_set: dict[str, str], model_drop: set[str], writer: str, session_write: bool) -> str:
     """What an update owes the watchers, on the metadata as the write leaves it: a session's write ends the shown arrival (`woke`); a wait newly set, or whose awaited date or anchor moved,
     stamps its time (a notice older than that is not its arrival) and starts the chases over (they were about the old date); a wait cleared drops both. → the reply's lines."""
@@ -11622,7 +11663,7 @@ _MODEL_FORM = (
     " The item model (design: docs/design): an item is dead (closed), alive (someone in the perimeter is working: one mover) or waiting (nothing happens until something outside arrives). "
     "mover is how an item says whose move it is (there is no owner parameter any more: the sender of the create is recorded as its creator). "
     f"Optional fields, stored as given (each parameter says how it is set): goal=<the end-state in one sentence, what {OWNER} would ask \"is it done?\" about>; mover=<who moves an alive item now: {OWNER}, a session name or the project's background agent; a front agent (a session {OWNER} talks to) only by itself: a create or update from another session that sets mover to one gets the project's builder instead, and the reply and History say so (send the same mover again to keep it; with no builder it is refused)>; "
-    f"then=<who takes it after {OWNER}'s answer or step; then=<front agent> from another session gets the builder the same way>; wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches; or scope an anchor to the item>; "
+    f"then=<who takes it after {OWNER}'s answer or step; then=<front agent> from another session gets the builder the same way>; wait_kind=time | anchor | item | relay | event; wait_anchor=<url of the anchor an anchor wait watches; or scope an anchor to the item>, which must be on the project's anchors list first (add it with the anchors tool, scoped to this item), else the write is refused; "
     f"wait_event=<what must happen there (an anchor wait), or the party or event {OWNER} relays (a relay wait), or the fleet event an event wait watches: {_ew.FORMS}>, which the server asks for when a waiting item waits on an anchor event, a relay or an event without it; "
     f"ask_by=YYYY-MM-DD (a relay wait's end day; an event, item or anchor wait's backstop day, as a wake is); post_wake_mover=<who moves it when the wait ends; a front agent only by itself, as for mover>. "
     "An event wait is how an item whose mover waits in the background for something the fleet does (a release running, a PR's merge, a recycle or a fleet op finishing, a scheduled job's next run) says so: "
@@ -11748,7 +11789,7 @@ _STEP_FORM = (
 
 _STEP_PROOF_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=f"The event that finishes a step, so the server ticks it: [{{step: its 1-based position or exact first line, proof: pr_merged|pr_released <owner>/<repo>#<n> (or none to clear that step's)}}], or the string none to clear them all; the step must be open and not {OWNER}'s own.")]
 
-_WAIT_KIND_PARAM = Annotated[str, Field(description="What a waiting item waits on: time | anchor | item | relay | event. A time wait is its wake; an item wait its after; an anchor wait its wait_anchor and wait_event (a wake is the backstop); a relay wait its wait_event and ask_by; an event wait its wait_event (a fleet event) and a backstop day (ask_by or a wake). \"none\" clears it.")]
+_WAIT_KIND_PARAM = Annotated[str, Field(description="What a waiting item waits on: time | anchor | item | relay | event. A time wait is its wake; an item wait its after; an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (a wake is the backstop); a relay wait its wait_event and ask_by; an event wait its wait_event (a fleet event) and a backstop day (ask_by or a wake). \"none\" clears it.")]
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what must happen at the anchor. A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, recycle and every fleet_op form; job_run turns only on the backstop day). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
@@ -11973,6 +12014,7 @@ def _create_item(
     _gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += _options_note(meta) + _actor_note(meta)
     desc_note = _gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True)    # the write guards of the item model, every field judged on a create
+    _anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
     if getattr(_SESSION_NEXT, "on", False) and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: _after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
         raise ToolError(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
@@ -14116,6 +14158,7 @@ def _update_unlocked(
         desc_note = _gate_model(item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
                                next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets
         desc_note += mover_note
+        _anchor_wait_gate(item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
             if not getattr(_TERMINAL_ROW, "on", False):      # the terminal prompt's repair path (a script's own row, orphan case) is exempt as on create
                 _gate_owner_step(item_now, gid, sender=next_writer, keeper=keeper_was)
@@ -14995,7 +15038,7 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
     for u in add or []:
         base, _ = _anc.split_fragment(u)
         if not _anc.anchor_id(base):
-            raise ToolError(f"Refused: {u!r} is not an anchor shape (Slack channel/DM, Drive file/folder, Gmail thread or gmail:q:, Notion page or database, GitHub issue/PR, …/releases or a repo root)")
+            raise ToolError(f"Refused: {u!r} is not an anchor shape ({_ANCHOR_SHAPES})")
     if add:
         _anc.add(store, key, add, scope, by=who)
     if remove:
