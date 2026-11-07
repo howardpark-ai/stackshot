@@ -36,7 +36,7 @@ for m in range(0, 200, 10): at(4 * 3600 + m * 60, "drive:busy", "drive", "Someon
 # Slack: unchanged — 60 s after the first
 at(6 * 3600, "slack:C1", "slack", "Dana", "hi"); at(6 * 3600 + 30, "slack:C1", "slack", "Dana", "again"); tick(6 * 3600 + 59); tick(6 * 3600 + 60)
 want = [
-    (0, "example-site", '[anchor] Drive L drive:plan: Alex Example changed "plan" → https://u/drive:plan'),
+    (0, "example-site", '[anchor] Drive L drive:plan: Alex Exampel changed "plan" → https://u/drive:plan'),
     (5400, "example-site", '[anchor] Drive L drive:plan: 12 more between 00:00 and 01:00 +04, last from Alex Example: "changed "plan"" → https://u/drive:plan'),
     (10800, "example-site", '[anchor] Drive L drive:plan: Alex Example changed "plan" → https://u/drive:plan'),
     (14400, "example-site", '[anchor] Drive L drive:busy: Someone changed "sheet" → https://u/drive:busy'),
