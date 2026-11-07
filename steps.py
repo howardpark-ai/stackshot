@@ -184,6 +184,9 @@ def resolve(steps: list[dict[str, Any]], refs: Any, param: str, verb: str = "mar
             if not k:
                 raise StepError(f"{param} holds an empty entry; pass a step's position or its exact text")
             hits = [j for j, s in enumerate(steps) if s["status"] == OPEN and (key(s["text"]) == k or first_line(s["text"]) == k)]
+            if not hits:        # the owner's name left off, put on, or stored twice: the words are the same step (an owner-led step only; any other step is found by its whole text)
+                lk = loose_key(ref)
+                hits = [j for j, s in enumerate(steps) if s["status"] == OPEN and (loose_key(s["text"]) == lk or loose_key(first_line(s["text"])) == lk)]
             if not hits:
                 raise StepError(f"{param}: no open step reads {clean(ref)[:90]!r}; the open steps are " + (numbered(steps, OPEN) or "none"))
             if len(hits) > 1:
@@ -360,6 +363,52 @@ def strip_opener(line: Any) -> str:
     if not _mg._NAME_RX.match(t.replace("**", "")):
         return t
     return re.sub(r"^\*{0,2}[^:*]{1,40}:\*{0,2}[ \t]*", "", t, count=1).strip()
+
+
+def _owner_led(text: Any) -> bool:
+    nm = opener(text)
+    return bool(nm) and _model.is_owner(nm)
+
+
+def strip_owner(line: Any) -> str:
+    """A line without its opener and without any further owner opener that follows it (`Name: Name: x` and `Name (role): name: x` both give `x`); an opener that is not the owner's stays after the first."""
+    t = strip_opener(line)
+    for _ in range(8):
+        if not _owner_led(t):
+            break
+        s = strip_opener(t)
+        if s == t:
+            break
+        t = s
+    return t
+
+
+def without_owner(text: Any) -> str:
+    """A step's text on one line without the owner's name at its front, however many times and in whatever spelling the opener stands there (any case, a role in parentheses, a list marker or bold marks around it);
+    a text that does not open with the owner's name comes back as it is, on one line."""
+    t = clean(text)
+    return strip_owner(t) if _owner_led(t) else t
+
+
+def collapse_owner(line: Any) -> str:
+    """A line as it is shown: an owner opener repeated at its front (a step stored with his name twice, before the server stopped doubling it) reads with it once; any other line comes back as it is."""
+    t = str(line or "")
+    if _owner_led(t) and _owner_led(strip_opener(t)):
+        return f"{_model.owner_display()}: {strip_owner(t)}"
+    return t
+
+
+def owner_key(text: Any) -> str:
+    """A step as compared when it may be the owner's: `key`, with the owner's opener written one way (`<owner>: `) and only once, so `Name: x`, `Name: Name: x`, `name (role): x` and a bulleted or bold form
+    are one step, and a step stored with the name twice still matches the one-name form."""
+    k = key(text)
+    return f"{_model.owner_display()}: {strip_owner(k)}" if _owner_led(k) else k
+
+
+def loose_key(text: Any) -> str:
+    """The step's words for a reference that may leave the owner's name off: `key`, and for an owner-led step the text after all of its owner openers."""
+    k = key(text)
+    return strip_owner(k) if _owner_led(k) else k
 
 
 def is_bare(text: Any) -> bool:
