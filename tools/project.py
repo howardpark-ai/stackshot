@@ -2,6 +2,7 @@
 """tools/project.py — the verbs that write a project's identity (project_verbs.py): the record first, then the page's mirror lines.
 
     tools/project.py create NAME --scope S [--page KEY|LINK] [--make-page] [--title T]    a new project; with no --page it has no page and none is made
+    tools/project.py adopt PAGE [--name N] [--scope S]                                    a project from a page that never had one: reads the page once, writes the entry (how: adopted); the page is a pointer after
     tools/project.py rename PROJECT NEW_NAME                                              the name changes, the id stays, the old name goes to former_names
     tools/project.py move-page PROJECT NEW_KEY [--phase plan|copy|stub ...] [--why W]    runs rename_page.py (copy, then stub), then the record: the pointer is the new key, the old key a former key
     tools/project.py archive PROJECT [--why W]                                            status archived (by, at, how); the page's status: line follows
@@ -41,6 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--json", action="store_true"); ap.add_argument("--by", default="cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create"); c.add_argument("name"); c.add_argument("--scope", required=True); c.add_argument("--page", default=""); c.add_argument("--make-page", action="store_true"); c.add_argument("--title", default="")
+    ad = sub.add_parser("adopt"); ad.add_argument("page"); ad.add_argument("--name", default=""); ad.add_argument("--scope", default="")
     r = sub.add_parser("rename"); r.add_argument("project"); r.add_argument("new_name")
     m = sub.add_parser("move-page"); m.add_argument("project"); m.add_argument("new_key"); m.add_argument("--phase", action="append", choices=["plan", "copy", "stub"]); m.add_argument("--why", default="")
     m.add_argument("--parent", default=""); m.add_argument("--no-agents-ok", action="store_true")
@@ -65,12 +67,14 @@ def run(a: argparse.Namespace) -> dict:
     import project_verbs as pv
     import page_debt
     io = None
-    if a.cmd in ("create", "rename", "archive", "reopen", "agent-add", "agent-retire", "agent-rename", "mirror", "move-page"):
+    if a.cmd in ("create", "adopt", "rename", "archive", "reopen", "agent-add", "agent-retire", "agent-rename", "mirror", "move-page"):
         io = page_debt.page_io()
     kw = {"by": a.by, "io": io}
     dry = {"dry": a.dry_run}
     if a.cmd == "create":
         return pv.create(a.name, a.scope, a.page, make_page=a.make_page, title=a.title, **kw, **dry)
+    if a.cmd == "adopt":
+        return pv.adopt(a.page, name=a.name, scope=a.scope, **kw, **dry)
     if a.cmd == "rename":
         return pv.rename(a.project, a.new_name, **kw, **dry)
     if a.cmd == "move-page":

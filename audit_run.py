@@ -58,6 +58,13 @@ are on the record as `page_agents` and are no finding of the item checks: they c
 (or items touched in the last 30 days) and no front agent on its `agents:` map (`no agents map` / `no front agent`, the name is the item count); it goes the same way and repeats the same way. A fourth kind, `session off the map`, names the live sessions that created, move or are the contact of
 an open item of a project whose `agents:` map has no line for them (`anchors.off_map`); one line for each project page, to the same recipient.
 
+The project registry (tools/registry_report.py, `audit.py registry` reads it without sending): every run checks the project record and the pages it points at, and the findings are on the run record as `registry` (they are no finding of the item
+checks: they count in neither `by_category` nor the tightening). Each is `page · problem · name · what fixes it`: a page with no project (`adopt`), a project whose page is gone, page lines that differ from the record (`mirror`), an agent on no
+live session, items whose project id or key no project has, two live projects on one page. Messages go out only with `[registry_audit] send = true` (the default is false): then, after the page agent lines, each project's -main agent (else the
+page's, the hub's, the scope's general one) gets ONE message listing its problems, no fyi, kind `registry` in `messages`, at most once a calendar day: a second run on the same date sends an agent nothing that a delivered message of that date
+already told it (the record's `registry.told_earlier_today` names them), and the next day it comes again until the problem is fixed. Nothing is sent when sala's session list could not be read. Not made when the record has no projects (the summary
+then says nothing about it); a source it cannot read (sala, the page store, the items) skips only the checks that need it and says so in the note.
+
 Not carried over from the agent (the agent's mode still has them): wrong-owner (the `owner check:` line it read no longer exists), page-lag and page-shape, and the timeline entry on
 the project page (a script cannot call gbrain; the summary message goes to the project instead).
 
@@ -156,6 +163,7 @@ class Env:
         self.sessions = kw.get("sessions")          # () -> (live names, aliases) as sala lists them, or None when unreadable; None here reads sala
         self.registry = kw.get("registry")          # () -> the project pages' registry; None here reads the store's
         self.pages = kw.get("pages")                # (run stamp, deadline epoch) -> the server's answer to its page-debt pass ({"enabled", "mode", "counts"}); None here asks the server (client.page_debt)
+        self.registry_check = kw.get("registry_check")   # (items, now) -> the project registry check's answer ({"checked", "note", "projects", "pages", "findings"}); None here runs tools/registry_report.py on the store
         self.orphans = kw.get("orphans")            # (apply) -> the server's answer to its orphan hand-over ({"checked", "applied", "found", "moved", "left", ...}); None here asks the server (client.orphan_handover)
         self.step_mark = kw.get("step_mark")        # (gid, step hash or None, now, mover) -> whether the item's stuck_since clock was written (None hash: dropped); the server's, None = the front-step rule does nothing (front_step.py)
         self.step_move = kw.get("step_move")        # (gid, step hash, opener, mover, hours, now) -> {"moved": bool, "why": str, "line": str}: the server rewords the step to the mover and writes the History line (front_step.py)
@@ -194,6 +202,17 @@ class Env:
             return _par.read(self.registry() if self.registry else None, self.sessions, items, now)
         except Exception as e:  # noqa: BLE001
             return {"checked": False, "note": _clip(f"the check failed: {type(e).__name__}: {e}", 120), "sessions": 0, "pages": 0, "findings": []}
+
+    def registry_problems(self, items: Any = None, now: float | None = None) -> dict[str, Any]:
+        """The project registry check (tools/registry_report.py) on this environment's record, pages, sala sessions and the run's board items (None reads the store's). `registry_check` replaces it (a fixture hands in
+        the answer). A check that fails is a check not made, never the end of the run."""
+        try:
+            if self.registry_check:
+                return self.registry_check(items, now)
+            import registry_report as _rr  # noqa: PLC0415
+            return _rr.read(ov=self.registry() if self.registry else None, sessions=self.sessions, items=items)
+        except Exception as e:  # noqa: BLE001
+            return {"checked": False, "note": _clip(f"the check failed: {type(e).__name__}: {e}", 120), "projects": 0, "pages": 0, "findings": []}
 
     def page(self, project: str) -> tuple[str, float | None]:
         try:
@@ -704,7 +723,7 @@ def threshold_message(findings: list[dict[str, Any]], trips: list[str], run_date
 
 
 def par_line(f: dict[str, Any]) -> str:
-    return f"{f['page']} · {f['line']} · {f['name']} · {_clip(f.get('fix'), 240)}"
+    return f"{f['page']} · {f['line']} · {f['name']} · {_clip(f.get('fix'), 320)}"
 
 
 def par_target(f: dict[str, Any], env: Env) -> tuple[str, bool]:
@@ -1212,6 +1231,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     reserve = 1 if cap >= 2 and _cfg.audit_pattern_review() != "off" else 0     # the pattern review's one call keeps one of the calls of the cap
     picked = sus[:cap - reserve]
     pa = env.page_agents(items, now)                        # read only; its messages go after the item findings'
+    rg = env.registry_problems(items, now)                  # read only; its messages go after the page agent lines'
     if dry:
         say(f"audit dry run: {n_open} open items · {len(findings)} field findings ({len(passes)} idle-pass) · {len(sus)} suspects ({skipped} unchanged since a verdict) · would make {len(picked)} call(s), cap {cap}")
         for f in findings:
@@ -1221,6 +1241,10 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
         say("  [page-agents] " + (f"{len(pa['findings'])} line(s) on {len({f['page'] for f in pa['findings']})} page(s)" if pa["checked"] else f"not checked ({pa['note']})"))
         for f in pa["findings"]:
             say(f"  [page-agents] {par_line(f)}  (to {par_target(f, env)[0]})")
+        if not rg.get("silent"):
+            say("  [registry · " + ("sending on" if _cfg.registry_audit_send() else "sending off: [registry_audit] send = false") + "] " + (f"{len(rg['findings'])} problem(s) on {len({f['page'] for f in rg['findings']})} page(s)" + (f" · {rg['note']}" if rg["note"] else "") if rg["checked"] else f"not checked ({rg['note']})"))
+        for f in rg["findings"]:
+            say(f"  [registry] {par_line(f)}  (to {par_target(f, env)[0]})")
         pw_found, pw = proof_stage(items, anchors, now, env)
         say(f"  [proof-waits] {pw['read']} held for a real event read · {pw['found']} finding(s) · {pw['left_n']} left alone with their basis" + (f" · {pw['note']}" if pw["note"] else ""))
         for f in pw_found:
@@ -1235,7 +1259,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
         pr = pattern_stage(env, t0, hist, [], 0, dry=True)
         if pr["mode"] != "off":
             say(f"  [pattern-review · {pr['mode']}] {pr['read']} finding(s) in the log since {_stamp(pr['since'])} · {pr['patterns']} pattern(s), {pr['deduped']} already drafted, {pr['capped']} over the cap" + (f" · {pr['note']}" if pr["note"] else ""))
-        return {"dry": True, "items_read": n_open, "findings": findings, "idle_pass": passes, "suspects": [{k: s[k] for k in ("id", "checks")} for s in sus], "would_call": len(picked), "cap": cap, "page_agents": pa, "proof_waits": {**pw, "findings": pw_found},
+        return {"dry": True, "items_read": n_open, "findings": findings, "idle_pass": passes, "suspects": [{k: s[k] for k in ("id", "checks")} for s in sus], "would_call": len(picked), "cap": cap, "page_agents": pa, "registry": rg, "proof_waits": {**pw, "findings": pw_found},
                 "orphans": orph, "pattern_review": pr}
 
     model_found, entries, calls = judge(items, picked, now, env, rubric, t0)
@@ -1323,6 +1347,20 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
         ok, said = _send(env, to, text)
         sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120), "kind": "page-agents"})
 
+    # the project registry: with [registry_audit] send = true, one message per agent a day, listing the record's problems with the fix of each (page · problem · name · what fixes it); no fyi, and it comes again the next
+    # day until the problem is fixed. A second run on a date sends an agent nothing that a delivered message of that date already told it; nothing is sent when sala's list could not be read (nobody is known to be live)
+    registry_told: list[str] = []
+    if _cfg.registry_audit_send() and not rg.get("unrouted"):
+        told_today = {m.get("to") for h in hist if h.get("date") == date for m in (h.get("messages") or []) if m.get("kind") == "registry" and m.get("delivered")}
+        for to, g in sorted(page_agent_groups(rg, env).items()):
+            if to in told_today:
+                registry_told.append(to)
+                continue
+            head = (f"[stackshot] Project registry {label}: {len(g['lines'])} problem(s) on {len(g['pages'])} page(s) in the project record or the pages it points at (page · problem · name · what fixes it); each line says the fix.")
+            text = compose(g["lines"], head, g["front"])
+            ok, said = _send(env, to, text)
+            sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120), "kind": "registry"})
+
     by_cat, by_ses = counts(findings, passes)
     trips = tightening(n_open, findings, by_cat, by_ses, by_day(hist, date))
     thr = _cfg.audit_threshold()
@@ -1339,7 +1377,8 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
         sent.append({"to": builder, "lines": len(tripped) + len(trips), "delivered": bool(ok), "said": _clip(said, 120), "kind": "threshold", "checks": sorted(tripped)})
     summary = (f"[stackshot] Board audit {label} (script): {n_open} open items · {len({f['id'] for f in findings})} flagged ({len(findings)} findings) · "
                + (" · ".join(f"{c} {n}" for c, n in sorted(by_cat.items(), key=lambda kv: -kv[1])) or "no findings") + f" · {calls['made'] + pr['called']} model call(s) of {cap}" +(f" · stopped at the {_cfg.audit_max_minutes()}-minute limit" if calls.get("timed_out") else "") + orphan_text(orph) + proof_text(pw) + pages_text(pg) + pattern_text(pr) + (f" · unmoved: {', '.join(s['id'] for s in stuck)}" if stuck else "") + (f" · {len(repeats)} unchanged since sent, not sent again" if repeats else "")
-               + (f" · page agent lines {len(pa['findings'])}" if pa["checked"] else f" · page agent lines not checked ({pa['note']})"))
+               + (f" · page agent lines {len(pa['findings'])}" if pa["checked"] else f" · page agent lines not checked ({pa['note']})")
+               + ("" if rg.get("silent") else f" · registry problems {len(rg['findings'])}" if rg["checked"] else f" · registry not checked ({rg['note']})"))
     fsc, fsc_line = front_step_count(hist, items, env, t0)       # once a calendar month: front agents' steps closed by someone else, and the open ones the write check would refuse now
     summary_to = _cfg.audit_summary_to()
     ok, said = _send(env, summary_to, "\n".join([summary, *orphan_lines(orph), *pattern_lines(pr), *([fsc_line] if fsc_line else [])]), True)
@@ -1359,7 +1398,8 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
            "calls": {"made": calls["made"], "failed": calls["failed"], "cap": cap, "max_minutes": _cfg.audit_max_minutes(), "timed_out": bool(calls.get("timed_out")), "suspects": len(sus), "unchanged": skipped, "notes": calls["notes"]},
            "pages": pg, "proof_waits": pw, **({"orphans": orph} if orph["mode"] != "off" else {}), **({"pattern_review": pr} if pr["mode"] != "off" else {}), **({"front_step_count": fsc} if fsc else {}),
            "messages": sent, "mode": "script",
-           "page_agents": {"checked": pa["checked"], "note": pa["note"], "sessions": pa["sessions"], "pages": pa["pages"], "findings": [{k: f.get(k, "") for k in ("page", "line", "name", "to")} for f in pa["findings"]]}}
+           "page_agents": {"checked": pa["checked"], "note": pa["note"], "sessions": pa["sessions"], "pages": pa["pages"], "findings": [{k: f.get(k, "") for k in ("page", "line", "name", "to")} for f in pa["findings"]]},
+           "registry": {"checked": rg["checked"], "note": rg["note"], "projects": rg["projects"], "pages": rg["pages"], "send": _cfg.registry_audit_send(), "told_earlier_today": registry_told, "findings": [{k: f.get(k, "") for k in ("page", "line", "name", "project", "to")} for f in rg["findings"]]}}
     write_record(rec, t0)
     return rec
 

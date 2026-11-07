@@ -43,6 +43,10 @@ whose `started` is two hours old or more is a crashed run, not a running one: it
     audit.py page-agents [--line|--json]  the lines of a project page's `agents:` map, `agent:` and `display-name:` that name a session sala no longer knows
                               (tools/page_agent_report.py): read only, nothing is sent. The daily run (audit_run.py, script mode) sends each page's -main agent one message
                               listing its page's leftovers. Nothing is flagged when sala's session list cannot be read or is empty. No model, no tokens.
+    audit.py registry [--line|--json]  what is wrong with the project record and the pages it points at, each problem with the command that fixes it (tools/registry_report.py): a page with no project, a
+                              project whose page is gone, page lines that differ from the record, an agent on no live session, items whose project id or key no project has, two live projects on one page.
+                              Read only, nothing is sent. The daily run puts the findings on its record, and sends each project's -main agent one message a day only with `[registry_audit] send = true` (off by default). Not checked
+                              when the record has no projects. No model, no tokens.
     audit.py orphans [--apply]  the open items whose mover is a session that is gone (a project's last agent retired, say) and the closest live agent each would go to (successor.py): a dry run, nothing
                               written and nobody told; --apply hands them over, as the daily run's first stage does ([audit] orphan_handover: "report" the default, which lists and moves nothing even with --apply; "apply" to hand over; "off"). An item an owner moves is never
                               listed, and one with no live agent to take it stays and is listed as such. Needs the server reached: it makes the check and the writes. No model, no tokens.
@@ -329,9 +333,13 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(HERE / "tools"))
         import page_agent_report  # noqa: PLC0415 — only the page-agents verb needs it
         return page_agent_report.main(argv[1:])
+    if argv[:1] == ["registry"]:
+        sys.path.insert(0, str(HERE / "tools"))
+        import registry_report  # noqa: PLC0415 — only the registry verb needs it
+        return registry_report.main(argv[1:])
     if argv[:1] == ["orphans"] and set(argv[1:]) <= {"--apply"}:
         return orphans("--apply" in argv)
-    print("usage: audit.py cue <reason> | run [--dry-run] | status | scan [--dry-run] | next-check [--line|--json] | board-check [--line|--json] | page-agents [--line|--json] | orphans [--apply]", file=sys.stderr)
+    print("usage: audit.py cue <reason> | run [--dry-run] | status | scan [--dry-run] | next-check [--line|--json] | board-check [--line|--json] | page-agents [--line|--json] | registry [--line|--json] | orphans [--apply]", file=sys.stderr)
     return 2
 
 
