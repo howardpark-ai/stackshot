@@ -25,3 +25,6 @@ ExecStart=@UV@ run --locked --script @CHECKOUT@/audit.py cue scheduled
 # a failed scan from failing the unit, `timeout 300` keeps a slow one from holding the unit past five minutes, and [rulebook_scan] enabled = false (the default) makes it a no-op. A note already sent
 # and still true is not sent again, so the unit running twice a day does not repeat one
 ExecStartPost=-/usr/bin/timeout 300 @UV@ run --locked --script @CHECKOUT@/tools/rulebook_scan.py run
+# the weekly count of refused board writes (no model; a message that asks nothing, once per finished Monday-to-Sunday week, so the unit's two runs a day send it once); [refusal_report] enabled = false (the default) makes it a no-op.
+# Run through audit.py (a locked uv script), like the cue above
+ExecStartPost=-/usr/bin/timeout 120 @UV@ run --locked --script @CHECKOUT@/audit.py refusals
