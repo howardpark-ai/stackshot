@@ -3722,10 +3722,15 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             machine, linking to /runners: the machine's name (bold, takes the width), the count `busy/online` summed over its repos (runners.card_total: muted at 0 busy, bold
             while some are busy, bold amber when all are) and a muted ↗ that turns accent with the card's border on hover. No link above the cards, no per-repo line (the
             Runners page keeps the split). The heading is plain text. Drawn from runners.peek(), the last snapshot: this render never waits on GitHub or ssh, and a
-            missing snapshot reads "not read yet". The hour's GitHub calls are a card in the Audit section (gh_calls_card), no longer a line here."""
+            missing snapshot reads "not read yet". With no repo listed in [runners] repos the section reads "not used on this board", and once a clean read has found no runner at all "no self-hosted runners" (no cards, no link).
+            The hour's GitHub calls are a card in the Audit section (gh_calls_card), no longer a line here."""
             head = '<h2 class="hdr">Runners</h2>'
+            if not _runners.enabled():                 # no repo in [runners] repos (or no [runners] table): one plain line, no cards, nothing read (the section stays, so the panel keeps its five sections and their order)
+                return _top_fold("runners", head, '<p class="mnote">not used on this board</p>', is_open=True)
             snap = _runners.peek()
             if snap is None: return _top_fold("runners", head, '<p class="mnote">not read yet</p>', is_open=True)
+            if _runners.unused(snap):                  # a clean read found no runner at all: the same plain line, in its own words
+                return _top_fold("runners", head, '<p class="mnote">no self-hosted runners</p>', is_open=True)
             note = ""
             if now.timestamp() - float(snap.get("ts") or 0) > _run_stale_s():
                 note = f'<p class="mnote">last read at {esc(datetime.datetime.fromtimestamp(float(snap["ts"]), _cfg.tz()).strftime("%H:%M"))} {esc(_cfg.tz_abbr())}</p>'

@@ -262,8 +262,8 @@ check("a GitHub error on both repos: the page still renders (a row per machine, 
 SAVE = {k: list(v) for k, v in RUNNERS.items()}
 for k in RUNNERS: RUNNERS[k] = []
 fresh(); snap = R.snapshot(); html = R2.table_html(snap, T0)
-check("no runners at all: the table renders with 'no runners' in each machine's row and no error", html.count("no runners") == 3 and "alert" not in html
-      and [tcard(html, w) for w in ("Runners", "Running", "Idle", "Disabled", "Offline")] == [0, 0, 0, 0, 0], html[:500])
+check("no runners at all (a clean read): the page says so in one plain line, with no error, no count card and no empty machine rows (section 15 has the rest)",
+      "GitHub lists no self-hosted CI runners" in html and "alert" not in html and "rcard" not in html and "<table" not in html and "no runners" not in html, html[:500])
 RUNNERS.update(SAVE)
 import ghsync
 fresh()
@@ -1790,6 +1790,110 @@ try:
     check("14f/1: after a restart that took hours the saved mark is not carried: no instant fault", (x["kind"], x["off_since"]) == ("restarting", T0 + 7200), x)
 finally:
     RUNNERS.clear(); RUNNERS.update(RUNNERS_G14); SSH_OUT.clear(); SSH_OUT.update(SSH_G14); clean_state(); fresh()
+
+
+# ---- 15. runners are optional: no [runners] table, a table with no repo, or a clean read of no runner = the feature is off, silently (no error, no empty block, no read)
+# The same fake GitHub, ssh and clock as above. The config is the module's own dict (R._cfg.CFG), put back at the end.
+NOT_USED_OFF = "This board does not use self-hosted CI runners."
+NOT_USED_ZERO = "GitHub lists no self-hosted CI runners for the repositories this board follows."
+CFG_RUNNERS_15 = copy.deepcopy(R._cfg.CFG.get("runners"))
+OLD_FAULT = {"version": 1, "ts": T0 - 3000, "errors": {}, "failed": [], "switch": {"box-a": {"ok": True, "mode": "on", "held": [], "gate": [], "since": 0}},
+             "runners": [{"name": "box-a-old", "repo": "salamander", "box": "box-a", "state": "offline", "job": None, "kind": "fault", "reason": "offline, and the CI switch did not disable it",
+                          "disabled": False, "stopping": False, "off_since": T0 - 2900}]}      # what an earlier config with runners left in <state>/runners-snapshot.json
+def clean_page(h, what):
+    """The page, the JSON html or the panel carries no fault, no error line, no card, no table and no machine row."""
+    bad = [w for w in ("rerr", "GitHub error", "rcard", "<table", "rtab", "box-a", "box-b", "box-c", "Disable", "Enable", "offline", "fault", "Traceback", "unknown") if w in h]
+    check(f"{what}: no error line, no count card, no table, no machine row, no button, no offline word", not bad, bad)
+def off_is_silent(label, line):
+    """Everything the feature touches, with the feature off: nothing is read, started or drawn."""
+    fresh(); clean_state(); R._get = fake_get; R.AUTOSTART = True; R.PERSIST = True; CALLS.clear(); SSH.clear(); OWNER_CALLS.clear()
+    (T / "state").mkdir(parents=True, exist_ok=True); (T / "state" / R.SNAP_FILE).write_text(json.dumps(OLD_FAULT))
+    try:
+        check(f"{label}: enabled() is False and the saved snapshot of an earlier config is not taken back", R.enabled() is False and R.restore() is False and R._CACHE.get("snap") is None)
+        t0 = time.monotonic(); sv = R.serve(); took = time.monotonic() - t0
+        check(f"{label}: serve() answers at once with no runner, no error, not pending, not refreshing, and starts no thread", took < 0.15 and sv["runners"] == [] and sv["errors"] == {} and sv["failed"] == []
+              and not sv.get("pending") and not sv["refreshing"] and R._SERVE["thread"] is None, sv)
+        check(f"{label}: peek() is None and starts no rebuild even with AUTOSTART on", R.peek() is None and R._PEEK["thread"] is None)
+        h = R2.table_html(sv, CLOCK[0])
+        check(f"{label}: the page body is the one plain line", h == f'<p class="sub rnotused" role="status">{line}</p>', h)
+        clean_page(h, f"{label}: page body")
+        d = R2.data(sv, CLOCK[0])
+        check(f"{label}: the JSON has zero counts, no error, no runner, not pending, and the same line as its html", d["counts"] == {"runners": 0, "running": 0, "idle": 0, "disabled": 0, "offline": 0}
+              and d["errors"] == {} and d["runners"] == [] and d["pending"] is False and d["html"] == h, d)
+        bh = board_html(); sec = runners_section(bh)
+        check(f"{label}: the side panel's Runners section is one plain line, 'not used on this board': no card, no link to the page, no 'not read yet'", "not used on this board" in sec and sec.count('class="mnote"') == 1
+              and not cards(sec) and "<a " not in sec and "not read yet" not in sec and 'href="/runners"' not in bh, sec[:300])
+        order = ["projects-panel", "audit-panel", "runners", "anchorhub", "machines"]
+        moved = ui_render.apply_panel_order(bh, order)
+        check(f"{label}: a saved panel order still applies (five markers, in that order)", re.findall(r"<!--ps:([a-z0-9-]+)-->", moved) == order, re.findall(r"<!--ps:([a-z0-9-]+)-->", moved))
+        check(f"{label}: no GitHub call, no ssh, no thread, and the saved file is left as it was", CALLS == [] and OWNER_CALLS == [] and SSH == [] and R._PEEK["thread"] is None
+              and (T / "state" / R.SNAP_FILE).read_text() == json.dumps(OLD_FAULT), (CALLS, SSH))
+        with TestClient(server.mcp.http_app()) as c:
+            r = c.get("/runners"); j = c.get("/runners.json")
+            body = r.text.split('id="rn-body"', 1)[1].split("</main>", 1)[0] if 'id="rn-body"' in r.text else ""
+            check(f"{label}: GET /runners is a 200 page with the plain line, no subtitle about machines, no error", r.status_code == 200 and line in body and "GitHub Actions runners on each machine" not in r.text
+                  and 'role="alert"' not in body, r.status_code)
+            clean_page(body, f"{label}: /runners body")
+            jd = j.json()
+            check(f"{label}: GET /runners.json is a 200 with zero counts and no error", j.status_code == 200 and jd["errors"] == {} and jd["counts"]["runners"] == 0 and line in jd["html"] and jd["pending"] is False, (j.status_code, jd))
+            check(f"{label}: …and the routes made no GitHub call and no ssh", CALLS == [] and SSH == [], (CALLS, SSH))
+            hp = c.get("/")
+            check(f"{label}: the board's home still renders (200) with the plain Runners line and no card", hp.status_code == 200 and "not used on this board" in runners_section(hp.text) and not cards(runners_section(hp.text))
+                  and 'id="machines"' in hp.text, hp.status_code)
+    finally:
+        R.AUTOSTART = False; clean_state(); fresh()
+try:
+    # 15a. no [runners] table at all
+    R._cfg.CFG.pop("runners", None)
+    off_is_silent("15a no [runners] table", NOT_USED_OFF)
+    # 15b. the table is there (the live shape: switch script, state dir, gate file, machines) but lists no repo
+    R._cfg.CFG["runners"] = {**copy.deepcopy(CFG_RUNNERS_15), "repos": [], "switch_script": "~/ci-switch.sh", "state_dir": "~/.config/ci", "gate_file": "/var/lib/ci/halted"}
+    off_is_silent("15b [runners] with repos = []", NOT_USED_OFF)
+    check("15b: …the buttons do not come back either (no machine row to put them on)", "mact" not in R2.table_html(R.serve(), CLOCK[0], token=lambda b: "t"))
+    # 15c. repos listed, GitHub lists no runner and no error: the same plain line (its own words), no section, no cards
+    R._cfg.CFG["runners"] = copy.deepcopy(CFG_RUNNERS_15)
+    saved_runners = copy.deepcopy(RUNNERS); RUNNERS["salamander"] = []; RUNNERS["stackshot"] = []
+    try:
+        fresh(); clean_state(); R._get = fake_get; R.AUTOSTART = False; setfiles(mode="on\n", hold="", gate="")
+        check("15c: enabled() is True with repos listed", R.enabled() is True)
+        snap = R.snapshot(force=True)
+        check("15c: a clean read of zero runners: no error, no failed list, unused()", snap["runners"] == [] and snap["errors"] == {} and snap["failed"] == [] and R.unused(snap), snap)
+        h = R2.table_html(R.serve(), CLOCK[0])
+        check("15c: the page body is the plain line (its own words), no cards, no table, no machine row", h == f'<p class="sub rnotused" role="status">{NOT_USED_ZERO}</p>', h)
+        clean_page(h, "15c: page body")
+        R.reset(); R._CACHE["snap"] = snap
+        bh = board_html(); sec = runners_section(bh)
+        check("15c: the side panel's Runners section is one plain line, 'no self-hosted runners': no card, no link, no per-machine 'no runners' line", "no self-hosted runners" in sec and sec.count('class="mnote"') == 1
+              and not cards(sec) and "<a " not in sec and "box-a" not in sec, sec[:300])
+        d = R2.data(R.serve(), CLOCK[0])
+        check("15c: the JSON: zero counts, no error, the plain line", d["counts"]["runners"] == 0 and d["errors"] == {} and NOT_USED_ZERO in d["html"], d)
+        check("15c: the placeholder before the first read is not 'unused'", R.unused({"ts": 0, "errors": {}, "failed": [], "runners": [], "pending": True}) is False)
+        # the saved snapshot of an earlier config with a fault runner is replaced by the first read, not kept
+        fresh(); clean_state(); R.PERSIST = True; (T / "state").mkdir(parents=True, exist_ok=True); (T / "state" / R.SNAP_FILE).write_text(json.dumps(OLD_FAULT))
+        check("15c: a saved snapshot from an earlier config is taken back while repos are listed", R.restore() is True)
+        R.serve(); settle()
+        sv = R.serve()
+        check("15c: …and the first rebuild replaces it: no runner, no fault, the plain line", sv["runners"] == [] and R2.table_html(sv, CLOCK[0]) == f'<p class="sub rnotused" role="status">{NOT_USED_ZERO}</p>', sv["runners"])
+        # a read that FAILED is not hidden as 'unused': the error is shown
+        fresh(); clean_state(); BROKEN.update({"salamander", "stackshot"})
+        snap = R.snapshot(force=True); BROKEN.clear()
+        h = R2.table_html(snap, CLOCK[0])
+        check("15c: both runner lists failing is an error, not 'unused': the error line is drawn and the plain line is not", R.unused(snap) is False and "GitHub error: salamander: GitHub answered 502" in h and NOT_USED_ZERO not in h, h[:300])
+    finally:
+        RUNNERS.clear(); RUNNERS.update(saved_runners); fresh(); clean_state()
+    # 15d. runners listed: nothing changes (the cards, the table, the panel section and the subtitle are all there)
+    fresh(); clean_state(); R._get = fake_get; setfiles(mode="on\n", hold="", gate=""); SSH_OUT.update({"box-b": wsl("off"), "box-c": wsl("on", "salamander")})
+    snap = R.snapshot(force=True); R._CACHE["snap"] = snap
+    h = R2.table_html(R.serve(), CLOCK[0])
+    check("15d: with runners, the page body is the cards and the table as before (ten runners, five cards, no plain line)", h.count('<li class="rn ') == 10 and h.count('<div class="rcard ') == 5 and "<table" in h
+          and "rnotused" not in h and R.enabled() is True and not R.unused(snap), h[:200])
+    pg = R2.page_html(ui_render.Board(str(T / "store")), snap)
+    check("15d: …with its subtitle, and the panel keeps its Runners section with a card per machine", "GitHub Actions runners on each machine" in pg and "rnotused" not in pg and len(cards(runners_section(board_html()))) >= 3,
+          len(cards(runners_section(board_html()))))
+finally:
+    if CFG_RUNNERS_15 is None: R._cfg.CFG.pop("runners", None)
+    else: R._cfg.CFG["runners"] = CFG_RUNNERS_15
+    R.AUTOSTART = False; clean_state(); fresh()
 
 
 print(("ok" if not fails else "FAILED") + f": runners scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

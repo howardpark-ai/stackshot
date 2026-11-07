@@ -45,6 +45,8 @@ Where the facts come from (read only; nothing here changes the pool except the b
   A repo is found by GitHub's numeric repository ID when [runners.ids] gives one (`name = <id>`): the ID survives a transfer to another owner, owner/name does not. The
   page's links to github.com still need owner/name: a running job's links take `repository.full_name` from the run GitHub already returned for it (no extra call), else
   [runners] owner + the name (GitHub redirects a transferred repo's old address).
+Optional: a board that uses no self-hosted runners lists no repo in [runners] repos (or has no [runners] table). enabled() is then False: nothing is read (no GitHub call, no ssh, no thread, no saved
+  snapshot taken back), the page says plainly that the board does not use CI runners and the side panel has no Runners section. The same holds when a clean read finds no runner at all (unused()).
 Pure of the server: server.py serves the routes and the board's header links /runners. Tests replace _get, _read_local, _ssh and _now."""
 from __future__ import annotations
 
@@ -118,6 +120,17 @@ def conf(key: str) -> Any:
 
 def _repos() -> list[str]:
     return [str(r) for r in conf("repos")]
+
+
+def enabled() -> bool:
+    """Whether this board uses the Runners feature: [runners] repos lists at least one repo. No [runners] table, or an empty list, is off: nothing is read and nothing is drawn."""
+    return bool(_repos())
+
+
+def unused(snap: dict[str, Any]) -> bool:
+    """A snapshot that read cleanly and found no runner at all (no error, no failed list, not the placeholder before the first read): the page and the side panel treat the
+    feature as not in use, as when it is off. A read that failed is not this: its error is shown."""
+    return not snap.get("runners") and not snap.get("failed") and not snap.get("errors") and not snap.get("pending")
 
 
 def _ids() -> dict[str, int]:
@@ -995,7 +1008,7 @@ def restore() -> bool:
     """Server start: take the saved snapshot as the last answer, when there is a usable one and none is cached yet. It is due by its own time, so the first request after a
     restart is answered from it and starts the one rebuild when it is older than cache_s. True when a snapshot was taken."""
     p = _file()
-    if p is None:
+    if p is None or not enabled():
         return False
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
@@ -1046,6 +1059,8 @@ def serve() -> dict[str, Any]:
     one, whoever asks. `stale` (the page dims the table and says "not refreshed since") means the numbers are not about to be replaced: the last rebuild read nothing, the running one
     has overrun (longer than OVERRUN x build_s), or a rebuild was due and none could start. Age alone never makes it stale: a snapshot an idle page left behind is drawn at full
     strength while its rebuild runs."""
+    if not enabled():                                   # no repo listed: nothing to read, so no thread and no GitHub call; the pages say the board does not use runners
+        return {"ts": _now(), "errors": {}, "failed": [], "runners": [], "switch": {}, "stale": False, "refreshing": False, "age_s": 0}
     with _LOCK:
         c = _CACHE.get("snap")
         due = c is None or bool(c.get("dirty")) or _now() - _at(c) >= float(conf("cache_s"))
@@ -1128,7 +1143,9 @@ def peek() -> dict[str, Any] | None:
     """The last snapshot, never built here: None when there is none yet. When it is missing or older than [runners] panel_refresh_s (not cache_s: that one is
     the /runners page's), and AUTOSTART is on and [runners] panel is not false, starts at most one background rebuild (one peek thread at a time, and none while
     snapshot() has a build in flight), so however many page views and renders there are, the panel causes at most one rebuild per panel_refresh_s. When that
-    rebuild ends with other counts, ON_CHANGE asks for a republish. Returns at once, whatever GitHub or ssh are doing."""
+    rebuild ends with other counts, ON_CHANGE asks for a republish. Returns at once, whatever GitHub or ssh are doing. None, and no rebuild, when enabled() is False."""
+    if not enabled():
+        return None                                     # off: no snapshot, no rebuild (the side panel draws no Runners section)
     with _LOCK:
         c = _CACHE.get("snap")
         if c and not c.get("dirty") and _now() - _at(c) < float(conf("panel_refresh_s")):
