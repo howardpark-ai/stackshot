@@ -1,9 +1,9 @@
 """tests/_release_harness.py: what the release suites share (a helper module, not a suite).
 
-release.sh's scenarios are split over two suites to keep each one's measured run short: release_scenario.py (the merge, the deploy lock, main's tests, the fast path, the
-update of a branch behind main) and release_queue_scenario.py (the ride-along ledger, the retest skip, covering runs, the CI-run poller, the release queue, the shadow
-merge queue). Both copy release.sh into a scenario's own folder beside stubs, which are here with `scenario()` (one run of release.sh in such a folder, everything it did
-read back as a dict), `check()`, `fast()` (an up-to-date PR) and the constants and small readers the sections of both suites use. A suite imports it whole:
+release.sh's scenarios are split over two suites to keep each one's measured run short: release_scenario.py (the enqueue and the wait for GitHub's merge, the deploy lock, the deploy gate,
+main's tests, the rollback, the session pick) and release_queue_scenario.py (covering runs, the CI-run poller, the release queue). Both copy release.sh into a scenario's own folder beside
+stubs, which are here with `scenario()` (one run of release.sh in such a folder, everything it did read back as a dict), `check()`, `fast()` (a deploy gate that is open) and the constants and
+small readers the sections of both suites use. A suite imports it whole:
 
     from _release_harness import *
 
@@ -49,33 +49,13 @@ open(f"{d}/gh.log", "a").write(" ".join(a) + "\n")
 def env(k, v=""): return os.environ.get(k, v)
 if a[:2] == ["pr", "view"]:
     fields = a[a.index("--json") + 1]
-    if (env("RT_PRSTATE") or env("RT_PRSTATE_AFTER")) and fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # THE MERGE QUEUE, ON: a group release reads each PR's state first: RT_PRSTATE = "<pr>=<OPEN|MERGED|CLOSED>[@<oid>][#<head oid>],..." (a PR not listed is OPEN; MERGED with only #<head> is a fast-forward merge GitHub names no merge commit for);
-        # once `mq add` was called (mq.log exists) RT_PRSTATE_AFTER answers instead when it is set (the queue merged the PR meanwhile);
-        # RT_PRSTATE_FAILN = n: after `mq add` the first n reads fail (a GitHub outage), counted in prstate_failed
-        if env("RT_PRSTATE_FAILN") and os.path.exists(f"{d}/mq.log"):
-            nf = int(open(f"{d}/prstate_failed").read()) if os.path.exists(f"{d}/prstate_failed") else 0
-            if nf < int(env("RT_PRSTATE_FAILN")): open(f"{d}/prstate_failed", "w").write(str(nf + 1)); sys.stderr.write("gh: HTTP 502\n"); sys.exit(1)
-        for kv in (env("RT_PRSTATE_AFTER") if env("RT_PRSTATE_AFTER") and os.path.exists(f"{d}/mq.log") else env("RT_PRSTATE")).split(","):
-            if not kv: continue
-            k, v = kv.split("=", 1)
-            if k == a[2]:
-                v, _, head = v.partition("#"); st, _, oid = v.partition("@"); print(json.dumps({"state": st, "mergeCommit": {"oid": oid} if oid else None, "headRefOid": "" if head == "-" else (head or "abc1234def5678abc1234def5678abc1234def56")})); sys.exit(0)
-        print(json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
-    if fields == "mergeCommit":   # the old path's merge commit M (main_green looks for the runs on commits that contain it): RT_MERGE_OID, else the first main tip; "none": GitHub does not say
-        oid = env("RT_MERGE_OID") or env("RT_TIPS", "0106c0de0106c0de0106c0de0106c0de0106c0de").split(",")[0]
-        print(json.dumps({"mergeCommit": None if oid == "none" else {"oid": oid}})); sys.exit(0)
     if "mergeable" in fields:
         mn = int(open(f"{d}/mviews").read()) + 1 if os.path.exists(f"{d}/mviews") else 1   # one value per read, the last repeated: RT_MERGEABLE (comma-separated)
         open(f"{d}/mviews", "w").write(str(mn)); mseq = env("RT_MERGEABLE", "MERGEABLE").split(",")
-        print(json.dumps({"state": "OPEN", "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
+        vst = env("RT_VIEWSTATE", "OPEN").split(",")   # RT_VIEWSTATE: the PR's state per read, the last repeated (OPEN | CLOSED | MERGED)
+        print(json.dumps({"state": vst[min(mn, len(vst)) - 1], "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
                           "isCrossRepository": env("RT_CROSS") == "1", "headRefOid": (env("RT_PRHEADS") or env("RT_HEAD", "abc1234def5678abc1234def5678abc1234def56")).split(",")[min(mn, len((env("RT_PRHEADS") or "x").split(","))) - 1]})); sys.exit(0)
-    n = int(open(f"{d}/views").read()) + 1 if os.path.exists(f"{d}/views") else 1
-    open(f"{d}/views", "w").write(str(n))
-    if env("RT_AFTER") == "merged" and n >= int(env("RT_MERGED_FROM", "1")):
-        print(json.dumps({"state": "MERGED", "mergeCommit": {"oid": env("RT_MERGE_OID") or "0106c0de0106c0de0106c0de0106c0de0106c0de"}}))
-    else:
-        print(json.dumps({"state": "OPEN", "mergeCommit": None}))
-    sys.exit(0)
+    sys.exit(3)
 if a[:2] == ["pr", "list"]:   # the open PRs based on the merged head branch (retarget_and_delete_branch): RT_STACKED, comma-separated numbers, none by default; RT_LIST=fail: the call errors
     if env("RT_LIST") == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
     print(json.dumps([{"number": int(x)} for x in env("RT_STACKED").split(",") if x])); sys.exit(0)
@@ -92,29 +72,36 @@ if a[:2] == ["pr", "checks"]:
             time.sleep(0.1)
     print(json.dumps([{"name": "lint", "bucket": "pass"}] if cv == "lint" else [{"name": "suites", "bucket": "pending"}, {"name": "tool-text", "bucket": "fail"}] if cv == "toolfail"
                      else [{"name": "suites", "bucket": cv}, {"name": "lint", "bucket": "pass"}])); sys.exit(0)
-def update_lock_state():   # is the update lock held (by the release that called us) at this moment
-    import fcntl
-    lf = open(env("UPDATE_LOCK_FILE", f"{d}/releases/update.lock"), "a")
-    try: fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB); fcntl.flock(lf, fcntl.LOCK_UN); return "free"
-    except OSError: return "held"
+if a[:1] == ["api"] and a[1:2] == ["graphql"]:   # GitHub's merge queue (ghq_read, ghq_reason). The timeline query (RemovedFromMergeQueueEvent): RT_GQ_REASON = the reason text, "none" = no removal event yet, "fail" = the read errors.
+    q = " ".join(a)   # The state query: one answer per read, the last repeated: RT_GQ, comma-separated, of
+                      # queued (OPEN, entry QUEUED position 1) | awaiting (OPEN, entry AWAITING_CHECKS) | open (OPEN, no entry) | merged (MERGED, the merge commit RT_MERGE_OID) | mergednocommit (MERGED, no merge commit yet)
+                      # | closed | fail (the read errors) | garbage (not JSON)
+    if "timelineItems" in q:
+        open(f"{d}/gq_reason_reads", "a").write("x")
+        r = env("RT_GQ_REASON", "")
+        if r == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
+        print(json.dumps({"data": {"repository": {"pullRequest": {"timelineItems": {"nodes": [] if r == "none" else [{"reason": r or "the merge group failed its checks", "createdAt": "2026-11-07T00:00:00Z"}]}}}}})); sys.exit(0)
+    gn = int(open(f"{d}/gqreads").read()) + 1 if os.path.exists(f"{d}/gqreads") else 1
+    open(f"{d}/gqreads", "w").write(str(gn)); gseq = env("RT_GQ", "merged").split(","); gv = gseq[min(gn, len(gseq)) - 1]
+    open(f"{d}/gq_args", "a").write(" ".join(x for x in a if not x.startswith("query=")) + "\n")
+    if gv == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
+    if gv == "garbage": print("not json"); sys.exit(0)
+    oid = env("RT_MERGE_OID") or "0106c0de0106c0de0106c0de0106c0de0106c0de"
+    pr_ = {"queued": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "QUEUED", "position": 1}},
+           "awaiting": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": {"state": "AWAITING_CHECKS", "position": 2}},
+           "open": {"state": "OPEN", "mergeCommit": None, "mergeQueueEntry": None},
+           "merged": {"state": "MERGED", "mergeCommit": {"oid": oid}, "mergeQueueEntry": None},
+           "mergednocommit": {"state": "MERGED", "mergeCommit": None, "mergeQueueEntry": None},
+           "closed": {"state": "CLOSED", "mergeCommit": None, "mergeQueueEntry": None}}[gv]
+    print(json.dumps({"data": {"repository": {"pullRequest": pr_}}})); sys.exit(0)
 if a[:1] == ["api"] and "/commits/" in a[1] and "/check-runs" in a[1]:   # the check runs of one commit (the tests job on the updated head); RT_CHECKRUNS: one answer per read, the last repeated: pass | none (not run on this commit)
     kn = int(open(f"{d}/crreads").read()) + 1 if os.path.exists(f"{d}/crreads") else 1
     open(f"{d}/crreads", "w").write(str(kn)); kseq = env("RT_CHECKRUNS", "pass").split(","); kv = kseq[min(kn, len(kseq)) - 1]
     print(json.dumps({"check_runs": [] if kv == "none" else [{"name": "suites", "status": "completed", "conclusion": "success", "head_sha": a[1].split("/commits/")[1].split("/")[0]}]})); sys.exit(0)
-if a[:2] == ["pr", "update-branch"]:
-    open(f"{d}/upd_fd5", "w").write("open" if os.path.lexists(f"/proc/{os.getpid()}/fd/5") else "closed"); open(f"{d}/upd_lock_at_update", "w").write(update_lock_state())   # the update lock is held, and not given to gh   # merges main into the PR branch; RT_UPDATE=fail is a conflict; RT_UTRACE: start of the update, with a real second in it (the two-release case)
-    open(f"{d}/order.log", "a").write("update-branch\n")
-    if env("RT_UTRACE"):
-        import time; open(env("RT_UTRACE"), "a").write(f"update-branch {d}\n"); time.sleep(1)
-    if env("RT_UPDATE") == "fail":
-        print("HTTP 422: merge conflict between base and head", file=sys.stderr); sys.exit(1)
-    sys.exit(0)
 if env("RT_BG") and a[:2] in (["pr", "merge"], ["run", "list"]):   # a child that outlives its command: it keeps every descriptor it was given (close_fds=False)
     import subprocess; bgp = subprocess.Popen(["/usr/bin/sleep", "9"], start_new_session=True, close_fds=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     open(f"{d}/bgpids", "a").write(f"{bgp.pid}\n")
-if a[:2] == ["pr", "merge"]:
-    if env("RT_UTRACE"): open(env("RT_UTRACE"), "a").write(f"merge {d}\n")
-    open(f"{d}/merge_fd5", "w").write("open" if os.path.lexists(f"/proc/{os.getpid()}/fd/5") else "closed"); open(f"{d}/upd_lock_at_merge", "w").write(update_lock_state())
+if a[:2] == ["pr", "merge"]:   # the enqueue call (the ruleset's merge queue): accepted; RT_MERGE=fail: a 504 after the PR may have been queued
     open(f"{d}/merge_fd9", "w").write("open" if os.path.lexists(f"/proc/{os.getpid()}/fd/9") else "closed")   # the lock must not reach gh
     if env("RT_MERGE") == "fail":
         print("Merging pull request...", file=sys.stderr); print("HTTP 504: We couldn't respond to your request in time.", file=sys.stderr); sys.exit(1)
@@ -176,73 +163,38 @@ sys.exit(3)
 '''
 GIT = r'''#!/bin/sh
 echo "$*" >> "$RT_DIR/git.log"
-if [ -L /proc/$$/fd/5 ]; then echo open >> "$RT_DIR/git_fd5"; else echo closed >> "$RT_DIR/git_fd5"; fi   # the update lock must not reach git
 if [ -n "${RT_BG:-}" ]; then case "$1" in fetch|merge-base) setsid sh -c 'exec /usr/bin/sleep 9' >/dev/null 2>&1 </dev/null & echo $! >> "$RT_DIR/bgpids" ;; esac; fi   # a child that outlives its command (git gc --auto)
 case "$*" in
   "remote get-url origin") echo "git@github.com:example-owner/stackshot.git" ;;
   "rev-parse --short HEAD") echo "0106c0d" ;;
-  "rev-list --first-parent origin/main") echo "${RT_FPLIST:-}" | tr , '\n' | sed '/^$/d' ;;   # origin/main's first-parent line, newest first (RT_FPLIST, comma-separated): a PR head on it was merged by fast-forward
-  "rev-list --first-parent --ancestry-path "*"..origin/main")   # RT_LANDING = "<head>=<newest>/<...>/<oldest>,...": the first-parent commits of main that have the head in their ancestry, newest first
-    h="${4%%..*}"; for kv in $(echo "${RT_LANDING:-}" | tr , ' '); do [ "${kv%%=*}" = "$h" ] && echo "${kv#*=}" | tr / '\n'; done ;;
-  "show origin/main:.github/mergequeue.toml") printf '%s' "${RT_MAINTOML:-}"; [ -n "${RT_MAINTOML:-}" ] || exit 128 ;;   # the rules file as origin/main has it (what mq reads): unset = the file is not there
   "rev-parse HEAD")   # the deployed checkout's HEAD, one per call, the last repeated: RT_HEADS (comma-separated)
     n=$(( $(cat "$RT_DIR/heads" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/heads"
     echo "${RT_HEADS:-}" | tr , '\n' | sed -n "$n{p;q};\${p}" | tail -1 ;;
-  "rev-parse --verify --quiet origin/main^{commit}")   # main's tip before the merge (the up-to-date test); unset: unreadable, so the old path. RT_BASES: one per call, the last repeated (main moves)
-    if [ -n "${RT_BASES:-}" ]; then n=$(( $(cat "$RT_DIR/bases" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/bases"; echo "$RT_BASES" | tr , '\n' | sed -n "$n{p;q};\${p}" | tail -1
-    else echo "${RT_BASE:-}"; fi ;;
-  "rev-parse --verify --quiet "*"^{commit}")   # THE MERGE QUEUE, ON: the merge commit the queue named by its first 7 characters, in full: the one of RT_FULLSHAS (comma-separated) that starts with it; none: no output
-    p="${4%%^*}"; for f in $(echo "${RT_FULLSHAS:-}" | tr , ' '); do case "$f" in "$p"*) echo "$f"; break ;; esac; done ;;
-  "log --first-parent --format=%H %s "*) echo "${RT_GROUPLOG:-}" | tr ';' '\n' | sed '/^$/d' ;;   # the merge commits between the live checkout and the queue's merge, "<sha> <subject>" a line, ;-separated: RT_GROUPLOG
-  "rev-parse "*"^1") echo "${RT_P1:-${RT_BASE:-}}" ;;                          # the merge commit's parents: the tip that was checked and the pinned head
-  "rev-parse "*"^2") echo "${RT_P2:-${RT_HEAD:-abc1234def5678abc1234def5678abc1234def56}}" ;;
   "log --first-parent --reverse --format=%H %s "*)   # a rollback asks twice, in this order: the merges the failing run covers (RT_COVERED), then everything between the last good commit and the live HEAD (RT_REMOVED); ;-separated
     n=$(( $(cat "$RT_DIR/logn" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/logn"
     if [ $n = 1 ]; then echo "$RT_COVERED"; else echo "$RT_REMOVED"; fi | tr ';' '\n' | sed '/^$/d' ;;
-  "rev-list --first-parent --reverse "*) echo "${RT_DOCS:-}" | tr , '\n' | sed '/^$/d' ;;   # the commits between the live HEAD and main's tip (the docs-only walk): RT_DOCS
-  "-c core.quotePath=false diff --no-color --no-ext-diff --no-renames --src-prefix=a/ --dst-prefix=b/ "*) printf '%s\n' "${RT_DIFF:-}" ;;                                       # what each of them changed (RT_DIFF, a git diff)
   "rev-list "*) echo "$RT_RANGE" | tr , '\n' | sed '/^$/d' ;;   # the commits between the last good one and main's tip (the fast path's (b)): RT_RANGE, comma-separated
   "diff --diff-filter=A --name-only "*) echo "$RT_NEWUNITS" | tr , '\n' | sed '/^$/d' ;;   # unit files a rollback leaves installed (RT_NEWUNITS)
-  "fetch --quiet origin main refs/pull/"*)   # RT_PRFETCH_FAIL set: every fetch of the PR head fails, from the RT_PRFETCH_FROM-th one on (default the first)
-    n=$(( $(cat "$RT_DIR/prfetches" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/prfetches"
-    [ -z "${RT_PRFETCH_FAIL:-}" ] || [ $n -lt "${RT_PRFETCH_FROM:-1}" ] || exit 1 ;;
   "cat-file -e "*) [ -z "${RT_NOHEAD:-}" ] || case "$*" in *"$RT_NOHEAD"*) exit 1 ;; esac ;;
-  "rev-parse origin/main")   # main's tip, one per call, the last repeated: RT_TIPS (comma-separated), else the merge commit
-    n=$(( $(cat "$RT_DIR/tips" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/tips"
-    echo "${RT_TIPS:-0106c0de0106c0de0106c0de0106c0de0106c0de}" | tr , '\n' | sed -n "$n{p;q};\${p}" | tail -1 ;;
   "merge-base --is-ancestor "*)   # A is an ancestor of B in a linear history, oldest first: RT_HISTORY (comma-separated); B = HEAD is the live checkout, RT_LIVE (unset: A is in it)
     set -- $*; ia=0; ib=0; i=0
     if [ "$4" = HEAD ]; then
       if flock -n "${DEPLOY_LOCK_FILE:-$RT_DIR/releases/deploy.lock}" true; then echo free >> "$RT_DIR/lock_at_live"; else echo held >> "$RT_DIR/lock_at_live"; fi   # the check that a passed merge is still live: under the deploy lock
-      lv="${RT_LIVE:-}"; [ ! -f "$RT_DIR/deployed" ] || [ -z "${RT_LIVE_AFTER:-}" ] || lv="$RT_LIVE_AFTER"   # RT_LIVE_AFTER: the live checkout once a deploy ran (a group release deploys a commit the checkout did not have)
+      lv="${RT_LIVE:-}"; [ ! -f "$RT_DIR/deployed" ] || [ -z "${RT_LIVE_AFTER:-}" ] || lv="$RT_LIVE_AFTER"   # RT_LIVE_AFTER: the live checkout once a deploy ran (a deploy moves the live checkout to a commit it did not have)
       [ -n "$lv" ] || exit 0; set -- "$1" "$2" "$3" "$lv"
     fi
     for c in $(echo "${RT_HISTORY:-0106c0de0106c0de0106c0de0106c0de0106c0de,0107c0de0107c0de0107c0de0107c0de0107c0de}" | tr , ' '); do
       i=$((i+1)); [ "$c" = "$3" ] && ia=$i; [ "$c" = "$4" ] && ib=$i
     done
     [ $ia -gt 0 ] && [ $ib -ge $ia ] ;;
+  "fetch --quiet origin main refs/pull/"*)   # fetch_retry with the PR head (regen_snapshot): RT_PRFETCH_FAIL makes it fail every time
+    [ -z "${RT_PRFETCH_FAIL:-}" ] || { echo "fatal: couldn't find remote ref refs/pull/23/head" >&2; exit 1; } ;;
   "fetch --quiet origin main")   # RT_FETCH_FAILS: that many fetches fail first, as one racing another release's fetch in the same checkout does
     n=$(( $(cat "$RT_DIR/fetches" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/fetches"
     [ $n -gt "${RT_FETCH_FAILS:-0}" ] || { echo "error: fetching ref refs/remotes/origin/main failed: incorrect old value provided" >&2; exit 1; } ;;
   *) exit 0 ;;
 esac
 '''
-FAKE_FM = r'''#!/usr/bin/env bash
-# a stand-in for docs-merge.sh: the same shape (PYSRC in a quoted heredoc, diff-check <diff> <repo> <sha> <tmp>), and only .md files pass
-PYSRC=$(cat <<'PYEOF'
-import re, sys
-def diff_check(path, repo, sha, tmp):
-    files = re.findall(r"^diff --git a/(\S+) b/", open(path).read(), re.M)
-    bad = [f for f in files if not f.endswith(".md")]
-    for f in bad: print("REFUSED: %s:0 not a doc" % f)
-    print("files=%d refused=%d" % (len(files), len(bad) or (0 if files else 1)), file=sys.stderr)
-    sys.exit(3 if bad or not files else 0)
-if sys.argv[1] == "diff-check": diff_check(*sys.argv[2:6])
-PYEOF
-)
-'''
-FAKE_FM_NOSUB = FAKE_FM.replace('if sys.argv[1] == "diff-check": diff_check(*sys.argv[2:6])', 'if sys.argv[1] == "pr-check": diff_check(*sys.argv[2:6])')   # a dispatch that does not know diff-check: exits 0, says nothing
-REAL_DM = os.environ.get("RELEASE_TEST_DOCS_MERGE", "")   # a real docs-merge script to run the same checks against, when this box has one (set by the person running the suite)
 SLEEP = '#!/bin/sh\necho "$*" >> "$RT_DIR/sleep.log"\n'
 # the clock the release reads (date +%s): a fixed start plus every sleep it asked for plus what each look at main's runs cost (RT_POLL_COST), so the waits are read off a clock the test controls
 DATE = ('#!/bin/sh\nif [ "$1" = "+%s" ]; then\n  [ -f "$RT_DIR/clock-base" ] || /usr/bin/date +%s > "$RT_DIR/clock-base"\n'
@@ -268,63 +220,8 @@ NOTIFY = ('#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a"; done >> "$RT_DIR/no
 # The default answer (none) comes from a shell stub: the measured run on main (coverage in every Python child, under strace -f) made one Python start per wait
 # cycle of every scenario cost enough to push the suite past its 1800 s limit (main's run 9000001); the Python one below answers only a scenario that sets RT_SALAMANDER.
 SALAMANDER_SH = ('#!/bin/sh\n'
-                 # `salamander mq` (THE MERGE QUEUE, SHADOW): a stand-in that logs its arguments apart from ci-runs' (mq.log) and answers from RT_MQ_ADD (ok | fail | slow) and RT_MQ_WAIT
-                 # (tested = exit 3, the shadow verdict | failed = 1 | ejected-merged = 1 with the queue's own words for a PR the old path merged first | ejected-left = 1, the PR left the group because the old path's merge closed it | ejected-conflict = 1, a real eject reason | gaveup = 2 | error = 7)
-                 'if [ "${1:-}" = mq ]; then\n  echo "$*" >> "$RT_DIR/mq.log"\n'
-                 # THE MERGE QUEUE, ON: RT_MQ_PRS = "<pr>=<kind>[@<sha7>],..." answers `mq wait <pr>` per PR (kinds: merged | failed | ejected | gaveup | error | notinline | tested), RT_MQ_STATUS = paused | blocked answers `mq status --json`,
-                 # RT_MQ_DROP = fail makes `mq drop` exit 1; RT_MQ_ADD = refused is salamander's own refusal while its ON_OPEN switch is false, timeout never answers within the release's cap
-                 '  if [ "${2:-}" = wait ] && [ -n "${RT_MQ_PRS:-}" ]; then\n'
-                 '    [ -z "${RT_MQ_DRIVERLINE:-}" ] || echo "driver started (mq-example-owner__stackshot)" >&2   # what `mq wait` prints to stderr when it had to start the driver again: the first line of 2>&1\n'
-                 '    for kv in $(echo "$RT_MQ_PRS" | tr , " "); do\n      [ "${kv%%=*}" = "$3" ] || continue; v="${kv#*=}"; k="${v%%@*}"; sh="${v#*@}"; [ "$sh" != "$v" ] || sh=a1b2c3d\n'
-                 '      case "$k" in\n'
-                 '        merged) echo "PR $3 merged: merged in group g1 at $sh [g1]"; exit 0 ;;\n'
-                 '        mergednosha) echo "PR $3 merged: merged in group g1 [g1]"; exit 0 ;;\n'
-                 '        mergedpause) echo "PR $3 merged: merged in group g1 at $sh [g1]"; echo "PR #22 failed at the main tests after its merge, 2026-11-04T00:00:00Z" > "$RT_DIR/releases/queue.paused"; exit 0 ;;   # merged, and release.sh queue is paused right after (a lone release rolled back)\n'
-                 '        failed) echo "PR $3 failed: required check suites failed in group g1 [g1]"; echo "PR $3 failed: required check suites failed in group g1 [g1]" >&2; exit 1 ;;\n'
-                 '        ejected) echo "PR $3 ejected: refused: conflicts with main or with PR #1 ahead of it (app.py) [g1]"; echo "PR $3 ejected: refused: conflicts with main or with PR #1 ahead of it (app.py) [g1]" >&2; exit 1 ;;\n'
-                 '        gaveup) echo "${RT_MQ_SLICE_COST:-300}" >> "$RT_DIR/clock-extra"; [ -z "${RT_MQ_PAUSEQ:-}" ] || echo "PR #22 failed at the main tests after its merge, 2026-11-04T00:00:00Z" > "$RT_DIR/releases/queue.paused"; echo "PR $3: gave up waiting after 5s (still grouped)" >&2; exit 2 ;;\n'   # a slice that ran out took its time on the test clock
-                 '        error) echo "salamander mq: state file unreadable" >&2; exit 1 ;;\n'
-                 '        blocked) echo "PR $3 is waiting and the queue is blocked: bad repo config" >&2; exit 2 ;;\n'   # the real line: exit 2 without "gave up"
-                 '        skipped) echo "PR $3 built, not tested (replay ci = skip: the group was built, nothing was pushed or tested; this is not a pass) [g1]"; exit 4 ;;\n'
-                 '        ejectedmerged) echo "PR $3 ejected: pull request is merged [g1]"; echo "PR $3 ejected: pull request is merged [g1]" >&2; exit 1 ;;\n'
-                 '        notinline) echo "PR $3 is not in the line" >&2; exit 2 ;;\n'
-                 '        tested) echo "PR $3 tested: group g1 passed in shadow [g1]"; exit 3 ;;\n'
-                 '      esac\n    done\n  fi\n'
-                 '  if [ "${2:-}" = status ]; then case "${RT_MQ_STATUS:-}" in\n'
-                 '    paused) echo \'{"paused": {"reason": "the merge push failed 5 times", "since": 1, "by": "driver"}, "blocked": null, "queue": []}\'; exit 0 ;;\n'
-                 '    blocked) echo \'{"paused": null, "blocked": {"reason": "bad repo config", "since": 1}, "queue": []}\'; exit 0 ;;\n'
-                 '    error) echo "salamander mq: cannot read the state file" >&2; exit 1 ;;\n'
-                 '    active) echo \'{"paused": null, "blocked": null, "queue": [{"pr": 23, "state": "waiting"}, {"pr": 25, "state": "grouped"}, {"pr": 26, "state": "merged"}]}\'; exit 0 ;;\n'
-                 '    *) echo \'{"paused": null, "blocked": null, "queue": []}\'; exit 0 ;;\n  esac; fi\n'
-                 '  if [ "${2:-}" = drop ]; then\n'
-                 '    [ -z "${RT_MQ_DROP:-}" ] || { echo "salamander mq: cannot lock the queue state" >&2; exit 1; }\n'
-                 '    case "${RT_MQ_ADD:-ok}" in ok|slow) ;; *) echo "PR $3 is not in the line" >&2; exit 1 ;; esac   # an add that was refused or never answered queued nothing: the real drop says so and exits 1\n'
-                 '    case ",${RT_MQ_PRS:-}," in *",$3=merged"*|*",$3=failed"*|*",$3=ejected"*|*",$3=ejectedmerged"*) echo "PR $3 is not in the line" >&2; exit 1 ;; esac   # settled already\n'
-                 '    echo "PR $3 dropped"; exit 0\n  fi\n'
-                 '  case "${2:-}" in\n'
-                 '    add) case "${RT_MQ_ADD:-ok}" in\n'
-                 '           refused) echo "salamander mq: mode \\"on\\" is not open yet (the merge step is built, the switch to it is a step of its own: docs/mq.md, Migration); use mode = \\"shadow\\". Nothing was queued." >&2; exit 1 ;;\n'
-                 '           timeout) exec /usr/bin/sleep 30 ;;\n'
-                 '           ok) for a in "$@"; do case "$a" in [0-9]*) echo "PR $a: queued" ;; esac; done; echo "mode on: tested groups are merged into main; driver started (mq-example-owner__stackshot)"; exit 0 ;;\n'
-                 '           fail) echo "salamander mq: mode is off for example-owner/stackshot (host config /nowhere/example-owner__stackshot.toml); nothing was queued." >&2; exit 1 ;;\n'
-                 '           slow) echo $$ > "$RT_DIR/mq-add.pid"; exec /usr/bin/sleep 6 ;;\n         esac ;;\n'
-                 '    wait) case "${RT_MQ_WAIT:-tested}" in\n'
-                 '           tested) echo "PR $3 tested: group g1 passed in shadow [g1]"; exit 3 ;;\n'
-                 '           failed) echo "PR $3 failed: required check suites failed in group g1 [g1]"; echo "PR $3 failed: required check suites failed in group g1 [g1]" >&2; exit 1 ;;\n'
-                 '           ejected-merged) echo "PR $3 ejected: pull request is merged [g1]"; echo "PR $3 ejected: pull request is merged [g1]" >&2; exit 1 ;;\n'
-                 '           ejected-left) echo "PR $3 ejected: left the group before the merge (closed, changed or moved) [g27]"; echo "PR $3 ejected: left the group before the merge (closed, changed or moved) [g27]" >&2; exit 1 ;;\n'
-                 '           ejected-conflict) echo "PR $3 ejected: conflict with main in group g27 [g27]"; echo "PR $3 ejected: conflict with main in group g27 [g27]" >&2; exit 1 ;;\n'
-                 '           gaveup) echo "PR $3: gave up waiting after 5s (still grouped)" >&2; exit 2 ;;\n'
-                 '           error) echo "salamander mq: state file unreadable" >&2; exit 7 ;;\n'
-                 '           hosterr) echo "salamander mq: /nowhere/example-owner__stackshot.toml: unknown key \'colour\'" >&2; exit 1 ;;\n'   # host_or_exit: exit 1 like a failed PR, but its own words
-                 '           titled) echo "PR $3 failed: a title with FAILED at x and done: y in it [g1]"; echo "PR $3 failed: a title with FAILED at x and done: y in it [g1]" >&2; exit 1 ;;\n         esac ;;\n'
-                 '  esac\n  exit 2\nfi\n'
                  'echo "$*" >> "$RT_DIR/salamander.log"\n'
                  'case "${RT_SALAMANDER:-none}" in none) echo "no file" >&2; exit 3;; esac\nexec python3 "$RT_DIR/bin/salamander.py" "$@"\n')
-# systemd-run for the shadow comparison unit: logs its arguments (systemd-run.log) and, like the unit would, runs the command after its options at once, in this environment (RT_MQ_UNIT_FAIL: it refuses)
-SYSTEMD_RUN_MQ = ('#!/bin/sh\necho "$*" >> "$RT_DIR/systemd-run.log"\n'
-                  '[ -z "${RT_MQ_UNIT_FAIL:-}" ] || { echo "Failed to start transient service unit: Unit stackshot-mq-shadow-a.service was already loaded" >&2; exit 1; }\n'
-                  'while [ $# -gt 0 ]; do case "$1" in */release.sh) break ;; esac; shift; done\nexec "$@"\n')
 SALAMANDER = r'''import json, os, sys, time
 d = os.environ["RT_DIR"]; a = sys.argv[1:]
 n = int(open(f"{d}/salcalls").read()) + 1 if os.path.exists(f"{d}/salcalls") else 1
@@ -348,7 +245,6 @@ DEPLOY = ('#!/bin/sh\ntouch "$RT_DIR/deployed"\necho "${DEPLOY_TO:-}" > "$RT_DIR
           '[ -z "${RT_DEPLOYED_MARK:-}" ] || touch "$RT_DEPLOYED_MARK"\n'   # what the lock looks like from inside a deploy: held by the release, and not inherited through fd 9
           'if flock -n "${DEPLOY_LOCK_FILE:-$RT_DIR/releases/deploy.lock}" true; then echo free > "$RT_DIR/lock_during"; else echo held > "$RT_DIR/lock_during"; fi\n'
           'cat "$RT_DIR/lock_during" >> "$RT_DIR/locks"\n'
-          'if flock -n "${UPDATE_LOCK_FILE:-$RT_DIR/releases/update.lock}" true; then echo free > "$RT_DIR/upd_lock_at_deploy"; else echo held > "$RT_DIR/upd_lock_at_deploy"; fi\n'
           'for f in "$RT_DIR"/releases/pending-verify/pr-*; do [ -f "$f" ] || continue; if flock -n "$f" true; then echo "$(basename $f):free"; else echo "$(basename $f):locked"; fi; done >> "$RT_DIR/pending_at_deploy"\n'   # the record, as the deploy sees it
           'if [ -L /proc/$$/fd/7 ]; then echo open > "$RT_DIR/fd7"; else echo closed > "$RT_DIR/fd7"; fi\n'   # the lock as every deploy saw it, in order
           'if [ -L /proc/$$/fd/9 ]; then echo open > "$RT_DIR/fd9"; else echo closed > "$RT_DIR/fd9"; fi\n'
@@ -387,31 +283,21 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
     if env.get("lastgood"): (d / "releases").mkdir(exist_ok=True); (d / "releases/last-good").write_text(env.pop("lastgood") + "\n")   # the record main's passing runs keep
     if env.get("marker"): (d / "releases").mkdir(exist_ok=True); (d / "releases" / f"pr-{pr}.rolledback").write_text(env.pop("marker") + "\n")   # another release's failure rolled this one back
     if env.get("pre_lockdir"): (d / "releases/last-good.lock").mkdir(parents=True); env.pop("pre_lockdir")                                 # the record's lock file is unusable
-    if env.get("ledger") is not None: (d / "releases").mkdir(exist_ok=True); (d / "releases/fast-ok.json").write_text(env.pop("ledger"))   # the fast-ok ledger a release finds: its text as it stands
-    if env.get("ledger_lockdir"): (d / "releases").mkdir(exist_ok=True); (d / "releases/fast-ok.json.lock").mkdir(); env.pop("ledger_lockdir")   # the ledger's lock file is unusable (a folder)
     shutil.copy(os.path.join(STACK, "release.sh"), box / "release.sh")
     for rel, text in (files or {}).items(): (d / rel).parent.mkdir(parents=True, exist_ok=True); (d / rel).write_text(text)
     if units is not None:
         for p, body in ((d / "bin/systemctl", SYSTEMCTL), (d / "bin/systemd-run", SYSTEMD_RUN)): p.write_text(body); p.chmod(0o755)
         env["active"] = units
-    mqhost = env.pop("mqhost", None)   # THE MERGE QUEUE, SHADOW: the host file's text (a bare mode word is written as `mode = "<word>"`); None = no file. The folder is the scenario's own either way, never the real ~/.config
-    if mqhost is not None:
-        (d / "xdg/mergequeue").mkdir(parents=True, exist_ok=True)
-        (d / "xdg/mergequeue/example-owner__stackshot.toml").write_text(mqhost.replace("@DIR@", str(d)) if "=" in mqhost else f'mode = "{mqhost}"\n')
-        if units is None: (d / "bin/systemd-run").write_text(SYSTEMD_RUN_MQ); (d / "bin/systemd-run").chmod(0o755)
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
-    fm = env.pop("fm", None)   # docs-merge.sh as the allow-list: "fake" (a stub checker that accepts only .md paths), "real" (the one on this box), else none
-    if fm in ("fake", "nosub"): (d / "docs-merge.sh").write_text(FAKE_FM if fm == "fake" else FAKE_FM_NOSUB)
     for p, body, x in ((box / "config.py", CONFIG, False), (box / "client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
                        (d / "bin/gh", GH_SH, True), (d / "bin/gh.py", GH, False), (d / "bin/git", GIT, True), (d / "bin/sleep", SLEEP, True), (d / "bin/sala", SALA, True), (d / "bin/notify", NOTIFY, True), (d / "bin/date", DATE, True), *(() if nosal else ((d / "bin/salamander", SALAMANDER_SH, True), (d / "bin/salamander.py", SALAMANDER, False)))):
         p.write_text(body); x and p.chmod(0o755)
     e = {**os.environ, "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", "RELEASE_SKIP_DISJOINT": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks
-    e["DOCS_MERGE_SCRIPT"] = {"fake": str(d / "docs-merge.sh"), "nosub": str(d / "docs-merge.sh"), "real": REAL_DM}.get(fm, str(d / "no-such-docs-merge.sh"))
     held = None; timer = None
     if hold is not None:
         (d / "releases").mkdir(exist_ok=True); held = open(d / "releases/deploy.lock", "w"); fcntl.flock(held, fcntl.LOCK_EX)
         if hold == "until-waiting":   # never a fixed time: a slow start (a measured run under strace) would reach the lock after it was let go
-            def unhold(logs=(d / "releases" / f"pr-{pr}.log", d / "releases" / f"group-{pr}.log"), end=time.time() + 60):   # a lone release logs to its PR's file, a group's to the group's
+            def unhold(logs=(d / "releases" / f"pr-{pr}.log",), end=time.time() + 60):
                 while time.time() < end and not any("another release holds the deploy lock; waiting" in (l.read_text() if l.exists() else "") for l in logs): time.sleep(0.05)
                 time.sleep(0.3)
                 if lockhook: lockhook(d)
@@ -459,8 +345,8 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
     return {"rc": r.returncode, "out": r.stdout + r.stderr, "gh": rd("gh.log"), "sal": rd("salamander.log").splitlines(), "sleeps": rd("sleep.log").split(),
             "released": rd("released.log").splitlines(), "msg": rd("messages.log"), "deployed": (d / "deployed").exists(), "log": rd(f"releases/pr-{pr}.log"), "dir": d,
             "lock_during": rd("lock_during").strip(), "fd9": rd("fd9").strip(), "merge_fd9": rd("merge_fd9").strip(),
-            "client_fd9": rd("client_fd9").split(), "client_fd5": rd("client_fd5").split(), "git_fd5": rd("git_fd5").split(), "upd_fd5": rd("upd_fd5"), "merge_fd5": rd("merge_fd5"),
-            "ulock": [rd("upd_lock_at_update"), rd("upd_lock_at_merge"), rd("upd_lock_at_deploy").strip()], "deploy_to": rd("deploy_to").strip(),
+            "client_fd9": rd("client_fd9").split(), 
+"deploy_to": rd("deploy_to").strip(), "gq_reads": int(rd("gqreads").strip() or 0), "gq_reason_reads": len(rd("gq_reason_reads")), "gq_args": rd("gq_args").splitlines(),
             "deploys": rd("deploys").splitlines(), "locks": rd("locks").split(), "order": rd("order.log").split(), "lastgood": rd("releases/last-good").strip(),
             "msgs": [l for l in rd("messages.log").splitlines() if l.startswith("message |")],
             "pending_files": sorted(p.name for p in (d / "releases/pending-verify").iterdir()) if (d / "releases/pending-verify").is_dir() else [],
@@ -468,8 +354,7 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
             "bgpids": [int(x) for x in rd("bgpids").split()], "notice": [a for a in rd("notice.log").split("\0")][:-1], "notice_pid": rd("notice.pid").strip(), "sala": rd("sala.log"), "lock_at_live": rd("lock_at_live").split(),"git": rd("git.log"),
             "lockfile": pathlib.Path(e.get("DEPLOY_LOCK_FILE", d / "releases/deploy.lock")),
             "side_rc": side_res["r"].returncode if side_res.get("r") else None, "side_log": rd(f"releases/pr-{side}.log") if side else "", "paused_at_rollback": rd("paused_at_rollback").strip(),
-            "started": rd("started").split(), "queue": rd("releases/queue").split(), "driver": rd("releases/queue.driver").strip(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log"),
-            "mq": rd("mq.log").splitlines(), "mq_old": "".join(p.read_text() for p in sorted((d / "releases/mq-shadow").glob(f"pr-{pr}-*.old"))) if (d / "releases/mq-shadow").is_dir() else "", "mq_files": sorted(p.name for p in (d / "releases/mq-shadow").glob("*.old")) if (d / "releases/mq-shadow").is_dir() else [], "sysrun": rd("systemd-run.log").splitlines(), "ledger": rd("releases/fast-ok.json"), "ledger_files": sorted(p.name for p in (d / "releases").iterdir() if p.name.startswith("fast-ok")) if (d / "releases").is_dir() else []}
+            "started": rd("started").split(), "queue": rd("releases/queue").split(), "started_marks": rd("releases/queue.started").split(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log")}
 
 def lock_free(s):   # nothing the release left behind holds the lock, and no report child got fd 9
     if s["lockfile"].exists():
@@ -491,7 +376,7 @@ BASE = "ba5e0000000000000000000000000000000000ba"; MERGE = "0106c0de0106c0de0106
 NEWER = "0107c0de0107c0de0107c0de0107c0de0107c0de"; LATER = "5ec00000000000000000000000000000000000c2"
 HIST = ",".join([GOOD, BASE, HEADSHA, MERGE, LATER, NEWER])
 GOOD_RUN = {"databaseId": 1, "headSha": GOOD, "conclusion": "success"}   # the run list reaches the last good commit (what (b) needs to call it readable)
-def fast(name, **kw):   # an up-to-date PR (main's tip BASE is in its head's history), the checkout deployed at BASE (the live HEAD is main's tip), GOOD the recorded last good commit
+def fast(name, **kw):   # an open deploy gate: the live checkout at BASE (an ancestor of the merge MERGE in HIST), GOOD the recorded last good commit in its history, no failed run since
     noreach = kw.pop("noreach", False)   # runs given: newest first; the last good commit's run is added at the end, unless the test is about the list not reaching it
     if "runs" not in kw: kw["runs"] = json.dumps([{"databaseId": 7, "headSha": MERGE}, GOOD_RUN])
     elif kw["runs"] != "not json" and not noreach: kw["runs"] = json.dumps([*json.loads(kw["runs"]), GOOD_RUN])
@@ -506,15 +391,12 @@ RUNS67 = json.dumps([{"databaseId": 6, "headSha": BASE}, {"databaseId": 7, "head
 H1 = "d00d1000000000000000000000000000000000d1"; H2 = "d00d2000000000000000000000000000000000d2"; H3 = "d00d3000000000000000000000000000000000d3"
 B2 = "ba5e2000000000000000000000000000000000b2"; B3 = "ba5e3000000000000000000000000000000000b3"; B4 = "ba5e4000000000000000000000000000000000b4"
 TAIL = [MERGE, LATER, NEWER]
-HIST_B = ",".join([GOOD, HEADSHA, BASE, *TAIL])                      # the PR head is behind main's tip BASE
-HIST_1 = ",".join([GOOD, HEADSHA, BASE, H1, *TAIL])                 # after one update the head H1 contains BASE
 def file_free(f):   # nobody holds a flock on this file
     if not pathlib.Path(f).exists(): return True
     lk = open(f, "a")
     try: fcntl.flock(lk, fcntl.LOCK_EX | fcntl.LOCK_NB); return True
     except OSError: return False
     finally: lk.close()
-def upd_lock_free(s): return file_free(s["dir"] / "releases" / "update.lock")
 def at(log, *parts):   # the parts appear in the log in this order
     i = -1
     for p in parts:
@@ -522,7 +404,6 @@ def at(log, *parts):   # the parts appear in the log in this order
         if j < 0: return False
         i = j
     return True
-UPD_LINE = "pr update-branch 23 --repo example-owner/stackshot"
 
 def polls_over(): return [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 
