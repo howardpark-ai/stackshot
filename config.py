@@ -514,6 +514,10 @@ KEYWORDS: dict[str, dict[str, tuple[str, str]]] = {
     "waiting": {
         "park_words": ("words", "other-language words for park, postpone or hold: the owner's answer with one parks the item"),
     },
+    "ask_options": {
+        "particles": ("words", "the suffixes that may follow the last word of an option's label in a Recommend sentence (a language that glues them on): the label still counts as named"),
+        "refusals": ("words", "other-language words or phrases that say 'not this option' right before a label, letter or place (the English ones are not, no, avoid, never, skip, except, don't, instead of, rather than): the option after one is turned away"),
+    },
     "server": {
         "command_cues": ("words", "other-language words that say an item waits on the owner running or pasting a command"),
     },
