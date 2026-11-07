@@ -111,6 +111,7 @@ item("a", 33, needs=["decision"], ask=YESNO)                               # Yes
 item("a", 40, state="your-step", step=STEP, needs=["home-agent"])                # Send with an empty box = Done
 item("a", 41, state="your-step", step=STEP, needs=["home-agent"])                # Send with a note = his note on the step, handed to the then-mover to judge
 item("a", 45, state="your-step", step=STEP, needs=["home-agent"])                # Send with a note that names a later time: the item waits until then
+item("a", 47, state="your-step", step=STEP, needs=["home-agent"])                # Send with a note the server reads as a later time: it holds the item itself
 item("a", 46, state="your-step", step=STEP, needs=["home-agent"])                # a later-time note whose time is past the wait cap
 item("a", 42)                                                              # Send on an item that has no step any more
 item("a", 43, state="your-step", step=STEP, owner="")                         # Send with a note, nobody to take it
@@ -594,8 +595,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("History and `get` show the note as his note on the step, never as Done",
           "note on his step" in ui_render.Board(str(STORE)).item_html("a41") and "<b>Done</b>" not in ui_render.Board(str(STORE)).item_html("a41")
           and "note on his step: which box do I run it on?" in server.stackshot_get("a41"), None)
-    # a note that names a later time: the notice carries the third branch, and the tools it names put the item on hold with a wake
-    told.clear(); r_s45 = post("/items/a45/answer", {"token": tok("a45"), "act": "send", "text": "I will do this tomorrow evening", "back": "/#task-a-45"}); m45 = rd("a", 45)["metadata"]
+    # a note that names a later time the server does not read (no date or day part in it): the notice carries the third branch, and the tools it names put the item on hold with a wake
+    told.clear(); r_s45 = post("/items/a45/answer", {"token": tok("a45"), "act": "send", "text": "I will do this after the trip, so wait until then", "back": "/#task-a-45"}); m45 = rd("a", 45)["metadata"]
     n45 = {t[1]: t[2] for t in told}[AGENT]
     check("a later-time note: the then-mover alone is told, and its notice keeps both earlier branches word for word and adds the wait branch after them",
           sorted(t[1] for t in told) == [AGENT] and _judge_old + "; if it says he will do the step at a later time" in n45 and n45.endswith(_judge_later + f" → {BOARD}/items/a45")
@@ -603,7 +604,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the wait branch names the exact tool form: hold=true, a wake as YYYY-MM-DDTHH:MM in the instance zone, a wait_reason with its minimum length, his step left open, no new step handed back",
           "update hold=true" in n45 and f"wake=<that time, YYYY-MM-DDTHH:MM {_tz}>" in n45 and f"wait_reason=<what it waits on, at least {_minreason} characters>" in n45
           and "leave his step open and hand no new step back" in n45 and _minreason >= 15, n45)
-    check("the server itself does not read the time in the note: the item is with the then-mover, not on hold, no wake (the instruction is the notice's text, carried out by the mover's update)",
+    check("the server does not read a time out of a note that names none: the item is with the then-mover, not on hold, no wake (the instruction is the notice's text, carried out by the mover's update)",
           r_s45.headers["location"] == "/?sent=stepreply&item=a45&then=home-agent#task-a-45" and m45.get("mover") == "home-agent" and "hold" not in m45 and "wake" not in m45
           and [a["kind"] for a in m45["answers"]] == ["step-reply"], m45)
     _when = (server.dt.datetime.now(server.ZONE) + server.dt.timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
@@ -612,7 +613,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("following the notice (update hold=true, wake, wait_reason) is accepted: the item is on hold with that wake, the same mover, and no step handed back to him",
           r_u45.startswith("updated a45") and m45.get("hold") is True and m45.get("wake") == _when and m45.get("mover") == "home-agent" and "step" not in m45 and m45.get("state") != "your-step"
           and server._model.derive(i45).state == "waiting" and not server._model.is_owner(server._model.derive(i45).mover), (r_u45, m45))
-    check("the wake stands on his note: it is recorded as the words behind the hold (cap_ok quote)", "tomorrow evening" in str((m45.get("cap_ok") or {}).get("quote")), m45.get("cap_ok"))
+    check("the wake stands on his note: it is recorded as the words behind the hold (cap_ok quote)", "after the trip" in str((m45.get("cap_ok") or {}).get("quote")), m45.get("cap_ok"))
+    # a note the server reads ("tomorrow evening"): it puts the item on hold itself, with his words behind the wake, and the notice says so instead of asking the mover to judge
+    told.clear(); r_s47 = post("/items/a47/answer", {"token": tok("a47"), "act": "send", "text": "I will do this tomorrow evening", "back": "/#task-a-47"}); m47 = rd("a", 47)["metadata"]; n47 = {t[1]: t[2] for t in told}[AGENT]
+    check("a note the server reads as a later time: the item is on hold until then (the wake as YYYY-MM-DDTHH:MM, his words behind it), with the then-mover, and the notice says what was done, not to judge the note",
+          m47.get("hold") is True and m47.get("wake") == _when and (m47.get("cap_ok") or {}).get("quote") == "I will do this tomorrow evening" and m47.get("mover") == "home-agent"
+          and "put the item on hold until" in n47 and "Judge the note" not in n47 and [a["kind"] for a in m47["answers"]] == ["step-reply"], (m47, n47))
     # a wake past the cap: his note, given since the item's last move, is the words that let it stand
     told.clear(); post("/items/a46/answer", {"token": tok("a46"), "act": "send", "text": "after the trip, next month", "back": "/#task-a-46"})
     _far = (server.dt.datetime.now(server.ZONE) + server.dt.timedelta(days=server._wt.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
@@ -655,7 +661,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear()
 
     st_ = server._answers_load()
-    for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42", "a45", "a46"): st_.pop(g, None)
+    for g in ("a13", "a14", "a18", "a19", "a20", "a21", "a22", "a23", "a24", "a25", "a17", "a27", "a40", "a41", "a42", "a45", "a46", "a47"): st_.pop(g, None)
     server._answers_save(st_)
     for p in G.pending(): p.unlink()
     told.clear()

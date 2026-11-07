@@ -73,6 +73,10 @@ allow = [
     "waiting on the owner",
     "to the owner as",
     "the owner is quoted",
+    "takes an ask off the owner's move",      # the update tool's text on an ask that leaves his move (the server takes it off); here "the owner" is Oliver
+    "answers for the owner",
+    "with the owner's notes",
+    "shows the owner's comments",
     "the owner, an outside party",
     "line that starts `the owner:`",
     "only the owner does",
