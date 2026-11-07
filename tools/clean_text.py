@@ -28,7 +28,7 @@ the branch names in them are checked as branch names (the owner and the URL are 
     python3 tools/clean_text.py --commits BASE..HEAD                       # every commit message of a range (git is run in the cwd)
     python3 tools/clean_text.py --new-commits SHA [--remote NAME]          # commits of SHA that remote NAME lacks (no NAME: all of them)
     python3 tools/clean_text.py --from-env                                 # CI: PR_TITLE, PR_BODY, PR_BRANCH, BASE_REV, HEAD_SHA
-The git hooks in .githooks/ (core.hooksPath, see CONTRIBUTING.md) run it before a commit is made and before a push.
+The git hooks in .githooks/ (core.hooksPath, see CONTRIBUTING.md) run it before a commit is made and before a push (and also run the machine-wide hook of the same name, when one is installed: the global core.hooksPath first, then the XDG hooks directory).
 The modes combine. Exit 0: clean; 1: something matched; 2: the call itself is wrong (a bad deny pattern, an unreadable file,
 a git failure).
 """

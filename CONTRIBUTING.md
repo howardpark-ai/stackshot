@@ -61,6 +61,8 @@ project's notes.
   git config core.hooksPath .githooks
   ```
 
+  Setting `core.hooksPath` replaces a machine-wide hook directory, so each of the two hooks also runs the machine-wide hook of the same name, with the same arguments (and, for `pre-push`, the same standard input), when one is installed and executable, and skip it otherwise (the `chain-global` helper beside them looks in the user's global `core.hooksPath` first, then in `${XDG_CONFIG_HOME:-$HOME/.config}/git/hooks`). Both run, so every refusal shows, and the commit or push is refused if either refuses.
+
   They are POSIX `sh`, need `python3` on `PATH`, and work from a linked worktree (the setting is per clone and every worktree of it shares it). `git commit --no-verify` and `git push --no-verify` skip them, and CI still checks.
   The deny list for a local run is the environment variable `CLEAN_TEXT_DENY` if it holds anything, else the file `${XDG_CONFIG_HOME:-$HOME/.config}/stackshot/clean-text-deny` (one regex per line, blank lines ignored; the maintainer
   holds the list and hands it to a contributor who is to have it). It is never read from the tree. With neither, only the generic patterns run and one line on standard error says so; that is not a failure.

@@ -3,7 +3,14 @@
 # Turn it on once per clone:  git config core.hooksPath .githooks
 # The deny list is read from CLEAN_TEXT_DENY or ${XDG_CONFIG_HOME:-$HOME/.config}/stackshot/clean-text-deny, never from the tree;
 # without one only the generic patterns run, and the check says so. `git commit --no-verify` skips it; CI checks again.
+# A clone that sets core.hooksPath replaces the machine-wide hook directory, so this hook also runs the machine-wide hook of the
+# same name through the chain-global helper beside it (the user's global core.hooksPath, else the XDG hook directory), with the
+# same argument (the message file). Both run, so every refusal shows; the commit is refused if either refuses. Nothing happens
+# when there is no such hook.
 set -u
+global_status=0
+sh "$(dirname "$0")/chain-global" commit-msg "$@" || global_status=$?
+[ "$global_status" -eq 0 ] || echo "commit-msg: the machine-wide commit-msg hook refused the commit." >&2
 root=$(git rev-parse --show-toplevel) || exit 1
 command -v python3 >/dev/null 2>&1 || { echo "clean-text: python3 is not on PATH; the commit message was not checked" >&2; exit 1; }
 # Every line of the file is checked, "#" lines included: `git commit -m` keeps them in the message. Only what git itself writes
@@ -15,3 +22,4 @@ if ! sed -e '/^# -\{24\} >8 -\{24\}$/,$d' -e '/^# On branch /d' -e '/^# HEAD det
     echo "commit-msg: the commit was refused; reword the message and commit again." >&2
     exit 1
 fi
+[ "$global_status" -eq 0 ] || exit 1
