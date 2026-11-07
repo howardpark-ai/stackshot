@@ -10,6 +10,9 @@ replaced by recorders, a fake clock (every pass is given its `now`), no live sto
   1b the clock starts at the later of the item's activity and the moment it left a hold, a wait or an after link (an item parked 30 hours and woken is not silent for 45 minutes); spans read in hours and minutes
   2b the stall pass's view: only an item the stall ladder is already on is left alone; the pane's state (busy, shell, idle, unreadable) is never read, so a busy pane hides no silent item
   3  the server's tick (also: a background agent's shell pane is busy and a front agent's is idle; a pane view that cannot be built sends nothing): stands still when the audit is off or in agent mode, and sends through the server's own message function as the audit's sender
+  4  a builder directing subagents is busy all day: its items are judged one by one by their own activity (an event on an anchored pull request counts, a bare confirm does not)
+  5  a build subagent running on an item (a `work` line in progress, changed within 90 minutes, on the project builder's item) is the evidence that it is taken, whatever the pane shows; a builder's item with
+     neither such a line nor an event is silent while its pane is busy; lines only defined, assigned or done, one past the bound, a non-builder's item and a project with no builder are not taken
 
     tests/run-suite silence       -> exit 0 / 1"""
 import datetime as dt, json, os, pathlib, re, sys, time
@@ -361,6 +364,45 @@ check("4 …", r4b["fresh"] == 0 and r4b["repeats"] == 3 and sent == [], (r4b, s
 ladder.add("a4"); clear_state()
 check("4 an item the stall ladder is already chasing is left to it, busy builder or not", [f["id"] for f in SL.findings(busy, now, env(), server._silence_skip())[0]] == ["board#1", "board#5"])
 ladder.clear()
+
+# ---- 5. a build subagent running on the item (its `work` line) is the evidence that it is taken; a busy pane alone is not
+def wl(state, ago_h, agent="home-agent"): return [{"id": "build-it", "text": "build it", "agent": agent, "state": state, "ts": now - ago_h * H}]
+def sub(i, lines, mover="home-agent"):
+    """A doing item of `mover` silent for 3 hours (no event, no write), carrying the given work lines."""
+    k, d = ev(i, None, ACT.EVENT)
+    d["metadata"]["needs"] = [mover]; d["metadata"]["next"] = f"{mover}: build it"
+    if lines is not None: d["metadata"]["work"] = lines
+    return k, d
+real_builder = server._handoff_builder
+server._handoff_builder = lambda project: ["home-agent"] if project == "projects/alpha" else []
+panes.update({"home-agent": "busy", "home-nobody-else": "busy"})
+subs = build(sub(1, wl("in progress", 0.5)),                    # a subagent running on it, started 30 minutes ago, nothing written since: taken
+             sub(2, None),                                     # no subagent, no event, the pane is busy: silent
+             sub(3, wl("assigned", 1)),                        # handed to an agent, not started: silent
+             sub(4, wl("defined", 1)),                         # only defined: silent
+             sub(5, wl("done", 1)),                            # finished: silent
+             sub(6, wl("in progress", 2)),                     # a line left behind 2 hours ago (a recycle stops subagents): silent
+             sub(7, wl("in progress", 0.5), mover="home-nobody-else"),    # not the builder's item: the line is not read, silent
+             ev(9, 10, ACT.EVENT))                             # an event on its anchored pull request ten minutes ago: taken, as in section 4
+found5 = SL.findings(subs, now, env(), server._silence_skip())[0]
+check("5 a builder's item with a build subagent running on it (a work line in progress) is not flagged, though it has had no write for three hours",
+      "board#1" not in [f["id"] for f in found5], found5)
+check("5 …nor the one with an event on its anchor ten minutes ago", "board#9" not in [f["id"] for f in found5], found5)
+check("5 a builder's item with neither a subagent nor an event is flagged though its pane is busy, as are lines only defined or assigned, a done one, one older than 90 minutes, and a non-builder's",
+      [f["id"] for f in found5] == ["board#2", "board#3", "board#4", "board#5", "board#6", "board#7"], found5)
+check("5 the rule alone: a line in progress inside the bound is a subagent running, the same line past it is not",
+      SL.subagent_running(subs["a1"], now) and not SL.subagent_running(subs["a6"], now) and not SL.subagent_running(subs["a2"], now) and SL.SUBAGENT_S == 90 * M)
+panes.update({"home-agent": "idle"})
+check("5 …the pane's state makes no difference to a taken item: an idle pane reads the same", "board#1" not in [f["id"] for f in SL.findings(subs, now, env(), server._silence_skip())[0]])
+clear_state()
+r5 = SL.silence_pass(now=now, items=subs, env=env(), skip=server._silence_skip())
+check("5 the pass sends the six silent items to the builder in one message and leaves the taken ones out",
+      r5["fresh"] == 6 and len(sent) == 2 and sorted(ids_in(t) for _to, t, _f in sent) == [["board#2", "board#3", "board#4", "board#5", "board#6"], ["board#7"]], (r5, sent))
+server._handoff_builder = lambda project: []
+check("5 a project with no builder: no item is taken by a work line", "board#1" in [f["id"] for f in SL.findings(subs, now, env(), server._silence_skip())[0]])
+server._handoff_builder = real_builder
+panes.update({"home-agent": "busy", "home-nobody-else": "busy"})
+clear_state(); msgs.clear()
 
 msgs.clear(); clear_state()
 res = server._silence_tick()

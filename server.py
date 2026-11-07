@@ -6747,14 +6747,23 @@ def _archive_tick() -> "list[tuple[str, str]]":
 
 
 def _silence_skip() -> "Callable[[str, dict[str, Any], str], bool]":
-    """The silence pass's view of the stall pass (`silence.findings(skip=)`): True leaves a silent item alone only when the stall ladder is already on it (`_stall_active`: that ladder is
-    chasing the mover). The mover's pane is NOT read: silence is judged per item (the item's own activity clock), so a busy pane, a background agent's `shell` pane or a pane this box does not
-    show says nothing about one item, and a builder directing subagents (a pane that is nearly always busy) no longer hides its silent items. Only the rungs that need a pane with no turn
-    running (the ladder's look, cold call and builder steps) wait for an idle one: they stay in the stall pass and ladder.py. The ladder's items are read once per pass."""
+    """The silence pass's view of what is already on an item (`silence.findings(skip=)`): True leaves a silent item alone when the stall ladder is already on it (`_stall_active`: that ladder is
+    chasing the mover), or when its mover is its project's builder (`_handoff_builder`) and a build subagent is running on it by the item's own `work` line (`silence.subagent_running`: a line in
+    progress, changed within 90 minutes). The mover's pane is NOT read: silence is judged per item (the item's own activity clock, an event on its anchored pull request included), so a busy pane, a
+    background agent's `shell` pane or a pane this box does not show says nothing about one item, and a builder directing subagents (a pane that is nearly always busy) no longer hides its silent
+    items; only a subagent the item itself shows counts as taken. The rungs that need a pane with no turn running (the ladder's look, cold call and builder steps) stay in the stall pass and ladder.py.
+    The ladder's items are read once per pass, and so is each project's builder."""
+    import silence as _silence
     active = _stall_active()
+    builders: dict[str, list[str]] = {}
 
     def skip(gid: str, item: dict[str, Any], mover: str) -> bool:
-        return gid in active
+        if gid in active:
+            return True
+        project = str((item.get("metadata") or {}).get("project") or "")
+        if project not in builders:
+            builders[project] = _handoff_builder(project) if project else []
+        return any(_ho_same(mover, b) for b in builders[project]) and _silence.subagent_running(item, time.time())
     return skip
 
 
@@ -11784,7 +11793,8 @@ _UPDATE_DESC = (
     "work: one status line of the item's subtasks per call, what is in motion and what waits: work={\"text\": \"migrating the ids\", \"state\": \"in progress\", "
     "\"agent\": \"my-engineer\"}, a few words (at most 40 characters; the details stay on the project page), a state (defined | assigned | in progress | done) "
     "and the session doing it; a line is found again by its text (or id), remove=true drops it, at most 8 open lines. Written by the mover or a "
-    "session named in needs; it changes no needs, owes no page and leaves the state clock and the confirm alone. "
+    "session named in needs; it changes no needs, owes no page and leaves the state clock and the confirm alone. A project builder's line in progress (changed within 90 minutes) "
+    "tells the silence check a build subagent is running on the item, so the item is not found silent meanwhile; a line left in progress stops hiding the item after that, and a line sent again unchanged keeps its old time, so a long job changes the line's words or writes to the item; mark it done or remove it when the subagent ends. "
     + _SAID_FORM
     + f"A question {OWNER} asks on an item (in his answer or a comment on it) is answered by the mover on the item itself: rewrite the "
     "description, and the options where it is a pick, the description saying it answers his question. His question is never posted with "
