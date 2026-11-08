@@ -465,7 +465,8 @@ check("tests.yml: the suites job waits for the plan and the shards and keeps the
 verdict = next(st for st in uj["steps"] if st.get("name") == "run every suite, measured")
 check("tests.yml: the verdict step needs the plan, the shards and the merge to have passed",
       all(k in verdict["env"].get(v, "") for k, v in (("needs.shards.result", "PLAN"), ("needs.measure.result", "SHARDS"), ("steps.merge.outcome", "MERGED"))), verdict.get("env"))
-# the release queue's branches (Mon Nov 2nd 2026, changed Tue Nov 3rd 2026): a push to queue/** gets a pull request's run (the selection, no shards), as .github/mergequeue.toml's `suites = "select"` says;
+# release.sh can use either of two merge queues: GitHub's (the default; its entries are the `merge_group` event) or salamander's own (`salamander mq`, used when the host file says mode on; its entry branches are queue/**). Neither is retired, and both get the same run.
+# The salamander queue's branches (Mon Nov 2nd 2026, changed Tue Nov 3rd 2026): a push to queue/** gets a pull request's run (the selection, no shards), as .github/mergequeue.toml's `suites = "select"` says;
 # main's push keeps the full measured run. The workflow's `if:` expressions are evaluated for each kind of event, so a workflow and a rules file that disagree fail here.
 import tomllib
 push_on = y[True]["push"]["branches"]   # YAML 1.1 reads the key `on` as True
@@ -484,9 +485,9 @@ def holds(expr, event, ref):
         raise ValueError(f"an `if:` outside the subset this test reads: {expr!r} -> {e!r}")
     return eval(e, {"__builtins__": {}})
 EVENTS = {"a pull request": ("pull_request", "refs/pull/7/merge"), "a push to main": ("push", "refs/heads/main"),
-          "a push to a queue branch": ("push", "refs/heads/queue/main/g1"), "a manual run": ("workflow_dispatch", "refs/heads/some-branch"),
+          "a push to a queue branch": ("push", "refs/heads/queue/main/g1"), "a manual run": ("workflow_dispatch", "refs/heads/some-branch"),   # a push to a queue branch: the salamander merge queue's entry branch
           "a manual run on a queue branch": ("workflow_dispatch", "refs/heads/queue/main/g1"),
-          "a merge-queue entry": ("merge_group", "refs/heads/gh-readonly-queue/main/pr-7-0123456789abcdef0123456789abcdef01234567")}   # GitHub's native queue: its own branch, not a push
+          "a merge-queue entry": ("merge_group", "refs/heads/gh-readonly-queue/main/pr-7-0123456789abcdef0123456789abcdef01234567")}   # GitHub's merge queue (the default one release.sh uses): its own branch, not a push
 MEASURED_ONLY = ["the shards' maps", "merge the shards' maps", "run every suite, measured", "keep the map", "save the map", "publish the map for release.sh", "audit the selection"]
 SELECTION, MANUAL = "run the suites the change reaches", "run the suites named, or every suite"
 def what_runs(event, ref):
@@ -505,7 +506,7 @@ def expected(kind, queue_suites):
 check("mergequeue.toml and tests.yml agree on the queue: `suites` is all or select, queue_prefix starts with the `queue/` the push trigger lists and ends with /, and the check mq reads (`required`) is the job named `suites`",
       mq.get("suites") in ("all", "select") and push_on == ["main", "queue/**"] and mq["queue_prefix"].startswith("queue/") and mq["queue_prefix"].endswith("/")
       and "suites" in mq["required"] and "suites" in y["jobs"] and "name" not in uj, (mq.get("suites"), push_on, mq.get("queue_prefix"), mq.get("required")))
-# the queue runs as a chain (each PR an entry stacked on the one ahead, all tested at once): the rules file pins it, and carries none of the retired group keys (group_max, bisect), which salamander only warns about
+# the salamander queue runs as a chain (each PR an entry stacked on the one ahead, all tested at once): the rules file pins it, and carries none of the retired group keys (group_max, bisect), which salamander only warns about
 check("mergequeue.toml: the queue runs as a chain, its entries keep the queue/ prefix, and the check mq reads is still `suites`",
       mq.get("queue_mode") == "chain" and mq["queue_prefix"].startswith("queue/") and mq["queue_prefix"].endswith("/") and "suites" in mq["required"] and mq.get("base") == "main", mq)
 check("mergequeue.toml: no retired group keys (group_max, bisect), and inflight_max, when set, is mq's 1 to 16",

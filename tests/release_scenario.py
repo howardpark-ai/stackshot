@@ -153,15 +153,22 @@ check("never shown, and the timeline names a removal: that reason", s["rc"] == 1
 s = scenario("closed", merge="ok", gq="queued,closed")
 check("closed while it waited: FAILED at pr state, nothing deployed", s["rc"] == 1 and not s["deployed"] and "PR #23 FAILED at pr state: the PR was closed while it waited for the merge queue" in s["msg"], s["msg"])
 s = scenario("wait-limit", merge="ok", gq="queued", extra={"RELEASE_QUEUE_WAIT": "300"})
-check("still in the queue at the limit: FAILED at merge queue naming the limit, saying the PR may still merge; five sleeps of 60 s; nothing deployed",
-      s["rc"] == 1 and not s["deployed"] and s["sleeps"] == ["60"] * 5 and "PR #23 FAILED at merge queue: still in the merge queue (QUEUED position 1) 5 min after the enqueue, which is as long as this release waits; the PR may still merge" in s["msg"], (s["msg"], s["sleeps"]))
+check("still in the queue at the limit: FAILED at merge queue naming the limit, saying the PR may still merge later and to rerun release.sh 23 (a rerun on the merged PR carries on from the merge); five sleeps of 60 s; nothing deployed",
+      s["rc"] == 1 and not s["deployed"] and s["sleeps"] == ["60"] * 5 and "PR #23 FAILED at merge queue: still in the merge queue (QUEUED position 1) 5 min after the enqueue, which is as long as this release waits; the PR may still merge later: rerun release.sh 23 to carry on from the merge" in s["msg"], (s["msg"], s["sleeps"]))
+s = scenario("wait-limit-default", merge="ok", gq="queued", extra={"RELEASE_QUEUE_WAIT": "10800", "RELEASE_POLL_QUEUE": "3600"})
+check("the 3 h limit itself (the default RELEASE_QUEUE_WAIT, read every hour here to keep the run short): FAILED at merge queue after 180 min, the text says to rerun release.sh 23, nothing deployed",
+      s["rc"] == 1 and not s["deployed"] and "180 min after the enqueue" in s["msg"] and "rerun release.sh 23" in s["msg"], (s["msg"], s["sleeps"]))
 s = scenario("wait-default", merge="ok", gq="queued,merged")
 check("the default limit is 3 h and the default read every 60 s (the log line names both)", "up to 180 min; reading it every 60 s" in s["log"], s["log"])
 s = scenario("unreadable", merge="ok", gq="fail,fail,queued,merged")
-check("GitHub's answer cannot be read twice: waited out like a pending one every 10 s, then the wait goes on; one log line, not one per read",
-      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["10", "10"] and s["log"].count("could not be read") == 1, (s["sleeps"], s["log"]))
+check("GitHub's answer cannot be read twice: waited out like a pending one, at the slow poll (60 s) from the first unreadable read on (a 403/429 is a wait, not a reason to ask again in 10 s), then the wait goes on; one log line, not one per read",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"][:2] == ["60", "60"] and s["log"].count("could not be read") == 1, (s["sleeps"], s["log"]))
+s = scenario("unreadable-backoff", merge="ok", gq="queued,fail,queued,merged")
+check("an entry seen in the queue, then an unreadable answer: the poll stays at 60 s (never back to 10 s); the whole wait is 60 s sleeps", s["rc"] == 0 and s["deployed"] and set(s["sleeps"][:3]) == {"60"}, (s["sleeps"], s["log"]))
+s = scenario("unreadable-first", merge="ok", gq="fail,queued,merged")
+check("an unreadable first answer (before the entry shows): the next read is 60 s later, not 10 s", s["rc"] == 0 and s["deployed"] and s["sleeps"][:1] == ["60"], (s["sleeps"], s["log"]))
 s = scenario("garbage", merge="ok", gq="garbage,merged")
-check("an answer that is not JSON counts as unreadable", s["rc"] == 0 and s["deployed"] and s["sleeps"][:1] == ["10"], (s["sleeps"], s["out"]))
+check("an answer that is not JSON counts as unreadable (waited out at the slow poll)", s["rc"] == 0 and s["deployed"] and s["sleeps"][:1] == ["60"], (s["sleeps"], s["out"]))
 s = scenario("unreadable-forever", merge="ok", gq="fail", extra={"RELEASE_QUEUE_WAIT": "120"})
 check("never readable: FAILED at merge queue after the limit, not a hang", s["rc"] == 1 and "FAILED at merge queue: still not merged 2 min after the enqueue" in s["msg"], (s["msg"], s["sleeps"]))
 
@@ -358,16 +365,17 @@ check("completed and green but the suites step has no conclusion yet: pending, r
 check("…the wait made no GitHub call beyond a pending run's: one run list and one run view per poll (three of each, GH_TTL 0)", s["gh"].count("run view 7") == 3 and s["gh"].count("run list --repo") == 3, s["gh"])
 s = scenario("main-late-absent", merge="ok", main="lateabsent,lateabsent,pass")
 check("completed and green with no step in the job at all: pending as well, then passes", s["rc"] == 0 and s["deployed"] and s["sleeps"] == ["20", "20"], (s["sleeps"], s["log"]))
-s = scenario("main-late-never", merge="ok", main="late", live=NOTLIVE, extra={"RELEASE_WAIT_STEPS": "60"})
-check("completed and green but the step results never come: gives up after RELEASE_WAIT_STEPS (60 s here, three 20 s polls), fails with a message that says the step results never arrived, merged and not deployed",
-      s["rc"] == 1 and not s["deployed"] and s["sleeps"] == ["20"] * 3
-      and "FAILED at main's tests: the run on main for 0106c0d failed (finished successfully, but its step results never arrived in 1 min: no conclusion for \"run every suite, measured\"" in s["msg"]
-      and "merged, not deployed" in s["msg"], (s["rc"], s["sleeps"], s["msg"]))
+s = scenario("main-late-never", merge="ok", main="late", extra={"RELEASE_WAIT_STEPS": "60"})
+check("completed and green (conclusion success) but the step results never come: after RELEASE_WAIT_STEPS (60 s here, three 20 s polls) the run counts as green, never a failure: deploys, exit 0, nothing rolled back",
+      s["rc"] == 0 and s["deployed"] and s["sleeps"] == ["20"] * 3 and "FAILED" not in s["msg"] + s["log"] and "rolling back" not in s["log"], (s["rc"], s["sleeps"], s["msg"], s["log"]))
+check("…a WARNING line in the log says the step results never arrived and the run is counted as green, and the report goes to the keeper (not green) saying so",
+      "WARNING: main's run 7 on 0106c0d concluded success but GitHub never filled in its step results in 1 min: counted as green (not rolled back)" in s["log"]
+      and "counted as green, but finished successfully, but its step results never arrived in 1 min" in s["msg"] and "--release" not in s["msg"], (s["log"], s["msg"]))
 s = scenario("main-late-rerun", merge="ok", main="late,late,pending,pending,pending,pending,late,late,pass", extra={"RELEASE_WAIT_STEPS": "60"})
 check("the gap is seen, the run goes back to running for longer than RELEASE_WAIT_STEPS (a re-run keeps its run id), then completes with the gap again: a fresh wait starts, it does not fail at once on the old start; the wait line is logged twice",
-      s["rc"] == 0 and s["deployed"] and s["sleeps"] == ["20"] * 8 and s["log"].count("has not filled in its step results yet") == 2 and "never arrived" not in s["out"] + s["log"], (s["rc"], s["sleeps"], s["log"]))
-s = scenario("main-late-default-cap", merge="ok", main="late", live=NOTLIVE, extra={"RELEASE_WAIT_STEPS": ""})
-check("the default cap is 10 min: 30 polls of 20 s, then the step results never arrived in 10 min", s["rc"] == 1 and not s["deployed"] and s["sleeps"] == ["20"] * 30 and "never arrived in 10 min" in s["msg"], (len(s["sleeps"]), s["msg"]))
+      s["rc"] == 0 and s["deployed"] and s["sleeps"] == ["20"] * 8 and s["log"].count("has not filled in its step results yet") == 2 and "never arrived" not in s["out"] + s["log"] and "WARNING" not in s["log"], (s["rc"], s["sleeps"], s["log"]))
+s = scenario("main-late-default-cap", merge="ok", main="late", extra={"RELEASE_WAIT_STEPS": ""})
+check("the default cap is 10 min: 30 polls of 20 s, then the run counts as green with the step results never arrived in 10 min", s["rc"] == 0 and s["deployed"] and s["sleeps"] == ["20"] * 30 and "never arrived in 10 min" in s["msg"] and "rolling back" not in s["log"], (len(s["sleeps"]), s["msg"]))
 s = scenario("main-late-real-fail", merge="ok", main="fail", live=NOTLIVE, extra={"RELEASE_WAIT_STEPS": "60"})
 check("a completed suites step that failed for real fails at once: no sleep, the step named, never read as a gap",
       s["rc"] == 1 and not s["deployed"] and not s["sleeps"] and "run every suite, measured=failure" in s["msg"] and "never arrived" not in s["msg"], (s["sleeps"], s["msg"]))
