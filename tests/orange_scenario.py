@@ -5,7 +5,7 @@ The board has ONE orange: #ad4608 on the light theme, #f0a06a on the dark one. -
 
 Covers:
   * the scan: every colour literal (#rgb, #rrggbb, rgb(), rgba(), hsl(), hsla(), a CSS named colour of the orange family as a value; a data: SVG is decoded first) in the SOURCE of the repo (every .py, .css, .svg, .html, .js,
-    .sh, .toml, .md outside tests/, so ui/*.py, render.py, home.py, itempage.py, runners.py, search.py, publish.py, server.py and README.md alike) and in the RENDERED stylesheet and pages (home, Closed, For you, the item pages,
+    .sh, .toml, .md outside tests/, so ui/*.py, render.py, home.py, itempage.py, runners.py, search.py, publish.py, server.py and the docs pages alike) and in the RENDERED stylesheet and pages (home, Closed, For you, the item pages,
     the search box), and every token of the stylesheet as it resolves in each theme (a var() or color-mix() included), is put to the ORANGE BAND below. A colour in the band that is not on the allowlist fails with
     its file and literal. A form this scan cannot compute (oklch(), lab(), hwb(), color(), percent rgb) fails too, so a colour cannot hide in one;
   * the values: --orange, --acc, --call and --t-you are exactly #ad4608 (light) and #f0a06a (dark) in the stylesheet as the cascade gives it (--acc, --call and --t-you reference --orange and repeat no hex), the OS-dark block
@@ -156,8 +156,8 @@ if os.environ.get("ORANGE_LIST"):
 check("the old oranges are gone from the source: #a34a14, #b3541e, and the old tints #fbe9df, #fbf0e8, #2b2118 appear in no file outside tests/",
       not [(rel, o) for rel, text in sources() for o in ("#a34a14", "#b3541e", "#fbe9df", "#fbf0e8", "#2b2118") if o in text.lower()], None)
 # #3a2619 was one of the old tints and is now the small labels' fill (the shipped dark look): it stays out of everything but the places that name that fill
-check("the small-label fill #3a2619 appears only in the stylesheet's dark label tokens (ui/render.py), the color tool's shipped values (ui/colortool.py) and the README, nowhere else outside tests/",
-      sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}) == ["README.md", "ui/colortool.py", "ui/render.py"], sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}))
+check("the small-label fill #3a2619 appears only in the stylesheet's dark label tokens (ui/render.py), the color tool's shipped values (ui/colortool.py) and docs/color-tool.md, nowhere else outside tests/",
+      sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}) == ["docs/color-tool.md", "ui/colortool.py", "ui/render.py"], sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}))
 
 # the scan itself, on planted text: each way a rogue orange could hide is caught, and what is not a colour is left alone (the text is in memory; no file is written)
 def rogues(text, icon=False):

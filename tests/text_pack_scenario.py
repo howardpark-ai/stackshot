@@ -5,7 +5,7 @@ a throwaway repository. No network.
 Covers: a change that touches nothing gives the `nothing to read` line; what the pack holds (the affected tools' snapshot text, the diff, the changed functions,
 whether the PR changed the snapshot); the diff cut to its cap with the hunks of the changed tools kept first and the cut said; the command line (the `run` command that
 called a model is gone); the real server's tool names and helpers; and that no workflow job calls a model or signs in to AWS (the model job, the OIDC sign-in and the
-AWS variables are gone, the deterministic jobs stay) and that CONTRIBUTING and the README say so.
+AWS variables are gone, the deterministic jobs stay) and that CONTRIBUTING, the README and the docs say so.
 
     tests/run-suite text_pack        → exit 0 / 1"""
 import json, os, pathlib, re, subprocess, sys
@@ -146,10 +146,10 @@ check("the merge queue requires `suites` and not the removed job", 'required = [
 check("the tool-text job still reads the PR body through env and runs the touched gate", "tools/tool_text.py touched" in wf_text and wf["jobs"]["tool-text"]["env"]["PR_BODY"] == "${{ github.event.pull_request.body }}")
 src_tc = pathlib.Path(STACK, "tools/text_check.py").read_text(encoding="utf-8")
 check("text_check.py has no dependency block, no lock and no model or AWS call", "# /// script" not in src_tc and not pathlib.Path(STACK, "tools/text_check.py.lock").exists() and not re.search(r"(?i)boto3|bedrock|invoke_model", src_tc))
-contrib = pathlib.Path(STACK, "CONTRIBUTING.md").read_text(encoding="utf-8"); readme = pathlib.Path(STACK, "README.md").read_text(encoding="utf-8")
+contrib = pathlib.Path(STACK, "CONTRIBUTING.md").read_text(encoding="utf-8"); import _docs; readme = pathlib.Path(STACK, "README.md").read_text(encoding="utf-8") + _docs.pages()
 check("CONTRIBUTING says the reviewer reads the text before merge, that small changes are skipped, and that text_check.py pack is run by hand and by no workflow",
       "reviewer subagent" in contrib and "Small changes are skipped" in contrib and "text_check.py pack" in contrib and "no workflow runs it" in contrib, None)
-check("CONTRIBUTING and the README no longer describe a model check job or its variables", not re.search(r"tool-text-model: ignore|configure-aws|The model check", contrib + readme), None)
+check("CONTRIBUTING, the README and the docs no longer describe a model check job or its variables", not re.search(r"tool-text-model: ignore|configure-aws|The model check", contrib + readme), None)
 
 print(f"{len(fails)} FAILED of {ran[0]}" if fails else f"ok: text_pack scenario, {ran[0]} checks")
 sys.exit(1 if fails else 0)

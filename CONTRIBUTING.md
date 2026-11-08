@@ -33,8 +33,8 @@ becomes live. Nobody commits to `main` directly; nobody works in the production 
 A branch is now named `<kind>/<short-topic>` (step 1 above, and *Commit and PR text* below), which carries no agent name; the rest of this section describes the routing by an agent-named prefix, which applies only to a branch that still has one. The router reads the head branch of a pull request that anchor-hub reports (a CI result,
 a comment, a merge) and, when the prefix before the first slash is a background agent's name, passes the notice to that builder (router rule `anchor-builder`) and not to the item's
 front mover. A branch named `<kind>/<short-topic>` is of any other shape here; a branch of any other shape (a person's, `main`, a subagent's
-`worktree-agent-…`) routes as before, except that a CI result on any pull request, whoever's branch it is, goes to the project's builder too (router rule `anchor-ci`), never to a front agent. A builder's report on an item is written onto the item, not messaged to a front agent (the `message` tool; README, tool table);
-a hand-back to a front agent mover is held three minutes and dropped when the item is closed in that time (README, *A front agent mover hears of its item at two moments only*).
+`worktree-agent-…`) routes as before, except that a CI result on any pull request, whoever's branch it is, goes to the project's builder too (router rule `anchor-ci`), never to a front agent. A builder's report on an item is written onto the item, not messaged to a front agent (the `message` tool; docs/board-and-connector.md, tool table);
+a hand-back to a front agent mover is held three minutes and dropped when the item is closed in that time (docs/handoffs.md, *A front agent mover hears of its item at two moments only*).
 
 ## Commit and PR text
 
@@ -228,7 +228,7 @@ Every job of the two workflows (`tests.yml`, `clean-text.yml`) runs on GitHub's 
 
 ## When the stall pass misfires
 
-The stall pass (`stall.py`, README "The stall pass") moves an item on when its mover's pane has no turn running. When it takes a wrong step on an item, an agent does three things and never a fourth:
+The stall pass (`stall.py`, docs/stall-and-ladder.md "The stall pass") moves an item on when its mover's pane has no turn running. When it takes a wrong step on an item, an agent does three things and never a fourth:
 
 1. **Undo the step on the item** with `update` (the `get` tool says the same, and `update` points to it): set `mover` and `next` back after a hand-off (`cold`, `builder`); `status=open` with a new `next` after a close; nothing after a recovery request (the message to the fleet's builder cannot be unsent and the item was left with its mover). The `stall:` line stays in History as the record. A notice already sent (`resend`) cannot be unsent and needs nothing.
 2. **Fix the cause through a normal PR** to stackshot (this file's branch model), handed to `my-engineer`: a wrong step is `not_due`, `action` or the registry signal reading the item wrong.

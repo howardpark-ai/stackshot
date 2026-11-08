@@ -531,7 +531,7 @@ def _opener_rx(names: tuple[str, ...], to: bool):
 # [keywords.<feature>] in stackshot.toml; each list ADDS to the English defaults, and a missing section or key is an empty list (the English behavior, exactly).
 # A "words" key holds literal words or phrases (matched as written, case-insensitive for scripts that have case; a space inside a phrase stands for any run of white
 # space); a "patterns" key holds regular expressions (Python `re` syntax, matched case-insensitively), for a construct that words alone cannot spell.
-# KEYWORDS is the one list of the keys: the example file and the README document each, and notes() names a key that is not here or a value that is not a list of strings.
+# KEYWORDS is the one list of the keys: the example file and the docs/configuration*.md pages document each, and notes() names a key that is not here or a value that is not a list of strings.
 KEYWORDS: dict[str, dict[str, tuple[str, str]]] = {
     "step_commands": {
         "shell_names": ("words", "other-language names of a shell (the English ones are PowerShell, pwsh, WSL, terminal, shell, console): a text that names one asks the owner to run something there"),

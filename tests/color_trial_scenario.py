@@ -71,7 +71,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 LIB = pathlib.Path(STACK, "shared", "colortool.js").read_text(encoding="utf-8")
-SRCT = {p: pathlib.Path(STACK, p).read_text(encoding="utf-8") for p in ("ui/colortool.py", "ui/render.py", "README.md", "deploy.sh")}
+SRCT = {p: pathlib.Path(STACK, p).read_text(encoding="utf-8") for p in ("ui/colortool.py", "ui/render.py", "deploy.sh")}
 m_css = re.search(r"var CSS = \[(.*?)\]\.join\('\\n'\);", LIB, re.S)
 CSS_LIB = "\n".join(re.findall(r"'((?:[^'\\]|\\.)*)'", m_css.group(1))) if m_css else ""
 

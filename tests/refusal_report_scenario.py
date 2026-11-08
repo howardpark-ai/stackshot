@@ -317,8 +317,9 @@ check("4 unit: the audit unit runs the report after the audit run, with a timeou
       and [i for i, l in enumerate(unit) if l.startswith("ExecStart=")][0] < unit.index(post[0]), post)
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 check("4 example: the example config has a [refusal_report] section, off", re.search(r"(?m)^\[refusal_report\][^\n]*\nenabled = false", ex) is not None, ex[ex.find("[refusal_report]"):][:300])
-readme = pathlib.Path(STACK, "README.md").read_text(encoding="utf-8")
-check("4 readme: the report and the corrections are documented, and so are the config keys", "refused board writes" in readme.lower() and all(f"`refusal_report.{k}`" in readme for k in ("enabled", "to", "top", "sender")), None)
+import _docs
+readme = _docs.page("configuration")
+check("4 docs: the report and the corrections are documented, and so are the config keys", "refused board writes" in _docs.page("audit").lower() and all(f"`refusal_report.{k}`" in readme for k in ("enabled", "to", "top", "sender")), None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

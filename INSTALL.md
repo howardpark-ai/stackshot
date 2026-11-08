@@ -13,7 +13,7 @@ with systemd (the *server box*). Other machines where you run Claude Code get a 
 
 | You need | Why | Notes |
 |---|---|---|
-| A Linux box with systemd and a user account | the services run as systemd user units under your account; no `sudo` | they need lingering to keep running after you log out and to start at boot. On systemd 255 or later (Ubuntu 24.04, for one) your account may switch it on for itself without root (polkit allows `set-self-linger`), so setup does it; only where polkit refuses does setup print the one command root runs once, `sudo loginctl enable-linger <user>`. The README's [Scope](README.md#scope) section says which setups are supported |
+| A Linux box with systemd and a user account | the services run as systemd user units under your account; no `sudo` | they need lingering to keep running after you log out and to start at boot. On systemd 255 or later (Ubuntu 24.04, for one) your account may switch it on for itself without root (polkit allows `set-self-linger`), so setup does it; only where polkit refuses does setup print the one command root runs once, `sudo loginctl enable-linger <user>`. The [Scope](docs/scope.md) page says which setups are supported |
 | `git`, `curl`, `uv`, Python 3.12+ | code, units, the publisher's pushes | `uv` installs its own Python for the server; the small tools run on `/usr/bin/python3`. Optional: `npm`, for the latest Claude Code version in the Machines panel (without it the panel shows `?`); `gh`, only for a `github-release:` package in `[machines_panel]` or anchor-hub's GitHub receiver |
 | A public HTTPS name that reaches `127.0.0.1:8020` on the box | claude.ai and other machines must reach the connector | a Cloudflare tunnel, Caddy, nginx, Tailscale Funnel: your choice. If anchor-hub will take webhooks, also forward a second name or path to `127.0.0.1:8010` |
 | A Google account, and a Google Cloud project where you can create an OAuth client | sign-in for the connector and the board | the client is created in step 3 from a URI that setup prints |
@@ -167,7 +167,7 @@ plugin carries as well as the four above, and its hooks line says how many came 
 
 The page gate nags: a page debt is said at the next prompt, and again at every prompt while it is owed;
 nothing is held. The Stop hook asks nothing about pages. It holds a turn only for the board check, which is
-off until you set `[board_check] mode` (README, "The board check at the end of a turn"). The hooks read the
+off until you set `[board_check] mode` (docs/page-rule-and-hooks.md, "The board check at the end of a turn"). The hooks read the
 config at each run, so no restart is needed.
 
 ## 7. Another machine
@@ -238,7 +238,7 @@ python3 tools/project.py --by you create Acme --scope general
 That project has no page and none is made; add `--make-page --page projects/acme` for a page, or
 `--page https://example.com/acme` for a pointer. The other commands are `rename`, `move-page` (needs
 `[pages] flavor = "gbrain"`, so it refuses on plain pages), `archive` and `reopen`, `agent-add`, `agent-mandate`, `agent-retire`,
-`agent-rename`, `mirror` and `show`; `--dry-run` writes nothing. `README.md` ("Projects: the record first")
+`agent-rename`, `mirror` and `show`; `--dry-run` writes nothing. `docs/projects.md` ("Projects: the record first")
 has the table (so does the docstring at the top of `tools/project.py`; `--help` lists only the command names, and `<command> -h` the flags). The client API has the same verbs as `client.py post project`, `post project-agent`, `post project-agent-mandate`, `post project-agent-rename` and `post project-agent-retire`; `client.py post project -h` prints only a one-line usage. Each verb writes the record
 first and then, for a project with a page here, three lines of the page's frontmatter (`display-name:`,
 `agents:`, `status:`). On plain pages the server writes a page file into `paths.brain` and does not commit or
@@ -341,5 +341,5 @@ obsolete) or be dropped; the system unit files left disabled on disk are harmles
 | units | `~/.config/systemd/user/`: `stackshot.service`, `stackshot-reload.service` (reloads the server and anchor-hub when the config file changes: SIGHUP, no restart), `stackshot-reload.path` (the watcher that triggers it), `stackshot-puller.service`, and with their options `stackshot-portal-sync.service`, the portal drop-in `stackshot.service.d/portal-sync.conf` and `anchor-hub.service` | `install.sh` via setup |
 | hooks | `~/stackshot/client/hooks/` (in the checkout; `client.sh` for a machine with `--no-puller`) | the repository; `client install` wires them |
 
-A typical deployment is described in the README: one server box, further client machines, a gbrain brain as the page store,
+A typical deployment is described in [docs/overview.md](docs/overview.md): one server box, further client machines, a gbrain brain as the page store,
 an access proxy in front, and sala as the fleet operator.

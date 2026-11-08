@@ -67,7 +67,7 @@ operator_session = ""                               # the session of this name i
                                                     # Contract: none (it names a session; nothing is exchanged).
 tool_name = ""                                      # the fleet tool that relaunches panes, as the prose names it: "Pane recycle pending for … (<name> runs it)",
                                                     # "open this session in <name>", the update tool's recycle text. e.g. "sala". "" = "the fleet tool".
-                                                    # stackshot runs with no fleet tool at all; how one plugs in: the stackshot–sala contracts (README)
+                                                    # stackshot runs with no fleet tool at all; how one plugs in: the stackshot–sala contracts (docs/fleet-tool.md)
                                                     # Contract: none (prose only).
 recycle_when_idle = ""                              # the command that asks the fleet tool for a pane recycle once the box is idle, the reason appended as its
                                                     # last argument, e.g. "sala recycle --when-idle". Sessions are told to run it when no item covers a change,
@@ -498,7 +498,7 @@ tell_owner = true                                   # another session's close of
 handback_hold_seconds = 180                          # the one line a front agent keeper hears when a builder hands an item back to it alone is held this long; a close of the item
                                                     # inside the window drops it, so the keeper hears only the close. 0 = sent at once. A held line survives a restart (<state>/handback-held.json). Live
 
-[for_you]                                           # the owner's For you list: rows on the board for what he should see; see README
+[for_you]                                           # the owner's For you list: rows on the board for what he should see; see docs/for-you-and-closed.md
 slack_command = ""                                  # an urgent row (a due date within 24 h) is also posted once to Slack by this command: an argv
                                                     # (e.g. "/path/to/post-to-slack.sh"), the text on its standard input, exit 0 = posted. "" (the default) = no Slack
                                                     # path: stackshot holds no Slack posting credential of its own, so name a script that already posts

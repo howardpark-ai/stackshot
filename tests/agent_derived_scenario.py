@@ -167,7 +167,8 @@ check("text: create and update say a wait on an agent session that is not stored
       all("a wait on an agent session that is not stored as doing" in x.lower() and "3 hours from when" in x for x in (cd,)) and "hours from when it was set" in ud and "carries no expected time" in ud, None)
 check("text: …the check text says a check does not set the due", "A check does not set the item's due time" in cd and "3 hours from when the check was set" in cd, None)
 check("text: …no tool text still sends a check or a needs wait to the cap or the default for an agent", "check set + the cap" not in cd + ud and "needs set + the default" not in cd + ud, None)
-readme = pathlib.Path(STACK, "README.md").read_text(encoding="utf-8")
-check("text: the README states the rule and no longer the one-off re-judge", "Derived waits on an agent are hours too" in readme and "one-off re-judge" not in readme and "check set + the agent hours" in readme, None)
+import _docs
+readme = _docs.page("waiting-and-doing")
+check("text: the docs state the rule and no longer the one-off re-judge", "Derived waits on an agent are hours too" in readme and "one-off re-judge" not in _docs.pages() and "check set + the agent hours" in readme, None)
 
 print(("ok" if not fails else "FAILED") + f": agent derived scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

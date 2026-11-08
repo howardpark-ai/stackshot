@@ -1,5 +1,7 @@
 # Installing stackshot (board alone): procedure for an AI agent (draft v0.3)
 
+What this page covers: the same board-alone install written as a procedure for an AI assistant to follow. Back to the [README](../README.md).
+
 You are a Claude Code agent on the user's Linux box. Follow this file in order. Last checked against the `main` that carries this file (its git log names the commit). Line numbers cite that tree: a later commit moves them, so find the function or message named beside a cite when a number is off. `TODO(verify)` marks what the code could not confirm: check it live and tell the user what you found.
 The same procedure for the human reader is [board-alone-guide.md](board-alone-guide.md). The full reference is [INSTALL.md](../INSTALL.md).
 
@@ -405,7 +407,7 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T21 | Notice shows as waiting; router log says "no agent can take it" | Page and scope list no user-facing agent | router_live.py:494-495 | `TODO(verify)` whether a solo install ever produces one. Fix: list an agent in the page's `agents:` frontmatter, or set `[router] general_general` |
 | T22 | Router calls time out or fail | `claude` not on the login-shell PATH, not signed in, or slow | example `[router]` (`command`, `timeout_seconds`, `login_shell`); router.py:146 (timeout_seconds), router.py:1187 (login_shell) | Run `bash -lc 'claude --version'` as the user; sign in. The notice is retried then passed to a `-main` agent (router_live.py:18-19) |
 | T23 | Claude Code lists only `authenticate` stubs for the connector | Connector not signed in for the CLI | n/a | Hand-off H3, then a new session. `TODO(verify)` |
-| T24 | New connector tools or parameters do not appear after an update | claude.ai caches the tool list for about a day | README, "A new tool or parameter" | Wait, or call the new form through a portal. Not needed for a board-alone setup |
+| T24 | New connector tools or parameters do not appear after an update | claude.ai caches the tool list for about a day | docs/board-and-connector.md, "A new tool or parameter" | Wait, or call the new form through a portal. Not needed for a board-alone setup |
 | T25 | Config edit seems ignored | Restart-only key | `RESTART_ONLY` in config.py; [INSTALL.md](../INSTALL.md) "Changing the config" | `systemctl --user restart stackshot.service`; for `[server] port`/`[instance] timezone` run `./install.sh units` first |
 | T26 | A page edited in an Obsidian vault does not settle a session's page debt | Freshness is read from the server's checkout (last commit time or file mtime) | pages.py:423-437 | The server must pull that repo. The default layout (pages inside the data repo) is pulled by the publisher at publish.py:80-81. A separate pages repo is not pulled by anything: add a timer |
 | T27 | `update` refused: "a wait on your own item needs its reason" | `[wait_guard]`: a bare `wake`, or a `next` line whose step is dated later than today, with no `wait_reason`. A `wake` together with `hold=true` and `wait_basis` is not judged and needs none (seen accepted on a scratch instance); neither is a wait on another item (`after`), on the owner or an outside party (`needs`) | self_wait.py, example `[wait_guard]` | Pass `wait_reason=<what the step waits on that is not available now, at least 15 characters>`. If nothing blocks the step, do it now. A refusal that says the step could be done now came from one model call: it is not a server fault |
@@ -413,7 +415,7 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 
 ## 7. Using the board afterwards
 
-You operate the board only through the connector tools, `mcp__claude_ai_Stackshot__*` in Claude Code. Do not edit the files under `~/stackshot-data/board-data/` by hand: the server is the only writer (README, "The board and the publisher"). Do not call the GitHub API for items: sync is off.
+You operate the board only through the connector tools, `mcp__claude_ai_Stackshot__*` in Claude Code. Do not edit the files under `~/stackshot-data/board-data/` by hand: the server is the only writer (docs/board-and-connector.md, "The board and the publisher"). Do not call the GitHub API for items: sync is off.
 
 Start each session by reading the brief. The SessionStart hook injects it. Call `brief` again for the full list, and `rules` for the rulebook (`~/stackshot-data/RULES.md`).
 
@@ -443,7 +445,7 @@ Rules that apply on every write:
 
 ### 7a. Project verbs
 
-A project is an entry in `project-record.json` (store folder), keyed by an id `prj_<8 hex>`, written record first; then, when the project has a page in this instance's page store, three lines of the page's frontmatter (`display-name:`, `agents:`, `status:`) are written from the record. A page pointer is optional: it may be a page key, a link to another knowledge base, or nothing (README, "Projects: the record first"; project_verbs.py). Run the verbs from the checkout, `python3 ~/stackshot/tools/project.py [--by <label>] [--dry-run] [--json] <command> ...`: the global flags go before the command (after it argparse refuses them, exit 2). Each ran on a scratch instance for this guide, except where a row says otherwise.
+A project is an entry in `project-record.json` (store folder), keyed by an id `prj_<8 hex>`, written record first; then, when the project has a page in this instance's page store, three lines of the page's frontmatter (`display-name:`, `agents:`, `status:`) are written from the record. A page pointer is optional: it may be a page key, a link to another knowledge base, or nothing (docs/projects.md, "Projects: the record first"; project_verbs.py). Run the verbs from the checkout, `python3 ~/stackshot/tools/project.py [--by <label>] [--dry-run] [--json] <command> ...`: the global flags go before the command (after it argparse refuses them, exit 2). Each ran on a scratch instance for this guide, except where a row says otherwise.
 
 | Command | Effect | Result seen |
 |---|---|---|

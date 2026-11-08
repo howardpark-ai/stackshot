@@ -1,5 +1,7 @@
 # The Windows client
 
+What this page covers: how a Windows machine joins the board as a client, with its token, its puller and its Claude Code hooks. Back to the [README](../README.md).
+
 A Windows machine where Claude Code runs is a client of the stackshot server, like any other machine: it holds a
 machine token, runs one puller (or none, below), and has the page hooks in its Claude Code settings. Its config is
 written by `client install` from the instance's own settings, read from the server; the two files below hold the token
