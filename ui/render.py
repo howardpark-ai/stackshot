@@ -471,18 +471,18 @@ def open_ask(r):
     get, and read as waiting on him). "" otherwise; the stored line stays (a decision put back brings it back), and the item
     page's History names it on the line where the decision left the needs."""
     return ask_of(r) if r.get("status") != "completed" and needs_kind(r) == "call" else ""
-# A design decision's mockup (a claude.ai artifact page) is linked on the question itself: the home row and the item page's Ask block draw
+# A design decision's mockup (a claude.ai artifact page, or a fleet tool's /mockup/<n> page) is linked on the question itself: the home row and the item page's Ask block draw
 # "Mockup ↗" beside the Decide part, so the owner opens the design from the ask he answers and not only from the item's background.
-ARTIFACT_RX = re.compile(r"https://claude\.ai/(?:code/)?artifact/[^\s<>()\[\]\"'`]+")
+from render import mockup_hit   # the one rule for what counts as a mockup link (render.py): server.py's write gate uses it too
 def mockup_url(r):
-    """The first claude.ai artifact link of an open decision item, looked for in the ask, then the options, then the description, then next; "" when it names
+    """The first mockup link (a claude.ai artifact page or a /mockup/<n> page) of an open decision item, looked for in the ask, then the options, then the description, then next; "" when it names
     none or is no open decision."""
     if r.get("status") == "completed" or needs_kind(r) != "call": return ""
     m = r.get("metadata") or {}
     opts = " ".join(f'{o.get("label") or ""} {o.get("line") or ""}' for o in (m.get("options") or []) if isinstance(o, dict))
     for text in (ask_of(r), opts, str(r.get("description") or ""), str(m.get("next") or "")):
-        hit = ARTIFACT_RX.search(text)
-        if hit: return hit.group(0).rstrip(".,;:!?")
+        hit = mockup_hit(text)
+        if hit: return hit
     return ""
 def mockup_link(r, shown=""):
     """The "Mockup ↗" link drawn beside an open decision's question (an outside link: a new tab), "" when the item names no mockup, or when `shown`, the question text
@@ -548,6 +548,7 @@ def link_label(u):
     if "notion" in h: return "Notion"
     if "docs.google.com" in h: return {"/document": "Google Doc", "/spreadsheets": "Google Sheet", "/presentation": "Google Slides"}.get(next((k for k in ("/document", "/spreadsheets", "/presentation") if path.startswith(k)), ""), "Google Docs")
     if "drive.google.com" in h: return "Drive"
+    if "claude.ai" not in h and mockup_hit(u) == u: return "mockup"   # a fleet tool's mockup page: a plain link, never embedded (its pages share the terminal's address)
     if "claude.ai" in h: return "session"
     if "slack.com" in h: return "Slack"
     return h
