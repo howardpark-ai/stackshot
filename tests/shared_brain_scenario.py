@@ -5,7 +5,8 @@ real gbrain CLI (a fake one answers a read from the brain's copy and logs every 
 Covers: a `[[brains]]` entry marked `shared = true` (and `[gbrain] shared = true` for the default brain) makes every page-store write for its slugs (put, create, a timeline
 line) refuse with a line that names the mark, leaves the page file as it was, and never calls the gbrain CLI; an unmarked brain writes as before; a project verb on a
 shared page writes the record and answers mirror state "retired" with the reason, no page is made for `make_page`, and the same verb on a page of the unmarked brain still
-writes the lines; `[pages] copy_project_lines = false` retires the copy on every brain with one switch (the record is right, the page is not touched) and turning it back on
+writes the lines; `[pages] copy_project_lines = false` retires the copy on every brain with one switch (the record is right, the page is not touched; a new project's page is still made on an unshared brain with
+none of the copied lines, and nothing is made on a shared brain) and turning it back on
 writes the lines from the record; a page of a shared brain owes no page update (`_owed_mark` charges nothing, `_owed_settle` drops a debt charged before the mark);
 config.notes names a `shared` or `copy_project_lines` that is not a boolean; `projects.fields` reads the record first and the page's lines for a project the record does
 not cover (with the source of each field), keeps answering after the page's lines stop being written, resolves a sub-page to its owner and a project with no page, and the
@@ -144,7 +145,44 @@ check("copy_project_lines = false: the record has the agent, the mirror state is
 res = pv.agent_add("projects/alpha", "home-sparrow-eng", False, "builds", by="home-sparrow-main", io=IO)
 check("…on the default brain's other page too (every brain)", res["mirror"]["state"] == "retired" and "home-sparrow-eng" not in text("brain", "projects/alpha"), res["mirror"])
 check("…and a dry-run mirror of a page does not report drift either (nothing to write)", pv.mirror(G, IO, dry=True)["state"] == "retired")
+# page creation does not depend on the switch: a new project's page is made on an unshared brain, with none of the copied lines written, and a shared brain gets nothing
+CALLS.write_text("")
+res = pv.create("home-offsw-name", "home", page="projects/offsw-one", make_page=True, io=IO)
+OF = res["project"]; ofpage = (T / "brain/projects/offsw-one.md")
+check("copy_project_lines = false: create with make_page makes the page on the default brain (state written, the note says the copy is retired)",
+      res["mirror"]["state"] == "written" and "copy_project_lines" in res["mirror"]["note"] and ofpage.exists() and ents()[OF]["page"] == "projects/offsw-one", (res["mirror"], ofpage.exists()))
+body = ofpage.read_text(encoding="utf-8") if ofpage.exists() else ""
+check("…the page is the template's skeleton: its sections are there, no agents block, and the record's name is not copied onto it",
+      all(h in body for h in ("## Goal", "## Current state", "## Decisions", "## Open questions", "## Open work", "## Where things are", "## Timeline")) and "agents:" not in body
+      and "display-name: home-offsw-name" not in body and "status: active" in body, body[:600])
+check("…and the record holds the project's own name", ents()[OF]["name"] == "home-offsw-name")
+rev = ofpage.read_bytes()
+res = pv.agent_add("projects/offsw-one", "home-offsw-name-main", True, "talks", by="x", io=IO)
+check("…a later verb copies nothing onto it (retired), the record has the agent, the page is as it was", res["mirror"]["state"] == "retired" and "home-offsw-name-main" in agents(OF) and ofpage.read_bytes() == rev, res["mirror"])
+m = pv.mirror(OF, IO, make_page=True)
+check("…mirror with make_page on a page that is there changes nothing (retired)", m["state"] == "retired" and ofpage.read_bytes() == rev, m)
+res = pv.create("home-offsw-two", "home", by="x", io=IO)
+m = pv.mirror(res["project"], IO, make_page=True)
+check("…a project with no page has none made by mirror", m["state"] == "none" and not (T / "brain/projects/home-offsw-two.md").exists(), m)
+pid2 = pv.create("home-offsw-three", "home", page="projects/offsw-three", io=IO)["project"]
+m = pv.mirror(pid2, IO, make_page=True, dry=True)
+check("…mirror --make-page --dry-run for a pointed page that is not there says would-write and writes nothing", m["state"] == "would-write" and not (T / "brain/projects/offsw-three.md").exists(), m)
+m = pv.mirror(pid2, IO)
+check("…without make_page a page that is not there stays unmade (retired: the copy is off)", m["state"] == "retired" and not (T / "brain/projects/offsw-three.md").exists(), m)
+m = pv.mirror(pid2, IO, make_page=True)
+check("…mirror --make-page for a pointed page that is not there makes it", m["state"] == "written" and (T / "brain/projects/offsw-three.md").exists() and "agents:" not in text("brain", "projects/offsw-three"), m)
+shr_before = {f.name for f in (T / "shared/projects").iterdir()}
+res = pv.create("home-offsw-shr", "home", page="projects/shr-offsw", make_page=True, io=IO)
+check("…on a shared brain nothing is made with the switch off either: retired, no file, no CLI call",
+      res["mirror"]["state"] == "retired" and "shared = true" in res["mirror"]["note"] and {f.name for f in (T / "shared/projects").iterdir()} == shr_before and calls() == [], (res["mirror"], calls()))
+_cfg.CFG.setdefault("gbrain", {})["shared"] = True
+res = pv.create("home-offsw-dflt", "home", page="projects/offsw-dflt", make_page=True, io=page_debt.page_io())
+_cfg.CFG["gbrain"].pop("shared")
+check("…nor on the default brain when it is marked shared", res["mirror"]["state"] == "retired" and "[gbrain] shared = true" in res["mirror"]["note"] and not (T / "brain/projects/offsw-dflt.md").exists(), res["mirror"])
 _cfg.CFG["pages"]["copy_project_lines"] = True
+res = pv.create("home-onsw-name", "home", page="projects/onsw-one", make_page=True, io=IO)
+check("control, switch on: create with make_page still makes the page and writes the record's name onto it",
+      res["mirror"]["state"] == "written" and "display-name: home-onsw-name" in text("brain", "projects/onsw-one"), (res["mirror"], text("brain", "projects/onsw-one")))
 m = pv.mirror(G, IO)
 check("switch back on: the next mirror writes the page from the record, the agent added meanwhile included", m["state"] == "written" and "home-gamma-docs: keeps the docs" in text("brain", "projects/gamma"), (m, text("brain", "projects/gamma")))
 m = pv.mirror(S1, IO)

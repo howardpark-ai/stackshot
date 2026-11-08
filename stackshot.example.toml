@@ -47,8 +47,8 @@ timeline_source = "stackshot"                       # the source word on the tim
 copy_project_lines = true                           # the copy of a project's record onto its page: `display-name:`, `status:` and the `agents:` block, written after every project verb (project_verbs.mirror).
                                                     # false retires the copy on every brain at once: the record is the one place those fields live, and a script that needs them reads
                                                     # `stackshot projects fields <project>` (the record first, the page's lines for a project the record does not cover yet). A brain marked
-                                                    # `shared` never gets the copy, whatever this says. false also stops the creation of a page for a new project (`create --make-page` writes the
-                                                    # record and no page). Turn it off once nothing outside stackshot reads the page lines
+                                                    # `shared` never gets the copy, whatever this says. false does not stop the creation of a page for a new project (`create --make-page` still makes it from the template on a brain not marked `shared`, with no copied
+                                                    # line written onto it). Turn it off once nothing outside stackshot reads the page lines
 
 [steps]                                             # where the owner runs the commands of a board step (the text of the create and update tools is built from this at start: restart-only)
 owner_shell = ""                                    # "powershell" = the owner runs a step's commands in PowerShell on a Windows machine: a command in a next line that starts "<owner>:" must say where it runs ("In PowerShell: ...")
