@@ -91,7 +91,7 @@ from stackshot.core import config as _cfg; from stackshot.audit import audit; fr
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
-if min((now + ZONE_OFFSET) % 86400, 86400 - (now + ZONE_OFFSET) % 86400) < 600: now -= 900     # a run within 10 minutes of local midnight starts 15 minutes earlier: the sections that read record times a few seconds after `now` must stay on one calendar day
+if not 600 <= (now + ZONE_OFFSET) % 86400 <= 86400 - 1200: now -= 1800     # a run from 20 minutes before to 10 minutes after local midnight starts 30 minutes earlier: the sections that read record times after `now` (the registry's second run is at now + 600) must stay on one calendar day
 ZONE = dt.timezone(dt.timedelta(seconds=ZONE_OFFSET)); OWNER = "00000000-0000-4000-8000-000000000001"
 local = lambda ts: dt.datetime.fromtimestamp(ts, ZONE).strftime("%Y-%m-%d %H:%M")
 fails = []; ran = []
