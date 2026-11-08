@@ -24,7 +24,7 @@ from stackshot.web.common import OWNER, _clip_line, _needs_kinds
 _OPT_FORM = (f'options=[{{"label": "<a short name>", "line": "<one sentence, at most {_rmod.OPTION_LINE_MAX} characters>", "recommended": true}}, '
              f'{{"label": …, "line": …, "recommended": false}}, …] ({_rmod.OPTIONS_MIN}–{_rmod.OPTIONS_MAX} entries, exactly one recommended)')
 _OPT_RELAUNCH = (" If this tool shows no options parameter, this session's cached tool list predates it: claude.ai refreshes it on its own "
-                 "within about a day, and a relaunch does not. Meanwhile write through the MCP Portal: portal_codemode_execute with "
+                 "within about a day, and a relaunch does not. Meanwhile write through the Portal connector: portal_codemode_execute with "
                  "codemode.stackshot_update({item_id, options, ask}) (or codemode.stackshot_create).")
 
 
