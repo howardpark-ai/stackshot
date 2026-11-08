@@ -309,10 +309,10 @@ def shift_proof(label, src_store, base, anchors_file=None):
     stamped_total = 0
     for name, t in shifts:
         R_ = pathlib.Path(_scratch.mkdtemp(prefix="phasesweep-shift-"))
-        real_store, real_anc = server.STORE, server._anc.FILE
+        real_store, real_anc = server._store.STORE, server._anc.FILE
         try:
             shutil.copytree(src_store, R_ / "store", ignore=shutil.ignore_patterns(".git", "*.tmp", ".*"))
-            server.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
+            server._store.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
             items0 = SP.load_dir(R_ / "store")
             opens = sorted((g for g, it in items0.items() if it.get("status") == "open"), key=SP.num)
             with frozen(t):
@@ -331,7 +331,7 @@ def shift_proof(label, src_store, base, anchors_file=None):
                 again = server._phase_sweep()
             check(f"9 {label} {name}: …and a second sweep writes nothing (mtimes equal)", again == [] and ms == {p: p.stat().st_mtime_ns for p in (R_ / "store").rglob("*.json")}, again)
         finally:
-            server.STORE, server._anc.FILE = real_store, real_anc
+            server._store.STORE, server._anc.FILE = real_store, real_anc
             shutil.rmtree(R_, ignore_errors=True)
     return stamped_total
 

@@ -818,7 +818,7 @@ with TestClient(app) as c:
     check("titles: the board keeps the instance's title as it is in every title bar and tab",
           all(x.status_code == 200 for x in _pages.values())
           and all("stackshot: example" in _site(_pages[u].text) for u in ("/", "/closed", "/search?q=item")), {u: (x.status_code, _site(x.text), _tab(x.text)) for u, x in _pages.items()})
-    _bt = server._rmod.Board(str(server.STORE)); _md = _bt.markdown()
+    _bt = server._rmod.Board(str(server._store.STORE)); _md = _bt.markdown()
     check("titles: Board.title is the plain instance title, and the markdown render (board.md) heads with it", _bt.title == "stackshot: example" and _md.startswith("# stackshot: example\n"), (_bt.title, _md[:60]))
     check("…and the files next to the board are served as before", c.get("/healthz").text == "ok" and c.get("/board.md", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code in (200, 503)
           and c.get("/nothing.txt", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code == 404)
