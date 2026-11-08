@@ -88,7 +88,7 @@ _ITEM_LINES = [   # the item as get shows it, which create, update and complete 
     ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"), ("stackshot/waits/waiting.py", "line"),
 ]
 _WRITE_NOTES = [   # the notes a create or an update reply ends with
-    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_capped_note"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/server.py", "_options_note"), ("stackshot/web/server.py", "_owner_param"),
+    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_capped_note"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/decision_gates.py", "_options_note"), ("stackshot/web/server.py", "_owner_param"),
     ("stackshot/web/server.py", "_owner_then_default"),
 ]
 _GET_ONLY = [("stackshot/web/server.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
