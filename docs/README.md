@@ -36,7 +36,7 @@ These pages hold the detail behind the [README](../README.md). Each page starts 
 ## Hooks and the audit
 
 - [The page rule, the client hooks and the board check](page-rule-and-hooks.md): The page debt a state-changing write records, the four hook verbs on each machine, and the board check at the end of a turn.
-- [The daily board audit](audit.md): The daily audit in script and agent mode, the Audits page, its checks (page agent lines, project registry, off-map sessions, board checks), the weekly refusal count and how findings reach their mover.
+- [The board audits](audit.md): The audits in script and agent mode, the three paces they run at, the Audits page, its checks (page agent lines, project registry, off-map sessions, board checks), the weekly refusal count and how findings reach their mover.
 
 ## Machines and clients
 

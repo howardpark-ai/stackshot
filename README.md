@@ -35,7 +35,7 @@ In any session, call `create` with a subject that starts with one of your prefix
 
 - **Board and connector.** One server holds the items, publishes the board and serves the tools that sessions call. [Read more](docs/board-and-connector.md).
 - **Project pages and hooks.** Every item names a project page that tells the next session where things stand. Small scripts on each machine remind a session to update that page after it changes an item. [Read more](docs/page-rule-and-hooks.md).
-- **Daily audit.** Once a day the board is read for work that is stuck, unowned or filed wrong, and each finding goes to the session that can fix it. [Read more](docs/audit.md).
+- **Audits.** The board is read on a schedule for work that is stuck, unowned or filed wrong, and each finding goes to the session that can fix it. The Audits page lists the findings. [Read more](docs/audit.md).
 - **Puller and inbox.** A small program on each machine keeps it up to date and brings it the notices and messages meant for its sessions. [Read more](docs/puller-and-inbox.md).
 - **anchor-hub and the router.** anchor-hub watches outside services such as Slack or GitHub for things your items depend on. The router then decides, for each notice, which session should hear about it and which should not be interrupted. [Read more](docs/router.md).
 - **Item model.** At any time an item is either being worked on, with one session or person who has the move, or waiting for something outside the board, such as a date or another item. [Read more](docs/item-model.md).

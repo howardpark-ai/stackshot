@@ -1,6 +1,6 @@
-# The daily board audit
+# The board audits
 
-What this page covers: the daily audit in script and agent mode, the Audits page, its checks (page agent lines, project registry, off-map sessions, board checks), the weekly refusal count and how findings reach their mover. Back to the [README](../README.md).
+What this page covers: the audits in script and agent mode, at the three paces they run at, the Audits page, its checks (page agent lines, project registry, off-map sessions, board checks), the weekly refusal count and how findings reach their mover. Back to the [README](../README.md).
 
 **The daily board audit.** With `[audit] enabled = true` the board is read once a day and what was found is reported
 (`audit.py`, `audit_run.py`). `[audit] mode` says who reads it. **`"script"`** (the default) runs a script: the
