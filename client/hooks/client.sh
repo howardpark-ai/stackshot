@@ -7,4 +7,4 @@ HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKOUT="$(cd "$HOOKS/../.." && pwd)"
 . "$HOOKS/_python.sh"
 [ -n "$PY" ] || exit 0
-exec $PY "$CHECKOUT/client.py" "$@"
+exec $PY "$CHECKOUT/stackshot/fleet/client.py" "$@"

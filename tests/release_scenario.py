@@ -453,7 +453,7 @@ check("two releases: each deploy is pinned to the commit its own main run passed
       a and b and a["deploy_to"] == "0106c0de0106c0de0106c0de0106c0de0106c0de" and b["deploy_to"] == "0107c0de0107c0de0107c0de0107c0de0107c0de", (a and a["deploy_to"], b and b["deploy_to"]))
 
 # ---- 12. deploy.sh's pin: the real deploy.sh in a throwaway checkout of a throwaway origin, four commits on main;
-# config.py, units/scope.sh, install.sh and curl are stubs, and the commits change only text files, so nothing restarts
+# stackshot/core/config.py, units/scope.sh, install.sh and curl are stubs, and the commits change only text files, so nothing restarts
 dp = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-deploy-")); dirs.append(dp)
 g("init", "-q", "--bare", "-b", "main", str(dp / "origin.git")); g("clone", "-q", str(dp / "origin.git"), str(dp / "box"))
 bx = dp / "box"; cs = []
@@ -462,7 +462,7 @@ for i in range(1, 5):
     (bx / f"notes{i}.txt").write_text(f"{i}\n")
     if i == 1:   # the real deploy.sh and its stubs are part of the tree from c1 on
         shutil.copy(os.path.join(STACK, "deploy.sh"), bx / "deploy.sh"); (bx / "units").mkdir()
-        (bx / "config.py").write_text('import sys\nif sys.argv[1:] == ["get", "server.port"]: print("1")\n')
+        (bx / "stackshot/core").mkdir(parents=True); (bx / "stackshot/core/config.py").write_text('import sys\nif sys.argv[1:] == ["get", "server.port"]: print("1")\n')
         (bx / "units/scope.sh").write_text('server_ctl() { :; }\nxdg_repair() { :; }\n')
         (bx / "install.sh").write_text("#!/bin/sh\n"); (bx / "install.sh").chmod(0o755)
     g("add", "-A", cwd=bx); g("commit", "-qm", f"c{i}", cwd=bx); cs.append(g("rev-parse", "HEAD", cwd=bx))
@@ -1236,6 +1236,29 @@ check("--status of a release with no log: the unit's state and nothing else", st
 
 wf = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text()
 check("the step names main_green reads are tests.yml's own", all(f"- name: {n}\n" in wf for n in ("run every suite, measured", "audit the selection")))
+
+# ---- 12b. deploy.sh's restart plan for the package layout: the real deploy.sh, --dry-run, in a throwaway checkout of a throwaway origin;
+# the plan is what a change between two commits restarts (the units start the server and the hub through the project's pinned dependencies and stackshot/cli.py)
+pl = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-plan-")); dirs.append(pl)
+g("init", "-q", "--bare", "-b", "main", str(pl / "origin.git")); g("clone", "-q", str(pl / "origin.git"), str(pl / "box"))
+pbx = pl / "box"
+shutil.copy(os.path.join(STACK, "deploy.sh"), pbx / "deploy.sh"); (pbx / "units").mkdir()
+(pbx / "stackshot/core").mkdir(parents=True); (pbx / "stackshot/core/config.py").write_text('import sys\nif sys.argv[1:] == ["get", "server.port"]: print("1")\n')
+(pbx / "units/scope.sh").write_text('server_ctl() { :; }\nxdg_repair() { :; }\n')
+(pbx / "install.sh").write_text("#!/bin/sh\n"); (pbx / "install.sh").chmod(0o755)
+g("add", "-A", cwd=pbx); g("commit", "-qm", "base", cwd=pbx); pbase = g("rev-parse", "HEAD", cwd=pbx)
+def plan(*files):
+    g("reset", "-q", "--hard", pbase, cwd=pbx)
+    for f in files:
+        (pbx / f).parent.mkdir(parents=True, exist_ok=True); (pbx / f).write_text(f"{f} changed\n")
+    g("add", "-A", cwd=pbx); g("commit", "-qm", "change " + " ".join(files), cwd=pbx); g("push", "-q", "-f", "origin", "HEAD:main", cwd=pbx); g("reset", "-q", "--hard", pbase, cwd=pbx)
+    r = subprocess.run(["bash", str(pbx / "deploy.sh"), "--dry-run"], cwd=pbx, env={**genv, "PATH": os.environ.get("PATH", "")}, capture_output=True, text=True, timeout=60)
+    return r.returncode, [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("restarts:")], r.stdout + r.stderr
+for what, files, want in (("pyproject.toml alone", ("pyproject.toml",), 2), ("uv.lock alone", ("uv.lock",), 2),
+                          ("stackshot/cli.py", ("stackshot/cli.py",), 2), ("an icon (the server only)", ("icons/a.png",), 1), ("a doc only", ("docs/notes.md",), 0)):
+    rc, got, out = plan(*files)
+    units = got[0].split()[1:] if got and got[0] != "restarts: none" else []
+    check(f"deploy.sh plan: {what} restarts {want} unit(s), the server first", rc == 0 and len(got) == 1 and len(units) == want and (not units or units[0] == "stackshot.service"), (rc, got, out[-300:]))
 
 long = [f"{n} ({k})" for n, k in POLLS if k > MAX_POLLS]
 check(f"no scenario polls more than {MAX_POLLS} times (one that waits main's run out to the 3 h cap: pass RELEASE_CAP_MAIN, as most do)", not long, long)

@@ -52,7 +52,7 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 | claude.ai callbacks | already in `[auth] allowed_client_redirect_uris` | example `[auth]` |
 | Units (always) | `stackshot.service`, `stackshot-reload.path`, `stackshot-reload.service`, `stackshot-puller.service`, in `~/.config/systemd/user/` | install.sh |
 | Units (off by default) | `anchor-hub.service`, `stackshot-portal-sync.service` (+ drop-in), `stackshot-audit.{service,timer}` | install.sh |
-| Server command | `uv run --locked --script ~/stackshot/server.py` | units/stackshot.service.in:15 |
+| Server command | `uv run --project ~/stackshot --locked --extra server stackshot server` | units/stackshot.service.in:15 |
 | Python | system `python3` 3.12+ (CLI, hooks, puller at `/usr/bin/python3`); server 3.12+ via uv | stackshot; stackshot/web/server.py; units/stackshot-puller.service.in |
 | Connector name | `Stackshot` (set on claude.ai) | [INSTALL.md](../INSTALL.md) step 5 |
 | Claude Code tool names | `mcp__claude_ai_Stackshot__<tool>` | [INSTALL.md](../INSTALL.md) step 5 |
@@ -348,7 +348,7 @@ Expected: the call succeeds and returns an id.
 Check all three:
 
 ```bash
-python3 ~/stackshot/client.py get brief | head -20
+~/stackshot/bin/stackshot client get brief | head -20
 ```
 
 Expected: the item is listed.
@@ -463,7 +463,7 @@ A project is an entry in `project-record.json` (store folder), keyed by an id `p
 
 An item can be filed on a project by its id (`project=prj_...`), also for one with no page. A project with no page is absent from `stackshot/fleet/client.py get projects` and `stackshot/fleet/client.py get project <prj_id>` answers 404 for it (the registry is built from pages), though `stackshot/tools/project.py show <prj_id>` reads it and an item filed on it works with an explicit `mover`. There is no verb that deletes a project. Hand-made page files are still read by the registry and get a record entry at their first verb.
 
-Reads from a shell on the box, with the box's own token: `python3 ~/stackshot/client.py get brief`, `get whoami`, `get items <session>`, `get rules`.
+Reads from a shell on the box, with the box's own token: `~/stackshot/bin/stackshot client get brief`, `get whoami`, `get items <session>`, `get rules`.
 
 ## 8. Updating
 

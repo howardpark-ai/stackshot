@@ -4,7 +4,7 @@ After=network-online.target
 
 [Service]
 Environment=STACKSHOT_CONFIG=@CONFIG@
-ExecStart=@UV@ run --locked --script @CHECKOUT@/anchor-hub.py
+ExecStart=@UV@ run --project @CHECKOUT@ --locked --extra anchor-hub stackshot anchor-hub
 # systemctl --user reload anchor-hub.service (stackshot-reload.path, on a config change): SIGHUP, the hub re-reads stackshot.toml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
@@ -12,7 +12,7 @@ RestartSec=10
 Environment=PYTHONUNBUFFERED=1 TZ=@TZ@
 # Install: ./install.sh units
 # the clean reboot protocol: SIGTERM to the hub only — its handler lets running anchor-relay deliveries
-# finish, queues pending follow-ups and saves every read position (cursors.json); the reboot hook is stackshot/reboot-hooks/anchor-hub-hook
+# finish, queues pending follow-ups and saves every read position (cursors.json); the reboot hook is reboot-hooks/anchor-hub-hook in the checkout
 KillMode=mixed
 TimeoutStopSec=60
 # boot order gbrain → stackshot → anchor-hub: a user unit cannot order itself after system units, so wait for stackshot

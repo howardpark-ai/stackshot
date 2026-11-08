@@ -1,6 +1,6 @@
-# stackshot-audit.service — one run of the board audit (audit.py cue scheduled), followed by the rulebook scan. With [audit] mode = "script" (the default)
-# it runs audit.py's script in this unit: the field checks in code, then one `claude -p` call per suspect item, at most [audit] max_calls (40) a run,
-# one after the other; with mode = "agent" it pushes one line to the audit agent's session through push.py instead, as the board's "Audit now" button did before.
+# stackshot-audit.service — one run of the board audit (`stackshot audit cue scheduled`), followed by the rulebook scan. With [audit] mode = "script" (the default)
+# it runs the audit module's script in this unit: the field checks in code, then one `claude -p` call per suspect item, at most [audit] max_calls (40) a run,
+# one after the other; with mode = "agent" it pushes one line to the audit agent's session through the push program instead, as the board's "Audit now" button did before.
 # A run already in progress, or [audit] enabled = false, refuses it. Started by stackshot-audit.timer. Install: ./install.sh units (only with [audit] enabled = true)
 [Unit]
 Description=stackshot — run the board audit now
@@ -19,12 +19,12 @@ TimeoutStartSec=2h
 WorkingDirectory=@CHECKOUT@
 Environment=STACKSHOT_CONFIG=@CONFIG@
 Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=@UV@ run --locked --script @CHECKOUT@/audit.py cue scheduled
+ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot audit cue scheduled
 # the rulebook scan runs after the run, so after its page checks (no model; one note per instruction file with a stale tool, parameter, sala flag or retired term, to its keeper; the run
 # never reads its result; in mode = "agent" the unit only pushes a cue and exits, so the scan runs before the agent works, as it did before). ExecStartPost runs only when the run ended without error: a run that failed or was refused (one already in progress) skips the scan until the next run. The "-" keeps
 # a failed scan from failing the unit, `timeout 300` keeps a slow one from holding the unit past five minutes, and [rulebook_scan] enabled = false (the default) makes it a no-op. A note already sent
 # and still true is not sent again, so the unit running twice a day does not repeat one
-ExecStartPost=-/usr/bin/timeout 300 @UV@ run --locked --script @CHECKOUT@/tools/rulebook_scan.py run
+ExecStartPost=-/usr/bin/timeout 300 @UV@ run --project @CHECKOUT@ --locked python -m stackshot.tools.rulebook_scan run
 # the weekly count of refused board writes (no model; a message that asks nothing, once per finished Monday-to-Sunday week, so the unit's two runs a day send it once); [refusal_report] enabled = false (the default) makes it a no-op.
-# Run through audit.py (a locked uv script), like the cue above
-ExecStartPost=-/usr/bin/timeout 120 @UV@ run --locked --script @CHECKOUT@/audit.py refusals
+# Run through `stackshot audit` (the locked project environment), like the cue above
+ExecStartPost=-/usr/bin/timeout 120 @UV@ run --project @CHECKOUT@ --locked stackshot audit refusals

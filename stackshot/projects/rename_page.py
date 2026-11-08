@@ -308,7 +308,7 @@ def main():
                 _prj.ensure_ids([old])      # a page the id file has never seen gets its id now, so there is one to move
                 print(f"  project id {_prj.rename(old, new)} now stands for {new}")
             except Exception as e:
-                print(f"  FAIL project id of {old} not moved to {new} ({e}); run: python3 {_paths.ROOT}/projects.py rename {old} {new}"); bad += 1
+                print(f"  FAIL project id of {old} not moved to {new} ({e}); run: python3 {_paths.ROOT}/stackshot/projects/projects.py rename {old} {new}"); bad += 1
     sys.exit(1 if bad else 0)
 
 if __name__ == "__main__":

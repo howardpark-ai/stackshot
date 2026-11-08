@@ -12,7 +12,7 @@
 # summary; details: <state>/anchor-hub/hook.log.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"; Q="$HERE/reboot-queue.py"
-if ! A=$(python3 "$HERE/../config.py" state anchor-hub 2>&1); then echo "anchor-hub ${1:-} failed: ${A##*$'\n'}"; exit 1; fi   # a removed mode in the config: config.py's line is the summary
+if ! A=$(python3 "$HERE/../stackshot/core/config.py" state anchor-hub 2>&1); then echo "anchor-hub ${1:-} failed: ${A##*$'\n'}"; exit 1; fi   # a removed mode in the config: config.py's line is the summary
 . "$(cd "$HERE/.." && pwd)/units/scope.sh"   # xdg_repair on source
 LOG="$A/hook.log"; PAUSED="$A/paused-hub.json"; UNIT=anchor-hub.service
 mkdir -p "$A"
@@ -27,7 +27,7 @@ for k in sys.argv[2].split("."): d=(d or {}).get(k) if isinstance(d,dict) else N
 print("" if d is None else (json.dumps(d) if isinstance(d,(dict,list,bool)) else d))' "$1" "$2"; }
 paused_note() { [ -f "$PAUSED" ] && echo ", paused since $(jget "$PAUSED" at)"; }
 queued_note() { python3 "$Q" count --source hub | python3 -c 'import json,sys; d=json.load(sys.stdin); n,s=d["items"],d["sessions"]; print(", %d queued for %d session(s)" % (n, s) if n else "")'; }
-healthy() { python3 - "$A/status.json" "${1:-0}" "$(python3 "$HERE/../config.py" get instance.timezone 2>/dev/null)" <<'PY'
+healthy() { python3 - "$A/status.json" "${1:-0}" "$(python3 "$HERE/../stackshot/core/config.py" get instance.timezone 2>/dev/null)" <<'PY'
 import json,sys,datetime,zoneinfo
 try: d=json.load(open(sys.argv[1]))
 except Exception: sys.exit(1)

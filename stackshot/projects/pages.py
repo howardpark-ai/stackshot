@@ -60,7 +60,7 @@ import glob, json, os, re, shlex, subprocess, sys, time, datetime
 
 HOME = os.path.expanduser("~")
 from stackshot import paths as _paths
-HERE = str(_paths.ROOT)      # the checkout: the commands this module prints for a session name pages.py at its root (the allow rules match that path)
+HERE = str(_paths.ROOT)      # the checkout: the commands this module prints for a session name this file by its package path (the allow rules match that path)
 from stackshot.core import config as _cfg   # stackshot.toml through the repo checkout: the same paths on every machine (stdlib tomllib)
 from stackshot.projects import project_registry as _pr   # the project record's entries, laid over the registry's page lines (stdlib only)
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id
@@ -1308,7 +1308,7 @@ def describe(key, v, strict=False):
     item = f"board item {shown_id(tid_of(task) or task)}" if task else "a board item"     # as shown, never g7
     if key.startswith(NO_PROJECT):
         return (f"{item} changed at {t} but carries no `metadata.project` — set it (TaskUpdate metadata) and update that page. "
-                f"Only if the item does carry one (the reply did not say it, and the server could not be asked): `python3 {HERE}/pages.py clear '{key}'`.")
+                f"Only if the item does carry one (the reply did not say it, and the server could not be asked): `python3 {HERE}/stackshot/projects/pages.py clear '{key}'`.")
     head = (f"{item} changed at {t} but the project page `{key}` " + ("has no Current-state edit since (a timeline line alone does not settle it)" if strict else "has not been committed since") + " — update the page ")
     kb = _brains.for_key(key)
     if _cfg.page_flavor() == "gbrain" or not kb.default:    # a second brain's page is written through gbrain only (its copy here is read-only)
@@ -1321,7 +1321,7 @@ def describe(key, v, strict=False):
         else:       # no pages copy on this machine (a client box): say where the page is, in one parenthesis
             how = (f"(edit the page `{key}.md` in a checkout of the pages repository, which this machine has none of: its Current state, "
                    "and a dated line under its Timeline; commit and push). ")
-    return head + how + f"Only if the board edit needed no page change: `python3 {HERE}/pages.py clear {key}`."
+    return head + how + f"Only if the board edit needed no page change: `python3 {HERE}/stackshot/projects/pages.py clear {key}`."
 
 def page_link(key):
     """Where a reader opens the whole page: the mirror URL, or the file when no mirror is configured."""
@@ -1723,7 +1723,7 @@ def cmd_clear(key, force=False):
     print(f"Kept, not yours: {key} is still owed by " + "; ".join(f"{w} ({', '.join(dict.fromkeys(ws))})" for w, ws in seen.items())
           + (f". The server's entry {', '.join(shared)} names no writer, so it cannot be split and stays while they owe" if shared else "")
           + ". That debt settles when they update the page. Only if their board edit needed no page change either: "
-          + f"`python3 {HERE}/pages.py clear {shlex.quote(key)} --force` clears every writer's.")
+          + f"`python3 {HERE}/stackshot/projects/pages.py clear {shlex.quote(key)} --force` clears every writer's.")
     return 3
 
 def cmd_pending():

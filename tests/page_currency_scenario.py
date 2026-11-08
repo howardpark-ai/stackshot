@@ -319,7 +319,7 @@ check("flavor gbrain: the nag is today's text, byte for byte", gb == (
       f"(a dated line: the gbrain connector's add_timeline_entry; any other edit: get_page with section or grep (the smallest read that shows the text to change; a whole read only for a rewrite or a change spanning the page), then edit_page "
       f"with expected_revision (the read's revision) and edits [{{old_text, new_text}}]; put_page only for a whole rewrite; "
       f"never edit or git inside the brain mirror). "
-      f"Only if the board edit needed no page change: `python3 {p.HERE}/pages.py clear projects/beta`."), gb)
+      f"Only if the board edit needed no page change: `python3 {p.HERE}/stackshot/projects/pages.py clear projects/beta`."), gb)
 check("flavor gbrain: the nag names add_timeline_entry, then edit_page, and put_page only for a whole rewrite; no retired script, no push override",
       gb.index("add_timeline_entry") < gb.index("edit_page")
       and "put_page only for a whole rewrite" in gb and "with expected_revision" in gb

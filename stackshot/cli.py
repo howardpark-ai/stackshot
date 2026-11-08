@@ -13,8 +13,9 @@
                              `stackshot server`, `stackshot puller --once`, `stackshot audit run` ... (PROGRAMS below lists them; `stackshot client`
                              with anything but install or mint is the client program)
 
-How to run it: `uv run stackshot ...` in the checkout (the package is installed by `uv sync`), `python3 -m stackshot ...` or `python3 stackshot ...` from the
-checkout's root on a box with no uv, or `bin/stackshot ...`. The scripts at the checkout's root (pages.py, client.py, ...) still work: they forward to the package.
+How to run it: `uv run stackshot ...` in the checkout (the package is installed by `uv sync`); on a box with no uv, `bin/stackshot ...` from anywhere, or
+`python3 -m stackshot ...` from the checkout's root (`python3 stackshot ...` does not run: a folder started that way puts itself, not the checkout, on the import path).
+The scripts at the checkout's root (pages.py, client.py, ...) still forward to the package until Sun Nov 22nd 2026; callers use the program names or the package paths.
 Each takes -h. INSTALL.md is the walk-through.
 """
 from __future__ import annotations
@@ -845,8 +846,8 @@ def client_config_text(settings: dict, url: str) -> str:
 
 def puller_hint() -> str:
     if os.name == "nt":
-        return f"run `pythonw {HERE / 'puller.py'}` as a scheduled task at logon (docs/windows.md)"
-    return f"run `python3 {HERE / 'puller.py'}` as a service or scheduled task"
+        return f"run `pythonw {HERE / 'stackshot' / 'fleet' / 'puller.py'}` as a scheduled task at logon (docs/windows.md)"
+    return f"run `python3 {HERE / 'stackshot' / 'fleet' / 'puller.py'}` as a service or scheduled task"
 
 
 def cmd_client_install(a: argparse.Namespace) -> int:
@@ -998,9 +999,18 @@ PROGRAMS = {
 
 
 def run_program(name: str, args: list[str]) -> int:
-    """Run the package's module for `name` as __main__ with sys.argv = [its name, *args]; the module's own exit code is this one's."""
+    """Run the package's module for `name` as __main__ with sys.argv = [`stackshot <name>`, *args]; the module's own exit code is this one's.
+    runpy puts the module's file in sys.argv[0] and, from Python 3.14, argparse names a parser after `python -m <module>`: a parser the module made
+    without a prog is given `stackshot <name>`, so `stackshot ghmigrate -h` prints that, the command that was typed."""
     import runpy
-    sys.argv = [PROGRAMS[name][0], *args]
+    sys.argv = [f"stackshot {name}", *args]
+    _init = argparse.ArgumentParser.__init__
+
+    def init(self, *a, **kw):
+        if not a and kw.get("prog") is None:
+            kw["prog"] = f"stackshot {name}"
+        _init(self, *a, **kw)
+    argparse.ArgumentParser.__init__ = init
     try:
         runpy.run_module(PROGRAMS[name][0], run_name="__main__", alter_sys=True)
     except SystemExit as e:
@@ -1008,6 +1018,8 @@ def run_program(name: str, args: list[str]) -> int:
             return e.code or 0
         print(e.code, file=sys.stderr)
         return 1
+    finally:
+        argparse.ArgumentParser.__init__ = _init
     return 0
 
 

@@ -151,6 +151,27 @@ from stackshot import cli
 progs = [n for n, (m, _) in cli.PROGRAMS.items() if not (ROOT / m.replace(".", "/")).with_suffix(".py").is_file()]
 check("every program of the command line names a module that exists", not progs, progs)
 
+rc, out, err = run([str(ROOT / "bin/stackshot"), "ghmigrate", "-h"], cwd="/")
+check("stackshot <program> -h prints the usage line under the name typed (`stackshot ghmigrate`), not `python3 -m <module>`", rc == 0 and out.startswith("usage: stackshot ghmigrate "), (rc, out[:200], err[-200:]))
+check("... and the parser class is the stock one again once the program has run", "stackshot" not in __import__("argparse").ArgumentParser.__init__.__code__.co_names)
+
+# ---- no caller outside the package names a forwarder (the forwarders go on Sun Nov 22nd 2026)
+# a caller is a command that runs a root script, or a python -c that imports a root module, in a file that is not a forwarder, a test or the package; a comment line names things and runs nothing
+FWD_NAMES = sorted({pathlib.PurePosixPath(k).stem for k in FWD if k.count("/") == 0} | {pathlib.PurePosixPath(k).stem for k in FWD if k.startswith("tools/")})
+CALLER_FILES = [p for p in ROOT.rglob("*") if p.is_file() and not any(s in p.relative_to(ROOT).parts[:1] for s in ("stackshot", "tests", ".git", ".venv", "docs", "ui", "fonts", "icons", "shared"))
+                and p.suffix in ("", ".sh", ".in", ".py", ".yml", ".toml") and str(p.relative_to(ROOT)) not in FWD and p.name != "uv.lock"]
+_N = "|".join(re.escape(n) for n in FWD_NAMES)
+RUNS = re.compile(r"(?:\$CHECKOUT|\$HERE|\$\{HERE\}|@CHECKOUT@)(?:/\.\.)?/(?:tools/)?(?:" + _N + r")\.py\b(?!\.lock)|(?:python3?|--script|exec|\$PY)\s+\"?(?:\./)?(?:tools/)?(?:" + _N + r")\.py\b(?!\.lock)")
+IMPORTS = re.compile(r"python3? -c .*(?:['\"]|;\s*)(?:import|from) (" + "|".join(re.escape(n) for n in FWD_NAMES) + r")\b")
+callers = []
+for p in CALLER_FILES:
+    try: lines = p.read_text(encoding="utf-8").splitlines()
+    except (UnicodeDecodeError, OSError): continue
+    for i, l in enumerate(lines, 1):
+        if l.lstrip().startswith("#"): continue
+        if RUNS.search(l) or IMPORTS.search(l): callers.append(f"{p.relative_to(ROOT)}:{i}: {l.strip()[:110]}")
+check("no unit, script, hook or workflow of the checkout runs a root forwarder or imports a root module by its old name", not callers, callers[:8])
+
 # ---- the project
 import tomllib
 pp = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))

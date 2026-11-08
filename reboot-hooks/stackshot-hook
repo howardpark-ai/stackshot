@@ -13,12 +13,12 @@
 # and a user manager still out of reach fails status, flush-stop and start with their summary line instead of reading as "stopped".
 # The last stdout line is the one-line summary; details: <state>/anchor-hub/hook.log.
 set -u
-HERE="$(cd "$(dirname "$0")" && pwd)"; Q="$HERE/reboot-queue.py"; PUB="$HERE/../publish.py"
-if ! A=$(python3 "$HERE/../config.py" state anchor-hub 2>&1); then echo "stackshot ${1:-} failed: ${A##*$'\n'}"; exit 1; fi   # a removed mode in the config: config.py's line is the summary
+HERE="$(cd "$(dirname "$0")" && pwd)"; Q="$HERE/reboot-queue.py"; PUB="$HERE/../stackshot/web/publish.py"
+if ! A=$(python3 "$HERE/../stackshot/core/config.py" state anchor-hub 2>&1); then echo "stackshot ${1:-} failed: ${A##*$'\n'}"; exit 1; fi   # a removed mode in the config: config.py's line is the summary
 LOG="$A/hook.log"; PAUSED="$A/paused-msg.json"; UNIT=stackshot.service
 . "$(cd "$HERE/.." && pwd)/units/scope.sh"   # xdg_repair, user_manager_ok
 CTL="systemctl --user"
-HEALTH="http://$(python3 "$HERE/../config.py" get server.host):$(python3 "$HERE/../config.py" get server.port)/healthz"
+HEALTH="http://$(python3 "$HERE/../stackshot/core/config.py" get server.host):$(python3 "$HERE/../stackshot/core/config.py" get server.port)/healthz"
 mkdir -p "$A"
 log() { echo "$(date -u +%FT%TZ) stackshot-hook $*" >> "$LOG"; }
 say() { log "$1"; echo "$1"; }
@@ -51,7 +51,7 @@ case "$verb" in
     flush-stop)
         reachable flush-stop
         if active; then
-            out=$(cd "$(dirname "$PUB")" && python3 "$PUB" flush 2>&1); rc=$?; log "publish.py flush: $out"
+            out=$(cd "$HERE/.." && python3 "$PUB" flush 2>&1); rc=$?; log "publish.py flush: $out"
             [ $rc -eq 0 ] || { say "stackshot flush-stop failed: $(tail -1 <<<"$out" | cut -c1-90)"; exit 1; }
             last=$(tail -1 <<<"$out")
             ctl stop "$UNIT" || { say "stackshot flush-stop failed: $CTL stop $UNIT failed"; exit 1; }

@@ -12,7 +12,7 @@ Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
 # caio (FastMCP's OAuth store, through aiofile) tries io_uring first. When the user's locked-memory allowance is spent by
 # other processes' rings, that setup fails with ENOMEM and board sign-in with it; Linux AIO needs none.
 Environment=CAIO_IMPL=linux
-ExecStart=@UV@ run --locked --script @CHECKOUT@/server.py
+ExecStart=@UV@ run --project @CHECKOUT@ --locked --extra server stackshot server
 # systemctl --user reload stackshot.service (stackshot-reload.path, on a config change): SIGHUP, the server re-reads stackshot.toml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

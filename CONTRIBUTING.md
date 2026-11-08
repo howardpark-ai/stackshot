@@ -109,8 +109,12 @@ and runs the module's `main` when started as a script. It holds no code: do not 
 
 **Dependencies.** `pyproject.toml` lists them and `uv.lock` pins them; `uv lock` after an edit, and commit both. The base install has none. Extras: `server` (the MCP server, the publisher),
 `anchor-hub`, `icons`; the `tests` dependency group is what the suites run with. `exclude-newer` holds a release date: a newer upload is not resolved until someone moves the date.
-The root scripts that units start as `uv run --locked --script` (`server.py`, `anchor-hub.py`, `anchor-hub-google-auth.py`, `audit.py`, `publish.py`, `ghmigrate.py`) and `tools/make_icons.py`,
-`tools/migrate_model.py`, `tools/close_marks_backfill.py`, `tools/rulebook_scan.py` are forwarders that keep their PEP 723 header and their `<script>.lock` until the units move to the package; CI
+The units run the package, not the forwarders: `uv run --project <checkout> --locked [--extra server|anchor-hub] stackshot <program>` for the server, anchor-hub and the audit (one project environment,
+`.venv` in the checkout, from `pyproject.toml` and `uv.lock`), and `/usr/bin/python3 <checkout>/stackshot/fleet/puller.py` for the puller. A script, hook or allow rule outside the package runs a module that needs only
+the standard library (`client`, `puller`, `config`, `push`, `pages`, `connectors`) by its path, `python3 <checkout>/stackshot/<area>/<module>.py`, or any program as `<checkout>/bin/stackshot <program>`; Python that
+imports one writes `from stackshot.<area> import <module>` with the checkout on `sys.path`. `tests/package_layout_scenario.py` fails when a unit, script, hook or workflow of this repository still runs a forwarder.
+The root scripts that used to be started as `uv run --locked --script` (`server.py`, `anchor-hub.py`, `anchor-hub-google-auth.py`, `audit.py`, `publish.py`, `ghmigrate.py`) and `tools/make_icons.py`,
+`tools/migrate_model.py`, `tools/close_marks_backfill.py`, `tools/rulebook_scan.py` keep their PEP 723 header and their `<script>.lock` for a caller outside this repository that still starts them; CI
 fails when one of those locks no longer matches its header (`uv lock --script <file>`). They go away with the forwarders.
 
 **The test suites share one environment, and carry no inline metadata.** uv keys a PEP 723 script's cached environment by the
