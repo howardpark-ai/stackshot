@@ -562,7 +562,7 @@ check("the items API (the web board and sala read it) carries mover, expected_by
 from starlette.testclient import TestClient
 with TestClient(server.mcp.http_app()) as _tc:
     _r = _tc.get("/audit/status")
-check("the audit status carries no waiting counts: GET /audit/status answers the audit's own status and no `waiting` key", _r.status_code == 200 and "waiting" not in _r.json() and set(_r.json()) == set(server._audit.status()) | {"runner", "phase_sweep"}, (_r.status_code, _r.text[:200]))      # the audit's own keys, and the minute set's runner record (runner.py); never a waiting one
+check("the audit status carries no waiting counts: GET /audit/status answers the audit's own status and no `waiting` key", _r.status_code == 200 and "waiting" not in _r.json() and set(_r.json()) == set(server._audit.status()) | {"runner", "phase_sweep", "card"}, (_r.status_code, _r.text[:200]))      # the audit's own keys, the minute set's runner record (runner.py), the phase sweep's counters and the audit shortlist the side panel polls (card); never a waiting one
 
 # a session mover stored as a transcript id shows as its name wherever a wait is displayed (the Owner field's resolver); an id that does not resolve stays raw
 _own = U["home-owner"]

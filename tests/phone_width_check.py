@@ -69,6 +69,14 @@ def audit_run(rec):
     for f in (T / "state/audit").glob("run-*.json"): f.unlink()
     if rec is not None: (T / "state/audit" / f"run-{now.date().isoformat()}.json").write_text(json.dumps(rec))
 audit_run({"started": (now - 20 * H).timestamp(), "finished": (now - 20 * H).timestamp() + 1200, "items_read": 9, "findings": [{"id": "a1"}, {"id": "a2"}], "by_category": {"stale": 1, "no-ask": 1}, "by_session": {}})   # the board's Audit card has its three rows
+def findings_log(on):
+    """The findings log the Audit card and the Audits page count from: a few appearances in the last 24 hours (and one older), or none."""
+    f = T / "state/audit/findings-log.jsonl"
+    if not on: f.unlink(missing_ok=True); return
+    rows = [(1, "silence", f"board#{1}", "stale"), (2, "filing", f"board#{2}", "stuck-elsewhere"), (3, "filing", f"board#{3}", "board checks:why-not-now"), (4, "run", f"board#{4}", "ask-missing"), (30, "run", f"board#{5}", "stuck-elsewhere")]
+    f.write_text("".join(json.dumps({"at": (now - r[0] * H).timestamp(), "source": r[1], "id": r[2], "kind": r[3], "agent": "ops-falcon-main", "project": "projects/alpha",
+                                     "detail": "waits on something that is closed, so the wait reads as stuck " + "x" * 40}) + "\n" for r in rows), encoding="utf-8")
+findings_log(True)
 A, X = "22222222-2222-4222-8222-222222222222", "44444444-4444-4444-8444-444444444444"
 LONG = "ops-falcon-engineer-background-builder-with-a-long-name"
 sess = {"11111111-1111-4111-8111-111111111111": {"name": "ops-falcon", "machine": "a", "url": "https://claude.ai/code/session_s", "seen": "x"},
@@ -247,8 +255,9 @@ _vj = json.loads((T / "state/site/versions.json").read_text()); _vj["packages"][
 b2 = render.Board(str(T / "store"), now=now + datetime.timedelta(minutes=2))
 (OUT / "index2.html").write_text(b2.html(), encoding="utf-8")
 # the Audit card in six states: the page the server draws and the status JSON the page script reads (the script draws the same rows)
-import audit as _audit
+import audit as _audit, audit_overview as _ov
 AUDIT_STATES = {}
+(OUT / "audits-findings.html").write_text(render.Board(str(T / "store"), now=now).audits_html(), encoding="utf-8")      # the Audits page with findings and a finished run
 _ago = lambda h: (now - h * H).timestamp()
 for _nm, _rec in (("none", None),
                   ("findings", {"started": _ago(20), "finished": _ago(20) + 1200, "findings": [{"id": "a1"}, {"id": "a2"}], "by_category": {"stale": 1, "no-ask": 1}}),
@@ -259,8 +268,10 @@ for _nm, _rec in (("none", None),
                   ("crashed-no-start", {"finished": None, "findings": []})):
     audit_run(_rec)
     (OUT / f"audit-{_nm}.html").write_text(render.Board(str(T / "store"), now=now).html(), encoding="utf-8")
-    AUDIT_STATES[_nm] = _audit.status(now.timestamp())
+    AUDIT_STATES[_nm] = {**_audit.status(now.timestamp()), "card": _ov.card(now.timestamp())}
 audit_run(None)
+findings_log(False)
+(OUT / "audits-empty.html").write_text(render.Board(str(T / "store"), now=now).audits_html(), encoding="utf-8")      # ... and with nothing yet: no run, no findings
 import search
 (OUT / "runners.html").write_text(ui_runners.page_html(b, {"errors": {}, **runners._CACHE["snap"]}), encoding="utf-8")   # the Runners page: the same title bar and side panel, from the snapshot handed above
 # the Runners column, one runner per line: a machine with six runners (long names)
@@ -270,13 +281,13 @@ _six = {"errors": {}, **runners._CACHE["snap"], "runners": [{"box": "box-a", "re
 RUNNER_LISTS = {"runners page": OUT / "runners-six.html"}
 # the pages that start with home's header: the title, the five count cards and the search box
 HEADER_PAGES = {"item": b.item_html("a1"), "item (answer box)": b.item_html("a60", answer={"action": "/items/a60/answer", "token": "T", "sent": ""}), "project": b.routing_html("projects/alpha"),
-                "Projects": b.projects_html(), "Closed": b.landed_html(), "Search": None, "runners": None}
+                "Projects": b.projects_html(), "Closed": b.landed_html(), "Search": None, "runners": None, "Audits": (OUT / "audits-findings.html").read_text(encoding="utf-8")}
 HEADER_FILES = {}
 search.sync(b); (OUT / "results.html").write_text(ui_search.results_html(b, "item"), encoding="utf-8")   # the search's results page: its results are the fixture's items, projects and sessions
 HEADER_PAGES["Search"] = ui_search.results_html(b, "item"); HEADER_PAGES["runners"] = ui_runners.page_html(b, _six)
 for _nm, _html in HEADER_PAGES.items():
     HEADER_FILES[_nm] = OUT / ("header-page-" + re.sub(r"\W+", "-", _nm).strip("-") + ".html"); HEADER_FILES[_nm].write_text(_html, encoding="utf-8")
-PAGES = {"board": OUT / "index.html", "project page": OUT / "project.html", "landed page": OUT / "landed.html", "item page": OUT / "items/a1.html", "results page": OUT / "results.html", "runners page": OUT / "runners.html", "item page (waiting)": OUT / "items/a4.html", "item page (closed)": OUT / "items/a3.html", "step page (with a draft)": OUT / "items/a67.html", "step page (numbered)": OUT / "items/a68.html", "step page (long history entry)": OUT / "items/a69.html", "ask page (long history entry)": OUT / "items/a70.html", "checklist page": OUT / "items/cl1.html", "step page (his Next lines)": OUT / "items/cl2.html",
+PAGES = {"board": OUT / "index.html", "project page": OUT / "project.html", "landed page": OUT / "landed.html", "item page": OUT / "items/a1.html", "results page": OUT / "results.html", "runners page": OUT / "runners.html", "audits page": OUT / "audits-findings.html", "audits page (empty)": OUT / "audits-empty.html", "item page (waiting)": OUT / "items/a4.html", "item page (closed)": OUT / "items/a3.html", "step page (with a draft)": OUT / "items/a67.html", "step page (numbered)": OUT / "items/a68.html", "step page (long history entry)": OUT / "items/a69.html", "ask page (long history entry)": OUT / "items/a70.html", "checklist page": OUT / "items/cl1.html", "step page (his Next lines)": OUT / "items/cl2.html",
          "comment box (doing)": OUT / "items/cb-doing.html", "comment box (waiting)": OUT / "items/cb-waiting.html", "comment box (verifying)": OUT / "items/cb-verifying.html", "comment box (decision)": OUT / "items/a60.html"}
 
 
@@ -897,7 +908,7 @@ with sync_playwright() as p:
         machines: M.flatMap(c => q('.mh, .mr .lbl', c)).map(L), runners: R.flatMap(c => q('.rn', c)).map(L),
         anchorhub: A.flatMap(c => q(':scope > :nth-child(odd)', c)).map(L),
         audit: U ? q('.lbl:not(.mh)', U).map(L) : [], name: U ? [L(q('.mh', U)[0])] : [], auditLabels: U ? q('.lbl:not(.mh)', U).map(e => e.textContent) : [], auditValues: U ? q('.val', U).map(e => e.textContent) : [],
-        button: U ? [L(q('#audit-now', U)[0])] : [],
+        button: U ? [L(q('#audit-now', U)[0])] : [], auditName: U ? [q('.mh a.nm', U)[0].textContent, q('.mh a.nm', U)[0].getAttribute('href')] : [],
         nameH: {machines: M.length ? r(q('.mh', M[0])[0]).height : null, anchorhub: A.length ? r(q('b.lbl', A[0])[0]).height : null, audit: U ? r(q('.mh', U)[0]).height : null},
         auditOrder: U ? (() => { const lb = q('.lbl', U), nm = r(q('.mh', U)[0]), bt = r(q('#audit-now', U)[0]), cd = r(U), rg = document.createRange(); rg.selectNodeContents(q('.mh', U)[0].firstChild); const tx = rg.getBoundingClientRect();      // the name row first, the button on it (beside the name, vertically centred), the labels under it one under the other
           return [lb.every((e, i) => !i || r(e).top > r(lb[i - 1]).top), bt.top >= nm.top - 1 && bt.bottom <= nm.bottom + 1, Math.abs((bt.top + bt.bottom) / 2 - (nm.top + nm.bottom) / 2) <= 2, bt.right <= cd.right - 9 && bt.right >= cd.right - 11,
@@ -919,8 +930,9 @@ with sync_playwright() as p:
         near = lambda xs: len(xs) >= 1 and all(abs(x - ref) <= 0.5 for x in xs)
         check(f"{tag}: every panel card's text starts at the same left edge: Machines, Runners, Anchor hub and Audit labels, the Audit card's name and the GitHub calls card (the Audit now link sits at the right end of the name row)",
               ref is not None and near(a["machines"]) and near(a["runners"]) and near(a["anchorhub"]) and near(a["audit"]) and near(a["name"]) and len({x for c in a["cards"] for x in c}) == 1, a)
-        check(f"{tag}: the Audit card is named 'Daily audit' with the Audit now link on the name's row, to its right, vertically centred and at the card's right padding; the labels (last audit, findings, next) start at Anchor hub's left x, one under the other, under the name row",
-              a["auditLabels"] == ["last audit", "findings", "next"] and a["auditValues"][1] == "2" and ref is not None and near(a["audit"]) and near(a["name"]) and a["auditOrder"] == [True, True, True, True, True, True], a)
+        check(f"{tag}: the Audit card is named 'Audits' (a link to the Audits page) with the Audit now link on the name's row, to its right, vertically centred and at the card's right padding; the eight group names start at Anchor hub's left x, one under the other, under the name row, each with its number of audits and its findings in 24 hours (a dash for the two groups that keep no log)",
+              a["auditLabels"] == ["Silence", "Filing", "Wording", "Dates", "Proof and patterns", "Pages and agents", "Fleet and services", "Text and rules"] and a["auditValues"][::2] == ["7", "12", "12", "3", "2", "5", "5", "5"]
+              and a["auditValues"][1::2] == ["1", "2", "1", "0", "0", "0", "\u2013", "\u2013"] and a["auditName"] == ["Audits \u2197", "/audits"] and ref is not None and near(a["audit"]) and near(a["name"]) and a["auditOrder"] == [True, True, True, True, True, True], a)
         b = a["btn"]
         check(f"{tag}: Audit now reads as a text link, not a button: a <button type=button> with no class, the accent (--acc) as text, no border, no fill, no padding, the card's 12px text at weight 400, no underline at rest, no taller than the name row",
               b["tag"] == "BUTTON" and b["type"] == "button" and b["cls"] == "" and b["color"] == colour(pg, "var(--acc)") and b["bw"] == "0px" and b["bg"] == "rgba(0, 0, 0, 0)" and b["pad"] == "0px"

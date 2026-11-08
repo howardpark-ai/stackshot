@@ -2242,14 +2242,14 @@ check("errors: stale threshold = 1.5 × the timer period (10 min → 15 min), dr
 _ws = he[he.find('<div id="status">'):he.find('<section id="your-move">')]
 _as = he[he.find('<section id="audit-panel">'):he.find("</aside>")]
 check("audit: the line sits in the side panel's own Audit section (open), hidden and empty (a .pc card, the Anchor hub's), the board's zone on it, and the old place under the counts holds none",
-      _as.startswith('<section id="audit-panel"><details class="fold" data-fold="audit-panel" open><summary><h2 class="hdr">Audit</h2></summary><div id="audit" class="pc audit" data-tz="Asia/Dubai" hidden><b class="lbl mh">Daily audit<button type="button" id="audit-now">Audit now</button></b><span class="a-txt"></span> <span class="a-msg" role="status" aria-live="polite"></span></div></details><button type="button" class="pgrip" id="pgrip-audit-panel"')
+      _as.startswith('<section id="audit-panel"><details class="fold" data-fold="audit-panel" open><summary><h2 class="hdr">Audit</h2></summary><div id="audit" class="pc audit" data-tz="Asia/Dubai" hidden><b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now">Audit now</button></b><span class="a-txt"></span> <span class="a-msg" role="status" aria-live="polite"></span></div></details><button type="button" class="pgrip" id="pgrip-audit-panel"')
       and 'id="audit' not in _ws and he.count('id="audit"') == 1 and he.count('id="audit-now"') == 1 and he.find('<aside id="panel"') < he.find('id="audit"'), (_as[:500], _ws[:300]))
 check("audit: with the audit off the whole Audit section is hidden with its line (nothing but an empty heading would show), unless it holds the GitHub calls card", "#audit-panel:has(#audit[hidden]):not(:has(#ghcalls)){display:none}" in he)
 check("audit: hidden means hidden, whatever the grid display (the card is a .pc grid)", ".audit[hidden]{display:none}" in he)
 check("audit: the rows are grid items out of a display:contents wrapper, so they carry the .pc>* rules themselves: a value wraps and may shrink",
       ".audit .a-txt{display:contents}.audit .lbl,.audit .val{min-width:0}.audit .val{white-space:normal;overflow-wrap:anywhere}" in he)
 check("audit: Audit now is a text link, not a .b button: a real <button type=button> with id audit-now and no class, inside the card's name row after the name, the old .b rules not applying to it",
-      re.search(r'<b class="lbl mh">Daily audit<button type="button" id="audit-now">Audit now</button></b>', he) is not None and 'id="audit-now" class=' not in he and re.search(r'<button[^>]*id="audit-now"[^>]*class="b', he) is None
+      re.search(r'<b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now">Audit now</button></b>', he) is not None and 'id="audit-now" class=' not in he and re.search(r'<button[^>]*id="audit-now"[^>]*class="b', he) is None
       and he.count("Audit now</button>") == 1 and ".a-btn" not in he and ".b.pri" not in he and ".b.xs" not in he)
 check("audit: the link look: the accent as text (--acc), no border, no background, no padding, the card text's own font and line height (the name row stays one line), underline on hover and keyboard focus with the focus ring",
       "#audit-now{position:relative;flex:none;margin:0;padding:0;border:0;border-radius:2px;background:none;font:inherit;font-weight:400;line-height:inherit;color:var(--acc);text-decoration:none;cursor:pointer}" in he
@@ -2258,7 +2258,7 @@ check("audit: the link look: the accent as text (--acc), no border, no backgroun
 check("audit: running, it greys (--mut), loses the underline and shows not-allowed; on a touch screen its tap area is 44 px tall (a hit area laid over the row, the row's height unchanged)",
       "#audit-now:disabled{color:var(--mut);text-decoration:none;cursor:not-allowed}" in he
       and "#audit-now::after{content:'';position:absolute;left:-8px;right:-8px;top:-6px;bottom:-6px}" in he and "@media(pointer:coarse){#audit-now::after{bottom:auto;height:44px}}" in he)
-check("audit: the card's name row, 'Daily audit', holds the link at its right end (flex, space between, centred)", "#panel :is(.audit,.ghc)>.mh{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center" in he)
+check("audit: the card's name row, 'Audits ↗' (a link to the Audits page), holds the Audit now link at its right end (flex, space between, centred)", "#panel :is(.audit,.ghc)>.mh{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center" in he)
 AJ = ui_render._AUDIT_JS
 check("audit: the script is on the page, before the poll, and refreshes on every poll tick (load, 60 s, focus …)",
       AJ in he and he.find(AJ) < he.find(L) and "document.addEventListener('stackshot:poll',refresh)" in AJ
@@ -2266,44 +2266,54 @@ check("audit: the script is on the page, before the poll, and refreshes on every
 check("audit: GET /audit/status uncached; a failure keeps what is drawn; a 404 or enabled false hides the line",
       "fetch('/audit/status',{cache:'no-store',credentials:'same-origin'" in AJ and ".catch(function(){})" in AJ
       and "if(r.status===404&&!r.redirected){E.hidden=true;return null}if(!r.ok||r.redirected)throw 0" in AJ
-      and "typeof d.enabled!=='boolean')throw 0" in AJ and "function draw(d){if(!d.enabled){E.hidden=true;return}" in AJ)
+      and "typeof d.enabled!=='boolean')throw 0" in AJ and "function draw(d){if(!d.enabled){E.hidden=true;if(P)P.hidden=true;return}" in AJ)
 check("audit: the button POSTs /audit/now once, same-origin, no retry, and fetches the status after",
       AJ.count("fetch('/audit/now'") == 1 and "fetch('/audit/now',{method:'POST',cache:'no-store',credentials:'same-origin'})" in AJ
       and "setInterval" not in AJ and AJ.count("setTimeout(") == 1 and ".then(function(){inflight=false;btn();refresh()})" in AJ)
 check("audit: the button is disabled while a run is in progress, while the POST is in flight and while 'cued' shows",
-      "function btn(){N.disabled=run||inflight||Date.now()<hold;if(inflight)N.setAttribute('aria-busy','true');else N.removeAttribute('aria-busy')}" in AJ and "run=!!d.running" in AJ and "inflight=true;btn();" in AJ
+      "function btn(){B.forEach(function(b){b.disabled=run||inflight||Date.now()<hold;if(inflight)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy')})}" in AJ and "run=!!d.running" in AJ and "inflight=true;btn();" in AJ
       and "if(s===202){hold=Date.now()+10000;say(t||'audit cued',false)}" in AJ)
 check("audit: the server's answer shows 10 s — 409 / 503 warn, 404 hides the line",
-      "else if(s===409||s===503)say(t||'HTTP '+s,true)" in AJ and "if(s===404){E.hidden=true;return}" in AJ and "},10000)" in AJ and ".audit .a-bad,.audit .a-msg.warn{color:var(--warn)" in he)
-check("audit: the variants — running since, no audit yet, did not finish (warn), last with findings and their categories as a tooltip, next",
-      "'Audit running'+(num(d.running_since)?' since '+clock(d.running_since):'')+'…'" in AJ and "row('last audit','none yet')" in AJ
-      and "L.finished==null){row('last audit',(num(L.started)?when(L.started)+' ':'')+'did not finish','val a-bad')" in AJ
-      and "map(function(k){return k+': '+c[k]}).join('\\n')" in AJ and "row('findings',String(n),'val a-f',tip)" in AJ and "function nx(){if(num(d.next))row('next',when(d.next))}" in AJ
-      and "' · next '" not in AJ and "n===1?' finding':' findings'" not in AJ)
+      "else if(s===409||s===503)say(t||'HTTP '+s,true)" in AJ and "if(s===404){E.hidden=true;if(P)P.hidden=true;return}" in AJ and "},10000)" in AJ and ".audit .a-bad,.audit .a-msg.warn{color:var(--warn)" in he)
+check("audit: the variants — running since, did not finish (warn), the shortlist (a group's name, its audits, its findings in 24 h, a dash where no log is kept) and the note under it",
+      "'Audit running'+(num(d.running_since)?' since '+clock(d.running_since):'')+'…'" in AJ and "sp('a-run a-bad','Last audit did not finish')" in AJ
+      and "sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found))" in AJ and "sp('a-h','found, 24 h')" in AJ and "if(C.note)f.appendChild(sp('a-cn',C.note))" in AJ
+      and "row('findings'" not in AJ and "row('last audit'" not in AJ)
+check("audit: the Audits page's button shares the script: it finds #audit-now-page and the message line #audit-page-msg, and both buttons cue through the one cue()",
+      "document.getElementById('audit-page-msg')" in AJ and "B=[N,P].filter(Boolean)" in AJ and "B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})})" in AJ and AJ.count("function cue()") == 1)
 check("audit: times in the rulebook's form, in the board's zone", "Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))" in AJ
       and "return p.weekday+' '+p.month+' '+ord(+p.day)+' '+p.hour+':'+p.minute" in AJ and "hourCycle:'h23'" in AJ)
-check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "G.textContent=t" in AJ)
+check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "g.textContent=t" in AJ)
 check("audit: a redraw builds the new text first and swaps it in, and leaves an unchanged line alone",
       "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}" in AJ
       and "T.textContent=''" not in AJ.replace("else{T.textContent='';T.appendChild(f)}", ""))
-# with the audit on, the static page carries the line already drawn — the script's text, classes, tooltip and button
+# with the audit on, the static page carries the card already drawn — the script's rows, classes and button
+import audit_overview as _ov
 _AD = T / "state/audit"; _AD.mkdir(parents=True, exist_ok=True)
 _audit_was = render._cfg.CFG.setdefault("audit", {}).get("enabled"); render._cfg.CFG["audit"]["enabled"] = True
 _audit_at_was = render._cfg.CFG["audit"].get("at"); render._cfg.CFG["audit"]["at"] = "05:00"      # the card is checked on the once-a-day schedule; the example ships two times
 def _aw(h): w = h[h.find('<section id="audit-panel">'):]; return w[w.find('<div id="audit"'):w.find("</div>", w.find('<div id="audit"')) + 6]
 _at = lambda d, hh, mm: (datetime.datetime(2026, 2, 18, hh, mm, tzinfo=_now.tzinfo) + datetime.timedelta(days=d)).timestamp()
-_BTN = ' <span class="a-msg" role="status" aria-live="polite"></span></div>'      # the button moved up beside the card's name, "Daily audit"
-_NM = lambda dis="": '<b class="lbl mh">Daily audit<button type="button" id="audit-now"' + dis + '>Audit now</button></b>'
+_BTN = ' <span class="a-msg" role="status" aria-live="polite"></span></div>'      # the message line after the rows
+_NM = lambda dis="": '<b class="lbl mh"><a class="nm" href="/audits">Audits ↗</a><button type="button" id="audit-now"' + dis + '>Audit now</button></b>'
 _HD = '<div id="audit" class="pc audit" data-tz="Asia/Dubai">' + _NM() + '<span class="a-txt">'
-_R = lambda lab, val, cls="val", tip="": f'<span class="lbl">{lab}</span><span class="{cls}"' + (f' title="{tip}"' if tip else "") + f'>{val}</span>'
-check("audit on, no run yet: visible, rows 'last audit / none yet' and 'next / <when>'",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _R("last audit", "none yet") + _R("next", "Tue Feb 24th 05:00") + '</span>' + _BTN,
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
+_CH = '<span class="a-h"></span><span class="a-h">audits</span><span class="a-h">found, 24 h</span>'
+def _CARD(found=None, note="\u2013 keeps no findings log"):
+    """The shortlist the card draws: per group its name, audits and findings in 24 h (0 for a logged group without findings, a dash for the two that keep no log) and the note."""
+    found = found or {}; o = _CH
+    for g in _ov.GROUPS:
+        n = found.get(g["key"], 0) if g["log"] else None
+        o += f'<span class="lbl">{g["name"]}</span><span class="val a-n">{len(g["audits"])}</span><span class="val a-n{" hit" if n else ""}">{"\u2013" if n is None else n}</span>'
+    return o + (f'<span class="a-cn">{note}</span>' if note else "")
+_LOG = _AD / "findings-log.jsonl"
+check("audit on, no run yet: visible, the shortlist of the eight groups (a zero for a group that keeps a log and found nothing, a dash for the two that keep none) and the note, no run line",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _CARD() + '</span>' + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": _at(5, 5, 0), "finished": _at(5, 5, 20), "items_read": 9,
     "findings": [{"id": "a1"}, {"id": "a2"}], "by_category": {"stale": 1, "no-ask": 1}, "by_session": {}}))
 ha = ui_render.Board(f"{tmp}/store", now=_now).html()
-check("audit on, last run with findings: three rows (last audit in the rulebook's form, findings with the categories as a tooltip, next) and the button on its own row",
-      _aw(ha) == _HD + _R("last audit", "Mon Feb 23rd 05:20") + _R("findings", "2", "val a-f", "stale: 1\nno-ask: 1") + _R("next", "Tue Feb 24th 05:00") + '</span>' + _BTN, _aw(ha))
+check("audit on, last run finished: the same shortlist (the card no longer lists the last run), no run line",
+      _aw(ha) == _HD + _CARD() + '</span>' + _BTN, _aw(ha))
+check("audit on: the dash is an en dash and never a zero for Fleet and services and Text and rules; the others show a number", _aw(ha).count("\u2013</span>") == 2 and _aw(ha).count('<span class="val a-n">') == 16, _aw(ha))
 check("audit on: the line does not move a block's fingerprint (its script keeps it current)", _bm(ha) == _bm(he), (_bm(ha), _bm(he)))
 _av = ha[ha.find('<section id="audit-panel">'):]; _av = _av[:_av.find("</section>") + 10]
 for _rx, _sub in ui_render._VOLATILE: _av = _rx.sub(_sub, _av)
@@ -2311,31 +2321,45 @@ check("audit on: _VOLATILE takes the whole card (rows, button, message) out of t
       _av.startswith('<section id="audit-panel"><details class="fold" data-fold="audit-panel" open><summary><h2 class="hdr">Audit</h2></summary></details><button type="button" class="pgrip" id="pgrip-audit-panel"') and 'id="audit"' not in _av, _av)
 check("audit on: the card keeps the ids the page script finds it by (#audit, #audit-now, .a-txt, .a-msg) and the live swap carries the live card over by #audit",
       all(x in ha for x in ('id="audit"', 'id="audit-now"', 'class="a-txt"', 'class="a-msg"')) and "o.querySelector('#audit')" in ui_render._LIVE_JS
-      and "E=document.getElementById('audit')" in AJ and "N=document.getElementById('audit-now')" in AJ and "T=E.querySelector('.a-txt')" in AJ and "G=E.querySelector('.a-msg')" in AJ)
+      and "E=document.getElementById('audit')" in AJ and "N=document.getElementById('audit-now')" in AJ and "T=E.querySelector('.a-txt')" in AJ and "E.querySelector('.a-msg')" in AJ)
+# findings in the log: counted by group over the last 24 hours, older ones left out, the group's number marked
+_LOG.write_text("\n".join(json.dumps(r) for r in (
+    {"at": _now.timestamp() - 3600, "source": "silence", "id": f"board#{1}", "kind": "stale", "agent": "a", "project": "projects/x", "detail": "d"},
+    {"at": _now.timestamp() - 7200, "source": "filing", "id": f"board#{2}", "kind": "board checks:why-not-now", "agent": "a", "project": "projects/x", "detail": "d"},
+    {"at": _now.timestamp() - 7300, "source": "filing", "id": f"board#{3}", "kind": "stuck-elsewhere", "agent": "a", "project": "projects/x", "detail": "d"},
+    {"at": _now.timestamp() - 90000, "source": "filing", "id": f"board#{4}", "kind": "stuck-elsewhere", "agent": "a", "project": "projects/x", "detail": "older than a day"})) + "\n")
+check("audit on, findings in the log: counted per group in the last 24 hours (the older one left out), a nonzero number marked 'hit', the groups with no log still a dash",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _CARD({"silence": 1, "filing": 2}) + '</span>' + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
+_pr_was = render._cfg.CFG["audit"].get("pattern_review"); render._cfg.CFG["audit"]["pattern_review"] = "off"
+check("audit on, the findings log off: every group a dash and the note says the log is off (a count of nothing is never a zero)",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _CH + "".join(f'<span class="lbl">{g["name"]}</span><span class="val a-n">{len(g["audits"])}</span><span class="val a-n">\u2013</span>' for g in _ov.GROUPS)
+      + '<span class="a-cn">\u2013 the findings log is off</span></span>' + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
+if _pr_was is None: render._cfg.CFG["audit"].pop("pattern_review", None)
+else: render._cfg.CFG["audit"]["pattern_review"] = _pr_was
+_LOG.unlink()
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": _at(5, 12, 40), "finished": None, "findings": []}))
-check("audit on, a run in progress: 'Audit running since 12:40…', the button disabled",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD.replace(_NM(), _NM(" disabled")) + '<span class="a-run">Audit running since 12:40…</span></span>'
+check("audit on, a run in progress: 'Audit running since 12:40…' above the shortlist, the button disabled",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD.replace(_NM(), _NM(" disabled")) + '<span class="a-run">Audit running since 12:40…</span>' + _CARD() + '</span>'
       + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": _at(5, 5, 0), "finished": None, "findings": []}))
-check("audit on, a crashed run: 'last audit' reads 'Mon Feb 23rd 05:00 did not finish' in warn, then the next run",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _R("last audit", "Mon Feb 23rd 05:00 did not finish", "val a-bad") + _R("next", "Tue Feb 24th 05:00") + '</span>' + _BTN,
+check("audit on, a crashed run: 'Last audit did not finish' in warn above the shortlist",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + '<span class="a-run a-bad">Last audit did not finish</span>' + _CARD() + '</span>' + _BTN,
       _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 # the agent's real records hold ISO-8601 strings, not epoch numbers: the card shows the same words
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": "2026-02-23T05:00+04:00", "finished": "2026-02-23T05:20+04:00", "items_read": 9,
     "findings": [{"id": "a1"}, {"id": "a2"}], "by_category": {"stale": 1, "no-ask": 1}, "by_session": {}}))
-check("audit on, last run with ISO-string times: 'last audit' shows the finish time, the same card as with epoch numbers",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _aw(ha) and "Mon Feb 23rd 05:20" in _aw(ha), _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
+check("audit on, last run with ISO-string times: the same card as with epoch numbers",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _aw(ha), _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": "2026-02-22T20:00:00Z", "finished": "2026-02-22T20:20:00Z", "findings": []}))
-check("audit on, ISO times with a trailing Z: the same instant in the board's zone (UTC+4: the local day is the next day after the Z one), zero findings",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _R("last audit", "Mon Feb 23rd 00:20") + _R("findings", "0", "val a-f") + _R("next", "Tue Feb 24th 05:00") + '</span>' + _BTN,
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
+check("audit on, ISO times with a trailing Z: finished, so no run line",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _CARD() + '</span>' + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": "2026-02-23T12:40+04:00", "finished": None, "findings": []}))
 check("audit on, a run in progress with an ISO start: 'Audit running since 12:40…', the button disabled",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD.replace(_NM(), _NM(" disabled")) + '<span class="a-run">Audit running since 12:40…</span></span>'
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD.replace(_NM(), _NM(" disabled")) + '<span class="a-run">Audit running since 12:40…</span>' + _CARD() + '</span>'
       + _BTN, _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 (_AD / "run-2026-02-23.json").write_text(json.dumps({"started": "2026-02-23T05:00+04:00", "finished": None, "findings": []}))
-check("audit on, a crashed run with an ISO start: 'last audit' reads 'Mon Feb 23rd 05:00 did not finish' in warn, as with an epoch",
-      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + _R("last audit", "Mon Feb 23rd 05:00 did not finish", "val a-bad") + _R("next", "Tue Feb 24th 05:00") + '</span>' + _BTN,
+check("audit on, a crashed run with an ISO start: 'Last audit did not finish' in warn, as with an epoch",
+      _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == _HD + '<span class="a-run a-bad">Last audit did not finish</span>' + _CARD() + '</span>' + _BTN,
       _aw(ui_render.Board(f"{tmp}/store", now=_now).html()))
 render._cfg.CFG["audit"]["enabled"] = False
 check("audit off with run records: hidden and empty", _aw(ui_render.Board(f"{tmp}/store", now=_now).html()) == '<div id="audit" class="pc audit" data-tz="Asia/Dubai" hidden>' + _NM() + '<span class="a-txt"></span>' + _BTN)

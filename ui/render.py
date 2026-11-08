@@ -1452,18 +1452,18 @@ window.addEventListener('offline',function(){down=true;draw()});
 document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
 window.addEventListener('pageshow',function(e){if(e.persisted){last=0;poll()}});
 poll()})();"""
-# The daily audit's card (label/value rows like the Anchor hub's cards: last audit, findings, next: named "Daily audit" with the Audit now text link beside the name, not on a row of its own) in the side panel's Audit section (an "Audit now"
-# button, and the board shows when the last audit ran). The static page carries the line already drawn (Board.audit_line:
+# The audit card (the side panel's Audit section): its name is a link to the Audits page, with the Audit now text link beside it, and under the name the shortlist: each audit group with its number of audits and
+# its findings in the last 24 hours (a dash for a group that keeps no findings log, never a zero). The static page carries the card already drawn (Board.audit_line:
 # a card that shipped hidden and empty blinked out on every reload; the rows this script draws are the ones the server draws, character for character, tests/phone_width_check.py compares them), hidden only when the audit is not enabled; this script
 # redraws it from GET /audit/status on every tick of the reachability poll above (load, every 60 s, focus / visibility /
 # online), uncached, building the new text before it swaps it in and leaving it alone when nothing changed. A failed fetch
-# keeps what is drawn (the banner above says the server is unreachable); enabled false or a 404 hides the line. Times are drawn
+# keeps what is drawn (the banner above says the server is unreachable); enabled false or a 404 hides the card. Times are drawn
 # in the board's zone (data-tz), in the rulebook's "Thu Mar 5th 05:00" form. The button POSTs /audit/now once (no retry),
 # is disabled while the request is in flight, while a run is in progress and for the 10 s the "cued" answer shows; the
-# server's answer shows next to it for 10 s (202 plain; 409 / 503 / anything else warn; 404 hides the line), then the
-# status is fetched again.
+# server's answer shows next to it for 10 s (202 plain; 409 / 503 / anything else warn; 404 hides the card), then the
+# status is fetched again. The Audits page has the same button (#audit-now-page, with its message line #audit-page-msg): this one script drives both, so they post to the same route and share one state.
 _AUDIT_JS = r"""(function(){var E=document.getElementById('audit');if(!E)return;
-var T=E.querySelector('.a-txt'),N=document.getElementById('audit-now'),G=E.querySelector('.a-msg'),Z=E.getAttribute('data-tz'),inflight=false,run=false,hold=0,mt=null;
+var T=E.querySelector('.a-txt'),N=document.getElementById('audit-now'),P=document.getElementById('audit-now-page'),G=[E.querySelector('.a-msg'),document.getElementById('audit-page-msg')].filter(Boolean),B=[N,P].filter(Boolean),Z=E.getAttribute('data-tz'),inflight=false,run=false,hold=0,mt=null;
 var O={weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'},F;try{F=new Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))}catch(e){F=new Intl.DateTimeFormat('en-US',O)}
 function pt(ts){var o={};F.formatToParts(new Date(ts*1000)).forEach(function(p){o[p.type]=p.value});return o}
 function ord(d){return d+(d%100>=11&&d%100<=13?'th':({1:'st',2:'nd',3:'rd'})[d%10]||'th')}
@@ -1472,32 +1472,32 @@ function clock(ts){var p=pt(ts),q=pt(Date.now()/1000);return p.month===q.month&&
 function num(v){return typeof v==='number'&&isFinite(v)}
 function sig(e){return [].map.call(e.childNodes,function(c){return c.nodeType===1?c.className+'|'+c.title+'|'+c.textContent:'#'+c.textContent}).join('\u0001')}
 function sp(c,t,tip){var e=document.createElement('span');e.className=c;e.textContent=t;if(tip)e.title=tip;return e}
-function btn(){N.disabled=run||inflight||Date.now()<hold;if(inflight)N.setAttribute('aria-busy','true');else N.removeAttribute('aria-busy')}
-function draw(d){if(!d.enabled){E.hidden=true;return}
-var L=d.last,f=document.createDocumentFragment();run=!!d.running;
-function row(l,v,c,tip){f.appendChild(sp('lbl',l));f.appendChild(sp(c||'val',v,tip))}
-function nx(){if(num(d.next))row('next',when(d.next))}
+function btn(){B.forEach(function(b){b.disabled=run||inflight||Date.now()<hold;if(inflight)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy')})}
+function draw(d){if(!d.enabled){E.hidden=true;if(P)P.hidden=true;return}
+var L=d.last,C=d.card,f=document.createDocumentFragment();run=!!d.running;
 if(run)f.appendChild(sp('a-run','Audit running'+(num(d.running_since)?' since '+clock(d.running_since):'')+'…'));
-else if(!L){row('last audit','none yet');nx()}
-else if(L.finished==null){row('last audit',(num(L.started)?when(L.started)+' ':'')+'did not finish','val a-bad');nx()}
-else{var n=Math.trunc(+L.findings||0),c=L.by_category||{},tip=Object.keys(c).map(function(k){return k+': '+c[k]}).join('\n');
-row('last audit',num(L.finished)?when(L.finished):'');row('findings',String(n),'val a-f',tip);nx()}
+else if(L&&L.finished==null)f.appendChild(sp('a-run a-bad','Last audit did not finish'));
+if(C&&C.groups&&C.groups.length){f.appendChild(sp('a-h',''));f.appendChild(sp('a-h','audits'));f.appendChild(sp('a-h','found, 24 h'));
+C.groups.forEach(function(g){f.appendChild(sp('lbl',g.name));f.appendChild(sp('val a-n',String(g.audits)));f.appendChild(sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found)))});
+if(C.note)f.appendChild(sp('a-cn',C.note))}
+else{btn();E.hidden=false;if(P)P.hidden=false;return}
 if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}
-btn();E.hidden=false}
+btn();E.hidden=false;if(P)P.hidden=false}
 function refresh(){fetch('@ROOT@/audit/status',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'}})
 .then(function(r){if(r.status===404&&!r.redirected){E.hidden=true;return null}if(!r.ok||r.redirected)throw 0;return r.json()})
 .then(function(d){if(d===null)return;if(!d||typeof d.enabled!=='boolean')throw 0;draw(d)}).catch(function(){})}
-function say(t,warn){G.textContent=t;G.className='a-msg'+(warn?' warn':'');clearTimeout(mt);mt=setTimeout(function(){G.textContent='';hold=0;btn()},10000)}
-N.addEventListener('click',function(){if(N.disabled)return;inflight=true;btn();
+function say(t,warn){G.forEach(function(g){g.textContent=t;g.className=g.className.replace(/ ?warn/,'')+(warn?' warn':'')});clearTimeout(mt);mt=setTimeout(function(){G.forEach(function(g){g.textContent=''});hold=0;btn()},10000)}
+function cue(){if(inflight||run)return;inflight=true;btn();
 fetch('@ROOT@/audit/now',{method:'POST',cache:'no-store',credentials:'same-origin'})
 .then(function(r){if(r.redirected||r.status===401)return[0,''];return r.text().then(function(t){return[r.status,t]})})
 .then(function(a){var s=a[0],t=String(a[1]||'').trim().slice(0,200);
-if(s===404){E.hidden=true;return}
+if(s===404){E.hidden=true;if(P)P.hidden=true;return}
 if(s===202){hold=Date.now()+10000;say(t||'audit cued',false)}
 else if(s===409||s===503)say(t||'HTTP '+s,true);
 else say(s?'could not cue the audit (HTTP '+s+')':'could not cue the audit: sign in again',true)})
 .catch(function(){say('could not reach stackshot',true)})
-.then(function(){inflight=false;btn();refresh()})});
+.then(function(){inflight=false;btn();refresh()})}
+B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})});
 document.addEventListener('stackshot:poll',refresh)})();"""
 # The scripts above are written with @ROOT@ where an address starts, filled in once here.
 _ANSWER_JS, _HOME_JS, _LANDED_JS, _LIVE_JS, _AUDIT_JS = (x.replace("@ROOTR@", PREFIX.replace("/", "\\/")).replace("@ROOT@", PREFIX) for x in (_ANSWER_JS, _HOME_JS, _LANDED_JS, _LIVE_JS, _AUDIT_JS))
@@ -1534,6 +1534,34 @@ _MACH_CSS = """
 .pc.mach>.mf{grid-column:1/-1;display:block;min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;cursor:help}
 """   # the Machines panel's machine cards, appended after the main sheet so that its #machines .matrix wins over the old 128px columns; the panel's own one-column rule is more specific and still applies
 
+_AUDITS_CSS = """
+main.audits-page .atop{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}main.audits-page .atop h1{margin:0}
+main.audits-page .atop .atbtn{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+main.audits-page .apmsg{font-size:13px;color:var(--fg);overflow-wrap:anywhere}main.audits-page .apmsg:empty{display:none}main.audits-page .apmsg.warn{color:var(--warn);font-weight:600}
+main.audits-page .asub{margin:4px 0 16px;color:var(--mut)}
+main.audits-page .apaces{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 22px}
+@media(max-width:520px){main.audits-page .apaces{grid-template-columns:minmax(0,1fr)}}
+main.audits-page .apace{min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}main.audits-page .apace b{display:block;font-weight:600}main.audits-page .apace span{font-size:13px;color:var(--mut);overflow-wrap:anywhere}
+main.audits-page h2{margin:22px 0 8px;font-size:17px}main.audits-page h2 small{font-size:13px;font-weight:400;color:var(--mut)}
+main.audits-page .agroups,main.audits-page .afeed{display:flex;flex-direction:column;gap:8px}
+details.audg{border:1px solid var(--line);border-radius:10px;background:var(--card)}
+details.audg>summary{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:baseline;padding:8px 12px;cursor:pointer;list-style:none}
+details.audg>summary::-webkit-details-marker{display:none}details.audg>summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:10px}
+@media(max-width:420px){details.audg>summary{grid-template-columns:minmax(0,1fr) auto}details.audg>summary .agn{grid-column:1/-1}}
+details.audg .agn b{display:block;font-weight:600}details.audg .agn b::before{content:'▸';display:inline-block;margin-right:6px;color:var(--mut)}details.audg[open] .agn b::before{transform:rotate(90deg)}#audit-now-page[hidden]{display:none}details.audg .agn span{display:block;font-size:13px;color:var(--mut)}
+main.audits-page .anum{font-size:13px;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}main.audits-page .anum.hit{color:var(--orange);font-weight:600}
+details.audg ul.aaud{margin:0;padding:0 12px 10px;list-style:none;border-top:1px solid var(--line)}
+details.audg ul.aaud li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}details.audg ul.aaud li:last-child{border-bottom:0}
+details.audg ul.aaud li span{color:var(--mut)}details.audg ul.aaud li span.shadow{color:var(--orange)}
+main.audits-page .af{min-width:0;padding:7px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:13px;overflow-wrap:anywhere}main.audits-page .af .am{font-size:12px;color:var(--mut)}
+main.audits-page .aempty{margin:0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--mut)}
+main.audits-page .atw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+main.audits-page .atw table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}main.audits-page .atw th,main.audits-page .atw td{padding:6px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+main.audits-page .atw th{font-weight:400;color:var(--mut)}main.audits-page .atw tr:last-child td{border-bottom:0}main.audits-page .atw td.warn{color:var(--warn);font-weight:600}
+@media(max-width:520px){main.audits-page .atw th,main.audits-page .atw td{padding:6px 8px}}
+main.audits-page .anote{max-width:70ch;margin:16px 0 0;font-size:13px;color:var(--mut)}
+"""   # the Audits page (GET /audits): the paces, the audit groups (a native details each), the latest findings and the runs, on the theme's tokens, so light and dark need no rule of their own
+
 _RUN_CSS = """
 #runners{margin:0 0 4px}#runners h2.hdr{margin:32px 0 12px}
 #audit-panel:has(#audit[hidden]):not(:has(#ghcalls)){display:none}
@@ -1550,6 +1578,11 @@ tr.scope{scroll-margin-top:calc(var(--hdr,0px) + 12px)}
 #audit-now:focus-visible{outline:2px solid var(--acc);outline-offset:2px;text-decoration:underline}
 #audit-now:disabled{color:var(--mut);text-decoration:none;cursor:not-allowed}
 @media(pointer:coarse){#audit-now::after{bottom:auto;height:44px}}
+#audit{grid-template-columns:minmax(0,1fr) auto auto;column-gap:12px}
+#audit .mh a.nm{color:var(--fg)}#audit .mh a.nm:hover{color:var(--acc)}
+#panel .audit .a-h{font-size:11px;line-height:1.4;color:var(--mut);text-align:right}
+#audit .a-n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}#audit .a-n.hit{color:var(--orange);font-weight:600}
+#panel .audit .a-cn{grid-column:1/-1;margin-top:4px;font-size:11px;line-height:1.4;color:var(--mut);white-space:normal}
 #panel .ghc{margin-top:8px;font-size:12px}#panel .ghc .val{color:var(--fg)}#panel .ghc .val .cap{color:var(--mut)}
 """   # the Runners panel's cards (one line each, the count busy/online and a ↗, since an earlier change): the Machines cards' look, one to a row in the side panel; the Audit section: the daily audit's card, its name row with the Audit now text link beside the name, and the GitHub calls card, the section hidden when the audit is off and there is no calls card; every panel section on the Anchor hub's card spacing (8px between cards, 6px 10px inside a card, 2px between lines) and the Machines and Runners cards on the same three columns (subgrid: the matrix owns them, so "latest" lines up from card to card)
 def _run_stale_s(): return 3 * max(float(_runners.conf("panel_refresh_s")), _every_m() * 60)   # a snapshot older than this carries a "last read at" note in the Runners panel: three times the larger of the panel refresh and the publish interval, so the note never flips between two publishes and the block holds still (younger ones say nothing)
@@ -3106,45 +3139,44 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         css = css.replace("__D2FACE__", _D2_FACE).replace("__DOCK__", str(_PANEL_DOCK_PX)).replace("__ISPIN__", f"{_ITEM_PIN_STRIP_PX - 0.02:g}")
         css = css.replace("__FONT__", str(_cfg.get("instance", "font_stack") or "system-ui,sans-serif"))
         ts = _ui.type_scale      # the page's own rules on the five-size scale; the panel's cards, the machine cards and the Runners page keep theirs
-        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + _ui.CSS
+        return ts(css) + ts(_BTN_CSS) + ts(_ABOX_CSS) + ts(_CARDS_CSS) + _MACH_CSS + _RUN_CSS + ts(_PORDER_CSS) + ts(_search.CSS) + ts(_AUDITS_CSS) + _ui.CSS
 
     def audit_line(self):
-        """HTML: the daily audit's card (since an earlier change the body of the side panel's Audit section; since an earlier change label/value rows in the
-        Anchor hub's card style: `last audit`, `findings`, `next`; since an earlier change under the name row `Daily audit` with the Audit now text link at its right), drawn at render time with the rows,
-        classes, tooltip and button _AUDIT_JS draws from GET /audit/status, character for character, so the page script's first refresh changes
-        nothing. A run in progress is one line (`Audit running since 03:00…`) with no rows, a run that did not finish is `last audit` with a warn
-        value. The status is the endpoint's own (audit.status, imported here: audit.py needs only config). Hidden only when the audit is
-        not enabled; a status that cannot be read leaves the card hidden and empty for the script to fill, as before."""
+        """HTML: the audit card, the body of the side panel's Audit section. The name row is `Audits ↗`, a link to the Audits page (/audits), with the Audit now text link at its right; under it the shortlist
+        (audit_overview.card): one row per audit group with its number of audits and its findings in the last 24 hours, `–` for a group that keeps no findings log (never a zero) and a line under the list that
+        says what the dash means. Drawn at render time with the rows, classes and button _AUDIT_JS draws from GET /audit/status, character for character, so the page script's first refresh changes
+        nothing. A run in progress is a line above the list (`Audit running since 03:00…`), a last run that did not finish a warn line. The status is the endpoint's own (audit.status, imported here:
+        audit.py needs only config). Hidden only when the audit is not enabled; a status that cannot be read leaves the card hidden and empty for the script to fill."""
         z = _cfg.tz()
         head = f'<div id="audit" class="pc audit" data-tz="{esc(str(z))}"'
-        name = '<b class="lbl mh">Daily audit<button type="button" id="audit-now"{dis}>Audit now</button></b>'      # the card's name row, the text link beside the name (a real button, styled as a link in _RUN_CSS: no .b)
+        name = f'<b class="lbl mh"><a class="nm" href="{under("/audits")}">Audits ↗</a><button type="button" id="audit-now"{{dis}}>Audit now</button></b>'      # the card's name row: the link to the page, and the text link beside it (a real button, styled as a link in _RUN_CSS: no .b)
         tail = ' <span class="a-msg" role="status" aria-live="polite"></span></div>'
         try:
             import audit as _audit
+            import audit_overview as _ov
             d = _audit.status(self.now.timestamp())
+            c = _ov.card(self.now.timestamp(), getattr(self, "_audit_rows", None))      # set by audits_html: the page's own read of the findings log, so the card and the page agree
         except Exception:
-            d = None
+            d = c = None
         if not d or not d.get("enabled"):
             return f'{head} hidden>' + name.format(dis="") + '<span class="a-txt"></span>' + tail
-        def when(ts): return when_words(datetime.datetime.fromtimestamp(ts, z))
         def clock(ts):
-            t, n = datetime.datetime.fromtimestamp(ts, z), self.now.astimezone(z)
-            return f"{t:%H:%M}" if (t.month, t.day) == (n.month, n.day) else when(ts)
-        def row(lab, val, cls="val", tip=""):
-            return f'<span class="lbl">{lab}</span><span class="{cls}"' + (f' title="{esc(tip)}"' if tip else "") + f'>{esc(val)}</span>'
+            try: t, n = datetime.datetime.fromtimestamp(ts, z), self.now.astimezone(z)
+            except (OverflowError, OSError, ValueError, TypeError): return "–"      # an epoch no date can hold is a dash
+            return f"{t:%H:%M}" if (t.month, t.day) == (n.month, n.day) else when_words(t)
+        def cell(cls, text): return f'<span class="{cls}">{esc(text)}</span>'
         L, run = d.get("last"), bool(d.get("running"))
-        nx = row("next", when(d["next"])) if _num_ok(d.get("next")) else ""
         if run:
-            txt = '<span class="a-run">' + esc("Audit running" + (f" since {clock(d['running_since'])}" if _num_ok(d.get("running_since")) else "") + "…") + "</span>"
-        elif not L:
-            txt = row("last audit", "none yet") + nx
-        elif L.get("finished") is None:
-            txt = row("last audit", (when(L["started"]) + " " if _num_ok(L.get("started")) else "") + "did not finish", "val a-bad") + nx
+            txt = cell("a-run", "Audit running" + (f" since {clock(d['running_since'])}" if _num_ok(d.get("running_since")) else "") + "…")
+        elif L and L.get("finished") is None:
+            txt = cell("a-run a-bad", "Last audit did not finish")
         else:
-            try: n = int(float(L.get("findings") or 0))
-            except (TypeError, ValueError): n = 0
-            tip = "\n".join(f"{k}: {v}" for k, v in (L.get("by_category") or {}).items())
-            txt = row("last audit", when(L["finished"]) if _num_ok(L.get("finished")) else "") + row("findings", str(n), "val a-f", tip) + nx
+            txt = ""
+        txt += cell("a-h", "") + cell("a-h", "audits") + cell("a-h", "found, 24 h")
+        for g in c["groups"]:
+            txt += cell("lbl", g["name"]) + cell("val a-n", str(g["audits"])) + cell("val a-n" + (" hit" if g["found"] else ""), "–" if g["found"] is None else str(g["found"]))
+        if c["note"]:
+            txt += cell("a-cn", c["note"])
         return f'{head}>' + name.format(dis=" disabled" if run else "") + f'<span class="a-txt">{txt}</span>' + tail
 
     def gh_calls_card(self):
@@ -3629,6 +3661,89 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
                 f'<h1>Projects</h1><p class="pjnote">Each project and the agents that are running. Its items are on its own page.</p><section id="by-project">{self.projects_table()}</section></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_HOME_FOLD_JS}</script></body></html>')
+
+    def audits_html(self, runner=None) -> str:
+        """The Audits page (GET /audits, behind the board's sign-in, drawn on request): the three paces the audits run at, the audit groups (each a fold of its audits with their pace and mode, the number
+        of audits and the findings of the last 24 hours), the latest findings, and the recent runs, with an Audit now button at the top (the same button as the side panel card's: _AUDIT_JS drives both, and both post
+        to /audit/now). The data is audit_overview.overview: the findings log, the run records and, for the ten-minute set's last run, `runner`, the runner's record (server._runner_status; None draws no "last").
+        A group that keeps no findings log shows `not logged`, never a zero; with the findings log off no group has a count. Nothing yet (no run, no finding) draws the same page with plain empty lines, and the audit off
+        says so and has no button. The page makes no write and no model call."""
+        import audit_overview as _ov
+        e = esc
+        z = _cfg.tz()
+        ts = self.now.timestamp()
+        rows = _ov.day_rows(ts)      # the findings log, read once for the whole request: the page's counts and rows and the side panel's card below all come from this list
+        self._audit_rows = rows
+        ov = _ov.overview(ts, runner, rows)
+        def at(t):
+            try: return datetime.datetime.fromtimestamp(t, z)
+            except (OverflowError, OSError, ValueError, TypeError): return None      # an epoch no date can hold (a damaged record) is a dash, never an error page
+        def words(t):
+            d = at(t)
+            return "–" if d is None else when_words(d)
+        def stamp(t):
+            """A time as the page says it: the clock for today, the date and clock for another day (the way the card's clock() does)."""
+            d = at(t)
+            return "–" if d is None else (f"{d:%H:%M}" if d.date() == self.now.astimezone(z).date() else when_words(d))
+        running = ov["running_since"] is not None
+        if ov["enabled"]:
+            sub = f"{ov['total']} audits in {len(ov['groups'])} groups." + (f" Next run {words(ov['next'])}." if _num_ok(ov["next"]) else "")
+            btn = (f'<div class="atbtn"><button type="button" class="b" id="audit-now-page"{" disabled" if running else ""}>Audit now</button>'
+                   '<span class="apmsg" id="audit-page-msg" role="status" aria-live="polite"></span></div>')
+        else:
+            sub, btn = "The audit is off ([audit] enabled), so nothing runs and no run is listed.", ""
+        done = [r for r in ov["runs"] if r["finished"] is not None and not r["error"]]
+        last = done[0] if done else None
+        times = " and ".join(ov["times"]) or "Scheduled runs"
+        paces = [("Every minute", "events, hand-offs, answers, fleet"),
+                 ("Every 10 minutes", (f"last {stamp(ov['ten_last'])}: " if ov["ten_last"] else "") + "filing, dates, silence"),
+                 (times, (f"last {stamp(last['finished'])}: {last['items'] if last['items'] is not None else 0} items, {last['found']} findings") if last else "no run yet")]
+        paces_html = "".join(f'<div class="apace"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in paces)
+        def group(g):
+            if g["found"] is None:
+                num = f'<span class="anum">{"not logged" if not g["log"] else "log off"}</span>'
+            else:
+                num = f'<span class="anum{" hit" if g["found"] else ""}">{g["found"]} found</span>'
+            items = "".join(f'<li>{e(a["name"])}<span{"" if a["mode"] == "on" else " class=" + chr(34) + "shadow" + chr(34)}>{e(a["pace"])}{"" if a["mode"] == "on" else " · " + e(a["mode"])}</span></li>' for a in g["audits"])
+            return (f'<details class="audg"><summary><span class="agn"><b>{e(g["name"])}</b><span>{e(g["desc"])}</span></span><span class="anum">{len(g["audits"])} audits</span>{num}</summary>'
+                    f'<ul class="aaud">{items}</ul></details>')
+        groups_html = "".join(group(g) for g in ov["groups"])
+        def finding(r):
+            n = _ov.item_path(r["id"])
+            ref = f'<a href="{under("/items/" + n)}">{e(r["id"])}</a>' if n else e(r["id"])
+            return (f'<div class="af">{ref} {e(r["detail"])}<div class="am">{e(stamp(r["at"]))} · {e(_ov.SOURCES.get(r["source"], r["source"] or "audit"))} · {e(r["agent"])}</div></div>')
+        if not ov["log"]:
+            feed, fsub = '<p class="aempty">The findings log is off, so findings are not listed here.</p>', "log off"
+        elif ov["recent"]:
+            feed, fsub = '<div class="afeed">' + "".join(finding(r) for r in ov["recent"]) + "</div>", f"{ov['found']} in the last 24 hours"
+        else:
+            feed, fsub = '<p class="aempty">No findings in the last 24 hours.</p>', "none in the last 24 hours"
+        def run_row(r):
+            if r["finished"] is None:
+                took = "running" if running and r["started"] == ov["running_since"] else "did not finish"
+            else:
+                took = f"{max(0, round(r['finished'] - (r['started'] or r['finished'])))} s"
+            warn = ' class="warn"' if took == "did not finish" or r["error"] else ""
+            start = words(r["started"]) if r["started"] is not None else "–"
+            dash = lambda v: "–" if v is None else str(v)
+            return f'<tr><td>{e(start)}</td><td{warn}>{e(took)}</td><td>{e(dash(r["items"]))}</td><td>{r["found"]}</td><td>{e(dash(r["calls"]))}</td></tr>'
+        if ov["runs"]:
+            runs = ('<div class="atw"><table><tr><th>Started</th><th>Took</th><th>Items</th><th>Findings</th><th>Calls</th></tr>' + "".join(run_row(r) for r in ov["runs"]) + "</table></div>")
+        else:
+            runs = '<p class="aempty">No audit has run yet.</p>'
+        note = ('Counts are findings in the last 24 hours, counted the first time each appears, from the findings log. A group whose audits report to a machine or to CI keeps no findings log, so it shows a dash on the card and "not logged" here, not a zero.'
+                if ov["log"] else
+                "The findings log is off ([audit] pattern_review), so no group has a count and no finding is listed.")
+        font_css = str(_cfg.get("instance", "font_css") or "")
+        return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>Audits · {e(self.title)}</title>'
+                f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
+                + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
+                f'<div class="atop"><h1>Audits</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
+                f'<h2>Groups <small>open one to see its audits</small></h2><div class="agroups">{groups_html}</div>'
+                f'<h2>Latest findings <small>{e(fsub)}</small></h2>{feed}'
+                f'<h2>Runs <small>{e(times)}, and Audit now</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
+                + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     def page_header(self, pinned: bool = True, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None) -> str:
         """The header every page of the board starts with, the home page's own: the theme and summary-panel buttons, the site title (a link to "/") with the rendered line beside it (_rendered_line), the five count cards (home_counts) and the search box.
