@@ -202,7 +202,7 @@ check("tool text: update's own hand-over sentence says a front agent is not told
 check("tool text: the post_wake_mover parameter of create and update carries the fix (snapshot)",
       json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))).count("sets post_wake_mover=<front agent> gets the project's builder instead") >= 2)
 
-_cdecl = next(l for l in pathlib.Path(STACK, "server.py").read_text(encoding="utf-8").splitlines() if l.startswith('@mcp.tool(name="create"'))
+_cdecl = server._CREATE_DESC
 check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover gets the builder",
       "a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
 

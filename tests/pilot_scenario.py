@@ -2902,8 +2902,8 @@ wait_push(n0 + 1); time.sleep(0.3)
 check("plain id: a sala-style handover names the job's item and not the item its context line cites in backticks",
       needs46(q2) == ["work-osprey-x"] and "needs" not in rd(q3)["metadata"] and res.count("(named work-osprey-x") == 1, (needs46(q2), rd(q3)["metadata"], res))
 check("plain id: the message tool's description says how a handover writes the id, and that a context-only id goes in backticks",
-      any('name="message"' in l and "names the item id, written as a plain word, not in backticks or quotes" in l
-          and "An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item." in l for l in pathlib.Path(server.__file__).read_text(encoding="utf-8").splitlines()))
+      "names the item id, written as a plain word, not in backticks or quotes" in server._MESSAGE_DESC
+      and "An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item." in server._MESSAGE_DESC)
 # moment 2: a write on the item by a background agent not named in its needs
 w1 = mk46(); n0 = len(wait_push(0))
 res = server._update(w1, next="building it", sender="work-osprey-x"); p = wait_push(n0 + 2)
