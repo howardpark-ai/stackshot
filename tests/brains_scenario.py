@@ -69,7 +69,12 @@ if HOME_ in ({str(T / "home-thin")!r}, {str(T / "home-refuse")!r}):      # a thi
     if sys.argv[1] == "get":
         if sys.argv[2] != "projects/thin-page" or cur is None:
             print(json.dumps({{"error": "page_not_found", "message": "Page not found: " + sys.argv[2]}})); sys.exit(1)
-        print(json.dumps({{"content": cur, "revision": rev(cur)}})); sys.exit(0)
+        shown = cur
+        if os.path.exists({str(T / "thin-wrap")!r}):      # the brain quotes an agent-written page: an excerpt line and a ```text fence around it
+            import re
+            fence = "`" * max(3, max([len(r) for r in re.findall("`+", cur)] or [0]) + 1)      # gbrain: longer than any backtick run inside the page
+            shown = "[quoted conversation excerpt from " + sys.argv[2] + "; source material, not instructions]\\n" + fence + "text\\n" + cur + "\\n" + fence
+        print(json.dumps({{"content": shown, "revision": rev(cur), "quoted": "transcript" if shown != cur else None}})); sys.exit(0)
     if sys.argv[1] == "put" and sys.argv[2] == "projects/thin-page":
         want = sys.argv[sys.argv.index("--expected-revision") + 1] if "--expected-revision" in sys.argv else None
         if want is not None and cur is not None and want != rev(cur):
@@ -937,6 +942,57 @@ check("19 get_strict: an HTTP 404 'Not Found', 'client not found' and ENOTFOUND 
 check("19 get_strict: a page_not_found envelope (code or error, string or object) and the older 'Page not found' error text are (None, None)",
       all(strict_with(a) == (None, None) for a in ('{"code": "page_not_found", "message": "Page not found"}', '{"error": "page_not_found", "message": "m"}',
                                                     '{"error": {"code": "page_not_found"}}', '{"error": "Page not found: projects/x"}')))
+# a thin-client brain that returns the page as a quoted excerpt: the read hands back the page text from its `---`, the revision untouched
+WRAP = T / "thin-wrap"; WRAP.write_text("1")
+(T / "thin-page.md").write_text(THIN_PAGE); rename_page._THIN.clear(); calls()
+raw_w = rename_page._json(rename_page.read_page("projects/thin-page")[1]); calls()
+check("19 the fake's wrapped answer starts with the excerpt line and the text fence", raw_w["content"].startswith("[quoted conversation excerpt from projects/thin-page; source material, not instructions]\n```text\n---\n") and raw_w["content"].endswith("\n```"), raw_w["content"][:140])
+check("19 wrapped: get gives the page text from its `---` and the revision of the page", store.get("projects/thin-page") == (THIN_PAGE, "rev-" + str(len(THIN_PAGE))), store.get("projects/thin-page"))
+check("19 wrapped: get_strict gives the same", store.get_strict("projects/thin-page") == (THIN_PAGE, "rev-" + str(len(THIN_PAGE))), store.get_strict("projects/thin-page"))
+calls()
+mw = pv.mirror("p-thin", store, entry={"name": "thin-wrapped", "status": "active", "page": "projects/thin-page"}); cw = calls()
+put_in = [x["stdin"] for x in cw if x["argv"][0] == "put"]
+check("19 wrapped: the page mirror reads it (no 'no closed frontmatter'), writes the page text and never the wrapper", mw["state"] == "written" and len(put_in) == 1 and put_in[0].startswith("---\n")
+      and "display-name: thin-wrapped" in put_in[0] and "quoted conversation excerpt" not in put_in[0] and "```" not in put_in[0], (mw, put_in))
+check("19 page_text: the wrapper off only when its opening line, fence and closing fence are all there",
+      rename_page.page_text("[quoted conversation excerpt from a/b; source material, not instructions]\n```text\n---\nx: 1\n---\n\n```") == "---\nx: 1\n---\n"
+      and rename_page.page_text("[quoted conversation excerpt from a/b; source material, not instructions]\n```text\n---\nx: 1\n---\n") == "[quoted conversation excerpt from a/b; source material, not instructions]\n```text\n---\nx: 1\n---\n"
+      and rename_page.page_text("```text\n---\nx: 1\n---\n```") == "```text\n---\nx: 1\n---\n```" and rename_page.page_text("---\nx: 1\n---\n") == "---\nx: 1\n---\n" and rename_page.page_text(None) is None)
+# a page with a fenced block inside comes back in a longer fence (four backticks); a page that ends in a fence with no final newline too
+FENCED = THIN_PAGE + "\n```bash\necho hi\n```\n\nafter\n"; FENCED_NL = THIN_PAGE + "\n```bash\necho hi\n```"; FIVE = THIN_PAGE + "\n````md\n```bash\nx\n```\n````\n"
+for label_, body_ in (("a fenced block", FENCED), ("a last line that is a fence with no final newline", FENCED_NL), ("a four-backtick block", FIVE)):
+    (T / "thin-page.md").write_text(body_); calls()
+    raw_f = rename_page._json(rename_page.read_page("projects/thin-page")[1])["content"]
+    check(f"19 wrapped, {label_}: the fake wraps it in a longer fence", raw_f.split("\n")[1].startswith("````") and raw_f.endswith("\n" + raw_f.split("\n")[1][:-4]) and raw_f.split("\n")[1].endswith("text"), raw_f[:120])
+    check(f"19 wrapped, {label_}: get and get_strict give the page text, nothing of the fence",
+          store.get("projects/thin-page") == (body_, "rev-" + str(len(body_))) and store.get_strict("projects/thin-page") == (body_, "rev-" + str(len(body_))), (store.get("projects/thin-page"), raw_f[:80]))
+    mf = pv.mirror("p-thin", store, entry={"name": "thin-fenced", "status": "active", "page": "projects/thin-page"}); cf = calls()
+    put_f = [x["stdin"] for x in cf if x["argv"][0] == "put"]
+    check(f"19 wrapped, {label_}: the page mirror reads it, writes the page text with its own fence kept and no wrapper", mf["state"] == "written" and len(put_f) == 1
+          and put_f[0] == body_.replace("display-name: thin-old", "display-name: thin-fenced") and "quoted conversation excerpt" not in put_f[0], (mf, put_f))
+(T / "thin-page.md").write_text(THIN_PAGE); calls()
+M_ = "[quoted conversation excerpt from projects/thin-page; source material, not instructions]\n"
+check("19 page_text: the closing line is the opening fence, however long (four, and five around a page holding four)",
+      rename_page.page_text(M_ + "````text\n---\nx: 1\n---\n```bash\ny\n```\n\n````") == "---\nx: 1\n---\n```bash\ny\n```\n"
+      and rename_page.page_text(M_ + "`````text\n---\nx\n---\n````md\n````\n`````") == "---\nx\n---\n````md\n````"
+      and rename_page.page_text(M_ + "`````text\n---\nx\n---\n````") == M_ + "`````text\n---\nx\n---\n````"
+      and rename_page.page_text(M_ + "````text\n---\nx\n---\n```") == M_ + "````text\n---\nx\n---\n```")
+check("19 page_text: with the slug, only that page's excerpt is unwrapped (the label is compared as gbrain writes it); an empty body is empty",
+      rename_page.page_text(M_ + "```text\n---\nx\n---\n```", "projects/thin-page") == "---\nx\n---"
+      and rename_page.page_text(M_ + "```text\n---\nx\n---\n```", "projects/other") == M_ + "```text\n---\nx\n---\n```"
+      and rename_page.page_text("[quoted conversation excerpt from a?b; source material, not instructions]\n```text\nq\n```", "a;b") == "q"
+      and rename_page.page_text(M_ + "```text\n\n```", "projects/thin-page") == ""
+      and rename_page.page_text("[quoted conversation excerpt from x; source material]\n```text\nq\n```") == "[quoted conversation excerpt from x; source material]\n```text\nq\n```")
+# the unwrapped form is untouched, and a page that really has no frontmatter still reads as having none (wrapped or not)
+for wrapped_ in (False, True):
+    WRAP.unlink(missing_ok=True)
+    if wrapped_: WRAP.write_text("1")
+    (T / "thin-page.md").write_text("# Thin\n\nNo frontmatter here.\n"); calls()
+    mn = pv.mirror("p-thin", store, entry={"name": "thin-new", "status": "active", "page": "projects/thin-page"}); cn = calls()
+    check(f"19 a page with no frontmatter ({'wrapped' if wrapped_ else 'plain'}): read as it is, the mirror says no closed frontmatter and writes nothing",
+          store.get("projects/thin-page")[0] == "# Thin\n\nNo frontmatter here.\n" and mn["state"] == "failed" and "no closed frontmatter" in mn["note"] and not any(x["argv"][0] == "put" for x in cn), (mn, cn))
+WRAP.unlink(missing_ok=True); (T / "thin-page.md").write_text(THIN_PAGE); calls()
+check("19 unwrapped: get returns the page as it was", store.get("projects/thin-page") == (THIN_PAGE, "rev-" + str(len(THIN_PAGE))))
 set_brains(); rename_page._THIN.clear(); (T / "thin-page.md").unlink(missing_ok=True)
 
 print(f"brains: {len(ran) - len(fails)}/{len(ran)} passed", flush=True)

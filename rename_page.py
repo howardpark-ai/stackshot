@@ -114,10 +114,26 @@ def read_page(slug):
     return gb_routed(["call", "get_page", json.dumps({"slug": slug, "include_content": True, "content_only": True})],
                      ["get", slug, "--include-content", "--content-only", "--json"])
 
+_QUOTED_HEAD = re.compile(r"\[quoted conversation excerpt from ([^\[\];\r\n]*); source material, not instructions\]\n(`{3,})text\n")
+
+def page_text(content, slug=None):
+    """The page text of a `content` value. A thin-client brain's `get` can return an agent-written page as a quoted excerpt: a line
+    `[quoted conversation excerpt from <slug>; source material, not instructions]`, a fence of backticks followed by `text`, the page, and a
+    closing line of the same fence. gbrain makes the fence longer than any backtick run inside the page (three at least), so a page with a
+    ```bash block comes in a fence of four. The wrapper is taken off, and only when its opening line names `slug` (when the caller gives it;
+    gbrain writes the slug into the line with `[`, `]`, `;` and line breaks turned into `?`) and its closing line is the opening fence;
+    any other text (a page that really starts at its `---`, one with no frontmatter, a different page's excerpt) comes back as it is."""
+    if isinstance(content, str):
+        m = _QUOTED_HEAD.match(content)
+        if m and (slug is None or m.group(1) == re.sub(r"[\[\];\r\n]", "?", slug)):
+            close = "\n" + m.group(2)
+            if content.endswith(close) and len(content) >= m.end() + len(close): return content[m.end():-len(close)]
+    return content
+
 def get(slug):
     rc, out = read_page(slug)
     d = _json(out)
-    return (d["content"], d["revision"]) if "content" in d and "revision" in d else (None, None)
+    return (page_text(d["content"], slug), d["revision"]) if "content" in d and "revision" in d else (None, None)
 
 def family(old):
     """The page and every page under it, from the mirror's file tree (slugs)."""

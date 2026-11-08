@@ -251,7 +251,7 @@ class GbrainIO:
             raise OSError(f"gbrain get_page {slug}: {type(e).__name__}: {e}") from e
         d = _rp._json(out)
         if "content" in d and "revision" in d:
-            return d["content"], d["revision"]
+            return _rp.page_text(d["content"], slug), d["revision"]
         if d and self._absent(d):
             return None, None
         raise OSError(f"gbrain get_page {slug}: no page and no clean 'not found' answer (exit {rc}): {out[:120]!r}")
