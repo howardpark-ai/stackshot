@@ -144,6 +144,13 @@ def gbrain_bin() -> str:
     return os.path.expanduser(v) if v else "gbrain"
 
 
+def copy_project_lines() -> bool:
+    """[pages] copy_project_lines: whether stackshot copies a project's record (name, status, agents) onto its page's `display-name:`, `status:` and `agents:`
+    lines after a project verb. True unless the key is the boolean false: the one switch that retires the copy on every brain (a shared brain's pages never get
+    it, whatever this says: brains.shared_refusal)."""
+    return get("pages", "copy_project_lines") is not False
+
+
 def page_flavor() -> str:
     """[pages] flavor: how a session is told to update its page. "gbrain" = through gbrain's tools (add_timeline_entry,
     get_page/edit_page/put_page); "plain" (default) = edit the markdown file in the pages checkout, commit and push."""
@@ -962,6 +969,8 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
                 out.append(f"[[brains]] {name} prefix {p.strip()!r} does not end in \"-\" or \"/\", so it also catches longer names (projects/beta also takes projects/betamax): end it with the separator, for example {p.strip() + '-'!r}")
         out.extend(_prefix_folder_notes(name, b, pf))
         out.extend(_new_page_notes(name, b))
+        if "shared" in b and not isinstance(b["shared"], bool):
+            out.append(f"[[brains]] {name} shared = {b['shared']!r} is not true or false, so the brain is not marked shared and stackshot still writes its pages: write shared = true or shared = false (no quotes)")
         sf = b.get("secret_file")
         if sf is not None and not isinstance(sf, str):
             out.append(f"[[brains]] {name} secret_file is not a path, so no client secret is passed to its gbrain CLI: set secret_file = \"<path of the file holding the client_secret>\" or remove the key")
@@ -972,6 +981,12 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
                 out.append(f"[[brains]] {name} secret_file {full} {bad}")
         if not str(b.get("home") or "").strip() and not b.get("remote"):
             out.append(f"[[brains]] {name} has no home, so its pages are neither read nor written through the gbrain CLI (the CLI would run on the default brain): set home = \"<its GBRAIN_HOME folder>\" on that entry")
+    gb = get("gbrain", cfg=cfg)
+    if isinstance(gb, dict) and "shared" in gb and not isinstance(gb["shared"], bool):
+        out.append(f"[gbrain] shared = {gb['shared']!r} is not true or false, so the default brain is not marked shared and stackshot still writes its pages: write shared = true or shared = false (no quotes)")
+    pgs = get("pages", cfg=cfg)
+    if isinstance(pgs, dict) and "copy_project_lines" in pgs and not isinstance(pgs["copy_project_lines"], bool):
+        out.append(f"[pages] copy_project_lines = {pgs['copy_project_lines']!r} is not true or false, so the copy stays on (true): write copy_project_lines = false to stop writing project lines onto pages")
     out.extend(released_notes(cfg))
     out.extend(report_notes(cfg))
     pm = get("presence", "minutes", cfg=cfg)

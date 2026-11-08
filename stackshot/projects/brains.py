@@ -14,6 +14,7 @@ gbrain CLI run with that brain's home folder (environment GBRAIN_HOME=<home>, wh
                                    (a copy: the server's own environment is never touched; unchanged for the default brain without a home)
     redact(text, env)            → text with the secret of that environment replaced, for any output a CLI call hands back
     mirror(key)                  → the page's mirror link from its brain's template ("" when none)
+    shared_refusal(key)          → "" when stackshot may write the page; else why not (its brain is marked `shared`: see below)
     looked_in(key)               → for a page reported missing: "" for the default brain, else which second brain's copy was looked in and what routed it there
     warn_once(brain, why, what)  → one stderr line per outage, naming the brain (fail open: the caller carries on); the state is per brain
     clear(brain, what)           → a read works again; when no read of the brain fails any more, one stderr line says it is back
@@ -28,6 +29,10 @@ starts a new process for every prompt, so it says so at each prompt while the ou
 A copy that exists but is not a usable copy (no `.git`, or no page in any page folder: an unmounted mount point, a clone in progress) is
 as good as missing. A second brain with no `home` is not reached through the CLI at all: a read or a write for its slugs is refused (the CLI would run on the
 default brain's home and return or take that brain's page), see cli_refusal; a refused read is a page that could not be read.
+
+A brain marked `shared = true` (a `[[brains]]` entry's own key; `[gbrain] shared = true` for the default brain) holds pages of people other than the board's owner:
+stackshot writes nothing of its board onto them. Every write the page store makes for such a page (a Current-state edit, a timeline line, a new page, the
+project lines' copy of the record) is refused with a line that names the mark (shared_refusal), and a page of it owes no page update to a session. Reads are not touched.
 
 A remote brain's CLI also needs its OAuth client secret (GBRAIN_REMOTE_CLIENT_SECRET). The entry's optional `secret_file` is a path (~ allowed)
 to a file holding it: a JSON file with a `client_secret` key, or a plain file whose first line is the secret. The server reads it at each
@@ -82,6 +87,7 @@ class Brain:
     keep: tuple[str, ...] = field(default_factory=tuple)           # a page key containing one of these stays in the default brain, whatever new_prefixes says
     stale_hours: float = 0.0
     default: bool = False
+    shared: bool = False                 # holds pages other people read and write: stackshot writes nothing of its board onto them (see shared_refusal)
     secret_file: str = field(default="", repr=False)    # path of the file holding the CLI's OAuth client secret (never its content; see secret())
 
 
@@ -99,9 +105,15 @@ def _exp(v: Any) -> str:
     return os.path.expanduser(v) if v else ""
 
 
+def _flag(v: Any) -> bool:
+    """A config boolean: only a real true counts (a string such as "false" is no mark; config.notes names it)."""
+    return v is True
+
+
 def default() -> Brain:
     return Brain(name=DEFAULT, path=Path(_exp(_cfg.get("paths", "brain")) or os.path.expanduser("~/brain")),
-                 home=_exp(_cfg.get("gbrain", "home")), mirror_url=str(_cfg.get("gbrain", "mirror_url") or ""), default=True)
+                 home=_exp(_cfg.get("gbrain", "home")), mirror_url=str(_cfg.get("gbrain", "mirror_url") or ""), default=True,
+                 shared=_flag(_cfg.get("gbrain", "shared")))
 
 
 def _strs(v: Any, strip_slash: bool = False) -> tuple[str, ...]:
@@ -137,7 +149,7 @@ def extra() -> list[Brain]:
                          slugs=tuple(s for s in (_norm(x) for x in slugs if isinstance(x, str)) if s),
                          prefixes=tuple(str(p).strip().lstrip("/") for p in prefixes if isinstance(p, str) and str(p).strip()),
                          new_prefixes=_strs(b.get("new_prefixes"), strip_slash=True), keep=_strs(b.get("keep")),
-                         stale_hours=max(stale, 0.0)))
+                         stale_hours=max(stale, 0.0), shared=_flag(b.get("shared"))))
     return out
 
 
@@ -224,6 +236,22 @@ def by_name(name: str) -> Brain | None:
 def file(key: Any) -> str:
     """The page's file in its brain's local copy."""
     return str(for_key(key).path / (_norm(key) + ".md"))
+
+
+def shared_refusal(key: Any) -> str:
+    """"" when stackshot may write the page `key`; else the line that says why not, naming the mark: the page's brain is marked shared. Never raises
+    (a config that cannot be read answers "": a write is then not refused here, and the page store's own checks stand)."""
+    try:
+        b = for_key(key)
+    except Exception:  # noqa: BLE001
+        # Fails open on purpose: a config fault must not block every write of the board, and the config loader already refuses a malformed mark at load
+        # (`shared` counts only as a real boolean true; config.notes names any other value), so what reaches here is a fault of the brain list itself.
+        return ""
+    if not b.shared:
+        return ""
+    mark = "[gbrain] shared = true" if b.default else f"[[brains]] {b.name} shared = true"
+    return (f"brain {b.name!r} is marked shared ({mark}): stackshot writes nothing of its board onto a shared brain's pages "
+            f"(no Current-state edit, timeline line, new page or project-lines copy); the page is kept by its own people")
 
 
 def mirror(key: Any) -> str:

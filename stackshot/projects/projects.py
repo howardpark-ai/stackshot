@@ -37,6 +37,8 @@ name, status, hub, agents, scope), so every reader of the registry sees the entr
 A page move (`rename`) moves the entry's page pointer with the id.
 
 `ref(x)` is the one lookup: an id, a full page key or a bare slug → the record, or None.
+`fields(x)` (and `python3 -m stackshot projects fields <project>`) is the read-through for a script that needs a project's name, status and agents: the entry's fields first, the page's lines for a
+field the entry does not hold or a project the record does not cover yet, with the source of each: no script reads those page lines itself, so the lines can stop being written (`[pages] copy_project_lines`).
 Stdlib only; config.py is its one import."""
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
@@ -364,6 +366,75 @@ def ref(x, reg: dict | None = None):
 
 
 project_ref = ref       # the name the design gives it: `projects.project_ref(x)`; the server has the same, `server.project_ref(x)`
+
+
+# ---------------------------------------------------------------------------- the read-through for scripts: the record first, the page's lines for what it does not hold
+def _owner_key(key: str, reg: dict) -> str:
+    """The page that names the project `key` belongs to: the page itself, then the page its `hub:` line names, then each page above it, the nearest first, whose
+    own lines (or the record's entry) give the project a name. "" when none does."""
+    parts = key.split("/")
+    row = reg.get(key) if isinstance(reg.get(key), dict) else {}
+    chain = [key, str(row.get("hub") or "").strip(), *["/".join(parts[:n]) for n in range(len(parts) - 1, 1, -1)]]
+    for k in dict.fromkeys(c for c in chain if c):
+        e = reg.get(k)
+        if isinstance(e, dict) and e.get("role") in _NAME_ROLES and str(e.get("session") or "").strip():
+            return k
+    return ""
+
+
+def _fields_row(key: str, rec: dict, reg: dict, entry: dict | None) -> dict:
+    """One project's fields from the registry row the record is already laid over (`reg`), each with where it came from: "record" when the project's entry holds the
+    field, "page" when the page's own line answers, "" when neither has it."""
+    row = reg.get(key) if isinstance(reg.get(key), dict) else {}
+    entry = entry or {}
+    name = str(row.get("session") or "") if row.get("role") in _NAME_ROLES else ""
+    agents = rec.get("agents") or {}
+    src = lambda in_record, have: "record" if in_record else ("page" if have else "")
+    return {"id": rec["id"], "key": key, "owner_key": _owner_key(key, reg), "sub_page": is_sub_page(key, reg, row),
+            "source": "record" if entry else "page",
+            "display_name": name, "status": page_status(row) or "active", "retired": bool(rec.get("retired")), "hub": str(row.get("hub") or ""),
+            "agents": agents, "main": main_of(agents),
+            "from": {"display_name": src(bool(entry.get("name")), bool(name)), "status": src("status" in entry, bool(row.get("status"))), "agents": src("agents" in entry, bool(agents))}}
+
+
+def fields(x, reg: dict | None = None) -> dict | None:
+    """What a script reads of a project, so none reads the page's `display-name:`, `status:` and `agents:` lines itself: `x` is an id, a page key or a bare slug →
+    {id, key, owner_key, sub_page, source ("record" | "page"), display_name, status, retired, hub, agents {name: {front, role, mandate_line}}, main, from {display_name,
+    status, agents}} or None for a project nothing names. The project record's entry is read first, and the page's lines answer for a field the entry does not hold
+    (`from` says which) and for a project the record does not cover yet (`source` "page"), so nothing a reader needs is lost while the record fills. `owner_key` is the page
+    that names the project the page `x` belongs to (the page itself for a project's own page). A project the record says has no page is read from the record alone."""
+    reg = with_made(registry() if reg is None else reg)
+    recs = refs(x, reg)
+    if recs:
+        rec = recs[0]
+        return _fields_row(rec["key"], rec, reg, _pr.entries().get(rec["id"]))
+    v = _pr.resolve(x)
+    if not v or v.get("via") == "sub_page":
+        return None
+    e = _pr.entries().get(v["id"]) or {}
+    pre = [str(v["name"])] if v.get("name") else []
+    agents = {n: {"front": bool(a.get("front")), "role": role_of(n, pre), "mandate_line": str(a.get("mandate_line", ""))} for n, a in (v.get("agents") or {}).items()}
+    return {"id": v["id"], "key": "", "owner_key": "", "sub_page": False, "source": "record", "display_name": str(v.get("name") or ""), "status": v.get("status") or "active",
+            "retired": bool(v.get("archived")), "hub": str(v.get("hub") or ""), "agents": agents, "main": main_of(agents),
+            "from": {"display_name": "record" if v.get("name") else "", "status": "record", "agents": "record" if "agents" in e else ""}}
+
+
+def all_fields(reg: dict | None = None) -> list:
+    """`fields` of every page of the registry that names a project or lists an agent (a sub-page that lists agents included), sorted by key; plus the record's projects that
+    have no page. For a script that needs every project's names (a scan for private names)."""
+    reg = with_made(registry() if reg is None else reg)
+    by = _ids_for(list(reg), reg); pend = _pending_all(); mk = marks(); recent = recent_items(reg)
+    ents = _pr.entries(); out = []
+    for key, row in sorted(reg.items()):
+        if not isinstance(row, dict) or not (row.get("agents") or row.get("role") in _NAME_ROLES):
+            continue
+        rec = _record(key, row, reg, by[key], pend.get(by[key], {}), mk.get(by[key]), recent)
+        out.append(_fields_row(key, rec, reg, ents.get(rec["id"])))
+    seen = {r["id"] for r in out}
+    for pid in sorted(ents):
+        if pid not in seen and not _pr.page_key(ents[pid]) and (f := fields(pid, reg)):
+            out.append(f)
+    return out
 
 
 # ---------------------------------------------------------------------------- scope and listing (the fleet tool's "New session" form's project picker)
@@ -1008,9 +1079,35 @@ def sync(now: float | None = None, force: bool = False, reg: dict | None = None,
     return True
 
 
-if __name__ == "__main__":      # python3 projects.py rename <old key> <new key>: a page was moved, its project id follows (rename_page.py does this itself)
-    a = sys.argv[1:]
+USAGE = ("usage: python3 -m stackshot projects rename <old page key> <new page key>\n"
+         "       python3 -m stackshot projects fields <id | page key | bare slug>    one project's name, status and agents as JSON: the record first, the page's lines for what it does not hold\n"
+         "       python3 -m stackshot projects fields --all                          the same for every page that names a project or lists an agent (a JSON list)\n"
+         "fields exit 0 found · 1 no such project · 2 the registry or the project record cannot be read here (run it on the server box, where <store>/projects.json is)")
+
+
+def main(a: list) -> int:
+    """`projects rename <old> <new>`: a page was moved, its project id follows (rename_page.py does this itself). `projects fields <project> | --all`: the read-through."""
+    if a[:1] in (["-h"], ["--help"]):
+        print(USAGE); return 0
     if len(a) == 3 and a[0] == "rename":
         try: print(f"{rename(a[1], a[2])}: now {a[2]}")
         except ValueError as e: sys.exit(f"projects.py: {e}")
-    else: sys.exit("usage: python3 projects.py rename <old page key> <new page key>")
+        return 0
+    if len(a) == 2 and a[0] == "fields":
+        if not registry_raw():
+            print("projects.py fields: no page registry here (<store>/projects.json is missing or empty): run it on the server box", file=sys.stderr); return 2
+        bad = _pr.record_error()
+        if bad:        # the readers fall back to the pages' lines on a damaged record; a script reading the record must be told, the lines may be no longer written
+            print(f"projects.py fields: the project record cannot be read: {bad}", file=sys.stderr); return 2
+        try:
+            out = all_fields() if a[1] == "--all" else fields(a[1])
+        except ValueError as e:
+            print(f"projects.py fields: the project record cannot be read: {e}", file=sys.stderr); return 2
+        if out is None:
+            print(f"projects.py fields: no project {a[1]!r}: an id (prj_<8 hex>), a page key or a bare slug", file=sys.stderr); return 1
+        print(json.dumps(out, indent=1, ensure_ascii=False, sort_keys=True)); return 0
+    print(USAGE, file=sys.stderr); return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

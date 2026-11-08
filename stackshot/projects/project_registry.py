@@ -109,6 +109,18 @@ def _sig(p: Path) -> Any:
         return (str(p), None)
 
 
+def record_error() -> str:
+    """"" when the record file is missing or reads (entries() would answer from it), else why it cannot be read. entries() hides this on purpose (the readers fall back to the
+    pages); a caller that must not take the pages' lines for the record's, such as `projects fields` for a script, asks here first."""
+    try:
+        parse(json.loads(record_path().read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError) as e:
+        return f"{record_path()} cannot be read ({e})"
+    return ""
+
+
 def entries() -> dict:
     """Every entry by id ({} when the file has none, is missing, or cannot be read: the readers fall back to the pages). Parsed again only when the file changed.
     The dict is shared: a caller never changes it (resolve and apply hand out copies)."""

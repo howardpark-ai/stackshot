@@ -24,6 +24,30 @@ A page that already exists is routed exactly as before: `new_prefixes` never mov
 prefix stays where it is. A bad value (not a list of strings, an empty or non-string item, a `new_prefixes` entry without a `/` or not
 ending in `-` or `/`) is named by `config.notes` at the start and on a reload and is ignored.
 
+## A shared brain
+
+A brain whose pages other people also read and write is marked `shared = true` on its `[[brains]]` entry (`[gbrain] shared = true` for the default brain). stackshot then writes nothing of
+its board onto a page of that brain: every page-store write for one of its slugs (a Current-state edit by the audit's page call, a timeline line such as the router's note or an archive's,
+a new page, the copy of a project's lines) is refused with a line that names the mark (`brains.shared_refusal`; `page_debt.BrainIO` makes the refusal for every writer, before the gbrain CLI
+is called), and a page of it owes no page update to a session (pages owed charges nothing there, and drops a debt charged before the mark was set). Reads are unchanged, and a project
+verb still writes the project record: its answer says `mirror.state` = `retired` and gives the reason. A project verb that moves a page (`move-page`, which runs `rename_page.py`) is refused with 403 when the old or the new key is in a shared brain, before any step runs,
+a dry run included; the router's timeline note on such a page is skipped (no `note_error`, the ruling is unchanged). `rename_page.py` run by hand and `page_keeper.py` (the one-time pass that renames a
+page's `session:` line) are an operator's tools, not board writes, and are not refused. Only a boolean `true` marks a brain; `config.notes` names any other value, and the page-store check itself
+never blocks a write because the brain list could not be read. A brain is marked by its `slugs`, `prefixes` and `new_prefixes` only: a shared subset inside the same gbrain home as the default
+brain (a source id, not a separate home) cannot be marked yet.
+
+### The copy of the record onto pages, and the read-through
+
+stackshot used to copy a project's record onto its page after every project verb: the `display-name:`, `status:` and `agents:` lines (`project_verbs.mirror`). Its own readers read the record
+first (`project_registry.apply`), so the copy only served scripts that read the lines. It is retired in two steps. Per brain, the shared mark above: such a page never gets the copy. For every
+brain at once, one switch: `[pages] copy_project_lines = false`; a verb's `mirror.state` is then `retired` everywhere, and the page's three lines stay as they last were. The switch also stops the
+creation of a page for a new project (`create --make-page` writes the record and no page); the page is made by hand or by the project's people. Nothing a reader needs is lost
+meanwhile: `stackshot projects fields <id | page key | bare slug>` (`projects.fields`, run on the server box) prints a project's `display_name`, `status`, `agents` (front or background, role, mandate line),
+`main` and `owner_key` as JSON, taking each field from the project's entry in the record and, for a field the entry does not hold or a project the record does not cover yet, from the page's own
+lines; `source` and `from` say which. `projects fields --all` lists every page that names a project or lists an agent. A script reads this, never the lines. Exit 0 found, 1 no such project, 2 the
+registry or the project record cannot be read on this machine (a damaged record is told, never answered from the pages' lines). Until the record covers a project (the migration), its page lines are the answer for it. A verb on such a project first makes its entry from the lines, so once the
+copy is off the lines of a project stop following it from that verb on: turn the switch off only when nothing outside stackshot reads the lines any more.
+
 - **Reads** use that brain's copy: the page registry (`stackshot/projects/pages.py registry` reads each brain's copy for the keys that brain holds), create's
   page check, the page hook's freshness and Current-state checks, pages owed, the audit's page call's shadow read, the search index, and the
   page links (the brain's `mirror_url`, else the file in its copy).

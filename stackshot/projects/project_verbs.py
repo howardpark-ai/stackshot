@@ -16,6 +16,10 @@ map, front agents first and a `background:` sub-map) and `status:`. It is comput
 verbs at once leave the same page whichever writes last; a page edit by anyone else to one of the three lines is overwritten by the next mirror write. If the mirror cannot be
 written the verb says so in its answer (`mirror.state` = "failed") and the record is already right: nothing is rolled back, and `mirror()` writes it again.
 
+The copy is retired per page and everywhere: a page in a brain marked `shared` ([[brains]] shared = true, brains.shared_refusal) is never written, and `[pages] copy_project_lines = false` stops it on every brain; the
+verb's answer then says `mirror.state` = "retired" with the reason, and the page store is not called. The record is what readers use: `projects.fields` (python3 -m stackshot projects fields) reads it first and the page's lines
+for a project the record does not hold yet.
+
 A project with no entry yet (the migration has not run, or not reached it) gets its entry from the page lines the registry derives, with the migration's own function (`derive_entry`), at its
 first verb; the project's pending agents (agents the form registered before this) are folded into the entry in the same write. A project with no page has no mirror and no page store call at all.
 
@@ -449,11 +453,23 @@ def _expire_former(pid: str, content: str) -> None:
         pass
 
 
+def copy_off(key: str) -> str:
+    """"" when the copy of the record onto the page `key` is written; else why it is retired: a brain marked `shared` never gets it, and `[pages] copy_project_lines = false`
+    retires it on every brain. The record is the one place the fields live then, and `projects.fields` is how a script reads them."""
+    from stackshot.projects import brains as _brains
+    why = _brains.shared_refusal(key)
+    if why:
+        return f"the page was not written: {why}"
+    if not _cfg.copy_project_lines():
+        return "the page was not written: the copy of the record onto pages is retired ([pages] copy_project_lines = false); the record holds the project's name, status and agents"
+    return ""
+
+
 def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bool = False, dry: bool = False, tries: int = MIRROR_TRIES, now: float | None = None, exclusive: bool = False,
            drop: tuple = ()) -> dict:
     """Write the project's page mirror from its entry → {"state", "key", "note"}. States: "none" (the project has no page in this instance's page store: a project with no page, or a pointer
     that is a link elsewhere), "unchanged" (the page reads as the record says), "written", "would-write" (a dry run), "no-page" (the pointer names a page the store does not have, and `make_page` was
-    not asked), "failed" (the page could not be edited or written; `note` says why), "exists" (`exclusive` only: the page store says the page the verb meant to make is there already; nothing was written to it). Never raises. The entry is the one given on the first try; on every later try, and for a write (not a dry run) in the verbs' own answers, it is read from the record again, so the last writer of either leaves the page the record describes.
+    not asked), "failed" (the page could not be edited or written; `note` says why), "exists" (`exclusive` only: the page store says the page the verb meant to make is there already; nothing was written to it), "retired" (copy_off says why: the page is in a brain marked `shared`, or `[pages] copy_project_lines = false`; the page store is not called and `note` names the reason). Never raises. The entry is the one given on the first try; on every later try, and for a write (not a dry run) in the verbs' own answers, it is read from the record again, so the last writer of either leaves the page the record describes.
     A page that lists an agent the record lacks gets its `agents:` block left as it is ("failed", the names in `note`; the name and status lines are still written): the page was edited since the record
     last said, and the write would delete that line for good. `drop` = the names the verb has just taken off the record on purpose (a retire, a rename), which the page may still list; the entry's
     `former_agents` keeps them until a mirror has left the page without them."""
@@ -466,6 +482,9 @@ def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bo
         key = pr.page_key(e)
         if not key:
             return {"state": "none", "key": "", "note": "its page is a link to another knowledge base: nothing is written there"}
+        off = copy_off(key)
+        if off:
+            return {"state": "retired", "key": key, "note": off}
         from stackshot.router import page_debt as _pd
         if io is None:
             io = _pd.page_io()
@@ -1024,6 +1043,7 @@ def move_page(project: str, new_key: str, *, by: str = "", phases: tuple = ("cop
     names the old key: move those, then run `phases=("stub",)`; an item that stores the project's id (metadata.project_id) is read at the new key at once, and needs no move), and when the page has moved (the stub ran) writes the record: the pointer is the new key and the old key is appended to
     `former_keys`. rename_page.py's own stub step moves the id's key and the entry's pointer in the same way; this step makes the record right whatever that step did (it does nothing twice). The page
     mirror runs at the new key. A dry run runs only `plan`. → {project, key, changed, moved, steps, mirror}; a failed step is a VerbError(502) naming the step and its output.
+    A page of a brain marked `shared` (the old key or the new one) is not moved: 403, with the refusal's line (brains.shared_refusal), before any step runs, a dry run included.
     Only a project's own page moves: `project` may not be a sub-page's key, and `new_key` may not be below another page or a sub-page's (400). A stub that was written but whose id move failed
     (rename_page.py exits 1 after printing "stub OLD → NEW") is not an error: the record is made right here and the answer carries a `warning`."""
     new_key = _norm_key(new_key)
@@ -1050,6 +1070,11 @@ def move_page(project: str, new_key: str, *, by: str = "", phases: tuple = ("cop
         other = ctx.pid_of(new_key)
         if other and other != pid and (other in ctx.ents and pr.page_key(ctx.ents[other]) == new_key):
             raise VerbError(409, f"{new_key} is already the page of project {other}")
+        from stackshot.projects import brains as _brains
+        for k in (old, new_key):                # rename_page.py puts and stubs through the notes CLI: a shared brain's page is moved by its own people, never by a project verb
+            why = _brains.shared_refusal(k)
+            if why:
+                raise VerbError(403, f"the page {k} was not moved: {why}")
         return {"pid": pid, "old": old}
 
     pages = pages if pages is not None else preread(project, io)
