@@ -1715,9 +1715,9 @@ def _pilot_charge(project: str, writer: str) -> tuple[str, str]:
 # session keeps a connector's old tool list for about a day.
 _NEEDS_FORM = (
     "needs: whose move it is now, a list: \"decision\" ({OWNER}'s: decide, judge, review, give the go-ahead), \"external\" (someone outside, named in next) "
-    "and session names (a background agent of any project, or the item's mover itself; another user-facing agent is refused: its part becomes its own item, linked with after=), "
-    "e.g. needs=[\"decision\", \"my-engineer\"] or one comma-separated string. An item has one mover: a session that is not a background agent of the item's project counts as a mover, "
-    "and two of them, or decision beside one, are refused (name the one who moves it now, and who takes it after his answer in then=); the project's own background agents are never a second mover; "
+    "and session names (the item's project's own background agents, or the item's mover itself; another user-facing agent is refused: its part becomes its own item, linked with after=), "
+    "e.g. needs=[\"decision\", \"my-engineer\"] or one comma-separated string. An item has one mover: a session named that is not a background agent of the item's project counts as a mover, "
+    "and two of them, or decision beside one, are refused (name the one who moves it now, and who takes it after his answer in then=); a background agent of this project never counts as a second mover; "
     "empty means the item's mover (mover=, else the project's builder, else its -main agent) moves it. The lane follows the first of decision, external, a session (your call · on others · on agent). "
     "A session named is told when added, is asked about the item at each turn end and hears its wake, recycle and after notices; it passes sender=<its name> on its writes, so that they reach the mover as another session's. "
     "needs= replaces the whole list (name again what should stay); needs=\"none\" or clear_needs=true empties it. "
@@ -1731,7 +1731,7 @@ _NEEDS_FORM = (
     "An item waiting on {OWNER} is never on hold: it carries needs=decision with its ask, or after=<the item that carries the ask>. needs names "
     "only who can move now. An item that waits on {OWNER} and on a session at once: where his answer could change with the session's work, or "
     "its work with his answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with after=); "
-    "decision sits beside a session only when the two are independent, and when unsure, in sequence. When decision leaves needs (he has "
+    "decision sits beside this project's background agents only when the two are independent (beside any other session it is refused), and when unsure, in sequence. When decision leaves needs (he has "
     "decided), the sessions still named are told at once; a session whose work changes the question rewrites the ask. The server never hands an item to a front agent on its own "
     "motion: when the item is back with its front agent mover alone, the project's builder is told instead."
 ).replace("{OWNER}", OWNER)
@@ -11827,7 +11827,7 @@ _ITEM_FORM = (
     f"One decision per item: an ask that packs several decisions, or points at choices by a number or letter code the item does not spell out (“choices 2-3”, “2b”), is refused. "
     f"Split it into one item per decision and write each option out in words in the ask or the description, so that {OWNER} can decide from the item page alone. "
     "A decision to change wording quotes the current and the proposed text, labeled before and after, in the description or the options' lines. "
-    "A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page, or a /mockup/<n> page of the fleet tool's web UI) puts [mockup](<that link>) in the ask's Decide part too, or the write is refused; a mockup link goes in the ask only, never in an option (an option label or line holding a markdown link or an http(s) URL is refused). "
+    "A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page, or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the question. A mockup link goes in the ask only, never in an option (an option label or line holding a markdown link or an http(s) URL is refused). "
     f"A command for {OWNER} to run, or a paste, belongs on the item: in next when it is short (a code span), otherwise on the project page, with next linking to it. "
     "options: when the decision is a pick between alternatives, list them, each on one line, "
     f"{_OPT_FORM}; the ask's Recommend names the recommended one's label. The server refuses a needs=decision item whose ask or "
@@ -11869,7 +11869,7 @@ _CHECK_FORM = (
     "session (a line of next in the form `<session>: <action>`, a list marker before the name at most: any session but the item's mover and you, not "
     "one already in needs; a name elsewhere, in a slug, a link or a sentence, hands nothing over) is refused unless the item carries a check "
     "or a wake (a reminder of your own work at that date; the item stays active, never on hold); a write that leaves an existing hand-off as it was is not asked again. "
-    "Right: update(item_id=\"board#N\", sender=\"my-x\", next=\"other-x: build the export\", check=\"pr_merged owner/repo#12\"). "
+    "Right: update(item_id=\"board#N\", sender=\"my-x\", next=\"other-x: build the export\", check=\"pr_merged acme/widgets#12\"). "
     "A front agent is the exception: its hand-off needs neither (a check stays allowed to anyone), because a front agent does not watch handed-off work itself: "
     "the result lands through stackshot when the mover closes the item or hands it back to you, so a front agent's own reminder wake on an alive item another session moves is refused (a done check, a park with its wake and ask_by stay allowed). "
     "To watch anyway, pass watch_reason=<why no push reaches you> (at least 15 characters) on update, in the same call; it is recorded on the item. check=\"none\" clears it; "
@@ -11924,7 +11924,7 @@ _SELF_WAIT_FORM = (
     "(a reply, a build or test still running, a window the work itself needs, a resource that is down; a preference for a scheduled run is none). The check passes the write when the model is unavailable "
     "or slow. It does not apply to a wait on another item (after), on a decision or an outside party (needs decision or external), a park (hold with wait_basis), a stored wait (wait_kind), a hand-off to another session, "
     "or a step you leave as it was. wait_reason is not stored on the item. "
-    f"Right: update(item_id=\"board#N\", sender=\"my-x\", wake=\"<a day within {_wt.cap_days():g} days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"). "
+    f"Right: update(item_id=\"board#N\", sender=\"my-x\", wake=\"<tomorrow or later, within {_wt.cap_days():g} days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"). "
 )
 
 
@@ -12002,7 +12002,7 @@ _OUTCOME_PARAM = Annotated[str, Field(description="How a close ended: done | dro
 
 _REASON_PARAM = Annotated[str, Field(description=f"One line, at most {_CLOSE_REASON_MAX} characters (longer is refused): the end state reached and why. Goes with outcome on a close.")]
 
-_NEXT_PARAM = Annotated[str, Field(description="Your lines of the checklist, one step per line, each opening with who takes it, then a space: next=\"my-x: open the PR\" (a label such as `Status:` names no one). It replaces only your own lines; a line of yours it leaves out must be marked in done or dropped (or reword) in the same call. An item that stays open keeps one open step, a held one the step its wake leads to. Never reword an open step to add progress. next=\"none\" removes your open lines.")]
+_NEXT_PARAM = Annotated[str, Field(description="Your lines of the checklist, one step per line, each opening with who takes it, then a space: next=\"my-x: open the PR\" (a label such as `Status:` names no one). It replaces only your own lines; a line of yours it leaves out must be marked in done or dropped (or reword) in the same call. An item that stays open keeps one open step, a held one the step its wake leads to. Never reword an open step to add progress. next=\"none\" removes your open lines; an empty next is next not passed.")]
 
 _NEXT_CREATE_PARAM = Annotated[str, Field(description="The checklist, one step per line, each opening with who takes it: next=\"my-x: open the PR\" (or several lines with \\n). Results and PRs go on the project page, never in next.")]
 
@@ -12032,9 +12032,9 @@ _STEP_PROOF_FORM = (
 
 
 _DRAFT_FORM = (
-    f" draft: the text exactly as it is to be posted, sent or pasted somewhere else by the person whose step it is (a channel message, an email, a reply), as many lines as it has, stored and shown as written (no bullets, no line limit; at most {_draft.MAX} characters); "
-    "his item page draws it under the step with a Copy button. "
-    f"A write that makes a step his, or sets or clears the draft, with a step that names a text to post, send or paste ({_draft.STEMS}, and the instance's own words of [keywords.draft]), "
+    f" draft: the text exactly as it is to be posted, sent or pasted somewhere else by the person whose step it is (a channel message, an email, a reply), as many lines as it has, stored and shown as written (no bullets, no line limit; at most {_draft.MAX} characters). "
+    "His item page draws it under the step as a block with a Copy button; a close or his Send on the step drops it. "
+    f"An item whose step is such a post, send or paste carries the text: a write that sets the step or mover of an item so that it is his step, or that sets or clears its draft, with a step that names a text to post, send or paste ({_draft.STEMS}, and the instance's own words of [keywords.draft]; a heuristic, not a complete list), "
     "is refused unless the item has a draft or its step or description links the document that holds the text (an https:// link to a doc, Drive file, Notion page or Slack thread; a GitHub issue, pull request or commit link, or a link to the board, does not count). draft=\"none\" (or update clear_draft=true) removes it; a create can store one before the step exists. "
 )
 
@@ -12058,7 +12058,7 @@ _STEP_FORM = (
 _STEP_PROOF_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=f"The event that finishes a step, so the server ticks it: [{{step: its 1-based position or exact first line, proof: pr_merged|pr_released <owner>/<repo>#<n> (or none to clear that step's)}}], or the string none to clear them all; the step must be open and not {OWNER}'s own.")]
 
 _WAIT_KIND_PARAM = Annotated[str, Field(description="What a waiting item waits on: time | anchor | item | relay | event. A time wait is its wake; an item wait its after; an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (a wake is the backstop); a relay wait its wait_event and ask_by; an event wait its wait_event (a fleet event) and a backstop day (ask_by or a wake). \"none\" clears it.")]
-_WAIT_BASIS_PARAM = Annotated[str, Field(description=f"The reason a time wait's wake carries, one line that names its date: wait_basis=\"soak ends <that day, YYYY-MM-DD>\" (YYYY-MM-DD, on or after the wake day; a wake with no date is refused). Three wakes take it: a hold's wake (the park), a verifying item's wake, and a wake more than {_wt.cap_days():g} days out (it lifts the cap for that wake alone). A hold with a wake and no basis takes the line of next or the description that says what the work waits for.")]
+_WAIT_BASIS_PARAM = Annotated[str, Field(description=f"The reason a time wait's wake carries, one line that names its date: wait_basis=\"soak ends <that day, YYYY-MM-DD>\" (YYYY-MM-DD, on or after the wake day; a wake with no date is refused). Three wakes take it, each basis bound to the wake it was given for: a hold's wake (the park), a verifying item's wake, and a wake more than {_wt.cap_days():g} days out (it lifts the cap for that wake alone, up to {_wt.BASIS_MAX_WAKE_DAYS} days: a wake further out is refused whatever the basis). A hold with a wake and no basis takes the line of next or the description that says what the work waits for.")]
 
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what must happen at the anchor. A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know; an item parked on a date check-back for an offline machine says wait_event=\"box_online <machine>\" with the check-back day as ask_by instead). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
@@ -12566,11 +12566,11 @@ _NEXT_FORM = (
 _UPDATE_DESC = (
     "Update an item; only the fields you pass change." + _OFF_MAP + " Right calls (sender = you): "
     "step done, next added: update(item_id=\"board#N\", sender=\"my-x\", done=[1], next=\"my-x: open the PR\") (next keeps your open steps; one you leave out must be in done or dropped); "
-    "new words for an open step: reword={\"2\": \"my-x: ship the export\"}; step no longer wanted: dropped=[2]; "
+    "reword an open step: reword={\"2\": \"my-x: ship the export\"}; drop a step: dropped=[2]; "
     "status line: work={\"text\": \"migrating ids\", \"state\": \"in progress\", \"agent\": \"my-x\"} "
     f"(text at most {_work.TEXT_MAX} characters, at most {_work.OPEN_MAX} open lines); "
     "park for a work window: hold=true, wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\"; "
-     "a reminder wake on your own item: wake=\"<a day within " + f"{_wt.cap_days():g}" + " days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"; "
+     "a reminder wake on your own item: wake=\"<tomorrow or later, within " + f"{_wt.cap_days():g}" + " days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"; "
     "wait on another item: after=[\"board#N\"], ask_by=\"2099-03-02\"; "
     "description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\"; "
     "close: complete(item_id=\"board#N\", sender=\"my-x\", outcome=\"done\", reason=\"Export shipped in PR 12\", outcome_text=\"- PR 12 merged\"). "
@@ -15263,13 +15263,14 @@ _MESSAGE_DESC = (
     "Right calls (sender = you: your session id or pane name; to = the target's session id (cse_… for a cloud/Cowork session, the transcript UUID for a pane), its pane name, or projects/<slug>): "
     f"ask a front agent (a session {OWNER} talks to; the sessions tool shows each role) for input {OWNER} must give: message(to=\"widgets-main\", sender=\"my-x\", text=\"{_FOR_OWNER}\\nDecide whether the export ships on Friday; I would ship it.\"); "
     "a plain result (a build is done, it is live, an FYI): message(to=\"projects/widgets\", sender=\"my-x\", text=\"PR 12 is live\", fyi=true), or put it on the item (update, complete); "
-    "a question to a background agent: message(to=\"widgets-builder\", sender=\"my-x\", text=\"Does `board#N` need the export in the nightly run?\"). "
+    "a question to a background agent, the id cited only for context: message(to=\"widgets-builder\", sender=\"my-x\", text=\"Does `board#N` need the export in the nightly run?\"); "
+    "a hand-off of an item's done step, which names the item id, written as a plain word, not in backticks or quotes: message(to=\"widgets-builder\", sender=\"my-x\", text=\"board#N: the design is done, build the export\"), and the server then names that agent in the item's needs. "
+    "An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item. "
     f"A message to a front agent is refused unless its first line carries {_FOR_OWNER}, and the mark is for what {OWNER} has to do (a decision, a go-ahead, a step only he can take): a build hand-back, a result, a screenshot, \"it's live\" or an FYI goes to the project (to=projects/<slug>), where the router rules it and passes on what needs the agent; a marked message that says nothing is needed from him (nothing needed from {OWNER}, no action needed, FYI, for the record, no reply needed, …) is refused too. "
     "A background agent's message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board items is held back, not delivered, only when it clearly reads as a plain status report: the reply then begins 'Not delivered: written onto <item> as a History line from <sender>, because ...' and the message sits on the item for the front agent to read there. "
     "It reads as a plain status report only when every sentence says done, live, merged, released, deployed, closed, opened, fixed, passes, green, recorded or unchanged, and the text has no question mark (a URL's included), no word of trouble, waiting or asking (failed, broke, rolled back, blocked, waiting, need, must, should, review, ready, approve, decide, confirm, please ...), no plan (will, if, when, then), no person or front agent named to act, and no prose in a code span. "
     "Everything else is delivered (the reply begins 'delivered'), and so is a message whose item waits on a decision (needs: decision) or names the front agent in its needs. A move to needs=decision reaches "
     f"{OWNER} on the board, not through a message. "
-    "A hand-off of an item's done step names the item id, written as a plain word, not in backticks or quotes (board#N); to a background agent, the server then names that agent in the item's needs. An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item. "
     "To hand an item to a session set its mover (update, mover=<session>), which tells the new mover itself. A merge-queue group number in a release line (\"group g7\", \"split from g7\", \"[g7]\") names no item. "
     f"Long content goes on a page or into a repo, with the pointer in the message (at most {MSG_MAX} characters). "
     "fyi=true marks a message that asks nothing of its receiver (news, a result, a status it need not act on): a background agent gets it with the first turn it takes, once, oldest first (the reply begins 'held for <agent>'s next turn'), and it names the agent in no item's needs, so send it again without fyi if it does ask; to a project it is held the same way when the router passes it to a background agent; to a front agent it changes nothing, and a message that carries "

@@ -7,6 +7,8 @@ A worked example that the server refuses teaches the wrong call. Each example be
     create   own work · an item that needs the owner's call (ask and options) · a wait on another item · work for the builder
     update   a step done and the next one added · reword · dropped · a work line · a park · a reminder wake on your own item · a wait on another item · a description
     complete done · dropped · superseded
+    message  a front agent · a plain result to the project · a question and a hand-off to a background agent (the hand-off example must sit in the first 2,048 characters)
+    anchors  list · add · add scoped to an item · remove        confirm        route        check=  (create and update)
 
     uv run tests/tool_text_examples_scenario.py        → exit 0 / 1"""
 import contextlib, datetime as dt, json, logging, os, pathlib, re, subprocess, sys, time
@@ -38,11 +40,14 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "fleet/a", "brain/projects", "secrets"): (T / d).mkdir(parents=True)
 OWNER = "00000000-0000-4000-8000-000000000001"
 AGENT = "00000000-0000-4000-8000-000000000002"
+BUILDER = "00000000-0000-4000-8000-000000000003"
 now = time.time()
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
-(T / "fleet/a/sessions.json").write_text(json.dumps({OWNER: {"name": "home-here", "machine": "a", "seen": now}, AGENT: {"name": "home-agent", "machine": "a", "seen": now}}))
+(T / "fleet/a/sessions.json").write_text(json.dumps({OWNER: {"name": "home-here", "machine": "a", "seen": now}, AGENT: {"name": "home-agent", "machine": "a", "seen": now},
+                                                                               BUILDER: {"name": "home-builder", "machine": "a", "seen": now}}))
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
-                                                                                "session": "home-agent", "status": "active", "board": [], "board_open": 0}}}))
+                                                                                "session": "home-agent", "status": "active", "board": [], "board_open": 0,
+                                                                                "agents": {"home-alpha-main": "the front", "home-builder": "builds the code"}, "back_agents": {"home-builder": "builds the code"}}}}))
 DESC = "- Goal: A thing, finished when it works"
 
 
@@ -58,7 +63,7 @@ for i in range(1, 60):
     item(i)                                                       # items in the agent's hands, one open step each
 TWO = "home-agent: build it\nhome-agent: ship it"
 (T / "store/next-id").write_text("200"); (T / "store/anchors.json").write_text("{}")
-(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
+(T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\ndisplay-name: home-alpha\nagents:\n  home-alpha-main: the front\n  background:\n    home-builder: builds the code\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
@@ -96,7 +101,7 @@ def kwargs_of(*frags, swap=None):
     """The keyword arguments the fragments spell, as a dict: JSON words read as Python, the text's names swapped for the fixture's."""
     text = ", ".join(frags)
     for old, new in (swap or []) + [("my-x", "home-agent"), ("projects/widgets", "projects/alpha"), ("[work] ", "[home] "),
-                                     ("<a day within 7 days, YYYY-MM-DD>", D(1)), ("<last day of the window, YYYY-MM-DD>", D(3)), ("<that day>", D(3))]:
+                                     ("<tomorrow or later, within 7 days, YYYY-MM-DD>", D(1)), ("<last day of the window, YYYY-MM-DD>", D(3)), ("<that day>", D(3))]:
         text = text.replace(old, new)
     text = re.sub(r"\btrue\b", "True", text); text = re.sub(r"\bfalse\b", "False", text)
     kw = eval(f"dict({text})", {"__builtins__": {"dict": dict}})
@@ -156,7 +161,7 @@ upd(2, 'work={"text": "migrating ids", "state": "in progress", "agent": "my-x"}'
 check("update: a work line", "migrating ids" in json.dumps(mt(2)), mt(2))
 upd(3, 'hold=true', 'wake="<last day of the window, YYYY-MM-DD>"', 'wait_basis="soak ends <that day>"')
 check("update: a park", mt(3).get("hold") and mt(3).get("wake", "").startswith(D(3)), mt(3))
-upd(4, 'wake="<a day within 7 days, YYYY-MM-DD>T04:00"', 'wait_reason="the nightly run finishes at 03:00"')
+upd(4, 'wake="<tomorrow or later, within 7 days, YYYY-MM-DD>T04:00"', 'wait_reason="the nightly run finishes at 03:00"')
 check("update: a reminder wake on your own item", mt(4).get("wake", "").startswith(D(1)), mt(4))
 upd(5, 'after=["board#N"]', 'ask_by="2099-03-02"', swap=[("board#N", "a12")])
 upd(6, DESC_X)
@@ -182,8 +187,57 @@ runs("complete: superseded", "complete", ['outcome="superseded"', 'superseded_by
      lambda **k: server.stackshot_complete("a51", **k), sender="home-agent", swap=[("board#M", "a52")])
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- message
+# The examples are called through the real function with the text's names swapped for the fixture's. The delivery itself (the hub, a pane) is not under test: a message to a
+# session that is not live is queued, which is a successful reply.
 msg = SNAP["message"]["description"][:CLI_CUT]
+MSGS = [("ask a front agent", 'to="widgets-main", sender="my-x", text="[for the owner]\\nDecide whether the export ships on Friday; I would ship it."'),
+        ("a plain result to the project", 'to="projects/widgets", sender="my-x", text="PR 12 is live", fyi=true'),
+        ("a question to a background agent (the id in backticks)", 'to="widgets-builder", sender="my-x", text="Does `board#N` need the export in the nightly run?"'),
+        ("a hand-off of a done step (the id as a plain word)", 'to="widgets-builder", sender="my-x", text="board#N: the design is done, build the export"')]
+for what, frag in MSGS:
+    check(f"message: {what}: the example is in the first {CLI_CUT} characters", f"message({frag})" in msg, frag)
+    out = runs(f"message: {what}", "message", [frag], lambda **k: server.stackshot_message(**k), swap=[("widgets-main", "home-here"), ("widgets-builder", "home-builder"), ("board#N", "a12")])
+    check(f"message: {what}: the reply says what became of it", bool(out) and out.split()[0].lower().rstrip(":—") in ("delivered", "queued", "held", "inbox", "not"), out)
+check("message: the hand-off sentence and the context-only sentence are both in the first characters",
+      "which names the item id, written as a plain word, not in backticks or quotes" in msg and "An item id cited only for context, not handed over, goes in backticks" in msg, msg[-400:])
 check("message: the front-agent example opens with the mark the server asks for", 'text="[for the owner]\\n' in msg, msg[:CLI_CUT])
-check("message: the question to a background agent cites the id in backticks (a plain id would name the receiver in the item's needs)", 'text="Does `board#N` need the export' in msg, msg)
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------- anchors, confirm, route
+P_ = 'project="projects/widgets"'; PR_ = 'add=["https://github.com/acme/widgets/pull/12"]'
+anc = lambda **k: server.stackshot_anchors(**k)
+item(12)
+runs("anchors: list", "anchors", [P_], anc)
+runs("anchors: add one for the project", "anchors", [P_, PR_], anc)
+runs("anchors: scope it to an open item", "anchors", [P_, PR_, 'items=["board#N"]'], anc, swap=[("board#N", "a12")])
+runs("anchors: remove", "anchors", [P_, 'remove=["https://github.com/acme/widgets/pull/12"]'], anc)
+check("anchors: the four examples are written as anchors(...) calls", all(f"anchors({x})" in SNAP["anchors"]["description"][:CLI_CUT] for x in (
+      P_, f"{P_}, {PR_}", f'{P_}, {PR_}, items=["board#N"]', f'{P_}, remove=["https://github.com/acme/widgets/pull/12"]')), SNAP["anchors"]["description"][:900])
+
+item(8)
+runs("confirm", "confirm", ['item_id="board#N", sender="my-x"'], lambda **k: server.stackshot_confirm(**k), swap=[("board#N", "a8")])
+check("confirm: the example is written as confirm(...)", 'confirm(item_id="board#N", sender="my-x")' in SNAP["confirm"]["description"][:CLI_CUT])
+
+nid = server._routing.record("projects/alpha", kind="board", to=AGENT, label="board note", who="hub", text="a note for the export work", target="project-wide")
+out = runs("route", "route", ['notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x"'], lambda **k: server.stackshot_route(**k),
+           swap=[("a1b2c3", nid), ('to="my-x"', 'to="home-builder"')])
+check("route: the example is written as route(...)", 'route(notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x")' in SNAP["route"]["description"][:CLI_CUT])
+check("route: the reply names the ruling", bool(out) and "ruled" in out and "passed" in out, out)
+
+# ---- the check= example: it sits in the parameter text of create and update (and in the update description after the first characters), so it is called here with the whole text searched
+item(10)
+CHK = 'next="other-x: build the export", check="pr_merged acme/widgets#12"'
+check("update: the check example is in the parameter text and the description", 'check="pr_merged acme/widgets#12"' in SNAP["update"]["parameters"]["check"]["description"] and 'check="pr_merged acme/widgets#12"' in SNAP["update"]["description"],
+      SNAP["update"]["parameters"]["check"]["description"][:300])
+try:
+    out = server.stackshot_update("a10", sender="home-agent", **kwargs_of(CHK, swap=[("other-x", "home-builder")])); check("update a10: the server takes the check example", True)
+    check("update a10: the check is stored", "pr_merged" in json.dumps(mt(10)), mt(10))
+except server.ToolError as e:
+    check("update a10: the server takes the check example", False, str(e))
+
+try:
+    out = server.stackshot_create(sender="home-agent", mover="home-agent", **kwargs_of(P, SUBJ, DESC_X, CHK, swap=[("other-x", "home-builder")])); check("create: the server takes the check example", bool(out) and "created" in out, out)
+except server.ToolError as e:
+    check("create: the server takes the check example", False, str(e))
+check("create: the check example is in the parameter text", 'check="pr_merged acme/widgets#12"' in SNAP["create"]["parameters"]["check"]["description"])
 
 print(("ok" if not fails else "FAILED") + f": tool text examples scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
