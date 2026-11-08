@@ -1,6 +1,6 @@
-"""ui — the board's web pages, at the root address ("/", "/items/<id>", "/closed", "/projects", "/search", "/runners", a project's page), served by the server from the store, behind the sign-in.
+"""ui — the board's web pages, at the root address ("/", "/items/<id>", "/closed", "/projects", "/search", "/runners", "/audits", a project's page), served by the server from the store, behind the sign-in.
 
-The page markup, style and scripts live here: ui/render.py (the home, an item page, a project page, Projects, Closed), the page half of search (ui/search.py) and of runners
+The page markup, style and scripts live here: ui/render.py (the home, an item page, a project page, Projects, Closed, Audits), the page half of search (ui/search.py) and of runners
 (ui/runners.py), ui/kit.py (the state words, the one row every list draws, the type scale) and ui/releasing.py (which pull requests are in the release script's queue).
 
 What the pages share with the rest of the server: the data and logic modules (home, itempage, landed, model, states, fleet, config, ...), search.py's index, runners.py's snapshot

@@ -983,7 +983,7 @@ def orphan_lines(o: dict[str, Any]) -> list[str]:
 
 
 # ---------- the pattern review (the last stage of a model run) ----------
-LOG_FILE = "findings-log.jsonl"
+LOG_FILE = _audit.FINDINGS_LOG
 
 
 def _log_path() -> Path:
@@ -1009,13 +1009,13 @@ def log_findings(rows: list[dict[str, Any]]) -> None:
 
 
 def read_log(since: float = 0.0) -> list[dict[str, Any]]:
-    """The findings log's rows appended after `since` (an epoch), oldest first; a line that does not parse is skipped."""
+    """The findings log's rows appended after `since` (an epoch), oldest first; a line that does not parse is skipped (a damaged byte is replaced, so a line torn mid-character is one of them)."""
     try:
-        text = _log_path().read_text(encoding="utf-8")
+        text = _log_path().read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
     out: list[dict[str, Any]] = []
-    for ln in text.splitlines():
+    for ln in text.split("\n"):
         try:
             r = json.loads(ln)
         except ValueError:

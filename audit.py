@@ -72,14 +72,16 @@ sys.path.insert(0, str(HERE))
 import config as _cfg  # noqa: E402
 import interp as _interp  # noqa: E402  — a missing interpreter (its uv environment deleted) never stops a delivery
 
+FINDINGS_LOG = "findings-log.jsonl"   # <audit state>/findings-log.jsonl: audit_run.log_findings appends to it, audit_overview reads it
 RUNNING_MAX = 2 * 3600            # s: an unfinished record older than this is a crashed run
 PUSH = [sys.executable, str(HERE / "push.py")]
 
 
 def state_dir() -> Path:
-    """<paths.state>/audit, made on first use."""
+    """<paths.state>/audit, made on first use (a folder that is there is only returned, so a read-only copy that reads the records does not write)."""
     d = _cfg.state("audit")
-    d.mkdir(parents=True, exist_ok=True)
+    if not d.is_dir():
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -107,7 +109,10 @@ def runs(limit: int | None = None) -> list[dict[str, Any]]:
     """The run records, newest first (by the day in the file name, then by `started` within a day, so a second run the same day reads as the newer), each with its `date`; a file that does not parse
     as a JSON object is skipped."""
     days: dict[str, list[Path]] = {}
-    for p in state_dir().glob("run-*.json"):
+    folder = _cfg.state("audit")
+    if not folder.is_dir():         # no folder, no records: reading them (the Audits page, the card, /audit/status) makes nothing
+        return []
+    for p in folder.glob("run-*.json"):
         d = _record_date(p.stem)
         if d is not None:
             days.setdefault(d, []).append(p)

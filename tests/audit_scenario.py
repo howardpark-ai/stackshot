@@ -47,6 +47,17 @@ def recorder(ok, said): return lambda agent, text: (pushed.append((agent, text))
 
 # ---- 1. no records yet
 check("state_dir: <paths.state>/audit, made on first use", not D.exists() and audit.state_dir() == D and D.is_dir())
+_real_mkdir = pathlib.Path.mkdir
+def _no_mkdir(self, *a, **k): raise AssertionError(f"mkdir {self}")
+pathlib.Path.mkdir = _no_mkdir
+try: only_returned = audit.state_dir() == D
+except AssertionError: only_returned = False
+finally: pathlib.Path.mkdir = _real_mkdir
+check("state_dir on a folder that is there only returns it: it calls no mkdir (a read-only standby copy reads the records)", only_returned)
+import shutil; shutil.rmtree(D)
+audit.runs(); audit.last(); audit.running(T0); audit.status(T0)
+check("reading the records with no audit folder makes none", not D.exists())
+audit.state_dir()
 check("no records: runs, last and running are empty", audit.runs() == [] and audit.last() is None and audit.running(T0) is None)
 st = audit.status(T0)
 check("status with no records: the shape, nothing running, no last run", st == {"enabled": True, "agent": "falcon-audit", "running": False, "running_since": None,
@@ -250,9 +261,14 @@ with TestClient(server.mcp.http_app()) as c:
     check("…and it says POST is allowed", c.get("/audit/now").headers.get("allow") == "POST")
     r = c.get("/audit/status")
     check("GET /audit/status: audit.status() as JSON, not cached", r.status_code == 200 and r.headers["content-type"].startswith("application/json")
-          and set(r.json()) == {"enabled", "agent", "running", "running_since", "last", "next", "runner", "phase_sweep"} and r.headers.get("cache-control") == "no-store", (r.status_code, r.text[:200]))
+          and set(r.json()) == {"enabled", "agent", "running", "running_since", "last", "next", "runner", "phase_sweep", "card"} and r.headers.get("cache-control") == "no-store", (r.status_code, r.text[:200]))
     check("…and no waiting counts: the ladder's counts (open, overdue, stuck, undelivered, nodate, unaddressed) went with the ladder", "waiting" not in r.json(), list(r.json()))
     check("…and the runner's record instead (the minute set's mode and a record per tick)", r.json().get("runner", {}).get("mode") == "runner" and r.json()["runner"].get("enabled") is True, r.json().get("runner"))
+    card_ = r.json().get("card") or {}
+    check("…and the side panel card's shortlist (card): eight groups, each with its audits and its findings in 24 hours, null for the two that keep no findings log, and the note that says what the dash means",
+          [g["name"] for g in card_.get("groups", [])] == ["Silence", "Filing", "Wording", "Dates", "Proof and patterns", "Pages and agents", "Fleet and services", "Text and rules"]
+          and [g["found"] for g in card_["groups"]][-2:] == [None, None] and all(isinstance(g["found"], int) and isinstance(g["audits"], int) for g in card_["groups"][:6])
+          and card_.get("note") == "– keeps no findings log", card_)
     check("POST /audit/status is not a route: 405", c.post("/audit/status").status_code == 405)
     real_mode, server._auth_mode = server._auth_mode, (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
     r1, r2 = c.post("/audit/now", follow_redirects=False), c.get("/audit/status", follow_redirects=False)

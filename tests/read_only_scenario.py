@@ -206,6 +206,8 @@ with TestClient(app, base_url=BOARD) as c:
     note = re.search(r'class="se-summary"[^>]*>(.*?)</div>', s.text)
     check("search works on the copy (an index in memory, no file): the item is found", s.status_code == 200 and note is not None and note.group(1).startswith("<b>1 match</b> for") and "standby test item" in s.text.replace("<mark>", "").replace("</mark>", ""), (s.status_code, note and note.group(1)))
     check("search page carries the banner", "ro-banner" in s.text, s.text[s.text.find("<body"):][:300])
+    au = c.get("/audits")
+    check("the Audits page is served from the copy with the banner (its Audit now buttons post to /audit/now, which the standby refuses 503)", au.status_code == 200 and "ro-banner" in au.text and "<h1>Audits</h1>" in au.text, (au.status_code, au.text[:200]))
     r = c.get("/runners")
     check("the Runners page, which reads GitHub and the other machines, is refused 503 on the standby", r.status_code == 503 and "STACKSHOT_READ_ONLY" in r.text, (r.status_code, r.text[:200]))
     # every custom route, found from the route table itself, with every write method

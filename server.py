@@ -4694,6 +4694,7 @@ import session_ids as _sid  # noqa: E402  — the migration to permanent session
 import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
 import audit as _audit  # noqa: E402  — the daily board audit's cue and status
+import audit_overview as _audit_overview  # noqa: E402  — what the Audits page and the side panel's audit card say: the audit groups and their findings in 24 hours
 import audit_checks as _ac  # noqa: E402  — the audit's code checks: the filing pass, and the broad wait words of an alive item's next
 import interp as _interp  # noqa: E402  — a child process still starts when this process's own interpreter was deleted under it
 _HERE = Path(__file__).resolve().parent
@@ -19643,6 +19644,20 @@ async def audit_now(request: Request):
     return PlainTextResponse(text, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+@mcp.custom_route("/audits", methods=["GET"])
+async def audits_page(request: Request):
+    """The Audits page: the paces the audits run at, the audit groups with their audits, the latest findings and the recent runs (ui/render.py Board.audits_html, from audit_overview). Behind the board's sign-in,
+    drawn on request; its Audit now button posts to /audit/now, like the side panel card's."""
+    g = _ui_guard(request)
+    if g is not None:
+        return g
+    from starlette.concurrency import run_in_threadpool
+
+    from ui import render as r2
+
+    return HTMLResponse(await run_in_threadpool(lambda: r2.Board(str(STORE)).audits_html(runner=_runner_status())), headers={"Cache-Control": "no-store"})
+
+
 @mcp.custom_route("/audit/status", methods=["GET"])
 async def audit_status(request: Request):
     """The audit at a glance (audit.status): enabled, the agent, a run in progress and since when, the last run, the next."""
@@ -19650,6 +19665,7 @@ async def audit_status(request: Request):
     if g is not None:
         return g
     out = _audit.status()
+    out["card"] = _audit_overview.card(time.time())      # the side panel card's shortlist: per audit group its audits and its findings in 24 hours (null where the group keeps no findings log)
     out["runner"] = _runner_status()        # the minute set: which mode, and per tick its last run and last error (runner.py)
     out["phase_sweep"] = _phase_sweep_status()      # the stored phase kept true at the clock edges: runs, items swept, stamped, moved, differences seen, last run (_phase_sweep)
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
