@@ -227,20 +227,32 @@ class GbrainIO:
         except Exception:  # noqa: BLE001
             return None, None
 
-    _ABSENT = re.compile(r"not[ _-]?found|no such page|does not exist|unknown page", re.I)
+    # A page is absent only when gbrain says so in the error's own code: `page_not_found` (in `code`, or in `error` as a string or an object with a `code`), or the older
+    # plain `error` text "Page not found…" / "No such page…". The message text is never searched: an HTTP 404 "Not Found" from a wrong server address, or "client not found",
+    # is a read that failed.
+    _ABSENT_TEXT = re.compile(r"^\s*(page[ _]not[ _]found|no such page)\b", re.I)
+
+    @classmethod
+    def _absent(cls, d: dict) -> bool:
+        for v in (d.get("code"), d.get("error")):
+            if isinstance(v, dict):
+                v = v.get("code")
+            if isinstance(v, str) and (v.strip().lower() == "page_not_found" or cls._ABSENT_TEXT.match(v)):
+                return True
+        return False
 
     def get_strict(self, slug: str) -> tuple[str | None, str | None]:
         """`get`, but a call that failed raises OSError instead of reading as "no page": (None, None) only when gbrain answered that the page is not there. For a reader that must tell a page that is
         gone from a read that did not work (the audit's registry check)."""
         import rename_page as _rp
         try:
-            rc, out = _rp.gb(["call", "get_page", json.dumps({"slug": slug, "include_content": True, "content_only": True})])
+            rc, out = _rp.read_page(slug)
         except Exception as e:  # noqa: BLE001
             raise OSError(f"gbrain get_page {slug}: {type(e).__name__}: {e}") from e
         d = _rp._json(out)
         if "content" in d and "revision" in d:
             return d["content"], d["revision"]
-        if d and self._ABSENT.search(json.dumps(d)):
+        if d and self._absent(d):
             return None, None
         raise OSError(f"gbrain get_page {slug}: no page and no clean 'not found' answer (exit {rc}): {out[:120]!r}")
 
@@ -286,7 +298,8 @@ class GbrainIO:
         if request_id: args["request_id"] = request_id
         if detail: args["detail"] = detail
         try:
-            rc, res = _rp.gb(["call", "add_timeline_entry", json.dumps(args, ensure_ascii=False)])
+            named = ["timeline-add"] + [x for k, v in (("--detail", detail), ("--source", source), ("--request-id", request_id)) if v for x in (k, v)] + ["--", slug, date, summary]
+            rc, res = _rp.gb_routed(["call", "add_timeline_entry", json.dumps(args, ensure_ascii=False)], named)
         except subprocess.TimeoutExpired:
             return "gbrain timed out"
         except Exception as e:  # noqa: BLE001

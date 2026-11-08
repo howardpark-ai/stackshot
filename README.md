@@ -1149,6 +1149,13 @@ ending in `-` or `/`) is named by `config.notes` at the start and on a reload an
   environment: the variable is removed from every child first and set only from the brain's file. A file that cannot be read, is empty, has
   no `client_secret`, or holds an unusable one (shorter than 16 characters, or with a control character) refuses the CLI calls for that brain with a line naming the path and the reason, said once per outage; the board carries
   on as with any other outage of that brain.
+- **A brain that is a thin client of a remote gbrain.** Such a brain's CLI refuses `gbrain call <tool>` (error code `requires_local_engine`, "not
+  routable") and forwards the named commands. A page read and a timeline line first run as `call get_page` and `call add_timeline_entry`; when
+  the CLI answers with that refusal, the same read runs as `gbrain get <slug> --include-content --content-only --json` and the line as
+  `gbrain timeline-add <slug> <date> <summary> [--detail …] [--source …] [--request-id …]` (a page write is `gbrain put`, which is forwarded
+  as it is), and the brain is remembered for the life of the process so its later calls skip the refused form. No key is needed. A read that
+  fails is never told as "no page": a project's page mirror (`mirror`), `adopt` and the audit's registry check name the CLI's own error
+  (`mirror.state` = `failed`, a 502 for `adopt`), and only the brain's own `page_not_found` error reads as a page that is not there (an HTTP 404 or any other "not found" text is a failed read).
 - **Prefixes end in `-` or `/`.** A prefix such as `projects/beta` also takes `projects/betamax`; `config.notes` warns about one that does not
   end in a separator, and about a repeated brain name.
 - **Client boxes.** `stackshot client install --url` copies each brain's name, mirror link and slug rules into the client's config (marked
