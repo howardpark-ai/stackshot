@@ -1715,7 +1715,7 @@ def _pilot_charge(project: str, writer: str) -> tuple[str, str]:
 # session keeps a connector's old tool list for about a day.
 _NEEDS_FORM = (
     "needs: whose move it is now, a list: \"decision\" ({OWNER}'s: decide, judge, review, give the go-ahead), \"external\" (someone outside, named in next) "
-    "and session names (the item's project's own background agents, or the item's mover itself; another user-facing agent is refused: its part becomes its own item, linked with after=), "
+    "and session names (the item's project's own background agents, or, as the one mover, any other session (another user-facing agent is refused: its part becomes its own item, linked with after=)), "
     "e.g. needs=[\"decision\", \"my-engineer\"] or one comma-separated string. An item has one mover: a session named that is not a background agent of the item's project counts as a mover, "
     "and two of them, or decision beside one, are refused (name the one who moves it now, and who takes it after his answer in then=); a background agent of this project never counts as a second mover; "
     "empty means the item's mover (mover=, else the project's builder, else its -main agent) moves it. The lane follows the first of decision, external, a session (your call · on others · on agent). "
@@ -11827,7 +11827,7 @@ _ITEM_FORM = (
     f"One decision per item: an ask that packs several decisions, or points at choices by a number or letter code the item does not spell out (“choices 2-3”, “2b”), is refused. "
     f"Split it into one item per decision and write each option out in words in the ask or the description, so that {OWNER} can decide from the item page alone. "
     "A decision to change wording quotes the current and the proposed text, labeled before and after, in the description or the options' lines. "
-    "A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page, or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the question. A mockup link goes in the ask only, never in an option (an option label or line holding a markdown link or an http(s) URL is refused). "
+    "A needs=decision item whose description or next links a mockup (a https://claude.ai/artifact/… page, or a /mockup/<n> page of the fleet tool's web UI (host set in the instance config)) puts [mockup](<that link>) in the ask's Decide part too, or the write is refused: the home row and the item page show it as Mockup ↗ beside the question. A mockup link goes in the ask only, never in an option: an option label or line holding a markdown link or an http(s) URL is refused. "
     f"A command for {OWNER} to run, or a paste, belongs on the item: in next when it is short (a code span), otherwise on the project page, with next linking to it. "
     "options: when the decision is a pick between alternatives, list them, each on one line, "
     f"{_OPT_FORM}; the ask's Recommend names the recommended one's label. The server refuses a needs=decision item whose ask or "
@@ -11997,6 +11997,7 @@ _WAKE_PARAM = Annotated[str, Field(description=("When the item wakes, in the fut
 _AFTER_PARAM = Annotated[list[str] | str | None, Field(description="Items this one waits on: after=[\"board#N\"], with ask_by=<YYYY-MM-DD> as the day it comes back if they are still open. The wait ends when they close.")]
 
 _ASK_BY_PARAM = Annotated[str, Field(description="The day a wait on another item, a relay or an event comes back to someone if it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by=\"2099-03-02\". Moving it later with nothing else changed is refused (see wake).")]
+_ASK_BY_PARAM_NEW = Annotated[str, Field(description="The day a wait on another item, a relay or an event comes back to someone if it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by=\"2099-03-02\".")]      # create: nothing is stored yet to move later, and create has no wake
 
 _OUTCOME_PARAM = Annotated[str, Field(description="How a close ended: done | dropped (won't do, no longer needed, or can't) | superseded (replaced by another item: reworded, merged or split; send superseded_by=<the replacing item's id>). Passed on update with status=completed, or on complete: outcome=\"done\", reason=\"Export shipped in PR 12\", outcome_text=\"- PR 12 merged\"; all three are required.")]
 
@@ -12009,6 +12010,7 @@ _NEXT_CREATE_PARAM = Annotated[str, Field(description="The checklist, one step p
 _DESCRIPTION_PARAM = Annotated[str, Field(description=f"The item's background as short `- ` bullets, at most {_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters, live state only (never steps or commands): description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\". The first bullet opens `Goal:` (case-sensitive), a symptom or cause goes in a later `Problem:` bullet, {OWNER}'s words go in a bullet such as `- {OWNER}: …`, and parallel bullets go under one parent bullet, indented two spaces.")]
 
 _ASK_PARAM = Annotated[str, Field(description="The one line a needs=decision item carries, at most 240 characters: ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099\" (By is a date in words, or no date). A real choice, not \"have you done X?\"; one decision per ask. \"none\" or clear_ask=true withdraws it.")]
+_ASK_PARAM_NEW = Annotated[str, Field(description="The one line a needs=decision item carries, at most 240 characters: ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099\" (By is a date in words, or no date). A real choice, not \"have you done X?\"; one decision per ask.")]      # create: no ask exists yet to withdraw, and create has no clear_ask
 
 _OPTIONS_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=f"The alternatives of a decision, one per line: options=[{{\"label\": \"Approve\", \"line\": \"Approve the schema\", \"recommended\": true}}, {{\"label\": \"Decline\", \"line\": \"Wait a week\", \"recommended\": false}}] ({_rmod.OPTIONS_MIN}-{_rmod.OPTIONS_MAX} entries, exactly one recommended, each line at most {_rmod.OPTION_LINE_MAX} characters). A yes/no decision lists Approve and Decline.")]
 
@@ -12107,7 +12109,7 @@ def stackshot_create(
     anchors: list[str] | None = None,
     request_id: str = "",
     owner_name: str = "",
-    ask: _ASK_PARAM = "",
+    ask: _ASK_PARAM_NEW = "",
     options: _OPTIONS_PARAM = None,
     agent: str = "",
     observers: list[str] | str = "",
@@ -12120,7 +12122,7 @@ def stackshot_create(
     wait_kind: _WAIT_KIND_PARAM = "",
     wait_anchor: str = "",
     wait_event: _WAIT_EVENT_PARAM = "",
-    ask_by: _ASK_BY_PARAM = "",
+    ask_by: _ASK_BY_PARAM_NEW = "",
     post_wake_mover: _POST_WAKE_PARAM = "",
     sender: str = "",
     draft: str = "",

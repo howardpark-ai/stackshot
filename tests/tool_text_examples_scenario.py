@@ -11,7 +11,7 @@ A worked example that the server refuses teaches the wrong call. Each example be
     anchors  list · add · add scoped to an item · remove        confirm        route        check=  (create and update)
 
     uv run tests/tool_text_examples_scenario.py        → exit 0 / 1"""
-import contextlib, datetime as dt, json, logging, os, pathlib, re, subprocess, sys, time
+import datetime as dt, json, logging, os, pathlib, re, subprocess, sys, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
@@ -41,10 +41,12 @@ for d in ("store/a", "fleet/a", "brain/projects", "secrets"): (T / d).mkdir(pare
 OWNER = "00000000-0000-4000-8000-000000000001"
 AGENT = "00000000-0000-4000-8000-000000000002"
 BUILDER = "00000000-0000-4000-8000-000000000003"
+FRONT = "00000000-0000-4000-8000-000000000004"
 now = time.time()
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({OWNER: {"name": "home-here", "machine": "a", "seen": now}, AGENT: {"name": "home-agent", "machine": "a", "seen": now},
-                                                                               BUILDER: {"name": "home-builder", "machine": "a", "seen": now}}))
+                                                                               BUILDER: {"name": "home-builder", "machine": "a", "seen": now},
+                                                                               FRONT: {"name": "home-alpha-main", "machine": "a", "seen": now}}))
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                 "session": "home-agent", "status": "active", "board": [], "board_open": 0,
                                                                                 "agents": {"home-alpha-main": "the front", "home-builder": "builds the code"}, "back_agents": {"home-builder": "builds the code"}}}}))
@@ -92,9 +94,23 @@ TODAY = dt.datetime.now(dt.timezone(dt.timedelta(hours=4))).date()      # the in
 D = lambda n: (TODAY + dt.timedelta(days=n)).isoformat()
 
 
-def fragment_ok(tool, frag):
-    """The example is in the first CLI_CUT characters of the tool's description, as written."""
-    return frag in SNAP[tool]["description"][:CLI_CUT]
+def groups_of(frags):
+    """A call written whole in the text is one list of fragments; a call the text spells in pieces ("the same call with no mover, and needs=…") is a list of groups, each a list of fragments."""
+    return [list(g) for g in frags] if any(isinstance(f, (list, tuple)) for f in frags) else [list(frags)]
+
+
+def flat(frags):
+    return [f for g in groups_of(frags) for f in g]
+
+
+def fragment_ok(tool, frags):
+    """The example is in the first CLI_CUT characters of the tool's description as written: each group of fragments, joined as the text joins them, whole and in that order."""
+    text, at = SNAP[tool]["description"][:CLI_CUT], 0
+    for g in groups_of(frags):
+        i = text.find(", ".join(g), at)
+        if i < 0: return False
+        at = i + len(", ".join(g))
+    return True
 
 
 def kwargs_of(*frags, swap=None):
@@ -111,9 +127,9 @@ def kwargs_of(*frags, swap=None):
 
 def runs(name, tool, frags, fn, *, swap=None, **extra):
     """Check the fragments sit in the description's first CLI_CUT characters, then call the real tool with them."""
-    check(f"{name}: the example is in the first {CLI_CUT} characters of {tool}", all(fragment_ok(tool, f) for f in frags), [f for f in frags if not fragment_ok(tool, f)])
+    check(f"{name}: the example is in the first {CLI_CUT} characters of {tool}", fragment_ok(tool, frags), ", ".join(flat(frags)))
     try:
-        kw = kwargs_of(*frags, swap=swap); kw.update(extra)
+        kw = kwargs_of(*flat(frags), swap=swap); kw.update(extra)
         out = fn(**kw)
         check(f"{name}: the server takes the example", True)
         return out
@@ -138,15 +154,15 @@ out = runs("create: own work", "create", [P, SUBJ, 'sender="my-x"', 'mover="my-x
 check("create: own work: written, moved by the sender", bool(out) and "mover: home-agent" in out and "profile the nightly run" in out, out)
 
 out = runs("create: an item that needs the owner's call", "create",
-           [P, SUBJ, 'sender="my-x"', DESC_X, 'next="my-x: profile the nightly run"', 'needs="decision"', 'then="my-x"', DEC],
+           [[P, SUBJ, 'sender="my-x"'], [DESC_X, 'next="my-x: profile the nightly run"'], ['needs="decision"', 'then="my-x"'], [DEC]],
            lambda **k: server.stackshot_create(**k))
 
 out = runs("create: a step that waits on another item", "create",
-           [P, SUBJ, 'sender="my-x"', 'mover="my-x"', DESC_X, 'next="my-x: ship the export once board#N closes"', 'after=["board#N"]', 'ask_by="2099-03-02"'],
+           [[P, SUBJ, 'sender="my-x"', 'mover="my-x"', DESC_X], ['next="my-x: ship the export once board#N closes"', 'after=["board#N"]', 'ask_by="2099-03-02"']],
            lambda **k: server.stackshot_create(**k), swap=[("board#N", "a12")])
 
 out = runs("create: work for the builder (mover left out)", "create",
-           [P, SUBJ, 'sender="my-x"', DESC_X, 'next="my-x: profile the nightly run"'],
+           [[P, SUBJ, 'sender="my-x"'], [DESC_X, 'next="my-x: profile the nightly run"']],
            lambda **k: server.stackshot_create(**k))
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- update
@@ -196,7 +212,7 @@ MSGS = [("ask a front agent", 'to="widgets-main", sender="my-x", text="[for the 
         ("a hand-off of a done step (the id as a plain word)", 'to="widgets-builder", sender="my-x", text="board#N: the design is done, build the export"')]
 for what, frag in MSGS:
     check(f"message: {what}: the example is in the first {CLI_CUT} characters", f"message({frag})" in msg, frag)
-    out = runs(f"message: {what}", "message", [frag], lambda **k: server.stackshot_message(**k), swap=[("widgets-main", "home-here"), ("widgets-builder", "home-builder"), ("board#N", "a12")])
+    out = runs(f"message: {what}", "message", [frag], lambda **k: server.stackshot_message(**k), swap=[("widgets-main", "home-alpha-main"), ("[for the owner]", server._FOR_OWNER), ("widgets-builder", "home-builder"), ("board#N", "a12")])
     check(f"message: {what}: the reply says what became of it", bool(out) and out.split()[0].lower().rstrip(":—") in ("delivered", "queued", "held", "inbox", "not"), out)
 check("message: the hand-off sentence and the context-only sentence are both in the first characters",
       "which names the item id, written as a plain word, not in backticks or quotes" in msg and "An item id cited only for context, not handed over, goes in backticks" in msg, msg[-400:])
