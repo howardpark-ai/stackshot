@@ -50,8 +50,8 @@ item(5, "[home] closed one", status="completed", su=now - 2 * H, outcome="done",
 (T / "store/next-id").write_text("40"); (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from ui import render, search
-import landed as ld, foryou as fy
+from stackshot.web.ui import render, search
+from stackshot.web import landed as ld; from stackshot.web import foryou as fy
 bd = render.Board(f"{tmp}/store")
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 for k, (g, w) in enumerate((("a50", "older row"), ("a51", "newer row"))):

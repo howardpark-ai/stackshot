@@ -55,7 +55,7 @@ def tool(script, *args):
     r = subprocess.run([sys.executable, f"{STACK}/{script}"] + list(args), capture_output=True, text=True, env=os.environ, cwd=str(T))
     return r.returncode, r.stdout, r.stderr
 
-import pages as p, projects as prj, project_registry as pr, project_verbs as pv, page_debt
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.projects import project_verbs as pv; from stackshot.router import page_debt
 p.cmd_registry(quiet=True)
 IO = page_debt.PlainIO()
 def reg(): return json.loads((T / "store/projects.json").read_text())["pages"]
@@ -72,9 +72,9 @@ def fmagents(rel):
 
 # ---- 1. the migration: top-level pages only, the live-shaped pending fold
 r0 = recsha()
-rc, out, err = tool("tools/migrate_project_record.py", "--run-dir", str(T / "run"))
+rc, out, err = tool("stackshot/tools/migrate_project_record.py", "--run-dir", str(T / "run"))
 check("migration, dry run: exit 0, counts name the sub-page as left out, nothing written", rc == 0 and "1 of them sub-pages (never projects: no entry)" in out and "entries to write: 4" in out and recsha() == r0, (rc, out, err))
-rc, out, err = tool("tools/migrate_project_record.py", "--apply", "--run-dir", str(T / "run"))
+rc, out, err = tool("stackshot/tools/migrate_project_record.py", "--apply", "--run-dir", str(T / "run"))
 E = ents()
 check("migration, apply: an entry for each top-level project page (alpha, zeta, gamma, delta) and none for the sub-page", rc == 0 and set(E) == {A, Z, G, D} and ids["projects/alpha/sub"] not in E, (rc, out, err, sorted(E)))
 check("migration: the pending agents of an active project are folded after the page's own (front as asked, with who and when), and the table is cleared",
@@ -439,7 +439,7 @@ res = pv.agent_add("projects/deadp", "home-deadp-eng", False, "builds", io=Dead(
 check("a pre-read that fails: the answer carries a warning, the entry comes from the registry's row, and the mirror leaves the page's own agent line alone (guard)",
       "could not be read" in res.get("warning", "") and res["mirror"]["state"] == "failed" and "home-deadp-late" in res["mirror"]["note"] and "home-deadp-late: added a minute ago" in text("projects/deadp"), (res.get("warning"), res["mirror"]))
 # the server's helper path: pre-read before _PROJECT_LOCK
-import server
+from stackshot.web import server
 page("projects/srvp.md", "type: project\ntitle: Srv\ndisplay-name: home-srvp\nagents:\n  home-srvp-main: talks\nstatus: active"); p.cmd_registry(quiet=True)
 pre_slow = Slow(IO, NAP); res_pre = {}
 def do_pre(): res_pre["p"] = pv.preread("projects/srvp", pre_slow)
@@ -509,22 +509,22 @@ res = pv.move_page("projects/xi", "projects/xi-new", runner=skipped, io=IO)
 check("move-page: a child that was a redirect already counts as done", res["moved"] is True and "was stubbed" in res["warning"], res)
 
 # ---- 11. the CLI
-rc, out, err = tool("tools/project.py", "show", "home-sparrow")
+rc, out, err = tool("stackshot/tools/project.py", "show", "home-sparrow")
 check("cli: show names the project, its page and its agents", rc == 0 and A in out and "projects/alpha" in out and "home-sparrow-main" in out, (rc, out[:400], err[:300]))
 rb = recsha()
-rc, out, err = tool("tools/project.py", "--dry-run", "agent-add", "home-sparrow", "home-sparrow-cli", "--front", "--mandate", "added by the cli")
+rc, out, err = tool("stackshot/tools/project.py", "--dry-run", "agent-add", "home-sparrow", "home-sparrow-cli", "--front", "--mandate", "added by the cli")
 check("cli: --dry-run says what it would do and writes nothing", rc == 0 and recsha() == rb and "home-sparrow-cli" not in agents(A), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "agent-add", "home-sparrow", "home-sparrow-cli", "--front", "--mandate", "added by the cli")
+rc, out, err = tool("stackshot/tools/project.py", "agent-add", "home-sparrow", "home-sparrow-cli", "--front", "--mandate", "added by the cli")
 check("cli: agent-add writes the record and the page", rc == 0 and agents(A).get("home-sparrow-cli") == (True, "added by the cli") and "home-sparrow-cli" in text("projects/alpha"), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-cli", "--mandate", "changed by the cli")
+rc, out, err = tool("stackshot/tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-cli", "--mandate", "changed by the cli")
 check("cli: agent-mandate changes the record's line and the page follows", rc == 0 and agents(A).get("home-sparrow-cli") == (True, "changed by the cli") and "home-sparrow-cli: changed by the cli" in text("projects/alpha"), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-cli", "--mandate", "  ")
+rc, out, err = tool("stackshot/tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-cli", "--mandate", "  ")
 check("cli: agent-mandate with an empty line exits non-zero and says it is empty", rc != 0 and "empty" in (out + err) and agents(A).get("home-sparrow-cli") == (True, "changed by the cli"), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-nobody", "--mandate", "x")
+rc, out, err = tool("stackshot/tools/project.py", "agent-mandate", "home-sparrow", "home-sparrow-nobody", "--mandate", "x")
 check("cli: agent-mandate for an unlisted agent exits non-zero and says it is not listed", rc != 0 and "not listed" in (out + err), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "create", "home-clip", "--scope", "home")
+rc, out, err = tool("stackshot/tools/project.py", "create", "home-clip", "--scope", "home")
 check("cli: create with no page makes a project with no page", rc == 0 and any(e.get("name") == "home-clip" and "page" not in e for e in ents().values()), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "create", "home-clis", "--scope", "home", "--page", SUB)
+rc, out, err = tool("stackshot/tools/project.py", "create", "home-clis", "--scope", "home", "--page", SUB)
 check("cli: create on a sub-page key exits non-zero and says why, nothing written", rc != 0 and "sub-page" in (out + err) and not any(e.get("name") == "home-clis" for e in ents().values()), (rc, out[:300], err[:300]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

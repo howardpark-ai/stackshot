@@ -68,8 +68,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:400]}" if got is not None else ""))
 
 # ---- 1. who gets a notice, and for whom it is
-import anchors as a, routing
-import router_live
+from stackshot.anchors import anchors as a; from stackshot.router import routing
+from stackshot.router import router_live
 # Since the router rules every project page, so a notice for a page's keeper is held for it (router_live.holds) and the
 # keeper is told nothing: tests/router_live_scenario.py covers the holding, the router's rulings and what is delivered. This scenario is about the
 # notice text, the routing log, the ledger and the rulings; to see them without the router, holds() is switched off here, which hands every
@@ -85,7 +85,7 @@ b, _f = a.bindings(); check("the agent is bound to nothing in the pilot", all(A 
 check("pilot_root", a.pilot_root("projects/alpha/sub") == "projects/alpha" and a.pilot_root("projects/alphabet") == "" and a.pilot_root("projects/beta") == "projects/beta" and a.pilot_root("projects/nope") == "")
 
 # ---- 2. the hub: text and log
-from anchorhub import core
+from stackshot.anchors.anchorhub import core
 hub = core.Hub(); out = []
 hub.deliver = lambda anchor, session, text: out.append((session, text)); hub.write_status = lambda: None
 hub.bindings = core.load_bindings()
@@ -100,7 +100,7 @@ c = routing.counts(["projects/alpha", "projects/alpha/sub"]); check("pilot count
 c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a one-session page is the router's like the rest)", (c["in"], c["pending"]) == (1, 1), c)
 
 # ---- 3. rulings
-import server
+from stackshot.web import server
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends; the held case has its own check (front_quiet_scenario)
 _real_verdict = server._front_verdict
@@ -146,7 +146,7 @@ res = server._update("a2", status="completed", sender="work-osprey-main", outcom
 check("completion on a sub-page: charged to the root's keeper", list(server._owed_load().get("projects/alpha/sub", {})) == [S] and len(p) == 2 and "a2 completed (done) by work-osprey-main" in p[1][1], p)
 
 # ---- 5. a message addressed to a project: the router rules it (every project since), so it is recorded and held, and delivered to no session here
-import router_live as _rl
+from stackshot.router import router_live as _rl
 def msg(*a, **k):
     general(True)
     try: return server._message(*a, **k)
@@ -257,7 +257,7 @@ PJ.write_text(PJ0); FJ.write_text(FJ0); MJ.write_text(MJ0); push_log.write_text(
 import shutil; shutil.rmtree(T / "fleet/b")
 
 # ---- 6. the pane gate lets a pilot agent off
-import pages
+from stackshot.projects import pages
 pl = lambda sid: {"session_id": sid, "tool_response": "updated."}
 pages._touch_mcp_record(pl(A), {"project": "projects/alpha", "item_id": "a1"}, "update"); check("pilot agent: no pane debt", not pages.load_state(A).get("touches"), pages.load_state(A))
 pages._touch_mcp_record(pl(S), {"project": "projects/alpha", "item_id": "a1"}, "update"); check("pilot keeper: pane debt as usual", "projects/alpha" in pages.load_state(S).get("touches", {}), pages.load_state(S))
@@ -276,7 +276,7 @@ except Exception as e: ok = "sender is required" in str(e)
 check("a script must still name itself", ok)
 
 # ---- 7. the board cell and the page behind it
-import render
+from stackshot.web import render
 # ---- type and title are kept apart from the receiver on; only a notice puts them together
 e = core.Event(anchor="notion:" + "a" * 32, kind="notion", title='"Notion tips"', who="Dana", text="hi", url="https://u/n")
 check("an event carries its title; type and label derive from it", (e.type, e.title, e.label) == ("Notion", '"Notion tips"', 'Notion "Notion tips"'), (e.type, e.title, e.label))
@@ -286,8 +286,8 @@ h2.rescan(); sa = h2.status["anchors"]
 check("a resolved anchor is stored as type + title + composed label", {k: sa["slack:C0000000001"].get(k) for k in ("type", "title", "label")} == {"type": "Slack", "title": "Slack-talk #alpha", "label": "Slack Slack-talk #alpha"}, sa.get("slack:C0000000001"))
 check("an unresolved one keeps its id and no title, so it is tried again", sa["slack:C0000000002"].get("label") == "slack:C0000000002" and not sa["slack:C0000000002"].get("title"), sa.get("slack:C0000000002"))
 (T / "state/anchor-hub/status.json").write_text(json.dumps({"started": "x", "anchors": sa}))
-import importlib, render; importlib.reload(render)
-import ui.render as ui_render; importlib.reload(ui_render)   # after render's reload: it binds the icon versions at import
+import importlib; from stackshot.web import render; importlib.reload(render)
+import stackshot.web.ui.render as ui_render; importlib.reload(ui_render)   # after render's reload: it binds the icon versions at import
 bd = ui_render.Board(f"{tmp}/store")
 # the watch state of a row: one word per row, the overlay's lines one detail per line
 w_, det = bd.watch("projects/alpha"); c = routing.counts(["projects/alpha", "projects/alpha/sub"])
@@ -2288,7 +2288,7 @@ check("audit: a redraw builds the new text first and swaps it in, and leaves an 
       "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}" in AJ
       and "T.textContent=''" not in AJ.replace("else{T.textContent='';T.appendChild(f)}", ""))
 # with the audit on, the static page carries the card already drawn — the script's rows, classes and button
-import audit_overview as _ov
+from stackshot.audit import audit_overview as _ov
 _AD = T / "state/audit"; _AD.mkdir(parents=True, exist_ok=True)
 _audit_was = render._cfg.CFG.setdefault("audit", {}).get("enabled"); render._cfg.CFG["audit"]["enabled"] = True
 _audit_at_was = render._cfg.CFG["audit"].get("at"); render._cfg.CFG["audit"]["at"] = "05:00"      # the card is checked on the once-a-day schedule; the example ships two times
@@ -2434,7 +2434,7 @@ check("recycle: completed items and falsy values are not on the line", all(f"/it
 check("recycle: the board's test is the predicate the server's recycle-wanted calls",
       render.recycle_due(next(r for r in r1.rows if r["gid"] == "a88"), [])
       and not render.recycle_due(next(r for r in r1.rows if r["gid"] == "a84"), []) and not render.recycle_due(next(r for r in r1.rows if r["gid"] == "a89"), ["a86"])
-      and "_rmod.recycle_due(" in open(os.path.join(STACK, "server.py"), encoding="utf-8").read() and "_rmod.held_only_for_recycle(" in open(os.path.join(STACK, "server.py"), encoding="utf-8").read())
+      and "_rmod.recycle_due(" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read() and "_rmod.held_only_for_recycle(" in open(os.path.join(STACK, "stackshot/web/server.py"), encoding="utf-8").read())
 check("recycle: the line is out of Need your call (agents) and sits under the Machines heading, above the machine matrix",
       '<p id="recycle"' not in w1 and "Pane recycle" not in w1 and 0 < x1.find("</h2>") < x1.find('<p id="recycle"') < x1.find('<div class="matrix"'), (w1[:600], x1[:600]))
 check("recycle: no ask or call styling: no warning box, no icon, no call colour",
@@ -2531,7 +2531,7 @@ sala_on(False)
 check("sala link: with [client] session_view unset no name links", mb.sess_href("work-osprey") == "" and mb.sess_html("work-osprey") == "work-osprey")
 
 # ---- the writer owes the page update; the keeper gets it only past the grace ([pilot] writer_owes_page)
-import pages as _pg
+from stackshot.projects import pages as _pg
 _ct0, _pts0 = _pg.ct_changed_since, server._page_ts
 server._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False      # no page written yet
 server._owed_save({}); server._cfg.CFG["pilot"]["writer_owes_page"] = True
@@ -2627,7 +2627,7 @@ res = server._update(gid_new, next="switch off again", sender="work-osprey-main"
 check("off: today's behaviour (the keeper charged and told at once)", "charged to the keeper work-osprey" in res and list(server._owed_load()["projects/alpha"]) == [S] and len(p) == n0 + 1 and p[-1][0] == S, res)
 server._page_ts, _pg.ct_changed_since = _pts0, _ct0
 # ---- the pane gate follows [pilot] writer_owes_page, and settles as the server does
-import pages as _pg2
+from stackshot.projects import pages as _pg2
 _pg2._cfg.CFG["pilot"]["writer_owes_page"] = True
 _pts, _ct = _pg2.page_ts, _pg2.ct_changed_since
 for sid in (A, X): _pg2.save_state(sid, {})
@@ -2708,10 +2708,10 @@ check("observers: stored as given; get shows them", rd(o1)["metadata"].get("obse
 e = refusal(lambda: mk2(observers=["nobody-at-all"])); check("observers: an unknown session is refused", e.startswith("Refused: observer 'nobody-at-all' names no session"), e)
 n0 = len(wait_push(0)); server._update(o1, next="a step", sender="home-beta"); time.sleep(0.4)
 check("observers: an ordinary edit tells them nothing", not [m for m in wait_push(0)[n0:] if m[0] in xs or m[0] == S], wait_push(0)[n0:])
-import held; held.mark_client(X, "work-osprey-x")      # the rollout gate: its hook fetches held lines
+from stackshot.waits import held; held.mark_client(X, "work-osprey-x")      # the rollout gate: its hook fetches held lines
 n0 = len(wait_push(0)); res = server.stackshot_complete(o1, sender="home-beta", outcome="done", reason="landed", description="- Goal: Done"); p = wait_push(n0 + 2)
 ox = [m for m in p[n0:] if m[0] in xs]; os_ = [m for m in p[n0:] if m[0] == "work-osprey-bld"]
-import held
+from stackshot.waits import held
 hx = held.take(X, "work-osprey-x")
 check("observers: a close is held for a background observer (it asks nothing, so it starts no turn) and reaches a front observer through its own project's keeper; the reply names them", len(ox) == 0 and f"{o1} was completed (done: landed) by home-beta" in hx and "(you observe it)" in hx and " · closed · " in hx
       and len(os_) == 1 and os_[0][1].startswith(f"[stackshot] {o1} (observer work-osprey-main, a front agent) was completed (done: landed) by home-beta") and not [m for m in p[n0:] if m[0] == A]
@@ -2771,7 +2771,7 @@ for i in (90, 91): (T / f"store/a/{i}.json").unlink()
 (T / "store/projects.json").write_text(_reg_b)
 
 # ---- the board item: work lines, what is in motion on an item and what waits
-import work as W, ghsync as _ghs
+from stackshot.model import work as W; from stackshot.github import ghsync as _ghs
 _regw = (T / "store/projects.json").read_text(); _rgw = json.loads(_regw)
 _rgw["pages"]["projects/alpha"].update(agents={"work-osprey-main": "front", "work-osprey-x": "back"}, back_agents={"work-osprey-x": "back"})
 (T / "store/projects.json").write_text(json.dumps(_rgw))
@@ -3144,7 +3144,7 @@ check("the digest machinery is gone: no _digest_tick, no _digest_rows, no digest
 # comment, failing CI, a reopen and anything on someone else's repository are delivered as before; and a log-only event still
 # releases the held item scoped to its anchor, as the keeper's own `merged` would
 import types as _types
-from anchorhub import github as ghr
+from stackshot.anchors.anchorhub import github as ghr
 server._cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot", "example-org/*"]
 PR48, HUB48, FOR48, BETA48 = ("https://github.com/example-owner/stackshot/pull/116", "https://github.com/example-org/board-repo",
                               "https://github.com/example-upstream/tool/pull/77", "https://github.com/example-owner/stackshot/pull/117")

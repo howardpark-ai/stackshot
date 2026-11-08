@@ -72,9 +72,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
-import pages as pg, project_registry as PR, item_project as IP
-import server, anchors as ANC, render as R1, projects as PRJ, stamp_phase as SP, project_id_report as RR
-from ui import render as R2
+from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
+from stackshot.web import server; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.web.ui import render as R2
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -329,10 +329,10 @@ rc3, out3 = cli(RR.undo, undo=str(undo_file))
 check("11 --undo puts every file back value for value", rc3 == 0 and values(snapshot()) == values(snapS0) and out3["results"] == {"set": len(EXPECT)}, (rc3, out3))
 rc4, out4 = cli(RR.undo, undo=str(undo_file))
 check("11 …twice is a no-op", rc4 == 0 and values(snapshot()) == values(snapS0) and set(out4["results"]) == {"same"}, (rc4, out4))
-check("11 --apply and --undo need --sender", subprocess.run([sys.executable, os.path.join(STACK, "tools/project_id_report.py"), "--apply"], capture_output=True, text=True).returncode != 0 and subprocess.run([sys.executable, os.path.join(STACK, "tools/project_id_report.py"), "--undo", "x.json"], capture_output=True, text=True).returncode != 0, None)
+check("11 --apply and --undo need --sender", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/project_id_report.py"), "--apply"], capture_output=True, text=True).returncode != 0 and subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/project_id_report.py"), "--undo", "x.json"], capture_output=True, text=True).returncode != 0, None)
 CFGM["migration"] = False
 snapD = snapshot()
-p = subprocess.run([sys.executable, os.path.join(STACK, "tools/project_id_report.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
+p = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/project_id_report.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
 check("11 the dry run over a copy writes nothing live, prints the totals and the readers' comparison, and exits 0", p.returncode == 0 and snapshot() == snapD and "items the pass would write" in p.stdout
       and "readers that show the open items differently before and after: 0" in p.stdout, (p.returncode, p.stdout[-900:], p.stderr[-600:]))
 

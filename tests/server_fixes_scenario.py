@@ -64,7 +64,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-import server, audit_checks as AC, audit_run as AR, dated_wait as DW, model as MODEL
+from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
@@ -77,8 +77,8 @@ PARK = "(parked: wake"
 SN_HEAD = "alone is a reminder, and this item's only open next line"
 TIMED = f"{BACK}: at 08:00 run the nightly check and report"
 
-import server_fixes as SF, board_report as BR
-import audit_checks as AC, audit_run as AR
+from stackshot.waits import server_fixes as SF; from stackshot.tools import board_report as BR
+from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR
 OWN = server.OWNER
 log = lambda i: [e["text"] for e in ((mt(i).get("stall") or {}).get("log") or [])]
 w3 = local_day(now0 + 3 * DAY)

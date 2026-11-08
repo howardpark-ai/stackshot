@@ -82,13 +82,13 @@ def check(name, cond, got=None):
 try:
     logging.disable(logging.INFO)
     sys.path.insert(0, STACK)
-    from ui import render as ui_render
-    import config as _cfg
+    from stackshot.web.ui import render as ui_render
+    from stackshot.core import config as _cfg
     BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
     bd = ui_render.Board(f"{tmp}/store")
     page1 = bd.item_html("a1", answer=BOX)
     check("the fixture store renders real item pages: the ask, the owner as mover (Your move) and the buttons", "Your move · since" in re.sub(r"<[^>]+>", "", page1) and "Ship it now" in page1 and ASK.split(" · ")[0].replace("Decide: ", "") in page1, page1[:300])
-    import server
+    from stackshot.web import server
     mv_of =lambda i: server._wait_fields(f"a{i}", json.loads((T / f"store/a/{i}.json").read_text(encoding="utf-8")), server._WaitCtx(time.time())).get("mover", {})
 
 
@@ -116,7 +116,7 @@ try:
     finally:
         _cfg.CFG["instance"]["owner"] = running
     check("an instance that names no owner gets the neutral word by default, and a two-word name its first word", placeholder == "owner" and two_words == "maria", (placeholder, two_words))
-    import waiting as _w
+    from stackshot.waits import waiting as _w
     check("the code's own kind for the owner is the neutral word", _w.mover_of({"needs": ["decision"], "project": "projects/alpha"})["kind"] == "owner", None)
     check("a person-named needs value is not the owner's (the code reads decision only)", _w.mover_of({"needs": [NAME], "project": "projects/alpha"})["kind"] == "session", None)
     CONFIG.write_text(base, encoding="utf-8"); _cfg.reload()

@@ -63,7 +63,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((T / "store").glob("*/*.json"))}
 
-import server, steps as S, nextlines as NL, next_backfill as NB, owner_steps as HS, migration as M
+from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_backfill as NB; from stackshot.model import owner_steps as HS; from stackshot.model import migration as M
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 

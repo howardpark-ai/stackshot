@@ -84,7 +84,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, handoff as H, cold_call as CC, model, router_live
+from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 # section 15's invariant, checked after every save of the run: an OPEN record never names someone but the item's mover (handoff.stale)
@@ -203,7 +203,7 @@ hand(10, "home-peer"); drain()
 check("2 delivered: a push that waits in the inbox is neither delivered nor failed", ho(10).get("delivered_at") is None and ho(10).get("queued", "").startswith("inbox") and not ho(10).get("attempts"), ho(10))
 check("2 delivered: …it is queued (queued_at), with no delivered_at", isinstance(ho(10).get("queued_at"), float) and len(pushes_to("home-peer", "a10")) == 1, (ho(10), pushes()))
 # the puller's ack, seen by the server in the /inbox/ack route, is the delivery
-import inbox as IB
+from stackshot.fleet import inbox as IB
 iid = IB.put(U["home-peer"], server._handoff_text("a10", rd(10), ho(10)), "msg", sender="home-send")
 st_, body_ = server._client_post("a", "ack", {"delivered": [iid]})
 check("2 ack: the puller's ack of the hand-off notice (read from the inbox file before it goes) makes the hand-off delivered, at the ack's time", st_ == 200 and abs((ho(10).get("delivered_at") or 0) - time.time()) < 30
@@ -1119,7 +1119,7 @@ server._handoff_repair_pass()
 
 # 15.17 the tool: --live --apply is refused while the server runs; --live alone (the dry run) is not
 import importlib.util
-spec = importlib.util.spec_from_file_location("handoff_repair_tool", os.path.join(STACK, "tools", "handoff_repair.py")); tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
+spec = importlib.util.spec_from_file_location("handoff_repair_tool", os.path.join(STACK, "stackshot", "tools", "handoff_repair.py")); tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
 item(131, mover="team-back", handoff=rec("home-peer"))
 for label, state in (("active", True), ("unknown", None)):
     tool.service_running = lambda state=state: state
@@ -1309,7 +1309,7 @@ set_cfg()
 
 # ================================================================ 18. the one ladder ([ladder] enabled): an untaken hand-off and a silent pane share one record and one order
 # ask the mover, 30 minutes later look at its pane (no turn running: the notice again), the cold call, the project's builder, then the fleet's builder asked once. The sender rung is gone.
-import ladder as LD
+from stackshot.waits import ladder as LD
 for p_ in (T / "store/a").glob("*.json"):
     d_ = json.loads(p_.read_text()); d_["status"] = "completed"; p_.write_text(json.dumps(d_))      # earlier sections' items are closed: only this section's are on the board now
 for p_ in (T / "cli").glob("*.json"): p_.unlink()

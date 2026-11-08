@@ -22,7 +22,7 @@ toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off")
 (T / "store/a").mkdir(parents=True); (T / "store2/a").mkdir(parents=True)
 
-import board_report as BR
+from stackshot.tools import board_report as BR
 now = time.time(); OWNER = "00000000-0000-4000-8000-000000000001"; H = 3600
 iso = lambda ts: time.strftime("%Y-%m-%dT%H:%M", time.gmtime(ts))
 at = lambda ts: time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts))
@@ -88,7 +88,7 @@ def check(name, cond, got=None):
 def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((T / "store").glob("*/*.json"))}
 d0 = digest()
 
-import next_report as NR
+from stackshot.tools import next_report as NR
 rep = BR.scan(NR.load_all(T / "store"), BR.load_anchors(T / "store"), now)
 by = {}
 for f in rep["findings"]: by.setdefault(f["id"], []).append(f["kind"])
@@ -138,16 +138,16 @@ check("the check changes no file", digest() == d0, None)
 
 def run(*a):
     r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=dict(os.environ)); return r.returncode, r.stdout, r.stderr
-rc, out, err = run(os.path.join(STACK, "tools", "board_report.py"), "--store", str(T / "store"))
+rc, out, err = run(os.path.join(STACK, "stackshot", "tools", "board_report.py"), "--store", str(T / "store"))
 check("the listing: one line per finding, then the counts line; exit 0", rc == 0 and len(re.findall(r" \| (?:arbitrary-hold|mislabeled-state) \| ", out)) == len(rep["findings"]) and "Board checks: 12 item(s)" in out, (rc, out[-400:], err[-300:]))
-rc, out, _ = run(os.path.join(STACK, "tools", "board_report.py"), "--store", str(T / "store"), "--line")
+rc, out, _ = run(os.path.join(STACK, "stackshot", "tools", "board_report.py"), "--store", str(T / "store"), "--line")
 check("--line gives the one line with the counts per kind", rc == 0 and out.strip() == "Board checks: 12 item(s) · arbitrary-hold 6 · mislabeled-state 6", out)
-rc, out, _ = run(os.path.join(STACK, "audit.py"), "board-check", "--json", "--store", str(T / "store"))
+rc, out, _ = run(os.path.join(STACK, "stackshot/audit/audit.py"), "board-check", "--json", "--store", str(T / "store"))
 js = json.loads(out) if rc == 0 else {}
 check("audit.py board-check --json runs the same report", js.get("kinds") == rep["kinds"] and [f["id"] for f in js.get("findings", [])] == [f["id"] for f in rep["findings"]], (rc, out[:300]))
-rc, _, err = run(os.path.join(STACK, "tools", "board_report.py"), "--store", str(T / "no-such"))
+rc, _, err = run(os.path.join(STACK, "stackshot", "tools", "board_report.py"), "--store", str(T / "no-such"))
 check("a --store that is no folder: exit 2", rc == 2, (rc, err))
-rc, _, err = run(os.path.join(STACK, "audit.py"), "bogus")
+rc, _, err = run(os.path.join(STACK, "stackshot/audit/audit.py"), "bogus")
 check("audit.py's usage names board-check", rc == 2 and "board-check" in err, (rc, err))
 
 check("nothing was written by any of it", digest() == d0, None)

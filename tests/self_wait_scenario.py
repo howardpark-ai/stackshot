@@ -1,11 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["fastmcp>=4.0,<5", "httpx", "markdown-it-py>=4,<5"]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-03T04:00:00Z"
-# ///
 """Scenario test for the check on a wait a session sets on its own item (self_wait.py) — fixture data, the tools called in-process, the model call stubbed (`self_wait._run`;
 router.run_call raises, so a test that reached the real model would fail), no live store, no network, no claude.
 
@@ -82,7 +74,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def files(): return sorted(p.name for p in (T / "store/a").glob("*.json"))
 
-import server, self_wait as SW, router as R
+from stackshot.web import server; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def _no_claude(*a, **k): raise AssertionError("the real model was called")

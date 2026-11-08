@@ -40,9 +40,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import server, nextlines as NL
+from stackshot.web import server; from stackshot.model import nextlines as NL
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None

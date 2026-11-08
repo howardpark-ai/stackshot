@@ -5,14 +5,14 @@ What this page covers: the page debt a state-changing write records, the four ho
 **The page rule and the client hooks.** Every item names a project page (`projects/<slug>` or `infra/<slug>`) in a
 directory of markdown files with frontmatter. A state-changing write (a create, a complete, or an update of
 description, next, needs, status or due) records a debt against the writing session. The debt settles by itself once
-the page is newer than the write. On each machine, `pages.py` runs as four Claude Code hooks: `touch` (PostToolUse on
+the page is newer than the write. On each machine, `stackshot/projects/pages.py` runs as four Claude Code hooks: `touch` (PostToolUse on
 the connector's write tools) remembers the write, `nag` (UserPromptSubmit) reminds the session at every prompt while the
 page is owed, `check` (Stop) runs the board check below, and `keeper` (SessionStart) shows a page's keeper the current
 state of its pages. The Stop hook asks nothing about pages: the end-of-turn page question (`Page: no change, <reason>`)
 was retired, and with it `[page_gate] mode` and `block_after`. The hook scripts live
-in this repository under `client/hooks/`: `project-page.sh <verb>` forwards to `pages.py`, and `session-start.sh` prints
-the board's brief and then the keeper's pages. `./stackshot client install` wires the four of them into
-`~/.claude/settings.json`. A machine with no puller uses three more hook verbs of `client.py`: `register`, `seen` and
+in this repository under `client/hooks/`: `project-page.sh <verb>` forwards to `stackshot/projects/pages.py`, and `session-start.sh` prints
+the board's brief and then the keeper's pages. `bin/stackshot client install` wires the four of them into
+`~/.claude/settings.json`. A machine with no puller uses three more hook verbs of `stackshot/fleet/client.py`: `register`, `seen` and
 `drain`.
 
 **The board check at the end of a turn.** With `[board_check] mode = "block"`, `check` (Stop) also asks about the board.

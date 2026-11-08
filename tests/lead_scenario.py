@@ -25,7 +25,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import server
+from stackshot.web import server
 from fastmcp import Client
 LEAD = "If your session did not load"   # only a session without the rulebook (cloud, Cowork) is told to call rules
 

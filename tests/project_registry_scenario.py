@@ -51,12 +51,12 @@ def reg(): return json.loads((T / "store/projects.json").read_text())["pages"]
 REC = T / "store/project-record.json"
 def recfile(): return json.loads(REC.read_text())
 def sha(b): return hashlib.sha256(b).hexdigest()
-TOOL = [sys.executable, f"{STACK}/tools/migrate_project_record.py"]
+TOOL = [sys.executable, f"{STACK}/stackshot/tools/migrate_project_record.py"]
 def tool(*args, store=None):
     r = subprocess.run(TOOL + list(args), capture_output=True, text=True, env=os.environ, cwd=str(T))
     return r.returncode, r.stdout, r.stderr
 
-import pages as p, projects as prj, project_registry as pr, anchors, server
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server
 server._publish = lambda: None
 p.cmd_registry(quiet=True)
 ids = {k: e["id"] for k, e in reg().items()}
@@ -191,7 +191,7 @@ check("a dry run after the pass says there is nothing left to write", rc == 0 an
 
 # ---- 5. undo after something else wrote to the record: the entries go, the other writes stay
 prj.set_mark(A, on_purpose=True, by="home-sparrow-main"); prj.ensure_ids(["projects/fresh"]); fresh = prj.ensure_ids(["projects/fresh"])["projects/fresh"]
-import project_verbs as _pv
+from stackshot.projects import project_verbs as _pv
 LATER = _pv.create("home-later", "home")["project"]            # a project a verb made after the pass
 rc, out, err = tool("--undo", str(undo2))
 R3 = recfile()

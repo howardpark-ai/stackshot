@@ -57,8 +57,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-import server, config, model as _model, stamp_phase as SP, render as root_render
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None

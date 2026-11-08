@@ -100,9 +100,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 os.environ.update(ANTHROPIC_API_KEY="[masked secret]", ANTHROPIC_AUTH_TOKEN="tok-test", ANTHROPIC_BASE_URL="http://invalid.test", ANTHROPIC_FOO="x", CLAUDE_CODE_USE_BEDROCK="1", ANTHROPIC_CUSTOM_HEADERS="x-test: 1", CLAUDE_CODE_ENTRYPOINT="cli")
-import config as _cfg, routing, router, page_debt, pages as _pg
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import page_debt; from stackshot.projects import pages as _pg
 _ct_changed_since = _pg.ct_changed_since       # the real one: section 9 patches it
-import server
+from stackshot.web import server
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]; server._page_ts = lambda key: 0.0
 server._cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
 ZONE = _cfg.tz()
@@ -197,7 +197,7 @@ out = server._page_debt_pass(now=DAY(20, 0), run=RUN2)
 check("the next run, the same day, calls again for the debts still unsettled", out["pages"] == 2 and len(calls()) == 4 and page_debt.read_days() == {"projects/alpha": RUN2 + ":shadow", "projects/gamma": RUN2 + ":shadow"}, (out, page_debt.read_days()))
 
 # ---- 4. shadow: the 30-minute relay is unchanged: a new debt moves at once, to the router (every project is the router's since)
-import router_live
+from stackshot.router import router_live
 reset(); owe("projects/alpha", A, "a1", "changed (next)", settle="any")
 n0 = len(pushes()); server._pilot_fallback_tick(); time.sleep(0.4); p = pushes()[n0:]
 nb = [n for n in routing.read("projects/alpha") if n.get("kind") == "board" and n.get("live") and not n.get("ruling")][-1:]
@@ -308,7 +308,7 @@ io, last = fallback_case("a put that timed out and whose read back shows no edit
 check("…the page was read back before the fallback, and the log says the edit is not on the page", io.gets == 2 and "a read back does not show the edit" in last["why"] and last["result"] == "fallback", (io.gets, last["why"]))
 
 # GbrainIO.put tells a refusal from an unknown outcome (the CLI is faked)
-import rename_page as _rp, subprocess as _sp
+import subprocess as _sp; from stackshot.projects import rename_page as _rp
 _gb = _rp.gb
 def gbio(rc_out=None, exc=None):
     def f(args, stdin=None):
@@ -376,7 +376,7 @@ check("POST /client/page-debt runs the pass for the named run and answers its mo
 GOOD = "2026-10-16-050000"
 check("…a body with no run, an empty run, a run that is not the audit's stamp shape, or a bad deadline is refused", [server._client_post("m", "page-debt", b)[0] for b in ({}, {"run": " "}, {"run": "x" * 41}, {"run": "r-http"}, {"run": GOOD + "\n"}, {"run": " " + GOOD}, {"run": 20261016050000}, {"run": GOOD, "deadline": "soon"})] == [400] * 8)
 check("…a deadline of NaN or infinity is refused, not read as no deadline", [server._client_post("m", "page-debt", {"run": GOOD, "deadline": v})[0] for v in ("nan", "inf", "-inf", float("nan"), float("inf"))] == [400] * 5)
-check("…the stamp the audit run writes passes the route's check", server._client_post("m", "page-debt", {"run": __import__("audit_run")._stamp_of(1.8e9), "deadline": time.time() + 60})[0] == 200)
+check("…the stamp the audit run writes passes the route's check", server._client_post("m", "page-debt", {"run": __import__("stackshot.audit.audit_run", fromlist=["_"])._stamp_of(1.8e9), "deadline": time.time() + 60})[0] == 200)
 rcfg(page_debt=False)
 st, d = server._client_post("m", "page-debt", {"run": "2026-10-16-200000"})
 check("…with [router] page_debt off it makes no call and says so", st == 200 and d == {"enabled": False, "mode": "", "counts": {}}, (st, d))

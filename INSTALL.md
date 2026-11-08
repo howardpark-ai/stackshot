@@ -39,7 +39,7 @@ name when one is installed (in the user's global `core.hooksPath` first, else in
 ## 2. Set up
 
 ```bash
-./stackshot setup
+bin/stackshot setup
 ```
 
 `setup` asks for the handful of values that are yours and derives the rest:
@@ -109,7 +109,7 @@ URI, then put its id and secret into `oauth.env` with your editor:
 
 ```bash
 "${EDITOR:-nano}" ~/.config/stackshot/oauth.env
-./stackshot doctor
+bin/stackshot doctor
 ```
 
 `doctor` starts the server when `oauth.env` holds both values and at least one allowed email is set; a
@@ -125,7 +125,7 @@ expected at this point.
 ## 4. The HTTPS front
 
 Point your tunnel or reverse proxy at `127.0.0.1:8020`. If you will run anchor-hub with webhooks, also
-expose `127.0.0.1:8010` under the address you put in `[anchor_hub] hook_url`. `./stackshot doctor`
+expose `127.0.0.1:8010` under the address you put in `[anchor_hub] hook_url`. `bin/stackshot doctor`
 checks your base URL from the box itself, which does not prove the front works from elsewhere: verify it
 from a browser on another machine by opening `<base URL>/.well-known/oauth-authorization-server`, which
 answers with JSON once the front is live.
@@ -141,8 +141,8 @@ change is live at once (no restart).
 
 In claude.ai: Settings, Connectors, Add custom connector. Name it **Stackshot** (it becomes the tool
 prefix in Claude Code, `claude.ai Stackshot`, so the tools are `mcp__claude_ai_Stackshot__create`, `__update` and
-`__complete`). The PostToolUse hook that `client install` writes runs on every MCP tool (`mcp__.*`); `pages.py` recognizes
-a board write by the server's name inside the tool name, and, once `connectors.py build` has written a connector catalog
+`__complete`). The PostToolUse hook that `client install` writes runs on every MCP tool (`mcp__.*`); `stackshot/projects/pages.py` recognizes
+a board write by the server's name inside the tool name, and, once `stackshot/fleet/connectors.py build` has written a connector catalog
 (`[portal] catalog_file`), by that catalog, which also lets it see a write made inside an MCP portal's Code Mode script.
 Paste the connector URL, connect, and sign in with one of the allowed Google accounts. claude.ai's two callback URIs are
 already in your config.
@@ -152,7 +152,7 @@ Open a new claude.ai chat and ask it to call the connector's `brief` tool. The e
 ## 6. Claude Code on the server box
 
 ```bash
-./stackshot client install
+bin/stackshot client install
 ```
 
 This adds four hook lines to `~/.claude/settings.json` (SessionStart, UserPromptSubmit, Stop, and
@@ -175,7 +175,7 @@ config at each run, so no restart is needed.
 On the server box, mint a token for it and copy the file over:
 
 ```bash
-./stackshot client mint laptop          # writes ~/.config/stackshot/client-tokens/laptop.token
+bin/stackshot client mint laptop          # writes ~/.config/stackshot/client-tokens/laptop.token
 ```
 
 A name that already has a token is refused, so a second `mint` cannot silently cut off the machine
@@ -187,7 +187,7 @@ stores the token and adds the hooks but only prints how to run the puller):
 ```bash
 git clone https://github.com/howardpark-ai/stackshot ~/stackshot
 cd ~/stackshot
-./stackshot client install --url https://board.example.com --token-file ~/Downloads/laptop.token
+bin/stackshot client install --url https://board.example.com --token-file ~/Downloads/laptop.token
 ```
 
 It stores the token and URL under `~/.config/stackshot`, installs and starts the puller (which fetches
@@ -204,15 +204,15 @@ When a session there owes a page, the nag names it as `<key>.md` "in a checkout 
 repository, which this machine has none of": edit it in such a checkout (on the server box, or a clone
 anywhere), commit and push; with `[pages] flavor = "gbrain"` the nag names gbrain's tools instead.
 
-`./stackshot doctor` works there too. A machine with no `oauth.env` and no installed `stackshot.service`
+`bin/stackshot doctor` works there too. A machine with no `oauth.env` and no installed `stackshot.service`
 is a client machine, and doctor says so on its first line. It then checks only this machine's half:
-the config, the client token, that the server answers `client.py get whoami` for that token (and with
+the config, the client token, that the server answers `stackshot/fleet/client.py get whoami` for that token (and with
 which machine name), lingering and the puller when the puller's unit is installed, and the four hooks.
 It never checks or starts the server's units there. A unit check it could not run (the user manager
 out of reach) is a warning, and doctor then exits 1 rather than reporting "all good".
 
 A machine where no puller runs can pass `--no-puller`: `client install` then adds three more hooks
-(`client.py register` on SessionStart, `drain` on UserPromptSubmit, `seen` on Stop), so its sessions
+(`stackshot/fleet/client.py register` on SessionStart, `drain` on UserPromptSubmit, `seen` on Stop), so its sessions
 register themselves and fetch what waits for them at each prompt.
 
 ## 8. The first item
@@ -232,14 +232,14 @@ digits). Its page is optional: the entry may point at a page of this instance, a
 base, or at nothing. Make one from the checkout (global flags go before the command):
 
 ```bash
-python3 tools/project.py --by you create Acme --scope general
+python3 stackshot/tools/project.py --by you create Acme --scope general
 ```
 
 That project has no page and none is made; add `--make-page --page projects/acme` for a page, or
 `--page https://example.com/acme` for a pointer. The other commands are `rename`, `move-page` (needs
 `[pages] flavor = "gbrain"`, so it refuses on plain pages), `archive` and `reopen`, `agent-add`, `agent-mandate`, `agent-retire`,
 `agent-rename`, `mirror` and `show`; `--dry-run` writes nothing. `docs/projects.md` ("Projects: the record first")
-has the table (so does the docstring at the top of `tools/project.py`; `--help` lists only the command names, and `<command> -h` the flags). The client API has the same verbs as `client.py post project`, `post project-agent`, `post project-agent-mandate`, `post project-agent-rename` and `post project-agent-retire`; `client.py post project -h` prints only a one-line usage. Each verb writes the record
+has the table (so does the docstring at the top of `stackshot/tools/project.py`; `--help` lists only the command names, and `<command> -h` the flags). The client API has the same verbs as `stackshot/fleet/client.py post project`, `post project-agent`, `post project-agent-mandate`, `post project-agent-rename` and `post project-agent-retire`; `stackshot/fleet/client.py post project -h` prints only a one-line usage. Each verb writes the record
 first and then, for a project with a page here, three lines of the page's frontmatter (`display-name:`,
 `agents:`, `status:`). On plain pages the server writes a page file into `paths.brain` and does not commit or
 push it. A project with a page and an agent (`agent-add`) gets a default mover from that agent. A project with no page does not: every item filed on it needs an explicit mover, or `create` is refused with "names no mover".
@@ -252,7 +252,7 @@ push it. A project with a page and an agent (`agent-add`) gets a default mover f
   user token and `SLACK_APP_TOKEN` the app-level token), Notion (`NOTION_TOKEN`, an integration token;
   `NOTION_HOOK_TOKEN` is optional, and without it Notion is polled instead of pushed), Google Drive and
   Gmail (set `[anchor_hub] google_oauth_envs` to `{ <label> = "<path to an oauth.env>" }`, the file holding
-  `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`, then run `anchor-hub-google-auth.py <label>`
+  `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`, then run `stackshot/anchors/anchor_hub_google_auth.py <label>`
   once per account), GitHub (the `gh` login you already have). Then run `./install.sh units --start`, which
   installs and starts the unit (and restarts the server): `doctor` only starts units while the server is
   down, so on a running instance it does not.
@@ -284,7 +284,7 @@ cd ~/stackshot && ./deploy.sh
 
 fast-forwards to `origin/main`, re-renders the units that changed, restarts only the affected
 services (with `systemctl --user`) and waits for
-`/healthz`. `./stackshot doctor` afterwards is a good habit. The checkout's `origin` must be a repository
+`/healthz`. `bin/stackshot doctor` afterwards is a good habit. The checkout's `origin` must be a repository
 that carries `main` (the one you cloned in step 1): without it, deploy refuses with
 `cannot fetch main from origin (…)` and changes nothing.
 
@@ -298,7 +298,7 @@ enabled) anchor-hub; the board is republished by the publisher's next run, withi
 
 Edit `stackshot.toml` and save: nothing else to run. `stackshot-reload.path` sees the file change and
 `stackshot-reload.service` runs `systemctl --user reload` on the server and anchor-hub, which sends each a
-SIGHUP; each re-reads the file and checks it as `python3 config.py check` does. What happens next, in the
+SIGHUP; each re-reads the file and checks it as `python3 stackshot/core/config.py check` does. What happens next, in the
 journal (`journalctl --user -u stackshot.service`, lines starting `config reload:`):
 
 - **A valid file** is live at once: the next tool call, gate, render or delivery reads the new value, and the
@@ -312,7 +312,7 @@ journal (`journalctl --user -u stackshot.service`, lines starting `config reload
   `[fleet] operator_label`, `[freshness]`) and anchor-hub's receiver setup (`[anchor_hub]` hook_url, hook_port,
   slack_team, self_emails, gmail_topics). `[server] port`, `[instance] timezone`, `[anchor_hub] enabled`,
   `[audit] enabled` and `at`, and `[portal]` also need `./install.sh units` first, since the units carry
-  them. The list is `RESTART_ONLY` in `config.py`; `systemctl --user restart stackshot.service` (and
+  them. The list is `RESTART_ONLY` in `stackshot/core/config.py`; `systemctl --user restart stackshot.service` (and
   `anchor-hub.service`) applies them.
 
 Code is not watched: `./deploy.sh` restarts what a change touches. A reload by hand is
@@ -323,7 +323,7 @@ Code is not watched: `./deploy.sh` restarts what a change touches. A reload by h
 Earlier releases could install the server's units under `/etc/systemd/system` (`[units] scope = "system"`). That
 option is gone: the units are user units, and a config that still says `scope = "system"` (or names one of the
 removed `[client]` modes: `reads`, `sessions`, `delivery`, `liveness` at a value other than `api`, `client`, `inbox`,
-`puller`) is refused by `config.py`, so `install.sh`, `deploy.sh`, `doctor` and the reboot hooks stop with one line
+`puller`) is refused by `stackshot/core/config.py`, so `install.sh`, `deploy.sh`, `doctor` and the reboot hooks stop with one line
 naming the key; `install.sh units` also refuses while a system-scope `stackshot.service` is enabled or running. Such an
 instance moves to user units **before** updating, with the previous release's section
 "Moving an instance from system to user scope" (a section of that release's INSTALL.md, which this repository does not keep),

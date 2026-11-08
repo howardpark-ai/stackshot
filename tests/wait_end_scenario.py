@@ -64,7 +64,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-import server, audit_checks as AC, audit_run as AR, model as MODEL, server_fixes as SF, wait_end as WE, config as CFG, watchers as WATCH
+from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
@@ -72,7 +72,7 @@ server._evwait_preread = lambda kind, phrase: None                       # no Gi
 server._own_repo = lambda: "acme/widgets"
 BOXES = {"hp-box": ("hp-box", {}), "hp-up": ("hp-up", {"puller": time.time()})}
 server._evw_boxes = lambda: dict(BOXES)
-import liveness as LV
+from stackshot.fleet import liveness as LV
 LV.puller_online = lambda rec: bool(rec)
 BACK = "team-back"
 log = lambda i: [e["text"] for e in ((mt(i).get("stall") or {}).get("log") or [])]
@@ -420,7 +420,7 @@ check("7 a Facts whose item_anchors raises: the item that asks for it (a stored 
 
 # a project-wide anchor for the link already exists: the add is a no-op and the undo changes nothing
 for p in (T / "store/g").glob("*.json"): p.unlink()
-import anchors as ANC
+from stackshot.anchors import anchors as ANC
 LINK = "https://github.com/acme/widgets/issues/12"
 st = {}; ANC.add(st, "projects/alpha", [LINK], None, by="team-back"); ANC.save(st)
 wide = json.loads((T / "store/anchors.json").read_text())

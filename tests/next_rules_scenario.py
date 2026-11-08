@@ -71,7 +71,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
-import server, steps as S, nextlines as NL, next_rules as NR
+from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
 for p_ in (T / "store/a").glob("*.json"):       # as a session's write leaves them: each line remembers who wrote it (next_by), so a session's next replaces its own lines
     j_ = json.loads(p_.read_text()); m_ = j_["metadata"]
     if m_.get("next", "").startswith("home-agent:"):
@@ -160,7 +160,7 @@ refused("N1 (c): no space after the colon (`home-agent:do`) is refused with the 
 check("N1 (c): a link is no opener and gets no spacing hint, a sentence with a colon neither", NR.hint("see https://example.org/x") == "" and NR.hint("build it") == "", NR.hint("see https://example.org/x"))
 check("N1 (c): hint() of a plain line without a name is empty and of a label names it", NR.hint("Status: ok").startswith("`Status:` is a label") and NR.hint("home-agent:do it").startswith("put a space"), NR.hint("home-agent:do it"))
 # the guard itself, for the writes N1 does not judge (a script's, the server's own): any name passes, an unnamed line is refused
-import model_guards as _MG
+from stackshot.model import model_guards as _MG
 _it = lambda nx: {"id": "a1", "status": "open", "subject": "[home] x", "description": "- x", "metadata": {"project": "projects/alpha", "next": nx, "mover": "home-agent", "needs": ["home-agent"]}}
 _ctx = _MG.Ctx(label=server._session_label, shown=server._gh.shown)
 _keys = lambda nx: [p.key for p in _MG.check(_it(nx), _ctx, touched={"next"})[0]]
@@ -272,7 +272,7 @@ n7("N7: a hash that is the object of a wait is quiet (`when GitHub removes commi
 n7("N7: a hash after `once` is quiet", "once 0202c0d reaches main, tag the release", True)
 n7("N7: a hash that reports a merge is noted (`merge at <hash>`), a later `after` in another clause changes nothing",
    "PR #7 re-checked, merge at 0202c0d; release after #5", False, "a commit hash", "0202c0d")
-import next_rules as _nr7
+from stackshot.model import next_rules as _nr7
 for ln, quiet in (("lane-example: when GitHub removes commit 0201c0d (or support replies), trim the comment and close", True),
                   ("lane-example: wait until 0203c0d is gone from the fork, then close", True),
                   ("lane-example: after 0204c0d is deployed, close", True),
@@ -340,6 +340,6 @@ check("a hold through the tool keeps the step it had (an item on hold has the st
 server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
 check("the wake pass over the held item raises no refusal and leaves its step", not mt(48).get("hold") and st(48) == [OPEN("home-agent: build it")], (mt(48), st(48)))
 check("the router never calls the two tools (they write through the server's own functions)",
-      not re.search(r"\bstackshot_(update|create)\(", pathlib.Path(STACK, "router.py").read_text() + pathlib.Path(STACK, "router_live.py").read_text()), None)
+      not re.search(r"\bstackshot_(update|create)\(", pathlib.Path(STACK, "stackshot/router/router.py").read_text() + pathlib.Path(STACK, "stackshot/router/router_live.py").read_text()), None)
 
 print(("ok" if not fails else "FAILED") + f": next_rules scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -59,7 +59,7 @@ cd ~/stackshot
 ### Step 3. Run setup
 
 ```bash
-./stackshot setup
+bin/stackshot setup
 ```
 
 Setup asks for these. The defaults are in brackets.
@@ -72,7 +72,7 @@ Setup asks for these. The defaults are in brackets.
 - Where the data repository lives (default `~/stackshot-data`).
 - Where the project pages live (default `~/stackshot-data/pages`, inside the data repository).
 
-It needs a real terminal. In a script, pass every answer as a flag and add `--yes` (see `./stackshot setup -h`). `./stackshot setup --no-systemd` skips the user-services part (item 5 below) and says how to install the units later: use it on a box where `systemctl --user` is out of reach, then run `./install.sh units --start` when it is.
+It needs a real terminal. In a script, pass every answer as a flag and add `--yes` (see `bin/stackshot setup -h`). `bin/stackshot setup --no-systemd` skips the user-services part (item 5 below) and says how to install the units later: use it on a box where `systemctl --user` is out of reach, then run `./install.sh units --start` when it is.
 
 Setup then does this, in order, and says so as it goes:
 
@@ -150,7 +150,7 @@ Save. The file is mode 0600. Do not commit it or paste it into chat.
 ### Step 8. Start the server with doctor
 
 ```bash
-./stackshot doctor
+bin/stackshot doctor
 ```
 
 `doctor` prints a checklist. Each line starts with `ok`, `warn` or `missing`. With both OAuth values and an allowed email set, and the server not running, it starts the server and waits for it.
@@ -170,7 +170,7 @@ https://board.example.com/.well-known/oauth-authorization-server
 Good result: a page of JSON. Then run doctor again.
 
 ```bash
-./stackshot doctor
+bin/stackshot doctor
 ```
 
 Good result: "OAuth metadata reachable" is `ok`. Only the hooks line is still `missing`.
@@ -187,7 +187,7 @@ Test: open a new claude.ai chat and ask it to call the Stackshot connector's `br
 ### Step 11. Add the Claude Code hooks
 
 ```bash
-./stackshot client install
+bin/stackshot client install
 ```
 
 It prints a diff, backs up `~/.claude/settings.json` to `settings.json.bak-<timestamp>`, and adds four hook lines (SessionStart, UserPromptSubmit, PostToolUse on MCP tools, Stop). It asks nothing. To look first, run it with `--print`: it writes nothing. If you run the stackshot Claude Code plugin, doctor counts the hooks that plugin carries too (its line says how many came from the plugin).
@@ -197,7 +197,7 @@ Start a new Claude Code session. Good result: the connector shows up as `claude.
 Run doctor once more.
 
 ```bash
-./stackshot doctor
+bin/stackshot doctor
 ```
 
 Good result: `all good`, exit 0.
@@ -223,11 +223,11 @@ Why the mover is named: the server's default mover is the project's builder, els
 
 A project is an entry in the board's project record, `project-record.json` in the server's store, with a permanent id (`prj_` and eight hex digits), a name, a scope and a status. A **page is optional**: the entry can point at a page in your pages folder, at a link to another knowledge base, or at nothing.
 
-Make one with `tools/project.py`, run from the checkout on the server box. The flags that apply to every command (`--by LABEL` for who the record names, `--dry-run`, `--json`) go **before** the command name. `--dry-run` shows what would be written and writes nothing.
+Make one with `stackshot/tools/project.py`, run from the checkout on the server box. The flags that apply to every command (`--by LABEL` for who the record names, `--dry-run`, `--json`) go **before** the command name. `--dry-run` shows what would be written and writes nothing.
 
 ```bash
 cd ~/stackshot
-python3 tools/project.py --by you create Acme --scope general
+python3 stackshot/tools/project.py --by you create Acme --scope general
 ```
 
 That makes a project named `Acme` with no page. Add `--make-page --page projects/acme` to make a page for it, or `--page https://example.com/acme` to point at a page you keep elsewhere. Items can be filed on the project by its id (`prj_...`), and a project with no page gets no page reminders.
@@ -250,7 +250,7 @@ The verbs that exist today:
 
 The record is written first. When the project has a page in your pages folder, the tool then rewrites three lines of the page's frontmatter from the record (`display-name:`, `agents:`, `status:`) and nothing else. A hand edit to those three lines is overwritten by the next write: change them through the verbs. Under `[pages] flavor = "plain"` the page is a markdown file in the pages folder, and neither the tool nor the server commits or pushes it: you do.
 
-The same verbs answer the client API: `python3 ~/stackshot/client.py post project --scope general --name Acme` (or `--key projects/acme` to make the page from the template at once), then `post project-agent`, `post project-agent-mandate`, `post project-agent-rename` and `post project-agent-retire`. The verbs and their flags are listed at the top of `tools/project.py` and in `docs/projects.md` ("Projects: the record first"); `python3 tools/project.py --help` lists only the command names (`<command> -h` shows one command's flags), and `client.py post project -h` prints a one-line usage to stderr and exits 1. There is no verb to delete a project. A project made with no page does not show in `client.py get projects`, and `client.py get project <id>` answers 404 for it; `tools/project.py show <id>` reads it, and items filed on it work with an explicit mover. A page made by hand (a file under the pages folder) is still read by the registry, but it has no record entry until its first verb.
+The same verbs answer the client API: `python3 ~/stackshot/client.py post project --scope general --name Acme` (or `--key projects/acme` to make the page from the template at once), then `post project-agent`, `post project-agent-mandate`, `post project-agent-rename` and `post project-agent-retire`. The verbs and their flags are listed at the top of `stackshot/tools/project.py` and in `docs/projects.md` ("Projects: the record first"); `python3 stackshot/tools/project.py --help` lists only the command names (`<command> -h` shows one command's flags), and `stackshot/fleet/client.py post project -h` prints a one-line usage to stderr and exits 1. There is no verb to delete a project. A project made with no page does not show in `stackshot/fleet/client.py get projects`, and `stackshot/fleet/client.py get project <id>` answers 404 for it; `stackshot/tools/project.py show <id>` reads it, and items filed on it work with an explicit mover. A page made by hand (a file under the pages folder) is still read by the registry, but it has no record entry until its first verb.
 
 A page file you write yourself starts from `getting-started.md`. The registry refreshes after a write and at least every 10 minutes.
 
@@ -269,7 +269,7 @@ How the pieces move files:
 | | A. Separate vault | B. A folder in your main vault |
 |---|---|---|
 | What it is | A new vault that is a clone of the stackshot data repository. Pages are in its `pages/` folder. | Your existing vault, in its own git repository. The pages are a folder inside it. |
-| Server setup | The default. Nothing extra. | Set `paths.brain` to `~/vault/<folder>` in the config, where `~/vault` is a clone of your main vault on the server. On a first install, `./stackshot setup --pages ~/vault/<folder>` writes the same setting. |
+| Server setup | The default. Nothing extra. | Set `paths.brain` to `~/vault/<folder>` in the config, where `~/vault` is a clone of your main vault on the server. On a first install, `bin/stackshot setup --pages ~/vault/<folder>` writes the same setting. |
 | Do laptop edits reach the server? | Yes, by themselves. The publisher fast-forwards the data repository each publish. | Not by themselves. Nothing in stackshot pulls that second repository. You add a pull on the server (below). |
 | Extra files in the vault | `board.md`, `RULES.md` and `board-data/` JSON. Obsidian ignores the JSON. `board.md` is a handy read-only view of the board. | None from stackshot. |
 | Commit noise | The publisher commits board data every few seconds when the board changes. The vault pulls it. | Page commits only. |
@@ -287,7 +287,7 @@ Recommendation: **A**. It has no moving part you have to add. Pick B only if you
 
 1. On the server, clone your main vault, for example to `~/vault`.
 2. Make the pages folder: `~/vault/stackshot/projects/`. Keep the folder names in step with `[pages] dirs` (default `["projects"]`) in the config.
-3. Set `paths.brain = "~/vault/stackshot"` in `~/.config/stackshot/stackshot.toml`. `paths.brain` is read at start only. Restart the server after changing it: `systemctl --user restart stackshot.service`. Only on a first install, before setup has written a config, can you pass `--pages ~/vault/stackshot` to `./stackshot setup` instead. On a box that already has a config, running setup again exits with code 2 and changes nothing unless you add `--force`, which rewrites the whole config: edit the file instead.
+3. Set `paths.brain = "~/vault/stackshot"` in `~/.config/stackshot/stackshot.toml`. `paths.brain` is read at start only. Restart the server after changing it: `systemctl --user restart stackshot.service`. Only on a first install, before setup has written a config, can you pass `--pages ~/vault/stackshot` to `bin/stackshot setup` instead. On a box that already has a config, running setup again exits with code 2 and changes nothing unless you add `--force`, which rewrites the whole config: edit the file instead.
 4. Sessions then commit and push into your main vault repository. That repository needs a push credential on the server.
 5. Add a job on the server that runs `git -C ~/vault pull --ff-only` every few minutes, so laptop edits arrive. `TODO(verify)`: stackshot has no such job. Write it as a systemd user timer, so it keeps running without any session open.
 
@@ -332,19 +332,19 @@ Two traps:
 - **Do not run `git pull` first.** `deploy.sh` decides what to restart by comparing your current commit with `origin/main`. After a manual pull it says "nothing to deploy" and restarts nothing. If you already pulled, run `./install.sh units --start`: it re-renders the units and restarts the server, the config watcher and the puller.
 - **Keep the checkout clean.** It refuses with "the production checkout has local changes" if tracked files differ. Your config lives outside the checkout, so you do not need to edit anything in it.
 
-Afterwards, run `./stackshot doctor`.
+Afterwards, run `bin/stackshot doctor`.
 
 The repository takes ordinary pull requests, so a clean checkout always fast-forwards to `origin/main`. `deploy.sh` refuses with "does not contain HEAD" only if you made commits in `~/stackshot` yourself. To drop your commits, go back to the last commit of `origin/main` you had, then deploy: `git -C ~/stackshot reset --hard "$(git -C ~/stackshot merge-base HEAD origin/main)"`, then `./deploy.sh`. (Resetting straight to `origin/main` has the same effect as `git pull` first: nothing restarts.)
 
 ### Changing the config later
 
-Edit `~/.config/stackshot/stackshot.toml` and save. A watcher reloads the server. A valid file takes effect at once. A broken file is refused with a reason in `journalctl --user -u stackshot.service` (lines starting `config reload:`) and the old config stays. A setting only a start can apply (the server's bind address and port, `[auth]` `mode`, `base_url`, `allowed_client_redirect_uris` and `portal_identity` (not `ui_open` or `allowed_emails`, which are live), every `[paths]` entry, `[ids] letter`, and the text the connector's tool descriptions carry: `[instance]` name, owner, board URL and timezone, `[subject] prefixes`) keeps its running value until you restart. The journal logs `<key> changed: takes effect at the next restart`. `[server] port` and `[instance] timezone` also need `./install.sh units` first, because the units carry them. The full list is `RESTART_ONLY` in `config.py`. Restart with `systemctl --user restart stackshot.service`.
+Edit `~/.config/stackshot/stackshot.toml` and save. A watcher reloads the server. A valid file takes effect at once. A broken file is refused with a reason in `journalctl --user -u stackshot.service` (lines starting `config reload:`) and the old config stays. A setting only a start can apply (the server's bind address and port, `[auth]` `mode`, `base_url`, `allowed_client_redirect_uris` and `portal_identity` (not `ui_open` or `allowed_emails`, which are live), every `[paths]` entry, `[ids] letter`, and the text the connector's tool descriptions carry: `[instance]` name, owner, board URL and timezone, `[subject] prefixes`) keeps its running value until you restart. The journal logs `<key> changed: takes effect at the next restart`. `[server] port` and `[instance] timezone` also need `./install.sh units` first, because the units carry them. The full list is `RESTART_ONLY` in `stackshot/core/config.py`. Restart with `systemctl --user restart stackshot.service`.
 
 ## 7. Left out of this guide
 
 This guide installs the board only. Later options, none needed now:
 
-- **Other machines.** Run Claude Code on a laptop too: `./stackshot client mint <name>` on the server, then `./stackshot client install --url ... --token-file ...` there. See [INSTALL.md](../INSTALL.md), step 7.
+- **Other machines.** Run Claude Code on a laptop too: `bin/stackshot client mint <name>` on the server, then `bin/stackshot client install --url ... --token-file ...` there. See [INSTALL.md](../INSTALL.md), step 7.
 - **anchor-hub.** Watches Slack, Notion, Drive, Gmail and GitHub and drops one-line notices into the right session. Off by default.
 - **sala.** A tmux session manager for running many long-lived Claude Code sessions. Not required.
 - **gbrain.** A Postgres-backed knowledge server that can hold the project pages instead of markdown files. Not required. Pages stay `[pages] flavor = "plain"`.
@@ -365,4 +365,4 @@ This guide installs the board only. Later options, none needed now:
 | `systemctl --user` says it cannot reach your user manager | You are in a shell that was not a login | `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again |
 | A session is told a project-page update is owed and then refused | The page rule, with `[pilot] writer_owes_page = true` | Edit the page, commit, push, then retry. With the default (`false`) the page's keeper is charged and no write is refused for it |
 | A bare wake is refused with "a wait on your own item needs its reason" | `[wait_guard]` | Pass `wait_reason` (at least 15 characters): what the step waits on that is not available now. If nothing blocks the step, do it now |
-| `tools/project.py move-page` refuses | A plain-pages install | `move-page` needs `[pages] flavor = "gbrain"`. On plain pages there is no verb for it |
+| `stackshot/tools/project.py move-page` refuses | A plain-pages install | `move-page` needs `[pages] flavor = "gbrain"`. On plain pages there is no verb for it |

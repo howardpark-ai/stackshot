@@ -52,7 +52,7 @@ def put(i, status="open", **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": status,
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
-import server
+from stackshot.web import server
 sh = server._gh.shown
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -250,7 +250,7 @@ out = server._contact_backfill(dry=False)
 check("backfill: a second run writes nothing", out["written"] == 0 and all(bytes_of(f"a{i}") == snap2[i] for i in range(20, 27)) and out["counts"]["has_contact"] == 5, out["counts"])
 
 # ---- the item page: the side column's first row, "Owner"
-from ui import render as r2
+from stackshot.web.ui import render as r2
 for p in (T / "store").glob("?/*.json"): p.unlink()
 put(30, contact=SIDE); put(31); put(32, contact="home-delta-gone"); put(33, status="completed", contact=SIDE, outcome="done", reason="done")
 server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"; server._cfg.CFG.setdefault("fleet", {})["tool_name"] = "sala"

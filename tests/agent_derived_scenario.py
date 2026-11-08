@@ -54,7 +54,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W
+from stackshot.web import server; from stackshot.waits import waiting as W
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []

@@ -45,8 +45,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-from anchorhub import core
-import anchors as anc, routing
+from stackshot.anchors.anchorhub import core
+from stackshot.anchors import anchors as anc; from stackshot.router import routing
 T0 = 1790798400.0                      # 2026-10-01 00:00 in the instance timezone (Asia/Dubai, UTC+4: 2026-09-30 20:00 UTC)
 clock = types.SimpleNamespace(t=T0)
 core.time = types.SimpleNamespace(time=lambda: clock.t, sleep=lambda s: None)
@@ -78,7 +78,7 @@ n = len(calls); scan(30)
 check("not asked again before a minute has passed", calls[n:].count(gm) == 0 and calls[n:].count(dr) == 1, calls[n:])     # the unnamed Drive file is tried each pass, as ever
 
 # ---- 2. still refused a minute later: one notice, recorded for the router to rule (every project is the router's since), delivered to no session
-import router_live as live
+from stackshot.router import router_live as live
 st = scan(60)
 w = [o for o in out if "Gmail anchor" in o[2]]
 log = routing.read("projects/alpha")
@@ -112,7 +112,7 @@ check("after a restart the anchor is still marked and was not warned about again
 # ---- 6. the listing and the board say so
 txt = anc.fmt(anc.load()["projects/alpha"], st)
 check("anchors listing: the readable one by name, the other marked with the reason", '— Slack #general' in txt and re.search(r"UNREADABLE by anchor-hub since 20\d\d-\d\d-\d\d \d\d:\d\d:\d\d \+04: the thread is in none of the mailboxes", txt), txt)
-from ui import render as ui_render
+from stackshot.web.ui import render as ui_render
 now = datetime.datetime.fromtimestamp(clock.t, core.ZONE)
 try:
     b = ui_render.Board(str(T / "store"), now=now)
@@ -135,7 +135,7 @@ hub.bindings = core.load_bindings(); hub.event(dr, {"title": '"Deck"', "who": "D
 check("an event from it: asked again at the next pass", hub.status["anchors"][dr]["unreadable"]["next"] == 0, hub.status["anchors"][dr])
 
 # ---- 9. the rulebook's import line (server._rules_source)
-import server
+from stackshot.web import server
 R = T / "rules"; R.mkdir()
 (R / "A.md").write_text("<!-- header -->\n# Rules\n\n## One\n\n- a rule\n\n@B.md\n@missing.md\nnot an @import.md line\n", encoding="utf-8")
 (R / "B.md").write_text("# Agent rules\n\nOne sentence.\n\n<!-- surface: cli -->\n## CLI only\n\n- hidden from Cowork\n\n## Two\n\n- another rule\n- a cli bullet <!-- cli -->\n@C.md\n", encoding="utf-8")
@@ -318,7 +318,7 @@ check("permanent: a missing file or key, a refused or revoked token (401, 403, i
                                           nm("RefreshError"), ValueError("bad json"), AttributeError("x"), core.Permanent("x"))))
 
 # github: gh's own network message is a Transient (retried); a refused credential keeps today's way (off, a warning, no retry)
-from anchorhub import github as ghmod
+from stackshot.anchors.anchorhub import github as ghmod
 class Done:
     def __init__(self, rc, err, out=""): self.returncode, self.stderr, self.stdout = rc, err, out
 def gh_with(err, rc=1):
@@ -349,7 +349,7 @@ for mod, attrs in (("slack_sdk", {"WebClient": FakeWeb}), ("slack_sdk.socket_mod
                    ("slack_sdk.socket_mode.request", {"SocketModeRequest": object}), ("slack_sdk.socket_mode.response", {"SocketModeResponse": object})):
     sys.modules[mod] = types.SimpleNamespace(**attrs)
 os.makedirs(os.path.dirname(core.ENVF), exist_ok=True); open(core.ENVF, "w").write("SLACK_USER_TOKEN=not-a-token\nSLACK_APP_TOKEN=not-a-token\n")
-from anchorhub import slack as slackmod
+from stackshot.anchors.anchorhub import slack as slackmod
 hs = core.Hub(); hs.status["receivers"] = {}
 ts = core.start_receiver(hs, "slack", slackmod.run, lambda: True, backoff=TINY); ts.join(10)
 check("slack: the client whose connect() failed is closed once, the retry builds a new one and connects",

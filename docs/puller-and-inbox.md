@@ -3,11 +3,11 @@
 What this page covers: how notices and messages reach a session on another machine, how a client box keeps itself current, and how the machine card is judged. Back to the [README](../README.md).
 
 **The puller and the inbox.** A notice or message for a session on another machine waits in the server's inbox
-(`inbox.py`). Each machine runs one `puller.py`, which holds a long poll open to the server with its machine token,
+(`stackshot/fleet/inbox.py`). Each machine runs one `stackshot/fleet/puller.py`, which holds a long poll open to the server with its machine token,
 reports the sessions live on that machine (from the CLI's own registry, `~/.claude/sessions`; the router's own `claude -p` call, which runs in a `stackshot-router-*` temporary directory, is not a session and is skipped), writes each waiting line
 into the session's inbox (a unix socket on Linux, a named pipe on Windows) and confirms it. The poll is also the
-machine's sign of life. `client.py` mints and revokes machine tokens on the server box and reads the board from any box.
-`push.py` puts the lines into the inbox and delivers on the server box itself what the inbox does not serve: a pane
+machine's sign of life. `stackshot/fleet/client.py` mints and revokes machine tokens on the server box and reads the board from any box.
+`stackshot/fleet/push.py` puts the lines into the inbox and delivers on the server box itself what the inbox does not serve: a pane
 here over its local socket, a cloud session with `claude --cloud`. The server box reaches into no other machine.
 A line is for a session by its permanent id (code finds a session by its permanent
 id, names are for people): `inbox.put` resolves whatever the sender wrote (a permanent id, a name, an alias, a transcript id) to the
@@ -27,7 +27,7 @@ keeps itself current). Every poll's answer carries what is current (`clients.cur
 checkout commit, and whether that box may update itself). When the box is behind (its checkout is not at the server's
 commit and is its ancestor) and idle (no live session in the CLI's registry, no `claude` process: the hooks run from the
 checkout under a session, so it is never moved under one), the puller fast-forwards its whole checkout (`git fetch
-origin`, `git merge --ff-only` to the server's commit: `pages.py`, the hooks and everything else the box runs from it move
+origin`, `git merge --ff-only` to the server's commit: `stackshot/projects/pages.py`, the hooks and everything else the box runs from it move
 with the puller; a dirty checkout is refused and the refusal reported).
 
 **A box follows the server through a repo move and a history rewrite** (puller 10), with no hand step. The poll's answer also carries
@@ -70,7 +70,7 @@ compile is refused), idle is asked again right before the merge, a failed merge 
 that does not load is recorded as failed and the running puller carries on. A checkout that reaches the server's commit some other way (swapped for a fresh clone, moved there by hand) is settled on the next poll with one ok attempt (`already at the server's commit`), so an older failure stops showing; `puller-updates.json` is never edited for that. On Windows only the CLI's own `claude.exe` counts as a
 claude process, not Claude Desktop's; a process check that cannot answer counts as busy. `[client] self_update = false` switches it off: in the server's config for
 every box (the server never says yes to its own box: `deploy.sh` keeps that checkout), in a box's own config for that box.
-`puller.py --dry-run` prints what the box would update now, or why not. Until this, sala kept a Windows box's `~\stackshot`
+`stackshot/fleet/puller.py --dry-run` prints what the box would update now, or why not. Until this, sala kept a Windows box's `~\stackshot`
 current: its heartbeat fast-forwarded the checkout to `origin/main` every round, and its watchdog provisioned a lagging box
-over ssh (`client.py puller-lag`, still served for the panel); both retire on sala's side, replaced by this. The helper has no
+over ssh (`stackshot/fleet/client.py puller-lag`, still served for the panel); both retire on sala's side, replaced by this. The helper has no
 part in the Claude CLI (it only reports the installed version): the machine's own provisioning step updates it.

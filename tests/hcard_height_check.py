@@ -62,7 +62,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import server
+from stackshot.web import server
 import uvicorn
 server._publish = lambda: None
 COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
@@ -73,7 +73,7 @@ for _ in range(100):
     except OSError: time.sleep(0.1)
 else: raise SystemExit("the app did not start")
 
-import landed as ld
+from stackshot.web import landed as ld
 SHOTS = os.environ.get("HCARD_HEIGHT_SHOTS", "")
 if SHOTS: pathlib.Path(SHOTS).mkdir(parents=True, exist_ok=True)
 def shot(pg, name):

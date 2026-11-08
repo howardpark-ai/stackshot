@@ -114,7 +114,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here

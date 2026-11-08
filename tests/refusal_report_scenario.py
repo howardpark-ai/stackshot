@@ -47,7 +47,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-import server, call_log as CL, refusal_report as RR, config as CFG
+from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG
 from fastmcp.exceptions import ToolError
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -303,13 +303,13 @@ env = dict(os.environ, STACKSHOT_CONFIG=f"{tmp}/stackshot.toml")
 def cli(*argv):
     p = subprocess.run([sys.executable, *argv], capture_output=True, text=True, env=env, cwd=STACK, timeout=120)
     return p.returncode, p.stdout + p.stderr
-rc, out = cli(os.path.join(STACK, "tools/refusal_report.py"), "run", "--dry-run", "--week", mon.isoformat())
+rc, out = cli(os.path.join(STACK, "stackshot/tools/refusal_report.py"), "run", "--dry-run", "--week", mon.isoformat())
 check("4 cli: refusal_report.py run --dry-run --week prints the report and exits 0", rc == 0 and "create and update: 20 of 106 calls refused" in out and "refusal report: dry run" in out, (rc, out[-400:]))
-rc, out = cli(os.path.join(STACK, "audit.py"), "refusals", "--dry-run", "--week", mon.isoformat())
+rc, out = cli(os.path.join(STACK, "stackshot/audit/audit.py"), "refusals", "--dry-run", "--week", mon.isoformat())
 check("4 cli: audit.py refusals is the same report", rc == 0 and "create and update: 20 of 106 calls refused" in out, (rc, out[-400:]))
-rc, out = cli(os.path.join(STACK, "tools/refusal_report.py"), "run", "--week", "not-a-date")
+rc, out = cli(os.path.join(STACK, "stackshot/tools/refusal_report.py"), "run", "--week", "not-a-date")
 check("4 cli: a bad --week exits 2 naming the form", rc == 2 and "YYYY-MM-DD" in out, (rc, out))
-rc, out = cli(os.path.join(STACK, "tools/refusal_report.py"), "run", "--bogus")
+rc, out = cli(os.path.join(STACK, "stackshot/tools/refusal_report.py"), "run", "--bogus")
 check("4 cli: an unknown option prints the usage and exits 2", rc == 2 and "usage: refusal_report.py" in out, (rc, out))
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8").splitlines()
 post = [l for l in unit if l.startswith("ExecStartPost=") and "audit.py refusals" in l]

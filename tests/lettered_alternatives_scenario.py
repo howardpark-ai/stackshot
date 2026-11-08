@@ -40,9 +40,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import server
+from stackshot.web import server
 server._publish = lambda: None
 DESC = "- Goal: The side panel's left line\n- It lives in the board's stylesheet\n- Done when the line is picked"
 ASKB = lambda decide, rec="A": f"Decide: {decide} · Recommend: {rec} · Stakes: the panel looks different · By: no date"

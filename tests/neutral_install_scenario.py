@@ -169,7 +169,7 @@ check("plain pages: a stale revision is refused, a path outside the checkout is 
 check("plain pages: create makes a file, a second create says exists, a put with the right revision writes", r.get("create") == "ok" and r.get("again") == "exists" and r.get("put") == "ok", r)
 check("plain pages: the router's timeline note is one line on the page however often it is sent, a missing page is a message not an error", r.get("note1") == "" and r.get("note2") == "" and r.get("lines") == 1 and r.get("has_timeline") and r.get("missing"), r)
 check("plain pages: no temporary file is left in the checkout", r.get("tmp_left") == [], r)
-for name, args in (("rename_page.py", ["plan", "projects/alpha=projects/zeta"]), ("page_keeper.py", ["plan"])):
+for name, args in (("stackshot/projects/rename_page.py", ["plan", "projects/alpha=projects/zeta"]), ("stackshot/projects/page_keeper.py", ["plan"])):
     rc, out, err = sh(sys.executable, os.path.join(STACK, name), *args, cwd=STACK, env=inst["env"])
     check(f"plain pages: {name} refuses with a message that says why, no traceback", rc == 1 and out.startswith("FAIL") and "plain" in out and "Traceback" not in err, (rc, out[:300], err[-300:]))
     check(f"plain pages: {name} prints exactly the refusal, one FAIL line and no note", len(out.strip().splitlines()) == 1 and "note:" not in out and not err.strip(), (rc, out[:400], err[-300:]))
@@ -178,18 +178,18 @@ for name, args in (("rename_page.py", ["plan", "projects/alpha=projects/zeta"]),
 errf = open(inst["root"] / "server.err", "w+")
 env = inst["env"]
 def cli(*args, stdin=None):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "client.py"), *args], capture_output=True, text=True, timeout=120, env=env, cwd=str(inst["root"]), input=stdin)
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/fleet/client.py"), *args], capture_output=True, text=True, timeout=120, env=env, cwd=str(inst["root"]), input=stdin)
     return r.returncode, r.stdout, r.stderr
 def get(url, timeout=10):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}{url}", timeout=timeout) as r: return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e: return e.code, e.read().decode("utf-8", "replace")
     except Exception as e: return 0, f"{type(e).__name__}: {e}"
-r_ = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "registry"], capture_output=True, text=True, timeout=120, env=env, cwd=str(inst["root"]))
+r_ = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "registry"], capture_output=True, text=True, timeout=120, env=env, cwd=str(inst["root"]))
 check("setup: the page registry is made from the markdown pages", r_.returncode == 0 and "projects/alpha" in (inst["root"] / "store/projects.json").read_text(), (r_.returncode, r_.stdout[-200:], r_.stderr[-300:]))
 rc, out, err = cli("mint", socket.gethostname())
 check("setup: this box's client token is minted, pointing at the test's port", rc == 0 and (inst["root"] / "secrets/client.url").read_text().strip() == f"http://127.0.0.1:{port}", (rc, out, err))
-proc = subprocess.Popen([sys.executable, os.path.join(STACK, "server.py")], stdout=subprocess.DEVNULL, stderr=errf, cwd=str(inst["root"]), env=env)
+proc = subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/web/server.py")], stdout=subprocess.DEVNULL, stderr=errf, cwd=str(inst["root"]), env=env)
 try:
     st = 0; end = time.time() + 90
     while time.time() < end and proc.poll() is None:

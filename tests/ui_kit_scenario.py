@@ -1,11 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["fastmcp>=4.0,<5", "httpx", "markdown-it-py>=4,<5"]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-03T04:00:00Z"
-# ///
 """Scenario test for the board pages' one item system (ui/kit.py and its use in ui/render.py): fixture store, the Board's own page methods, no network.
 
 Covers:
@@ -97,10 +89,10 @@ for i in range(40, 40 + NMORE):
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 logging.disable(logging.INFO)
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-import config as _cfg
+from stackshot.core import config as _cfg
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 (T / "fakepush.py").write_text("import sys\nprint('delivered')\n"); server._PUSH = [sys.executable, str(T / "fakepush.py")]
 for i, oc, why in ((10, "done", "Live at 0168c0d: the sample shows once in the list; rows follow the list order"), (11, "dropped", "Not needed any more: the supplier changed the plan and the question is moot"),
@@ -109,10 +101,10 @@ for i, oc, why in ((10, "done", "Live at 0168c0d: the sample shows once in the l
     if oc == "superseded": kw["superseded_by"] = "a4"
     kw["description"] = "- The thing works and is in use"
     r = server.stackshot_complete(f"a{i}", **kw)
-from ui import render as r2, search as s2
-import search as sm
+from stackshot.web.ui import render as r2, search as s2
+from stackshot.web import search as sm
 Bd = lambda: r2.Board(str(T / "store"), now=None)
-import landed as ld
+from stackshot.web import landed as ld
 sm.sync(Bd())
 
 # ---------------------------------------------------------------------------------------------------------------- the checks
@@ -121,8 +113,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-from ui import kit as ui
-from ui import render as r2
+from stackshot.web.ui import kit as ui
+from stackshot.web.ui import render as r2
 def lum(h):
     h = h.lstrip("#"); c = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
     c = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in c]
@@ -357,7 +349,7 @@ check("Landed: the page script says the same words, and finds Clear and the id i
 check("Landed: the hooks the script reads are still there", all(x in ld_html for x in ("li.lrow", "form.lclear", ".lago[data-ts]")) or all(x in js for x in ("li.lrow", "form.lclear", ".lago[data-ts]")))
 
 # ---- 8. Search: the item's state as its tag, the project on the who line, the snippet behind the guide line, the link in the page's own tab
-import search as _sm
+from stackshot.web import search as _sm
 _sm.sync(bd)
 sr = s2.results_html(bd, "item")
 sl = lis(sr)
@@ -430,7 +422,7 @@ check("a wait on a date keeps its 'Expected by' on the item page", "Expected by"
 check("doing, no expected time: no On agent row carries the 7-hour marker either", "ir-age red" not in ag5 and "ir-age amber" not in ag5, re.findall(r'ir-age [a-z ]*', ag5))
 
 # ---- 10. Queued for release: an agent's item whose pull request has a release in the release script's queue (its unit is running) leaves On agent for its own open list, count card and tag
-from ui import releasing as rel
+from stackshot.web.ui import releasing as rel
 units = {18}
 rel._run = lambda argv: "".join(f"stackshot-release-{n}.service loaded active running [systemd-run] release.sh --run {n}\n" for n in sorted(units))     # the one systemctl call, stubbed: no unit of the host is read
 rel._OWN[:] = ["acme/widget"]                                                                                                                   # this checkout's repository
@@ -576,7 +568,7 @@ rel._run = lambda argv: "stackshot-release-18.service loaded active running x\ns
 check("queued: the unit name is matched whole (release 40618 is not release 18's)", rel.release_units() == {18, 40618} and rel.pr_of(pr(7)) == 7 and rel.pr_of(pr(7, "other/repo")) == 0 and rel.pr_of("https://example.org/x/pull/7") == 0)
 
 # ---- 11. Queued for release, the other links: an agent's item counts when an open step names the PR (its proof, its URL, "PR #N"), not only when an anchor does
-import steps as _stp
+from stackshot.model import steps as _stp
 KEY = _stp.key
 item(41, owner=X, subject="[work] linked by a step's URL", next="alpha-builder: release [PR #23](https://github.com/acme/widget/pull/23) as it comes up")
 item(42, owner=X, subject="[work] linked by a step that says PR #N", next="alpha-builder: release PR #27 (in its turn)")
@@ -650,7 +642,7 @@ check("machine failure: once the machine has no failure, it has no line and no b
 
 # ---- the header: every page of the board starts with home's header (the site title, the five count cards, the search box); off home each list card links to home with that list open
 import time as _time
-from ui import runners as n2
+from stackshot.web.ui import runners as n2
 LISTS = (("your-move", "Your move"), ("agents-at-work", "On agent"), ("queued-release", "Queued for release"), ("waiting-list", "Waiting"))
 def header_of(pg):
     m = re.search(r"<header class=\"top\">.*?</header>", pg, re.S); return m.group(0) if m else ""

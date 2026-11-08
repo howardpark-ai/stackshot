@@ -45,7 +45,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import audit_checks as AC, audit_run as AR, ask_read
+from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import ask_read
 H = 3600; now = time.time()
 OWNER = "00000000-0000-4000-8000-000000000001"
 fails = []; ran = []
@@ -139,7 +139,7 @@ check("2/3 a yes/no with a matching Recommend (no options, a stored pair, a Reco
       " a 'should' frame, an item that needs no decision, a watcher's ask, a closed item, no ask and a description alone are none a finding", set(got) == set(), got)
 mm = ask_read.recommend_missing({"ask": ask("which", "Beta"), "options": opts("Alpha", "Beta", rec="Alpha")})
 check("3 the matcher is the write gates': the server's names are ask_read's own", mm == "Alpha", mm)
-import server
+from stackshot.web import server
 check("3 …server._open_question, _recommend_missing, _alternatives and _yes_no_options are ask_read's functions", server._open_question is ask_read.open_question and server._recommend_missing is ask_read.recommend_missing
       and server._alternatives is ask_read.alternatives and server._yes_no_options is ask_read.yes_no_options and server._lettered_alternatives is ask_read.lettered_alternatives)
 
@@ -216,7 +216,7 @@ check("3b3 …and the label stored decomposed against a composed Recommend, and 
       and ask_read.recommend_missing(LAYOUT(unicodedata.normalize("NFD", "άρνηση"), opts(*GR, rec="έγκριση"))) == "έγκριση")
 
 # ---- 3b4. [keywords.ask_options]: a particle glued to a label, and a refusal word of another language (invented ASCII stand-ins: particle "zz", refusal "nope")
-import config as _cfg
+from stackshot.core import config as _cfg
 def kw_set(particles=(), refusals=(), after=()):
     sec = _cfg.CFG.setdefault("keywords", {}).setdefault("ask_options", {}); sec["particles"] = list(particles); sec["refusals"] = list(refusals); sec["refusals_after"] = list(after)
 def kw_off(): _cfg.CFG.get("keywords", {}).pop("ask_options", None)

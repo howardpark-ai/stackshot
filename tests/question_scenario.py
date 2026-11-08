@@ -50,9 +50,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import server, client
+from stackshot.web import server; from stackshot.fleet import client
 server._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
@@ -376,8 +376,8 @@ with TestClient(app) as c:
     rc, o, e = run("get", "answer", gid_cli); check("…and the same call works again when the server does", rc == 0 and o == f"comment\t\tActually, wait.\t{W(TS(0))}\n", (rc, o, e))
 
 # ---- 5b. provenance: Oliver sees who filed it, on the item page and in the issue body (the mirror on)
-from ui import render as ui_render
-import ghsync as G
+from stackshot.web.ui import render as ui_render
+from stackshot.github import ghsync as G
 st, pv = q(sender="nightly-job")
 LINE = f"Filed by nightly-job (a script on {me})"
 check("the item page shows the line that says who filed it", LINE in ui_render.Board(str(T / "store")).item_html(server._norm_id(pv["item"])), pv)

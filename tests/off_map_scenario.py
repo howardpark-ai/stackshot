@@ -41,7 +41,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
-import server, anchors as A, page_agent_report as PAR, audit_run as AR
+from stackshot.web import server; from stackshot.anchors import anchors as A; from stackshot.tools import page_agent_report as PAR; from stackshot.audit import audit_run as AR
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda *a, **k: None

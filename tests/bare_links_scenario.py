@@ -1,11 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["fastmcp>=4.0,<5", "httpx", "markdown-it-py>=4,<5"]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-03T04:00:00Z"
-# ///
 """Scenario test for bare web addresses in item text (ui/render.py) — fixture data, no live store, no network.
 
 An address written without https:// (a host, with or without a path) is a link wherever item text is drawn: a one-line text (linkify,
@@ -57,7 +49,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-from ui import render as ui_render
+from stackshot.web.ui import render as ui_render
 
 EXT = lambda addr, label, rel="noopener noreferrer": f'<a href="https://{addr}" target="_blank" rel="{rel}">{label} ↗</a>'
 OLD = lambda url, label: f'<a href="{url}" target="_blank" rel="noopener">{label} ↗</a>'      # an https:// link as the board always wrote it

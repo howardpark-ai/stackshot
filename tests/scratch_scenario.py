@@ -90,8 +90,10 @@ check("helper: track() of a relative path removes it after a chdir", rc == 0 and
 
 # ---- 2. run-suite, beside throwaway suites (the same shared test environment, the same lock)
 RS = T / "rs"; (RS / "tests").mkdir(parents=True)
-for f in ("run-suite", "pyproject.toml", "uv.lock", "_scratch.py"):
+for f in ("run-suite", "_scratch.py"):
     shutil.copy(os.path.join(SCR, f), RS / "tests" / f)
+for f in ("pyproject.toml", "uv.lock"):   # the one project is at the checkout's root: run-suite looks for it beside its own folder
+    shutil.copy(os.path.join(STACK, f), RS / f)
 (RS / "tests" / "leak_scenario.py").write_text(
     "import tempfile, os\nd = tempfile.mkdtemp(prefix='leaked-'); open(os.path.join(d, 'f'), 'w').write('x')\n"
     "open(os.path.join(tempfile.gettempdir(), 'loose-file'), 'w').write('x')\nprint('ok: leak')\n")

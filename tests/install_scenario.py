@@ -161,7 +161,7 @@ for key, bad, keep in (("reads", "checkout", "api"), ("sessions", "both", "clien
           and f'set {key} = "{keep}" or drop the line' in berr and berr.count("removed; ") == 1, berr[-500:])
 rc, kout, kerr = render_out(conf("kept.toml", client={"reads": "api", "sessions": "client", "delivery": "inbox", "liveness": "puller"}), "stackshot.service")
 check("the four [client] keys at their one value: accepted without a word", rc == 0 and "for the user manager" in kout and kerr.count("\n") == 1, kerr)
-r = subprocess.run([sys.executable, os.path.join(STACK, "config.py"), "check"], capture_output=True, text=True, env={**ENV, "STACKSHOT_CONFIG": conf("multi.toml", scope="system", client={"delivery": "push"})})
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True, env={**ENV, "STACKSHOT_CONFIG": conf("multi.toml", scope="system", client={"delivery": "push"})})
 check("config.py check: one line per removed mode in the file, exit 1", r.returncode == 1 and r.stderr.count("removed; ") == 2 and r.stdout == "", r.stderr[-400:])
 check("render never called sudo", not (T / "sudo-called").exists())
 

@@ -71,7 +71,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
-import server, steps as S, nextlines as NL, owner_steps as HS, itempage as IP, next_backfill as NB
+from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS; from stackshot.web import itempage as IP; from stackshot.model import next_backfill as NB
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
@@ -278,7 +278,7 @@ check("(setup) a held item in an agent's hands has no step of his", b["metadata"
 server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
 a = rd(11)
 check("a wake pass over a held item makes no step of his and ticks none", not a["metadata"].get("hold") and his(11) == [], (his(11), told[-1:] if told else None))
-check("the router and its live pass never write an item (no save, no update call in either)", not re.search(r"\b_save\(|stackshot_update\(|_update_unlocked\(", pathlib.Path(STACK, "router.py").read_text() + pathlib.Path(STACK, "router_live.py").read_text()))
+check("the router and its live pass never write an item (no save, no update call in either)", not re.search(r"\b_save\(|stackshot_update\(|_update_unlocked\(", pathlib.Path(STACK, "stackshot/router/router.py").read_text() + pathlib.Path(STACK, "stackshot/router/router_live.py").read_text()))
 
 # ---- 10. his name once: a text written with his name at the front and one without read the same, and a line stored with it twice still matches
 SPELLINGS = [f"Oliver: {STEP}", f"oliver: {STEP}", f"OLIVER: {STEP}", f"Oliver (builder): {STEP}", f"**Oliver:** {STEP}", f"- Oliver: {STEP}", f"Oliver: Oliver: {STEP}", f"Oliver:  Oliver (lead): {STEP}", STEP]

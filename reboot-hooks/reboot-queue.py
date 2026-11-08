@@ -15,8 +15,8 @@ import glob, json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
-import config as _cfg  # noqa: E402  (stackshot.toml)
-import interp as _interp  # noqa: E402  (a missing interpreter never stops a delivery)
+from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml)
+from stackshot.core import interp as _interp  # noqa: E402  (a missing interpreter never stops a delivery)
 A = str(_cfg.state("anchor-hub"))
 FLEET = str(_cfg.fleet_dir())
 PUB = str(_cfg.get("fleet", "publisher_letter") or "a")
@@ -54,7 +54,7 @@ def resume_inbox(src, listed, fl):
     although the source is still paused), every other key on this box is held, and this waits for the pullers to confirm.
     → the counts, in the shape the push path reports."""
     import time
-    import inbox
+    from stackshot.fleet import inbox
     here = fl.get(PUB, {})
     elsewhere = {k for L, m in fl.items() if L != PUB for k in m} | {n for L, m in fl.items() if L != PUB for n in m.values() if n}
     allowed = listed | {here.get(u) for u in listed if here.get(u)}
@@ -81,7 +81,7 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     src = arg("--source", "hub"); src = "msg" if src == "msg" else "hub"
     q = queues(src)
-    import inbox
+    from stackshot.fleet import inbox
     if cmd == "count":
         w = inbox.waiting(src)
         print(json.dumps({"items": sum(q.values()) + sum(w.values()), "sessions": len(set(q) | set(w))})); return 0

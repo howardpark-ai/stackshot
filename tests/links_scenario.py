@@ -35,7 +35,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import server
+from stackshot.web import server
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 from fastmcp import Client
 L = lambda gid: f"[{gid}](https://board.example.org/items/{gid})"
@@ -93,7 +93,7 @@ err, out = run("sessions", name="home-x-main")
 check("sessions: answers, and a version or machine name is never taken for an id", not err and "home-x-main" in out and "](" not in out, out[:600])
 err, out = run("anchors", project="projects/x", add=["https://github.com/example/repo/issues/1"], items=["a1"])
 check("anchors: the scoped id linked, the anchor URL whole", not err and L("a1") in out and "https://github.com/example/repo/issues/1" in out, out)
-import routing
+from stackshot.router import routing
 nid = routing.record("projects/x", kind="board", to=S, label="board a1", who="home-x-main", text="changed: a1", url="", target="for home-x-main", pilot=True)
 err, out = run("route", notice=nid, ruling="dropped", reason="a1 is already handled", sender="home-x")
 check("route: an id in the ruling's reason linked", not err and f"{L('a1')} is already handled" in out, out)

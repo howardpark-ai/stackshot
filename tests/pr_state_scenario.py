@@ -95,7 +95,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import ghsync as G, ghbudget as GB, pr_state as PS
+from stackshot.github import ghsync as G; from stackshot.core import ghbudget as GB; from stackshot.github import pr_state as PS
 EVERY = 300.0
 def client(**kw): return G.GitHub("o/r", API, "test-token", pace=0.0, shared=True, **kw)
 CL = client()
@@ -199,7 +199,7 @@ check("…a 304 (the PR unchanged) is not counted at all", F.requests(8)[-1] == 
 check("…and the tag is gone after the call", GB.current() == "", GB.current())
 
 # ---- 5. the server's three callers on one pull request, through their own paths
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False
 server._refuse_if_owing = lambda debtor: None

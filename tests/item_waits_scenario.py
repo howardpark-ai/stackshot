@@ -63,7 +63,7 @@ def passes(name, f, *want):
 def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, model_guards as mg
+from stackshot.web import server; from stackshot.model import model_guards as mg
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told: list[tuple[str, str, str, str]] = []           # every notice the server sends: (gid(s), recipient, note, tag)

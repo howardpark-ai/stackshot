@@ -72,8 +72,8 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, ghsync
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -377,7 +377,7 @@ except Exception as e:
     check("writers: create refuses an answers argument", False, str(e))
 
 # over HTTP, in-process: the machine token is required; the sender too
-import client as _client
+from stackshot.fleet import client as _client
 from starlette.testclient import TestClient
 (T / "secrets").mkdir(exist_ok=True)
 tok = open(_client.mint("home-test")).read().strip()
@@ -394,7 +394,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("http: with the token and a sender it records, naming sender and machine", r.status_code == 200 and rd(39)["metadata"]["cap_ok"]["by"] == "home-test via a script on home-test", (r.status_code, r.text[:200], rd(39)["metadata"]))
 
 # ================================================================ tools/cap_words.py
-spec = importlib.util.spec_from_file_location("cap_words", os.path.join(STACK, "tools", "cap_words.py")); cw = importlib.util.module_from_spec(spec); spec.loader.exec_module(cw)
+spec = importlib.util.spec_from_file_location("cap_words", os.path.join(STACK, "stackshot", "tools", "cap_words.py")); cw = importlib.util.module_from_spec(spec); spec.loader.exec_module(cw)
 item(9193, letter="g", hold=True, wake="2099-06-04T09:00", su=now0 - 9 * DAY,
      answers=[{"ts": TB + 10.5, "kind": "decision", "text": "keep this parked until jun 4", "via": "board"}, {"ts": TB + 11.5, "kind": "decision", "choice": "Approve", "text": "ok", "via": "board"}])
 item(9194, letter="g", hold=True, wake="2099-06-07", needs=["external"], su=now0 - 9 * DAY, next="Parked (Oliver) until a reviewer moves it.")   # no words of his stored, an agent's paraphrase
@@ -420,7 +420,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     rc = cw.main(["--a-item", f"board#{BID_A}", "--a-item", f"board#{BID_B}"])
 check("tool: the dry run (the default) writes nothing and says so", rc == 0 and snap() == h0 and "DRY RUN" in buf.getvalue() and "nothing was written" in buf.getvalue(), buf.getvalue()[-300:])
-import client as _client
+from stackshot.fleet import client as _client
 real_post = _client.post
 _client.post = lambda what, body, timeout=20.0: server._client_post("testbox", what, body)
 try:

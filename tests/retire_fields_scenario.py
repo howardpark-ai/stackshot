@@ -63,7 +63,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-import server, waiting as W, model as _model, retire_fields as RF, retire_fields_report as RR, stamp_phase as SP
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.model import retire_fields as RF; from stackshot.tools import retire_fields_report as RR; from stackshot.tools import stamp_phase as SP
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -313,10 +313,10 @@ rc3, out3 = cli(RR.undo, undo=str(undo_file))
 check("10 --undo puts every file back value for value", rc3 == 0 and same_values(snapshot(), snapS0) and out3["results"] == {"set": 9}, (rc3, out3))
 rc4, out4 = cli(RR.undo, undo=str(undo_file))
 check("10 …twice is a no-op", rc4 == 0 and same_values(snapshot(), snapS0) and set(out4["results"]) == {"same"}, (rc4, out4))
-check("10 --apply and --undo need --sender", subprocess.run([sys.executable, os.path.join(STACK, "tools/retire_fields_report.py"), "--apply"], capture_output=True, text=True).returncode != 0 and subprocess.run([sys.executable, os.path.join(STACK, "tools/retire_fields_report.py"), "--undo", "x.json"], capture_output=True, text=True).returncode != 0, None)
+check("10 --apply and --undo need --sender", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/retire_fields_report.py"), "--apply"], capture_output=True, text=True).returncode != 0 and subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/retire_fields_report.py"), "--undo", "x.json"], capture_output=True, text=True).returncode != 0, None)
 CFGM["migration"] = False
 snapD = snapshot()
-p = subprocess.run([sys.executable, os.path.join(STACK, "tools/retire_fields_report.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
+p = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/retire_fields_report.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
 check("10 the dry run over a copy writes nothing live, prints the totals and exits 0", p.returncode == 0 and snapshot() == snapD and "items the pass would write" in p.stdout and "items whose phase, kind of wait, list or mover would change: 0" in p.stdout, (p.returncode, p.stdout[-600:], p.stderr[-600:]))
 
 print(f"ok: retire fields scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")

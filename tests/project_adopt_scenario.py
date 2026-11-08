@@ -58,7 +58,7 @@ def tool(script, *args):
     r = subprocess.run([sys.executable, f"{STACK}/{script}"] + list(args), capture_output=True, text=True, env=os.environ, cwd=str(T))
     return r.returncode, r.stdout, r.stderr
 
-import pages as p, projects as prj, project_registry as pr, project_verbs as pv, page_debt
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.projects import project_verbs as pv; from stackshot.router import page_debt
 p.cmd_registry(quiet=True)
 IO = page_debt.PlainIO()
 def pv_err(fn):
@@ -147,15 +147,15 @@ check("adopt: after the refusals an ordinary page still adopts", ok["adopted"] i
 
 # ---- 6. the CLI
 rb = recsha()
-rc, out, err = tool("tools/project.py", "--dry-run", "adopt", "projects/cli-one")
+rc, out, err = tool("stackshot/tools/project.py", "--dry-run", "adopt", "projects/cli-one")
 check("cli: --dry-run adopt says what it would do and writes nothing", rc == 0 and recsha() == rb and "dry run: adopt prj_" in out and "projects/cli-one" in out, (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "adopt", "projects/cli-one")
+rc, out, err = tool("stackshot/tools/project.py", "adopt", "projects/cli-one")
 check("cli: adopt makes the project", rc == 0 and any(v.get("name") == "home-cli-one" and (v.get("made") or {}).get("how") == "adopted" for v in ents().values()), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "adopt", "projects/cli-one")
+rc, out, err = tool("stackshot/tools/project.py", "adopt", "projects/cli-one")
 check("cli: adopt again exits non-zero and says the page is a project's already", rc != 0 and "already" in (out + err), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "adopt", "projects/cli-two", "--name", "home-cli-renamed", "--scope", "work")
+rc, out, err = tool("stackshot/tools/project.py", "adopt", "projects/cli-two", "--name", "home-cli-renamed", "--scope", "work")
 check("cli: --name and --scope reach the entry", rc == 0 and any(v.get("name") == "home-cli-renamed" and v.get("scope") == "work" for v in ents().values()), (rc, out[:300], err[:300]))
-rc, out, err = tool("tools/project.py", "adopt", "projects/alpha/sub")
+rc, out, err = tool("stackshot/tools/project.py", "adopt", "projects/alpha/sub")
 check("cli: a sub-page exits non-zero and says why", rc != 0 and "sub-page" in (out + err), (rc, out[:300], err[:300]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

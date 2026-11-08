@@ -74,7 +74,7 @@ def fake(req, timeout=None):
 urllib.request.urlopen = fake
 
 import logging; logging.disable(logging.INFO)
-from anchorhub import core, notion
+from stackshot.anchors.anchorhub import core, notion
 Hub, run = core.Hub, notion.run
 hub = Hub(); events = []
 def rec(anchor, summary, kind="slack"):

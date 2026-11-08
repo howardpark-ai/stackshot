@@ -71,10 +71,10 @@ fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
-import pages as p
-import anchors as A
-import clients as C
-import server
+from stackshot.projects import pages as p
+from stackshot.anchors import anchors as A
+from stackshot.fleet import clients as C
+from stackshot.web import server
 p.cmd_registry(quiet=True); R = json.loads((T / "store/projects.json").read_text())["pages"]
 check("(setup) the fixture registry lists the pages and their statuses", R["projects/fin"].get("status") == "done" and R["ops/multi-new"].get("hub") == "projects/act", {k: (v.get("status"), v.get("session")) for k, v in R.items()})
 

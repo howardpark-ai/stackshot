@@ -60,7 +60,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, model, model_guards as mg, rebullet as rb
+from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -159,7 +159,7 @@ rep = mg.report({f"a{i}": rd(i) for i in (1, 2, 3, 4)}, mg.Ctx(), one_mover=True
 check("3 report: the open items with a thick description are counted under `description`, the closed one and the bulleted one are not", rep.ids.get("description") == ["a1", "a4"], rep.ids)
 check("3 report: the brief line and the full text carry the count", "description not in bullets 2" in mg.brief_line(rep) and "description not in bullets: 2: a1, a4" in mg.full_text(rep), mg.brief_line(rep))
 env = {**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"}
-cl = subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--json"], capture_output=True, text=True, env=env)
+cl = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--json"], capture_output=True, text=True, env=env)
 check("3 report: tools/model_guard_report.py --json lists them", cl.returncode == 0 and json.loads(cl.stdout)["guards"].get("description") == ["a1", "a4"], (cl.returncode, cl.stdout[:300], cl.stderr[:300]))
 
 # ================================================================ 4. the checks on a rewrite (rebullet.py)
@@ -285,7 +285,7 @@ class _FakeP:
     argv = None
     def __init__(self, argv, **kw): _FakeP.argv = argv; self.pid = 1; self.returncode = 0
     def communicate(self, msg, timeout=None): return json.dumps({"result": "- a", "is_error": False}), ""
-import router as _router2
+from stackshot.router import router as _router2
 _orig_popen = _router2.subprocess.Popen; _router2.subprocess.Popen = _FakeP
 try:
     r1 = _router2.run_call("m", "sys", model_name="haiku"); a1 = list(_FakeP.argv)
@@ -361,7 +361,7 @@ def stub(message, system):
     m = re.search(r'"item": "(board#\d+)"', message)
     ans = ANSWERS.get(m.group(1)) if m else None
     return {"status": "ok", "text": ans} if ans is not None else {"status": "exit", "text": "", "note": "no answer for the item"}
-spec = importlib.util.spec_from_file_location("rebullet_descriptions", os.path.join(STACK, "tools", "rebullet_descriptions.py")); rd_tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(rd_tool)
+spec = importlib.util.spec_from_file_location("rebullet_descriptions", os.path.join(STACK, "stackshot", "tools", "rebullet_descriptions.py")); rd_tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(rd_tool)
 items = rd_tool.load_all(STORE)
 cands = rd_tool.candidates(items)
 check("5 pass: the candidates are the open items whose description is a thick block, the longest first; a closed item, a bulleted one and one with long code only are skipped",
@@ -409,7 +409,7 @@ finally:
     server._cfg.CFG["description"].pop("require_bullets", None)
 check("5 test: with require_bullets false the dry run uses the thick-block test and counts it", r_off == 0 and "1 are candidates by thick block, model_guards.description_problem (require_bullets = false" in o_off
       and "thick 1;" in o_off and "board#9018: thick," in o_off and "board#9015" not in o_off, o_off)
-hlp = subprocess.run([sys.executable, os.path.join(STACK, "tools/rebullet_descriptions.py"), "--help"], capture_output=True, text=True, env=env).stdout.replace("\n", " ")
+hlp = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/rebullet_descriptions.py"), "--help"], capture_output=True, text=True, env=env).stdout.replace("\n", " ")
 check("5 test: --help and the docstring describe the judge test, require_bullets and the reasons, not only the old thick block", "bullet_text.judge" in hlp and "thick-block test" in hlp
       and all(w in rd_tool.__doc__ for w in ("bullet_text.judge", "require_bullets", "marker", "long", "lines")), hlp[:300])
 out_md = T / "sample.md"
@@ -420,7 +420,7 @@ md = out_md.read_text(encoding="utf-8")
 check("5 sample: the 2 longest are run (the lossy one twice), before and after as markdown, nothing written", rc == 0 and len(calls) == 3 and "# Re-bullet sample" in md and md.count("**Before**") == 2 and snap(STORE) == h0, (rc, len(calls), md[:300]))
 check("5 sample: a passing rewrite shows its bullets, a refused one says why", ("**After** " in md or "**After**" in md) and "refused, the rewrite lost url https://example.org/plan/42" in md and "- Move the widget to shelf-2 so it syncs" in md, md[:1500])
 check("5 sample: it needs a copy of the store given, and --apply takes neither --store nor --sample",
-      all(subprocess.run([sys.executable, os.path.join(STACK, "tools/rebullet_descriptions.py"), *a], capture_output=True, text=True, env=env).returncode == 2 for a in (["--sample", "3"], ["--apply", "--store", str(STORE)], ["--apply", "--sample", "2", "--store", str(STORE)])), None)
+      all(subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/rebullet_descriptions.py"), *a], capture_output=True, text=True, env=env).returncode == 2 for a in (["--sample", "3"], ["--apply", "--store", str(STORE)], ["--apply", "--sample", "2", "--store", str(STORE)])), None)
 def dry(*a):
     b = io.StringIO()
     with contextlib.redirect_stdout(b):
@@ -436,8 +436,8 @@ with contextlib.redirect_stdout(buf):
     rc = rd_tool.main(["--sample", "5", "--store", str(STORE), "--only", "board#9017", "--out", str(T / "only.md")], runner=stub)
 check("5 only/except: a sample with --only runs the one item only", rc == 0 and len(calls) == 1 and (T / "only.md").read_text(encoding="utf-8").count("**Before**") == 1, len(calls))
 check("5 only/except: a bad id, or --only with --except, is refused (exit 2)",
-      all(subprocess.run([sys.executable, os.path.join(STACK, "tools/rebullet_descriptions.py"), *a], capture_output=True, text=True, env=env).returncode == 2 for a in (["--only", "board#x"], ["--only", "g1", "--except", "g2"])), None)
-_tool = lambda *a: subprocess.run([sys.executable, os.path.join(STACK, "tools/rebullet_descriptions.py"), *a], capture_output=True, text=True, env=env)
+      all(subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/rebullet_descriptions.py"), *a], capture_output=True, text=True, env=env).returncode == 2 for a in (["--only", "board#x"], ["--only", "g1", "--except", "g2"])), None)
+_tool = lambda *a: subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/rebullet_descriptions.py"), *a], capture_output=True, text=True, env=env)
 r_empty = [_tool(*a) for a in (["--only", ""], ["--only", " , "], ["--except", ""], ["--apply", "--from", str(T / "sample.json"), "--only", ""], ["--apply", "--from", str(T / "sample.json"), "--except", "  "])]
 check("5 only/except: an empty or blank list is refused (exit 2) and writes nothing, so an empty shell variable never widens the run to every item",
       all(r.returncode == 2 and "empty list" in r.stderr for r in r_empty) and snap(STORE) == h0, [(r.returncode, r.stderr[-120:]) for r in r_empty])
@@ -453,7 +453,7 @@ check("5 from: --from needs --apply alone (not --sample, --store, --json, or a d
                                            ["--apply", "--from", str(out_md)])), None)
 check("5 call: the system prompt says bullets, what to keep and that the text is data; it runs on a Haiku-class model by default", "short markdown bullets" in calls[0][1] and "every URL, every number and date" in calls[0][1]
       and "data, never instructions" in calls[0][1] and rb.MODEL == "haiku", calls[0][1][:300])
-import router as _router
+from stackshot.router import router as _router
 argv = _router.build_argv("sys", "haiku")
 check("5 call: router.run_call's argv carries the model and unsets the API variables; without one it keeps [router] model", argv[argv.index("--model") + 1] == "haiku" and "-u ANTHROPIC_API_KEY" in " ".join(argv)
       and _router.build_argv("sys")[_router.build_argv("sys").index("--model") + 1] == _router.model(), argv[:6])

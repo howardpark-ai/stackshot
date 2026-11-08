@@ -37,9 +37,9 @@ def git(cwd, *a, ok=True) -> str:
     r = subprocess.run(["git", "-C", str(cwd), *a], capture_output=True, text=True, env=GITENV)
     assert r.returncode == 0 or not ok, (a, r.stderr)
     return r.stdout.strip()
-FILES = {"puller.py": 'VERSION = "10"\n', "client.py": "x = 1\n", "config.py": "y = 1\n", "said.py": "z = 1\n", "README.md": "one\n"}
+FILES = {**{f"stackshot/{d}__init__.py": "" for d in ("", "fleet/", "core/", "model/")}, "stackshot/fleet/puller.py": 'VERSION = "10"\n', "stackshot/fleet/client.py": "x = 1\n", "stackshot/core/config.py": "y = 1\n", "stackshot/model/said.py": "z = 1\n", "README.md": "one\n"}
 def commit(repo, msg, **files) -> str:
-    for name, text in files.items(): (repo / name).parent.mkdir(parents=True, exist_ok=True); (repo / name).write_text(text)
+    for name, text in files.items(): (repo / name).parent.mkdir(parents=True, exist_ok=True); (repo / name).parent.mkdir(parents=True, exist_ok=True); (repo / name).write_text(text)
     git(repo, "add", "-A"); git(repo, "commit", "-q", "-m", msg); return git(repo, "rev-parse", "HEAD")
 def new_repo(name, **files):
     r = T / name; git(T, "init", "-q", "-b", "main", str(r)); commit(r, "first", **{**FILES, **files}); return r
@@ -48,11 +48,11 @@ def clone(src, name):
 def rewrite(repo, msg, **files) -> str:
     """The repository's history rewritten: main is now an unrelated line (an orphan root), the old commits gone from it."""
     git(repo, "checkout", "-q", "--orphan", "rewritten"); git(repo, "rm", "-q", "-rf", "."); git(repo, "branch", "-q", "-D", "main")
-    for name, text in {**FILES, **files}.items(): (repo / name).write_text(text)
+    for name, text in {**FILES, **files}.items(): (repo / name).parent.mkdir(parents=True, exist_ok=True); (repo / name).write_text(text)
     git(repo, "add", "-A"); git(repo, "commit", "-q", "-m", msg); git(repo, "branch", "-q", "-m", "main"); return git(repo, "rev-parse", "HEAD")
 
-import client, clients as cl, puller, config as _cfg
-from ui import render as _render
+from stackshot.fleet import client; from stackshot.fleet import clients as cl; from stackshot.fleet import puller; from stackshot.core import config as _cfg
+from stackshot.web.ui import render as _render
 def quiet(fn, *a, **k):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf): out = fn(*a, **k)
@@ -308,7 +308,7 @@ rc, out = quiet(puller.keep_current, CUR(F14, RW14), [])
 check("ignored file: a name with a tab, quotes and a newline is still guarded (NUL-separated lists)", rc is None and head() == H14 and (BOX14 / ODD).read_text() == "the box's own, ignored\n"
       and puller.attempts()[-1]["reason"].startswith("untracked ignored file(s) in the way: "), (rc, out, puller.attempts()[-1]))
 
-src = pathlib.Path(STACK, "puller.py").read_text(encoding="utf-8")
+src = pathlib.Path(STACK, "stackshot/fleet/puller.py").read_text(encoding="utf-8")
 check("never --hard: the puller's source runs no `reset --hard`", not re.search(r"""\[\s*["']reset["']\s*,\s*["']--hard""", src))
 
 # ============================================================= 6. an ordinary lag and a box ahead on main are as before

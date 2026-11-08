@@ -37,8 +37,8 @@ def check(name, cond, got=None):
     ran.append(name); print(("ok   " if cond else "FAIL ") + name + ("" if cond or got is None else f": {str(got)[:900]}"))
     if not cond: fails.append(name)
 
-import versions as ver
-from ui import render as ui_render
+from stackshot.fleet import versions as ver
+from stackshot.web.ui import render as ui_render
 ver._installed_cmd = lambda cmd: "1.9.12" if "gbrain" in cmd else "1.7.40"      # this box's own copies, not run here
 
 CALLS = []                                                       # every ssh call: (host, script)

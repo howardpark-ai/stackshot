@@ -93,9 +93,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 ID = re.compile(r"^prj_[0-9a-f]{8}$")
-import pages as p, projects as prj
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
-import server
+from stackshot.web import server
 server._publish = lambda: None
 def reg(): return json.loads((T / "store/projects.json").read_text())["pages"]
 def idfile(): return json.loads((T / "store/project-record.json").read_text())
@@ -319,7 +319,7 @@ gio.mode = "exists"; nx = len(gio.creates); st, out = mk("projects/raced", "home
 check("new project: gbrain answering that the page exists (revision_required) is a 409 pointing at post project-list, not a 502; nothing recorded", st == 409 and "post project-list" in out["error"] and len(gio.creates) == nx + 1
       and "projects/raced" not in idfile()["ids"].values() and rec("projects/raced") is None, (st, out))
 gio.mode = "ok"
-import page_debt, rename_page
+from stackshot.router import page_debt; from stackshot.projects import rename_page
 real_gb = rename_page.gb
 def gbio(ans):
     rename_page.gb = lambda args, stdin=None: ans
@@ -371,7 +371,7 @@ st, out = relist("projects/delta"); check("re-list: a damaged id file → 503, n
 check("re-list: …and the file is as it was", idfile() == json.loads(good) and not idfile().get("marks", {}).get(rec("projects/delta")["id"]))
 
 # ---- 6. project-agent: the form's agent (the record first, the page's agents block written from it)
-import project_verbs as pverbs, pages as _pg
+from stackshot.projects import project_verbs as pverbs; from stackshot.projects import pages as _pg
 def pa(project, name, sender, role="main", front=True, mandate="the main agent"): return server._client_post("box-c", "project-agent", {"project": project, "name": name, "role": role, "front": front, "mandate": mandate, "sender": sender})
 def page_agents(key): return _pg.split_agents(_pg.frontmatter_text(gio.pages[key]).get("agents"))
 locked_seen = []; real_add = pverbs.agent_add
@@ -1097,7 +1097,7 @@ check("id file: a field this code does not know is kept on a rewrite (extra), as
 prj.set_mark(A, on_purpose=None)
 
 # ---- 8. the HTTP API and client.py
-import client, copy
+import copy; from stackshot.fleet import client
 _NOCFG = object(); CFG_PA_8 = copy.deepcopy(server._cfg.CFG.get("project_agent", _NOCFG))      # the section's own config, put back by the rename checks' finally
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
@@ -1317,7 +1317,7 @@ CFG_PA_6F = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 
 # ---- 6f. archive on the last retire: a project with no agent and no open item is archived; one with open items waits on a list and is archived by the sweep once none is left
-import project_archive as ARC
+from stackshot.projects import project_archive as ARC
 AWAIT = pathlib.Path(server._cfg.state("archive-wait.json"))
 def wait_keys(): return set(json.loads(AWAIT.read_text())) if AWAIT.exists() else set()
 def status_of(slug): return str(p.frontmatter_text(rio.pages[slug]).get("status") or "")
@@ -1443,7 +1443,7 @@ check("archive: (end) only the project whose sub-page still holds an open item i
 
 # the dry-run tool: projects the rule covers that nothing archived
 import importlib.util as _ilu, io as _io, contextlib as _ctx
-_spec = _ilu.spec_from_file_location("archive_empty_projects", os.path.join(STACK, "tools/archive_empty_projects.py")); AEP = _ilu.module_from_spec(_spec); _spec.loader.exec_module(AEP)
+_spec = _ilu.spec_from_file_location("archive_empty_projects", os.path.join(STACK, "stackshot/tools/archive_empty_projects.py")); AEP = _ilu.module_from_spec(_spec); _spec.loader.exec_module(AEP)
 ren_page("projects/arc-late", "type: project\ntitle: arc-late\norg: home\ndisplay-name: home-arc-late\nagents:\n  background:\nstatus: active")          # an emptied map, no item: nothing archived it
 ren_page("projects/arc-late-items", "type: project\ntitle: arc-late-items\norg: home\ndisplay-name: home-arc-late-items\nagents:\nstatus: active")      # an emptied map, an open item
 ren_page("projects/arc-never", "type: project\ntitle: arc-never\norg: home\ndisplay-name: home-arc-never\nstatus: active")                                  # never had an agents map

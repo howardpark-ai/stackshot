@@ -72,7 +72,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-import server, waiting as W, model as _model, dated_wait as _dw, watchers as wk, stamp_phase as SP
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -237,7 +237,7 @@ shutil.rmtree(CP); shutil.copytree(T, CP)
 (CP / "stackshot.toml").write_text(mk_toml(str(CP)), encoding="utf-8")
 RDIR = pathlib.Path(_scratch.mkdtemp(prefix="pr2stamp-rep-"))
 env_ = {k: v for k, v in os.environ.items() if k != "STACKSHOT_CONFIG"}; env_["STACKSHOT_CONFIG"] = str(T / "stackshot.toml")
-run = lambda *a, **kw: subprocess.run([sys.executable, os.path.join(STACK, "tools/stamp_phase.py"), *a], capture_output=True, text=True, env={**env_, **kw.get("env", {})}, timeout=600)
+run = lambda *a, **kw: subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/stamp_phase.py"), *a], capture_output=True, text=True, env={**env_, **kw.get("env", {})}, timeout=600)
 def tree(root): return {str(p.relative_to(root)): p.read_bytes() for p in sorted(pathlib.Path(root).rglob("*")) if p.is_file()}
 live_before, copy_before = tree(T / "store"), tree(CP)
 p = run("--dry-run", "--store", str(CP), "--report-dir", str(RDIR))
@@ -496,8 +496,8 @@ check("14 …a stamp needs no begin and holds nothing", st_ == 200 and d_["resul
 CFGM["migration"] = False
 
 # ---- 13. History
-import render as root_render
-from ui import render as ui_render
+from stackshot.web import render as root_render
+from stackshot.web.ui import render as ui_render
 STORE_DIR = str(T / "store")
 gitc = lambda *a: subprocess.run(["git", "-C", STORE_DIR, "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 def distinct(i):

@@ -35,7 +35,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import config as _cfg, audit, audit_checks as AC, audit_run as AR
+from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR
 H = 3600; now = time.time()
 ZONE_HOURS = 4                                                                              # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
 if min((now + ZONE_HOURS * 3600) % 86400, 86400 - (now + ZONE_HOURS * 3600) % 86400) < 600: now -= 900     # not within ten minutes of a local midnight
@@ -121,7 +121,7 @@ check("2 the broad words alone: when, once, after and until, each once, in the l
 check("2 a negation passes", ww(alive("home-agent: no waiting for a slot, run it now")) == ([], []), ww(alive("home-agent: no waiting for a slot, run it now")))
 check("2 a waiting item has none (its next is the record of its wait)", ww(item(21, wrote=now - H, state="blocked", needs=["home-agent"], after=["a6"], next="home-agent: waiting for the build when it closes")[1]) == ([], []))
 check("2 a closed item has none", ww(item(22, status="completed", wrote=now - H, state="doing", next="home-agent: wait for it", outcome="done")[1]) == ([], []))
-import server
+from stackshot.web import server
 server._cfg.CFG["audit"]["mode"] = "script"
 (T / "store/a/30.json").write_text(json.dumps(item(30, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: ship it when the build is green")[1]))
 g = server.stackshot_get("a30")
@@ -212,7 +212,7 @@ msgs.clear()
 server._filing_tick()
 check("4 the next tick sends nothing new", msgs == [])
 seen_env = []
-import audit_run as _AR4
+from stackshot.audit import audit_run as _AR4
 real_filing_pass = _AR4.filing_pass
 _AR4.filing_pass = lambda **kw: (seen_env.append(kw.get("env")), {"findings": 0})[1]
 try:

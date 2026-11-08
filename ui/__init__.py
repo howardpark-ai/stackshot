@@ -1,18 +1,15 @@
-"""ui — the board's web pages, at the root address ("/", "/items/<id>", "/closed", "/projects", "/search", "/runners", "/audits", a project's page), served by the server from the store, behind the sign-in.
+"""Forwarder package for stackshot.web.ui: the modules in this folder forward one by one (kept until 2026-11-22). No code lives here."""
+import importlib
+import os
+import sys
 
-The page markup, style and scripts live here: ui/render.py (the home, an item page, a project page, Projects, Closed, Audits), the page half of search (ui/search.py) and of runners
-(ui/runners.py), ui/kit.py (the state words, the one row every list draws, the type scale) and ui/releasing.py (which pull requests are in the release script's queue).
-
-What the pages share with the rest of the server: the data and logic modules (home, itempage, landed, model, states, fleet, config, ...), search.py's index, runners.py's snapshot
-and switch, render.py's markdown, brief and address helpers, the icons, the font and the manifest (static files at their root addresses), and the server's write routes: a form or
-fetch on a page posts to the handler, which redirects back to the page.
-
-PREFIX is the one place the path is named, and it is empty: every link, form action, redirect target and fetch address a page carries goes through under(), so an address of a page
-is the bare root address. Shared static files keep their root addresses (/favicon.svg, /fonts/..., /manifest.webmanifest, /apple-touch-icon.png).
-"""
-PREFIX = ""
+_TARGET = "stackshot.web.ui"
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 
-def under(path: str) -> str:
-    """An app address under the prefix: under("/") is "/", under("/closed") is "/closed", under("/items/<n>") is "/items/<n>"."""
-    return PREFIX + (path if path.startswith("/") else "/" + path)
+def __getattr__(name):   # a name of the real package (PREFIX ...)
+    if name.startswith("__"):
+        raise AttributeError(name)
+    return getattr(importlib.import_module(_TARGET), name)

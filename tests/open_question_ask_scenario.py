@@ -1,11 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["fastmcp>=4.0,<5", "httpx", "markdown-it-py>=4,<5"]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-03T04:00:00Z"
-# ///
 """Scenario test for the gate that keeps the item page's Yes / No fallback from being asked an open question (server._gate_open_question) and the Recommend note beside it — fixture
 data, no live store, no network, no server socket.
 
@@ -86,8 +78,8 @@ def refused_nc(name, f, *want):
 def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, home, watchers as wk
-from ui import render as r2
+from stackshot.web import server; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.web.ui import render as r2
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda *a, **k: None
@@ -209,7 +201,7 @@ refused_nw("4 cold call: an ask_owner whose question is open and whose options a
 passes("4 cold call: …with two to four options naming the recommended label it is written", lambda: server._update("a20", needs=["decision"], ask=OPEN("which layout to ship"), options=OPTS,
                                                                                                               next="Oliver: answer the ask on the item", clear_next=True, sender=cold, clear_mover=True))
 check("4 cold call: …and stored", rd(20)["metadata"]["ask"] == OPEN("which layout to ship") and rd(20)["metadata"]["options"] == OPTS, rd(20)["metadata"])
-import cold_call as cc
+from stackshot.model import cold_call as cc
 ok, why = cc.validate({"action": "ask_owner", "ask": OPEN("which layout to ship"), "options": OPTS}, set())
 check("4 cold call: the answer's own validation is unchanged: an ask and two to six options", ok is not None and not why, (ok, why))
 

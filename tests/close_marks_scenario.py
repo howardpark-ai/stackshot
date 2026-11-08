@@ -61,7 +61,7 @@ def check(name, cond, got=None):
 def sts(i): return [(x["status"], x.get("by") or "") for x in rd(i)["metadata"].get("steps") or []]
 def kinds(i): return [k for k, _ in sts(i)]
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, steps as S
+from stackshot.web import server; from stackshot.model import steps as S
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told: list = []
@@ -141,7 +141,7 @@ item(35, status="completed", close_at=CLOSE, outcome="done", reason="x", next=No
 item(36, close_at=CLOSE, next="home-front: an open item", steps=OLD("home-front: an open item"))               # open: not the tool's
 def snapshot(): return {p.name: p.read_text() for p in (T / "store/g").glob("*.json")}
 before = snapshot()
-tool = os.path.join(STACK, "tools/close_marks_backfill.py"); cfg = f"{tmp}/stackshot.toml"
+tool = os.path.join(STACK, "stackshot/tools/close_marks_backfill.py"); cfg = f"{tmp}/stackshot.toml"
 def run(*a):
     return subprocess.run([sys.executable, tool, *a], capture_output=True, text=True, env={**os.environ}, timeout=300)
 # the earlier sections left their closed items in this store: the tool lists only what still has an open step, which is the fixtures above

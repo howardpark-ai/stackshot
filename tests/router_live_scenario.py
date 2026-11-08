@@ -100,9 +100,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import config as _cfg, routing, router, router_live as live, anchors as a, held
-import server
-from anchorhub import core
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
+from stackshot.web import server
+from stackshot.anchors.anchorhub import core
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about what the router and
@@ -327,7 +327,7 @@ cfg()
 st = {r["project"]: r for r in live.status()}
 check("status: a line per project, with what was acted on in the last hour and the last error (there is no mode: the router rules every project)", "mode" not in st["projects/alpha"] and set(st) >= {"projects/alpha", "projects/gamma", "projects/delta", "projects/beta"}
       and st["projects/alpha"]["acted_last_hour"] >= 10 and "failed" in st["projects/alpha"]["last_error"] and st["projects/gamma"]["acted_last_hour"] >= 1, st)
-cli = subprocess.run([sys.executable, str(pathlib.Path(STACK, "router_live.py")), "status"], capture_output=True, text=True, timeout=60, env=dict(os.environ))
+cli = subprocess.run([sys.executable, str(pathlib.Path(STACK, "stackshot/router/router_live.py")), "status"], capture_output=True, text=True, timeout=60, env=dict(os.environ))
 check("`router_live.py status` prints a line per project from the logs", cli.returncode == 0 and "projects/alpha" in cli.stdout and "projects/delta" in cli.stdout, (cli.returncode, cli.stderr[-300:], cli.stdout[:300]))
 
 # ---- 11. there is no rollback to the keepers: `[router] live = false` in an old config is ignored, and no notice is delivered to a keeper
@@ -340,7 +340,7 @@ check("…and no function of the router delivers a notice to a keeper by name an
 cfg(live=True)
 
 # ---- 12. the daily digest of held notices, a ruling's note on the page's timeline, the cap on writing a ruling
-import datetime as dt, rename_page as rp
+import datetime as dt; from stackshot.projects import rename_page as rp
 mid_ = dt.datetime.now(_cfg.tz()).replace(hour=0, minute=0, second=0, microsecond=0)
 D0 = (mid_ + dt.timedelta(hours=10)).timestamp()
 day = lambda k: D0 + k * 86400
@@ -485,7 +485,7 @@ check("…the next digest lists it as one that could not be ruled, to the projec
       [x[0] for x in d4] == ["work-osprey-x"] and n_c["id"] in d4[0][1] and "COULD NOT BE RULED" in d4[0][1] and "1 could not be ruled" in d4[0][1] and "[for Oliver]" not in d4[0][1], d4)
 live.digest_tick(now=day(5))
 check("…once: the digest after it does not list it again", len(digests(p1)) == 1)
-cli2 = subprocess.run([sys.executable, str(pathlib.Path(STACK, "router_live.py")), "status"], capture_output=True, text=True, timeout=60, env=dict(os.environ))
+cli2 = subprocess.run([sys.executable, str(pathlib.Path(STACK, "stackshot/router/router_live.py")), "status"], capture_output=True, text=True, timeout=60, env=dict(os.environ))
 check("`router_live.py status` shows the held count and the last digest", cli2.returncode == 0 and "last digest" in cli2.stdout and "held" in cli2.stdout, (cli2.returncode, cli2.stderr[-300:], cli2.stdout[:400]))
 
 # ---- 12d. who gets a digest that holds a notice the router could not rule: the builder unmarked, else -main marked; held rows are only listed with it
@@ -734,7 +734,7 @@ item(24, "projects/alpha", A); item(25, "projects/alpha", A, answers=[{"ts": 1.0
 item(31, "projects/alpha", A, answers=ANS)
 cfg(live=True)
 p13 = len(pushes()); n13 = len(routing.read("projects/alpha"))
-import foryou as fy
+from stackshot.web import foryou as fy
 fy_rows = lambda g, kind="closed": [r for r in fy.rows() if r.get("gid") == g and r["kind"] == kind]
 out20 = cl(20); settle()
 new13 = routing.read("projects/alpha")[n13:]; c20 = [n for n in new13 if n.get("label") == "close a20"]
@@ -997,7 +997,7 @@ cfg()
 # ---- 15. the keeper of a page that lists two builders is the first one the PAGE lists, not the first in alphabet (the registry kept the agent maps sorted)
 # projects/example: the page listed falcon-engineer before falcon-aux-engineer (a second background agent whose
 # mandate says builds), and the registry, written with sorted keys, put "aux" first: the server named the aux builder the project's keeper.
-import pages as pg
+from stackshot.projects import pages as pg
 OM = T / "omega-brain"; (OM / "projects").mkdir(parents=True)
 (OM / "projects/alpha.md").write_text("---\ntype: project\ntitle: Alpha\ndisplay-name: ops-tide\nagents:\n  background:\n    ops-tide-audit: 'keep the board fresh: the daily audit'\n"
                                       "    ops-tide-engineer: builds the project, via subagents\n"
@@ -1017,7 +1017,7 @@ try:
     check("15: the other builder is still one of the page's own agents, and is no keeper", live.agent_root("projects/alpha", a.registry()) == "projects/alpha" and "ops-tide-aux-engineer" in a.registry()["projects/alpha"]["back_agents"], a.registry()["projects/alpha"].get("back_agents"))
     # the one-time backfill rewrites the file when it adds fields: it must not sort the agents again
     doc = json.loads((T / "omega-registry.json").read_text()); doc["pages"]["projects/alpha"].pop("agent_records", None); (T / "omega-registry.json").write_text(json.dumps(doc))
-    import projects as prj
+    from stackshot.projects import projects as prj
     real_rp = prj.registry_path; prj.registry_path = lambda: T / "omega-registry.json"
     try: stamped = prj.stamp_registry()
     finally: prj.registry_path = real_rp
@@ -1043,7 +1043,7 @@ check("16: a name the page does not list is not passed by the rule: the call tak
 cfg()
 
 # ---- 17. the interpreter this process runs on is gone (its uv environment deleted under it): a delivery still goes out
-import interp
+from stackshot.core import interp
 DEAD = str(T / "gone-env/bin/python")          # a path that does not exist, as sys.executable after the clean-up
 FAKE = str(T / "fakepush.py")
 check("17: the interpreter exists: the argv is returned as it is, no lookup", interp.resilient([sys.executable, FAKE, "x"]) == [sys.executable, FAKE, "x"])

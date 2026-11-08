@@ -60,7 +60,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, states
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import states
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
@@ -224,7 +224,7 @@ check("wait note: a write that sets neither the state nor next stays quiet about
 out = server._create(subject="[home] wait not doing", description=DESC, project="projects/alpha", owner="home-front", needs=[BACK], next="team-back: read the counts in the morning")
 check("wait note: a create (never doing) carries no note and is created", NOTE_HEAD not in out and out.startswith("created"), out)
 # the matcher, alone: one assertion per phrase (a builder waiting on its own CI or review, or running until green, is work in hand under)
-import model_guards as MG
+from stackshot.model import model_guards as MG
 for x in ("ends overnight", "in the morning", "nightly job", "the next run picks it up", "once the run finishes", "after the run", "until 09:00", "until tomorrow", "ends tomorrow", "tomorrow morning",
           "waiting on the 09:00 timer", "waits for Sunday's timer", "until the morning", "until Nov 3rd", "holds until 2026-11-02"):
     check(f"matcher: {x!r} reads as a wait", bool(MG.reads_as_wait(x)), MG.reads_as_wait(x))
@@ -439,9 +439,9 @@ check("text: update's wait form excepts agent work in progress from the expected
       "Every open item but agent work in progress (state doing) also has an expected-by time" in ud and "Agent work in progress (state doing) has no expected time and is never past due" in ud
       and "(the one party whose move it is now: a session, " in ud and "and an expected-by time, which get shows" not in ud, None)
 check("text: waiting.py's rule says the same, and the audit rubric's why-not-now reads the wake only",
-      "except agent work in progress (state doing)" in pathlib.Path(STACK, "waiting.py").read_text(encoding="utf-8")
+      "except agent work in progress (state doing)" in pathlib.Path(STACK, "stackshot/waits/waiting.py").read_text(encoding="utf-8")
       and "but its wake is hours or a day away" in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8") and "wake, or expected-by" not in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8"), None)
-cli = pathlib.Path(STACK, "client.py").read_text(encoding="utf-8")
+cli = pathlib.Path(STACK, "stackshot/fleet/client.py").read_text(encoding="utf-8")
 check("text: client.py's usage lists neither --expected-by nor --expected-reason (post state, which took them, is retired: tests/retired_inputs_scenario.py)",
       "[--expected-reason" not in cli and "[--expected-by T]" not in cli and "--expected-by" not in cli, None)
 

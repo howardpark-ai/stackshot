@@ -41,8 +41,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK)
-import handover as HO
-import step_proof as SP
+from stackshot.waits import handover as HO
+from stackshot.model import step_proof as SP
 
 # ---- 1. the pure rules (handover.py)
 def meta_of(*texts, **kw): return {"owner": "o", "project": "projects/alpha", "next": "\n".join(texts), **kw}
@@ -71,7 +71,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing. It lives here. Done when done.",
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
-import server
+from stackshot.web import server
 OWNER = server.OWNER
 IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 def fixtures():
@@ -138,7 +138,7 @@ n2 = pushes_for("a1", "home-two")
 check("…home-two is told, by the server, with the step's text, that the item is its own now (nobody else sent anything)", len(n2) == 1 and "is yours" in n2[0][1] and "home-two: verify the pages" in n2[0][1]
       and "home-one: merge PR #11 is done" in n2[0][1] and "sender='home-one'" in n2[0][1], n2)
 check("…the row of the pass says so", rows["a1"].get("handover", {}).get("action") == "moved" and rows["a1"]["handover"]["to"] == "home-two", rows.get("a1"))
-import audit_checks as AC
+from stackshot.audit import audit_checks as AC
 known = {"home-builder", "home-one", "home-two", "home-three", "home-gone"}
 ROLES = {"home-builder": {"role": "front"}, "home-one": {"role": "back"}, "home-two": {"role": "back"}, "home-three": {"role": "back"}, "home-gone": {"role": "back"}}
 class _Env:
@@ -256,7 +256,7 @@ accepts("…a step that was there before the write is not judged again by a writ
 for words in ("review the release PR #7 for the notes", "verify the release PR #7 is live", "check merge #7 conflicts"):
     accepts(f"write check: `{words}` before another session's step is no delivery step and is not refused", mk(f"home-one: {words}\nhome-two: verify the pages"))
 refused("…`then merge PR #23 and restart` is one", mk("home-one: then merge PR #23 and restart the unit\nhome-two: verify the pages"), "step 1", "delivers #23")
-import step_proof as _SP
+from stackshot.model import step_proof as _SP
 check("delivers: the leading verb only", [_SP.delivers(t) for t in ("a: review the release PR #7", "a: merge PR #7 and restart", "a: wait for merge #7", "a: check merge #7 conflicts", "a: Merge #7.", "a: ship PR #7 and tell", "a: land #7",
                                                                        "a: please release #7 and verify", "a: wait for the release PR #7 to merge")]
       == [("", ""), ("pr_merged", "#7"), ("", ""), ("", ""), ("pr_merged", "#7"), ("pr_released", "#7"), ("pr_merged", "#7"), ("pr_released", "#7"), ("", "")], None)
@@ -312,7 +312,7 @@ mx = json.loads(json.dumps(base35)); mx["metadata"]["needs"] = ["home-one"]
 check("audit: needs naming only the mover is no skip: the finding stays", len([x for x in AC.filing_findings({"a35": {**mx, "gid": "a35"}}, {}, now, _Env())[0] if x["category"] == "step-handover"]) == 1)
 
 # delivery: to the mover; a front mover through the page key; repeated only after an item write
-import audit_run as AR
+from stackshot.audit import audit_run as AR
 sent = []
 def deliver(to, text, fyi=False): sent.append((to, text, fyi)); return True, "[200] ok"
 def env(**kw):

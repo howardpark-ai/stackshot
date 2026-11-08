@@ -89,7 +89,7 @@ def run_pass(label: str, tripwire: bool) -> None:
     env.update(PATH=path, HOME=str(home), TMPDIR=str(root / "tmp"), STACKSHOT_CONFIG=str(conf), STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=str(root / "fleet"))
     errf = open(root / "server.err", "w+")
     def cli(*args, stdin=None):
-        r = subprocess.run([sys.executable, os.path.join(STACK, "client.py"), *args], capture_output=True, text=True, timeout=120, env=env, cwd=str(root), input=stdin)
+        r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/fleet/client.py"), *args], capture_output=True, text=True, timeout=120, env=env, cwd=str(root), input=stdin)
         return r.returncode, r.stdout, r.stderr
     def get(url, timeout=10):
         try:
@@ -97,11 +97,11 @@ def run_pass(label: str, tripwire: bool) -> None:
         except urllib.error.HTTPError as e: return e.code, e.read().decode("utf-8", "replace")
         except Exception as e: return 0, f"{type(e).__name__}: {e}"
     # the page registry the server reads, made the way the pane gate makes it (pages.py registry, on this config); the client's token, minted for this box
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "registry"], capture_output=True, text=True, timeout=120, env=env, cwd=str(root))
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "registry"], capture_output=True, text=True, timeout=120, env=env, cwd=str(root))
     check(f"[{label}] setup: the page registry is made", r.returncode == 0 and "projects/alpha" in (root / "store/projects.json").read_text(), (r.returncode, r.stdout[-200:], r.stderr[-300:]))
     rc, out, err = cli("mint", socket.gethostname())
     check(f"[{label}] setup: this box's client token is minted, pointing at the test's port", rc == 0 and (root / "secrets/client.url").read_text().strip() == f"http://127.0.0.1:{port}", (rc, out, err, (root / "secrets/client.url").read_text()))
-    proc = subprocess.Popen([sys.executable, os.path.join(STACK, "server.py")], stdout=subprocess.DEVNULL, stderr=errf, cwd=str(root), env=env)
+    proc = subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/web/server.py")], stdout=subprocess.DEVNULL, stderr=errf, cwd=str(root), env=env)
     try:
         # ---- 1. up
         st = 0; end = time.time() + 90

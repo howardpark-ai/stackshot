@@ -61,7 +61,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, render, ghsync, states, model
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -74,7 +74,7 @@ day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFS
 BACK, OTHER, GONE = "team-back", "home-other", "home-gone"      # as the update path stores a name the registry does not know
 UB, UO = U["team-back"], U["home-other"]
 
-from model import Model, Wait   # noqa: E402
+from stackshot.model.model import Model, Wait   # noqa: E402
 OWN = model.owner_display()            # the owner as the instance names him ("the owner" in the example config)
 NOW = now0
 FUT, PAST = day(5), day(-3)
@@ -315,7 +315,7 @@ check("author: a stored revision is plain JSON a later step reads: written_by is
 
 # ================================================================ step 4b: the tools say mover, never owner
 PAGE_ = "docs/design"
-import datetime as _dt, whatschanged
+import datetime as _dt; from stackshot.web import whatschanged
 _mc = lambda **kw: {"subject": "[home] mover create", "description": DESC, "project": "projects/alpha", "needs": [BACK], "next": "team-back: take it up", **kw}
 nfiles = lambda: len(list((T / "store").glob("*/*.json")))
 # create: the sender is the creator, mover names who moves it; owner is accepted with a note until [model] owner_param_until, then refused

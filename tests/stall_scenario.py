@@ -88,7 +88,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, handoff as H, stall as S
+from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
 server._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = server._save
@@ -235,7 +235,7 @@ check("4 front: …the cold call hands it on to the session it names, written as
 close(4); cold("no json at all here")
 
 # ================================================================ 4b. the stall ladder's cold call never asks Oliver
-import io, contextlib, cold_call as CC, router as RT
+import io, contextlib; from stackshot.model import cold_call as CC; from stackshot.router import router as RT
 ASK_ANS = {"action": "ask_owner", "ask": ASK, "options": [{"label": "ship", "line": "Ship it now.", "recommended": True}, {"label": "wait", "line": "Hold it a week.", "recommended": False}]}
 def two_steps(i, mover="home-peer2"):
     """An item stepped to its cold call (the notice at T1, the cold call at T2) → the journal text of the second pass."""
@@ -399,7 +399,7 @@ close(26)
 # ================================================================ 10. History and get
 item(27); cli_row("home-peer", "idle", IDLE0)
 stk(T1)
-import render as R
+from stackshot.web import render as R
 shown = server._fmt({**rd(27), "gid": "a27"})
 check("10 get: the last steps are shown on the item", re.search(r"stall: .*sent to it again", shown) is not None, shown[-600:])
 new = S.new_entries({"stall": {"log": []}}, mt(27))
@@ -984,7 +984,7 @@ close(67)
 # ================================================================ 22. the one ladder ([ladder] enabled): a silent pane climbs the same ladder an untaken hand-off does
 # ask the mover at 10 minutes of no turn; 30 minutes later, and only then, look at the pane (no turn running: the notice again); the cold call 10 minutes after that, then the project's builder,
 # then the fleet's builder asked once. With the flag off (the default) sections 1 to 21 above are the ladder.
-import ladder as LD
+from stackshot.waits import ladder as LD
 def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, **kw}
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "no turn running" in p[1]]
 cold("no json at all here"); COLD_MSGS.clear(); set_cfg(); set_stall()

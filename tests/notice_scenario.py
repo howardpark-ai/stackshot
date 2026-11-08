@@ -62,9 +62,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import config as _cfg, routing, router, router_live as live
-import server
-import client
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live
+from stackshot.web import server
+from stackshot.fleet import client
 from fastmcp.exceptions import ToolError
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 CMD = [sys.executable, str(T / "fake_claude.py")]

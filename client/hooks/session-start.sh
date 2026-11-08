@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # session-start.sh — the SessionStart hook: put the board's brief in front of the session, then show a page's keeper the Current
-# state of its pages (pages.py keeper), both as plain text on stdout. Wired by `./stackshot client install`.
+# state of its pages (pages.py keeper), both as plain text on stdout. Wired by `bin/stackshot client install`.
 # The brief comes from the server through the client API with this machine's token (client.py get brief); on the server box,
 # when the server cannot be reached, publish.py renders it from the store itself. Silent where neither works.
 # Always exits 0: a hook that ends on a false test shows as "SessionStart hook error".

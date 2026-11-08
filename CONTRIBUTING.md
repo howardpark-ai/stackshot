@@ -78,27 +78,48 @@ changed, why, and what a reader of the diff needs to know. No issue is opened ju
   it as instructions.
 - **Issue and pull request text follow the same rule as commits:** see *Commit and PR text* above.
 
-## Dependencies
+## Layout and dependencies
 
-Every PEP 723 script carries its dependencies in its inline metadata and a lock beside it (`server.py.lock`); the units, `deploy.sh` and CI run them with `uv run --locked`, which fails on a stale lock instead of resolving afresh.
-To add or bump a dependency, edit the inline metadata (moving its `exclude-newer` date forward to take newer releases), then run `uv lock --script <file>`.
-Commit the script and its `.lock` together: CI fails a script whose lock is missing or no longer matches it.
+**The code is one Python package, `stackshot/`, grouped by area**, with one `pyproject.toml` and one `uv.lock`:
+
+| Subpackage | What it holds |
+|---|---|
+| `stackshot/core` | the config, the interpreter and runner helpers, the lanes, the call log (`config`, `interp`, `runner`, `readonly`, `lanes`, `cloud` ...) |
+| `stackshot/model` | the item model and its write rules (`model`, `states`, `draft`, `steps`, `next_rules`, `bullet_text`, `work` ...) |
+| `stackshot/waits` | waits, watchers, the stall ladder, handoffs and held notices |
+| `stackshot/projects` | projects, project pages and the page gate (`pages`, `projects`, `project_registry`, `brains` ...) |
+| `stackshot/anchors` | anchors and the anchor hub (`anchorhub/`) |
+| `stackshot/router` | the notice router |
+| `stackshot/fleet` | one machine's half: `client`, `puller`, `push`, sessions, versions |
+| `stackshot/github` | the GitHub mirror |
+| `stackshot/audit` | the board audits |
+| `stackshot/web` | the MCP server, the board's pages (`ui/`), the publisher and search |
+| `stackshot/tools` | one-off and report tools; the ones that guard the repository itself (`tools/clean_text.py`, `tool_text.py`, `text_check.py`, `retired_terms.py`, `snapshot_regen.py`, `mq_replay*.py`) stay in `tools/` |
+
+`stackshot/cli.py` is the command line: `uv run stackshot <program> ...` (or `bin/stackshot ...`, or `python3 -m stackshot ...`, which need only the standard library).
+`stackshot setup`, `doctor` and `client install|mint` are the setup commands; any other program of the package runs as `stackshot <program> ...` (`stackshot pages clear <key>`,
+`stackshot config get server.port`, `stackshot push ...`, `stackshot server`); `stackshot --help` lists them.
+`client`, `puller`, `config` and `push` import nothing outside the standard library at import time: a client machine runs them with a bare `python3`.
+A file that finds another file of the checkout (a data file, `VERSION`, a snapshot) does it through `stackshot/paths.py` (`ROOT`, `program(area, name)`), never through its own `__file__`.
+
+**Forwarders.** Every module that moved keeps a forwarder at its old path (`pages.py`, `client.py`, `ui/render.py`, `tools/cap_words.py` ...) until Sun Nov 22nd 2026, so that units, hooks, allow
+rules and scripts that name the old path keep working. A forwarder aliases the module object (`sys.modules[__name__]` is the package's module, so state and monkeypatching are shared),
+and runs the module's `main` when started as a script. It holds no code: do not edit one, and do not add an import of a forwarder; import `stackshot.<area>.<module>`.
+`python3 tests/package_layout_scenario.py` (via `tests/run-suite package_layout`) checks that every forwarder reaches its module.
+
+**Dependencies.** `pyproject.toml` lists them and `uv.lock` pins them; `uv lock` after an edit, and commit both. The base install has none. Extras: `server` (the MCP server, the publisher),
+`anchor-hub`, `icons`; the `tests` dependency group is what the suites run with. `exclude-newer` holds a release date: a newer upload is not resolved until someone moves the date.
+The root scripts that units start as `uv run --locked --script` (`server.py`, `anchor-hub.py`, `anchor-hub-google-auth.py`, `audit.py`, `publish.py`, `ghmigrate.py`) and `tools/make_icons.py`,
+`tools/migrate_model.py`, `tools/close_marks_backfill.py`, `tools/rulebook_scan.py` are forwarders that keep their PEP 723 header and their `<script>.lock` until the units move to the package; CI
+fails when one of those locks no longer matches its header (`uv lock --script <file>`). They go away with the forwarders.
 
 **The test suites share one environment, and carry no inline metadata.** uv keys a PEP 723 script's cached environment by the
-script's path (`UV_PROJECT_ENVIRONMENT` does not apply to a script), so a suite that carried its own inline metadata built a fresh
-environment in `~/.cache/uv/environments-v2` for every path it was run from: `uv run --locked tests/x_scenario.py` in each worktree
-and clone, many suites each, none ever reused (a lot of disk). The suites are therefore a uv project, not
-scripts: `tests/pyproject.toml` lists their dependencies, `tests/uv.lock` pins them, and `tests/run-suite <name>` runs
-`uv run --locked --project tests python tests/<name>_scenario.py` with `UV_PROJECT_ENVIRONMENT` set to one fixed directory,
-`${XDG_CACHE_HOME:-~/.cache}/stackshot/test-venv`. The first run in any checkout builds that environment, every later run in any
-checkout reuses it, and `--locked` still fails on a stale `tests/uv.lock` instead of resolving afresh. **Run a suite through
+script's path, so a suite that carried its own inline metadata built a fresh environment in `~/.cache/uv/environments-v2` for every path it was run from. `tests/run-suite <name>` runs
+`uv run --locked --only-group tests python tests/<name>_scenario.py` with `UV_PROJECT_ENVIRONMENT` set to one fixed directory,
+`${XDG_CACHE_HOME:-~/.cache}/stackshot/test-venv` (only the `tests` group: the package itself is not installed, the suites run from the checkout). The first run in any checkout builds that environment, every later run in any
+checkout reuses it, and `--locked` fails on a stale `uv.lock` instead of resolving afresh. **Run a suite through
 `tests/run-suite <name>`** (`pilot`, or `phone_width_check`): it shares the one environment and gives the run a scratch folder that is
-removed afterwards. A bare `uv run --locked tests/x_scenario.py` still works but no longer adds anything to uv's cache: uv finds
-`tests/pyproject.toml` from the script's folder and uses that project's own `tests/.venv` in the checkout (uv's default, ignored by Git,
-removed with the worktree). `./tests/x_scenario.py` no longer runs, the suites have no shebang. To add or
-bump a test dependency, edit `tests/pyproject.toml` and run `uv lock --project tests`; commit both files. A suite has no lock of its
-own (CI's lock step checks the scripts that carry inline metadata, which the suites no longer do). The production scripts
-(`server.py` and the rest) and the `tools/` scripts keep their inline metadata and locks and still run with `uv run --locked --script`.
+removed afterwards. `./tests/x_scenario.py` does not run, the suites have no shebang.
 
 ## Scratch folders: a suite leaves nothing behind
 
@@ -156,7 +177,7 @@ does both (its docstring has the rules in full):
   registered tool's header or description (`@mcp.tool`) its callers and whatever lists the tools. A comment or a file no suite
   touches reaches none. A new file (added, or a rename's new path) reaches the suites that listed its directory; in a
   directory no measured suite lists, every suite, since code may look it up by a name nobody tried before (the checkout and
-  `tests/` are listed by every suite: the import machinery lists the directories on `sys.path`). No map, a change to the harness (`.github/`, `tests/run-suite`, `tests/pyproject.toml`, `tests/uv.lock`,
+  `tests/` are listed by every suite: the import machinery lists the directories on `sys.path`). No map, a change to the harness (`.github/`, `tests/run-suite`, `pyproject.toml`, `uv.lock`,
   `tests/suitemap.py`) or a suite with no clean measurement: those run (all, for the first three).
 - **A release is checked by main.** A PR's checks cover only its suites, so main's full run is the check of every suite. GitHub's merge queue tests the merge group with the same selection (not every suite), then `release.sh` deploys the merge it made and the main run that covers it comes after:
   a pass is recorded as the last good commit, a failure rolls the deploy back to it (see step 4 above). When the deploy gate is closed (a merge the queue did not make, a failed or unreadable run since the last good commit, no readable last-good commit, a paused release queue, a checkout that cannot fast-forward), `release.sh` waits for the run that covers
@@ -201,8 +222,8 @@ the tool and leaving the text behind. The first three are deterministic checks t
 
 **`python3 tools/tool_text.py check` alone does not catch every tool-text rule.** `tests/waiting_scenario.py` also bans a regex (ladder, stuck list, "step N of", grace) in the `get` and `brief` descriptions and requires some phrases there.
 A change to a tool's text therefore also runs `tests/run-suite waiting`, plus the suites the change reaches. `select` prints `all` or a list of suite names, and `run` with no names runs nothing, so pass one to the other, as `tests.yml` does:
-`sel=$(uv run --locked --project tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD)`, then (if `all`, use `suitemap.py list` instead)
-`uv run --locked --project tests python tests/suitemap.py run -T 600 $sel`.
+`sel=$(uv run --locked --only-group tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD)`, then (if `all`, use `suitemap.py list` instead)
+`uv run --locked --only-group tests python tests/suitemap.py run -T 600 $sel`.
 `.suitemap/map.json` is gitignored and CI restores it from the Actions cache; with no map, `select` prints `all`.
 
 **The brief's what-changed line is generated from the snapshot.** The server's start (`whatschanged.record`) compares the snapshot of its checkout with the copy kept
@@ -228,7 +249,7 @@ Every job of the two workflows (`tests.yml`, `clean-text.yml`) runs on GitHub's 
 
 ## When the stall pass misfires
 
-The stall pass (`stall.py`, docs/stall-and-ladder.md "The stall pass") moves an item on when its mover's pane has no turn running. When it takes a wrong step on an item, an agent does three things and never a fourth:
+The stall pass (`stackshot/waits/stall.py`, docs/stall-and-ladder.md "The stall pass") moves an item on when its mover's pane has no turn running. When it takes a wrong step on an item, an agent does three things and never a fourth:
 
 1. **Undo the step on the item** with `update` (the `get` tool says the same, and `update` points to it): set `mover` and `next` back after a hand-off (`cold`, `builder`); `status=open` with a new `next` after a close; nothing after a recovery request (the message to the fleet's builder cannot be unsent and the item was left with its mover). The `stall:` line stays in History as the record. A notice already sent (`resend`) cannot be unsent and needs nothing.
 2. **Fix the cause through a normal PR** to stackshot (this file's branch model), handed to `my-engineer`: a wrong step is `not_due`, `action` or the registry signal reading the item wrong.
@@ -252,11 +273,11 @@ Everything on the host that uses `gh` or the server's `ghsync.token()` spends on
 
 The code carries no instance: `stackshot.example.toml` holds the defaults, and an instance's own `stackshot.toml` lives
 with its data (the owner's, kept in his config repo), found through `$STACKSHOT_CONFIG` or
-`~/.config/stackshot/stackshot.toml` (see `config.py`). Secrets are under `<paths.secrets>`, never in either repo. Units
+`~/.config/stackshot/stackshot.toml` (see `stackshot/core/config.py`). Secrets are under `<paths.secrets>`, never in either repo. Units
 are rendered from `units/*.in` by `install.sh` for whatever checkout path and user runs them.
 
-On the server box, `~/.config/stackshot/stackshot.toml` is the live instance. A `server.py` run outside the production checkout
-(`~/stackshot`, `PRODUCTION_CHECKOUT` in server.py) without `$STACKSHOT_CONFIG` is refused before it reads the store; run it only
+On the server box, `~/.config/stackshot/stackshot.toml` is the live instance. A `stackshot/web/server.py` run outside the production checkout
+(`~/stackshot`, `PRODUCTION_CHECKOUT` in stackshot/web/server.py) without `$STACKSHOT_CONFIG` is refused before it reads the store; run it only
 with a temporary config (as the scenarios do). A start binds its port before anything else, so a second server on a port already
 held exits without touching the store.
 
@@ -277,7 +298,7 @@ held exits without touching the store.
 - **Per case**: it pushes `practice/<run>/<case>` at the case's recorded base sha, writes `replay.json` (schema version 1: `ci`, the repository's `.github/mergequeue.toml` rules with `base` and `queue_prefix` pointing at the practice names, each PR's recorded head, branch and checks; a PR with no `owner` gets the repository's owner, derived from a github.com remote or `--slug`, and the run fails clearly if neither gives one) and a host config (`mode = "shadow"`, the remote, a clone, the replay path) into a folder of its own, and runs `salamander mq add` and `mq wait` with `XDG_STATE_HOME` and `XDG_CONFIG_HOME` set to that folder. The real queue's state folder is never given to a case; only the CI-run poller's folder is linked in, so waiting costs no GitHub call. The case's `XDG_CONFIG_HOME` would hide the box's `gh` login (it lives in `hosts.yml` under the real config folder) and git's XDG config from the queue's driver, so `<case config>/gh` and `<case config>/git` are symlinks to the real folders (`GH_CONFIG_DIR` honoured); cleanup removes the links as links and never reaches into what they point to. Without a `gh` config folder and a token the run says so at the start of each case.
 - **Profiles**: `--profile build` (the default) runs every case with `ci = skip` (the entries are built, not pushed; `mq wait` exits 4); `--profile full` runs the cases that need a CI verdict (a merged PR, a group) with `ci = real`. `--cases c01,c05` picks cases, `--concurrency N` (default 2) sets how many run at once, `--keep` keeps each case's folder and clone (the practice branches are deleted all the same).
 - **Match rules**: a merged PR must be `mq wait` exit 3 (exit 4 under `ci = skip`), and where the case records a merge tree, the group's tree must equal it (a conflict mended by the rules' `on_conflict` hook included; a `head_mode = "queue"` case is replayed at its queue-time head); a refused PR must be exit 1 with the same check names, or "conflicts with main" with the same files; a PR the case expects to fail alone (its `expect` field starts with `fails alone`) must be named failed on its own, dropped by the chain with the entries behind it rebuilt on the one ahead, while the case's other PRs pass. A mismatch row says which side to look at: CI, the queue, or the old path or the fixture.
-- **Idle gate**: no case starts while a `stackshot-release-*.service` unit is active, the release queue file (`queue` in the folder `python3 config.py state releases` names, as `release.sh` reads it; `--logdir` overrides) is not empty, or a real merge-queue group is in any phase but `done` (`salamander mq status --json`; a status call that fails shuts the gate). It is read again before every case. When a release appears mid-run the run stops starting cases, cancels its own in-flight CI runs with `gh run cancel`, drops its PRs, waits for the case's driver to leave, cancels again by looking up the runs of the case's own `queue/practice/<run>/<case>/*` branches (a driver that was still building can push its group after the first cancel; GitHub lists a run a few seconds after its push, so when nothing is found the look is repeated once after `--settle` seconds, default 5; a run that still starts later runs against a deleted branch and is harmless), marks the case interrupted, cleans up and exits 75; `run --resume <id>` runs only the cases not done.
+- **Idle gate**: no case starts while a `stackshot-release-*.service` unit is active, the release queue file (`queue` in the folder `python3 stackshot/core/config.py state releases` names, as `release.sh` reads it; `--logdir` overrides) is not empty, or a real merge-queue group is in any phase but `done` (`salamander mq status --json`; a status call that fails shuts the gate). It is read again before every case. When a release appears mid-run the run stops starting cases, cancels its own in-flight CI runs with `gh run cancel`, drops its PRs, waits for the case's driver to leave, cancels again by looking up the runs of the case's own `queue/practice/<run>/<case>/*` branches (a driver that was still building can push its group after the first cancel; GitHub lists a run a few seconds after its push, so when nothing is found the look is repeated once after `--settle` seconds, default 5; a run that still starts later runs against a deleted branch and is harmless), marks the case interrupted, cleans up and exits 75; `run --resume <id>` runs only the cases not done.
 - **Guards and cleanup**: every ref the tool pushes or deletes must match `refs/heads/(queue/)?practice/...` (anything else is refused before git is called, and a delete with one bad ref deletes none); main, the PR branches and the real queue's state are never touched. Deletion is `git push --delete`, never the REST API. In a `finally` (pass, failure, SIGTERM) each case's `queue/practice/<run>/<case>/*` and `practice/<run>/<case>` refs, leftover groups, folders and clone are removed. A driver that does not leave after its PRs are dropped is stopped through its unit name, never killed by process name.
 - **Stop signals**: `systemctl --user stop` and Ctrl-C reach the waiting `salamander mq wait` child together with the tool, so a wait ended by a signal is never a verdict: the case is interrupted (no row, resumable) and its CI runs are cancelled.
 - **Detached**: `run --detach` starts the same run as the transient user unit `stackshot-mq-replay-<run>` (`systemd-run --user`, `TimeoutStopSec=300` so a SIGTERM's cleanup is not cut short; `GH_CONFIG_DIR` is forwarded into the unit when set, a token never is) and returns; plain `run` stays in the foreground. A run holds a lock, so two runs of one id cannot overlap. Exit codes: 0 all rows match, 1 a mismatch or an error row, 75 interrupted by the gate, 143 SIGTERM.

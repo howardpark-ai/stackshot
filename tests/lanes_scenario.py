@@ -20,7 +20,7 @@ SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 sys.path.insert(0, STACK); sys.path.insert(0, SCR)
 import _scratch
 tmp = _scratch.mkdtemp(prefix="lanes-"); T = pathlib.Path(tmp)
-import lanes
+from stackshot.core import lanes
 
 fails, ran = [], []
 def check(name, cond, got=None):

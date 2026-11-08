@@ -1,11 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["fastmcp>=4.0,<5", "httpx", "markdown-it-py>=4,<5"]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-03T04:00:00Z"
-# ///
 """Scenario test for a design decision's mockup link (server._gate_mockup and ui/render.mockup_url) — fixture data, no live
 store, no network, no server socket.
 
@@ -78,8 +70,8 @@ def refused(name, f, *want):
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, home
-from ui import render as r2
+from stackshot.web import server; from stackshot.web import home
+from stackshot.web.ui import render as r2
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda *a, **k: None
@@ -177,7 +169,7 @@ css = b._css()
 check(f"2 style: the link keeps its two words together and the question still wraps (no overflow at a phone's width)", "a.mockup{white-space:nowrap" in css and ".hnext,.hwait{display:block;min-width:0;overflow-wrap:anywhere" in css, None)
 
 # ================================================================ 4. a fleet tool's /mockup/<n> page
-import render as r1
+from stackshot.web import render as r1
 cfgc = server._cfg.CFG.setdefault("client", {}); had_key = "mockup_hosts" in cfgc; was_key = cfgc.get("mockup_hosts")
 try:
     HOST = "mockup.example.invalid"

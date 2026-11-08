@@ -37,9 +37,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import server
+from stackshot.web import server
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = lambda: None
 MAIN, OTHER = "falcon-main", "home-other"

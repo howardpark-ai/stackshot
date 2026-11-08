@@ -11,7 +11,7 @@ There are four ways one could imagine running stackshot:
 
 The first is what stackshot is built for and supported for.
 
-The second comes with it by construction. Each person clones the code and runs `./stackshot setup` as themselves, with
+The second comes with it by construction. Each person clones the code and runs `bin/stackshot setup` as themselves, with
 `--port` set to a port of their own when the box already has an instance on the default one. Everything an instance owns
 then lives under that account: the config in `~/.config/stackshot`, the state in `~/.local/state/stackshot`, the secrets
 and machine tokens, the data repository, the Claude Code hooks in `~/.claude/settings.json`, and the systemd user units,

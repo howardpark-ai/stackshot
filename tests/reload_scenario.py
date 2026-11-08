@@ -50,9 +50,9 @@ def reload_with(text):
         out = config.reload()
     return out, err.getvalue()
 
-import config, pages, clients, fleet, server
-from ui import render as ui_render
-from anchorhub import core as hubcore
+from stackshot.core import config; from stackshot.projects import pages; from stackshot.fleet import clients; from stackshot.fleet import fleet; from stackshot.web import server
+from stackshot.web.ui import render as ui_render
+from stackshot.anchors.anchorhub import core as hubcore
 
 # ---- 1. a valid change: every reader sees it at its next read, nothing restarted
 before = (server._page_slack(), clients._online(), fleet._grace(), server._publish_every(), ui_render._stale_s(), hubcore._quiet_max())
@@ -82,7 +82,7 @@ check("valid, unchanged: an empty list, nothing logged", out == [] and log == ""
 OLDKEY = edit(LIVE, (r"(?m)^hours = 4", 'stuck_to = "home-old"\nhours = 4'))
 out, log = reload_with(OLDKEY)
 check("retired key: a file that still has [idle] stuck_to loads, the key is only listed as changed, nothing reads it and nothing is logged", out == ["idle.stuck_to"] and log == "" and not hasattr(server, "_stuck_to") and server._fleet_builder() == (config.get("fleet", "operator_session") or ""), (out, log))
-check("retired key: config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
+check("retired key: config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
 out, log = reload_with(LIVE)
 
 # ---- 2. an invalid file keeps the running config, and says why
@@ -90,12 +90,12 @@ running = config.CFG
 out, log = reload_with(LIVE.replace("[publish]", "[publish", 1))
 check("bad TOML: refused (None), CFG untouched", out is None and config.CFG is running and server._page_slack() == 120, out)
 check("bad TOML: the log names the file and the parse error", "config reload: " in log and str(CONF) in log and "TOMLDecodeError" in log and "kept" in log, log)
-r = subprocess.run([sys.executable, os.path.join(STACK, "config.py"), "check"], capture_output=True, text=True)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True)
 check("bad TOML: config.py check refuses it too", r.returncode != 0, r.returncode)
 out, log = reload_with(LIVE + '\n[units]\nscope = "system"\n')
 check("failed check ([units] scope = system): refused, CFG untouched", out is None and config.CFG is running and config.get("units", "scope") is None, out)
 check("failed check: the log carries config.py check's refusal line", "refused, the running config is kept" in log and '[units] scope = "system"' in log and "removed;" in log, log)
-r = subprocess.run([sys.executable, os.path.join(STACK, "config.py"), "check"], capture_output=True, text=True)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True)
 check("failed check: config.py check refuses the same file", r.returncode == 1 and '[units] scope = "system"' in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
 CONF.unlink(); err = io.StringIO()
 with contextlib.redirect_stderr(err): out = config.reload()
@@ -135,7 +135,7 @@ with socket.socket() as s:
 SRV = edit(BASE, (r"(?m)^port = 8020", f"port = {PORT}"), (r"(?m)^every_minutes = 10", "every_minutes = 1440"))   # the timer publish never lands in the test
 CONF.write_text(SRV, encoding="utf-8")
 errf = open(T / "server.err", "w+")
-proc = subprocess.Popen([sys.executable, os.path.join(STACK, "server.py")], stdout=subprocess.DEVNULL, stderr=errf, cwd=STACK,
+proc = subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/web/server.py")], stdout=subprocess.DEVNULL, stderr=errf, cwd=STACK,
                         env={**os.environ, "STACKSHOT_CONFIG": str(CONF), "STACKSHOT_AUTH": "off"})
 def up(timeout=60.0, port=None, p=None):
     end = time.time() + timeout
@@ -194,7 +194,7 @@ def fixture(name, port, home=None):
 def files(root): return sorted(str(p.relative_to(root)) for p in root.rglob("*"))
 def start(conf, root, env=None):
     e = {**os.environ, "STACKSHOT_CONFIG": str(conf), "STACKSHOT_AUTH": "off", "STACKSHOT_FLEET_DIR": str(root / "fleet")} if env is None else env
-    return subprocess.Popen([sys.executable, os.path.join(STACK, "server.py")], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, cwd=STACK, env=e)
+    return subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/web/server.py")], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, cwd=STACK, env=e)
 import shutil
 with socket.socket() as s:
     s.bind(("127.0.0.1", 0)); PORT2 = s.getsockname()[1]
@@ -238,8 +238,8 @@ check("no STACKSHOT_CONFIG outside the production checkout: exits 2, saying to s
       and "not the production checkout" in errD and str(confD) in errD and "Traceback" not in errD, (pd.returncode, errD[-600:]))
 check("no STACKSHOT_CONFIG: no state dir, the store as it was", not (rootD / "state").exists() and files(rootD) == beforeD, files(rootD))
 check("server.py names the production checkout once, and _serve hands uvicorn the socket bound at start",
-      pathlib.Path(STACK, "server.py").read_text(encoding="utf-8").count('PRODUCTION_CHECKOUT = "~/stackshot"') == 1
-      and '"sockets": [_LISTEN]' in pathlib.Path(STACK, "server.py").read_text(encoding="utf-8"))
+      pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8").count('PRODUCTION_CHECKOUT = "~/stackshot"') == 1
+      and '"sockets": [_LISTEN]' in pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": reload scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush()

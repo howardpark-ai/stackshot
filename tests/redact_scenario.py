@@ -27,7 +27,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import server
+from stackshot.web import server
 FMT = '%s - "%s %s HTTP/%s" %d'                          # uvicorn.protocols.http.*_impl: access_logger.info(FMT, ...)
 def rec(msg, args):
     return logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, msg, args, None)

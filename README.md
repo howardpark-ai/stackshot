@@ -13,23 +13,23 @@ You need a Linux box with systemd, `git`, `curl`, `uv` and Python 3.12 or later.
 ```bash
 git clone https://github.com/howardpark-ai/stackshot ~/stackshot
 cd ~/stackshot
-./stackshot setup            # asks a few questions, writes the config, the data repository and the systemd units
+bin/stackshot setup            # asks a few questions, writes the config, the data repository and the systemd units
 ```
 
 `setup` prints two URIs. Create a Google OAuth client of type *Web application* with the redirect URI, then put its id and secret into `oauth.env`:
 
 ```bash
 "${EDITOR:-nano}" ~/.config/stackshot/oauth.env
-./stackshot doctor           # checks the install and starts the server
+bin/stackshot doctor           # checks the install and starts the server
 ```
 
 Then point your HTTPS front at `127.0.0.1:8020`. In claude.ai, add a custom connector with the connector URL that `setup` printed, and name it exactly **Stackshot**. That name becomes the tool prefix in Claude Code, and the hooks recognize a board write by it. Last, add the Claude Code hooks on this box and start a new session:
 
 ```bash
-./stackshot client install
+bin/stackshot client install
 ```
 
-In any session, call `create` with a subject that starts with one of your prefixes, `project = "projects/getting-started"` and a `next` line. The item shows on the board within seconds. For another machine, mint a token with `./stackshot client mint <machine>`; [INSTALL.md](INSTALL.md) has every step, and [docs/windows.md](docs/windows.md) covers a Windows client.
+In any session, call `create` with a subject that starts with one of your prefixes, `project = "projects/getting-started"` and a `next` line. The item shows on the board within seconds. For another machine, mint a token with `bin/stackshot client mint <machine>`; [INSTALL.md](INSTALL.md) has every step, and [docs/windows.md](docs/windows.md) covers a Windows client.
 
 ## The main parts
 

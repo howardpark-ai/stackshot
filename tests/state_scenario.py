@@ -61,7 +61,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, render, ghsync, states
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -297,7 +297,7 @@ check("client items: …a closed item is not listed", "a49" not in mine, None)
 
 
 # ================================================================ POST /client/state, the MCP layer (the route and the inputs are retired: the refusals are in retired_inputs_scenario)
-import client as _client
+from stackshot.fleet import client as _client
 from starlette.testclient import TestClient
 (T / "secrets").mkdir(exist_ok=True)
 tok = open(_client.mint("home-test")).read().strip()
@@ -331,7 +331,7 @@ asyncio.run(mcp_checks())
 def g(n, subject=None, **kw): item(n, letter="g", subject=subject, **kw)
 
 # ================================================================ a doing item stored with a far expected time (before the time was dropped): work in hand, read as it always was (tools/move_waiting_doing.py, which parked them once, is removed)
-import model as _model
+from stackshot.model import model as _model
 # states.reads_as_wait stays gone: the reason text is never refused. The wait wording is read since the board item's follow-up by model_guards.reads_as_wait, which only adds a note to the update
 # reply (server._doing_wait_note; tests/agent_due_scenario.py, section 6b), never a refusal and never a state change.
 check("far-by states.reads_as_wait is gone: the reason text is never refused (model_guards.reads_as_wait only notes)", not hasattr(states, "reads_as_wait"), None)
@@ -367,7 +367,7 @@ g(35, needs=[BACK], state="doing", expected_by=hrs(60), expected_reason="waits o
 check("far-by held: the held doing item is on hold as the server reads it, and its legacy time would otherwise select it", W.is_held(rd(35, "g")) and W.doing_agent(rd(35, "g")), rd(35, "g").get("metadata"))
 
 # ================================================================ a doing item that only waits for a later day reads as waiting (dated_wait.py)
-import dated_wait as _dw
+from stackshot.waits import dated_wait as _dw
 for p in (T / "store/g").glob("*.json"): p.unlink()
 def ordinal(n): return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 def prose(n):                                                         # "Wed Nov 4th": the board's prose form for the local day n days from the suite's start

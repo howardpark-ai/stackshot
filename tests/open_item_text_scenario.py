@@ -24,7 +24,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 (T / "store/a").mkdir(parents=True)
 (T / "empty").mkdir()
 
-import next_report as NR
+from stackshot.tools import next_report as NR
 sid = lambda n: NR.shown(f"a{n}")          # the id as the tool prints it
 now = time.time()
 def item(i, status="open", description="- A thing, finished when it works", **meta):
@@ -47,7 +47,7 @@ def digest(): return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p i
 d0 = digest()
 def run(*a):
     r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=dict(os.environ)); return r.returncode, r.stdout, r.stderr
-TOOL = os.path.join(STACK, "tools", "open_item_text.py")
+TOOL = os.path.join(STACK, "stackshot", "tools", "open_item_text.py")
 
 rc, out, err = run(TOOL, "--store", str(T / "store"))
 lines = out.splitlines()

@@ -67,7 +67,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, render, model, watchers as wk
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
@@ -179,7 +179,7 @@ reset(); woke = server._wake_pass()
 check("item: a close nobody saw (every `after` item already closed) is found by the next pass", "a35" in woke and mt(35).get("mover") == BACK, mt(35))
 
 # the runner's ten-minute catch-up finds the same close even with the ask-by days away (the minute tick's due-wake gate does not see such a wait)
-import runner as RUN
+from stackshot.core import runner as RUN
 item(94, wait_kind="item", after=["a95"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] catch-up through the runner")
 item(95, status="completed", outcome="done", reason="r")
 reset(); server._minute_wake_pass()
@@ -260,7 +260,7 @@ check("relay: the brief lists the relay waits as waiting on the world: what, ask
 
 reset(); raw0 = raw(50)
 check("relay answer: not yet with no date writes nothing and says so", server._answer("a50", "not yet, ask again on <date>", "later please", "answer") == "needdate" and raw(50) == raw0, None)
-check("relay answer: the page has a line for it", '"needdate":' in open(os.path.join(STACK, "render.py"), encoding="utf-8").read(), None)
+check("relay answer: the page has a line for it", '"needdate":' in open(os.path.join(STACK, "stackshot/web/render.py"), encoding="utf-8").read(), None)
 server._answer("a50", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer")
 m = mt(50)
 check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and m.get("ask_by") == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("post_wake_mover") == BACK

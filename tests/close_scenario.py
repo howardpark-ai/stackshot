@@ -55,8 +55,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import server
-from ui import render as ui_render
+from stackshot.web import server
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def refused(name, f, *want):

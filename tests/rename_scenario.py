@@ -23,7 +23,7 @@ def check(name, ok, detail=""):
     ran.append(name)
     if not ok: fails.append(name); print(f"FAIL {name}\n     {str(detail)[:400]}")
 
-import rename_page as rp
+from stackshot.projects import rename_page as rp
 PAGE = {"content": "---\ntitle: X\n---\n\nbody {not json}\n", "revision": "abc123"}
 OBJ = json.dumps(PAGE, indent=2)
 NOTICE = "UPGRADE_AVAILABLE 0.60.69.0 0.60.81.0\ngbrain 0.60.69.0 -> 0.60.81.0 available. Run: gbrain self-upgrade\n"

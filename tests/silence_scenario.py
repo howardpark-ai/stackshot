@@ -38,7 +38,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import config as _cfg, audit, audit_checks as AC, audit_run as AR, silence as SL, handoff as HO
+from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.audit import silence as SL; from stackshot.waits import handoff as HO
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                                    # the instance timezone (the config's `timezone` above): UTC+4, no DST
@@ -290,7 +290,7 @@ check("2b the item the ladder let go of is found on the next round, and the four
 
 # ---- 3. the server's tick
 clear_state()
-import server
+from stackshot.web import server
 for k, v in pass_items.items(): (T / f"store/a/{k[1:]}.json").write_text(json.dumps(v))
 msgs = []
 real_msg = server._message
@@ -335,7 +335,7 @@ check("3 a ladder view that cannot be built sends nothing: the tick returns with
 server._stall_active = real_active_fn
 
 # ---- 4. a builder directing subagents is busy all day; its items are judged one by one
-import activity as ACT
+from stackshot.model import activity as ACT
 def ev(i, ago_min, kind):
     """A doing item of the builder whose last write was 3 hours ago, then one more activity `ago_min` minutes ago (an event on its own anchor: a PR review, a CI run, a step proof)."""
     k, d = item(i, wrote=now - 3 * H, state="doing", needs=["home-agent"], next="home-agent: build it", project="projects/alpha")

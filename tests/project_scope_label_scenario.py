@@ -39,7 +39,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import projects as prj, pages as p
+from stackshot.projects import projects as prj; from stackshot.projects import pages as p
 # ---- 1. the pure parts
 check("scoped_name: scope, a slash, the name", prj.scoped_name("ops", "ledger") == "ops/ledger" and prj.scoped_name("work", "Ledger") == "work/Ledger")
 check("scoped_name: a name that has the scope already, no scope and no name are left alone",
@@ -48,7 +48,7 @@ check("label_scope: an empty key has none", prj.label_scope("", {}, {}) == "")
 
 # ---- 2. the boards
 p.cmd_registry(quiet=True); R = json.loads((T / "store/projects.json").read_text())["pages"]
-import render, ui.render as r2
+from stackshot.web import render; import stackshot.web.ui.render as r2
 store = str(T / "store")
 def labels(Bd):
     bd = Bd(store)

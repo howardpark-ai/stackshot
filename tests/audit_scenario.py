@@ -34,7 +34,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:400]}" if got is not None else ""))
 
-import config, audit
+from stackshot.core import config; from stackshot.audit import audit
 config.CFG["audit"]["at"] = "05:00"          # the example ships a list of two times; sections 1 to 3 are the once-a-day schedule, the list has its own section 3c
 ZONE_HOURS = 4; ZONE = dt.timezone(dt.timedelta(hours=ZONE_HOURS))     # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
 OFFSET = f"+{ZONE_HOURS:02d}:00"; ABBR = f"+{ZONE_HOURS:02d}"             # an ISO offset, and the zone's own abbreviation as the audit prints it after a clock time
@@ -197,7 +197,7 @@ os.environ.update(FAKE_OUT="inbox → falcon-audit", FAKE_ERR="machine asleep")
 check("_push: a line left waiting in the inbox is not delivered; the answer carries stderr too",
       audit._push("falcon-audit", "x") == (False, "inbox → falcon-audit — machine asleep"))
 os.environ.pop("FAKE_ERR")
-check("the real push.py is the default", pathlib.Path(audit.PUSH[1]).name == "fakepush.py" and importlib.reload(audit).PUSH[1] == os.path.join(STACK, "push.py"))
+check("the real push.py is the default", pathlib.Path(audit.PUSH[1]).name == "fakepush.py" and importlib.reload(audit).PUSH[1] == os.path.join(STACK, "stackshot/fleet/push.py"))
 audit.PUSH = [sys.executable, str(fake)]
 # the interpreter this timer's process runs on was deleted under it (its uv environment): the push still goes out, through uv
 audit.PUSH = [str(T / "gone-env/bin/python"), str(fake)]; os.environ["FAKE_OUT"] = "delivered → falcon-audit"
@@ -208,7 +208,7 @@ audit.PUSH = [sys.executable, str(fake)]
 
 # ---- 6. the CLI (what the timer's service runs)
 def cli(*a, **env):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "audit.py"), *a], capture_output=True, text=True, env={**os.environ, **env})
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/audit/audit.py"), *a], capture_output=True, text=True, env={**os.environ, **env})
     return r.returncode, r.stdout, r.stderr
 rc, out, _ = cli("status")
 st = json.loads(out) if rc == 0 else {}
@@ -221,7 +221,7 @@ check("audit.py with no verb it knows: usage, exit 2", rc == 2 and "usage" in er
 check("audit.py orphans names itself in the usage, and with no server to reach it says so and exits 1 (the server makes the check)", "orphans [--apply]" in err and cli("orphans")[0] == 1 and "not run" in cli("orphans")[2], err)
 rc, _o, err2 = cli("orphans", "--bogus")
 check("audit.py orphans takes only --apply: anything else is the usage, exit 2", rc == 2 and "usage" in err2, (rc, err2))
-import client as _cl, contextlib as _ctx, io
+import contextlib as _ctx, io; from stackshot.fleet import client as _cl
 _real_oh = _cl.orphan_handover
 def _orph_out(ans, apply):
     _cl.orphan_handover = lambda a, timeout=120.0: (200, ans)
@@ -243,7 +243,7 @@ n0 = len((D / "cues.jsonl").read_text().splitlines())
 check("…the CLI's cue was logged like any other", n0 == 5 and json.loads((D / "cues.jsonl").read_text().splitlines()[-1])["reason"] == "scheduled")
 
 # ---- 7. over HTTP, in-process
-import server
+from stackshot.web import server
 server._publish = lambda: None
 from starlette.testclient import TestClient
 calls = []
@@ -278,7 +278,7 @@ with TestClient(server.mcp.http_app()) as c:
     server._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
 
 # ---- 8. the audit's own writes and a bare confirm do not move an item's activity clock (activity.py; its full table is tests/activity_scenario.py)
-import activity
+from stackshot.model import activity
 audit_agent = config.audit_agent()
 check("8 the server counts the configured audit agent among the audit's own writers", audit_agent in server._audit_writer_names() and "stackshot audit" in server._audit_writer_names(), server._audit_writer_names())
 ACT_OLD = T0 - 7200
@@ -299,14 +299,14 @@ save60(writer="home-a")
 check("8 a write by the item's mover does move it", act60() > seed + 3600, act60())
 
 # ---- 9. the code checks live in audit_checks.py; the filing pass's record sits beside the run records and is none of them
-import audit_checks, audit_run
+from stackshot.audit import audit_checks; from stackshot.audit import audit_run
 before = (audit.runs(), audit.last(), audit.status(T0)); running_before = audit.running(T0)
 (D / "filing.json").write_text(json.dumps({"started": T0, "finished": T0 + 30, "items_read": 3, "repeats": 0, "findings": [{"id": "board#1", "category": "stuck-elsewhere", "project": "projects/a", "owner": "home-a"}], "flags": []}))
 check("9 filing.json beside the run records is no run: runs, last and status are what they were", (audit.runs(), audit.last(), audit.status(T0)) == before)
 check("9 …nor a run in progress: that is told from the run records alone (the filing record is never running)", audit.running(T0) == running_before and not any(r.get("date") == "filing" for r in audit.runs()))
 check("9 the daily run's check names are importable from audit_run and are audit_checks' own", all(getattr(audit_run, n) is getattr(audit_checks, n) for n in ("field_findings", "check_stale", "check_ask_missing", "check_stuck_elsewhere", "idle_pass", "FIX", "CHECKS_CODE")))
 check("9 the filing categories all have a fix line, as every finding needs one", all(audit_checks.FIX.get(c) for c in ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing")) and audit_checks.CHECKS_FILING == ("stuck-elsewhere", "board checks", "reads-as-wait", "step-handover", "ask-options", "why-not-now", "wait-end", "event-missing"))
-check("9 the board report has no silence kind any more (idle-on-agent is gone; silence is the silence pass's) and the filing kinds are its kinds", "idle-on-agent" not in audit_checks.FILING_KINDS and "idle-on-agent" not in __import__("board_report").KINDS and set(audit_checks.FILING_KINDS) <= set(__import__("board_report").KINDS))
+check("9 the board report has no silence kind any more (idle-on-agent is gone; silence is the silence pass's) and the filing kinds are its kinds", "idle-on-agent" not in audit_checks.FILING_KINDS and "idle-on-agent" not in __import__("stackshot.tools.board_report", fromlist=["_"]).KINDS and set(audit_checks.FILING_KINDS) <= set(__import__("stackshot.tools.board_report", fromlist=["_"]).KINDS))
 (D / "filing.json").unlink()
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

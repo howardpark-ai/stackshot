@@ -21,7 +21,7 @@ toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml, count=1
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off")
 (T / "store/a").mkdir(parents=True)
 
-import next_report as NR
+from stackshot.tools import next_report as NR
 now = time.time(); OWNER = "00000000-0000-4000-8000-000000000001"
 def item(i, status="open", needs=None, **meta):
     base = {"owner": OWNER, "project": "projects/alpha"}
@@ -86,14 +86,14 @@ check("the check changes no file", digest() == d0, None)
 
 def run(*a):
     r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=dict(os.environ)); return r.returncode, r.stdout, r.stderr
-rc, out, err = run(os.path.join(STACK, "tools", "next_report.py"), "--store", str(T / "store"))
+rc, out, err = run(os.path.join(STACK, "stackshot", "tools", "next_report.py"), "--store", str(T / "store"))
 check("the listing: one line per finding, then the counts line; exit 0", rc == 0 and out.count(" | N") == len(rep["findings"]) and "Next rules: 12 item(s) break a rule" in out, (rc, out[-400:], err[-300:]))
-rc, out, _ = run(os.path.join(STACK, "tools", "next_report.py"), "--store", str(T / "store"), "--line")
+rc, out, _ = run(os.path.join(STACK, "stackshot", "tools", "next_report.py"), "--store", str(T / "store"), "--line")
 check("--line gives the one line with the counts per rule", rc == 0 and out.strip().startswith("Next rules: 12 item(s) break a rule · N1 1 · N2 3 · N3 1 · N4 3 · N5 1 · N6 2 · N7 2"), out)
-rc, out, _ = run(os.path.join(STACK, "audit.py"), "next-check", "--json", "--store", str(T / "store"))
+rc, out, _ = run(os.path.join(STACK, "stackshot/audit/audit.py"), "next-check", "--json", "--store", str(T / "store"))
 js = json.loads(out) if rc == 0 else {}
 check("audit.py next-check --json runs the same report", js.get("findings") == rep["findings"] and js.get("rules") == rep["rules"], (rc, out[:300]))
-rc, _, err = run(os.path.join(STACK, "tools", "next_report.py"), "--store", str(T / "no-such"))
+rc, _, err = run(os.path.join(STACK, "stackshot", "tools", "next_report.py"), "--store", str(T / "no-such"))
 check("a --store that is no folder: exit 2", rc == 2, (rc, err))
 check("…and nothing was written by any of it", digest() == d0, None)
 

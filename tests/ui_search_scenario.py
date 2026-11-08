@@ -92,8 +92,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import server, render, search
-from ui import search as s2
+from stackshot.web import server; from stackshot.web import render; from stackshot.web import search
+from stackshot.web.ui import search as s2
 server._publish = lambda: None
 from starlette.testclient import TestClient
 

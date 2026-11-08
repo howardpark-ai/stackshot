@@ -69,9 +69,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:2500]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import anchors as a, router, router_live, routing
+from stackshot.anchors import anchors as a; from stackshot.router import router; from stackshot.router import router_live; from stackshot.router import routing
 
 # ---- 1. the registry's lead_agents
 reg = a.registry()

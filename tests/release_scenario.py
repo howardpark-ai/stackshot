@@ -592,6 +592,19 @@ check("deploy.sh rollback: an untracked ü.txt (non-ASCII) at a path the target 
 rc, out, head = rollback(c8, extra={"RT_LSTREE_FAILS": "1"})
 check("deploy.sh rollback: git ls-tree failing is a refusal, never 'no clash'; HEAD unmoved", rc == 1 and head == c9 and "cannot tell whether an untracked file stands where the target commit tracks a path" in out, (rc, out))
 (bx / "ü.txt").unlink()
+# an ignored file (a __pycache__/*.pyc the interpreter wrote) under a path the target tracks as a file is no clash: a reset removes it; a file that is not ignored still refuses
+with open(bx / ".git/info/exclude", "a") as f_: f_.write("__pycache__/\n")
+(bx / "é/__pycache__").mkdir(parents=True); (bx / "é/__pycache__/m.cpython-312.pyc").write_bytes(b"\0")
+rc, out, head = rollback(c8)
+check("deploy.sh rollback: an ignored é/__pycache__/m.pyc where the target tracks a file é is no clash: the rollback runs and goes back to the target",
+      rc == 0 and head == c8 and "an untracked file stands" not in out and f"rolling back {c9[:7]} to {c8[:7]}" in out, (rc, out))
+g("reset", "-q", "--hard", c9, cwd=bx)
+(bx / "é").mkdir(); (bx / "é/__pycache__").mkdir(); (bx / "é/__pycache__/m.cpython-312.pyc").write_bytes(b"\0"); (bx / "é/real.txt").write_text("untracked, not ignored\n")
+rc, out, head = rollback(c8)
+check("deploy.sh rollback: the same folder with a file that is not ignored beside the .pyc: refused, named (the .pyc is not), HEAD unmoved, both files untouched",
+      rc == 1 and head == c9 and "an untracked file stands where the target commit tracks a path" in out and "é/real.txt" in out and "m.cpython" not in out
+      and (bx / "é/real.txt").exists() and (bx / "é/__pycache__/m.cpython-312.pyc").exists(), (rc, out))
+(bx / "é/real.txt").unlink(); (bx / "é/__pycache__/m.cpython-312.pyc").unlink(); (bx / "é/__pycache__").rmdir(); (bx / "é").rmdir()
 
 # ---- 13. release on PR pass: a PR whose checks passed on a head that contains main's tip deploys at the merge; main's full run
 # follows, outside the lock, and a failure rolls back to the last good commit. The git stub's history is linear, oldest first: HIST.

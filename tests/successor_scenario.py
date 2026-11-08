@@ -41,7 +41,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, successor as S, model as M, handoff as H, stall as ST, audit_run  # noqa: E402
+from stackshot.web import server; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 TOLD = []

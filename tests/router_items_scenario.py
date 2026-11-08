@@ -62,7 +62,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import config as _cfg, router
+from stackshot.core import config as _cfg; from stackshot.router import router
 _cfg.CFG["router"] = {}
 cx = router.Context()
 shown = cx.shown
@@ -174,7 +174,7 @@ i_kept = put_raw("Party still stored", party="Beta", chase="2026-12-02", wait_ev
 ops = router.open_items_block("projects/ops", router.Context())
 check("retired: the router's list shows the wait_event as the party when the item stores no party", any(f"{shown('a' + str(i_ret))} · mover site-main · party Acme legal replies · Waiting on Acme legal" in l for l in ops), ops[:4])
 check("retired: a stored party still wins over the wait_event", any(f"{shown('a' + str(i_kept))} · mover site-main · party Beta · Party still stored" in l for l in ops), ops[:4])
-import cold_call, datetime as _dt
+import datetime as _dt; from stackshot.model import cold_call
 def hidden(i):
     msg = cold_call.build_hidden_message(shown("a" + str(i)), json.loads((T / f"store/a/{i}.json").read_text()), [], _dt.date(2026, 11, 5), ["site-main"], [], "test")
     return json.loads(msg.split("<item>\n", 1)[1].split("\n</item>", 1)[0])

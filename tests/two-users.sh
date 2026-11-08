@@ -79,12 +79,12 @@ for u in "${USERS[@]}"; do
         rm -rf "$h/stackshot"; cp -a "$SRC" "$h/stackshot"; chown -R "$u:$u" "$h/stackshot"
     fi
     as "$u" 'command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1'
-    as "$u" "cd ~/stackshot && ./stackshot setup --yes --owner $U --tz UTC --base-url https://$u.example.test --emails $u@example.test --port $p --force" > "$h/setup.log" 2>&1
+    as "$u" "cd ~/stackshot && bin/stackshot setup --yes --owner $U --tz UTC --base-url https://$u.example.test --emails $u@example.test --port $p --force" > "$h/setup.log" 2>&1
     check "$u: setup exits 0" grep -q "fill oauth.env" "$h/setup.log"
     # a placeholder Google client (not a credential: nobody signs in here), so doctor starts the server
     as "$u" "sed -i 's/^STACKSHOT_GOOGLE_CLIENT_ID=.*/STACKSHOT_GOOGLE_CLIENT_ID=two-users-test.apps.googleusercontent.com/; s/^STACKSHOT_GOOGLE_CLIENT_SECRET=.*/STACKSHOT_GOOGLE_CLIENT_SECRET=placeholder/' ~/.config/stackshot/oauth.env"
-    as "$u" 'cd ~/stackshot && ./stackshot doctor' > "$h/doctor-1.log" 2>&1
-    as "$u" 'cd ~/stackshot && ./stackshot client install' > "$h/client-install.log" 2>&1
+    as "$u" 'cd ~/stackshot && bin/stackshot doctor' > "$h/doctor-1.log" 2>&1
+    as "$u" 'cd ~/stackshot && bin/stackshot client install' > "$h/client-install.log" 2>&1
     check "$u: client install wrote $u's settings.json" test -f "$h/.claude/settings.json"
 done
 
@@ -102,7 +102,7 @@ for u in "${USERS[@]}"; do
     check "$u: …and from a shell that is not a login" as_nologin "$u" 'cd ~/stackshot && python3 client.py get whoami | grep -q machine'
     other=$([ "$u" = alice ] && echo bob || echo alice)
     check "$u: $u's token is refused by $other's server" refused_by "$u" "${PORT[$other]}"
-    as_nologin "$u" './stackshot/stackshot doctor' > "$h/doctor.log" 2>&1        # the non-login path (XDG_RUNTIME_DIR repaired)
+    as_nologin "$u" './stackshot/bin/stackshot doctor' > "$h/doctor.log" 2>&1        # the non-login path (XDG_RUNTIME_DIR repaired)
     check "$u: doctor says server box" bash -c "head -1 '$h/doctor.log' | grep -q 'server box'"
     check "$u: doctor flags nothing but the placeholder URL's OAuth metadata and the data repository's missing origin" \
         bash -c "! grep -E '^  (missing|warn)' '$h/doctor.log' | grep -v -e 'OAuth metadata reachable' -e 'no origin remote'"
@@ -120,7 +120,7 @@ PY
 done
 check "the two servers listen on different ports" test "${PORT[alice]}" != "${PORT[bob]}"
 check "bob cannot set up a second instance on alice's port (setup refuses, writes nothing)" bash -c \
-    "su - bob -c 'cd ~/stackshot && STACKSHOT_CONFIG=~/taken.toml ./stackshot setup --yes --port ${PORT[alice]} --data ~/taken-data --no-systemd' | grep -q 'is taken on this box by alice' && test ! -e /home/bob/taken.toml -a ! -e /home/bob/taken-data"
+    "su - bob -c 'cd ~/stackshot && STACKSHOT_CONFIG=~/taken.toml bin/stackshot setup --yes --port ${PORT[alice]} --data ~/taken-data --no-systemd' | grep -q 'is taken on this box by alice' && test ! -e /home/bob/taken.toml -a ! -e /home/bob/taken-data"
 
 # ---------------------------------------------------------------------------- 4. nothing written outside the two homes and /run/user
 echo "== outside the homes"

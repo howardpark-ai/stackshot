@@ -56,7 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 # ---- 1. the registry and the rule
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True); R = json.loads((T / "store/projects.json").read_text())["pages"]
 check("registry: `hub:` with a full key", R["ops/example-hub"].get("hub") == "projects/example", R["ops/example-hub"])
 check("registry: a bare slug names a page in the first dir", R["ops/bare"].get("hub") == "projects/example", R["ops/bare"])
@@ -64,7 +64,7 @@ check("registry: a sub-page key counts as its top-level page", R["ops/subkey"].g
 check("registry: a hub that names no page is ignored", "hub" not in R["ops/missing"], R["ops/missing"])
 check("registry: a hub naming the page's own project is ignored", "hub" not in R["projects/example/self"], R["projects/example/self"])
 check("registry: a page without the line has no hub key", all("hub" not in R[k] for k in ("projects/example", "ops/example-hub/roster-notes", "projects/other")))
-import anchors as A
+from stackshot.anchors import anchors as A
 check("hub_of: a folded page and everything under it", [A.hub_of(k, R) for k in ("ops/example-hub", "ops/example-hub/roster-notes", "ops/example-hub/roster-notes/x")] == ["projects/example"] * 3)
 check("hub_of: otherwise the top-level page", [A.hub_of(k, R) for k in ("projects/other", "projects/other/sub", "ops/missing", "projects/example/queue-notes")] == ["projects/other", "projects/other", "ops/missing", "projects/example"])
 check("session_hubs: a keeper of a hub and of a page folded into it belongs to one hub", A.session_hubs("falcon", R) == ["projects/example"], A.session_hubs("falcon", R))
@@ -107,7 +107,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
       A.file_roles(_bg).get("home-both", {}).get("role") == "front", A.file_roles(_bg).get("home-both"))
 
 # ---- 2. the server's note
-import server
+from stackshot.web import server
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
 server._publish = lambda: None
 def create(project, owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, sender=owner, **{"next": f"{owner}: carry on", **kw})
@@ -195,7 +195,7 @@ check("roles.json: a stale file is refreshed by the pass the runner runs every m
       and [(t.group, t.board) for t in server._minute_ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(server._publish_now), json.loads(RJ.read_text())["generated"])
 st, ct, body = server._client_get("roles", {})
 check("client read `roles`: the file as written", (st, ct) == (200, "application/json") and body == RJ.read_text() and json.loads(body)["sessions"]["home-side-main"]["role"] == "front", (st, ct, body[:200]))
-import client as _client
+from stackshot.fleet import client as _client
 check("client.py knows the read", "roles" in _client.READS)
 check("the server's own gates keep session_roles: a one-session project's keeper may be named in needs, takes messages unmarked, "
       "and is no front agent for its notices", server._gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
@@ -211,7 +211,7 @@ check("sessions tool: the only session of a one-session project reads front ther
       and A.session_roles().get("harbor-ops") == {"role": "keeper", "project": "projects/ops"}, [row("harbor-ops"), A.session_roles().get("harbor-ops")])
 
 # ---- 3. the board
-import render
+from stackshot.web import render
 bd = render.Board(f"{tmp}/store")
 rows = set(bd.by_proj)
 check("board: no row for the folded page; its items sit on the hub's row", "ops/example-hub" not in rows and "projects/example" in rows

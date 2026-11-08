@@ -54,7 +54,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import server, uiprefs as up
+from stackshot.web import server; from stackshot.web import uiprefs as up
 import uvicorn
 server._publish = lambda: None
 DEFAULT = list(up.PANEL_SECTIONS); LAB = {"machines": "Machines", "runners": "Runners", "anchorhub": "Anchor hub", "audit-panel": "Audit", "projects-panel": "Projects"}

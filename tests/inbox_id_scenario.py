@@ -46,8 +46,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 rd = lambda p: json.loads(pathlib.Path(p).read_text())
 
-import config as cfg, clients as cl, fleet as fl, inbox, push
-import sessions_registry as sr
+from stackshot.core import config as cfg; from stackshot.fleet import clients as cl; from stackshot.fleet import fleet as fl; from stackshot.fleet import inbox; from stackshot.fleet import push
+from stackshot.fleet import sessions_registry as sr
 
 # ----------------------------------------------------------------------------- the fixture registry
 OLD, NEW, NEW2, NEW3, STALE, MAIN, SENDER, LONE = U(1), U(2), U(3), U(4), U(5), U(6), U(7), U(8)
@@ -219,7 +219,7 @@ check("…a hold on another session does not", len(poll_to({NEW: NAME})) == 1)
 os.remove(T / "state/anchor-hub/held-msg.txt"); clear()
 
 # ================================================================= 4. the client API's poll, and push.py / the message tool
-import client, server
+from stackshot.fleet import client; from stackshot.web import server
 server._publish = lambda: None
 tok = open(client.mint("box-far")).read().strip()
 from starlette.testclient import TestClient

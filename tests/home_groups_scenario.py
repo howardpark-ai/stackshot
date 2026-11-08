@@ -69,8 +69,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from ui import render
-import home
+from stackshot.web.ui import render
+from stackshot.web import home
 
 def board(queued=()):
     b = render.Board(str(T / "store"), now=NOW)
@@ -95,7 +95,7 @@ check("setup: the four lists hold what the fixtures say", sorted(ids(YMs)) == ["
 check("Your move: the subsections come work, home, ops (not the rows' creation or age order); home holds the project hmp and the row with no project (the default scope), ops the ops/ page",
       [t[0] for t in tree(YMs)] == ["work", "home", "ops"] and {t[0]: set(t[2]) for t in tree(YMs)} == {"work": {"3", "4"}, "home": {"2", "5", "6"}, "ops": {"1"}}, tree(YMs))
 check("Waiting: work, home, ops", [t[0] for t in tree(WLs)] == ["work", "home", "ops"], tree(WLs))
-check("the order is the config's order, read as the Closed page reads it (projects.scopes), not a list in the render code", __import__("projects").scopes() == ["work", "home", "ops"])
+check("the order is the config's order, read as the Closed page reads it (projects.scopes), not a list in the render code", __import__("stackshot.projects.projects", fromlist=["_"]).scopes() == ["work", "home", "ops"])
 
 # ---- the empty cases ----
 check("On agent: a scope with no row draws no heading (no ops here); the others come in order", tree(AWs) and [t[0] for t in tree(AWs)] == ["work", "home"] and heads(AWs) == ["work", "home"], tree(AWs))

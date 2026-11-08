@@ -102,7 +102,7 @@ def stderr():
     try: yield buf
     finally: sys.stderr = old
 
-import config as _cfg, brains, pages as _pg, page_debt, rename_page
+from stackshot.core import config as _cfg; from stackshot.projects import brains; from stackshot.projects import pages as _pg; from stackshot.router import page_debt; from stackshot.projects import rename_page
 _cfg.CFG["pages"]["flavor"] = "gbrain"
 def set_brains(*bs):
     if bs: _cfg.CFG["brains"] = [dict(b) for b in bs]
@@ -163,7 +163,7 @@ _cfg.CFG["pages"]["flavor"] = "gbrain"
 check("2 a healthy second brain reports no problem", brains.problem(brains.for_key("gamma")) == "")
 
 # ---- 3. the second copy is missing: fail open everywhere
-import server
+from stackshot.web import server
 server._publish = lambda: None
 shutil.move(str(T / "second"), str(T / "second-away"))
 with stderr() as err:
@@ -354,8 +354,7 @@ check("10 and not the gbrain home", all("home" not in b for b in cc["brains"]) a
 set_brains()
 check("10 with no [[brains]] the client config has no brains key", "brains" not in server._client_config())
 set_brains(SECOND)
-loader = importlib.machinery.SourceFileLoader("stackshot_cli", os.path.join(STACK, "stackshot"))
-cli = importlib.util.module_from_spec(importlib.util.spec_from_loader("stackshot_cli", loader)); loader.exec_module(cli)
+from stackshot import cli
 text = cli.client_config_text(server._client_config(), "https://board.example.com")
 parsed = tomllib.loads(text)
 check("10 client install writes the brain into the client's config", parsed.get("brains") == [{"name": "second", "path": str(T / "second"), "mirror_url": SECOND["mirror_url"],
@@ -856,7 +855,7 @@ for _f in ("brain/projects/zeta-old.md", "second/projects/zeta-seen.md", "brain/
     (T / _f).unlink(missing_ok=True)
 
 # ---- 19. a thin-client brain: `gbrain call` is refused, so a read and a timeline line go by the named commands; a refusal is never "no page"
-import project_verbs as pv
+from stackshot.projects import project_verbs as pv
 THIN = {"name": "thin", "path": str(T / "thin"), "home": str(T / "home-thin"), "slugs": ["projects/thin-page"], "stale_hours": 0}
 REFUSE = {"name": "refuse", "path": str(T / "refuse"), "home": str(T / "home-refuse"), "slugs": ["projects/refused-page"], "stale_hours": 0}
 THIN_PAGE = "---\ntype: project\ntitle: Thin\ndisplay-name: thin-old\nstatus: active\n---\n\n# Thin\n"

@@ -38,9 +38,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import server
+from stackshot.web import server
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = lambda: None
 
@@ -200,7 +200,7 @@ refused("…but it is judged when the call also passes an ask", lambda: create(n
 refused("…and an ask-shaped line that is not the first line is judged", lambda: create(next="home-other: first\n" + ASKL), "a line of next is")
 
 # ---- 6d. clipping is by how a line reads, at a word outside any link and any naked URL (bullet_text, shared by the cold call and the question route)
-import bullet_text as BT
+from stackshot.model import bullet_text as BT
 LK = "[board#1](https://github.com/example/board/issues/1)"
 long_words = " ".join(["word"] * 40)                    # 199 characters of words
 c1 = BT.clip_bullet(f"- {long_words} {LK} tail", 120)
@@ -269,7 +269,7 @@ check("judge: fences pair off one at a time (a second block is a block, an unpai
 check("an owner-name line with spaces round the backticks is the whole-command form; prose after it is not", server._owner_command(f"  {server.OWNER}: `ls -l`  ") and not server._owner_command(f"{server.OWNER}: `ls` and more"), None)
 
 # ---- 6g. the way back, and the re-bullet pass held to the same line limit
-import rebullet as RB
+from stackshot.model import rebullet as RB
 d_cfg["require_bullets"] = False
 passes("require_bullets = false: prose passes the bullet check again (the way back)", lambda: create("Plain prose, as before."))
 refused("…but the line cap still holds", lambda: create("\n".join(f"line {i}" for i in range(9))), "description has 9 lines")

@@ -64,12 +64,12 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
 server._front_sender = lambda who: False
-import waiting as W
+from stackshot.waits import waiting as W
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
@@ -139,7 +139,7 @@ upd(12, wake=day(5), wait_basis=f"the vendor moved the ship day to {day(5)}, a m
 check("park: a later wake with new basis text is accepted", mt(12)["wake"] == day(5), mt(12))
 
 # ================================================================ the tool function: the self-wait gate and this gate both run
-import self_wait as SW
+from stackshot.waits import self_wait as SW
 CALLS = []
 def fake_run(message):
     CALLS.append(message)

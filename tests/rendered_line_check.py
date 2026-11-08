@@ -60,7 +60,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import server
+from stackshot.web import server
 import uvicorn
 server._publish = lambda: None
 COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))

@@ -131,8 +131,8 @@ def check(name, cond, got=None):
 STORE = T / "store"
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 
-import server, ghsync as G
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False
 server._refuse_if_owing = lambda debtor: None

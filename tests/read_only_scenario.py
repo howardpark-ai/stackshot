@@ -23,7 +23,7 @@ if len(sys.argv) > 2 and sys.argv[1] == "--normal-child":
     os.environ.pop("STACKSHOT_READ_ONLY", None); os.environ.pop("STACKSHOT_URL", None)
     os.environ.update(STACKSHOT_CONFIG=f"{root}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{root}/fleet")
     sys.path.insert(0, STACK); logging.disable(logging.CRITICAL)
-    import readonly, server
+    from stackshot.core import readonly; from stackshot.web import server
     from starlette.testclient import TestClient
     app = server.mcp.http_app()
     routes = {}
@@ -104,8 +104,8 @@ ROOTS = [T / d for d in ("inst", "state", "brain", "touch", "secrets")]
 before = tree(*ROOTS)
 threads_before = {t.name for t in threading.enumerate()}
 
-import readonly
-import server
+from stackshot.core import readonly
+from stackshot.web import server
 atexit.register(lambda: readonly._reload_for_test(False))        # runs before _scratch's clean-up: the backstop must be off when the folders are removed
 REFUSAL = "stackshot here is a read-only standby copy (STACKSHOT_READ_ONLY); writes go to the live board."
 
@@ -154,7 +154,7 @@ for tool, args in WRITES:
 check("after every refused write tool the data is byte-for-byte as the fixture left it", tree(*ROOTS) == before, [k for k in tree(*ROOTS) if tree(*ROOTS)[k] != before.get(k)][:5])
 
 # ---- 3. the lowest layers, called directly
-import anchors as anc_mod, projects as proj_mod, publish as pub_mod, ghsync
+from stackshot.anchors import anchors as anc_mod; from stackshot.projects import projects as proj_mod; from stackshot.web import publish as pub_mod; from stackshot.github import ghsync
 
 
 def raises(name, f):
@@ -280,7 +280,7 @@ env = {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_URL",)}
 env.update(STACKSHOT_READ_ONLY="1", STACKSHOT_CONFIG=f"{tmp}/hub.toml", HOME=tmp, PYTHONDONTWRITEBYTECODE="1")
 hub_before = tree(*ROOTS)
 errf = open(T / "hub.err", "w")
-proc = subprocess.Popen([sys.executable, os.path.join(STACK, "anchor-hub.py")], env=env, cwd=tmp, stdout=subprocess.DEVNULL, stderr=errf)
+proc = subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/anchors/anchor_hub.py")], env=env, cwd=tmp, stdout=subprocess.DEVNULL, stderr=errf)
 try:
     st, data, ra = ask(hub_port, "GET", "/", tries=80)
     check("anchor-hub with the switch on: the hook port answers GET 503 `standby (STACKSHOT_READ_ONLY)`", st == 503 and data == "standby (STACKSHOT_READ_ONLY)", (st, data))
@@ -305,7 +305,7 @@ finally:
 check("anchor-hub standby stops cleanly on SIGTERM", proc.returncode == 0, proc.returncode)
 
 # the hub's own guards, behind anchor-hub.py's early exit: a delivery, a status write and a receiver start raise on the standby
-import anchorhub.core as hub_core
+import stackshot.anchors.anchorhub.core as hub_core
 raises("Hub.deliver raises on the standby", lambda: hub_core.Hub.deliver(None, "github:o/r#1", "home-here", "text"))
 raises("Hub.write_status raises on the standby", lambda: hub_core.Hub.write_status(None))
 raises("start_receiver raises on the standby", lambda: hub_core.start_receiver(None, "slack", lambda *_: None, lambda: True))
@@ -335,7 +335,7 @@ for d in ("fleet", "brain", "secrets"): (N / d).mkdir(parents=True, exist_ok=Tru
 shutil.copytree(T / "inst", N / "inst"); shutil.copytree(T / "fleet", N / "fleet", dirs_exist_ok=True); shutil.copytree(T / "brain", N / "brain", dirs_exist_ok=True)
 shutil.copy(T / "RULES.md", N / "RULES.md")
 write_toml("stackshot.toml", root=str(N))
-src = pathlib.Path(STACK, "server.py").read_text(encoding="utf-8")
+src = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 declared = {}
 for path, m in re.findall(r'(?m)^@mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)', src):
     if not m.startswith("["):

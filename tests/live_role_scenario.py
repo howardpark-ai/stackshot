@@ -44,8 +44,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server
-import pages as pg
+from stackshot.web import server
+from stackshot.projects import pages as pg
 from fastmcp.exceptions import ToolError
 server._publish = lambda: None
 

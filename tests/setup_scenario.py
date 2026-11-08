@@ -1,4 +1,4 @@
-"""Scenario test for ./stackshot: setup, doctor and client install on a fresh HOME — no systemd, no sudo, no network
+"""Scenario test for bin/stackshot: setup, doctor and client install on a fresh HOME — no systemd, no sudo, no network
 beyond 127.0.0.1, nothing outside a temp dir.
 
 Covers: `setup --yes` writes a config that config.py loads with the derived paths; the data repository has one commit with
@@ -49,7 +49,7 @@ ENV = {**os.environ, "HOME": str(HOME), "STACKSHOT_URL": "http://127.0.0.1:9",  
 for k in ("STACKSHOT_CONFIG", "BOARD_MCP_CONFIG", "STACKSHOT_URL", "STACKSHOT_FLEET_DIR", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL",
           "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"):
     ENV.pop(k, None)
-SS = os.path.join(STACK, "stackshot")
+SS = os.path.join(STACK, "bin", "stackshot")
 DATA = T / "data"; CFG = HOME / ".config/stackshot/stackshot.toml"; SEC = HOME / ".config/stackshot"
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -64,7 +64,7 @@ r = ss("setup", "--yes", "--data", str(DATA), "--base-url", "http://127.0.0.1:18
 out = r.stdout + r.stderr
 check("setup exits 0", r.returncode == 0, out[-1500:])
 check("setup prints the Google redirect URI and the connector URL", "http://127.0.0.1:18020/auth/callback" in out and "http://127.0.0.1:18020/mcp" in out, out[-800:])
-check("setup ends with the next step", "fill oauth.env" in out and "./stackshot doctor" in out, out[-300:])
+check("setup ends with the next step", "fill oauth.env" in out and "bin/stackshot doctor" in out, out[-300:])
 check("setup says the unit step was skipped", "skipped (--no-systemd)" in out, out)
 check("setup set a repo-local git identity and said so", "git has no identity" in out, out)
 check("setup never called sudo", not (T / "sudo-called").exists())
@@ -126,7 +126,7 @@ check("clients.py reads that row", r.returncode == 0 and json.loads(r.stdout).ge
 
 # the page registry
 (DATA / "board-data/projects.json").unlink()
-r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "registry"], capture_output=True, text=True, env=ENV)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "registry"], capture_output=True, text=True, env=ENV)
 reg = json.loads((DATA / "board-data/projects.json").read_text(encoding="utf-8")).get("pages", {}) if r.returncode == 0 else {}
 check("pages.py registry lists projects/getting-started", r.returncode == 0 and list(reg) == ["projects/getting-started"], r.stdout + r.stderr)
 g = reg.get("projects/getting-started", {})
@@ -273,12 +273,12 @@ check("plain, no pages copy: the nag says where the page is, without nested pare
 
 # ---- publish.py flush with no origin remote: committed is all there is
 fenv = {**ENV}
-r = subprocess.run([sys.executable, os.path.join(STACK, "publish.py"), "flush"], capture_output=True, text=True, env=fenv, timeout=120)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/web/publish.py"), "flush"], capture_output=True, text=True, env=fenv, timeout=120)
 check("flush with no origin remote: exit 0, says nothing was pushed", r.returncode == 0 and "no origin remote, so nothing was pushed" in r.stdout
       and "committed and pushed" not in r.stdout, r.stdout[-500:] + r.stderr[-500:])
 check("…and the board is committed (clean tree)", git("status", "--porcelain") == "" and int(git("rev-list", "--count", "HEAD")) >= 2, git("status", "--porcelain"))
 git("remote", "add", "origin", str(T / "no-such-remote.git"))
-r = subprocess.run([sys.executable, os.path.join(STACK, "publish.py"), "flush"], capture_output=True, text=True, env=fenv, timeout=120)
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/web/publish.py"), "flush"], capture_output=True, text=True, env=fenv, timeout=120)
 check("flush with an origin it cannot fetch: non-zero, and says so", r.returncode != 0 and "cannot fetch main from origin" in (r.stdout + r.stderr), r.stdout[-300:] + r.stderr[-300:])
 r = ss("doctor", "--no-systemd")
 check("doctor says the origin remote is set", re.search(r"ok\s+data repository \S+: origin remote set", r.stdout) is not None, r.stdout[-800:])
@@ -343,7 +343,7 @@ r = ss("client", "install", "--url", FURL, "--token-file", str(SEC / "client-tok
 check("with STACKSHOT_CONFIG set, client install writes no config", r.returncode == 0 and not (L2 / ".config/stackshot/stackshot.toml").exists(), r.stdout[-400:])
 # the puller stops within about 2 s of SIGTERM while the server holds its poll (a line is removed only on ack, so nothing is lost)
 (T / "emptyreg").mkdir()
-pp = subprocess.Popen([sys.executable, os.path.join(STACK, "puller.py"), "--registry", str(T / "emptyreg")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+pp = subprocess.Popen([sys.executable, os.path.join(STACK, "stackshot/fleet/puller.py"), "--registry", str(T / "emptyreg")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                       env={**lenv, "STACKSHOT_URL": FURL})
 time.sleep(2.0); t0 = time.time(); pp.send_signal(signal.SIGTERM)
 try: pout, perr = pp.communicate(timeout=10); took = time.time() - t0
@@ -400,7 +400,7 @@ r = ss("doctor", env=plug_home("ph-prefix", True, True, plugin_name="stackshot-x
 check("a plugin named stackshot-x@m is not the stackshot plugin: it does not count", r.returncode == 1 and re.search(r"missing\s+Claude Code hooks in \S+: 1 of 4", o), o[-500:])
 r = ss("doctor", env=plug_home("ph-alone", True, False, installed=False, plugin_name="unrelated@demo-market")); o = r.stdout
 check("board alone (settings hooks, no stackshot plugin): the line and the exit are as before", r.returncode == 1
-      and re.search(r"missing\s+Claude Code hooks in \S+: 1 of 4 — run ./stackshot client install\n", o), o[-700:])
+      and re.search(r"missing\s+Claude Code hooks in \S+: 1 of 4 — run bin/stackshot client install\n", o), o[-700:])
 r = ss("doctor", env={**lenv_x, "STACKSHOT_URL": "http://127.0.0.1:9"})
 check("doctor (client) with the server out of reach: missing, says why, exit 1", r.returncode == 1
       and re.search(r"missing\s+the server at http://127\.0\.0\.1:9 answers whoami for this machine: \[0\] .* — the server cannot be reached", r.stdout) is not None, r.stdout[-800:])

@@ -53,7 +53,7 @@ def commit(msg: str, **files) -> str:
     for name, text in files.items(): (ORIGIN / name).parent.mkdir(parents=True, exist_ok=True); (ORIGIN / name).write_text(text)
     git(ORIGIN, "add", "-A"); git(ORIGIN, "commit", "-q", "-m", msg); return git(ORIGIN, "rev-parse", "HEAD")
 git(T, "init", "-q", "-b", "main", str(ORIGIN))
-A = commit("first", **{"puller.py": 'VERSION = "6"\n', "client.py": "x = 1\n", "config.py": "y = 1\n", "said.py": "z = 1\n", "README.md": "one\n", "pages.py": "x = 1\n", "client/hooks/client.sh": "echo 1\n"})
+A = commit("first", **{**{f"stackshot/{d}__init__.py": "" for d in ("", "fleet/", "core/", "model/", "projects/")}, "stackshot/fleet/puller.py": 'VERSION = "6"\n', "stackshot/fleet/client.py": "x = 1\n", "stackshot/core/config.py": "y = 1\n", "stackshot/model/said.py": "z = 1\n", "README.md": "one\n", "stackshot/projects/pages.py": "x = 1\n", "client/hooks/client.sh": "echo 1\n"})
 git(T, "clone", "-q", str(ORIGIN), str(BOX))
 VFILE = T / "claude-version"; VFILE.write_text("2.9.9")
 exe = T / "bin/claude"
@@ -63,8 +63,8 @@ exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
 os.environ["PATH"] = str(T / "bin") + os.pathsep + os.environ.get("PATH", "")
 REG = str(T / "reg")
 
-import client, clients as cl, puller, versions as ver
-import server
+from stackshot.fleet import client; from stackshot.fleet import clients as cl; from stackshot.fleet import puller; from stackshot.fleet import versions as ver
+from stackshot.web import server
 server._publish = lambda: None
 puller.CHECKOUT = str(BOX)
 REAL_CP = puller._claude_process
@@ -88,7 +88,7 @@ check("clients.checkout_commit: the server's checkout commit, cached a minute", 
 cur = cl.current("box-far")
 check("current: the puller's VERSION, the server's commit, self_update on for a client box; nothing about the CLI", cur == {"puller": puller.VERSION, "stackshot": MINE, "self_update": True}, cur)
 check("current: never for the server box's own token", cl.current(ME)["self_update"] is False, cl.current(ME))
-import config as _cfg
+from stackshot.core import config as _cfg
 _cfg.CFG["client"]["self_update"] = False
 check("current: [client] self_update = false in the server's config switches every box off", cl.current("box-far")["self_update"] is False, cl.current("box-far"))
 _cfg.CFG["client"]["self_update"] = True
@@ -138,7 +138,7 @@ with TestClient(app) as c:
 
 # ============================================================= 2. what is behind
 CUR = lambda sha, on=True: {"puller": "6", "stackshot": sha, "self_update": on}
-B = commit("the docs, a page and a hook, not the puller", **{"README.md": "two\n", "pages.py": "x = 2\n", "client/hooks/client.sh": "echo 2\n"})
+B = commit("the docs, a page and a hook, not the puller", **{"README.md": "two\n", "stackshot/projects/pages.py": "x = 2\n", "client/hooks/client.sh": "echo 2\n"})
 check("plan: an older checkout is behind", puller.plan(CUR(B), []) == [("stackshot checkout", A, B)], puller.plan(CUR(B), []))
 check("plan: a checkout at the server's commit: nothing", puller.plan(CUR(A), []) == [], puller.plan(CUR(A), []))
 check("plan: no answer, no plan", puller.plan({"stackshot": ""}, []) == [] and puller.plan({}, []) == [])
@@ -170,11 +170,11 @@ at = puller.attempts()
 check("idle and behind: the whole checkout fast-forwarded, then a reload (a docs-only change too: the code the puller runs is the checkout's); the CLI untouched",
       rc == puller.RELOAD and probe() == "2.9.9" and head() == B and [(a["what"], a["from"], a["to"], a["ok"], a["reason"]) for a in at] == [("stackshot checkout", A[:12], B[:12], True, "")]
       and all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", a["at"]) for a in at) and f"update stackshot checkout {A[:12]} → {B[:12]}: ok" in out, (rc, out, at, probe(), head()))
-check("…the whole checkout moved with it: the docs, pages.py, the hooks", (BOX / "README.md").read_text() == "two\n" and (BOX / "pages.py").read_text() == "x = 2\n" and (BOX / "client/hooks/client.sh").read_text() == "echo 2\n", sorted(p.name for p in BOX.iterdir()))
+check("…the whole checkout moved with it: the docs, pages.py, the hooks", (BOX / "README.md").read_text() == "two\n" and (BOX / "stackshot/projects/pages.py").read_text() == "x = 2\n" and (BOX / "client/hooks/client.sh").read_text() == "echo 2\n", sorted(p.name for p in BOX.iterdir()))
 st = rd(T / "state/puller-updates.json")
 check("the attempts and the tries are kept on the box (the attempt names the commits short, the try the target in full)",
       st["attempts"] == at and st["tried"] == {"stackshot checkout": {"to": B, "at": st["tried"]["stackshot checkout"]["at"], "n": 1}}, st)
-C = commit("the puller itself", **{"puller.py": 'VERSION = "7"\n'})
+C = commit("the puller itself", **{"stackshot/fleet/puller.py": 'VERSION = "7"\n'})
 rc, out = quiet(puller.keep_current, CUR(C), [])
 check("a change to puller.py: fast-forwarded, and the puller asks for a reload", rc == puller.RELOAD and head() == C and puller.attempts()[-1]["ok"] is True, (rc, out, head()))
 rc, out = quiet(puller.keep_current, CUR(C), [])
@@ -205,12 +205,12 @@ rc, out = quiet(puller.keep_current, CUR(D), [])
 check("…and a second poll there records nothing", rc is None and out == "" and puller.attempts()[-1]["reason"] == "already at the server's commit" and puller.attempts()[-2]["reason"] == "local changes in the checkout", (out, puller.attempts()[-2:]))
 rc, out = quiet(puller.keep_current, CUR(E), [])
 check("back on the server's line: fast-forwarded", rc == puller.RELOAD and head() == E and puller.attempts()[-1]["ok"] is True, (out, head()))
-F = commit("broken", **{"puller.py": 'def (:\n'})
+F = commit("broken", **{"stackshot/fleet/puller.py": 'def (:\n'})
 rc, out = quiet(puller.keep_current, CUR(F), [])
 check("a commit whose puller.py does not compile: refused before the tree is touched (HEAD stays), the failure reported, no reload",
-      rc is None and head() == E and puller.attempts()[-1]["ok"] is False and puller.attempts()[-1]["reason"] == "puller.py does not compile at " + F[:12]
+      rc is None and head() == E and puller.attempts()[-1]["ok"] is False and puller.attempts()[-1]["reason"] == "stackshot/fleet/puller.py does not compile at " + F[:12]
       and git(BOX, "status", "--porcelain", "--untracked-files=no") == "", (out, puller.attempts()[-1], head()))
-G = commit("fixed", **{"puller.py": 'VERSION = "8"\n'})
+G = commit("fixed", **{"stackshot/fleet/puller.py": 'VERSION = "8"\n'})
 rc, out = quiet(puller.keep_current, CUR(G), [])
 check("the fix: fast-forwarded and a reload", rc == puller.RELOAD and head() == G and puller.attempts()[-1]["ok"] is True, (out, head()))
 Hc = commit("fetch will fail", **{"README.md": "five\n"})
@@ -279,29 +279,29 @@ Hc = head()
 clean = lambda: git(BOX, "status", "--porcelain", "--untracked-files=no") == ""
 
 # ---- the target is compiled from git before anything is touched: every file the puller runs from, and what those import
-K1 = commit("client.py broken", **{"client.py": "def (:\n"})
+K1 = commit("client.py broken", **{"stackshot/fleet/client.py": "def (:\n"})
 rc, out = quiet(puller.keep_current, CUR(K1), [])
-check("a broken client.py in the target: refused, HEAD untouched, nothing of it on disk", rc is None and head() == Hc and clean() and (BOX / "client.py").read_text() == "x = 1\n"
-      and puller.attempts()[-1]["reason"] == "client.py does not compile at " + K1[:12] and puller.attempts()[-1]["ok"] is False, (out, puller.attempts()[-1]))
-K2 = commit("client fixed, and puller.py imports a new module that is broken", **{"client.py": "x = 2\n", "puller.py": 'VERSION = "8"\nimport helper_mod\n', "helper_mod.py": "def (:\n"})
+check("a broken client.py in the target: refused, HEAD untouched, nothing of it on disk", rc is None and head() == Hc and clean() and (BOX / "stackshot/fleet/client.py").read_text() == "x = 1\n"
+      and puller.attempts()[-1]["reason"] == "stackshot/fleet/client.py does not compile at " + K1[:12] and puller.attempts()[-1]["ok"] is False, (out, puller.attempts()[-1]))
+K2 = commit("client fixed, and puller.py imports a new module that is broken", **{"stackshot/fleet/client.py": "x = 2\n", "stackshot/fleet/puller.py": 'VERSION = "8"\nfrom stackshot.fleet import helper_mod\n', "stackshot/fleet/helper_mod.py": "def (:\n"})
 rc, out = quiet(puller.keep_current, CUR(K2), [])
-check("a module the puller imports (not one of the four files) that does not compile: refused too", rc is None and head() == Hc and clean() and not (BOX / "helper_mod.py").exists()
-      and puller.attempts()[-1]["reason"] == "helper_mod.py does not compile at " + K2[:12], (out, puller.attempts()[-1]))
-git(ORIGIN, "rm", "-q", "said.py"); K3 = commit("helper fixed, said.py gone", **{"helper_mod.py": "z = 1\n"})
+check("a module the puller imports (not one of the four files) that does not compile: refused too", rc is None and head() == Hc and clean() and not (BOX / "stackshot/fleet/helper_mod.py").exists()
+      and puller.attempts()[-1]["reason"] == "stackshot/fleet/helper_mod.py does not compile at " + K2[:12], (out, puller.attempts()[-1]))
+git(ORIGIN, "rm", "-q", "stackshot/model/said.py"); K3 = commit("helper fixed, said.py gone", **{"stackshot/fleet/helper_mod.py": "z = 1\n"})
 rc, out = quiet(puller.keep_current, CUR(K3), [])
-check("a file the puller runs from that is missing in the target: refused", rc is None and head() == Hc and clean() and puller.attempts()[-1]["reason"] == "said.py is missing at " + K3[:12], (out, puller.attempts()[-1]))
-K4 = commit("said.py back", **{"said.py": "z = 1\n"})
+check("a file the puller runs from that is missing in the target: refused", rc is None and head() == Hc and clean() and puller.attempts()[-1]["reason"] == "stackshot/model/said.py is missing at " + K3[:12], (out, puller.attempts()[-1]))
+K4 = commit("said.py back", **{"stackshot/model/said.py": "z = 1\n"})
 rc, out = quiet(puller.keep_current, CUR(K4), [])
-check("…and a good target after the broken ones (a new target is tried at once) lands, with its new import", rc == puller.RELOAD and head() == K4 and clean() and (BOX / "helper_mod.py").read_text() == "z = 1\n", (rc, out, head()))
+check("…and a good target after the broken ones (a new target is tried at once) lands, with its new import", rc == puller.RELOAD and head() == K4 and clean() and (BOX / "stackshot/fleet/helper_mod.py").read_text() == "z = 1\n", (rc, out, head()))
 Hc = K4
 # the check after the merge, on the tree as it is: a failure there rolls the merge back
 _tc = puller._target_compiles; puller._target_compiles = lambda to: ""
-K5 = commit("slips past the pre-check", **{"config.py": "def (:\n"})
+K5 = commit("slips past the pre-check", **{"stackshot/core/config.py": "def (:\n"})
 rc, out = quiet(puller.keep_current, CUR(K5), [])
 puller._target_compiles = _tc
-check("a tree that does not compile after the merge (the pre-check let it by) is put back at the old HEAD, the failure reported", rc is None and head() == Hc and clean() and (BOX / "config.py").read_text() == "y = 1\n"
-      and puller.attempts()[-1]["reason"] == "config.py does not compile at " + K5[:12], (out, head(), puller.attempts()[-1]))
-K6 = commit("config fixed", **{"config.py": "y = 2\n"}); rc, out = quiet(puller.keep_current, CUR(K6), [])
+check("a tree that does not compile after the merge (the pre-check let it by) is put back at the old HEAD, the failure reported", rc is None and head() == Hc and clean() and (BOX / "stackshot/core/config.py").read_text() == "y = 1\n"
+      and puller.attempts()[-1]["reason"] == "stackshot/core/config.py does not compile at " + K5[:12], (out, head(), puller.attempts()[-1]))
+K6 = commit("config fixed", **{"stackshot/core/config.py": "y = 2\n"}); rc, out = quiet(puller.keep_current, CUR(K6), [])
 check("…and the next target lands", rc == puller.RELOAD and head() == K6 and clean(), (rc, out)); Hc = K6
 
 # ---- a merge that fails midway leaves the checkout at the old HEAD, clean, with git's own error line as the reason
@@ -314,7 +314,7 @@ check("an untracked file in the way: the merge fails, the checkout is as it was,
 _g = puller._git
 def half_merge(args, timeout=60, **kw):
     if args and args[0] == "merge":            # the merge moves HEAD and the files, then fails (a locked file, a virus scanner)
-        _g(args, timeout, **kw); (BOX / "README.md").write_text("half done\n"); (BOX / "pages.py").write_text("half done\n")
+        _g(args, timeout, **kw); (BOX / "README.md").write_text("half done\n"); (BOX / "stackshot/projects/pages.py").write_text("half done\n")
         return 1, "", "error: unable to unlink old 'pages.py': Permission denied"
     return _g(args, timeout, **kw)
 puller._git = half_merge
@@ -324,7 +324,7 @@ puller._git = _g
 check("a merge that fails after it moved HEAD and wrote files: back at the old HEAD on its branch (reset --keep), the reason recorded, the file that was being written is still the box's own edit, never reset away",
       rc is None and head() == Hc and (BOX / "README.md").read_text() == "half done\n" and not (BOX / "newfile.txt").exists()
       and puller.attempts()[-1]["reason"] == "git merge --ff-only: error: unable to unlink old 'pages.py': Permission denied" and git(BOX, "rev-parse", "--abbrev-ref", "HEAD") == "main", (out, head(), puller.attempts()[-1]))
-git(BOX, "checkout", "--", "README.md", "pages.py")      # (whoever edited them puts them back)
+git(BOX, "checkout", "--", "README.md", "stackshot/projects/pages.py")      # (whoever edited them puts them back)
 puller._STATE["tried"].pop("stackshot checkout", None)
 rc, out = quiet(puller.keep_current, CUR(K7), [])
 check("…and the next attempt lands", rc == puller.RELOAD and head() == K7 and clean(), (rc, out)); Hc = K7
@@ -432,11 +432,11 @@ Hn = git(ORIGIN, "rev-parse", "HEAD")
 
 # ---- a reload that does not load: the old code goes on, the failure is recorded, the files are marked
 bad_dir = T / "badreload"; bad_dir.mkdir()
-(bad_dir / "puller.py").write_text("import module_that_is_not_there_p189\n")
+(bad_dir / "stackshot/fleet").mkdir(parents=True); (bad_dir / "stackshot/fleet/puller.py").write_text("import module_that_is_not_there_p189\n")
 _real_fresh = puller._fresh; puller._RELOAD_FAIL_PAUSE = 0.0
 puller._fresh = lambda here=None: _real_fresh(str(bad_dir))
 seq = []; first = lambda argv: (seq.append(1), puller.RELOAD if len(seq) == 1 else 0)[1]
-mods = {n: m for n, m in sys.modules.items() if n in ("client", "config", "said")}
+mods = {n: m for n, m in sys.modules.items() if n in ("stackshot.fleet.client", "stackshot.core.config", "stackshot.model.said")}
 rc, out = quiet(puller._entry, ["puller.py"], first)
 at = rd(T / "state/puller-updates.json")["attempts"]
 check("an import error at load (compile() passes it): the old code resumes instead of the process exiting", rc == 0 and len(seq) == 2 and "failed to load" in out and "module_that_is_not_there_p189" in out, (rc, seq, out[-400:]))
@@ -478,19 +478,19 @@ puller._fresh = _real_fresh; os.environ.pop(puller._BAD_RELOAD_ENV, None); os.en
 
 # ---- the mark covers the modules the puller imports: fixing one lifts it, an unrelated file does not
 dg = T / "digestdir"; dg.mkdir()
-for n_, t_ in (("puller.py", 'VERSION = "9"\nimport helper_mod\n'), ("client.py", "a = 1\n"), ("config.py", "b = 1\n"), ("said.py", "c = 1\n"), ("helper_mod.py", "def (:\n"), ("pages.py", "p = 1\n")):
-    (dg / n_).write_text(t_)
-d1 = puller._digest(str(dg)); (dg / "pages.py").write_text("p = 2\n")
+for n_, t_ in (("stackshot/fleet/puller.py", 'VERSION = "9"\nfrom stackshot.fleet import helper_mod\n'), ("stackshot/fleet/client.py", "a = 1\n"), ("stackshot/core/config.py", "b = 1\n"), ("stackshot/model/said.py", "c = 1\n"), ("stackshot/fleet/helper_mod.py", "def (:\n"), ("stackshot/projects/pages.py", "p = 1\n")):
+    (dg / n_).parent.mkdir(parents=True, exist_ok=True); (dg / n_).write_text(t_)
+d1 = puller._digest(str(dg)); (dg / "stackshot/projects/pages.py").write_text("p = 2\n")
 check("digest: a file nobody imports (pages.py) does not change it", puller._digest(str(dg)) == d1)
 os.environ[puller._BAD_RELOAD_ENV] = d1; os.environ.pop(puller._RELOAD_AT_ENV, None)
 qr, _ = quiet(puller.reload_due, "1", str(dg), time.time() + 9999)
 check("…so the marked files are not a reload target", qr is False)
-(dg / "helper_mod.py").write_text("h = 1\n")
+(dg / "stackshot/fleet/helper_mod.py").write_text("h = 1\n")
 check("digest: a fix to an imported module (helper_mod.py) changes it, and the mark no longer holds", puller._digest(str(dg)) != d1 and puller.reload_due("1", str(dg), time.time() + 9999) is True)
 os.environ.pop(puller._BAD_RELOAD_ENV, None)
 
 # ---- two reloads in a row, the second fails: its record survives the first reload's code recording after it
-fresh_ns = runpy.run_path(os.path.join(STACK, "puller.py"), run_name="puller_first_reload")
+fresh_ns = runpy.run_path(os.path.join(STACK, "stackshot/fleet/puller.py"), run_name="puller_first_reload")
 fresh_ns = fresh_ns["_record"].__globals__      # run_path returns a copy; the functions' own globals are the module's, as in a real reload (_fresh()["main"].__globals__)
 fresh_ns["_CALLS"] = []
 exec('''def m1(argv):
@@ -709,7 +709,7 @@ quiet(puller._record, "stackshot checkout", "a" * 40, "b" * 40, False, "failed")
 check("moved: a failed attempt adds nothing", "b" * 40 not in puller._state()["moved"])
 
 # ---- a checkout that reached the server's commit another way (swapped, put there by hand) stops reporting an older failure
-from ui import render as _render
+from stackshot.web.ui import render as _render
 box_to(M8); puller._state()["moved"] = []; fresh_record()
 OLD = "1" * 40                                                   # the commit the server advertised when the attempt failed
 puller._state()["attempts"] += [{"what": "stackshot checkout", "from": "2" * 12, "to": OLD[:12], "ok": False, "reason": f"the server's commit {OLD[:12]} is not on origin", "at": "2026-11-01T00:00:00Z"},
@@ -776,14 +776,14 @@ for label, cur_, recs_ in (("updates off", CUR(M8, on=False), []), ("the box bus
     check(f"settle: the first settle also happens with {label}", rc is None and puller.attempts()[-1]["reason"] == puller._REACHED and puller.attempts()[-1]["ok"] is True and shown() == [], (out, puller.attempts()))
 
 # a commit that does not compile put on the box by hand: the refusal ("does not compile at ...") is still true, it stays
-git(ORIGIN, "checkout", "-q", "-b", "prA"); KA = commit("puller.py broken", **{"puller.py": "def (:\n"}); git(ORIGIN, "checkout", "-q", "main")
-puller._state()["attempts"] = [{"what": "stackshot checkout", "from": M8[:12], "to": KA[:12], "ok": False, "reason": f"puller.py does not compile at {KA[:12]}", "at": "2026-11-01T00:00:00Z"}]
+git(ORIGIN, "checkout", "-q", "-b", "prA"); KA = commit("puller.py broken", **{"stackshot/fleet/puller.py": "def (:\n"}); git(ORIGIN, "checkout", "-q", "main")
+puller._state()["attempts"] = [{"what": "stackshot checkout", "from": M8[:12], "to": KA[:12], "ok": False, "reason": f"stackshot/fleet/puller.py does not compile at {KA[:12]}", "at": "2026-11-01T00:00:00Z"}]
 box_to(KA); was = snap()
 rc, out = quiet(puller.keep_current, CUR(KA), [])
 check("settle (A): a broken commit checked out by hand (the server advertises it, the refusal says puller.py does not compile at it) stays red",
       rc is None and snap() == was and out == "" and [w for w, _ in shown()] == ["stackshot checkout"], (out, puller.attempts()))
-git(ORIGIN, "checkout", "-q", "-b", "prB"); KB = commit("helper_mod broken", **{"helper_mod.py": "def (:\n"}); git(ORIGIN, "checkout", "-q", "main")
-puller._state()["attempts"] = [{"what": "stackshot checkout", "from": M8[:12], "to": KB[:12], "ok": False, "reason": f"helper_mod.py does not compile at {KB[:12]}; rollback refused: error: x", "at": "2026-11-01T00:00:00Z"}]
+git(ORIGIN, "checkout", "-q", "-b", "prB"); KB = commit("helper_mod broken", **{"stackshot/fleet/helper_mod.py": "def (:\n"}); git(ORIGIN, "checkout", "-q", "main")
+puller._state()["attempts"] = [{"what": "stackshot checkout", "from": M8[:12], "to": KB[:12], "ok": False, "reason": f"stackshot/fleet/helper_mod.py does not compile at {KB[:12]}; rollback refused: error: x", "at": "2026-11-01T00:00:00Z"}]
 box_to(KB); was = snap()
 rc, out = quiet(puller.keep_current, CUR(KB), [])
 check("settle (B): a refused rollback leaves HEAD on a tree that does not compile: the failure stays red", rc is None and snap() == was and out == "" and [w for w, _ in shown()] == ["stackshot checkout"], (out, puller.attempts()))

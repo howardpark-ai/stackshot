@@ -73,9 +73,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
-import config as _cfg, routing, held, client
-import router as _router, router_live as _live
-import server
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import held; from stackshot.fleet import client
+from stackshot.router import router as _router; from stackshot.router import router_live as _live
+from stackshot.web import server
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
@@ -393,7 +393,7 @@ client.post = lambda what, body, timeout=20.0: (0, "unreachable")
 try: down = client.held_for(X, "work-osprey-x"); down_ack = client.held_ack(X, ["abc"])
 finally: client.post = _real_post
 check("7h: …and empty when the server cannot be reached (a hook never fails a session)", down == ("", []) and down_ack is False)
-with open(os.path.join(STACK, "pages.py"), encoding="utf-8") as f: nag = f.read().split("def cmd_nag", 1)[1].split("def cmd_check", 1)[0]
+with open(os.path.join(STACK, "stackshot/projects/pages.py"), encoding="utf-8") as f: nag = f.read().split("def cmd_nag", 1)[1].split("def cmd_check", 1)[0]
 check("7i: the UserPromptSubmit hook every client install wires (pages.py nag) asks for the held lines, prints them, then acknowledges the ids", "held_for(sid, name)" in nag and "print(held" in nag and "held_ack(sid, ids)" in nag
       and nag.index("print(held") < nag.index("held_ack("))
 check("7i2: …and does not ask when the server was already found unreachable in this run (UNREACHABLE)", "if not UNREACHABLE" in nag)

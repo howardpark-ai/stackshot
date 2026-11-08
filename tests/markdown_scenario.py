@@ -64,7 +64,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-from ui import render as ui_render
+from stackshot.web.ui import render as ui_render
 bd = ui_render.Board(f"{tmp}/store")
 def desc_of(gid):
     h = bd.item_html(gid); i = h.find('<div class="desc md">')

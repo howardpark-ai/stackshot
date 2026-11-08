@@ -91,8 +91,8 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
-import server, ghsync as G, steps as S, home as H, itempage as IP, nextlines as NL
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
@@ -268,7 +268,7 @@ check("hostile text in a step and in who marked it is escaped", "<script>alert(1
       and "<b>bold</b>" not in n14 and re.findall(r'<li class="cl-(\w+)">', n14) == ["open", "open", "done"], n14[:1200])
 
 # ---- 12. the Your step block shows his own open Next lines in full, with copy boxes; Next stays whole
-import step_commands as SC
+from stackshot.model import step_commands as SC
 BOX = {"action": "/items/a21/answer", "token": "TOKEN", "sent": ""}
 bd = ui_render.Board(str(STORE))
 p21 = bd.item_html("a21", answer=BOX)

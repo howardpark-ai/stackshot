@@ -21,7 +21,7 @@
 #                            state, and does not disable a unit or timer they added (install.sh only ever adds)
 #
 # What restarts, by the files the fast-forward changed:
-#   stackshot.service        any module the server imports (every *.py but the hub's, the clients' and the one-off scripts),
+#   stackshot.service        any module the server imports (every *.py but the hub's, the clients' and the one-off scripts; the paths are the package's, stackshot/<area>/<module>.py, and the old root forwarders),
 #                            server.py.lock, its unit, icons/* (their URLs carry a version read at the start, render.py ICON_V), fonts/*
 #                            (the code font's, render.py font_href), or shared/* (the shared color tool, read at import by ui/colortool.py)
 #   anchor-hub.service       anchor-hub.py, anchor-hub.py.lock, anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py, or its unit
@@ -74,7 +74,7 @@ if [ -n "${DEPLOY_TO:-}" ]; then
 import subprocess, sys
 def z(*a):
     return subprocess.run(["git", *a], capture_output=True, check=True).stdout.split(b"\0")[:-1]
-others = z("ls-files", "--others", "-z")
+others = z("ls-files", "--others", "--exclude-standard", "-z")
 bad = []
 if others:
     tree = set(z("ls-tree", "-r", "-t", "-z", "--name-only", sys.argv[1]))     # every path the target tracks: files and folders
@@ -107,17 +107,18 @@ while IFS= read -r f; do
         units/stackshot.service.in|units/stackshot-reload.*|install.sh) server=1 ;;
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
-        anchor-hub.py|anchor-hub.py.lock|anchorhub/*|push.py) hub=1 ;;
+        anchor-hub.py|anchor-hub.py.lock|anchorhub/*|push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
         server.py.lock) server=1 ;;      # the pinned dependencies: a new lock takes effect at the restart
         icons/*) server=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start
         fonts/*) server=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
-        shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (ui/colortool.py)
-        puller.py) puller=1 ;;
-        client.py) puller=1 ;;
-        config.py) server=1; hub=1; puller=1 ;;
-        retired_inputs.py) server=1; puller=1 ;;      # client.py imports it: the puller's source
-        anchors.py|project_registry.py|projects.py|fleet.py|liveness.py|routing.py|inbox.py|sessions_registry.py|interp.py) server=1; hub=1 ;;
-        *.py) case "$f" in rename_page.py|page_keeper.py|anchor-hub-google-auth.py|tests/*) ;; *) server=1 ;; esac ;;
+        shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)
+        puller.py|stackshot/fleet/puller.py) puller=1 ;;
+        client.py|stackshot/fleet/client.py) puller=1 ;;
+        config.py|stackshot/core/config.py) server=1; hub=1; puller=1 ;;
+        retired_inputs.py|stackshot/core/retired_inputs.py) server=1; puller=1 ;;      # client.py imports it: the puller's source
+        stackshot/paths.py) server=1; hub=1; puller=1 ;;      # every program finds the checkout's files through it
+        anchors.py|project_registry.py|projects.py|fleet.py|liveness.py|routing.py|inbox.py|sessions_registry.py|interp.py|stackshot/anchors/anchors.py|stackshot/projects/project_registry.py|stackshot/projects/projects.py|stackshot/fleet/fleet.py|stackshot/fleet/liveness.py|stackshot/router/routing.py|stackshot/fleet/inbox.py|stackshot/fleet/sessions_registry.py|stackshot/core/interp.py) server=1; hub=1 ;;
+        *.py) case "$f" in rename_page.py|page_keeper.py|anchor-hub-google-auth.py|tests/*|stackshot/projects/rename_page.py|stackshot/projects/page_keeper.py|stackshot/anchors/anchor_hub_google_auth.py) ;; *) server=1 ;; esac ;;
     esac
 done <<< "$files"
 plan=""; [ $server = 1 ] && plan="$plan stackshot.service"; [ $hub = 1 ] && plan="$plan anchor-hub.service"; [ $puller = 1 ] && plan="$plan stackshot-puller.service"

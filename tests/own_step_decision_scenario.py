@@ -46,9 +46,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import server
+from stackshot.web import server
 server._publish = lambda: None
 O = server.OWNER
 DESC = "- Goal: The release of the fruit sorter\n- It lives in the sorter repo\n- Done when the release is out"

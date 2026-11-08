@@ -47,8 +47,8 @@ fake = {"slack_sdk": types.SimpleNamespace(WebClient=Web), "slack_sdk.socket_mod
         "slack_sdk.socket_mode.response": types.SimpleNamespace(SocketModeResponse=lambda envelope_id: envelope_id)}
 sys.modules.update(fake)
 
-from anchorhub import core, slack
-import config
+from stackshot.anchors.anchorhub import core, slack
+from stackshot.core import config
 slack.threading = types.SimpleNamespace(Thread=lambda **k: types.SimpleNamespace(start=lambda: None))   # no watch loop
 hub = core.Hub(); out: list[tuple] = []
 hub.event = lambda anchor, s, kind="slack": out.append((anchor, kind, s["who"], s["text"]))

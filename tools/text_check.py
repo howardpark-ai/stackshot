@@ -66,7 +66,7 @@ def affected_tools(changed: list[str], head_server: str | None, base_server: str
         if ":" not in c:
             continue
         file, fn = c.rsplit(":", 1)
-        if file == "server.py" and fn in names:
+        if file == tt.SERVER_REL and fn in names:
             out.add(names[fn])
         for tool, helpers in tt.HELPERS.items():
             if (file, fn) in helpers:
@@ -108,8 +108,8 @@ def split_diff(diff: str) -> list[tuple[str, str, int, int, int, int]]:
 
 def fit_diff(root: Path, mb: str, head: str, changed: list[str], limit: int) -> str:
     """`git diff` of the watched files from the fork point to head, cut to `limit` characters by hunks: the ones that overlap a changed function first."""
-    files = sorted({f for f, _ in tt.ALL_HELPERS} | {"server.py"})
-    r = subprocess.run(["git", "-C", str(root), "diff", "--no-color", f"-U{CONTEXT}", mb, head, "--", *files], capture_output=True, text=True, errors="replace")
+    files = sorted({f for f, _ in tt.ALL_HELPERS} | {tt.SERVER_REL})
+    r = subprocess.run(["git", "-C", str(root), "diff", "--no-color", f"-U{CONTEXT}", mb, head, "--", *files, *tt._BEFORE_PACKAGE.values()], capture_output=True, text=True, errors="replace")
     diff = r.stdout if r.returncode == 0 else ""
     hunks = split_diff(diff)
     want: dict[str, set[str]] = {}
@@ -117,8 +117,8 @@ def fit_diff(root: Path, mb: str, head: str, changed: list[str], limit: int) -> 
         if ":" in c:
             f, fn = c.rsplit(":", 1)
             want.setdefault(f, set()).add(fn)
-    old_sp = {f: spans(tt.git(root, "show", f"{mb}:{f}"), n) for f, n in want.items()}
-    new_sp = {f: spans(tt.git(root, "show", f"{head}:{f}"), n) for f, n in want.items()}
+    old_sp = {f: spans(tt.show_at(root, mb, f), n) for f, n in want.items()}
+    new_sp = {f: spans(tt.show_at(root, head, f), n) for f, n in want.items()}
     hit = lambda sp, a, n: any(a <= e and a + max(n, 1) - 1 >= s for s, e in sp)
     rel = [hit(old_sp.get(f, []), a, b) or hit(new_sp.get(f, []), c, d) for f, _, a, b, c, d in hunks]
     order = [i for i in range(len(hunks)) if rel[i]] + [i for i in range(len(hunks)) if not rel[i]]
@@ -156,7 +156,7 @@ def build_pack(root: Path, base: str, head: str, exact: bool, max_diff: int, max
     mb, changed = tt.changed_since(root, base, head, exact)
     if not changed:
         raise NothingToRead("no tool function and no output helper has a changed body")
-    head_server, base_server = tt.git(root, "show", f"{head}:server.py"), tt.git(root, "show", f"{mb}:server.py")
+    head_server, base_server = tt.show_at(root, head, tt.SERVER_REL), tt.show_at(root, mb, tt.SERVER_REL)
     tools = affected_tools(changed, head_server, base_server)
     if not tools:
         raise NothingToRead("the changed functions reach no tool's text: " + ", ".join(changed))

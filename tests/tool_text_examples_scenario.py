@@ -81,7 +81,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 
-import server, self_wait as SW, router as R
+from stackshot.web import server; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def _no_claude(*a, **k): raise AssertionError("the real model was called")

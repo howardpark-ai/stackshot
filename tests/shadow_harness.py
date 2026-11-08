@@ -12,9 +12,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-import anchors as _anc
-import router
-import routing as _routing
+from stackshot.anchors import anchors as _anc
+from stackshot.router import router
+from stackshot.router import routing as _routing
 
 _LOCK = threading.Lock()
 

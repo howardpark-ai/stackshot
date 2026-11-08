@@ -71,7 +71,7 @@ def _png_rgba(b: bytes):
     return w, h, rows
 
 # ================================================================= 1. the server's own state and its view (clients.py)
-import config as cfg, clients as cl, fleet as fl
+from stackshot.core import config as cfg; from stackshot.fleet import clients as cl; from stackshot.fleet import fleet as fl
 V = T / "state/clients/fleet"; T0 = 1790780400.0
 check("readers are pointed at the materialised view", str(cfg.fleet_dir()) == str(V), cfg.fleet_dir())
 # sala's live heartbeat store ([client] session_links): the one source of a pane's link. Written as sala writes it, a new file put in place; the view takes each row's url by transcript id.
@@ -212,8 +212,8 @@ check("…and so does an upper-case id in the server's own record", v_["b"][1][U
 sala("b", {**SB, U(9): ("work-q", Q)}); cl.tick(now=T1 + 2 + 602)
 logging.disable(logging.WARNING); cl.log.handlers = _hs
 # ---- identity apart from presence: a gone session's items still name it; the horizon prunes what nothing names
-import render, anchors, inbox
-from ui import render as ui_render
+from stackshot.web import render; from stackshot.anchors import anchors; from stackshot.fleet import inbox
+from stackshot.web.ui import render as ui_render
 (T / "store/a/2.json").write_text(json.dumps({"id": "2", "subject": "[home] item 2", "description": "x", "status": "open", "metadata": {"owner": U(1), "mover": U(1), "project": "projects/alpha"}}))
 b = render.Board(str(T / "store")); r2 = next(x for x in b.rows if x["gid"] == "a2")
 check("the board draws an item's owner from a gone session's identity: machine/name and link (gone for hours, past the grace)", b.lab(r2) == "b/work-y2" and b.url(r2) == LINK, (b.lab(r2), b.url(r2)))
@@ -232,7 +232,7 @@ iid = inbox.put("work-y2", "to whoever carries the name", "msg"); line = json.lo
 check("…a line addressed by that name records the live session's id", line["uuid"] == U(31), line); inbox.ack([iid])
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
-import server
+from stackshot.web import server
 ls = server._sessions_listing("", now=T3 + 2).split("\n"); ly = [l for l in ls if l.startswith("- work-y2 ")]
 check("sessions tool: the live namesake plain, the gone owner of an open item kept with its last sign of life",
       len(ly) == 2 and any(l == f"- work-y2 — {NEW} · box-far" for l in ly) and any(re.fullmatch(rf"- work-y2 — {re.escape(LINK)} · box-far · not running \(last seen \d\d-\d\d \d\d:\d\d \+04; kept as the mover of open items\)", l) for l in ly), ly)
@@ -270,7 +270,7 @@ check("the operator session is the one config names ([fleet] operator_session), 
 cfg.CFG["fleet"].pop("operator_session")
 
 # ================================================================= 2. what makes a machine online (versions.py)
-import versions as ver
+from stackshot.fleet import versions as ver
 cl.checkin("box-far", [{"uuid": U(5), "name": "work-new"}], {"claude": "2.2.0"})          # online now, by the real clock
 _, st = ver.machines_state()
 check("the publisher box is live, a box whose puller checked in is live", st.get("a") == "live" and st.get("b") == "live", st)
@@ -281,7 +281,7 @@ _, st = ver.machines_state(); check("a box with no puller on record is offline s
 cl.tick()
 
 # ================================================================= 3. the inbox (inbox.py)
-import inbox
+from stackshot.fleet import inbox
 cl.checkin("box-far", [{"uuid": U(5), "name": "work-new"}], {})
 i1 = inbox.put("work-new", "first line", "msg")
 it = rd(T / f"state/inbox/msg/{i1}.json")
@@ -319,7 +319,7 @@ check("a held key keeps its lines after the pause is lifted", inbox.take({U(5): 
 
 # ================================================================= 4. push.py and the reboot queue in inbox mode
 env = {**os.environ, "PUSH_INBOX_WAIT": "0.4"}
-r = subprocess.run([sys.executable, f"{STACK}/push.py", "work-new", "pushed line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
+r = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "work-new", "pushed line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
 check("push.py in inbox mode: the line waits in the inbox, the answer says so", r.returncode == 1 and r.stdout.strip() == "inbox → work-new" and inbox.waiting("msg") == {"work-new": 1}, (r.returncode, r.stdout, r.stderr[-300:]))
 def confirm_soon(delay=0.3, live=None, within=10):
     # polls like a puller until it has confirmed a line: one take after a fixed sleep raced the push.py child's
@@ -333,9 +333,9 @@ def confirm_soon(delay=0.3, live=None, within=10):
     th = threading.Thread(target=run); th.start(); return th
 th = confirm_soon(0.1); th.join()
 th = confirm_soon(0.4)
-r = subprocess.run([sys.executable, f"{STACK}/push.py", "work-new", "confirmed line"], capture_output=True, text=True, env={**env, "PUSH_INBOX_WAIT": "5"}); th.join()
+r = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "work-new", "confirmed line"], capture_output=True, text=True, env={**env, "PUSH_INBOX_WAIT": "5"}); th.join()
 check("…and when the machine confirms within seconds, the answer is still 'delivered'", r.returncode == 0 and r.stdout.strip() == "delivered → work-new" and inbox.waiting() == {}, (r.returncode, r.stdout))
-import push
+from stackshot.fleet import push
 d = rd(V / "b/machine.json")
 check("a pane on a machine whose puller checks in is served from the inbox, by name or by id", push.inbox_serves("work-new") and push.inbox_serves(U(5)))
 d2 = dict(d); d2["online"] = {"ok": False, "since": "2026-10-02T03:00:00Z"}; (V / "b/machine.json").write_text(json.dumps(d2))
@@ -344,8 +344,8 @@ check("…a pane on another machine whose puller stopped still waits in the inbo
       push.inbox_serves("work-new") and not push.inbox_serves("local-pane") and not push.inbox_serves(U(40)) and not push.inbox_serves("ghost-pane"), rd(V / "a/machine.json"))
 (V / "b/machine.json").write_text(json.dumps(d))
 (F / "paused-msg.json").write_text("{}")
-r = subprocess.run([sys.executable, f"{STACK}/push.py", U(5), "during a pause"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
-r2 = subprocess.run([sys.executable, f"{STACK}/push.py", "ghost-pane", "for nobody listed"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
+r = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", U(5), "during a pause"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
+r2 = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "ghost-pane", "for nobody listed"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
 check("push.py while paused: queued, with the pause named", r.returncode == 1 and r.stdout.startswith("queued (paused for a reboot)") and r2.stdout.startswith("queued (paused"), r.stdout)
 RQ = f"{STACK}/reboot-hooks/reboot-queue.py"
 r = subprocess.run([sys.executable, RQ, "count", "--source", "msg"], capture_output=True, text=True, env=env)
@@ -362,9 +362,9 @@ check("…the release list is gone and the hold is on file for after the pause",
 check("label: a `from:` line on top; no sender (a line stored before senders were kept), the text as it was",
       inbox.label("release-job.py", "[stackshot] x") == "from: release-job.py\n[stackshot] x" and inbox.label("", "y") == "y")
 _FBL = T / "state/anchor-hub/push-fallback.jsonl"; _fb0 = len(_FBL.read_text().splitlines()) if _FBL.exists() else 0
-r = subprocess.run([sys.executable, f"{STACK}/push.py", "--from", "ops-x", "work-new", "a named line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
-r2 = subprocess.run([sys.executable, f"{STACK}/push.py", "work-new", "an env-named line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg", "PUSH_FROM": "ops-env"})
-r3 = subprocess.run([sys.executable, f"{STACK}/push.py", "work-new", "an unnamed line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
+r = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "--from", "ops-x", "work-new", "a named line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
+r2 = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "work-new", "an env-named line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg", "PUSH_FROM": "ops-env"})
+r3 = subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "work-new", "an unnamed line"], capture_output=True, text=True, env={**env, "ANCHOR_PUSH_SOURCE": "msg"})
 d = inbox.take({U(5): "work-new"}); txt = d[0]["text"] if d else ""; inbox.ack([i for x in d for i in x["ids"]])
 check("push.py --from, $PUSH_FROM and the fallback: each queued item keeps its own sender in the batch",
       r.returncode == r2.returncode == r3.returncode == 1 and txt.startswith("[stackshot] 3 queued while you were away:\n")
@@ -372,7 +372,7 @@ check("push.py --from, $PUSH_FROM and the fallback: each queued item keeps its o
       and "\nfrom: contract_scenario.py\nan unnamed line" in txt, (txt, r3.stderr[-300:]))
 _fb = [json.loads(ln) for ln in _FBL.read_text().splitlines()[_fb0:]] if _FBL.exists() else []
 check("the fallback is recorded (to, source, the caller found); a named drop is not", [(e["to"], e["src"], e["caller"]) for e in _fb] == [("work-new", "msg", "contract_scenario.py")], _fb)
-subprocess.run([sys.executable, f"{STACK}/push.py", "--from", "ops-x", "work-new", "[anchor] Slack: one line"], capture_output=True, text=True, env=env)
+subprocess.run([sys.executable, f"{STACK}/stackshot/fleet/push.py", "--from", "ops-x", "work-new", "[anchor] Slack: one line"], capture_output=True, text=True, env=env)
 d = inbox.take({U(5): "work-new"}); inbox.ack([i for x in d for i in x["ids"]])
 check("a single line opens with its sender, the tag within the first line after it", d and d[0]["text"] == "from: ops-x\n[anchor] Slack: one line", d)
 check("caller(): the script's name past the interpreter (python3 /…/release-job.py → release-job.py)",
@@ -386,7 +386,7 @@ check("the local queue's flush: each item with its sender (a line stored before 
       push.flush("ghost-q") == 0 and sent == ["[stackshot] 2 queued while you were away:\nold line\nfrom: ops-y\nnew line"], sent)
 sent.clear()
 check("a socket drop opens with the sender", push.deliver("local-pane", "hello", "ops-z") == 0 and sent == ["from: ops-z\nhello"], sent)
-import config as _cfgm
+from stackshot.core import config as _cfgm
 _cfgm.CFG.setdefault("anchor_hub", {})["require_sender"] = True
 check("[anchor_hub] require_sender: a drop without a sender is refused (exit 2), with one it goes",
       push.deliver("local-pane", "no name", "") == 2 and push.deliver("local-pane", "named", "ops-z") == 0)
@@ -394,7 +394,7 @@ _cfgm.CFG["anchor_hub"]["require_sender"] = False
 push.send, push.resolve, push.SRC, push.Q = _send, _resolve, _src, _q
 
 # ================================================================= 5. the client API's writes, over HTTP
-import client, server
+from stackshot.fleet import client; from stackshot.web import server
 server._publish = lambda: None
 tok_b = open(client.mint("box-far")).read().strip(); tok_me = open(client.mint(ME)).read().strip()
 from starlette.testclient import TestClient
@@ -437,7 +437,7 @@ with TestClient(app) as c:
     c.post("/client/ack", json={"delivered": r.json()["deliveries"][0]["ids"]}, headers=HB)
 
     # ============================================================= 6. the puller, end to end, against a fake CLI inbox
-    import puller, urllib.request, urllib.error
+    import urllib.request, urllib.error; from stackshot.fleet import puller
     class _Resp:
         def __init__(s, r): s.status = r.status_code; s._b = r.content
         def read(s): return s._b
@@ -603,7 +603,7 @@ with TestClient(app) as c:
     cl.tick()
 
     # ============================================================= 7b. the pane gate reads through the client API
-    import pages as pg
+    from stackshot.projects import pages as pg
     real_brain, real_reg = pg.BRAIN, pg.REG
     real_local = pg.LOCAL_ONLY; pg.LOCAL_ONLY = False   # this block plays a client machine; the server process itself never calls its own API (pages.LOCAL_ONLY)
     # client and server share one `pages` module in this process: the server's own answer is pinned to the real brain first

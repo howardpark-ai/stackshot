@@ -45,7 +45,7 @@ def rd(g):
     g = str(g); g = g if not g[:1].isdigit() else "a" + g
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda *a, **k: None
