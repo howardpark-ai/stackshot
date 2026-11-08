@@ -1,4 +1,4 @@
-"""common.py: the pieces of the server that more than one part of it reads, with no state in them: the owner's name, what an item's needs list holds, and a line of free text cut for a notice.
+"""common.py: the pieces of the server that more than one part of it reads, with no state in them: the instance's name and the owner's, what an item's needs list holds, and a line of free text cut for a notice.
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). A module of an area cannot import server.py, which is the program that imports the area, so what two
 areas share lives here, below both, and server.py imports each name back: `server.<name>` stays the one name its callers and the tests use. Nothing here is something a test replaces; a name a
@@ -13,6 +13,7 @@ from stackshot.core import config as _cfg
 
 # Read once, at import: the [instance] settings are among the ones config.RESTART_ONLY keeps for the run.
 OWNER = str(_cfg.get("instance", "owner") or "the owner")
+NAME = str(_cfg.get("instance", "name") or "stackshot")
 
 
 _NEEDS_KINDS = ("decision", "external")

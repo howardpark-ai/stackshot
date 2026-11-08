@@ -208,7 +208,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         for name, path in PAGES:
             r = get(path, cookie=None)
             check(f"{name} page, not signed in: 302 to /ui/login with next= the address", r.status_code == 302 and r.headers.get("location") == "/ui/login?next=" + quote(path, safe=""), (r.status_code, r.headers.get("location")))
-        server._ui_client_id = lambda: "test-client"                 # the board's own sign-in service is not reached from a test
+        server._signin._ui_client_id = lambda: "test-client"                 # the board's own sign-in service is not reached from a test
         for nxt in ("/items/a1", "/", "/items/a1"):
             rl = get("/ui/login?next=" + quote(nxt, safe=""), cookie=None)
             flow = json.loads(server._ui_unsign(rl.cookies.get(server._UI_FLOW) or "") or "{}")

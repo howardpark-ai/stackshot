@@ -159,8 +159,7 @@ from stackshot.web import runners as _runners  # noqa: E402  — the Runners pag
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
 # every other setting is read where it is used, so a reload (SIGHUP) is live at once.
-NAME = str(_cfg.get("instance", "name") or "stackshot")
-from stackshot.web.common import OWNER, _CODE_FENCE, _CODE_SPAN, _NEEDS_KINDS, _canon_needs, _clip_line, _needs_kinds, _needs_list, _needs_of, _needs_store, _without_mq_groups  # noqa: E402  — pieces shared with the server's other modules (common.py); OWNER is read from [instance] once, at this import
+from stackshot.web.common import NAME, OWNER, _CODE_FENCE, _CODE_SPAN, _NEEDS_KINDS, _canon_needs, _clip_line, _needs_kinds, _needs_list, _needs_of, _needs_store, _without_mq_groups  # noqa: E402  — pieces shared with the server's other modules (common.py); NAME and OWNER are read from [instance] once, at this import
 BOARD_URL = str(_cfg.get("instance", "board_url") or "")
 OPERATOR = str(_cfg.get("fleet", "operator_label") or "operator session")
 _FOR_OWNER = f"[for {OWNER}]"   # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance)
@@ -8175,8 +8174,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
 
 
 # ----------------------------------------------------------------------------- auth
-def _auth_mode() -> str:
-    return os.environ.get("STACKSHOT_AUTH") or os.environ.get("BOARD_MCP_AUTH") or str(_cfg.CFG["auth"]["mode"])
+from stackshot.web import signin as _signin  # noqa: E402  — the board's sign-in (signin.py), with the auth mode it reads: `_signin._auth_mode()` is read and set there, never here
 
 
 def _env(key: str) -> str:
@@ -8185,7 +8183,7 @@ def _env(key: str) -> str:
 
 
 def _auth():
-    mode = _auth_mode()
+    mode = _signin._auth_mode()
     if mode == "off":
         return None
     if mode != "google":
@@ -8254,7 +8252,7 @@ def _auth():
 
 def _who() -> str:
     """The signed-in identity, allow-listed; '' when auth is off."""
-    if _auth_mode() == "off":
+    if _signin._auth_mode() == "off":
         return ""
     from fastmcp.server.dependencies import get_access_token
     tok = get_access_token()
@@ -15102,123 +15100,10 @@ def stackshot_bump_versions(host: str = "") -> str:
 # Access in front of the hostname). ui_open = false: the server asks for a sign-in itself, with the OAuth it already runs
 # for /mcp — the board is one more client of its own /authorize, so no second OAuth app and no new redirect URI at Google.
 # The signed-in address is kept in a signed cookie; only [auth] allowed_emails get in.
-def _ui_open() -> bool:
-    return bool(_cfg.get("auth", "ui_open", default=True))
-
-
-def _ui_days() -> int:
-    return int(_cfg.get("auth", "ui_session_days") or 30)
-
-
-_UI_COOKIE, _UI_FLOW = "stackshot_ui", "stackshot_ui_flow"
-# The installed app's PNG icons, committed in the checkout's icons/ (rebuilt from _ICON by tools/make_icons.py): name → (px, purpose)
-_APP_ICONS = {"icon-192.png": (192, "any"), "icon-512.png": (512, "any"), "icon-maskable-512.png": (512, "maskable"), "apple-touch-icon.png": (180, "any")}
-_APP_ICON_DIR = _paths.ROOT / "icons"
-_FONT_PATH = "fonts/" + _rmod.FONT_FILE                          # a bundled monospace font (OFL), from the checkout like the icons
-_UI_PUBLIC = {"healthz", "healthz.json", "robots.txt", "favicon.svg", "favicon.ico", "manifest.webmanifest", *_APP_ICONS, _FONT_PATH}   # never behind the sign-in (a signed-out page that shows code asks for it too)
-_UI_CLIENT: dict[str, str] = {}                                             # the board's own OAuth client, registered once per run
-
-
-def _ui_key() -> bytes:
-    """The cookie-signing key, <secrets>/ui-session.key (made on first use, 0600)."""
-    p = _cfg.secrets("ui-session.key")
-    try:
-        return p.read_bytes()
-    except Exception:
-        import secrets as _s
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(_s.token_bytes(32))
-        return p.read_bytes()
-
-
-def _ui_sign(payload: str) -> str:
-    import base64, hashlib, hmac
-    b = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-    return b + "." + hmac.new(_ui_key(), b.encode(), hashlib.sha256).hexdigest()
-
-
-def _ui_unsign(value: str) -> str:
-    """The payload of a cookie this server signed, '' for anything else."""
-    import base64, hashlib, hmac
-    b, _, sig = str(value or "").partition(".")
-    if not b or not hmac.compare_digest(sig, hmac.new(_ui_key(), b.encode(), hashlib.sha256).hexdigest()):
-        return ""
-    try:
-        return base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)).decode()
-    except Exception:
-        return ""
-
-
-def _ui_now() -> float:
-    """The clock the board's sign-in reads (a test pins it)."""
-    return time.time()
-
-
-def _ui_session(request: Request) -> dict[str, Any]:
-    """The board's session cookie as it stands: its payload when this server signed it, the address is still allowed and it has not run out, else {}."""
-    try:
-        d = json.loads(_ui_unsign(request.cookies.get(_UI_COOKIE, "")) or "{}")
-    except Exception:
-        return {}
-    if not isinstance(d, dict):
-        return {}
-    email = str(d.get("email") or "")
-    return d if email in _cfg.CFG["auth"]["allowed_emails"] and float(d.get("exp") or 0) > _ui_now() else {}
-
-
-def _ui_email(request: Request) -> str:
-    """Who is signed in to the board, '' when nobody (no cookie, a forged or expired one, an address no longer allowed)."""
-    return str(_ui_session(request).get("email") or "")
-
-
-def _ui_set_session(resp, email: str) -> None:
-    """Put the board's session cookie on a response: signed, for [auth] ui_session_days from now."""
-    secs = 86400 * _ui_days()
-    resp.set_cookie(_UI_COOKIE, _ui_sign(json.dumps({"email": email, "exp": _ui_now() + secs})), max_age=secs,
-                    httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/")
-
-
-def _ui_is_navigation(request: Request) -> bool:
-    """True when a person's browser is opening the page (Sec-Fetch-Mode: navigate), or the client says nothing about it (a tool); False for a script's fetch() or a
-    sub-resource. A navigation can be sent to the sign-in; a script's request cannot use that, it needs the plain 401."""
-    mode = request.headers.get("sec-fetch-mode")
-    return not mode or mode == "navigate"
-
-
-# A visit restarts the session's days. The cookie is written again only when it has used up an hour of them, so a burst of page loads does not set a cookie on each.
-_UI_RENEW_AFTER = 3600
-
-
-def _ui_renewed(request: Request, resp):
-    """The response with the session cookie renewed when the request is a visit by someone signed in: a GET that a browser opens as a page (not a script's fetch, so a tab left polling
-    does not keep a session alive on its own), with a session that is still good (an expired one never comes back; a removed address is not renewed). Not on /ui/ (the sign-in's own routes:
-    logout deletes the cookie), not on a failed answer, not on a public cacheable file."""
-    try:
-        if (request.method != "GET" or _ui_open() or _auth_mode() == "off" or request.url.path.startswith("/ui/")
-                or request.url.path.strip("/") in _UI_PUBLIC or not _ui_is_navigation(request) or getattr(resp, "status_code", 200) >= 400
-                or "public" in str(resp.headers.get("cache-control") or "")):
-            return resp
-        d = _ui_session(request)
-        if d and float(d["exp"]) - _ui_now() <= 86400 * _ui_days() - _UI_RENEW_AFTER:
-            _ui_set_session(resp, str(d["email"]))
-    except Exception as e:  # noqa: BLE001
-        print(f"sign-in not renewed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return resp
-
-
-def _ui_guard(request: Request):
-    """None when the request may see the board, else the way to the sign-in: a redirect for a page the browser is opening, a plain 401 for a script's request (a page's script
-    that follows a redirect would run the sign-in again and again from a tab nobody is looking at)."""
-    if _ui_open() or _auth_mode() == "off" or _ui_email(request):
-        return None
-    if not _ui_is_navigation(request):
-        return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
-    from urllib.parse import quote
-    from starlette.responses import RedirectResponse
-    nxt = request.url.path + (("?" + request.url.query) if request.url.query else "")
-    return RedirectResponse("/ui/login?next=" + quote(nxt, safe=""), status_code=302)       # the path as asked: sign-in comes back to the page it started from
+# The cookie, the guard and the board's own OAuth client are signin.py's (imported here, where they were defined, apart from `_auth_mode`, `_ui_now`, `_ui_http` and `_ui_client_id`: those four
+# are read and set on that module (`_signin.`), as the suites set them there). The three /ui/ routes and `_ui_exchange` stay here: they use `mcp`.
+from stackshot.web.signin import (_APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_COOKIE, _UI_FLOW, _UI_PUBLIC, _UI_CLIENT, _ui_days, _ui_email, _ui_guard, _ui_is_board_client,  # noqa: E402
+                                  _ui_is_navigation, _ui_key, _ui_open, _ui_redirect_uri, _ui_renewed, _ui_session, _ui_set_session, _ui_sign, _ui_unsign)
 
 
 def _ui_mods():
@@ -15227,50 +15112,11 @@ def _ui_mods():
     return r2, s2, n2
 
 
-def _ui_http(method: str, path: str, data: dict[str, Any], form: bool = False) -> tuple[int, dict[str, Any]]:
-    """One call to this server's own OAuth endpoints, over its local port."""
-    import urllib.error, urllib.parse, urllib.request
-    url = f"http://{_cfg.CFG['server'].get('host', '127.0.0.1')}:{_cfg.CFG['server'].get('port', 8020)}{path}"
-    body = urllib.parse.urlencode(data).encode() if form else json.dumps(data).encode()
-    req = urllib.request.Request(url, data=body, method=method, headers={"Content-Type": "application/x-www-form-urlencoded" if form else "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return r.status, json.loads(r.read().decode() or "{}")
-    except urllib.error.HTTPError as e:
-        try:
-            return e.code, json.loads(e.read().decode() or "{}")
-        except Exception:
-            return e.code, {}
-    except Exception as e:  # noqa: BLE001
-        return 0, {"error": str(e)[:160]}
-
-
-def _ui_redirect_uri() -> str:
-    return str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/ui/callback"
-
-
-def _ui_client_id() -> str:
-    """The board's own OAuth client at this server (dynamic registration, once per run)."""
-    if not _UI_CLIENT.get("id"):
-        status, d = _ui_http("POST", "/register", {"client_name": f"{NAME} board", "redirect_uris": [_ui_redirect_uri()], "grant_types": ["authorization_code", "refresh_token"],
-                                                    "response_types": ["code"], "token_endpoint_auth_method": "none"})
-        if status not in (200, 201) or not d.get("client_id"):
-            raise RuntimeError(f"the board could not register with its own sign-in service [{status}]: {str(d)[:160]}")
-        _UI_CLIENT["id"] = str(d["client_id"])
-    return _UI_CLIENT["id"]
-
-
-def _ui_is_board_client(client_id: str, redirect_uri: str) -> bool:
-    """True for the one client the board registered for its own sign-in in this run, asking for its own callback; a client that merely looks like it is not."""
-    cid = _UI_CLIENT.get("id")
-    return bool(cid) and str(client_id) == cid and str(redirect_uri) == _ui_redirect_uri()
-
-
 def _ui_exchange(code: str, verifier: str) -> str:
     """An authorization code → the address that signed in ('' when the exchange or the token does not hold)."""
     import asyncio
-    status, d = _ui_http("POST", "/token", {"grant_type": "authorization_code", "code": code, "redirect_uri": _ui_redirect_uri(),
-                                             "client_id": _ui_client_id(), "code_verifier": verifier}, form=True)
+    status, d = _signin._ui_http("POST", "/token", {"grant_type": "authorization_code", "code": code, "redirect_uri": _ui_redirect_uri(),
+                                             "client_id": _signin._ui_client_id(), "code_verifier": verifier}, form=True)
     tok = str(d.get("access_token") or "") if status == 200 else ""
     if not tok:
         return ""
@@ -15285,7 +15131,7 @@ async def ui_login(request: Request):
     from urllib.parse import urlencode
     from starlette.concurrency import run_in_threadpool
     from starlette.responses import RedirectResponse
-    if _ui_open() or _auth_mode() == "off":
+    if _ui_open() or _signin._auth_mode() == "off":
         return RedirectResponse("/", status_code=302)
     if not _ui_is_navigation(request):          # a script's request starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
         return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
@@ -15293,7 +15139,7 @@ async def ui_login(request: Request):
     if not nxt.startswith("/") or nxt.startswith("//"):
         nxt = "/"
     try:
-        cid = await run_in_threadpool(_ui_client_id)
+        cid = await run_in_threadpool(_signin._ui_client_id)
     except Exception as e:  # noqa: BLE001
         return PlainTextResponse(f"sign-in is not available: {e}", status_code=503)
     verifier = _s.token_urlsafe(48); state = _s.token_urlsafe(16)
@@ -15301,7 +15147,7 @@ async def ui_login(request: Request):
     q = urlencode({"response_type": "code", "client_id": cid, "redirect_uri": _ui_redirect_uri(), "code_challenge": challenge, "code_challenge_method": "S256",
                    "state": state, "scope": "openid https://www.googleapis.com/auth/userinfo.email"})
     r = RedirectResponse(str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/authorize?" + q, status_code=302)
-    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": _ui_now() + 600})), max_age=600,
+    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": _signin._ui_now() + 600})), max_age=600,
                  httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/ui")
     return r
 
@@ -15316,7 +15162,7 @@ async def ui_callback(request: Request):
     except Exception:
         flow = {}
     code, state = str(request.query_params.get("code") or ""), str(request.query_params.get("state") or "")
-    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _ui_now():
+    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _signin._ui_now():
         return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
     email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
     if email not in _cfg.CFG["auth"]["allowed_emails"]:
@@ -18869,7 +18715,7 @@ async def for_you_seen(request: Request):
     everyone allowed, so there is no per-page token: signed in to the board, from its own origin (the same origin check as his
     answer), the cookie is SameSite=Lax. Then 303 to the board; a fetch from the page's script reads the status only."""
     email = _ui_email(request)
-    if not email and not (_ui_open() or _auth_mode() == "off"):
+    if not email and not (_ui_open() or _signin._auth_mode() == "off"):
         return PlainTextResponse("sign in to the board", status_code=403)
     if not _answer_same_origin(request):
         return PlainTextResponse("refused: this did not come from the board's own page", status_code=403)
@@ -19151,7 +18997,7 @@ async def _landed_change(request: Request, change):
     seen route's: signed in to the board (or the board open), from its own origin; the body is capped at 64 KB. A change that changed something republishes the board (debounced; the home Landed count follows with it).
     A form post (no JavaScript) gets a 303 back to the page; the page's own script asks with `Accept: application/json` and gets {"ok": true, "changed": n}, and keeps the line where it is. No keys changes nothing (it is not a clear-everything call)."""
     email = _ui_email(request)
-    if not email and not (_ui_open() or _auth_mode() == "off"):
+    if not email and not (_ui_open() or _signin._auth_mode() == "off"):
         return PlainTextResponse("sign in to the board", status_code=403)
     if not _answer_same_origin(request):
         return PlainTextResponse("refused: this did not come from the board's own page", status_code=403)
