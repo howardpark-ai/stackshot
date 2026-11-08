@@ -187,8 +187,8 @@ gh() { command gh "$@" 6>&- 7>&- 8>&- 9>&-; }
 python3() { command python3 "$@" 6>&- 7>&- 8>&- 9>&-; }
 sleep() { command sleep "$@" 6>&- 7>&- 8>&- 9>&-; }
 REPO="$(git remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
-LOGDIR="$(python3 config.py state releases)"; mkdir -p "$LOGDIR"
-REPORT_TO="$(python3 -c 'import config; print(config.release_report_to())' 2>/dev/null)"; REPORT_TO="${REPORT_TO:-projects/example}"   # [release] report_to: where tell() sends the report of a release; the stand-in page when unset (or when this config.py predates the key)
+LOGDIR="$(python3 stackshot/core/config.py state releases)"; mkdir -p "$LOGDIR"
+REPORT_TO="$(python3 -c 'from stackshot.core import config; print(config.release_report_to())' 2>/dev/null)"; REPORT_TO="${REPORT_TO:-projects/example}"   # [release] report_to: where tell() sends the report of a release; the stand-in page when unset (or when this config.py predates the key)
 WAIT_CHECKS="${RELEASE_WAIT_CHECKS:-3000}"   # seconds a PR's checks may stay pending (50 min); the knob lets the tests prove the give-up on a short cap, one scenario pins this default
 MERGEABLE_WAIT="${RELEASE_WAIT_MERGEABLE:-180}"   # seconds GitHub may say mergeable UNKNOWN (it recomputes after main moves) before the release gives up; read every 10 s
 LOCK_FILE="${DEPLOY_LOCK_FILE:-$LOGDIR/deploy.lock}"      # next to the other release state; DEPLOY_LOCK_FILE / DEPLOY_LOCK_WAIT let the tests point elsewhere
@@ -245,27 +245,27 @@ except Exception:
 say() { echo "$(date -u +%FT%TZ) $*"; }
 tell() {  # one message to the project; never fails the run. Extra arguments go to client.py (--release green --pr <url>)
     local text="$1"; shift
-    python3 client.py message "$REPORT_TO" "$text" --sender release "$@" >/dev/null 2>&1 9>&- 7>&- 6>&- || say "message not sent: $text"
+    python3 stackshot/fleet/client.py message "$REPORT_TO" "$text" --sender release "$@" >/dev/null 2>&1 9>&- 7>&- 6>&- || say "message not sent: $text"
 }
 released() {  # $1 = a PR, $2 = its merge commit: main's full run passed on it and it is in $LAST_GOOD. The server settles the open items with a release step
                # for the PR (client.py released; refused unless the merge is in last-good and HEAD): an item whose only open steps are that release is closed, done,
                # with no session turn; one with another open step has the release step ticked and its mover told once, a real notice (the green report is log-only).
                # Never fails the run; what it did, and why an item was left alone, is a log line
     local out
-    if out="$(python3 client.py released --pr "https://github.com/$REPO/pull/$1" --sha "$2" 2>&1 9>&- 8>&- 7>&- 6>&-)"; then say "items of PR #$1: $(echo "$out" | sed 's/^stackshot: //' | paste -sd ';' -)"
+    if out="$(python3 stackshot/fleet/client.py released --pr "https://github.com/$REPO/pull/$1" --sha "$2" 2>&1 9>&- 8>&- 7>&- 6>&-)"; then say "items of PR #$1: $(echo "$out" | sed 's/^stackshot: //' | paste -sd ';' -)"
     else say "the items of PR #$1 were not settled: $(echo "$out" | tail -1 | sed 's/^stackshot: //')"; fi
     return 0
 }
 idle_recycle() {  # ask the fleet tool for a recycle once the box is idle: [fleet] recycle_when_idle, the reason appended; 1 when none is set or it failed
     local -a cmd
-    mapfile -t cmd < <(python3 -c 'import config; print("\n".join(config.recycle_when_idle()))' 2>/dev/null)
+    mapfile -t cmd < <(python3 -c 'from stackshot.core import config; print("\n".join(config.recycle_when_idle()))' 2>/dev/null)
     [ "${#cmd[@]}" -gt 0 ] && [ -n "${cmd[0]}" ] && command -v "${cmd[0]}" >/dev/null 2>&1 && "${cmd[@]}" "$1" >/dev/null 2>&1 6>&- 7>&- 8>&- 9>&-
 }
 notice_send() {  # [fleet] notice_cmd with ONE argument appended: "<title> — <summary>", a newline or tab turned into a space and the whole cut to 400 characters
                  # (ending in "…" when cut), the most a fleet notice takes. 0 sent · 1 no command set · 2 the command failed or is not found
                  # · 3 it did not finish within NOTICE_TIMEOUT seconds (it is stopped: a hung command must not hold the report and the queue's next release)
     local -a cmd; local nrc text
-    mapfile -t cmd < <(python3 -c 'import config; print("\n".join(config.notice_cmd()))' 2>/dev/null)
+    mapfile -t cmd < <(python3 -c 'from stackshot.core import config; print("\n".join(config.notice_cmd()))' 2>/dev/null)
     [ "${#cmd[@]}" -gt 0 ] && [ -n "${cmd[0]}" ] || return 1
     command -v "${cmd[0]}" >/dev/null 2>&1 || return 2
     text=$(python3 -c 'import sys
@@ -1678,7 +1678,7 @@ print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get
     fi
     if [ "$recycle" = --recycle ]; then   # flag the items the PRs serve; with none flagged, the fleet tool is asked once for a recycle when the box is idle
         for m in "${merged_prs[@]}"; do
-            if rd="$(python3 client.py recycle-due --pr "https://github.com/$REPO/pull/$m" 2>&1)"; then flagged=1; rc_note="$rc_note; recycle (PR #$m): $(echo "$rd" | sed 's/^stackshot: //' | paste -sd ';' -)"; fi
+            if rd="$(python3 stackshot/fleet/client.py recycle-due --pr "https://github.com/$REPO/pull/$m" 2>&1)"; then flagged=1; rc_note="$rc_note; recycle (PR #$m): $(echo "$rd" | sed 's/^stackshot: //' | paste -sd ';' -)"; fi
         done
         if [ $flagged = 1 ]; then :
         elif idle_recycle "release: stackshot $live_pr"; then rc_note="$rc_note; recycle: no item flagged, so the fleet tool was asked for one once the box is idle"
@@ -1936,7 +1936,7 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
     fi
     if [ "$recycle" = --recycle ]; then   # flag the item the PR serves; a recycle is never an item of its own
         local url="https://github.com/$REPO/pull/$pr" rd
-        if rd="$(python3 client.py recycle-due --pr "$url" 2>&1)"; then rc_note="; recycle: $(echo "$rd" | sed 's/^stackshot: //' | paste -sd ';' -)"
+        if rd="$(python3 stackshot/fleet/client.py recycle-due --pr "$url" 2>&1)"; then rc_note="; recycle: $(echo "$rd" | sed 's/^stackshot: //' | paste -sd ';' -)"
         elif idle_recycle "release: stackshot PR #$pr: $title"; then
             rc_note="; recycle: no item flagged ($(echo "$rd" | tail -1 | sed 's/^stackshot: //' | cut -c1-160)), so the fleet tool was asked for one once the box is idle"
         else rc_note="; recycle NOT marked: $(echo "$rd" | tail -1)"; fi

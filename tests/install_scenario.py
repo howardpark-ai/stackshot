@@ -124,6 +124,14 @@ check("the server and anchor-hub take the reload as SIGHUP", all("\nExecReload=/
       {n: U.get(n, "") for n in ("stackshot.service", "anchor-hub.service")})
 check("every systemctl call in the units carries --user", all(re.match(r"ExecStart=-?/usr/bin/systemctl --user ", l) for l in uout.splitlines() if "systemctl " in l and not l.startswith("#")),
       [l for l in uout.splitlines() if "systemctl " in l])
+S_ = re.escape(STACK)
+for unit, rx in (("stackshot.service", r"ExecStart=\S+ run --project " + S_ + r" --locked --extra server stackshot server"),
+                 ("anchor-hub.service", r"ExecStart=\S+ run --project " + S_ + r" --locked --extra anchor-hub stackshot anchor-hub"),
+                 ("stackshot-puller.service", r"ExecStart=/usr/bin/python3 " + S_ + r"/stackshot/fleet/puller\.py")):
+    check(f"{unit} starts the package's program (the locked project environment for the two with an extra, the bare python3 for the puller)",
+          len(re.findall(r"(?m)^" + rx + "$", U.get(unit, ""))) == 1, re.findall(r"(?m)^ExecStart=.*", U.get(unit, "")))
+check("no unit starts a root forwarder or a uv --script: every Exec line names the package", not re.search(r"(?m)^Exec\w*=.*(--script|" + S_ + r"/[\w-]+\.py)", uout),
+      re.findall(r"(?m)^Exec\w*=.*(?:--script|" + S_ + r"/[\w-]+\.py).*", uout))
 check("the server units keep the header the user-scope rendering always had (an upgrade reports them unchanged)",
       all(U.get(n, "").split("\n", 1)[0] == f'# Rendered by install.sh from units/{n}.in for the user manager ([units] scope = "user") — edit the template, not this file.' for n in SERVER), [U.get(n, "").split("\n", 1)[0] for n in SERVER])
 check("the puller and anchor-hub keep their plain header",
@@ -281,7 +289,7 @@ check("the timer, a list with no time of day in it: 05:00", rc == 0 and [l for l
 rc, sout, _ = render_out(conf("aud-svc.toml", audit="true"), "stackshot-audit.service")
 lines = sout.splitlines()
 check("the service: the rulebook scan is ExecStartPost, after ExecStart (the run), and there is no ExecStartPre",
-      rc == 0 and not any(l.startswith("ExecStartPre=") for l in lines) and sum(l.startswith("ExecStartPost=") and "rulebook_scan.py run" in l for l in lines) == 1
+      rc == 0 and not any(l.startswith("ExecStartPre=") for l in lines) and sum(l.startswith("ExecStartPost=") and "stackshot.tools.rulebook_scan run" in l for l in lines) == 1
       and [i for i, l in enumerate(lines) if l.startswith("ExecStart=")][0] < [i for i, l in enumerate(lines) if l.startswith("ExecStartPost=")][0]
       and any(l.startswith("ExecStartPost=-/usr/bin/timeout 300 ") for l in lines), sout)
 rc, tout, _ = render_out(conf("aud-bad.toml", audit="true", at="25:99"), "stackshot-audit.timer")
@@ -289,8 +297,8 @@ check("[audit] at that is not a time of day: the timer keeps 05:00", rc == 0 and
 rc, sout, _ = render_out(acfg, "stackshot-audit.service")
 svc = pathlib.Path(STACK, "units/stackshot.service.in").read_text(encoding="utf-8")
 same = [l for l in svc.splitlines() if l.startswith(("WorkingDirectory=", "Environment="))]
-check("the service: a oneshot running `audit.py cue scheduled` with the server unit's working directory and environment lines",
-      rc == 0 and "\nType=oneshot\n" in sout and re.search(r"(?m)^ExecStart=\S+ run --locked --script " + re.escape(STACK) + r"/audit\.py cue scheduled$", sout)
+check("the service: a oneshot running `stackshot audit cue scheduled` with the server unit's working directory and environment lines",
+      rc == 0 and "\nType=oneshot\n" in sout and re.search(r"(?m)^ExecStart=\S+ run --project " + re.escape(STACK) + r" --locked stackshot audit cue scheduled$", sout)
       and all(re.sub("@[A-Z_]+@", "", l).split("=")[0] in sout for l in same) and "\nWorkingDirectory=" + STACK + "\n" in sout
       and "\nEnvironment=STACKSHOT_CONFIG=" + os.path.realpath(acfg) + "\n" in sout and "[Install]" not in sout, sout)
 check("the service carries X-Project=ops/example-service (the example's [audit] project) once, in [Unit] (sala job check reports no-project without it)",

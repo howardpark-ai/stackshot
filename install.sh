@@ -54,13 +54,13 @@ while [ $# -gt 0 ]; do
         *) ARGS+=("$1"); shift ;;
     esac
 done
-[ -n "$CONFIG" ] || CONFIG="$(python3 "$CHECKOUT/config.py" file)"
+[ -n "$CONFIG" ] || CONFIG="$(python3 "$CHECKOUT/stackshot/core/config.py" file)"
 CONFIG="$(python3 -c 'import os,sys; print(os.path.realpath(os.path.expanduser(sys.argv[1])))' "$CONFIG")"
-PORT="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/config.py" get server.port)"
-TZNAME="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/config.py" get instance.timezone)"; TZNAME="${TZNAME:-UTC}"
-PORTAL=0; [ -n "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/config.py" get portal.account_id)" ] && PORTAL=1       # the portal-sync unit and its drop-in
-HUB=0; case "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/config.py" get anchor_hub.enabled | tr '[:upper:]' '[:lower:]')" in true|1|yes) HUB=1 ;; esac   # anchor-hub's user unit
-read -r AUDIT AUDIT_AT AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import config as c; print(int(c.audit_enabled()), ",".join(c.audit_at()), c.audit_project())' "$CHECKOUT")   # the audit's timer pair, its HH:MM times (comma-joined: one OnCalendar line each)
+PORT="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get server.port)"
+TZNAME="$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get instance.timezone)"; TZNAME="${TZNAME:-UTC}"
+PORTAL=0; [ -n "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get portal.account_id)" ] && PORTAL=1       # the portal-sync unit and its drop-in
+HUB=0; case "$(STACKSHOT_CONFIG="$CONFIG" python3 "$CHECKOUT/stackshot/core/config.py" get anchor_hub.enabled | tr '[:upper:]' '[:lower:]')" in true|1|yes) HUB=1 ;; esac   # anchor-hub's user unit
+read -r AUDIT AUDIT_AT AUDIT_PROJECT < <(STACKSHOT_CONFIG="$CONFIG" python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from stackshot.core import config as c; print(int(c.audit_enabled()), ",".join(c.audit_at()), c.audit_project())' "$CHECKOUT")   # the audit's timer pair, its HH:MM times (comma-joined: one OnCalendar line each)
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"
 . "$HERE/units/scope.sh"      # UNIT_DIR, xdg_repair, user_manager_ok (config.py refused a removed mode above, with its line)
 SERVERU=" stackshot.service stackshot-reload.service stackshot-reload.path stackshot-portal-sync.service stackshot.service.d-portal-sync.conf "   # the server's units: their header names the user manager

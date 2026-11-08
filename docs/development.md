@@ -17,7 +17,7 @@ The map is `session_need` in `release.sh`; the table, with the code that shows h
 `release.sh --pick <pr>` and `release.sh --pick-files <file>...` print the pick and do nothing else.
 Releases go through GitHub's merge queue: `release.sh` enqueues the PR once its checks pass, waits until GitHub has merged it, deploys the merge and watches main's full run. Several PRs are released through the release queue (`release.sh queue N [N...]`: every waiting PR's release starts at once, four at a time, so the PRs reach GitHub's merge queue together), and main's measured run is split into six shards: both are in CONTRIBUTING.md (*Several PRs go in the release queue*, *Main's measured run is split across the pool*).
 For a local server without sign-in:
-`STACKSHOT_AUTH=off uv run --script stackshot/web/server.py`, then `curl localhost:8020/healthz`.
+`STACKSHOT_AUTH=off uv run --extra server stackshot server`, then `curl localhost:8020/healthz`.
 
 The code font is D2Coding (Naver, SIL Open Font License 1.1), vendored in `fonts/` and served by the server itself at `/fonts/D2Coding-Regular.woff2`
 (public, versioned by `?v=`, kept a year); `fonts/README.md` has its source, the conversion and how to replace it.

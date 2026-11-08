@@ -310,7 +310,7 @@ rc, out, err = cli("bogus", script="stackshot/audit/audit.py")
 check("audit.py's usage names scan", rc == 2 and "scan [--dry-run]" in err, err)
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
 check("the timer's unit runs the scan after the run (ExecStartPost), and a failed scan never fails the unit",
-      re.search(r"(?m)^ExecStartPost=-/usr/bin/timeout 300 @UV@ run --locked --script @CHECKOUT@/tools/rulebook_scan\.py run$", unit) and "ExecStart=@UV@ run --locked --script @CHECKOUT@/audit.py cue scheduled" in unit
+      re.search(r"(?m)^ExecStartPost=-/usr/bin/timeout 300 @UV@ run --project @CHECKOUT@ --locked python -m stackshot\.tools\.rulebook_scan run$", unit) and "ExecStart=@UV@ run --project @CHECKOUT@ --locked stackshot audit cue scheduled" in unit
       and "ExecStartPre" not in re.sub(r"(?m)^#.*$", "", unit) and unit.index("ExecStart=@UV@") < unit.index("ExecStartPost="), unit)
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 check("the example config documents [rulebook_scan], off by default", re.search(r"(?m)^\[rulebook_scan\][^\n]*\nenabled = false", ex) is not None)

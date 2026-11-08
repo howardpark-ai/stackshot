@@ -312,7 +312,7 @@ check("4 cli: a bad --week exits 2 naming the form", rc == 2 and "YYYY-MM-DD" in
 rc, out = cli(os.path.join(STACK, "stackshot/tools/refusal_report.py"), "run", "--bogus")
 check("4 cli: an unknown option prints the usage and exits 2", rc == 2 and "usage: refusal_report.py" in out, (rc, out))
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8").splitlines()
-post = [l for l in unit if l.startswith("ExecStartPost=") and "audit.py refusals" in l]
+post = [l for l in unit if l.startswith("ExecStartPost=") and "stackshot audit refusals" in l]
 check("4 unit: the audit unit runs the report after the audit run, with a timeout and a leading '-' so a failure never fails the audit", len(post) == 1 and post[0].startswith("ExecStartPost=-/usr/bin/timeout ")
       and [i for i, l in enumerate(unit) if l.startswith("ExecStart=")][0] < unit.index(post[0]), post)
 ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")

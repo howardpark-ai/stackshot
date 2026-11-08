@@ -408,7 +408,9 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
         (d / "xdg/mergequeue").mkdir(parents=True, exist_ok=True)
         (d / "xdg/mergequeue/example-owner__stackshot.toml").write_text(mqhost.replace("@DIR@", str(d)) if "=" in mqhost else f'mode = "{mqhost}"\n')
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
-    for p, body, x in ((box / "config.py", CONFIG, False), (box / "client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
+    for pkg in ("stackshot", "stackshot/core", "stackshot/fleet"):   # release.sh runs the checkout's modules by their package paths: stand-ins for two of them
+        (box / pkg).mkdir(parents=True, exist_ok=True); (box / pkg / "__init__.py").write_text("")
+    for p, body, x in ((box / "stackshot/core/config.py", CONFIG, False), (box / "stackshot/fleet/client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
                        (d / "bin/gh", GH_SH, True), (d / "bin/gh.py", GH, False), (d / "bin/git", GIT, True), (d / "bin/sleep", SLEEP, True), (d / "bin/sala", SALA, True), (d / "bin/notify", NOTIFY, True), (d / "bin/date", DATE, True), *(() if nosal else ((d / "bin/salamander", SALAMANDER_SH, True), (d / "bin/salamander.py", SALAMANDER, False)))):
         p.write_text(body); x and p.chmod(0o755)
     e = {**os.environ, "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks

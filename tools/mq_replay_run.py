@@ -110,9 +110,9 @@ def state_root(override: str | None = None) -> Path:
 
 
 def default_logdir() -> Path:
-    """the release folder where release.sh keeps its queue file: `python3 config.py state releases` (release.sh's own call; the instance config decides), else the shipped default"""
+    """the release folder where release.sh keeps its queue file: `python3 stackshot/core/config.py state releases` (release.sh's own call; the instance config decides), else the shipped default"""
     try:
-        r = run([sys.executable, str(ROOT / "config.py"), "state", "releases"], cwd=str(ROOT), timeout=30)
+        r = run([sys.executable, str(ROOT / "stackshot" / "core" / "config.py"), "state", "releases"], cwd=str(ROOT), timeout=30)
         if r.returncode == 0 and r.stdout.strip():
             return Path(r.stdout.strip())
     except (OSError, subprocess.TimeoutExpired):
@@ -1153,7 +1153,7 @@ def add_commands(sub) -> None:
     r.add_argument("--detach", action="store_true", help="start the run as the user unit stackshot-mq-replay-<run> and return")
     r.add_argument("--slug", help="OWNER/NAME of the repository (default: from a github.com remote url)")
     r.add_argument("--rules-ref", default="origin/main", help="where .github/mergequeue.toml is read from (default %(default)s)")
-    r.add_argument("--logdir", help="the release logs' folder, where the release queue file is (default: where release.sh keeps it, `python3 config.py state releases`)")
+    r.add_argument("--logdir", help="the release logs' folder, where the release queue file is (default: where release.sh keeps it, `python3 stackshot/core/config.py state releases`)")
     r.add_argument("--gate-poll", type=float, default=30.0, help="seconds between looks at the idle gate while waiting (default 30)")
     r.add_argument("--gate-cap", type=float, default=21600.0, help="give up waiting for an idle box after this many seconds (default 6 h)")
     r.add_argument("--case-timeout", type=float, default=14400.0, help="seconds a case may wait for its verdict (default 4 h)")

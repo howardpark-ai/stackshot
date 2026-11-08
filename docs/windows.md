@@ -31,7 +31,7 @@ and never printed (the command prints only the file's path). Carry that file to 
 means you use, then run, from the checkout on the box:
 
 ```
-python stackshot client install --url https://board.example.com --token-file <path to machine.token>
+python bin/stackshot client install --url https://board.example.com --token-file <path to machine.token>
 ```
 
 It stores the token as `%USERPROFILE%\.config\stackshot\client.token` and the address, one line, as `client.url`
@@ -51,7 +51,7 @@ moment, the example's defaults apply (UTC, plain pages) until `client install` r
 There is no `systemctl` on Windows, so `client install` skips the puller step (it says so and names the command to
 run, `pythonw <checkout>\stackshot/fleet/puller.py` as a scheduled task at logon) and the scheduled task below stays a manual step. It then merges the four hooks into
 `%USERPROFILE%\.claude\settings.json` the same way as on Linux: it prints the diff, backs up an existing file to
-`settings.json.bak-<timestamp>` and writes. `python stackshot client install --print` shows the hook lines and writes
+`settings.json.bak-<timestamp>` and writes. `python bin/stackshot client install --print` shows the hook lines and writes
 nothing. The command is covered by the repository's tests on Linux only: running it on Windows is **to verify**.
 
 Check from the box: `python stackshot/fleet/client.py get whoami` answers the machine's name.
@@ -95,7 +95,7 @@ Useful checks, run with `python` in a console:
 - `python stackshot/fleet/puller.py --once`: one poll, then exit (0 fine, 1 a delivery failed, 2 the server was not reached).
 - `python stackshot/fleet/puller.py --dry-run`: fetch, print what would be delivered, confirm nothing; then what the puller would update
   now, or why not (below).
-- `python stackshot client install --print`: the hook lines `client install` would write to `settings.json`; it writes
+- `python bin/stackshot client install --print`: the hook lines `client install` would write to `settings.json`; it writes
   nothing, so it is safe to run before the real install.
 
 The task is not defined in this repository. A working definition is a provisioning step that registers the task, checked on a host:

@@ -1650,7 +1650,7 @@ def _nag(owner: str = "") -> str:
                    + f" — a board change that reflects a state change is followed by a page update in the same turn ({_page_how()}). "
                    + (f"As a page keeper your debt settles only when the page's Current state changes: {_KEEPER_WHY}. " if any(_debt_strict(owner, e) for _k, e in mine) else "")
                    + f"After {_grace_min()} min the server refuses your next board write until the page is newer than the change. "
-                   + f"Board-only edit that changed no state: `python3 {_HERE}/pages.py clear <key>` on the server box.")
+                   + f"Board-only edit that changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` on the server box.")
     if others:
         out.append("pages owed: " + ", ".join(f"{k} ({_session_label(o)}, {_age(e['ts'])}{', a keeper: settles on a Current-state edit' if _debt_strict(o, e) else ''})" for k, o, e in others))
     return ("\n\n" + "\n".join(out)) if out else ""
@@ -1668,7 +1668,7 @@ def _refuse_if_owing(owner: str) -> None:
         raise ToolError("Refused: you owe a project-page update — " + ", ".join(f"{k} (since {e.get('item') or 'a board change'}, {_age(e['ts'])} ago)" for k, e in late)
                         + f" — update the page first ({_page_how()}), then retry this write. "
                         + (f"As a page keeper your debt settles only when the page's Current state changes: {_KEEPER_WHY}. " if _strict(owner) else "")
-                        + f"If that earlier board edit changed no state: `python3 {_HERE}/pages.py clear <key>` on the server box.")
+                        + f"If that earlier board edit changed no state: `python3 {_HERE}/stackshot/projects/pages.py clear <key>` on the server box.")
 
 
 # ----------------------------------------------------------------------------- publish (in-process)

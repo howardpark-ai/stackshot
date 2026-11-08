@@ -817,7 +817,7 @@ rec_clear(); cues_clear()
 
 # ---- 23. the unit and the CLI text
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
-check("the unit still starts `audit.py cue scheduled` (the mode switch lives in config) and carries the bedrock lane for the model calls", "audit.py cue scheduled" in unit and "X-Model-Lane=bedrock" in unit and "X-Model-Lane=max" not in unit, unit)
+check("the unit still starts `stackshot audit cue scheduled` (the mode switch lives in config) and carries the bedrock lane for the model calls", "stackshot audit cue scheduled" in unit and "X-Model-Lane=bedrock" in unit and "X-Model-Lane=max" not in unit, unit)
 r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/audit/audit.py"), "bogus"], capture_output=True, text=True, env=dict(os.environ))
 check("audit.py usage lists the run verb", r.returncode == 2 and "run [--dry-run]" in r.stderr, r.stderr)
 

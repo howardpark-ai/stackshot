@@ -39,11 +39,11 @@ ROLLBACK=""; [ "${DEPLOY_ROLLBACK:-}" = 1 ] && ROLLBACK=1            # only exac
 FROM="${DEPLOY_ROLLED_BACK_FROM:-}"                                   # set by the rolling-back step for the good tree's deploy.sh to finish with
 G="git"
 UV="$(command -v uv || echo "$HOME/.local/bin/uv")"     # a transient unit (release.sh) has no ~/.local/bin on its PATH
-python3 config.py check || exit 1; . "$HERE/units/scope.sh"      # server_ctl (systemctl --user), xdg_repair
+python3 stackshot/core/config.py check || exit 1; . "$HERE/units/scope.sh"      # server_ctl (systemctl --user), xdg_repair
 if [ -n "$($G status --porcelain --untracked-files=no)" ]; then echo "deploy refused: the production checkout has local changes ($HERE); work happens on a branch in a worktree, not here" >&2; exit 1; fi
 if [ -n "$FROM" ] && [ -z "$ROLLBACK" ]; then echo "deploy refused: DEPLOY_ROLLED_BACK_FROM is only for the second step of a rollback (DEPLOY_ROLLBACK=1)" >&2; exit 1; fi
 if [ -n "$ROLLBACK" ] && [ $DRY = 0 ]; then   # the lock must be held by someone: release.sh holds it for its children, by hand `flock <file> env ... ./deploy.sh`
-    LOCKF="${DEPLOY_LOCK_FILE:-$(python3 config.py state releases)/deploy.lock}"; mkdir -p "$(dirname "$LOCKF")"
+    LOCKF="${DEPLOY_LOCK_FILE:-$(python3 stackshot/core/config.py state releases)/deploy.lock}"; mkdir -p "$(dirname "$LOCKF")"
     if flock -n "$LOCKF" true 2>/dev/null; then echo "deploy refused: a rollback needs the deploy lock held; by hand: flock $LOCKF env DEPLOY_ROLLBACK=1 DEPLOY_TO=<sha> ./deploy.sh" >&2; exit 1; fi
 fi
 fetch_main() {   # release.sh's main_green fetches in this checkout too, outside the deploy lock: two fetches racing fail one ("incorrect old value
@@ -107,8 +107,9 @@ while IFS= read -r f; do
         units/stackshot.service.in|units/stackshot-reload.*|install.sh) server=1 ;;
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
-        anchor-hub.py|anchor-hub.py.lock|anchorhub/*|push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
-        server.py.lock) server=1 ;;      # the pinned dependencies: a new lock takes effect at the restart
+        anchor-hub.py|anchorhub/*|push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
+        pyproject.toml|uv.lock) server=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
+        stackshot/cli.py) server=1; hub=1 ;;      # the units start the server and the hub through it (the audit's oneshot reads it fresh)
         icons/*) server=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start
         fonts/*) server=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
         shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)
@@ -138,7 +139,7 @@ trap 'server_ctl start stackshot-reload.path' EXIT
 if [ $server = 1 ]; then server_ctl restart stackshot.service; echo "  restarted stackshot.service"; fi
 if [ $hub = 1 ] && [ -f "$HOME/.config/systemd/user/anchor-hub.service" ]; then systemctl --user restart anchor-hub.service; echo "  restarted anchor-hub.service"; fi   # not installed: [anchor_hub] enabled is off
 if [ $puller = 1 ]; then systemctl --user restart stackshot-puller.service; echo "  restarted stackshot-puller.service"; fi
-port="$(python3 config.py get server.port)"
+port="$(python3 stackshot/core/config.py get server.port)"
 # Wait up to 180 s: a start reads thousands of files in turn, and on a busy disk (a weekly fstrim, for one)
 # it can take a minute while the server comes up fine; 60 s would call that a failed release.
 HEALTH_WAIT=180; deadline=$((SECONDS + HEALTH_WAIT))
@@ -146,7 +147,7 @@ while [ $SECONDS -lt $deadline ]; do
     if curl -sf -m 3 "http://127.0.0.1:${port}/healthz" >/dev/null; then
         echo "healthz ok at $(git rev-parse --short HEAD)"
         if [ $server = 1 ]; then      # the live board was rendered by the old code until now: one publish, so a release never lags its own deploy
-            if out="$("$UV" run --locked --script publish.py publish 2>&1)"; then echo "  republished: $(echo "$out" | tail -1)"
+            if out="$("$UV" run --project "$HERE" --locked --extra server stackshot publish publish 2>&1)"; then echo "  republished: $(echo "$out" | tail -1)"
             else echo "  WARNING: the republish failed ($(echo "$out" | tail -1)); the deploy itself is done and the timer publishes within 10 min"; fi
         fi
         exit 0

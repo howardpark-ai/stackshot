@@ -20,7 +20,7 @@ from stackshot.core import interp as _interp  # noqa: E402  (a missing interpret
 A = str(_cfg.state("anchor-hub"))
 FLEET = str(_cfg.fleet_dir())
 PUB = str(_cfg.get("fleet", "publisher_letter") or "a")
-PUSH = [sys.executable, os.path.join(HERE, "..", "push.py")]
+PUSH = [sys.executable, os.path.join(HERE, "..", "stackshot", "fleet", "push.py")]
 
 
 def arg(name, default=None):

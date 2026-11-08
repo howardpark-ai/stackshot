@@ -9,15 +9,15 @@ CHECKOUT="$(cd "$HOOKS/../.." && pwd)"
 . "$HOOKS/_python.sh"
 [ -n "$PY" ] || exit 0
 PAYLOAD="$(cat)"
-if brief="$($PY "$CHECKOUT/client.py" get brief 2>/dev/null)"; then      # on a failure client.py prints its error on stdout: never shown
+if brief="$($PY "$CHECKOUT/stackshot/fleet/client.py" get brief 2>/dev/null)"; then      # on a failure client.py prints its error on stdout: never shown
     printf '%s\n' "$brief"
 else
-    store="$($PY "$CHECKOUT/config.py" path paths.store 2>/dev/null)"
-    [ -n "$store" ] && [ -d "$store" ] && $PY "$CHECKOUT/publish.py" brief 2>/dev/null
+    store="$($PY "$CHECKOUT/stackshot/core/config.py" path paths.store 2>/dev/null)"
+    [ -n "$store" ] && [ -d "$store" ] && $PY "$CHECKOUT/stackshot/web/publish.py" brief 2>/dev/null
 fi
 # pages.py keeper answers with a hookSpecificOutput JSON envelope; one hook's stdout is either JSON or plain text, so the
 # envelope is unwrapped and its context printed as text after the brief (a setup can run the two as separate hooks).
-printf '%s' "$PAYLOAD" | $PY "$CHECKOUT/pages.py" keeper 2>/dev/null | $PY -c '
+printf '%s' "$PAYLOAD" | $PY "$CHECKOUT/stackshot/projects/pages.py" keeper 2>/dev/null | $PY -c '
 import json, sys
 raw = sys.stdin.read()
 try: print(json.loads(raw)["hookSpecificOutput"]["additionalContext"])
