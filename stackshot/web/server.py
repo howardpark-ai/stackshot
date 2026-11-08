@@ -160,7 +160,7 @@ from stackshot.web import search as _search  # noqa: E402  — the board's searc
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
 # every other setting is read where it is used, so a reload (SIGHUP) is live at once.
 NAME = str(_cfg.get("instance", "name") or "stackshot")
-from stackshot.web.common import OWNER, _NEEDS_KINDS, _clip_line, _needs_kinds, _needs_list, _needs_of  # noqa: E402  — pieces shared with the server's other modules (common.py); OWNER is read from [instance] once, at this import
+from stackshot.web.common import OWNER, _CODE_FENCE, _CODE_SPAN, _NEEDS_KINDS, _canon_needs, _clip_line, _needs_kinds, _needs_list, _needs_of, _needs_store, _without_mq_groups  # noqa: E402  — pieces shared with the server's other modules (common.py); OWNER is read from [instance] once, at this import
 BOARD_URL = str(_cfg.get("instance", "board_url") or "")
 OPERATOR = str(_cfg.get("fleet", "operator_label") or "operator session")
 _FOR_OWNER = f"[for {OWNER}]"   # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance)
@@ -238,31 +238,22 @@ def _page_how(flavor: str | None = None) -> str:
     return "edit " + str(_cfg.get("paths", "brain") or "").rstrip("/") + "/<key>.md (its Current state, and a dated line under its Timeline), commit and push"
 
 
-STORE = _cfg.path("paths", "store")
+from stackshot.web import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import) and the readers of it (store.py); `STORE` is read and set on that module, never here
+from stackshot.web.store import _item_files, _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of the store, kept on this module as well (store.py)
 LETTER = str(_cfg.get("ids", "letter") or "s")
-NEXT_ID = STORE / "next-id"
+NEXT_ID = _store.STORE / "next-id"
 REQUESTS = _cfg.state("requests.json")
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
-    _ro.install_backstop([STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
+    _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
 else:
-    (STORE / LETTER).mkdir(parents=True, exist_ok=True)
+    (_store.STORE / LETTER).mkdir(parents=True, exist_ok=True)
     REQUESTS.parent.mkdir(parents=True, exist_ok=True)
 _GID = re.compile(r"^([a-z])#?(\d+)$")
 
 
 # ----------------------------------------------------------------------------- store (the one store, every letter)
-def _item_files() -> list[tuple[str, Path]]:
-    """Every item file in the store as (gid, path), across all letter dirs."""
-    out = []
-    for d in sorted(STORE.iterdir()):
-        if not (d.is_dir() and len(d.name) == 1 and d.name.isalpha()):
-            continue
-        for p in d.glob("*.json"):
-            if p.name.startswith(".") or not p.stem.isdigit():
-                continue
-            out.append((f"{d.name}{p.stem}", p))
-    return sorted(out, key=lambda t: (t[0][0], int(t[0][1:])))
+# _item_files, _path and _load, and STORE they read, are store.py's (imported where STORE was defined, above); _shown_ids is store.py's too.
 
 
 def _next_id() -> str:
@@ -307,27 +298,6 @@ def _norm_id(item_id: str | int, bare: bool = False) -> str:
     return _gh.resolve(g)
 
 
-def _path(gid: str) -> Path:
-    p = STORE / gid[0] / f"{gid[1:]}.json"
-    if not p.exists():                       # an old id kept in a field (after, superseded_by) after its item moved
-        alt = _gh.resolve(gid)
-        if alt != gid:
-            return STORE / alt[0] / f"{alt[1:]}.json"
-    return p
-
-
-def _load(gid: str) -> dict[str, Any]:
-    p = _path(gid)
-    if not p.exists():
-        raise ToolError(f"no item {gid}")
-    with open(p, encoding="utf-8") as f:
-        it = json.load(f)
-    _legacy_hold(it)                         # a file the start-time migration has not rewritten yet reads as it will be
-    _legacy_needs(it)
-    _ip.read_through(it)                     # metadata.project is the page the item's project id points at now (a moved or renamed page keeps its items)
-    return it
-
-
 # ----------------------------------------------------------------------------- needs, observers and after
 # An item relates to sessions four ways, on the whole board. Its mover (the first design called it the owner), one
 # session he talks to. metadata.needs, whose move it is now, a LIST: "decision" (his), "external" (someone outside, named in
@@ -337,35 +307,12 @@ def _load(gid: str) -> dict[str, Any]:
 # never messaged (only its own turn-end check asks it). metadata.observers: sessions that hear only a close or a reopen.
 # metadata.after: items of any project that must close first; while one is open the item is parked without a hold,
 # and the last close wakes it. The stored list is canonical: decision, external, then the sessions as given.
-# _NEEDS_KINDS, _needs_list, _needs_of and _needs_kinds are common.py's (imported with OWNER, near the top of this module).
+# _NEEDS_KINDS, _needs_list, _needs_of, _needs_kinds, _canon_needs and _needs_store are common.py's (imported with OWNER, near the top of this module).
 
 
 def _needs_sessions(meta: dict[str, Any]) -> list[str]:
     """The session names in an item's needs (whatever is not decision or external)."""
     return [x for x in _needs_of(meta) if x.lower() not in _NEEDS_KINDS]
-
-
-def _canon_needs(needs: list[str], nm: dict[str, str] | None = None) -> list[str]:
-    """The stored order: decision, external, then the sessions as given, each once (a session by its canonical id)."""
-    out, seen = [], set()
-    for k in _NEEDS_KINDS:
-        if any(x.lower() == k for x in needs):
-            out.append(k)
-    for x in needs:
-        if x.lower() in _NEEDS_KINDS:
-            continue
-        key = _anc.canonical(x, nm) if nm is not None else x
-        if key not in seen:
-            seen.add(key); out.append(x)
-    return out
-
-
-def _needs_store(meta: dict[str, Any], needs: list[str]) -> None:
-    """Write a needs list into an item's metadata (the key goes when the list is empty)."""
-    if needs:
-        meta["needs"] = list(needs)
-    else:
-        meta.pop("needs", None)
 
 
 def _after_of(meta: dict[str, Any]) -> list[str]:
@@ -391,23 +338,7 @@ def _observers_of(meta: dict[str, Any]) -> list[str]:
     return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
 
 
-def _legacy_needs(item: dict[str, Any]) -> bool:
-    """An item stored before an earlier change (needs a word, the linked agent in metadata.agent) → in memory, needs a list with the agent
-    in it, the agent key gone. → True when it was one. The migration and _load's tolerance only."""
-    meta = item.get("metadata")
-    if not isinstance(meta, dict):
-        return False
-    changed = False
-    if isinstance(meta.get("needs"), str):
-        _needs_store(meta, _needs_list(meta["needs"])); changed = True
-    elif meta.get("needs") is not None and not isinstance(meta.get("needs"), list):
-        meta.pop("needs", None); changed = True
-    ag = str(meta.pop("agent", "") or "").strip()
-    if ag:
-        if item.get("status") == "open":          # a closed item's agent is a record, and a close carries no needs
-            _needs_store(meta, _canon_needs(_needs_of(meta) + [ag]))
-        changed = True
-    return changed
+# _legacy_needs and _legacy_hold, the two forms _load reads an old file through, are store.py's.
 
 
 def _migrate_needs() -> list[str]:
@@ -694,16 +625,6 @@ def _session_ids_pass() -> str:
         return line
 
 
-def _legacy_hold(item: dict[str, Any]) -> bool:
-    """An item stored before on hold became a property (status "on_hold", since retired) → in
-    memory, status open + metadata.hold, its wake kept. → True when it was one. The migration and _load's tolerance only."""
-    if item.get("status") != "on_hold":
-        return False
-    item["status"] = "open"
-    item["metadata"] = {**(item.get("metadata") or {}), "hold": True}
-    return True
-
-
 def _hold_flag(item: dict[str, Any]) -> bool:
     """The stored hold flag: an open item with metadata.hold, whatever its needs. The wake pass reads it (a held item's wake
     releases the flag, a reminder's leaves it alone); everything that shows or counts the hold reads _is_held."""
@@ -753,7 +674,7 @@ def _close_description_repair(apply: bool = False, days: float = 14.0, now: floa
     on, takes the restored description like any description change. → (one row per item repaired or to repair: {gid, shown, closed_at, before, after, outcome_text},
     a count per reason an item was left)."""
     now = time.time() if now is None else now
-    rows, skipped = _cr.scan(STORE, _item_files(), now, days)
+    rows, skipped = _cr.scan(_store.STORE, _item_files(), now, days)
     out = []
     for row in rows:
         gid = row["gid"]
@@ -1031,7 +952,7 @@ def _remember_request(rid: str, gid: str) -> None:
 def _registry(name: str) -> dict[str, Any]:
     r = _cfg.CFG["registries"][name]
     try:
-        with open(STORE / f"{name}.json", encoding="utf-8") as f:
+        with open(_store.STORE / f"{name}.json", encoding="utf-8") as f:
             data = json.load(f)
         data = data[r["key"]] if r.get("key") else data
         return _prj.with_record(data) if name == "projects" else data      # the project record's entries first, the page lines for the rest
@@ -1042,7 +963,7 @@ def _registry(name: str) -> dict[str, Any]:
 def _registry_text() -> str:
     """The page registry file's text for the client API (`/client/registry`), with the project record's entries laid over the pages when there are any: a hook on another machine reads
     the same registry as the server does. The file's own text when no entry changes a page."""
-    text = (STORE / "projects.json").read_text(encoding="utf-8")
+    text = (_store.STORE / "projects.json").read_text(encoding="utf-8")
     try:
         doc = json.loads(text)
         pages = doc.get("pages") if isinstance(doc, dict) else None
@@ -3182,7 +3103,7 @@ def _writers_since(gid: str, since: float) -> list[tuple[str, str]]:
         pass
     try:
         p = _path(gid)
-        lg = subprocess.run(["git", "-C", str(STORE), "log", f"--since={int(since)}", "--name-only", "--format=%x01%H", "--", str(p)], capture_output=True, timeout=10)
+        lg = subprocess.run(["git", "-C", str(_store.STORE), "log", f"--since={int(since)}", "--name-only", "--format=%x01%H", "--", str(p)], capture_output=True, timeout=10)
         if lg.returncode:
             return out
         want = []
@@ -3193,7 +3114,7 @@ def _writers_since(gid: str, since: float) -> list[tuple[str, str]]:
                 want.append(f"{head.strip()}:{path}\n")
         if not want:
             return out
-        buf = subprocess.run(["git", "-C", str(STORE), "cat-file", "--batch"], input="".join(want[:60]).encode(), capture_output=True, timeout=10).stdout
+        buf = subprocess.run(["git", "-C", str(_store.STORE), "cat-file", "--batch"], input="".join(want[:60]).encode(), capture_output=True, timeout=10).stdout
         i = 0
         while i < len(buf):
             nl = buf.find(b"\n", i)
@@ -4078,8 +3999,7 @@ def _tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool
 _ID_FORM = r"(board#\d+|board-tmp-[a-z0-9-]+[#-]\d+|[a-z]\d+)"
 _ID_END = r"(?=$|[\s.,;:!?)\]}*…·—–]|['’]s(?!\w))"
 _ITEM_REF = re.compile(r"(?<![^\s(\[{<*,;·—–])" + _ID_FORM + _ID_END + r"|/items/(board-tmp-[a-z0-9-]+-\d+|[a-z]?\d+)" + _ID_END, re.I | re.M)
-_CODE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(?:^[ \t]*\1[ \t]*$|\Z)", re.M | re.S)
-_CODE_SPAN = re.compile(r"(`+)(?!`)[^\n]*?(?<!`)\1(?!`)")
+# _CODE_FENCE, _CODE_SPAN, _MQ_GROUP and _without_mq_groups are common.py's (the matchers that blank code and merge-queue group numbers before an id is read).
 _QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”|‘[^’\n]*’|(?<![\w'’])'(?=\S)(?:[^'\n]|'(?=\w))*?(?<=\S)'(?!\w)")
 
 
@@ -4088,17 +4008,6 @@ def _plain_text(text: str) -> str:
     into \\0, so what stays keeps its place and nothing reads as glued to a space)."""
     blank = lambda m: re.sub(r"[^\n]", "\0", m.group(0))
     return _QUOTED.sub(blank, _CODE_SPAN.sub(blank, _CODE_FENCE.sub(blank, str(text or ""))))
-
-
-# The merge queue numbers its groups g1, g2, … and a release log line carries them, in the forms "group g7", "split from g7" and
-# "[g7]". g<n> is also the store id of an issue-numbered item (board#N), so a relayed release line would name an unrelated item.
-# Those forms alone are blanked from a text before ids are read or shown; a bare g7, a "[g7](link)" and every other form still name.
-_MQ_GROUP = re.compile(r"(?i:\b(?:group|split[ \t]+from))[ \t]+(?i:g)\d+(?![\w\-/\\]|\.\w)|\[(?i:g)\d+\](?![(\[])")
-
-
-def _without_mq_groups(text: str) -> str:
-    """`text` with each merge-queue group number ("group g7", "split from g7", "[g7]") blanked out (each character but a newline turned into \\0)."""
-    return _MQ_GROUP.sub(lambda m: re.sub(r"[^\n]", "\0", m.group(0)), str(text or ""))
 
 
 def _item_refs(text: str) -> list[str]:
@@ -4120,39 +4029,7 @@ def _item_refs(text: str) -> list[str]:
     return out
 
 
-# The store keys an issue-numbered item as g<n>, but a person
-# reads it as board#N, and once a session has seen g<n> nothing kept it out of what it wrote. So every write that takes text in
-# (create, update and complete: subject, description, next, ask, the options' label and line, the close's reason and a work
-# line's text; the message tool's text) passes through _shown_ids, which writes a bare g<n> that names an item as it is shown.
-# Bare means a whole word: not glued to a word, and not after # / \ - . : @ (board#g7, x/g7, x-g7, a path or a handle);
-# not before a word character, - / \ or a dot-word (g7abc, g7-x, g7/, g7.json). Never inside code (a fenced block, an inline
-# span), a markdown link (its [text] and its (url)) or a URL. An id that names no item stays as written; the other stored forms
-# (s<n>, l<n>) are left as they are. The text a write stores and the reply that echoes it then show board#N; a gbrain page's
-# timeline is not stackshot's to rewrite.
-_SHOWN_SKIP = re.compile(r"!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<?https?://[^\s)>\]]+>?")
-
-
-def _shown_ids(text: str) -> str:
-    """Text a write takes in → the same, each bare store id of an issue-numbered item (g7) that names an item written as it is
-    shown; code, links, URLs, unknown ids and every other form untouched (above)."""
-    text = str(text or "")
-    L = _gh.letter()
-    if not text or L not in text:
-        return text
-    blank = lambda m: re.sub(r"[^\n]", "\0", m.group(0))
-    masked = _without_mq_groups(_SHOWN_SKIP.sub(blank, _CODE_SPAN.sub(blank, _CODE_FENCE.sub(blank, text))))
-    rx = re.compile(r"(?<![\w#/\\\-.:@])" + re.escape(L) + r"[1-9]\d*(?![\w\-/\\]|\.\w)")
-    out, at = [], 0
-    for m in rx.finditer(masked):
-        gid = _gh.resolve(m.group(0))
-        try:
-            ok = _path(gid).exists()
-        except Exception:  # noqa: BLE001
-            ok = False
-        label = _gh.shown(gid) if ok else ""
-        if label and label != m.group(0):
-            out += [text[at:m.start()], label]; at = m.end()
-    return "".join(out) + text[at:] if out else text
+# _SHOWN_SKIP and _shown_ids, which write a bare store id as the item's shown id, are store.py's.
 
 
 def _back_agent(who: str, idx: dict[str, dict[str, Any]] | None = None) -> str:
@@ -4675,7 +4552,7 @@ def _healthz_body() -> str:
     One stat, no process."""
     st = _interp.interpreter_status()
     body = "ok" if st["exists"] else f"ok\ndelivery interpreter missing: {st['path']} (children start with {st['fallback'] or 'nothing: deliveries fail'})"
-    return body + "\n" + _ro.healthz_line(STORE) if _ro.is_read_only() else body      # a standby adds `read-only: yes; data age: <s>s`; the first line stays "ok"
+    return body + "\n" + _ro.healthz_line(_store.STORE) if _ro.is_read_only() else body      # a standby adds `read-only: yes; data age: <s>s`; the first line stays "ok"
 
 
 def _head_commit() -> str | None:
@@ -8676,7 +8553,7 @@ def _ro_with_banner(resp):
         return resp
     try:
         raw = Path(resp.path).read_bytes() if isinstance(resp, FileResponse) else bytes(resp.body)
-        page = _ro.with_banner(raw.decode("utf-8", "replace"), STORE, ZONE)
+        page = _ro.with_banner(raw.decode("utf-8", "replace"), _store.STORE, ZONE)
     except Exception:  # noqa: BLE001  — a page that cannot carry the banner is served without it, never refused for it
         return resp
     drop = {"content-length", "content-type", "etag", "last-modified", "content-encoding"}
@@ -15466,7 +15343,7 @@ def _ro_board() -> dict[str, Any] | None:
     now = time.time()
     if _RO_BOARD["r"] is None or now - _RO_BOARD["at"] > 60:
         try:
-            _RO_BOARD["r"] = _rmod.render_all(str(STORE))
+            _RO_BOARD["r"] = _rmod.render_all(str(_store.STORE))
             _RO_BOARD["at"] = now
         except Exception as e:  # noqa: BLE001
             print(f"standby render failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -15539,7 +15416,7 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
     if what == "rules":
         return 200, "text/markdown; charset=utf-8", _rules_text("full")
     if what == "brief":
-        return 200, "text/plain; charset=utf-8", _rmod.render(str(STORE), "brief")
+        return 200, "text/plain; charset=utf-8", _rmod.render(str(_store.STORE), "brief")
     if what == "project":               # phase A: one project's record by id, full key or bare slug: {id, key, keeper, agents}
         key = str(params.get("key") or "").strip()
         if not key or len(key) > 200:
@@ -18367,7 +18244,7 @@ def _item_page(request: Request, gid: str):
             watch = _watch_box(email, gid, _load(gid))
         except Exception:  # noqa: BLE001  — the control is an extra; the page never fails for it
             watch = None
-        board = rmod.Board(str(STORE))
+        board = rmod.Board(str(_store.STORE))
         kw: dict[str, Any] = {}
         if "contact" in inspect.signature(board.item_html).parameters:     # chosen by the renderer, not the URL prefix: the one that draws the side column's first row takes the derived contact (an open item's live one)
             try:
@@ -19209,7 +19086,7 @@ def _details_page(request: Request, key: str):
     if g is not None:
         return g
     try:
-        return HTMLResponse(_ui_mods()[0].Board(str(STORE), contact_of=_contact_label).routing_html(key), headers={"Cache-Control": "no-store"})
+        return HTMLResponse(_ui_mods()[0].Board(str(_store.STORE), contact_of=_contact_label).routing_html(key), headers={"Cache-Control": "no-store"})
     except KeyError:
         return PlainTextResponse("no such project", status_code=404)
 
@@ -19226,7 +19103,7 @@ async def site_search(request: Request):
     rmod, smod, _ = _ui_mods()
 
     def page() -> str:         # the filters (When, Kind, State, how many rows) come from the address too
-        return smod.results_html(rmod.Board(str(STORE)), str(request.query_params.get("q") or ""), request.query_params)
+        return smod.results_html(rmod.Board(str(_store.STORE)), str(request.query_params.get("q") or ""), request.query_params)
     return HTMLResponse(await run_in_threadpool(page), headers={"Cache-Control": "no-store"})
 
 
@@ -19252,7 +19129,7 @@ async def landed_page(request: Request):
     kw = {"page": request.query_params.get("page")}        # the Closed page pages its Completed section (?page=N)
 
     def page() -> str:
-        return rmod.Board(str(STORE), contact_of=_contact_label).landed_html(**kw)
+        return rmod.Board(str(_store.STORE), contact_of=_contact_label).landed_html(**kw)
     return HTMLResponse(await run_in_threadpool(page), headers={"Cache-Control": "no-store"})
 
 
@@ -19266,7 +19143,7 @@ async def projects_page(request: Request):
 
     from stackshot.web.ui import render as r2
 
-    return HTMLResponse(await run_in_threadpool(lambda: r2.Board(str(STORE)).projects_html()), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(await run_in_threadpool(lambda: r2.Board(str(_store.STORE)).projects_html()), headers={"Cache-Control": "no-store"})
 
 
 async def _landed_change(request: Request, change):
@@ -19344,7 +19221,7 @@ async def site_runners(request: Request):
     rmod, _, nmod = _ui_mods()
 
     def page() -> str:
-        return nmod.page_html(rmod.Board(str(STORE)), _runners.serve(), token)     # the last snapshot at once; a rebuild (GitHub and ssh) runs in its own thread
+        return nmod.page_html(rmod.Board(str(_store.STORE)), _runners.serve(), token)     # the last snapshot at once; a rebuild (GitHub and ssh) runs in its own thread
     return HTMLResponse(await run_in_threadpool(page), headers={"Cache-Control": "no-store"})
 
 
@@ -19434,7 +19311,7 @@ async def audits_page(request: Request):
 
     from stackshot.web.ui import render as r2
 
-    return HTMLResponse(await run_in_threadpool(lambda: r2.Board(str(STORE)).audits_html(runner=_runner_status())), headers={"Cache-Control": "no-store"})
+    return HTMLResponse(await run_in_threadpool(lambda: r2.Board(str(_store.STORE)).audits_html(runner=_runner_status())), headers={"Cache-Control": "no-store"})
 
 
 @mcp.custom_route("/audit/status", methods=["GET"])
@@ -19538,7 +19415,7 @@ def _board_home_draw_locked() -> None:
         gen = _BOARD_HOME["gen"]
     try:
         from stackshot.web.ui import render as r2
-        page = r2.Board(str(STORE), contact_of=_contact_label).html()
+        page = r2.Board(str(_store.STORE), contact_of=_contact_label).html()
         _BOARD_HOME["drawn"] = int(now)
         _BOARD_HOME["html"] = page
         _BOARD_HOME["failed"] = 0.0
@@ -19625,10 +19502,10 @@ async def site_file(request: Request):
     name = request.path_params.get("name", "")
     if name == "healthz":
         if str(request.query_params.get("format") or "").lower() == "json":       # {ok, read_only, data_age_s, commit}, public like the plain one
-            return JSONResponse(_ro.healthz_json(STORE, _head_commit()), headers={"Cache-Control": "no-store"})
+            return JSONResponse(_ro.healthz_json(_store.STORE, _head_commit()), headers={"Cache-Control": "no-store"})
         return PlainTextResponse(_healthz_body())
     if name == "healthz.json":
-        return JSONResponse(_ro.healthz_json(STORE, _head_commit()), headers={"Cache-Control": "no-store"})
+        return JSONResponse(_ro.healthz_json(_store.STORE, _head_commit()), headers={"Cache-Control": "no-store"})
     r = _page_at(request, name)
     if r is not None:
         return r

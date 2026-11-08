@@ -227,8 +227,8 @@ put_registry([r_ if r_["id"] != S["main"] else {**r_, "name": "home-sparrow-lead
 put_fleet({**FLEET, Tr["main_b"]: "home-sparrow-lead"})
 check("rename: the stored item did not change", hashlib.sha256(server._path(g1).read_bytes()).hexdigest() == before)
 check("rename: get shows the new name", "mover: home-sparrow-lead" in server.stackshot_get(g1), server.stackshot_get(g1))
-check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(server.STORE)).item_html(g1) and "home-sparrow-lead" in server._rmod.render(str(server.STORE), "full"))
-check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(server.STORE)).item_html(g1))
+check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(server._store.STORE)).item_html(g1) and "home-sparrow-lead" in server._rmod.render(str(server._store.STORE), "full"))
+check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(server._store.STORE)).item_html(g1))
 check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", server._same_sess("home-sparrow-main", meta(g1)["owner"]) and server._same_sess("home-sparrow-lead", meta(g1)["owner"]) and server._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
 check("rename: the client API lists the item for the session by its new name, its old name, its id and its first transcript", all(
       g1 in {i["gid"] for i in json.loads(server._client_items(k)[2])["items"]} for k in ("home-sparrow-lead", "home-sparrow-main", S["main"], Tr["main_a"], Tr["main_b"])))
@@ -468,7 +468,7 @@ it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["m
 SALA.unlink()
 check("registry gone: get shows the stored value", "mover: " + S["main"] in server.stackshot_get(mig["name"]) or "mover: home-sparrow-main" in server.stackshot_get(mig["name"]), server.stackshot_get(mig["name"]))
 check("registry gone: the client API still lists the item for the id (the stored form)", mig["name"] in {i["gid"] for i in json.loads(server._client_items(S["main"])[2])["items"]})
-check("registry gone: the web page still renders", "<html" in ui_render.Board(str(server.STORE)).item_html(mig["name"]).lower())
+check("registry gone: the web page still renders", "<html" in ui_render.Board(str(server._store.STORE)).item_html(mig["name"]).lower())
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

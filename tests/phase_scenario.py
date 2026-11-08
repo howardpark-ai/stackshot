@@ -316,8 +316,8 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
     for p in copy_dir.rglob("*"):
         if p.is_file():
             p.chmod(0o444)                  # a read-only copy: the replay never writes it, and a write would fail
-    real_store = server.STORE
-    server.STORE = copy_dir
+    real_store = server._store.STORE
+    server._store.STORE = copy_dir
     rows = []
     try:
         for gid, _path in server._item_files():
@@ -334,7 +334,7 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
             rows.append((gid, it, (old, new, stamped, server._item_list(bare(it)), server._item_list(stamped), server._model_lines(bare(it), short=True), server._model_lines(stamped, short=True),
                                          server._fmt(bare(it)) + server._fmt(bare(it), brief=True), server._fmt(stamped) + server._fmt(stamped, brief=True))))
     finally:
-        server.STORE = real_store
+        server._store.STORE = real_store
     bad = [g for g, it, r in rows if it is None]
     check("7 replay: every item of the copy loads", not bad, bad[:5])
     got = [(g, it, r) for g, it, r in rows if it is not None]

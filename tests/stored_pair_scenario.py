@@ -164,13 +164,13 @@ def counts(store, t, on):
         return dict(c), w
 def with_store(src, fn):
     """fn(path) on a private copy of `src`, the server pointed at it and removed after, whatever happens."""
-    R_ = pathlib.Path(_scratch.mkdtemp(prefix="storedpair-copy-")); real, anc = server.STORE, server._anc.FILE
+    R_ = pathlib.Path(_scratch.mkdtemp(prefix="storedpair-copy-")); real, anc = server._store.STORE, server._anc.FILE
     try:
         shutil.copytree(src, R_ / "store", ignore=shutil.ignore_patterns(".git", "*.tmp", ".*"))
-        server.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
+        server._store.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
         return fn(R_ / "store")
     finally:
-        server.STORE, server._anc.FILE = real, anc
+        server._store.STORE, server._anc.FILE = real, anc
         shutil.rmtree(R_, ignore_errors=True)
 def counters(): return _model.UNSTAMPED["count"]
 def quietly(fn, *a):

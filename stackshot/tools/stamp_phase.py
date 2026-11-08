@@ -245,11 +245,11 @@ def dry_run(a: argparse.Namespace) -> int:
     scratch = Path(tempfile.mkdtemp(prefix="stampdry-"))
     fd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY)
     fcntl.flock(fd, fcntl.LOCK_SH)      # systemd-tmpfiles ageing skips a folder that holds a lock
-    real_store = server.STORE
+    real_store = server._store.STORE
     results: list[dict[str, Any]] = []
     try:
         shutil.copytree(store, scratch / "store", ignore=shutil.ignore_patterns(".git", "*.tmp"))
-        server.STORE = scratch / "store"
+        server._store.STORE = scratch / "store"
         for ch in chunks(opens):
             st, d = app.call({"op": "stamp", "items": ch})
             if st != 200:
@@ -261,7 +261,7 @@ def dry_run(a: argparse.Namespace) -> int:
             watch1 = {g: bool(server._watch.watches(after_items[g])) for g in opens}
         outside = files_outside(items, after_items)
     finally:
-        server.STORE = real_store
+        server._store.STORE = real_store
         os.close(fd)
         shutil.rmtree(scratch, ignore_errors=True)
 
