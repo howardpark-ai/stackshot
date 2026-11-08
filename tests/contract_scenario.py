@@ -771,7 +771,7 @@ with TestClient(app) as c:
         r = c.post(path, data=data) if form else c.post(path, json=data)
         try: return r.status_code, r.json()
         except Exception: return r.status_code, {}
-    server._ui_http = ui_http
+    server._signin._ui_http = ui_http
     r = c.get("/ui/login?next=/projects/alpha", follow_redirects=False)
     loc = r.headers.get("location", "")
     from urllib.parse import urlparse, parse_qs

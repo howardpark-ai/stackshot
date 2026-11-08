@@ -288,9 +288,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("GET /answer-tokens: with the server's own sign-in off (this scenario's STACKSHOT_AUTH=off), not signed in gets 200 and no token", t_anon.status_code == 200 and t_anon.json() == {}, (t_anon.status_code, t_anon.text[:200]))
     t_forged = page("/answer-tokens?ids=a1", cookie="forged.cookie")
     check("GET /answer-tokens: a forged cookie is nobody: 200 and no token", t_forged.status_code == 200 and t_forged.json() == {} and tok("a1") not in t_forged.text, (t_forged.status_code, t_forged.text[:200]))
-    _am, _uo = server._auth_mode, server._cfg.CFG["auth"]["ui_open"]
+    _am, _uo = server._signin._auth_mode, server._cfg.CFG["auth"]["ui_open"]
     try:
-        server._auth_mode = lambda: "oauth"          # the server's own sign-in on, [auth] ui_open = false as this scenario's config has it
+        server._signin._auth_mode = lambda: "oauth"          # the server's own sign-in on, [auth] ui_open = false as this scenario's config has it
         def raw(cookie):
             c.cookies.clear()
             if cookie: c.cookies.set(server._UI_COOKIE, cookie)
@@ -299,7 +299,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         server._cfg.CFG["auth"]["ui_open"] = True
         r_open = raw(None)
     finally:
-        server._auth_mode = _am; server._cfg.CFG["auth"]["ui_open"] = _uo
+        server._signin._auth_mode = _am; server._cfg.CFG["auth"]["ui_open"] = _uo
     check("GET /answer-tokens: ui_open = false and no cookie is a redirect to the sign-in, with no token in it", r_no.status_code == 302 and r_no.headers["location"].startswith("/ui/login?next=") and tok("a1") not in r_no.text + r_no.headers["location"], (r_no.status_code, r_no.headers.get("location")))
     check("GET /answer-tokens: ui_open = false and a forged cookie is the same redirect", r_bad.status_code == 302 and r_bad.headers["location"].startswith("/ui/login?next=") and tok("a1") not in r_bad.text, (r_bad.status_code, r_bad.headers.get("location")))
     check("GET /answer-tokens: ui_open = false and a good cookie still gets the token; ui_open = true and no cookie gets {} (the edge decides who reaches the board, nobody has a token)",

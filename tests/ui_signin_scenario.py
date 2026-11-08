@@ -46,9 +46,9 @@ from starlette.testclient import TestClient
 
 EMAIL, DAY = "you@example.com", 86400
 NAV, FETCH = {"Sec-Fetch-Mode": "navigate"}, {"Sec-Fetch-Mode": "cors"}
-T0 = 1_800_000_000.0                                    # the test's clock: a fixed moment the sign-in code reads through server._ui_now
+T0 = 1_800_000_000.0                                    # the test's clock: a fixed moment the sign-in code reads through server._signin._ui_now
 CLOCK = [T0]
-server._ui_now = lambda: CLOCK[0]
+server._signin._ui_now = lambda: CLOCK[0]
 DAYS = server._ui_days()
 def cookie(email=EMAIL, exp=None): return server._ui_sign(json.dumps({"email": email, "exp": (CLOCK[0] + DAYS * DAY) if exp is None else exp}))
 def set_cookies(r, name):
@@ -123,7 +123,7 @@ with TestClient(app) as c:
         r = c.post(path, data=data) if form else c.post(path, json=data)
         try: return r.status_code, r.json()
         except Exception: return r.status_code, {}
-    server._ui_http = ui_http
+    server._signin._ui_http = ui_http
     server._UI_CLIENT.clear()
     r = c.get("/ui/login?next=/projects", headers=NAV, follow_redirects=False)
     auth_url = r.headers.get("location", "")
@@ -161,7 +161,7 @@ with TestClient(app) as c:
     # ============================================================= 4. a lapsed tab does not retry
     server._UI_CLIENT.clear()
     regs = []
-    server._ui_http = lambda *a, **k: (regs.append(a), ui_http(*a, **k))[1]
+    server._signin._ui_http = lambda *a, **k: (regs.append(a), ui_http(*a, **k))[1]
     r = c.get("/render-stamp", headers=FETCH, follow_redirects=False)
     check("a script's request with no session (the open tab's poll) is a plain 401 with the text, not a redirect to the sign-in", r.status_code == 401 and "location" not in r.headers
           and "signed out" in r.text and r.headers.get("cache-control") == "no-store", (r.status_code, dict(r.headers)))
