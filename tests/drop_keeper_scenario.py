@@ -66,7 +66,7 @@ check("create: the reply and get never say 'keeper of record'", NOKEEP(r) and NO
 r = server.stackshot_create(subject="[home] made on beta", description=DESC, project="projects/beta", sender=MAIN, next=f"{BMAIN}: carry on")
 g2 = r.split()[1]
 check("create: a project with no builder falls to its -main agent, not the creator from another project", server._holder(rd(g2)) == BMAIN and "mover" not in rd(g2)["metadata"], server._holder(rd(g2)))
-_create_decl = next(l for l in pathlib.Path(STACK, "server.py").read_text(encoding="utf-8").splitlines() if l.startswith('@mcp.tool(name="create"'))
+_create_decl = server._CREATE_DESC
 check("create tool text: says background agents may create, and no tool text says 'keeper of record'", NOKEEP(_create_decl) and NOKEEP(server._UPDATE_DESC) and NOKEEP(server._NEEDS_FORM) and "background agent" in _create_decl.lower(), _create_decl[:300])
 
 # ---- 2. D1: the start pass
