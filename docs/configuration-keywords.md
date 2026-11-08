@@ -2,11 +2,10 @@
 
 What this page covers: the `keywords.*` keys that let an instance in another language list its own words, and how a words list is read. Back to the [README](../README.md).
 
-The keys are grouped in three pages by what they set. Each has the same four columns as [Configuration](configuration.md).
+The keys are grouped in three pages by what they set: [Configuration](configuration.md), [Configuration: project agents, runners, anchor-hub, router, auth and client](configuration-integrations.md) and [Configuration: keywords for another language](configuration-keywords.md). Each has the same four columns.
 
 | Key | Example | Meaning | Set |
 |---|---|---|---|
-
 | `keywords.step_commands.shell_names` | `[]` | A list of words: other-language names of a shell (the English ones are PowerShell, pwsh, WSL, terminal, shell, console): a text that names one asks the owner to run something there. Added to the English words; empty adds nothing. Live. | |
 | `keywords.step_commands.windows_words` | `[]` | A list of words: other-language names of Windows or PowerShell: a command with one of them says where it runs. Added to the English words; empty adds nothing. Live. | |
 | `keywords.step_commands.run_commands` | `[]` | A list of words: other-language imperative phrases that ask the owner to run, type or paste something (run it, type it, paste it). Added to the English words; empty adds nothing. Live. | |

@@ -120,8 +120,8 @@ live = [l for l in ex.splitlines() if re.match(r"\s*\[handoff", l)]
 check("the example config holds the table only as a comment", not live and "# [handoff.builder_by_page]" in ex, live)
 check("the example config has no uncommented entry for it", not any(re.match(r'\s*"projects/[^"]*"\s*=', l) for l in ex.splitlines()))
 import _docs
-rm = _docs.pages()
-check("the docs say how to set it", "`handoff.builder_by_page`" in rm and "[handoff.builder_by_page]" in rm and "falls back to the first builder" in rm)
+rm = _docs.page("configuration-integrations")
+check("the docs say how to set it", "`handoff.builder_by_page`" in rm and "[handoff.builder_by_page]" in _docs.page("item-model") and "falls back to the first builder" in rm)
 _cdecl = server._CREATE_DESC
 check("create's description names the mapped builder", "for a page the instance maps to a builder, that one when the project lists it" in _cdecl, _cdecl[:200])
 check("the tool-text snapshot carries it", "for a page the instance maps to a builder, that one when the project lists it" in pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))

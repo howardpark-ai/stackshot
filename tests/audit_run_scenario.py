@@ -1602,7 +1602,7 @@ finally:
     _client.page_debt = real_pd
 import _docs
 pg_doc = _docs.pages()
-check("the docs name the pages stage, its route and the run's mark, and no daily 09:00 call or start hour", "`POST /client/page-debt`" in pg_doc and "pages_stage" in pg_doc and "page_debt_hour" not in pg_doc
+check("the docs name the pages stage, its route and the run's mark, and no daily 09:00 call or start hour", "`POST /client/page-debt`" in _docs.page("router") and "pages_stage" in _docs.page("audit") and "page_debt_hour" not in pg_doc
       and "daily page" not in pg_doc and "thread of its own, once a day per page" not in pg_doc)
 
 # ---- 31. the orphan hand-over stage: the first stage of a run; the server finds and moves (tests/successor_scenario.py holds that half), the run asks, records and reports
@@ -1664,7 +1664,7 @@ try:
 finally:
     _client.orphan_handover = real_oh
 rec_clear(); sent.clear()
-check("the docs name the orphan hand-over, its route, its setting and the by-hand verb", "orphan hand-over" in pg_doc and "`POST /client/orphan-handover`" in pg_doc and "orphan_handover" in pg_doc and "audit.py orphans" in pg_doc)
+check("the docs name the orphan hand-over, its route, its setting and the by-hand verb", "orphan hand-over" in _docs.page("audit") and "`POST /client/orphan-handover`" in _docs.page("audit") and "orphan_handover" in _docs.page("audit") and "audit.py orphans" in _docs.page("audit"))
 
 # ---- 32. the summary's destination is a setting: [audit] summary_to, the stand-in page by default
 STAND_IN = "projects/example"; REPORTS = "projects/example-reports"

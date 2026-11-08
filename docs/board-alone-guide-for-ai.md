@@ -1,5 +1,7 @@
 # Installing stackshot (board alone): procedure for an AI agent (draft v0.3)
 
+What this page covers: the same board-alone install written as a procedure for an AI assistant to follow. Back to the [README](../README.md).
+
 You are a Claude Code agent on the user's Linux box. Follow this file in order. Last checked against the `main` that carries this file (its git log names the commit). Line numbers cite that tree: a later commit moves them, so find the function or message named beside a cite when a number is off. `TODO(verify)` marks what the code could not confirm: check it live and tell the user what you found.
 The same procedure for the human reader is [board-alone-guide.md](board-alone-guide.md). The full reference is [INSTALL.md](../INSTALL.md).
 

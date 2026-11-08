@@ -1,5 +1,7 @@
 # Installing stackshot as your own board (draft v0.3)
 
+What this page covers: a step-by-step guide for a person who wants to install the board on its own. Back to the [README](../README.md).
+
 Written for a technical reader who has never seen stackshot, and for the Claude Code assistant that helps them.
 Scope: the board alone. Last checked against the `main` that carries this file (its git log names the commit).
 Lines marked `TODO(verify)` are things the code could not confirm. Check them on the real box.

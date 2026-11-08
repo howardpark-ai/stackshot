@@ -25,7 +25,7 @@ stored in `metadata.answers`, takes `decision` out of needs (the sessions named 
 neither. Each is pushed to the owner and to the sessions named in needs, and with the mirror on becomes the issue's comment
 headed `[author: <owner> · board]`, a header only the server writes (a tool `sender` that names the owner is refused). A
 decision that no session it went to has followed with a write within 30 min goes to the project's keeper once
-(`<state>/answers.json`). There is no idle pass: a mover that goes quiet is the stall pass's and the hand-off ladder's (below). A raise to the owner's call stored before the last rung
+(`<state>/answers.json`). There is no idle pass: a mover that goes quiet is the stall pass's and the hand-off ladder's ([below](stall-and-ladder.md)). A raise to the owner's call stored before the last rung
 existed keeps its "Park until <day>" button, which the server still applies itself (the hold and its wake, a YYYY-MM-DD written in the box changes the day; `[idle] park_days` is only its
 fallback). `[idle] hours` is still read, by `waiting.py`: it is the expected time of a plain on-agent item.
 

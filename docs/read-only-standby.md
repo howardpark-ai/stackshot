@@ -1,5 +1,7 @@
 # A read-only standby copy
 
+What this page covers: running a second, read-only copy of the board on another machine and taking over from it. Back to the [README](../README.md).
+
 A second stackshot instance can run "warm" on another machine (a standby host) from a copy of the live
 board's data directory that a job re-copies every few minutes. The warm instance must never change anything: a
 write there would fork the board. `STACKSHOT_READ_ONLY=1` makes it read-only, and one switch makes it read-write

@@ -1,5 +1,7 @@
 # What a running session reloads
 
+What this page covers: which files a running session picks up on its next call and which only when it starts again. Back to the [README](../README.md).
+
 A release changes files on the server box. Some of them reach a running agent session on its next call; some reach it only when the
 session starts again. `release.sh` picks what the sessions need from the files the merged pull request changed, the same way `deploy.sh`
 picks which services restart from the files a fast-forward changed. This page is the reasoning behind that pick: which files of this
