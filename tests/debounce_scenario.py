@@ -14,7 +14,7 @@ assert n1 == 1 and n2 == 1
 toml, n3 = re.subn(r'(?m)^timezone = "[^"]*"', 'timezone = "Asia/Dubai"', toml); assert n3 == 1   # the expected strings are in the instance timezone (UTC+4, abbreviated +04)
 pathlib.Path(tmp, "stackshot.toml").write_text(toml, encoding="utf-8"); os.environ["STACKSHOT_CONFIG"] = f"{tmp}/stackshot.toml"
 os.makedirs(f"{tmp}/state/anchor-hub"); sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from anchorhub import core
+from stackshot.anchors.anchorhub import core
 ZONE_OFFSET = 4 * 3600                 # Asia/Dubai: UTC+4, no DST
 T0 = 1790812800.0 - ZONE_OFFSET        # 2026-10-01 00:00 +04 (1790812800 is 2026-10-01 00:00 UTC) = 2026-09-30 20:00 UTC
 clock = types.SimpleNamespace(t=T0)

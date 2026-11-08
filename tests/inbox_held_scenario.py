@@ -40,7 +40,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 rd = lambda p: json.loads(pathlib.Path(p).read_text())
 
-import config as cfg, clients as cl, fleet as fl, inbox
+from stackshot.core import config as cfg; from stackshot.fleet import clients as cl; from stackshot.fleet import fleet as fl; from stackshot.fleet import inbox
 V = T / "state/clients/fleet"; T0 = 1790780400.0
 OLD, NEW, MAIN, SENDER = U(1), U(2), U(3), U(4)
 NAME = "site-builder"
@@ -69,7 +69,7 @@ check("take: …a failed delivery is offered again to the same session", len(tk)
 inbox.ack(ids)
 check("fixture: the three lines are gone once confirmed", inbox.waiting() == {}, inbox.waiting())
 
-import client, server
+from stackshot.fleet import client; from stackshot.web import server
 server._publish = lambda: None
 tok = open(client.mint("box-far")).read().strip()
 from starlette.testclient import TestClient

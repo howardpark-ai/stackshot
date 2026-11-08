@@ -48,7 +48,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
-import runner as R
+from stackshot.core import runner as R
 
 
 class Clock:
@@ -301,8 +301,8 @@ with stderr_lines():
 check("2 …and when stop() was asked at the same time, the loop ends instead of going on", ended, thz)
 
 # ---- 3. the server's table
-import config as _cfg
-import server
+from stackshot.core import config as _cfg
+from stackshot.web import server
 server._publish = lambda: None
 ticks = server._minute_ticks()
 names = [t.name for t in ticks]
@@ -469,7 +469,7 @@ _cfg.CFG.pop("runner", None)
 # a stale key in a file: the config module loads it and `check` exits 0 (the server start does not read the key)
 import subprocess
 stale = T / "stale.toml"; stale.write_text(toml + "\n[runner]\nenabled = true\n", encoding="utf-8")
-cp = subprocess.run([sys.executable, "-I", f"{STACK}/config.py", "check"], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
+cp = subprocess.run([sys.executable, "-I", f"{STACK}/stackshot/core/config.py", "check"], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
 check("4 a file that still carries [runner] enabled = true loads and passes `config.py check`", cp.returncode == 0, (cp.returncode, cp.stdout[-300:], cp.stderr[-300:]))
 cp = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import config; print('\\n'.join(config.notes()))", STACK], env={**os.environ, "STACKSHOT_CONFIG": str(stale)}, capture_output=True, text=True, timeout=60)
 check("4 …and its notes (the start, doctor, a reload) carry the one line about the retired key", cp.returncode == 0 and cp.stdout.count("[runner] enabled is retired") == 1, (cp.returncode, cp.stdout[-300:], cp.stderr[-300:]))

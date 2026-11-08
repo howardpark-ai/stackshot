@@ -56,8 +56,8 @@ item(5, "[home] closed one", status="completed", outcome="done", reason="shipped
 (T / "store/next-id").write_text("40"); (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from ui import render, search as s2, runners as n2, colortool as ct, kit
-import search as sm
+from stackshot.web.ui import render, search as s2, runners as n2, colortool as ct, kit
+from stackshot.web import search as sm
 Bd = lambda: render.Board(f"{tmp}/store", now=None)
 sm.sync(Bd())
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
@@ -71,7 +71,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 LIB = pathlib.Path(STACK, "shared", "colortool.js").read_text(encoding="utf-8")
-SRCT = {p: pathlib.Path(STACK, p).read_text(encoding="utf-8") for p in ("ui/colortool.py", "ui/render.py", "deploy.sh")}
+SRCT = {p: pathlib.Path(STACK, p).read_text(encoding="utf-8") for p in ("stackshot/web/ui/colortool.py", "stackshot/web/ui/render.py", "deploy.sh")}
 m_css = re.search(r"var CSS = \[(.*?)\]\.join\('\\n'\);", LIB, re.S)
 CSS_LIB = "\n".join(re.findall(r"'((?:[^'\\]|\\.)*)'", m_css.group(1))) if m_css else ""
 
@@ -86,12 +86,12 @@ check("its header says it is the shared source, that another app pins a verbatim
       "SHARED SOURCE" in hdr and "VERBATIM" in hdr and "version bump" in hdr and "tell the apps that pin a copy" in hdr and all(w in hdr for w in ("applyStored(cfg)", "init(cfg)", "remount(mount", "engine(cfg)"))
       and all(re.search(rf"^ \*   {f}\s", hdr, re.M) for f in ("storageKey", "shipped", "vars", "onApply", "isDark", "gate", "css", "mount", "preview", "api")), hdr[:300])
 check("the file defines window.ColorTool with version, applyStored, init, remount and engine, and nothing else on window", re.search(r"window\.ColorTool = \{\s*version: VERSION,\s*applyStored:.*?init:.*?remount:.*?engine:", LIB, re.S) is not None and LIB[len(hdr):].count("window.ColorTool") == 1)
-check("stackshot inlines the file's text, whole and unchanged, and nothing of the tool is written in ui/colortool.py (it reads the file)", ct.LIB == LIB and ct.LIB in ct.HEAD and "shared" in SRCT["ui/colortool.py"] and "colortool.js" in SRCT["ui/colortool.py"]
-      and "applyStored" not in SRCT["ui/colortool.py"].split('"""', 2)[2].replace("ColorTool.applyStored(window.stackshotColors)", ""), None)
+check("stackshot inlines the file's text, whole and unchanged, and nothing of the tool is written in ui/colortool.py (it reads the file)", ct.LIB == LIB and ct.LIB in ct.HEAD and "shared" in SRCT["stackshot/web/ui/colortool.py"] and "colortool.js" in SRCT["stackshot/web/ui/colortool.py"]
+      and "applyStored" not in SRCT["stackshot/web/ui/colortool.py"].split('"""', 2)[2].replace("ColorTool.applyStored(window.stackshotColors)", ""), None)
 check("deploy.sh restarts the server for a change under shared/ (the file is read at import)", re.search(r"^\s*shared/\*\) server=1 ;;", SRCT["deploy.sh"], re.M) is not None)
 import ast
-imports = sorted(n.names[0].name for n in ast.parse(SRCT["ui/colortool.py"]).body if isinstance(n, ast.Import)) + sorted(n.module for n in ast.parse(SRCT["ui/colortool.py"]).body if isinstance(n, ast.ImportFrom))
-check("ui/colortool.py parses and imports only json, pathlib and the board's address helper (ui.under)", imports == ["json", "pathlib", "ui"], imports)
+imports = sorted(n.names[0].name for n in ast.parse(SRCT["stackshot/web/ui/colortool.py"]).body if isinstance(n, ast.Import)) + sorted(n.module for n in ast.parse(SRCT["stackshot/web/ui/colortool.py"]).body if isinstance(n, ast.ImportFrom))
+check("ui/colortool.py parses and imports only json, pathlib, the package's path helper (stackshot.paths) and the board's address helper (ui.under)", imports == ["json", "pathlib", "stackshot", "stackshot.web.ui"], imports)
 
 # ---- 2. the markup on every page
 check("the page set is the board's: home, an item page, a project page, Projects, Closed (two pages), Search (with and without a query), Runners", len(PAGES) == 9 and all(len(p) > 5000 for p in PAGES.values()), {k: len(v) for k, v in PAGES.items()})
@@ -107,8 +107,8 @@ for nm, pg in PAGES.items():
           and pg.find('<aside id="panel"') < pg.find('id="panel-colors"') < pg.find("</aside>", pg.find('id="panel-colors"')) and pg.find('id="panel-colors"') > pg.rfind("<section", 0, pg.find('id="panel-colors"')), pg.count('id="panel-colors"'))
     check(f"{nm}: with the tool's script blocks cut out no trace of the tool is left in the page", "ColorTool" not in C.without_colortool(pg) and "stackshotColors" not in C.without_colortool(pg) and "colortool" not in C.without_colortool(pg), None)
 check("the hooks in ui/render.py: the import, _APP_HEAD += HEAD, _FAB_PAIR += BODY, the mount in _panel_frame, and the panel keeps its peek open while the tool's panel is open",
-      "from ui import colortool as _ct" in SRCT["ui/render.py"] and "_APP_HEAD += _ct.HEAD" in SRCT["ui/render.py"] and "_FAB_PAIR += _ct.BODY" in SRCT["ui/render.py"] and 'id="panel-colors"' in SRCT["ui/render.py"]
-      and "document.querySelector('.ct-pop:not([hidden])')" in SRCT["ui/render.py"], None)
+      "from stackshot.web.ui import colortool as _ct" in SRCT["stackshot/web/ui/render.py"] and "_APP_HEAD += _ct.HEAD" in SRCT["stackshot/web/ui/render.py"] and "_FAB_PAIR += _ct.BODY" in SRCT["stackshot/web/ui/render.py"] and 'id="panel-colors"' in SRCT["stackshot/web/ui/render.py"]
+      and "document.querySelector('.ct-pop:not([hidden])')" in SRCT["stackshot/web/ui/render.py"], None)
 
 # ---- 3. the requests
 CFG_ONLY = ct.CFG_JS
@@ -128,10 +128,10 @@ check("the library uses localStorage through two sets of three calls, getItem / 
       sorted(c[0] for c in calls) == ["getItem", "getItem", "removeItem", "removeItem", "setItem", "setItem"] and sorted(c[1].strip().split(",")[0] for c in calls) == ["FOLD"] * 3 + ["KEY"] * 3 and "KEY = cfg.storageKey" in LIB and "var FOLD = KEY + ':fields';" in LIB
       and "function foldRead() { try { return localStorage.getItem(FOLD) === '1'; } catch (e) { return false; } }" in LIB, calls)
 check("the one key is stackshot's own, stackshot-color-trial, written in its settings and nowhere in the library; no other part of the page uses it", ct.KEY == "stackshot-color-trial" and f'storageKey:"{ct.KEY}"' in CFG_ONLY and ct.KEY not in LIB and "stackshot.fold." not in ALL_TOOL)
-others = [p for p in ("server.py", "client.py", "router.py", "publish.py", "readonly.py", "push.py", "config.py", "ui/search.py", "ui/runners.py", "ui/kit.py", "ui/__init__.py")
+others = [p for p in ("stackshot/web/server.py", "stackshot/fleet/client.py", "stackshot/router/router.py", "stackshot/web/publish.py", "stackshot/core/readonly.py", "stackshot/fleet/push.py", "stackshot/core/config.py", "stackshot/web/ui/search.py", "stackshot/web/ui/runners.py", "stackshot/web/ui/kit.py", "stackshot/web/ui/__init__.py")
           if re.search(r"colortool|stackshotColors|ct-btn|color-trial", pathlib.Path(STACK, p).read_text(encoding="utf-8"))]
 check("no route, handler or other module names the tool or its key (server.py and the page modules are untouched by it; the saved list's routes are colorcombos.py's)", not others, others)
-check("ui/colortool.py has no route, request or cookie code (the saved list is the library's fetch)", not re.search(r"\b(?:route|Response|Cookie|requests|httpx|urllib|socket|subprocess|open)\b", re.sub(r'""".*?"""', "", SRCT["ui/colortool.py"].split("CSS = ")[0], flags=re.S)), None)
+check("ui/colortool.py has no route, request or cookie code (the saved list is the library's fetch)", not re.search(r"\b(?:route|Response|Cookie|requests|httpx|urllib|socket|subprocess|open)\b", re.sub(r'""".*?"""', "", SRCT["stackshot/web/ui/colortool.py"].split("CSS = ")[0], flags=re.S)), None)
 css = Bd()._css()
 check("the Board's own stylesheet carries nothing of the tool but the five dark tokens of the small labels and the disabled buttons (and the rules that read them): no --orange-text, --orange-solid or --on-solid, no ct- class", not re.search(r"orange-text|orange-solid|on-solid|\.ct[-.{ ]|ct-on|ct-wl|ct-lab|ct-dis|color-trial", css), None)
 
@@ -278,7 +278,7 @@ if res:
     FIELDS = CONST["FIELDS"]; FIELD_KEYS = [f[0] for f in FIELDS]; PRESETS = CONST["PRESETS"]; PRE = {p[0]: p[2] for p in PRESETS}; LIM = CONST["LIM"]
     GROUPS = [("surfaces", ["bg", "card", "line"]), ("text", ["fg", "mut", "link"]), ("buttons", ["ibd", "solid", "onsolid", "disbg", "disfg"]), ("small-labels", ["labbg", "labfg", "labbd"])]
     check("the entries are version, applyStored, init, remount and engine; the version is 3; the gate of stackshot is the default, refuse", CONST["entries"] == ["applyStored", "engine", "init", "remount", "version"] and CONST["version"] == 3 and CONST["GATE"] == "refuse" and CONST["KEY"] == ct.KEY, CONST["entries"])
-    check("the fields are the saved list's 14 keys, in the panel's order, four groups (Surfaces, Text, Buttons, Small labels), named as the panel names them", sorted(FIELD_KEYS) == sorted(__import__("colorcombos").KEYS) and len(FIELD_KEYS) == 14 and sum(len(k) for _, k in GROUPS) == 14
+    check("the fields are the saved list's 14 keys, in the panel's order, four groups (Surfaces, Text, Buttons, Small labels), named as the panel names them", sorted(FIELD_KEYS) == sorted(__import__("stackshot.web.colorcombos", fromlist=["_"]).KEYS) and len(FIELD_KEYS) == 14 and sum(len(k) for _, k in GROUPS) == 14
           and [k for _, ks in GROUPS for k in ks] == FIELD_KEYS and CONST["GROUPS"] == ["Surfaces", "Text", "Buttons", "Small labels"] and sorted(CONST["KEYS"]) == sorted(FIELD_KEYS)
           and [f[1] for f in FIELDS] == ["Page background", "Cards", "Lines", "Body text", "Muted text", "Text and links", "Button outlines", "Solid fills", "Text on solid fills", "Disabled fill", "Disabled text", "Fill", "Text", "Outline"], FIELD_KEYS)
     check("the presets are the original orange theme (empty: what the page ships), Sky, Mint, Violet and Rose in that order, each a full 14-key combination of #rrggbb, the neutrals the same in every preset but the first, the label outline equal to the label fill; the four retired presets (old, two, radix, primer) are gone",
@@ -302,9 +302,9 @@ if res:
     check("the derived surfaces follow the background by the stated rule: Cards 4% and Lines and the input fill 10% of the body text over it, and only when the background is set",
           "r.card = s.card || (s.bg ? mix(r.fg, r.bg, 4) : S.card); r.line = s.line || (s.bg ? mix(r.fg, r.bg, 10) : S.line);" in LIB and "r.ifill = s.bg ? mix(r.fg, r.bg, 10) : S.ifill;" in LIB and tk["--ifill"] == "#2b2b2f", None)
     check("the tints follow the text orange as the shipped ones follow --orange: --selbg 8% and --t-you-bg 12% over the card", "set('--selbg','color-mix(in srgb,var(--orange-text) 8%,var(--card))')" in ct.ON_APPLY
-          and "set('--t-you-bg','color-mix(in srgb,var(--orange-text) 12%,var(--card))')" in ct.ON_APPLY and "--selbg:color-mix(in srgb,var(--orange) 8%,var(--card))" in SRCT["ui/render.py"]
+          and "set('--t-you-bg','color-mix(in srgb,var(--orange-text) 12%,var(--card))')" in ct.ON_APPLY and "--selbg:color-mix(in srgb,var(--orange) 8%,var(--card))" in SRCT["stackshot/web/ui/render.py"]
           and "--t-you-bg:color-mix(in srgb,var(--orange) 12%,var(--card))" in kit.CSS, None)
-    body_css = css + render._BTN_CSS + open(os.path.join(STACK, "ui/render.py"), encoding="utf-8").read() + kit.CSS
+    body_css = css + render._BTN_CSS + open(os.path.join(STACK, "stackshot/web/ui/render.py"), encoding="utf-8").read() + kit.CSS
     sol_css = {".b.main": r"\.b\.main\{background:var\(--acc\)", ".adot": r"\.adot::after\{[^}]*background:var\(--acc\)", "#panel-drop": r"#panel-drop\{[^}]*background:var\(--acc\)", "ul.hist li.ev-answer": r"ul\.hist li\.ev-answer::before\{background:var\(--call\)"}
     check("the solid fills the style re-points are fills in the shipped stylesheet: the main button, the live dot, the panel-order drop line and the answer dot of the history", set(sol_css) == set(ct.SOLID_RULES) and all(re.search(p, body_css) for p in sol_css.values()), [k for k, p in sol_css.items() if not re.search(p, body_css)])
     check("the style re-points them under html.ct-on only, each to --orange-solid (label --on-solid), and a lighter label hovers toward black (html.ct-wl .b.main)", "html.ct-on .b.main,html.ct-on .adot,html.ct-on #panel-drop{--acc:var(--orange-solid);--on-acc:var(--on-solid)}" in ct.CSS
@@ -329,7 +329,7 @@ if res:
     check("the shipped disabled looks that fade by opacity are .b:disabled, .b.main:disabled (the idle Send), the panel-order menu items and the option cards; the dark rule replaces the first two there and leaves the others alone",
           {s for s in dis_shipped if s.startswith(".b")} >= {".b:disabled", ".b.main:disabled"} and {".pmi:disabled", ".acards .acard:has(input:disabled)"} <= dis_shipped and all(f"{r} {DIS_SEL}{DIS_DECL}" in css for r in (DKR, MQR)) and ".pmi" not in DIS_SEL and ".acard" not in DIS_SEL, dis_shipped)
     check("the dark disabled rule: .b:disabled, not busy, not pressed (.on), not inside a busy form, opacity 1 and one flat look from --dis-bg and --dis-fg; the hover and pressed rules (:not(:disabled)) never meet it; the tool's own style has no label or disabled rule",
-          ".b.main.busy,.b.main[aria-busy=true],form[aria-busy] .b.main{" in body_css and ".b.busy,.b[aria-busy=true],form[aria-busy] .b{" in body_css and ".b.on{" in body_css and 'aria-pressed="true" disabled' in SRCT["ui/render.py"]
+          ".b.main.busy,.b.main[aria-busy=true],form[aria-busy] .b.main{" in body_css and ".b.busy,.b[aria-busy=true],form[aria-busy] .b{" in body_css and ".b.on{" in body_css and 'aria-pressed="true" disabled' in SRCT["stackshot/web/ui/render.py"]
           and "ct-dis" not in ct.CSS and "ct-lab" not in ct.CSS, None)
 
     # ---- the fields, in node
@@ -492,7 +492,7 @@ if res:
 check("the stylesheet of the library was read (it is a joined array of strings in the file)", len(CSS_LIB) > 3000 and ".ct-pop{" in CSS_LIB and ".ct-btn{" in CSS_LIB, len(CSS_LIB))
 pop_rule = re.search(r"\.ct-pop\{([^}]*)\}", CSS_LIB).group(1)
 check("the panel is fixed in the page (placed from the button's rectangle by the script), above the reload and Back to top buttons (their z-index is 10), at most the screen tall and scrolling inside itself (overscroll contained), and 366 px wide at most, 16 px less than the screen",
-      "position:fixed" in pop_rule and int(re.search(r"z-index:(\d+)", pop_rule).group(1)) > 10 and "z-index:10;" in SRCT["ui/render.py"].split("#totop,.fab{")[1].split("}")[0] + ";" and "max-height:calc(100dvh - 16px)" in pop_rule and "overflow-y:auto" in pop_rule and "overscroll-behavior:contain" in pop_rule
+      "position:fixed" in pop_rule and int(re.search(r"z-index:(\d+)", pop_rule).group(1)) > 10 and "z-index:10;" in SRCT["stackshot/web/ui/render.py"].split("#totop,.fab{")[1].split("}")[0] + ";" and "max-height:calc(100dvh - 16px)" in pop_rule and "overflow-y:auto" in pop_rule and "overscroll-behavior:contain" in pop_rule
       and "width:min(366px,calc(100vw - 16px))" in pop_rule and "document.body.appendChild(pop)" in LIB, pop_rule)
 check("the panel is placed upward from the button (bottom set from the button's top, top auto), downward only when there is no room above, and placed again on resize and on any scroll",
       "pop.style.top = 'auto'; pop.style.bottom = (vh - rc.top + 8) + 'px'" in LIB and "if (above < 160 && below > above)" in LIB and "window.addEventListener('resize', place)" in LIB and "window.addEventListener('scroll', place, true)" in LIB)
@@ -504,7 +504,7 @@ check("the button is a bare circle of the live page color (upper left half) and 
 check("every field group is its own box with a heading in the side panel's section style (uppercase, 12 px, 600, letter-spacing .06em) but in the link color (--ct-link, set on the panel from the live text-and-links field; --fg when unset), with its fields indented under it (.ct-rows); the presets and the saved combinations share one box (#ct-dock, two sections)",
       ".ct-box{" in CSS_LIB and ".ct-gh{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ct-link,var(--fg))}" in CSS_LIB and ".ct-rows{margin:0 0 0 14px}" in CSS_LIB
       and "pop.style.setProperty('--ct-link', r.link)" in LIB and "el('div', { className: 'ct-box', id: 'ct-dock' }, secs)" in LIB and "id: 'ct-g-presets', text: 'Presets'" in LIB
-      and re.search(r"#panel section h2,#panel section h2\.hdr\{font-size:12px;font-weight:600;letter-spacing:\.06em;text-transform:uppercase;color:var\(--fg\)", SRCT["ui/render.py"]) is not None
+      and re.search(r"#panel section h2,#panel section h2\.hdr\{font-size:12px;font-weight:600;letter-spacing:\.06em;text-transform:uppercase;color:var\(--fg\)", SRCT["stackshot/web/ui/render.py"]) is not None
       and "previewBox = box('ct-g-preview', 'Preview', [prev])" in LIB and "box('ct-g-' + g.toLowerCase().replace(/ /g, '-'), g, [el('div', { className: 'ct-rows' }, kids)])" in LIB and "id: 'ct-g-saved'" in LIB, None)
 check("a saved-list answer (the read, a save, a delete, and each of their errors) is drawn inside keepEnd, which decides whether the panel is at its end when the answer arrives (not when the request left) and scrolls to the end again only then",
       "function atEnd() { return pop.scrollTop + pop.clientHeight >= pop.scrollHeight - 2; }" in LIB and "function keepEnd(fn) { var stick = atEnd(); fn(); if (stick) toEnd(); }" in LIB and LIB.count("keepEnd(function") == 6 and "stick" not in LIB.split("function list()")[1].split("function useNow")[0]

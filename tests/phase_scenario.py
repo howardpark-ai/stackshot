@@ -56,7 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, model as _model, dated_wait as _dw
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -249,8 +249,8 @@ check("6 …an item that stores nothing is read as the fields do (the writer's r
 check("6 no model.read_stored, check_stored or DISAGREEMENTS is left: the decision has one source", not any(hasattr(_model, n) for n in ("read_stored", "check_stored", "DISAGREEMENTS", "STALE_AT_EDGE")), None)
 
 # ---- 8. History: a confirm of an item written before the phase is still a confirm; a phase flip alone is no History line
-import subprocess, render as root_render
-from ui import render as ui_render
+import subprocess; from stackshot.web import render as root_render
+from stackshot.web.ui import render as ui_render
 STORE_DIR = str(T / "store")
 gitc = lambda *a: subprocess.run(["git", "-C", STORE_DIR, "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
 gitc("init", "-q"); gitc("add", "-A"); gitc("commit", "-q", "-m", "fixture")

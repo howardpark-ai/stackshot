@@ -43,7 +43,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import config as _cfg, audit, audit_run as AR, audit_checks as AC
+from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.audit import audit_checks as AC
 
 H = 3600; DAY = 86400; now = time.time()
 ZONE_HOURS = 4                                                              # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
@@ -163,7 +163,7 @@ check("4 run: the findings log holds this run's fresh findings, at the time of t
 check("4 run: the call is made after the proof-waits and pages stages, the record carries the proof_waits and pages beside it", "proof_waits" in rec and "pages" in rec and list(rec).index("pattern_review") > list(rec).index("pages"), list(rec))
 
 # the call itself: the audit's lane and model, the review's brief as the system prompt
-import router as _router
+from stackshot.router import router as _router
 seen = []
 def fake_run_call(message, rubric, model_name=None, lane=None, **kw):
     seen.append((message, rubric, model_name, lane)); return {"status": "ok", "text": json.dumps({"drafts": []})}

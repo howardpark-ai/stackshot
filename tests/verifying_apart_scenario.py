@@ -28,8 +28,8 @@ A = "22222222-2222-4222-8222-222222222222"
 page = {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project", "session": "home-agent", "status": "active", "board": [], "board_row": False, "updated": 1,
         "mirror": "https://example.invalid/alpha"}
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import render
-from ui import render as ui_render
+from stackshot.web import render
+from stackshot.web.ui import render as ui_render
 fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)

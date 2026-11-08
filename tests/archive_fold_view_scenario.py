@@ -40,8 +40,8 @@ page("projects/w-old.md", "type: project\ntitle: Work old\norg: work\ndisplay-na
 page("projects/h-live.md", "type: project\ntitle: Home live\norg: home\ndisplay-name: home-hlive\nagents:\n  home-hlive-main: talks\nstatus: active")
 page("projects/h-old.md", "type: project\ntitle: Home old\norg: home\ndisplay-name: home-hold\nstatus: done")
 page("projects/o-old.md", "type: project\ntitle: Infra old\ntags:\n  - infra\ndisplay-name: zeta-zold\nstatus: Archived")
-import pages as p
-from ui import render as ui_render
+from stackshot.projects import pages as p
+from stackshot.web.ui import render as ui_render
 p.cmd_registry(quiet=True)
 def board(): return ui_render.Board(f"{tmp}/store")
 def text(h): return re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", h))
@@ -57,7 +57,7 @@ check("Archived: it follows the active table and holds the archived projects, by
       and tab.index("h-live") < tab.index(HEAD), text(tab))
 check("Archived: the old closed 'finished' details and its lowercase summary are gone from the table", "finished" not in tab and '<details class="finished"' not in tab)
 check("Archived: the markup stays balanced (details, tables)", tab.count("<details") == tab.count("</details>") == 1 and tab.count("<table") == tab.count("</table>") == 2, (tab.count("<details"), tab.count("<table")))
-from ui import groups as _grp
+from stackshot.web.ui import groups as _grp
 check("Archived: the same helper draws home's scope subsections (groups.fold) and this group (groups.fold_block); a subsection is still open with its hscope class",
       _grp.fold("k", "work", ["<li>x</li>"]).startswith('<details class="fold sfold hscope" data-fold="k" open><summary><h3 class="iscope">work <span class="count">1</span></h3></summary>')
       and _grp.fold_block("k", "Archived", 2, "", opened=False, cls="fold sfold") == '<details class="fold sfold" data-fold="k"><summary><h3 class="iscope">Archived <span class="count">2</span></h3></summary></details>')

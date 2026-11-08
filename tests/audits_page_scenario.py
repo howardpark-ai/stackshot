@@ -31,7 +31,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import config, audit, audit_overview as ov
+from stackshot.core import config; from stackshot.audit import audit; from stackshot.audit import audit_overview as ov
 config.CFG["audit"]["at"] = "05:00"
 D = T / "state/audit"; LOG = D / "findings-log.jsonl"
 NOW = time.time()
@@ -43,7 +43,7 @@ def text_of(html):
     return re.sub(r"\s+", " ", _html.unescape(re.sub(r"<[^>]+>", " ", h)))
 NAMES = ["Silence", "Filing", "Wording", "Dates", "Proof and patterns", "Pages and agents", "Fleet and services", "Text and rules"]
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 from starlette.testclient import TestClient
 posts = []
@@ -56,7 +56,7 @@ check("group_of: a finding's kind says its group; `stale` is the silence pass's 
       ov.group_of("run", "stuck-elsewhere") == "filing" and ov.group_of("filing", "board checks:why-not-now") == "filing" and ov.group_of("run", "next rules:N3") == "wording"
       and ov.group_of("silence", "stale") == "silence" and ov.group_of("dates", "stale") == "dates" and ov.group_of("run", "proof-wait") == "proof" and ov.group_of("run", "older-than-page") == "pages"
       and ov.group_of("run", "no-such-kind") is None)
-import audit_checks, audit_run
+from stackshot.audit import audit_checks; from stackshot.audit import audit_run
 KINDS = set(audit_checks.FIX) | set(audit_checks.CHECKS_CODE) | set(audit_checks.CHECKS_FILING) | set(audit_checks.CHECKS_DATES) | set(audit_run.CHECKS_MODEL) | {"proof-wait"}
 check("every finding category the audits can write (the FIX table and the CHECKS_* tables, plus proof-wait) maps to a group, whichever pass wrote it",
       len(KINDS) >= 14 and all(ov.group_of(src, k) is not None for k in KINDS for src in ("run", "silence", "filing", "dates")), sorted(k for k in KINDS if ov.group_of("run", k) is None))

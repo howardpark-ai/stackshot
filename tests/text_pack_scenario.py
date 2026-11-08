@@ -24,6 +24,8 @@ import tool_text as tt
 
 # ================================================================= the throwaway repository
 R = T / "repo"; R.mkdir()
+def W(rel, text):
+    (R / rel).parent.mkdir(parents=True, exist_ok=True); (R / rel).write_text(text)
 g = lambda *a: subprocess.run(["git", "-C", str(R), *a], capture_output=True, text=True, check=True).stdout.strip()
 g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
 SERVER = '''
@@ -58,15 +60,15 @@ def _other(a):
 SNAP = {"format": 1, "tools": {"x": {"description": "Make an x. a: the thing. b: the count (default 1).", "parameters": {"a": {"type": "string", "required": True, "description": ""}, "b": {"type": "integer", "required": False, "default": 1, "description": "the count"}}},
                                "y": {"description": "Return y", "parameters": {}},
                                "get": {"description": "Read an item", "parameters": {}, "labels": ["mover:", "state:"]}}}
-(R / "tests").mkdir(); (R / "server.py").write_text(SERVER); (R / "states.py").write_text("def words(i):\n    return 'state: ' + i\n")
+(R / "tests").mkdir(); W("stackshot/web/server.py", SERVER); W("stackshot/model/states.py", "def words(i):\n    return 'state: ' + i\n")
 (R / "tests" / "tool_text.snapshot.json").write_text(tt.render(SNAP))
 g("add", "-A"); g("commit", "-qm", "base")
 BASE = g("rev-parse", "HEAD")
 def variant(name, server=None, snap=None, states=None):
     g("checkout", "-q", "-b", name, BASE)
-    if server is not None: (R / "server.py").write_text(server)
+    if server is not None: W("stackshot/web/server.py", server)
     if snap is not None: (R / "tests" / "tool_text.snapshot.json").write_text(tt.render(snap))
-    if states is not None: (R / "states.py").write_text(states)
+    if states is not None: W("stackshot/model/states.py", states)
     g("commit", "-qam", name, "--allow-empty")
     return g("rev-parse", "HEAD")
 H_PARAM = variant("param", SERVER.replace("def stackshot_x(a, b=1):", "def stackshot_x(a, b=2, c=None):"))        # a tool function changed: x
@@ -88,7 +90,7 @@ check("a function the gate does not watch has nothing to read either", nothing(H
 # ================================================================= 2. the pack
 user = pack(H_PARAM)
 check("a changed tool function: the pack names the tool, carries its snapshot text and the diff, and not the tools it does not reach",
-      "Tools the change reaches: x\n" in user and "Make an x." in user and "Return y" not in user and "Read an item" not in user and "-def stackshot_x(a, b=1):" in user and "+def stackshot_x(a, b=2, c=None):" in user and "server.py:stackshot_x" in user, user[:900])
+      "Tools the change reaches: x\n" in user and "Make an x." in user and "Return y" not in user and "Read an item" not in user and "-def stackshot_x(a, b=1):" in user and "+def stackshot_x(a, b=2, c=None):" in user and "stackshot/web/server.py:stackshot_x" in user, user[:900])
 check("...and says the snapshot was not changed by the PR", "did not change tests/tool_text.snapshot.json" in user)
 user = pack(H_HELPER)
 check("a changed output helper reaches every tool that lists it (an absent one is said), here get, brief, create, update and complete", "Tools the change reaches: brief, complete, create, get, update\n" in user and "(not in the snapshot)" in user and "Read an item" in user and '+    return "keeper: " + a' in user, user[:700])
@@ -99,8 +101,8 @@ check("the text is the head's: a PR that edits the snapshot is read against its 
 BIG = SERVER.replace("def _other(a):\n    return a", "def _other(a):\n    return a\n" + "".join(f"def _filler{i}(a):\n    return {i} * a  # {'padding ' * 20}\n" for i in range(400)))
 BIG = BIG.replace("def stackshot_x(a, b=1):", "def stackshot_x(a, b=2, c=None):")
 H_BIG = variant("big", BIG)
-full = tc.fit_diff(R, BASE, H_BIG, ["server.py:stackshot_x"], 10_000_000)
-cut = tc.fit_diff(R, BASE, H_BIG, ["server.py:stackshot_x"], 3_000)
+full = tc.fit_diff(R, BASE, H_BIG, ["stackshot/web/server.py:stackshot_x"], 10_000_000)
+cut = tc.fit_diff(R, BASE, H_BIG, ["stackshot/web/server.py:stackshot_x"], 3_000)
 check("the unlimited diff is large and a capped one stays within the cap plus its notice", len(full) > 30_000 and len(cut) < 3_600, (len(full), len(cut)))
 check("…the hunk that overlaps the changed tool function is kept first, and the cut is said", "b=2, c=None" in cut and "1 of 2 hunks omitted to fit the size limit" in cut, cut[-300:])
 user = pack(H_BIG, max_diff=3_000, max_text=500)
@@ -113,7 +115,7 @@ _fix = (f"the {len(_real['tools'])} tools' text is {_total} characters as JSON, 
         "A branch behind main can fail on a total that main has already shrunk: merge main first with `gh pr update-branch <N>` (N is the PR's number), "
         "then run `tests/run-suite text_pack` again. Only when it still fails on a branch that has main in it is the text itself too long: shorten it, or raise MAX_TEXT")
 check("the real snapshot, all tools together, fits under MAX_TEXT uncut (growth past it fails here, not as a cut-off tool a reader takes for missing)", len(_real["tools"]) > 5 and "[tool text cut" not in _all and len(_all) < tc.MAX_TEXT, _fix)
-check("a deleted file or an unreadable revision gives an empty-diff note, not a crash", "no diff" in tc.fit_diff(R, "0" * 40, "1" * 40, ["server.py:stackshot_x"], 1000))
+check("a deleted file or an unreadable revision gives an empty-diff note, not a crash", "no diff" in tc.fit_diff(R, "0" * 40, "1" * 40, ["stackshot/web/server.py:stackshot_x"], 1000))
 
 # ================================================================= 4. the command line
 def cli(*a):
@@ -129,10 +131,10 @@ check("the `run` command that called a model is gone", r.returncode != 0, r.stdo
 check("the tool_text.touched gate still reads through the shared changed_since (no change in what it says)", tt.touched(R, BASE, H_PARAM, "")[0] == 1 and tt.touched(R, BASE, H_COMMENT, "")[0] == 0, (tt.touched(R, BASE, H_PARAM, ""),))
 
 # ================================================================= 5. tool names, the real HELPERS, the workflow and the docs
-src = pathlib.Path(STACK, "server.py").read_text(encoding="utf-8")
+src = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 names = tc.tool_names(src)
 check("the real server's tool functions map to the snapshot's tool names (stackshot_get -> get ...), every one of them in the snapshot", names["stackshot_get"] == "get" and set(names.values()) <= set(_real["tools"]), sorted(set(names.values()) - set(_real["tools"])))
-check("a changed shared item-line helper reaches the tools that list it", "get" in tc.affected_tools(["server.py:_mover_lines"], src, src) or tc.affected_tools(["server.py:_mover_lines"], src, src) != [], tc.affected_tools(["server.py:_mover_lines"], src, src))
+check("a changed shared item-line helper reaches the tools that list it", "get" in tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src) or tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src) != [], tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src))
 import yaml
 wf_text = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text(encoding="utf-8")
 wf = yaml.safe_load(wf_text)

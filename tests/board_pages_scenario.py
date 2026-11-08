@@ -1,11 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["fastmcp>=4.0,<5", "httpx", "markdown-it-py>=4,<5"]
-#
-# [tool.uv]
-# exclude-newer = "2026-10-03T04:00:00Z"
-# ///
 """Scenario test for the board's pages: the board at the root (ui/render.py, ui/search.py, ui/runners.py), the server routes that serve them and the write routes they post to.
 Fixture data, the routes through Starlette's test client, no live store, no network.
 
@@ -76,10 +68,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import config as _cfg, landed as ld
-import server, render, search, runners
-import ui as ui_pkg
-from ui import render as r2, search as s2, runners as n2
+from stackshot.core import config as _cfg; from stackshot.web import landed as ld
+from stackshot.web import server; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web import ui as ui_pkg
+from stackshot.web.ui import render as r2, search as s2, runners as n2
 from starlette.testclient import TestClient
 pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 server._PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -96,7 +88,7 @@ check("the search and runners pages use the index and the data of search.py and 
       and n2.switch_boxes is runners.switch_boxes and n2.conf is runners.conf and r2.icon_href is render.icon_href and r2.font_href is render.font_href)
 check("paths: the board's under() adds nothing to an address", ui_pkg.under("/landed") == "/landed" and ui_pkg.under("/") == "/" and ui_pkg.PREFIX == "")
 
-from ui import releasing as _rel2
+from stackshot.web.ui import releasing as _rel2
 _rel2._run = lambda argv: ""             # the release queue is the host's systemd units: none are read here (ui_kit_scenario drives the queue)
 
 # ---- 1. the pages
@@ -353,7 +345,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and server._split_letter(rd(30), "A · Beta") == ("A · Beta", "") and server._split_letter(rd(30), "B · Beta") == ("Beta", "B") and server._split_letter(rd(30), "Beta") == ("Beta", ""))
 
     # ---- 2c. a label that repeats its own badge letter ("A Report" under the badge A) is read without it, everywhere, and a pick that names it still lands
-    import option_labels as ol
+    from stackshot.model import option_labels as ol
     def opts_of(*labels, rec=1): return [{"label": lb, "line": f"Line {i}", "recommended": i == rec} for i, lb in enumerate(labels)]
     FORMS = ["{L} {w}", "{L}. {w}", "{L}: {w}", "{L}) {w}", "({L}) {w}", "{L} - {w}", "{L} · {w}", "Option {L}: {w}", "{L}:{w}", "{L} – {w}"]
     WORDS = ["Report", "Plan", "Fix"]
@@ -383,7 +375,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and [o["label"] for o in m.options_of({"metadata": {"options": opts_of(*WAKE)}})] == WAKE for m in (render, r2)))
     check("the plain option lines (tool replies, board.md, the brief) read the same", render.option_lines({"metadata": {"options": opts_of(*LAB)}})[1] == "Plan (recommended): Line 1"
           and r2.option_lines({"metadata": {"options": opts_of(*LAB)}})[0] == "Report: Line 0" and r2.option_lines({"metadata": {"options": opts_of("A", "B Plan", "C Fix")}})[0] == "A: Line 0")
-    import ghsync, ask_read
+    from stackshot.github import ghsync; from stackshot.model import ask_read
     check("the History line of an options edit (ghsync._options_text) lists the shown labels", ghsync._options_text(opts_of(*LAB)).splitlines()[0] == "- Report: Line 0"
           and ghsync._options_text(opts_of(*WAKE)).splitlines()[0] == "- A wake alone: Line 0" and ghsync._options_text(None) == "")
     check("the audit reads the recommended option by its shown label: a Recommend part that names \"Plan\" names it", ask_read.recommend_missing({"ask": "Decide: which · Recommend: Plan · Stakes: a day · By: no date", "options": opts_of(*LAB)}) == ""

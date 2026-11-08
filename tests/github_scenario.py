@@ -243,8 +243,8 @@ def check(name, cond, got=None):
 def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
-import server, render, ghsync as G
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.web import render; from stackshot.github import ghsync as G
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
@@ -477,7 +477,7 @@ check("the last `after` closing releases the item (stored) and the one that stil
       (writes()[w_before:], comments(n_rel), comments(n_two)))
 # an anchor release: a held item scoped to an anchor, released by its notice
 g_anc, n_anc = made("[home] waits on an anchor"); server._update(g_anc, hold=True, wake="2099-01-01", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
-import anchors as _anc
+from stackshot.anchors import anchors as _anc
 ANCHOR = "https://github.com/o/other/pull/9"; ast = _anc.load(); _anc.add(ast, "projects/alpha", [ANCHOR], [g_anc], "home-here"); _anc.save(ast)
 log0 = len(F.log)
 rel = server._anchor_release("projects/alpha", {"kind": "anchor", "anchor": ANCHOR, "to": OWNER, "ruling": "passed", "ruled_at": time.time() + 5, "ts": time.time() + 5, "id": "n-test"}, by="home-here")
@@ -1436,7 +1436,7 @@ finally:
 # PATCH (no comment goes with it any more); a create and a close or reopening go at once; the host's one ledger
 # (ghbudget.py) counts the mirror's writes and every counted read, the server's and anchor-hub's, and never a 304; a restart in the middle of a window
 # keeps the pending updates.
-import ghbudget as _gb, types
+import types; from stackshot.core import ghbudget as _gb
 _ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 check("the shipped defaults: 250 writes an hour, 1500 counted reads, a 300 s merge window, the pace still 1.5 s",
       G.DEFAULT_BUDGET == 250 == _gb.DEFAULT_WRITES and G.DEFAULT_READ_BUDGET == 1500 == _gb.DEFAULT_READS and G.DEFAULT_MERGE == 300.0 and G.DEFAULT_PACE == 1.5
@@ -1762,7 +1762,7 @@ rcs_ = [p_.wait(timeout=120) for p_ in procs_]
 check("six processes noting 40 reads and 40 writes each, at once, add up exactly: 240 and 240, none lost to the lock", rcs_ == [0] * 6 and _gb.count("r") == 240 and _gb.count("w") == 240, (rcs_, _gb.count("r"), _gb.count("w")))
 
 # ---- anchor-hub's reads go through the same ledger (anchorhub/github.py, the gh CLI): counted, a 304 free, the pass cut short over the cap
-import anchorhub.core as ahc, anchorhub.github as ghr
+import stackshot.anchors.anchorhub.core as ahc; import stackshot.anchors.anchorhub.github as ghr
 AN = "github:example-owner/stackshot#26"; NA = "github:example-owner/stackshot@notifications"; RP = "/repos/example-owner/stackshot"; calls = []; ghcli = {"304": False}; call_args = []; FAILS = set()
 NPATH = f"{RP}/notifications?all=true&per_page=50"
 def thread(updated): return {"id": "t1", "updated_at": updated, "reason": "comment", "subject": {"type": "Issue", "url": "https://api.github.com/repos/example-owner/stackshot/issues/5", "title": "a thread"}, "repository": {"id": 7}}

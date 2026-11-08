@@ -24,7 +24,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parents=True)
 (T / "store/anchors.json").write_text("{}"); (T / "store/next-id").write_text("1")
 
-import config as _cfg, audit_run as AR, goal_pass as GP, client as _client
+from stackshot.core import config as _cfg; from stackshot.audit import audit_run as AR; from stackshot.tools import goal_pass as GP; from stackshot.fleet import client as _client
 fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)

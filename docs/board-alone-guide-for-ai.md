@@ -11,7 +11,7 @@ Goal: a working stackshot instance for one person, on this box, reachable over p
 
 Done when all of these hold. Check each yourself, then report.
 
-1. `./stackshot doctor` prints `all good` and exits 0.
+1. `bin/stackshot doctor` prints `all good` and exits 0.
 2. `curl -sf https://<base>/healthz` answers, and `https://<base>/.well-known/oauth-authorization-server` returns JSON.
 3. A claude.ai chat can call the connector `Stackshot` tool `brief` (the user checks this: hand-off H3).
 4. In Claude Code, the tools `mcp__claude_ai_Stackshot__create`, `__update`, `__complete`, `__brief`, `__get` exist, and `create` made a first item that the board page and the data repository show.
@@ -27,20 +27,20 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 - Do not use `STACKSHOT_AUTH=off` on this instance. It is for local tests (stackshot.example.toml, `[auth] mode`).
 - Do not kill `claude` processes by name. Other sessions may be running.
 - Use `systemctl --user`, never `sudo`, except where this file says root is needed once (lingering).
-- Do not enable optional features (see the settings table). Do not run `./stackshot setup --force` on an installed box: it rewrites the config (stackshot).
+- Do not enable optional features (see the settings table). Do not run `bin/stackshot setup --force` on an installed box: it rewrites the config (stackshot).
 - At a hand-off, stop, tell the user exactly what to do, and end your turn. Continue after they reply.
 
 ## 2. Facts
 
 | Item | Value | Source |
 |---|---|---|
-| Code checkout | `~/stackshot` (clone of the repository) | server.py refuses a bare start elsewhere |
+| Code checkout | `~/stackshot` (clone of the repository) | stackshot/web/server.py refuses a bare start elsewhere |
 | Clone URL | `https://github.com/howardpark-ai/stackshot`, branch `main` (public: a plain clone works, no access request and no git credentials) | `git ls-remote` shows `refs/heads/main` |
 | Config file | `~/.config/stackshot/stackshot.toml`, or `$STACKSHOT_CONFIG` | stackshot |
 | Secrets dir | `~/.config/stackshot/` (mode 0700) | stackshot |
 | Secret files | `oauth.env`, `ui-session.key` (server makes it on first start), `client.token`, `client.url`, `clients.json`, `client-tokens/<host>.token` | stackshot |
-| Required env key names (in `oauth.env`) | `STACKSHOT_GOOGLE_CLIENT_ID`, `STACKSHOT_GOOGLE_CLIENT_SECRET` | server.py |
-| Optional env key name | `STACKSHOT_PORTAL_TOKEN` (portal only; leave unset). Old spelling `BOARD_MCP_*` still read | server.py |
+| Required env key names (in `oauth.env`) | `STACKSHOT_GOOGLE_CLIENT_ID`, `STACKSHOT_GOOGLE_CLIENT_SECRET` | stackshot/web/server.py |
+| Optional env key name | `STACKSHOT_PORTAL_TOKEN` (portal only; leave unset). Old spelling `BOARD_MCP_*` still read | stackshot/web/server.py |
 | State dir | `~/.local/state/stackshot/` (ledger, inbox, routing; services log to journald) | stackshot.example.toml `[paths] state` |
 | Data repo | `~/stackshot-data/` (`board-data/`, `board.md`, `RULES.md`, `session-names.tsv`, `pages/`) | stackshot |
 | Pages | `~/stackshot-data/pages/projects/<slug>.md` (inside the data repo by default) | stackshot |
@@ -48,18 +48,18 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 | Google redirect URI | `<base_url>/auth/callback` | stackshot |
 | Connector URL | `<base_url>/mcp` | stackshot |
 | OAuth metadata | `<base_url>/.well-known/oauth-authorization-server` | stackshot |
-| Board sign-in callback | `<base_url>/ui/callback` (no extra Google URI needed) | server.py: the comment block above `_ui_open`, and `_ui_redirect_uri` |
+| Board sign-in callback | `<base_url>/ui/callback` (no extra Google URI needed) | stackshot/web/server.py: the comment block above `_ui_open`, and `_ui_redirect_uri` |
 | claude.ai callbacks | already in `[auth] allowed_client_redirect_uris` | example `[auth]` |
 | Units (always) | `stackshot.service`, `stackshot-reload.path`, `stackshot-reload.service`, `stackshot-puller.service`, in `~/.config/systemd/user/` | install.sh |
 | Units (off by default) | `anchor-hub.service`, `stackshot-portal-sync.service` (+ drop-in), `stackshot-audit.{service,timer}` | install.sh |
 | Server command | `uv run --locked --script ~/stackshot/server.py` | units/stackshot.service.in:15 |
-| Python | system `python3` 3.12+ (CLI, hooks, puller at `/usr/bin/python3`); server 3.12+ via uv | stackshot; server.py; units/stackshot-puller.service.in |
+| Python | system `python3` 3.12+ (CLI, hooks, puller at `/usr/bin/python3`); server 3.12+ via uv | stackshot; stackshot/web/server.py; units/stackshot-puller.service.in |
 | Connector name | `Stackshot` (set on claude.ai) | [INSTALL.md](../INSTALL.md) step 5 |
 | Claude Code tool names | `mcp__claude_ai_Stackshot__<tool>` | [INSTALL.md](../INSTALL.md) step 5 |
 | Tools (12) | `brief get create update confirm complete anchors route message sessions rules bump_versions` | tests/tool_text.snapshot.json |
 | Hooks written | 4 entries in `~/.claude/settings.json`: SessionStart, UserPromptSubmit, PostToolUse (matcher `mcp__.*`), Stop; scripts in `~/stackshot/client/hooks/` | stackshot |
 | Router | server runs `claude -p` (login shell, `--model sonnet`) for notices | example `[router]` |
-| Config reload | automatic on save (`stackshot-reload.path`); restart-only keys listed in `config.py` RESTART_ONLY | `RESTART_ONLY` in config.py |
+| Config reload | automatic on save (`stackshot-reload.path`); restart-only keys listed in `stackshot/core/config.py` RESTART_ONLY | `RESTART_ONLY` in stackshot/core/config.py |
 
 ## 3. Settings
 
@@ -70,11 +70,11 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 | `[instance] owner` | the user's first name | `--owner` |
 | `[instance] timezone` | an IANA name | `--tz` |
 | `[instance] board_url`, `[auth] base_url`, `[client] url` | the final public HTTPS base URL, no trailing slash | `--base-url` (restart-only; get it right first) |
-| `[auth] allowed_emails` | the Google emails that may sign in; at least one | `--emails` (empty list breaks server start, server.py) |
+| `[auth] allowed_emails` | the Google emails that may sign in; at least one | `--emails` (empty list breaks server start, stackshot/web/server.py) |
 | `[subject] prefixes` | the user's prefixes, each ending in a space | `--prefixes` |
 | `[paths] repo/store/markdown/rules/brain/fleet_names` | derived from `--data` and `--pages` | `--data`, `--pages` |
 | `[server] port` | 8020 unless taken | `--port` |
-| `[auth] ui_open` | `false` | `sed` after setup (step 3). Default `true` serves the board page to anyone who reaches the URL (server.py: the comment block above `_ui_open`, and `_ui_guard`) |
+| `[auth] ui_open` | `false` | `sed` after setup (step 3). Default `true` serves the board page to anyone who reaches the URL (stackshot/web/server.py: the comment block above `_ui_open`, and `_ui_guard`) |
 
 Do not pass `--yes` unless every answer is given as a flag. `--yes` fills gaps with defaults. An empty `--emails` is the usual gap (stackshot).
 
@@ -86,10 +86,10 @@ Do not pass `--yes` unless every answer is given as a flag. `--yes` fills gaps w
 | `[pages] dirs` | `["projects"]` | Keep `[registries.projects] match` in step if you change it |
 | `[gbrain] mirror_url` | `""` (setup blanks it) | No gbrain |
 | `[publish] git` | `true` | Needs the remote and first push (step 4). `false` keeps everything local |
-| `[page_rule] mode / grace_minutes` | `"refuse"` / `30` | A session that owes a page 30 minutes gets its next state-changing write refused (server.py). Under the default `[pilot] writer_owes_page = false` a board change is charged to the page's keeper and the router passes it on, so the writer is not the one refused |
+| `[page_rule] mode / grace_minutes` | `"refuse"` / `30` | A session that owes a page 30 minutes gets its next state-changing write refused (stackshot/web/server.py). Under the default `[pilot] writer_owes_page = false` a board change is charged to the page's keeper and the router passes it on, so the writer is not the one refused |
 | `[pilot] writer_owes_page` | `false` | `true` makes the writing session owe the page update itself (refused after `grace_minutes`); the keeper is charged only after that. Leave it off unless the user asks |
 | `[wait_guard] enabled` | `true` | A bare `wake`, or a `next` line whose step is dated later than today, on your own item needs `wait_reason` (not a `wake` with `hold=true` and `wait_basis`); one model call (the `[router]` command) may refuse it when the step could be done now. It lets the write through when the call fails. `[wait_guard] enabled = false` turns it off. Live |
-| `[stall] enabled` | `true` | Moves an open item on when its mover session is idle past `minutes`. Needs `[model] handoff`. It leaves alone a pane the CLI's registry does not show, and its last rung (one message to the fleet's builder) needs `[fleet] operator_session`, which a board-alone install leaves empty (stall.py header) |
+| `[stall] enabled` | `true` | Moves an open item on when its mover session is idle past `minutes`. Needs `[model] handoff`. It leaves alone a pane the CLI's registry does not show, and its last rung (one message to the fleet's builder) needs `[fleet] operator_session`, which a board-alone install leaves empty (stackshot/waits/stall.py header) |
 | `[ladder] enabled` | `false` | The one-ladder rework of the hand-off and stall ladders. Leave off |
 | `[board_check] mode` | `"off"` | Optional later: `"note"` or `"block"` |
 | `[audit] enabled` | `false` | No daily audit timer |
@@ -169,10 +169,10 @@ Expected: `main`. The repository is public, so the clone needs no access request
 Run it with the user's answers as flags. Example shape (replace every value; do not run this literally):
 
 ```bash
-cd ~/stackshot && ./stackshot setup --owner "<name>" --tz "<Area/City>" --base-url "https://<host>" --emails "<email1>,<email2>" --prefixes "[work] ,[home] " --yes
+cd ~/stackshot && bin/stackshot setup --owner "<name>" --tz "<Area/City>" --base-url "https://<host>" --emails "<email1>,<email2>" --prefixes "[work] ,[home] " --yes
 ```
 
-If a terminal is available to the user, they may instead run `./stackshot setup` and answer the prompts. Without `--yes` and without a terminal it exits 2 (stackshot). If `systemctl --user` is out of reach on this box (T11), add `--no-systemd`: setup skips the units, says how to install them later, and you run `./install.sh units --start` once the user manager answers. The checks after this step that list units then fail until you have.
+If a terminal is available to the user, they may instead run `bin/stackshot setup` and answer the prompts. Without `--yes` and without a terminal it exits 2 (stackshot). If `systemctl --user` is out of reach on this box (T11), add `--no-systemd`: setup skips the units, says how to install them later, and you run `./install.sh units --start` once the user manager answers. The checks after this step that list units then fail until you have.
 
 Check:
 
@@ -234,7 +234,7 @@ git -C ~/stackshot-data rev-parse --abbrev-ref --symbolic-full-name @{u}
 
 Expected: `origin/main`.
 
-Why this is required: `publish.py:65` returns without pushing when `git fetch origin main` fails, and an empty remote has no `main` (publish.py:62-70). A missing upstream makes `rev-list @{u}..HEAD` fail, which the code reads as "nothing to push" (publish.py:63).
+Why this is required: `stackshot/web/publish.py:65` returns without pushing when `git fetch origin main` fails, and an empty remote has no `main` (stackshot/web/publish.py:62-70). A missing upstream makes `rev-list @{u}..HEAD` fail, which the code reads as "nothing to push" (stackshot/web/publish.py:63).
 
 If the remote is not wanted yet: set `[publish] git = false` in the config instead and tell the user.
 
@@ -263,7 +263,7 @@ Expected: `600`.
 ### Step 6. Start the server
 
 ```bash
-cd ~/stackshot && ./stackshot doctor
+cd ~/stackshot && bin/stackshot doctor
 ```
 
 With both values set, an allowed email set and the server inactive, doctor runs `install.sh units --start` and waits up to 30 s (stackshot). Expected after: `the server answers http://127.0.0.1:8020/healthz` is `ok`; `stackshot.service`, `stackshot-reload.path` and `stackshot-puller.service` are `active`. Still `missing` at this point, and exit 1: the OAuth metadata line (until step 7) and `Claude Code hooks ... 0 of 4` (until step 9). Doctor also exits 1 when a unit check could not run (the user manager out of reach): it prints a warning then, never `all good`.
@@ -291,7 +291,7 @@ curl -sf https://<host>/.well-known/oauth-authorization-server | head -c 200
 Expected: JSON text. Doctor checks this from the box only (stackshot); the user's browser test is the outside check.
 
 ```bash
-cd ~/stackshot && ./stackshot doctor
+cd ~/stackshot && bin/stackshot doctor
 ```
 
 Expected: the metadata line is `ok`. Only the hooks line is `missing`.
@@ -313,7 +313,7 @@ Expected: no tracebacks; sign-in lines are fine.
 ### Step 9. Claude Code hooks
 
 ```bash
-cd ~/stackshot && ./stackshot client install
+cd ~/stackshot && bin/stackshot client install
 ```
 
 It prints a diff, writes `~/.claude/settings.json.bak-<timestamp>`, adds four hooks, and restarts the puller. Check:
@@ -325,7 +325,7 @@ grep -c 'client/hooks' ~/.claude/settings.json
 Expected: `4` or more (one per hook entry). If the user runs the stackshot Claude Code plugin, doctor counts the hooks that plugin carries as well, and its hooks line says how many came from it; then `grep` here can print fewer than 4 while doctor is satisfied.
 
 ```bash
-cd ~/stackshot && ./stackshot doctor
+cd ~/stackshot && bin/stackshot doctor
 ```
 
 Expected: `all good`, exit 0.
@@ -340,7 +340,7 @@ In the new session, call `create` with:
 - `description`: 1 to 8 lines, each starting `- `, at most 120 characters (no `resolved:` or `done:` words); the first bullet opens `Goal:` and states the outcome wanted (the subject names the same outcome, "Make X work when Y", never the symptom "X fails when Y"); a symptom goes in a later bullet that opens `Problem:`
 - `project`: `projects/getting-started`
 - `sender`: a short stable name for this session
-- `mover`: the same name. A fresh page lists no agents, so the default mover (`_fallback_mover` in server.py: the project's builder, else its `-main` agent, else the page's `display-name:` session) is the `display-name:` session, which nothing answers to on a solo install. `create` without `mover` is not refused there (observed on a fresh install): the item gets that nonexistent mover and the stall pass logs "nobody could take it". Only a page-less project (`prj_...`) is refused ("names no mover")
+- `mover`: the same name. A fresh page lists no agents, so the default mover (`_fallback_mover` in stackshot/web/server.py: the project's builder, else its `-main` agent, else the page's `display-name:` session) is the `display-name:` session, which nothing answers to on a solo install. `create` without `mover` is not refused there (observed on a fresh install): the item gets that nonexistent mover and the stall pass logs "nobody could take it". Only a page-less project (`prj_...`) is refused ("names no mover")
 - `next`: one line per step, each starting with `<name>: `
 
 Expected: the call succeeds and returns an id.
@@ -388,12 +388,12 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T2 | `setup` exits 2: "exists; setup leaves it alone" | Config already written | stackshot | Run `doctor`. Use `--force` only to rewrite on purpose |
 | T3 | `setup` exits 2: "port 8020 is taken on this box by <user>" | Another account's server | stackshot | `--port <free port>` |
 | T4 | `setup` exits 2: "not a timezone this Python knows" | Bad `--tz` | stackshot | Use an IANA name |
-| T5 | Server will not start: `auth=google but STACKSHOT_GOOGLE_CLIENT_ID/SECRET not set (env file ...)` | `oauth.env` empty or wrong key names | server.py | Step 5 checks; restart: `systemctl --user restart stackshot.service` |
-| T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | server.py | Add an email; doctor refuses to start it in this case |
-| T7 | Server exits 1: "port 127.0.0.1:8020 is taken" | A second server or another program | server.py | `ss -ltnp \| grep 8020`; change `[server] port`, then `./install.sh units --start` |
-| T8 | Server exits 2: "STACKSHOT_CONFIG is unset and ... is not the production checkout" | Started by hand from outside `~/stackshot` | server.py | Use the unit, or export `STACKSHOT_CONFIG` |
-| T9 | Data repo never reaches the remote; no error | Empty remote has no `main`, so the publisher's fetch fails and it returns silently | publish.py:62-70 | Step 4: `git push -u origin main` by hand |
-| T10 | Board page opens for anyone with the URL | `[auth] ui_open = true` (default) | server.py: the comment block above `_ui_open`, and `_ui_email`/`_ui_guard` | Step 3 |
+| T5 | Server will not start: `auth=google but STACKSHOT_GOOGLE_CLIENT_ID/SECRET not set (env file ...)` | `oauth.env` empty or wrong key names | stackshot/web/server.py | Step 5 checks; restart: `systemctl --user restart stackshot.service` |
+| T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | stackshot/web/server.py | Add an email; doctor refuses to start it in this case |
+| T7 | Server exits 1: "port 127.0.0.1:8020 is taken" | A second server or another program | stackshot/web/server.py | `ss -ltnp \| grep 8020`; change `[server] port`, then `./install.sh units --start` |
+| T8 | Server exits 2: "STACKSHOT_CONFIG is unset and ... is not the production checkout" | Started by hand from outside `~/stackshot` | stackshot/web/server.py | Use the unit, or export `STACKSHOT_CONFIG` |
+| T9 | Data repo never reaches the remote; no error | Empty remote has no `main`, so the publisher's fetch fails and it returns silently | stackshot/web/publish.py:62-70 | Step 4: `git push -u origin main` by hand |
+| T10 | Board page opens for anyone with the URL | `[auth] ui_open = true` (default) | stackshot/web/server.py: the comment block above `_ui_open`, and `_ui_email`/`_ui_guard` | Step 3 |
 | T11 | `systemctl --user` "cannot reach your user manager" | Shell is not a login session; no `XDG_RUNTIME_DIR` | stackshot; units/scope.sh:19 | `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in with ssh/console |
 | T12 | Units stop at logout or are missing after reboot | Lingering off | install.sh; stackshot | H5 |
 | T13 | `deploy.sh` says "cannot fetch main from origin" | No `origin`, origin unreachable, or no `main` | deploy.sh | Check `git -C ~/stackshot remote -v` and that the URL is reachable |
@@ -401,17 +401,17 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T15 | `deploy.sh`: "does not contain HEAD" | Local commits in `~/stackshot` (the repository takes ordinary pull requests, so `origin/main` only moves forward) | deploy.sh | Ask the user before discarding them, then `git -C ~/stackshot reset --hard "$(git -C ~/stackshot merge-base HEAD origin/main)"` and `./deploy.sh`. Not `reset --hard origin/main`: that leaves nothing to deploy (T16) |
 | T16 | `deploy.sh` says "already at origin/main; nothing to deploy" after an update the user expected | `git pull` was run first, so HEAD already equals `origin/main` and no restart is planned | deploy.sh | Run `./install.sh units --start` (re-renders the units, restarts `stackshot.service`, `stackshot-reload.path`, `stackshot-puller.service` and, if enabled, `anchor-hub.service`). Next time run only `./deploy.sh` |
 | T17 | `deploy.sh`: "healthz did not answer within 180 s" | Server failed to start after the update | deploy.sh | `journalctl --user -u stackshot.service -n 80 --no-pager` |
-| T18 | A session is refused: "you owe a project-page update" | Page rule with `[pilot] writer_owes_page = true`: owed longer than `grace_minutes` (30) | server.py; example `[page_rule]` | Edit the page, commit, push, retry |
-| T19 | `create` refused: "subject must start with one of [...]", a description line "is not a `- ` bullet", or "the description must open with its goal" | Gate texts | server.py | Fix the call. Read `rules` for the shape |
-| T20 | `create` refused: "metadata.project ... names no page" | The page file does not exist or the registry is stale | server.py | Create `pages/projects/<slug>.md`; `python3 ~/stackshot/pages.py registry` |
-| T21 | Notice shows as waiting; router log says "no agent can take it" | Page and scope list no user-facing agent | router_live.py:494-495 | `TODO(verify)` whether a solo install ever produces one. Fix: list an agent in the page's `agents:` frontmatter, or set `[router] general_general` |
-| T22 | Router calls time out or fail | `claude` not on the login-shell PATH, not signed in, or slow | example `[router]` (`command`, `timeout_seconds`, `login_shell`); router.py:146 (timeout_seconds), router.py:1187 (login_shell) | Run `bash -lc 'claude --version'` as the user; sign in. The notice is retried then passed to a `-main` agent (router_live.py:18-19) |
+| T18 | A session is refused: "you owe a project-page update" | Page rule with `[pilot] writer_owes_page = true`: owed longer than `grace_minutes` (30) | stackshot/web/server.py; example `[page_rule]` | Edit the page, commit, push, retry |
+| T19 | `create` refused: "subject must start with one of [...]", a description line "is not a `- ` bullet", or "the description must open with its goal" | Gate texts | stackshot/web/server.py | Fix the call. Read `rules` for the shape |
+| T20 | `create` refused: "metadata.project ... names no page" | The page file does not exist or the registry is stale | stackshot/web/server.py | Create `pages/projects/<slug>.md`; `python3 ~/stackshot/pages.py registry` |
+| T21 | Notice shows as waiting; router log says "no agent can take it" | Page and scope list no user-facing agent | stackshot/router/router_live.py:494-495 | `TODO(verify)` whether a solo install ever produces one. Fix: list an agent in the page's `agents:` frontmatter, or set `[router] general_general` |
+| T22 | Router calls time out or fail | `claude` not on the login-shell PATH, not signed in, or slow | example `[router]` (`command`, `timeout_seconds`, `login_shell`); stackshot/router/router.py:146 (timeout_seconds), stackshot/router/router.py:1187 (login_shell) | Run `bash -lc 'claude --version'` as the user; sign in. The notice is retried then passed to a `-main` agent (stackshot/router/router_live.py:18-19) |
 | T23 | Claude Code lists only `authenticate` stubs for the connector | Connector not signed in for the CLI | n/a | Hand-off H3, then a new session. `TODO(verify)` |
 | T24 | New connector tools or parameters do not appear after an update | claude.ai caches the tool list for about a day | docs/board-and-connector.md, "A new tool or parameter" | Wait, or call the new form through a portal. Not needed for a board-alone setup |
-| T25 | Config edit seems ignored | Restart-only key | `RESTART_ONLY` in config.py; [INSTALL.md](../INSTALL.md) "Changing the config" | `systemctl --user restart stackshot.service`; for `[server] port`/`[instance] timezone` run `./install.sh units` first |
-| T26 | A page edited in an Obsidian vault does not settle a session's page debt | Freshness is read from the server's checkout (last commit time or file mtime) | pages.py:423-437 | The server must pull that repo. The default layout (pages inside the data repo) is pulled by the publisher at publish.py:80-81. A separate pages repo is not pulled by anything: add a timer |
-| T27 | `update` refused: "a wait on your own item needs its reason" | `[wait_guard]`: a bare `wake`, or a `next` line whose step is dated later than today, with no `wait_reason`. A `wake` together with `hold=true` and `wait_basis` is not judged and needs none (seen accepted on a scratch instance); neither is a wait on another item (`after`), on the owner or an outside party (`needs`) | self_wait.py, example `[wait_guard]` | Pass `wait_reason=<what the step waits on that is not available now, at least 15 characters>`. If nothing blocks the step, do it now. A refusal that says the step could be done now came from one model call: it is not a server fault |
-| T28 | `tools/project.py move-page` refuses | A plain-pages install: `move-page` runs rename_page.py (tools/project.py:6), and the page-moving tools (rename_page.py, page_keeper.py) refuse under `[pages] flavor = "plain"` | tests/neutral_install_scenario.py:172-175 (the two tools' refusal; `move-page` itself is not run there) | There is no verb for it on plain pages. Do not switch the flavor |
+| T25 | Config edit seems ignored | Restart-only key | `RESTART_ONLY` in stackshot/core/config.py; [INSTALL.md](../INSTALL.md) "Changing the config" | `systemctl --user restart stackshot.service`; for `[server] port`/`[instance] timezone` run `./install.sh units` first |
+| T26 | A page edited in an Obsidian vault does not settle a session's page debt | Freshness is read from the server's checkout (last commit time or file mtime) | stackshot/projects/pages.py:423-437 | The server must pull that repo. The default layout (pages inside the data repo) is pulled by the publisher at stackshot/web/publish.py:80-81. A separate pages repo is not pulled by anything: add a timer |
+| T27 | `update` refused: "a wait on your own item needs its reason" | `[wait_guard]`: a bare `wake`, or a `next` line whose step is dated later than today, with no `wait_reason`. A `wake` together with `hold=true` and `wait_basis` is not judged and needs none (seen accepted on a scratch instance); neither is a wait on another item (`after`), on the owner or an outside party (`needs`) | stackshot/waits/self_wait.py, example `[wait_guard]` | Pass `wait_reason=<what the step waits on that is not available now, at least 15 characters>`. If nothing blocks the step, do it now. A refusal that says the step could be done now came from one model call: it is not a server fault |
+| T28 | `stackshot/tools/project.py move-page` refuses | A plain-pages install: `move-page` runs stackshot/projects/rename_page.py (stackshot/tools/project.py:6), and the page-moving tools (stackshot/projects/rename_page.py, stackshot/projects/page_keeper.py) refuse under `[pages] flavor = "plain"` | tests/neutral_install_scenario.py:172-175 (the two tools' refusal; `move-page` itself is not run there) | There is no verb for it on plain pages. Do not switch the flavor |
 
 ## 7. Using the board afterwards
 
@@ -445,13 +445,13 @@ Rules that apply on every write:
 
 ### 7a. Project verbs
 
-A project is an entry in `project-record.json` (store folder), keyed by an id `prj_<8 hex>`, written record first; then, when the project has a page in this instance's page store, three lines of the page's frontmatter (`display-name:`, `agents:`, `status:`) are written from the record. A page pointer is optional: it may be a page key, a link to another knowledge base, or nothing (docs/projects.md, "Projects: the record first"; project_verbs.py). Run the verbs from the checkout, `python3 ~/stackshot/tools/project.py [--by <label>] [--dry-run] [--json] <command> ...`: the global flags go before the command (after it argparse refuses them, exit 2). Each ran on a scratch instance for this guide, except where a row says otherwise.
+A project is an entry in `project-record.json` (store folder), keyed by an id `prj_<8 hex>`, written record first; then, when the project has a page in this instance's page store, three lines of the page's frontmatter (`display-name:`, `agents:`, `status:`) are written from the record. A page pointer is optional: it may be a page key, a link to another knowledge base, or nothing (docs/projects.md, "Projects: the record first"; stackshot/projects/project_verbs.py). Run the verbs from the checkout, `python3 ~/stackshot/tools/project.py [--by <label>] [--dry-run] [--json] <command> ...`: the global flags go before the command (after it argparse refuses them, exit 2). Each ran on a scratch instance for this guide, except where a row says otherwise.
 
 | Command | Effect | Result seen |
 |---|---|---|
 | `create NAME --scope S [--page KEY\|LINK] [--make-page] [--title T]` | New project; with no `--page` it has no page and none is made | Made `prj_...` with no page (a name alone); also run with `--page https://example.com/x` |
 | `rename PROJECT NEW_NAME` | Name changes, id stays | Not run |
-| `move-page PROJECT NEW_KEY` | rename_page.py copy then stub, then the record | Refused on plain pages (T28); needs `[pages] flavor = "gbrain"`; `TODO(verify)` on a gbrain box |
+| `move-page PROJECT NEW_KEY` | stackshot/projects/rename_page.py copy then stub, then the record | Refused on plain pages (T28); needs `[pages] flavor = "gbrain"`; `TODO(verify)` on a gbrain box |
 | `archive PROJECT [--why W]` / `reopen PROJECT` | status `archived` and back; the page's `status:` follows | `--dry-run archive` run; archive run on a project with a page: its `status:` line changed |
 | `agent-add PROJECT NAME (--front\|--back) --mandate M` | Lists an agent; on a project with a page writes the `agents:` block | Run on a project with no page and on one with a page. On the page-less project it did NOT give a default mover: `create` with `project=prj_...` and no `mover` was refused ("names no mover"), and worked with `mover=<name>`. On the project with a page (agent listed in its `agents:` block, after the registry refreshed) `create` with no `mover` worked |
 | `agent-mandate PROJECT NAME --mandate M` | Changes the mandate line of a listed agent in the record, then writes the `agents:` block | `agent-add` with another mandate for a listed name is refused; use this verb. A hand edit of the page line does not stick (the record wins) |
@@ -459,9 +459,9 @@ A project is an entry in `project-record.json` (store folder), keyed by an id `p
 | `mirror PROJECT [--make-page]` | Writes the three mirror lines again | Not run |
 | `show PROJECT` | The entry and what the registry reads | Run |
 
-`PROJECT` is an id (printed by `create`), a page key or a bare slug; `show` also resolves the name or a former name, but `mirror <name>` returned 404 for a page-less project where `show <name>` found it, so pass `mirror` an id, page key or slug. A sub-page (`projects/<slug>/<sub>`) is never a project: `create` refuses it, and archive, reopen and move-page refuse it naming its top-level project. The verbs and their flags are listed at the top of `tools/project.py` (`--help` lists only the command names, `<command> -h` the flags). The client API has the same verbs: `client.py post project --scope S (--key projects/<slug> | --name N [--page KEY|LINK] [--make-page true|false])`, then `post project-agent`, `post project-agent-rename`, `post project-agent-retire` (the last two need `--sender` a label in `[project_agent] form_senders` and a token from a machine in `form_machines`, else 403). `post project --key ...` makes the page from the `[pages] template_page` page unless `--make-page false`; on plain pages it writes the file into `paths.brain` and does not commit or push it: do that from `~/stackshot-data`. A key or name some project already has is a 409.
+`PROJECT` is an id (printed by `create`), a page key or a bare slug; `show` also resolves the name or a former name, but `mirror <name>` returned 404 for a page-less project where `show <name>` found it, so pass `mirror` an id, page key or slug. A sub-page (`projects/<slug>/<sub>`) is never a project: `create` refuses it, and archive, reopen and move-page refuse it naming its top-level project. The verbs and their flags are listed at the top of `stackshot/tools/project.py` (`--help` lists only the command names, `<command> -h` the flags). The client API has the same verbs: `stackshot/fleet/client.py post project --scope S (--key projects/<slug> | --name N [--page KEY|LINK] [--make-page true|false])`, then `post project-agent`, `post project-agent-rename`, `post project-agent-retire` (the last two need `--sender` a label in `[project_agent] form_senders` and a token from a machine in `form_machines`, else 403). `post project --key ...` makes the page from the `[pages] template_page` page unless `--make-page false`; on plain pages it writes the file into `paths.brain` and does not commit or push it: do that from `~/stackshot-data`. A key or name some project already has is a 409.
 
-An item can be filed on a project by its id (`project=prj_...`), also for one with no page. A project with no page is absent from `client.py get projects` and `client.py get project <prj_id>` answers 404 for it (the registry is built from pages), though `tools/project.py show <prj_id>` reads it and an item filed on it works with an explicit `mover`. There is no verb that deletes a project. Hand-made page files are still read by the registry and get a record entry at their first verb.
+An item can be filed on a project by its id (`project=prj_...`), also for one with no page. A project with no page is absent from `stackshot/fleet/client.py get projects` and `stackshot/fleet/client.py get project <prj_id>` answers 404 for it (the registry is built from pages), though `stackshot/tools/project.py show <prj_id>` reads it and an item filed on it works with an explicit `mover`. There is no verb that deletes a project. Hand-made page files are still read by the registry and get a record entry at their first verb.
 
 Reads from a shell on the box, with the box's own token: `python3 ~/stackshot/client.py get brief`, `get whoami`, `get items <session>`, `get rules`.
 
@@ -480,7 +480,7 @@ cd ~/stackshot && ./deploy.sh
 Expected: ends with `healthz ok at <commit>` (deploy.sh). Do not run `git pull` first (T16). Then:
 
 ```bash
-cd ~/stackshot && ./stackshot doctor
+cd ~/stackshot && bin/stackshot doctor
 ```
 
 Expected: `all good`. New units are installed by the deploy itself (`./install.sh units`, deploy.sh).

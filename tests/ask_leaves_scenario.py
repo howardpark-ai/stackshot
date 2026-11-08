@@ -102,7 +102,7 @@ def check(name, cond, got=None):
 def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
-import server, ask_leaves as AL, note_read as NR, watchers
+from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
@@ -653,7 +653,7 @@ check("nothing in the leave closes an item, writes an ask or answers for him: no
       all(a.get("kind") != "decision" for i in (3, 4, 14, 710) for a in (rd(i)["metadata"].get("answers") or [])), None)
 
 # ---- 6. the off switch, in the config file
-import config as _cfg
+from stackshot.core import config as _cfg
 cfgfile = T / "stackshot.toml"; on_text = cfgfile.read_text(encoding="utf-8")
 assert re.search(r"(?m)^leaves = true", on_text), "the example config carries [ask] leaves"
 check("[ask] leaves defaults to on", _cfg.ask_leaves_on() is True)
@@ -677,7 +677,7 @@ check("his note 'ran it' ticks his step as an empty Send does", res == "steprepl
 check("the item goes to the then-mover and the notice says what was applied, not 'judge the note'", m.get("mover") == "home-agent" and told and "Judge the note" not in told[-1][2] and "ticked his step" in told[-1][2], told)
 told.clear()
 res = server._answer("a31", "", "I'll do it tomorrow evening", "send"); m = rd(31)["metadata"]
-tomorrow = (__import__("pages").zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
+tomorrow = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
 check("his note 'tomorrow evening' holds the item until then: hold, wake, his words behind the wake", m.get("hold") is True and str(m.get("wake")) == f"{tomorrow}T19:00" and (m.get("cap_ok") or {}).get("quote") == "I'll do it tomorrow evening", (m.get("hold"), m.get("wake"), m.get("cap_ok")))
 check("the notice names the hold and the time, and asks nothing before then", told and "Judge the note" not in told[-1][2] and f"on hold until {tomorrow}T19:00" in told[-1][2] and "nothing is asked of you before then" in told[-1][2], told)
 told.clear()
@@ -708,7 +708,7 @@ check("the docs say which parameters are read (every one of the text list, by na
       and "a line that only appears inside a longer held line is new" in readme and "with each of his writes to the item for as long as the dependency stays dropped and the ask stands" in readme
       and "an ask stored before the record has none, and then the item's mover and creator count as its author" in readme and "naming each such item once in the clause" in readme, [p for p in server._ASK_TEXT_PARAMS + server._ASK_NONTEXT_PARAMS if f"`{p}`" not in readme][:6])
 check("the ask rule never says 'nothing after it' and the config's own help says the same as the docs", "nothing after it" not in server._ASK_RULE
-      and "its author's write is, whole, one plain sentence" in pathlib.Path(STACK, "config.py").read_text(encoding="utf-8") and "the record shows it moot" not in pathlib.Path(STACK, "config.py").read_text(encoding="utf-8"), None)
+      and "its author's write is, whole, one plain sentence" in pathlib.Path(STACK, "stackshot/core/config.py").read_text(encoding="utf-8") and "the record shows it moot" not in pathlib.Path(STACK, "stackshot/core/config.py").read_text(encoding="utf-8"), None)
 check("the example config says the same", "only on its author's own plain sentence" in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

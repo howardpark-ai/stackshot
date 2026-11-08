@@ -28,7 +28,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import rulebook_scan as rs
+from stackshot.tools import rulebook_scan as rs
 
 # ---- fixtures: what exists
 SCHEMA = {"update": ["item_id", "subject", "next", "needs", "mover", "sender", "hold", "wake"], "create": ["subject", "description", "project", "mover", "sender"],
@@ -65,8 +65,8 @@ check("help: the verbs are the lines that open with `salamander <verb>`", set(h.
 check("help: a verb's flags are its line's and its continuations'", {"--mandate", "--brief", "--list", "--suggest-name"} <= h.verbs["spawn"] and "--force" not in h.verbs["spawn"], h.verbs["spawn"])
 check("help: a flag quoted inside another section counts for its verb", "--go" in h.verbs["reboot"])
 check("op help: its own flags, then each verb's", {"--from", "--words", "--plan", "--list"} <= h.op_general and h.op_verbs["retire"] == {"--keep-web", "--force"} and set(h.op_verbs) == {"recycle", "retire", "rename", "lane"}, (h.op_general, h.op_verbs))
-check("tools: the real server.py's @mcp.tool definitions are read with ast", {"update", "create", "message", "get", "complete", "anchors"} <= set(rs.server_tools(pathlib.Path(STACK, "server.py"))) and "mover" in rs.server_tools(pathlib.Path(STACK, "server.py"))["update"])
-check("tools: a function's own parameters, never self", all("self" not in v for v in rs.server_tools(pathlib.Path(STACK, "server.py")).values()))
+check("tools: the real server.py's @mcp.tool definitions are read with ast", {"update", "create", "message", "get", "complete", "anchors"} <= set(rs.server_tools(pathlib.Path(STACK, "stackshot/web/server.py"))) and "mover" in rs.server_tools(pathlib.Path(STACK, "stackshot/web/server.py"))["update"])
+check("tools: a function's own parameters, never self", all("self" not in v for v in rs.server_tools(pathlib.Path(STACK, "stackshot/web/server.py")).values()))
 check("params: name= at the top level only; values, strings, placeholders and nested objects are not read",
       rs._top_params('item_id="board#1", needs=["a", "b=c"], work={"x": 1, y=2}, mover=<the mover=x>, sender="a, owner=b"') == ["item_id", "needs", "work", "mover", "sender"],
       rs._top_params('item_id="board#1", needs=["a", "b=c"], work={"x": 1, y=2}, mover=<the mover=x>, sender="a, owner=b"'))
@@ -288,11 +288,11 @@ check("no [[rulebook_scan.files]] table: nothing is scanned, nothing is sent, an
       and r["notes"] == [rs.NO_FILES_NOTE] and "nothing is scanned" in rs.report(r, True), r)
 conf = T / "stackshot.toml"
 conf.write_text(conf.read_text() + f'[rulebook_scan]\nenabled = true\nterms = "{T}/terms.toml"\nsala = "x-sala"\nhelp_verbs = []\n[[rulebook_scan.files]]\nglob = "{T}/hub/RULES.md"\nkeeper = "k1"\n', encoding="utf-8")
-import config; config.CFG.update(config.load(config.PATH))
+from stackshot.core import config; config.CFG.update(config.load(config.PATH))
 cfg = rs.settings()
 check("settings: every path and the keeper are config values", cfg["enabled"] is True and cfg["files"] == [{"glob": f"{T}/hub/RULES.md", "keeper": "k1"}] and cfg["terms"] == T / "terms.toml" and cfg["sala"] == "x-sala" and cfg["help_verbs"] == [], cfg)
 
-def cli(*a, script="tools/rulebook_scan.py", **env):
+def cli(*a, script="stackshot/tools/rulebook_scan.py", **env):
     r = subprocess.run([sys.executable, os.path.join(STACK, script), *a], capture_output=True, text=True, env={**os.environ, **env}, timeout=120)
     return r.returncode, r.stdout, r.stderr
 srcs = ["--schema", str(T / "schema.json"), "--sala-help", str(T / "help.txt"), "--op-help", str(T / "ophelp.txt")]
@@ -302,11 +302,11 @@ check("CLI: --dry-run prints each file's findings with line, text, problem and w
 off = T / "off.toml"; off.write_text(re.sub(r"enabled = true", "enabled = false", conf.read_text()), encoding="utf-8")
 rc, out, err = cli("run", *srcs, STACKSHOT_CONFIG=str(off))
 check("CLI: with [rulebook_scan] enabled = false it says so and does nothing, exit 0", rc == 0 and "not enabled" in out and not (T / "state/rulebook-scan/sent.json").exists(), (rc, out, err[:200]))
-rc, out, err = cli("scan", "--dry-run", *srcs, script="audit.py")
+rc, out, err = cli("scan", "--dry-run", *srcs, script="stackshot/audit/audit.py")
 check("audit.py scan --dry-run is the same scan", rc == 0 and "L1 · update(…owner=…)" in out, (rc, out[:300], err[:300]))
 rc, out, err = cli("run", "--bogus")
 check("CLI: an option it does not know: usage, exit 2", rc == 2 and "usage" in err, (rc, err))
-rc, out, err = cli("bogus", script="audit.py")
+rc, out, err = cli("bogus", script="stackshot/audit/audit.py")
 check("audit.py's usage names scan", rc == 2 and "scan [--dry-run]" in err, err)
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
 check("the timer's unit runs the scan after the run (ExecStartPost), and a failed scan never fails the unit",

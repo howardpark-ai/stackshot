@@ -52,7 +52,7 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
 
 The rules, per changed file F (git diff --name-status -M), the first that applies:
   1. no map, a map of another format, a commit that does not resolve           → all
-  2. F is the harness: .github/, tests/run-suite, tests/pyproject.toml, tests/uv.lock, tests/suitemap.py → all
+  2. F is the harness: .github/, tests/run-suite, pyproject.toml, uv.lock, tests/suitemap.py → all
   3. F = tests/<suite>_scenario.py                                              → that suite
   4. F ends in .lock (a script's lock: the lock step checks every one)          → none;
      F is tests/*_check.py (a manual check, not in CI)                         → none
@@ -95,7 +95,7 @@ TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this oft
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
 INNER = {"scratch": ("rename", "redact", "lead", "migration")}   # outer suite -> the suites it runs itself (rule above)
-HARNESS = (".github/", "tests/run-suite", "tests/pyproject.toml", "tests/uv.lock", "tests/suitemap.py")
+HARNESS = (".github/", "tests/run-suite", "pyproject.toml", "uv.lock", "tests/suitemap.py")
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
 TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"

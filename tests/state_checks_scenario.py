@@ -61,8 +61,8 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, render, states
-import pages as pg
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.projects import pages as pg
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told_ = []

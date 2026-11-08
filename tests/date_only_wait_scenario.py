@@ -58,7 +58,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-import server, audit_checks as AC, audit_run as AR, dated_wait as DW, model as MODEL
+from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
@@ -161,7 +161,7 @@ if (tn.hour * 3600 + tn.minute * 60) < 21 * 3600:                      # a wake 
     out = bupd(25, next=f"{BACK}: at 23:30 on {td_} run the migration", wake=f"{td_}T23:30")
     check("2 …but a clock time on today at the wake still counts", out.count(PARK) == 1 and mt(25).get("hold") is True, (out, mt(25)))
 # the same readings on fixed dates, whatever the clock says
-import model_guards as MG
+from stackshot.model import model_guards as MG
 FD = dt.date(2026, 11, 5)
 tw = lambda txt, wake, only=True: MG.reads_as_timed_step(txt, wake, FD, dated_only=only)
 check("2 (fixed dates) 'then at 08:00' is read by the note's reading and not by the park's", tw("build the fix now, then at 08:00 verify it", "2026-11-06T08:00", False) == "at 08:00" and tw("build the fix now, then at 08:00 verify it", "2026-11-06T08:00") == "", None)

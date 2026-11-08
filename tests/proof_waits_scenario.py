@@ -58,7 +58,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import config as _cfg, audit, audit_run as AR, audit_checks as AC, event_waits as EW
+from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.audit import audit_checks as AC; from stackshot.waits import event_waits as EW
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
 
 H = 3600; DAY = 86400; now = time.time()
@@ -142,7 +142,7 @@ check("3 left alone: none of them is a finding", not ({f"board#{BID_05}", f"boar
 check("3 candidates read counts the findings and the items left alone", read == len(fs) + len(left), (read, len(fs), len(left)))
 # a release step still to come
 pend = item(30, state="parked", wake=WAKE, post_wake_mover=AGENT, needs=[], next=f"{AGENT}: release PR #19", released_told=[])
-import steps as _steps
+from stackshot.model import steps as _steps
 d30 = pend[1]; d30["metadata"]["next"] = f"{AGENT}: finish the rollout and see it in real life"
 key = _steps.key(_steps.first_line(d30["metadata"]["next"]))
 d30["metadata"]["step_proof"] = {key: "pr_released o/r#12"}

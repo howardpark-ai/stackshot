@@ -58,8 +58,8 @@ page("projects/arch.md", "type: project\ntitle: Arch\ndisplay-name: home-arch\ns
 page("projects/twin.md", "type: project\ntitle: Twin\ndisplay-name: home-twin\nstatus: active")
 page("projects/alpha/okchild.md", "type: note\ntitle: Child\nparent: projects/alpha")
 
-import pages as p, projects as prj, project_registry as pr, project_verbs as pv, page_debt, anchors as anc
-import registry_report as rr
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.projects import project_verbs as pv; from stackshot.router import page_debt; from stackshot.anchors import anchors as anc
+from stackshot.tools import registry_report as rr
 p.cmd_registry(quiet=True)
 IO = page_debt.PlainIO()
 def ents(): return pr.entries()
@@ -140,7 +140,7 @@ check("page store unreadable: pages and mirrors are skipped with a note, the oth
 ok_p = BRAIN / "projects/unreadable.md"; ok_p.mkdir(parents=True, exist_ok=True)       # a directory where the file should be: the read fails, the page is not "missing"
 check("page store: get_strict says (None, None) for a page that is not there and raises for a read that failed", IO.get_strict("projects/never-was") == (None, None) and pv_err_read(lambda: IO.get_strict("projects/unreadable")))
 ok_p.rmdir()
-import rename_page as _rpg, json as _json
+import json as _json; from stackshot.projects import rename_page as _rpg
 _real_gb = _rpg.gb
 def _fake_gb(answer, rc=0):
     return lambda args, stdin=None, slug=None: (rc, answer)
@@ -251,19 +251,19 @@ check("line_of: page · problem · name · fix", rr.line_of(res_c["findings"][0]
 SESS = T / "sessions.json"
 SESS.write_text(json.dumps({"schema": 1, "sessions": [{"name": n, "aliases": [], "state": "live"} for n in sorted(LIVE[0])]}))
 rec_before = (T / "store/project-record.json").read_bytes()
-rc, out, err = tool("audit.py", "registry", "--sessions", str(SESS))
+rc, out, err = tool("stackshot/audit/audit.py", "registry", "--sessions", str(SESS))
 check("cli: the listing has one line per problem, with whom it goes to, then the counts; exit 0", rc == 0 and "projects/beta · page with no project · " in out and "tools/project.py adopt projects/beta" in out
       and "Project registry: " in out.splitlines()[-1] and " · tell " in out, (rc, out[:600], err[:300]))
-rc, out2, err = tool("audit.py", "registry", "--line", "--sessions", str(SESS))
+rc, out2, err = tool("stackshot/audit/audit.py", "registry", "--line", "--sessions", str(SESS))
 check("cli: --line is the one line the audit carries", rc == 0 and out2.startswith("Project registry: ") and len(out2.strip().splitlines()) == 1, (rc, out2, err[:300]))
-rc, out3, err = tool("audit.py", "registry", "--json", "--sessions", str(SESS))
+rc, out3, err = tool("stackshot/audit/audit.py", "registry", "--json", "--sessions", str(SESS))
 try: js = json.loads(out3)
 except ValueError: js = {}
 check("cli: --json is the whole report, and it agrees with the line", rc == 0 and js.get("checked") is True and f"{len(js['findings'])} problem(s)" in out2 and all("to" in f and "fix" in f for f in js["findings"]), (rc, out3[:300], err[:300]))
 check("cli: it is read only: the record is as it was", (T / "store/project-record.json").read_bytes() == rec_before)
-rc, out4, err = tool("audit.py", "registry", "--sessions", str(T / "no-such-file.json"))
+rc, out4, err = tool("stackshot/audit/audit.py", "registry", "--sessions", str(T / "no-such-file.json"))
 check("cli: a sessions file that cannot be read is a check not made for the agents (a note), not a failure", rc == 0 and "Project registry: " in out4, (rc, out4[:300], err[:300]))
-rc, out5, err = tool("audit.py", "nonsense")
+rc, out5, err = tool("stackshot/audit/audit.py", "nonsense")
 check("cli: audit.py's usage names the registry verb", rc == 2 and "registry [--line|--json]" in err, (rc, err[:300]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

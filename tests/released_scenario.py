@@ -116,7 +116,7 @@ def raw(i): return (T / f"store/a/{i}.json").read_text()
 def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
 server._HERE = T / "repo"
@@ -263,7 +263,7 @@ g("reset", "-q", "--hard", M[45]); good(M[43])
 
 # ---- 6. over HTTP, with the machine's token, and the client verbs
 fixtures(); s0 = snap()
-import client
+from stackshot.fleet import client
 tok = open(client.mint("testbox")).read().strip()
 from starlette.testclient import TestClient
 with TestClient(server.mcp.http_app()) as c:

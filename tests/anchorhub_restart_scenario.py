@@ -101,9 +101,9 @@ class Fake:
 
 
 F = Fake()
-from anchorhub import core
-import anchorhub.github as ghr
-import ghbudget as _gb
+from stackshot.anchors.anchorhub import core
+import stackshot.anchors.anchorhub.github as ghr
+from stackshot.core import ghbudget as _gb
 ghr.subprocess = types.SimpleNamespace(run=F.gh, TimeoutExpired=subprocess.TimeoutExpired)
 caught = []; ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: caught.append(target)))
 class Stop(Exception): pass

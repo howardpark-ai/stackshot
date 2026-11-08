@@ -87,7 +87,7 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import config as _cfg, audit, audit_run as AR, mover_state as MS, stall, board_report as BR, next_report as NR
+from stackshot.core import config as _cfg; from stackshot.audit import audit; from stackshot.audit import audit_run as AR; from stackshot.waits import mover_state as MS; from stackshot.waits import stall; from stackshot.tools import board_report as BR; from stackshot.tools import next_report as NR
 _cfg.CFG["audit"]["pattern_review"] = "off"      # this suite holds the run to its other stages: the pattern review has its own suite (pattern_review_scenario)
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                         # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
@@ -408,7 +408,7 @@ false
 ]
 }}''')
 PIN_GOLD["run"][0] = sorted(PIN_GOLD["run"][0]); PIN_GOLD["run"][1] = sorted(PIN_GOLD["run"][1]); PIN_GOLD["each"] = sorted(PIN_GOLD["each"], key=lambda r: AR._num(r[0]))      # the gold lists are in the pins' own order (sorted rows; the per-item rows by number)
-import audit_checks as AC
+from stackshot.audit import audit_checks as AC
 PIN_NAMES = ("check_stale", "check_ask_missing", "check_stuck_elsewhere", "idle_pass", "field_findings", "_item_view", "FIX", "CHECKS_CODE", "_norm", "_no_session", "_clip", "_hours", "_f", "_num", "_stamp")
 check("pin: audit_run offers every check it offered before they moved, and each is the one in audit_checks.py", all(getattr(AR, n) is getattr(AC, n) for n in PIN_NAMES), [n for n in PIN_NAMES if getattr(AR, n) is not getattr(AC, n)])
 # what the ten-minute passes took over: stuck-elsewhere, the board report's arbitrary-hold and mislabeled-state, and the wake half of stale
@@ -818,7 +818,7 @@ rec_clear(); cues_clear()
 # ---- 23. the unit and the CLI text
 unit = pathlib.Path(STACK, "units/stackshot-audit.service.in").read_text(encoding="utf-8")
 check("the unit still starts `audit.py cue scheduled` (the mode switch lives in config) and carries the bedrock lane for the model calls", "audit.py cue scheduled" in unit and "X-Model-Lane=bedrock" in unit and "X-Model-Lane=max" not in unit, unit)
-r = subprocess.run([sys.executable, os.path.join(STACK, "audit.py"), "bogus"], capture_output=True, text=True, env=dict(os.environ))
+r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/audit/audit.py"), "bogus"], capture_output=True, text=True, env=dict(os.environ))
 check("audit.py usage lists the run verb", r.returncode == 2 and "run [--dry-run]" in r.stderr, r.stderr)
 
 # ---- 24. stuck-elsewhere reads a waiting item's post-wake mover
@@ -1059,7 +1059,7 @@ exec "$@"
 '''); os.chmod(T / "bin/salamander", 0o755)
 _old_path = os.environ["PATH"]; os.environ["PATH"] = f"{T / 'bin'}:{_old_path}"
 def lane_log(): return [l for l in LANELOG.read_text().splitlines() if l.startswith("lane exec ")] if LANELOG.exists() else []   # the system prompt in $* has newlines: count the lines that start a call
-import router as RT
+from stackshot.router import router as RT
 _cfg.CFG.setdefault("audit", {})
 try:
     check("[audit] lane unset reads as empty", _cfg.audit_lane() == "", _cfg.audit_lane())
@@ -1158,7 +1158,7 @@ rec_clear(); rec = go(f_off, env_=env(sessions=lambda: ({"alpha-main", "alpha-gh
 check("…and once the map lists the session there is no such message", not [1 for to, t, fy in sent if "session off the map" in t], sent)
 rec_clear()
 # a page whose -main agent is gone and no fallback is live: the real fallback (anchors.fallback_main on the registry, not a stand-in) names the gone agent, the line goes to the audit's -main agent instead
-import anchors as _anc
+from stackshot.anchors import anchors as _anc
 GREG = {"projects/delta": {"session": "delta", "role": "name", "status": "active", "agents": {"delta-main": "x", "delta-gone": "was renamed"}, "back_agents": {}}}
 _real_registry = _anc.registry
 _anc.registry = lambda: GREG                                    # the real Env.main_of reads the registry through anchors: give it the fixture, nothing else is stood in
@@ -1584,7 +1584,7 @@ rec_clear(); pages_asked.clear()
 fake(); clk2 = lambda: tP + len(calls()) * 40 * 60
 rec = go(f2, now=tP, env_=env(clock=clk2, pages=pages_ans({"enabled": True, "mode": "live", "counts": {"pages": 1, "applied": 1}})))
 check("the judgment calls come first and the stage shares their budget: three calls of 40 minutes use it up, so the stage is not asked", rec["calls"]["timed_out"] is True and pages_asked == [] and rec["pages"]["timed_out"] is True, (rec["calls"], pages_asked))
-import client as _client
+from stackshot.fleet import client as _client
 real_pd = _client.page_debt
 got = []
 def fake_pd(run, deadline=None, timeout=600.0): got.append((run, deadline, timeout)); return fake_pd.ans
@@ -1773,7 +1773,7 @@ try:
     rec_clear(); rec = go(f33, env_=rg_env({**RG, "unrouted": True}))
     check("registry, sala's list unreadable (the result is unrouted): nothing is sent even with send on, the findings stay on the record", not [1 for to, t, fy in sent if "Project registry" in t and to != "projects/example"]
           and len(rec["registry"]["findings"]) == 4, rec["registry"])
-    import registry_report as _rr
+    from stackshot.tools import registry_report as _rr
     longkey = "projects/" + "very-long-page-key-" * 5 + "end"
     npf = _rr.no_project({}, {longkey: {"type": "project", "title": "Long"}})
     check("registry, the real 'page with no project' finding for a long key (" + str(len(longkey)) + " characters) keeps its --name hint and its closing parenthesis in the message line",
@@ -1786,7 +1786,7 @@ finally:
 rec_clear()
 
 # ---- the wait-end pass (wait_end_scenario holds the cases against the server's fix): the pass only acts through env.wait_end
-import wait_end as _WE
+from stackshot.waits import wait_end as _WE
 def _gap(op="after"):
     return _WE.Gap("item", 1, "wait for board#" "2", "board#" "2", "ev", {"op": op, "ids": ["g2"], "shown": ["board#" "2"]}, "item:board#" "2|abcdef01")
 def _wf(i, mover="home-agent", cat="wait-end", gap=True):
@@ -1814,7 +1814,7 @@ left_, rep_ = AR.wait_end_pass([_wf(1)], {}, shown_, now, wenv(wait_end=lambda g
 check("wait-end pass: a fix the server declines leaves the finding standing", len(left_) == 1 and rep_["fixed"] == [], (left_, rep_))
 left_, rep_ = AR.wait_end_pass([_wf(1)], {}, shown_, now, wenv(wait_end=lambda g, p, n: 1 / 0))
 check("wait-end pass: a fix that raises is recorded and never stops the pass", len(left_) == 1 and rep_["errors"] and "ZeroDivisionError" in rep_["errors"][0], rep_)
-import audit_checks as _AC9
+from stackshot.audit import audit_checks as _AC9
 check("wait-end: event-missing is sent once (never repeated or escalated)", AR.ONCE == ("event-missing",) and "wait-end" in _AC9.CHECKS_FILING and "event-missing" in _AC9.CHECKS_FILING)
 
 if fails:

@@ -71,7 +71,7 @@ item(5, "[home] closed one", status="completed", su=now - 2 * H, outcome="done",
 (T / "store/next-id").write_text("40"); (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from ui import render, search
+from stackshot.web.ui import render, search
 bd = render.Board(f"{tmp}/store")
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 css = bd._css()
@@ -156,8 +156,8 @@ if os.environ.get("ORANGE_LIST"):
 check("the old oranges are gone from the source: #a34a14, #b3541e, and the old tints #fbe9df, #fbf0e8, #2b2118 appear in no file outside tests/",
       not [(rel, o) for rel, text in sources() for o in ("#a34a14", "#b3541e", "#fbe9df", "#fbf0e8", "#2b2118") if o in text.lower()], None)
 # #3a2619 was one of the old tints and is now the small labels' fill (the shipped dark look): it stays out of everything but the places that name that fill
-check("the small-label fill #3a2619 appears only in the stylesheet's dark label tokens (ui/render.py), the color tool's shipped values (ui/colortool.py) and docs/color-tool.md, nowhere else outside tests/",
-      sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}) == ["docs/color-tool.md", "ui/colortool.py", "ui/render.py"], sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}))
+check("the small-label fill #3a2619 appears only in the stylesheet's dark label tokens (stackshot/web/ui/render.py), the color tool's shipped values (stackshot/web/ui/colortool.py) and docs/color-tool.md, nowhere else outside tests/",
+      sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}) == ["docs/color-tool.md", "stackshot/web/ui/colortool.py", "stackshot/web/ui/render.py"], sorted({rel for rel, text in sources() if LABEL_FILL in text.lower()}))
 
 # the scan itself, on planted text: each way a rogue orange could hide is caught, and what is not a colour is left alone (the text is in memory; no file is written)
 def rogues(text, icon=False):
@@ -192,11 +192,11 @@ stray = [(th, k, v) for th, toks in TK.items() for k, v in toks.items() if in_ba
 check("no token of the stylesheet resolves into the orange band in either theme but --orange, --acc, --call, --t-you, the tints --t-you-bg and --selbg, and the small labels' dark fill, text and outline --lab-bg, --lab-fg and --lab-bd (the text references --orange, the fill and outline are #3a2619)", not stray, stray[:8])
 check("the amber of the status colours stays amber (hue 40 to 52) and outside the orange band in both themes: --warn, --amber, --yellow",
       all(40 <= C.hsl(TK[th][t])[0] <= 52 and not in_band(C.hsl(TK[th][t])) for th in TK for t in AMBER_TOKENS), {th: {t: TK[th].get(t) for t in AMBER_TOKENS} for th in TK})
-ro = pathlib.Path(STACK, "readonly.py").read_text(encoding="utf-8")
+ro = pathlib.Path(STACK, "stackshot/core/readonly.py").read_text(encoding="utf-8")
 check("the read-only page's amber (#c98a00, #3a2d00, #fff6df) is amber, outside the band", all(o in ro and not in_band(C.hsl(o)) and C.hsl(o)[0] >= 40 for o in ("#c98a00", "#3a2d00", "#fff6df")))
 
 # ---- the favicon: the icon orange stays
-srv = pathlib.Path(STACK, "server.py").read_text(encoding="utf-8")
+srv = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 ico = re.search(r'^_ICON = "(data:image/svg\+xml;base64,[A-Za-z0-9+/=]+)"', srv, re.M)
 svg = decoded_icons(ico.group(1))[0] if ico else ""
 check("the favicon (server.py _ICON) draws its mark in the icon orange #f0a06a, which is also the board's dark orange", ICON_ORANGE in svg and ICON_ORANGE == ORANGE["dark"], svg[:200])

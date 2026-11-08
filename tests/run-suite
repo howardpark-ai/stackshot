@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run a scenario suite in the one shared test environment (dependencies in tests/pyproject.toml, locked in tests/uv.lock).
+# Run a scenario suite in the one shared test environment (the `tests` dependency group of pyproject.toml, locked in uv.lock; the stackshot package itself
+# is not installed: the suites run from the checkout).
 #
 #   tests/run-suite pilot              runs tests/pilot_scenario.py
 #   tests/run-suite phone_width_check  a name ending in _check runs tests/<name>.py
@@ -7,7 +8,7 @@
 #
 # uv keys a PEP 723 script's environment by its path, so a suite with inline metadata built a new set of environments in every
 # checkout (the suites carry none now: this is how they run). Here the environment is a fixed directory under the XDG cache, the same for every checkout, built on the first
-# run and reused after. `--locked` fails on a stale tests/uv.lock instead of resolving afresh.
+# run and reused after. `--locked` fails on a stale uv.lock instead of resolving afresh.
 # UV_PROJECT_ENVIRONMENT overrides the directory (default: ${XDG_CACHE_HOME:-~/.cache}/stackshot/test-venv).
 #
 # Scratch: the suite runs with a TMPDIR of its own (rs.XXXXXX, short: a unix socket path is limited to 108 characters), made under the caller's TMPDIR (default /tmp), and that folder is
@@ -17,6 +18,7 @@
 # where every run finds it). KEEP_SCRATCH=1 leaves the folder for debugging and prints its path.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
+root=$(dirname "$here")
 [ $# -ge 1 ] || { echo "usage: tests/run-suite <suite> [args...]   (e.g. pilot, or phone_width_check)" >&2; exit 2; }
 name=$1; shift
 case $name in
@@ -38,7 +40,7 @@ trap done_scratch EXIT
 # KeyboardInterrupt on `timeout -s INT` (the traceback of where a hung suite sat): `env --default-signal=INT` gives it back. An INT
 # reaches the suite through the process group (Ctrl-C, `timeout`, a CI cancel: suitemap.py passes it to the suite's `timeout`),
 # so the INT trap only waits for it, then exits.
-uv run --locked --project "$here" env --default-signal=INT TMPDIR="$scratch" python "$script" "$@" &
+uv run --locked --project "$root" --only-group tests env --default-signal=INT TMPDIR="$scratch" python "$script" "$@" &
 child=$!
 trap 'kill -TERM "$child" 2>/dev/null; wait "$child" || :; exit 143' TERM HUP
 trap 'wait "$child" || :; exit 130' INT

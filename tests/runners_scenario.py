@@ -41,9 +41,9 @@ def check(name, cond, got=None):
     ran.append(name); print(("ok   " if cond else "FAIL ") + name + ("" if cond or got is None else f": {str(got)[:900]}"))
     if not cond: fails.append(name)
 
-import runners as R
-from ui import runners as R2
-from runners import RunnersError
+from stackshot.web import runners as R
+from stackshot.web.ui import runners as R2
+from stackshot.web.runners import RunnersError
 
 # ---- fixtures: a fake GitHub, a fake ssh, a fixed clock
 T0 = dt.datetime(2026, 10, 27, 12, 0, 0, tzinfo=dt.timezone.utc).timestamp()
@@ -265,7 +265,7 @@ fresh(); snap = R.snapshot(); html = R2.table_html(snap, T0)
 check("no runners at all (a clean read): the page says so in one plain line, with no error, no count card and no empty machine rows (section 15 has the rest)",
       "GitHub lists no self-hosted CI runners" in html and "alert" not in html and "rcard" not in html and "<table" not in html and "no runners" not in html, html[:500])
 RUNNERS.update(SAVE)
-import ghsync
+from stackshot.github import ghsync
 fresh()
 
 # ---- 6. the real GitHub call: the token goes in a header, an error never shows it or the query
@@ -302,7 +302,7 @@ try:
         return _Resp(b'{"runners": [1]}', {"ETag": '"etag-one"', "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4001", "x-ratelimit-used": "999", "x-ratelimit-reset": "1", "x-ratelimit-resource": "core"})
     R._open = lambda req, timeout: etag_urlopen(req, timeout)
     R._ETAGS.clear()
-    import ghbudget as gb
+    from stackshot.core import ghbudget as gb
     led0 = gb.count("r")
     a1 = R._get("/repos/example-owner/stackshot/actions/runners?per_page=100&page=1"); a2 = R._get("/repos/example-owner/stackshot/actions/runners?per_page=100&page=1")
     check("_get: the first read sends no validator, the second sends the ETag and a 304 gives the first answer back (a copy)", ETAG_SEEN == [None, '"etag-one"'] and a1 == a2 == {"runners": [1]} and a1 is not a2, (ETAG_SEEN, a1, a2))
@@ -325,9 +325,9 @@ finally:
 R._get = fake_get
 
 # ---- 7. over HTTP, in-process
-import server
+from stackshot.web import server
 server._publish = lambda: None
-from ui import render as ui_render
+from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 fresh(); setfiles(mode="on\n", hold="", gate="")
 SSH_OUT.update({"box-b": wsl("off"), "box-c": wsl("on", "salamander")})
@@ -667,7 +667,7 @@ sec = runners_section(board_html(_dtm.datetime.fromtimestamp(T0 + 1900, _dtm.tim
 check(f"…an older one says 'last read at {CLK} {ABBR}' and still shows its numbers", f"last read at {CLK} {ABBR}" in sec and "2/4" in words(sec), sec[:400])
 
 # 9e2. the GitHub calls card in the Audit section: the name, writes / reads (cap muted, thousands separator) and the 60-minute window counted, from the ledger file as of the render
-import ghbudget as _gbm
+from stackshot.core import ghbudget as _gbm
 _led = R._cfg.state("github", _gbm.LEDGER_NAME); _led_save = _led.read_bytes() if _led.exists() else None
 _tzn = R._cfg.tz()
 try:
@@ -767,7 +767,7 @@ try:
     except Exception: raised = True
     check("republish: with no hook set (a test, an import) nothing is asked and nothing breaks", not raised and R._CACHE["snap"]["ts"] == T0 + 800)
     # the server wires it to the debounced publish, in __main__ only
-    check("republish: server.py sets ON_CHANGE to its wrapper of the debounced publish in __main__ only", re.search(r"(?m)^    _runners\.ON_CHANGE = _publish_if_idle\b", pathlib.Path(STACK, "server.py").read_text(encoding="utf-8")) is not None and R.ON_CHANGE is None)
+    check("republish: server.py sets ON_CHANGE to its wrapper of the debounced publish in __main__ only", re.search(r"(?m)^    _runners\.ON_CHANGE = _publish_if_idle\b", pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")) is not None and R.ON_CHANGE is None)
 finally:
     R.ON_CHANGE = None; R.AUTOSTART = False; th = R._PEEK["thread"]
     if th is not None: th.join(10)
@@ -896,7 +896,7 @@ check("the example config documents [runners.ids] (empty) and carries no ID", "[
 
 check("the example config documents [runners.labels] (empty), and the server turns AUTOSTART on only in __main__",
       "[runners.labels]" in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8") and R.AUTOSTART is False
-      and re.search(r"(?m)^    _runners\.AUTOSTART = True", pathlib.Path(STACK, "server.py").read_text(encoding="utf-8")) is not None)
+      and re.search(r"(?m)^    _runners\.AUTOSTART = True", pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")) is not None)
 
 # ---- 10. the runners are found from the repo: the repo's owner is read from GitHub, an organization's shared runners are listed too, a runner's machine comes from its labels
 # A fake GitHub that answers the owner lookup, the repo-level and the org-level lists (paginated), and the runs and jobs of fake_get above.
@@ -1096,7 +1096,7 @@ R._cfg.CFG["runners"].pop("ids", None); R._get = fake_get; fresh()
 check("the example config documents owner_cache_s and role_labels", all(k in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8") for k in ("owner_cache_s", "role_labels")))
 
 # 11. the rows follow the Machines panel's order (fleet.machines_order), not the [runners] boxes order
-import fleet as _fl
+from stackshot.fleet import fleet as _fl
 for L, nm in (("a", "box-a"), ("b", "box-c"), ("d", "box-b"), ("e", "box-d"), ("x", "box-e")):
     (T / f"fleet/{L}").mkdir(exist_ok=True); (T / f"fleet/{L}/sessions.json").write_text("{}")
     (T / f"fleet/{L}/machine.json").write_text(json.dumps({"letter": L, "fleet": nm, "claude": "1.0.0"}))
@@ -1376,7 +1376,7 @@ try:
             check("/runners.json: the same buttons in its html", len(forms(row(jd["html"], "box-a"))) == 1 and jd["counts"]["runners"] == 10, jd.get("counts"))
             check("the token follows the viewer and the machine only", tok("box-b") == tok("box-b") and tok("box-b") != tok("box-a") and tok("box-b") != tok("box-b", "x@example.org"))
             # read-only copy: refused first, and no buttons drawn
-            import readonly
+            from stackshot.core import readonly
             try:
                 readonly._reload_for_test(True)
                 n0 = ncalls(); r = post(good())
@@ -1474,7 +1474,7 @@ finally:
 settle()
 
 # 13c2. the cue is stale only when no refresh is on its way: a first open after the page sat idle, an overrunning refresh, a failed refresh
-import ui.releasing as _rel
+import stackshot.web.ui.releasing as _rel
 _rel._run = lambda argv: ""                            # the page's header reads the release queue (systemd units of the host): none here
 BOARD13 = ui_render.Board(str(T / "store"))
 def pages13(sv): return {"page": R2.page_html(BOARD13, sv)}

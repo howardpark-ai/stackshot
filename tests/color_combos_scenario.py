@@ -53,8 +53,8 @@ if len(sys.argv) > 2 and sys.argv[1] == "--standby-child":
     os.environ["STACKSHOT_READ_ONLY"] = "1"
     os.environ.update(STACKSHOT_CONFIG=f"{root}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{root}/fleet"); os.environ.pop("STACKSHOT_URL", None)
     sys.path.insert(0, STACK); logging.disable(logging.CRITICAL)
-    import server
-    from colorcombos import WEB_LABEL as WL
+    from stackshot.web import server
+    from stackshot.web.colorcombos import WEB_LABEL as WL
     from starlette.testclient import TestClient
     server._cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": [HOST]}
     cookie = server._ui_sign(json.dumps({"email": MINA, "exp": time.time() + 3600}))
@@ -94,9 +94,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import colorcombos as cc
+from stackshot.web import colorcombos as cc
 WL = cc.WEB_LABEL         # the label the web form sends: the code's own constant, so this file names none of its own
-import server
+from stackshot.web import server
 from starlette.requests import Request
 from starlette.testclient import TestClient
 FILE = cc.path()

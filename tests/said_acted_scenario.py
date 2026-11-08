@@ -32,7 +32,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-import server, said, next_report as NR
+from stackshot.web import server; from stackshot.model import said; from stackshot.tools import next_report as NR
 
 fails = []; ran = []
 def check(name, cond, got=None):

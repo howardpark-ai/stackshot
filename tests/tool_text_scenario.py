@@ -22,7 +22,7 @@ def check(name, cond, got=None):
 
 import tool_text as tt
 live = tt.live_snapshot()              # imports server.py on a throwaway config (state under its temp dir)
-import server, whatschanged as wc, ast
+import ast; from stackshot.web import server; from stackshot.web import whatschanged as wc
 kept = tt.stored()
 
 # ================================================================= 1. the snapshot is the live text
@@ -46,7 +46,7 @@ check("owner: is not a label (the creator is no line at all), and create, update
 check("brief adds its own labels (mover gone:, pages owed:); message returns no labelled line", {"mover gone:", "waits no watcher owns:", "pages owed:"} <= set(lab["brief"]) and lab["message"] == [], lab["brief"])
 names_ok = tt.labels_by_tool()
 check("every output helper in HELPERS is defined (a renamed or removed one fails loudly, naming the list)", set(names_ok) == set(tt.HELPERS) and names_ok["get"] == lab["get"], None)
-tools_ast = tt.tool_functions(ast.parse((pathlib.Path(STACK) / "server.py").read_text(encoding="utf-8")))
+tools_ast = tt.tool_functions(ast.parse((pathlib.Path(STACK) / "stackshot" / "web" / "server.py").read_text(encoding="utf-8")))
 check("the touched check finds every registered tool function by its @mcp.tool decorator", len(tools_ast) == len(names) and "stackshot_brief" in tools_ast and "stackshot_complete" in tools_ast, sorted(tools_ast))
 
 # ================================================================= 2. a failing check: readable, with the refresh command
@@ -113,6 +113,8 @@ check("the scan finds `mover:` and `then:` in the real helpers, with no `owner:`
 
 # ================================================================= 4. the touched-tool check, on a throwaway repository
 R = T / "repo"; R.mkdir()
+def W(rel, text):
+    (R / rel).parent.mkdir(parents=True, exist_ok=True); (R / rel).write_text(text)
 g = lambda *a: subprocess.run(["git", "-C", str(R), *a], capture_output=True, text=True, check=True).stdout.strip()
 g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
 SERVER = '''
@@ -127,14 +129,14 @@ def _fmt(a):
 def _other(a):
     return a
 '''
-(R / "tests").mkdir(); (R / "server.py").write_text(SERVER); (R / "states.py").write_text("def words(i):\n    return 'state: ' + i\n"); (R / "tests" / "tool_text.snapshot.json").write_text("{}\n")
+(R / "tests").mkdir(); W("stackshot/web/server.py", SERVER); W("stackshot/model/states.py", "def words(i):\n    return 'state: ' + i\n"); (R / "tests" / "tool_text.snapshot.json").write_text("{}\n")
 g("add", "-A"); g("commit", "-qm", "base")
 BASE = g("rev-parse", "HEAD")
 def variant(name, server=None, snap=None, states=None):
     g("checkout", "-q", "-b", name, BASE)
-    if server is not None: (R / "server.py").write_text(server)
+    if server is not None: W("stackshot/web/server.py", server)
     if snap is not None: (R / "tests" / "tool_text.snapshot.json").write_text(snap)
-    if states is not None: (R / "states.py").write_text(states)
+    if states is not None: W("stackshot/model/states.py", states)
     g("commit", "-qam", name, "--allow-empty")
     return g("rev-parse", "HEAD")
 def touched(head, body="", base=None):
@@ -150,9 +152,9 @@ rc, m = touched(variant("other", SERVER.replace("def _other(a):\n    return a", 
 check("a function that is neither a tool nor an output helper may change", rc == 0 and "touches no tool function" in m, m)
 H = variant("helper", SERVER.replace('"mover: " + a', '"then: " + a'))
 rc, m = touched(H)
-check("an output helper's changed body with the snapshot unchanged fails, naming the function, the two ways out and the refresh command", rc == 1 and "server.py:_fmt" in m and "tool-text: unchanged: <why" in m and "python3 tools/tool_text.py update" in m, m)
+check("an output helper's changed body with the snapshot unchanged fails, naming the function, the two ways out and the refresh command", rc == 1 and "stackshot/web/server.py:_fmt" in m and "tool-text: unchanged: <why" in m and "python3 tools/tool_text.py update" in m, m)
 rc, m = touched(H, "Fixes a thing.\n\ntool-text: unchanged: a refactor, every line reads as before\n")
-check("…unless the PR body carries `tool-text: unchanged: <reason>`, and the reason is shown", rc == 0 and "a refactor, every line reads as before" in m and "server.py:_fmt" in m, m)
+check("…unless the PR body carries `tool-text: unchanged: <reason>`, and the reason is shown", rc == 0 and "a refactor, every line reads as before" in m and "stackshot/web/server.py:_fmt" in m, m)
 rc, m = touched(H, "- tool-text: unchanged:   \n")
 check("…an empty reason does not count", rc == 1, m)
 for ph in ("<reason>", "<why no session reads a difference>", "<reason> <reason>.", "<>", "ab"):
@@ -169,23 +171,23 @@ rc, m = touched(H2)
 check("the snapshot changing with the helper passes", rc == 0 and "changed with them" in m, m)
 T1 = variant("tool", SERVER.replace("return _fmt(a)", "return _fmt(a) + _fmt(a)"))
 rc, m = touched(T1)
-check("a tool function's changed body with the snapshot unchanged fails (stackshot_x, found by its @mcp.tool decorator)", rc == 1 and "server.py:stackshot_x" in m, m)
+check("a tool function's changed body with the snapshot unchanged fails (stackshot_x, found by its @mcp.tool decorator)", rc == 1 and "stackshot/web/server.py:stackshot_x" in m, m)
 T2 = variant("newtool", SERVER + '\n@mcp.tool(name="y", description="d")\ndef stackshot_y(a):\n    return a\n')
 rc, m = touched(T2)
-check("a new tool with no snapshot change fails", rc == 1 and "server.py:stackshot_y" in m, m)
+check("a new tool with no snapshot change fails", rc == 1 and "stackshot/web/server.py:stackshot_y" in m, m)
 S1 = variant("states", states="def words(i):\n    return 'next: ' + i\n")
 rc, m = touched(S1)
-check("a helper in another file (states.words) is watched too", rc == 1 and "states.py:words" in m, m)
-g("checkout", "-q", "main"); (R / "server.py").write_text(SERVER.replace('"mover: " + a', '"later: " + a')); g("commit", "-qam", "main moves on")
+check("a helper in another file (states.words) is watched too", rc == 1 and "stackshot/model/states.py:words" in m, m)
+g("checkout", "-q", "main"); W("stackshot/web/server.py", SERVER.replace('"mover: " + a', '"later: " + a')); g("commit", "-qam", "main moves on")
 MAIN_TIP = g("rev-parse", "HEAD")
 rc, m = touched(variant("fork", SERVER.replace("# a comment", "# fork")), base=MAIN_TIP)
 check("the base is the fork point: a main that moved on (its own helper change) is not the PR's change", rc == 0, m)
 rc, m = tt.touched(R, MAIN_TIP, g("rev-parse", "fork"), "", exact=True); m = "\n".join(m)
-check("…while --exact compares the two commits as they are", rc == 1 and "server.py:_fmt" in m, m)
+check("…while --exact compares the two commits as they are", rc == 1 and "stackshot/web/server.py:_fmt" in m, m)
 bf = T / "body.txt"; bf.write_text("tool-text: unchanged: from a file\n")
 r = subprocess.run([sys.executable, str(pathlib.Path(STACK, "tools", "tool_text.py")), "touched", "--repo", str(R), "--base", BASE, "--head", H, "--body-file", str(bf)], capture_output=True, text=True)
 r2 = subprocess.run([sys.executable, str(pathlib.Path(STACK, "tools", "tool_text.py")), "touched", "--repo", str(R), "--base", BASE, "--head", H, "--body-file", str(T / "none.txt")], capture_output=True, text=True)
-check("the command: exit 0 with the reason read from --body-file, exit 1 with no body (a missing file is an empty body)", r.returncode == 0 and "from a file" in r.stdout and r2.returncode == 1 and "server.py:_fmt" in r2.stdout, (r.returncode, r.stdout, r2.returncode, r2.stdout))
+check("the command: exit 0 with the reason read from --body-file, exit 1 with no body (a missing file is an empty body)", r.returncode == 0 and "from a file" in r.stdout and r2.returncode == 1 and "stackshot/web/server.py:_fmt" in r2.stdout, (r.returncode, r.stdout, r2.returncode, r2.stdout))
 wf = (pathlib.Path(STACK) / ".github/workflows/tests.yml").read_text(encoding="utf-8")
 body_refs = [l for l in wf.splitlines() if "github.event.pull_request.body" in l and not l.lstrip().startswith("#")]
 runs_on = [l.strip() for l in wf.splitlines() if l.strip().startswith("runs-on:")]   # every job runs on ubuntu-latest
@@ -279,8 +281,8 @@ for f in (st / wc.HISTORY, st / wc.RELEASED):
 snap.write_text(tt.render(A)); wc.record(snap, today, st); snap.write_text(tt.render(B)); wc.record(snap, today, st)
 first = [l for l in server.stackshot_brief().split("\n") if l.startswith("stackshot changed on")]
 check("the brief tool carries the generated line from the default history under the state dir (and the seeds while they are live)", f"stackshot changed on {wc.day_words(today)}: {want}; see {wc.PAGE}" in first, first)
-src = (pathlib.Path(STACK) / "server.py").read_text(encoding="utf-8")
-check("the server's start calls whatschanged.record with the committed snapshot (the mark of a release), and deploy.sh is not part of it", '_wc.record(Path(__file__).resolve().parent / "tests" / "tool_text.snapshot.json")' in src and "tool_text" not in (pathlib.Path(STACK) / "deploy.sh").read_text(encoding="utf-8"))
+src = (pathlib.Path(STACK) / "stackshot" / "web" / "server.py").read_text(encoding="utf-8")
+check("the server's start calls whatschanged.record with the committed snapshot (the mark of a release), and deploy.sh is not part of it", '_wc.record(_paths.ROOT / "tests" / "tool_text.snapshot.json")' in src and "tool_text" not in (pathlib.Path(STACK) / "deploy.sh").read_text(encoding="utf-8"))
 
 import shutil; shutil.rmtree(T, ignore_errors=True)
 tt.cleanup()

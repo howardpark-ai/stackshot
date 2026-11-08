@@ -35,7 +35,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import connectors as c
+from stackshot.fleet import connectors as c
 
 # ---- 1. the CLI's rule for a server's name inside a tool name (claude 2.1.296, In()), against names seen live
 check("claude.ai name: the apostrophe and the parentheses", c.cli_name("claude.ai Oliver's MCP Portal (Cloudflare)") == "claude_ai_Oliver_s_MCP_Portal_Cloudflare", c.cli_name("claude.ai Oliver's MCP Portal (Cloudflare)"))
@@ -206,7 +206,7 @@ check("to_json", j["route"] == "portal" and j["own"] and [x["server"] for x in j
 
 # ---- 8. the CLI
 ENV = dict(os.environ)
-run = lambda *a, inp=None: subprocess.run([sys.executable, os.path.join(STACK, "connectors.py"), *a], input=inp, capture_output=True, text=True, env=ENV)
+run = lambda *a, inp=None: subprocess.run([sys.executable, os.path.join(STACK, "stackshot/fleet/connectors.py"), *a], input=inp, capture_output=True, text=True, env=ENV)
 p = run("resolve", inp=json.dumps({"tool_name": PX, "tool_input": {"code": "async () => codemode.stackshot_update({item_id: 's1', next: n})"}, "mcp_server": {"name": "claude.ai Oliver's MCP Portal (Cloudflare)", "source": "claudeai"}}))
 try: out = json.loads(p.stdout)
 except Exception: out = None
@@ -343,12 +343,12 @@ c._cfg.CFG["portal"].update({"catalog_file": f"{tmp}/connectors.json", "catalog_
 (T / "connectors.json").write_text(json.dumps(CAT, indent=1), encoding="utf-8")   # the fixture back, for pages
 
 # ---- 10. pages.py sees the same calls by both routes
-import pages as pg
+from stackshot.projects import pages as pg
 wrap = lambda text: {"result": text}                    # the portal's response: the script's return, JSON-wrapped
 REPLY = "updated s1.\ns1 [open] [home] Alpha thing\nproject: projects/alpha\n"
 sid = lambda n: f"{n}{n}{n}{n}{n}{n}{n}{n}-{n}{n}{n}{n}-4{n}{n}{n}-8{n}{n}{n}-{n}{n}{n}{n}{n}{n}{n}{n}{n}{n}{n}{n}"
 def touch(payload):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "touch"], input=json.dumps(payload), capture_output=True, text=True, env=ENV)
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(payload), capture_output=True, text=True, env=ENV)
     return r.returncode, r.stdout, r.stderr
 state = lambda s: pg.load_state(s).get("touches", {})
 rc, out, err = touch({"session_id": sid("1"), "tool_name": ST + "update", "tool_input": {"item_id": "s1", "next": "x"}, "tool_response": REPLY})

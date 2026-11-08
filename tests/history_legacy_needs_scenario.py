@@ -61,7 +61,7 @@ def commit(root, i, v, when):
 for root in ("store", "control"):
     git(root, "init", "-q"); git(root, "config", "commit.gpgsign", "false")
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import legacy_owner as lo, config as _cfg
+from stackshot.core import legacy_owner as lo; from stackshot.core import config as _cfg
 LEG = lo.name_from_owner("Pat Example")
 # the old store: item 1 has the list form in its first commit, item 2 the one-word string form; both say ["decision"] in the second. The control was written in the neutral name from the start.
 commit("store", 1, version(1, [LEG], T0, "home-x"), T0); commit("store", 1, version(1, ["decision"], T1, "home-y"), T1)
@@ -85,7 +85,7 @@ def lines(root, i):
 
 
 try:
-    from ui import render as ui_render
+    from stackshot.web.ui import render as ui_render
     # ---- the helper
     check("the legacy name is the first word of [instance] owner in lower case", LEG == "pat" and lo.name_from_owner("Pat Example") == "pat" and lo.name_from_owner("  PAT-Lee ") == "pat", LEG)
     check("…an owner that names no one gives none (the placeholder, empty, not a word)", all(lo.name_from_owner(x) == "" for x in ("the owner", "", None, "  ", "___", "owner")), None)
@@ -117,7 +117,7 @@ try:
     check("…and the name is read at each call (a config reload is seen)", lines("store", 1) == lines("control", 1), None)
 
     # ---- the other readers of historical versions read no needs
-    import server, waiting as _wt
+    from stackshot.web import server; from stackshot.waits import waiting as _wt
     ws = server._writers_since("a1", T0 - 10)
     check("server._writers_since (written_by) gives both writers of the old commits", ("home-x", "") in ws and ("home-y", "") in ws, ws)
     prior = _wt.prior_state_ts("a3", W1)

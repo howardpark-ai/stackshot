@@ -33,7 +33,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-import config as cfg, fleet, clients, mover_state, stall, inbox, push, liveness as LV, server
+from stackshot.core import config as cfg; from stackshot.fleet import fleet; from stackshot.fleet import clients; from stackshot.waits import mover_state; from stackshot.waits import stall; from stackshot.fleet import inbox; from stackshot.fleet import push; from stackshot.fleet import liveness as LV; from stackshot.web import server
 NOW = float(int(time.time()))        # whole seconds: the stamps below are second-granular, so an edge case lands exactly on the edge
 iso = lambda delta: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW - delta))
 UU = lambda n: f"{n:08d}-0000-4000-8000-000000000000"

@@ -91,10 +91,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import config as _cfg, routing, reports
-import router as _router
-import server
-from anchorhub import core
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
+from stackshot.router import router as _router
+from stackshot.web import server
+from stackshot.anchors.anchorhub import core
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends its close line (the held case is in front_quiet_scenario)
@@ -348,7 +348,7 @@ check("2z3 negative: an anchor that is not GitHub's (a Slack message is a person
 check("…and a GitHub one is the builder's", _router.build_side_target(cx.index["a40"], bs("v11", "github:example-owner/stackshot#4"), KEY, cx) == "osprey-x")
 # 2y: an anchor held by ANOTHER project's page (a keeper there) and scoped to one open item of this project, whose mover is this project's front agent: the notice's target
 # (anchors.routes) must not name that mover, or anchor-item would read it against the holding page's roster, find no builder there and pass the notice to the front agent unmarked
-import anchors as _anc_y
+from stackshot.anchors import anchors as _anc_y
 _reg0, _anc0 = (T / "store/projects.json").read_text(), (T / "store/anchors.json").read_text()
 try:
     _pj = json.loads(_reg0); _pj["pages"]["projects/other"] = {**_pj["pages"]["projects/alpha"], "title": "Other", "name": "Other", "session": "work-other", "agents": {}, "back_agents": {}}
@@ -382,7 +382,7 @@ check("…with no builder (a background agent that does not build), only a notic
 ln = _router.code_rule(KEY, board_msg("b4", "osprey-x", "set next: PR 26 is up"), KEY, cx_nbb, [])
 check("…(no builder, a plain notice, no front turn)", ln and ln["ruling"] in ("merged", "held") and not ln["target"], ln)
 # the receiver puts head and author on the event; the hub's send records them in the routing log
-ghr = __import__("anchorhub.github", fromlist=["x"])
+ghr = __import__("stackshot.anchors.anchorhub.github", fromlist=["_"])
 G = {}; caught = []
 def _gh(args, capture_output=True, text=True, timeout=30):
     a = [x for x in args[2:] if x != "-i"]; path = a[0]; cond = "-i" in args

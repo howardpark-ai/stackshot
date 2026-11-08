@@ -288,8 +288,8 @@ out, err, _ = sel_after(lambda: sub("tests/run-suite", "exec", "exec "), "harnes
 check("the harness reaches all", out == "all", (out, err))
 out, err, _ = sel_after(lambda: write(".github/workflows/tests.yml", "name: tests\n"), "workflow")
 check("the workflow reaches all", out == "all", (out, err))
-for rel, edit in (("tests/pyproject.toml", lambda: write("tests/pyproject.toml", "[project]\nname = 't'\n")),
-                  ("tests/uv.lock", lambda: write("tests/uv.lock", "version = 1\n")),
+for rel, edit in (("pyproject.toml", lambda: write("pyproject.toml", "[project]\nname = 't'\n")),
+                  ("uv.lock", lambda: write("uv.lock", "version = 1\n")),
                   ("tests/suitemap.py", lambda: sub("tests/suitemap.py", "FORMAT = 1", "FORMAT = 1  # a comment"))):
     out, err, _ = sel_after(edit, rel)
     check(f"the harness's {rel} reaches all, even a comment", out == "all" and "the harness" in err, (out, err))
@@ -416,7 +416,7 @@ check("scopes: nested functions and methods are named; a def line is its parent'
 # (actions/runner ProcessInvoker.cs), never to its process group. A checkout of its own with the real tests/run-suite, pyproject and
 # lock, so the chain is CI's: exec uv run → suitemap.py → timeout (→ strace) → run-suite → uv → the suite.
 import re, signal, time
-STEP = "exec uv run --locked --project tests python tests/suitemap.py"
+STEP = "exec uv run --locked --only-group tests python tests/suitemap.py"
 wf = open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8").read().split("\n")
 at = [i for i, l in enumerate(wf) if re.search(r"\bsuitemap\.py (run|measure) ", l)]
 last = [next((len(l) - len(l.lstrip()) < len(wf[i]) - len(wf[i].lstrip()) for l in wf[i + 1:] if l.strip()), True) for i in at]
@@ -608,7 +608,8 @@ check("merge: a suite in no shard fails it, by name, and the map is still writte
 r = tool("merge", "--map", str(T / "never.json"), A, part(here[2:], commit="0" * 40))
 check("merge: maps of two commits are refused and nothing is written", r.returncode == 2 and "not of one commit" in r.stdout and not (T / "never.json").exists(), r.stdout)
 K = T / "cancel"; (K / "tests").mkdir(parents=True); MARK = T / "marks"; MARK.mkdir()
-for f in ("run-suite", "suitemap.py", "pyproject.toml", "uv.lock"): shutil.copy(os.path.join(SCR, f), K / "tests" / f)
+for f in ("run-suite", "suitemap.py"): shutil.copy(os.path.join(SCR, f), K / "tests" / f)
+for f in ("pyproject.toml", "uv.lock"): shutil.copy(os.path.join(SCR, "..", f), K / f)
 os.chmod(K / "tests/run-suite", 0o755)
 SAYS = f"import os, pathlib\npathlib.Path({str(MARK)!r}, '{{0}}').write_text(f\"{{{{os.getpid()}}}} {{{{os.environ['TMPDIR']}}}}\")\n"
 (K / "tests/slow_scenario.py").write_text(SAYS.format("slow") + "import time\ntime.sleep(120)\n")

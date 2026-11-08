@@ -79,7 +79,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-import server, handoff as H_, stall as S, ladder as LD, silence as SL, audit_run as AR, audit
+from stackshot.web import server; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
@@ -408,7 +408,7 @@ clear_records(); put(61, act=60, mover="home-docs"); cli_row("home-docs", "busy"
 silence_pass([61]); work_line(61, "in progress", now0 + 20 * MIN, "home-docs")
 check("10k mover's own line: the same line written by the mover holds it", "a61" not in stk(now0 + 31 * MIN) and not look_notices("home-docs", 61) and entry(61)["step"] == 1, (entry(61), pushes_to("home-docs", "a61")))
 close(61)
-import silence as SLN
+from stackshot.audit import silence as SLN
 it_ = {"metadata": {"work": [{"id": "w", "text": "t", "state": "in progress", "agent": "team-back", "ts": 1000.0}]}}
 check("10k pure: subagent_running counts a line of any agent without a mover, and only the mover's own line with one",
       SLN.subagent_running(it_, 1100.0) and SLN.subagent_running(it_, 1100.0, "team-back", server._ho_same) and not SLN.subagent_running(it_, 1100.0, "home-docs", server._ho_same), None)

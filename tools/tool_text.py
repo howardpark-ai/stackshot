@@ -55,29 +55,52 @@ FORMAT = 1
 REFRESH = "python3 tools/tool_text.py update"
 LABELLED = ("get", "brief", "create", "update", "message", "complete")     # the tools whose returned lines have labels in the snapshot
 
+SERVER_REL = "stackshot/web/server.py"
+# Where each watched file stood before the code moved into the package (Sun Nov 8th 2026): a base revision from before the move has the file there, so the move itself is not a change of every watched function.
+_BEFORE_PACKAGE = {
+    "stackshot/model/model.py": "model.py",
+    "stackshot/model/model_guards.py": "model_guards.py",
+    "stackshot/model/states.py": "states.py",
+    "stackshot/model/work.py": "work.py",
+    "stackshot/waits/handoff.py": "handoff.py",
+    "stackshot/waits/waiting.py": "waiting.py",
+    "stackshot/waits/watchers.py": "watchers.py",
+    "stackshot/web/server.py": "server.py",
+    "stackshot/web/whatschanged.py": "whatschanged.py",
+}
+
+
+def show_at(root: Path, rev: str, rel: str) -> str | None:
+    """The text of `rel` at `rev`; at a revision from before the package move, of the file it was then."""
+    got = git(root, "show", f"{rev}:{rel}")
+    if got is None and rel in _BEFORE_PACKAGE:
+        got = git(root, "show", f"{rev}:{_BEFORE_PACKAGE[rel]}")
+    return got
+
+
 # The output helpers: the functions the lines a tool returns come from, (file, function name) by tool. The labels of a tool are the labels found in its helpers; the
 # `touched` gate watches every one of them (and every function registered with @mcp.tool, found by itself) for a changed body. A new helper that builds a returned line
 # goes in here, in the same PR: this is the one list.
 _ITEM_LINES = [   # the item as get shows it, which create, update and complete return after their own first line, and the brief returns one per open item
-    ("server.py", "_fmt"), ("server.py", "_mover_lines"), ("server.py", "_model_lines"), ("server.py", "_handoff_lines"),
-    ("server.py", "_state_check_notes"), ("server.py", "_next_names_lines"), ("server.py", "_check_words"), ("server.py", "_answer_words"), ("server.py", "_nag"),
-    ("states.py", "words"), ("states.py", "carry_of"), ("model.py", "words"), ("handoff.py", "words"), ("watchers.py", "woke_line"),
-    ("watchers.py", "chases_line"), ("work.py", "words"), ("waiting.py", "line"),
+    ("stackshot/web/server.py", "_fmt"), ("stackshot/web/server.py", "_mover_lines"), ("stackshot/web/server.py", "_model_lines"), ("stackshot/web/server.py", "_handoff_lines"),
+    ("stackshot/web/server.py", "_state_check_notes"), ("stackshot/web/server.py", "_next_names_lines"), ("stackshot/web/server.py", "_check_words"), ("stackshot/web/server.py", "_answer_words"), ("stackshot/web/server.py", "_nag"),
+    ("stackshot/model/states.py", "words"), ("stackshot/model/states.py", "carry_of"), ("stackshot/model/model.py", "words"), ("stackshot/waits/handoff.py", "words"), ("stackshot/waits/watchers.py", "woke_line"),
+    ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"), ("stackshot/waits/waiting.py", "line"),
 ]
 _WRITE_NOTES = [   # the notes a create or an update reply ends with
-    ("server.py", "_form_notes"), ("server.py", "_capped_note"), ("server.py", "_said_note"), ("server.py", "_options_note"), ("server.py", "_owner_param"),
-    ("server.py", "_owner_then_default"),
+    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_capped_note"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/server.py", "_options_note"), ("stackshot/web/server.py", "_owner_param"),
+    ("stackshot/web/server.py", "_owner_then_default"),
 ]
-_GET_ONLY = [("server.py", "stackshot_get"), ("server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
+_GET_ONLY = [("stackshot/web/server.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
 HELPERS: dict[str, list[tuple[str, str]]] = {
     "get": _GET_ONLY + _ITEM_LINES,
-    "brief": [("server.py", "stackshot_brief"), ("server.py", "_model_report_line"), ("server.py", "_world_waits_text"),
-              ("server.py", "_handoff_brief"), ("whatschanged.py", "lines"), ("model_guards.py", "brief_line"), ("handoff.py", "brief_lines")] + _ITEM_LINES,
-    "create": [("server.py", "stackshot_create"), ("server.py", "_create"), ("server.py", "_create_item"), ("server.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
-    "update": [("server.py", "stackshot_update"), ("server.py", "_update_locked"), ("server.py", "_update_unlocked"), ("server.py", "_report_note"),
-               ("server.py", "_command_note"), ("server.py", "_watch_on_write"), ("server.py", "_mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
-    "message": [("server.py", "stackshot_message"), ("server.py", "_message")],
-    "complete": [("server.py", "stackshot_complete"), ("server.py", "_completion_anchor_prompt"), ("server.py", "_update_locked"), ("server.py", "_update_unlocked"), ("server.py", "_mentions_reply")]
+    "brief": [("stackshot/web/server.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/server.py", "_world_waits_text"),
+              ("stackshot/web/server.py", "_handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
+    "create": [("stackshot/web/server.py", "stackshot_create"), ("stackshot/web/server.py", "_create"), ("stackshot/web/server.py", "_create_item"), ("stackshot/web/server.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
+    "update": [("stackshot/web/server.py", "stackshot_update"), ("stackshot/web/server.py", "_update_locked"), ("stackshot/web/server.py", "_update_unlocked"), ("stackshot/web/server.py", "_report_note"),
+               ("stackshot/web/server.py", "_command_note"), ("stackshot/web/server.py", "_watch_on_write"), ("stackshot/web/server.py", "_mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
+    "message": [("stackshot/web/server.py", "stackshot_message"), ("stackshot/web/server.py", "_message")],
+    "complete": [("stackshot/web/server.py", "stackshot_complete"), ("stackshot/web/server.py", "_completion_anchor_prompt"), ("stackshot/web/server.py", "_update_locked"), ("stackshot/web/server.py", "_update_unlocked"), ("stackshot/web/server.py", "_mentions_reply")]
                 + _WRITE_NOTES + _ITEM_LINES,
 }
 ALL_HELPERS = sorted({h for hs in HELPERS.values() for h in hs})
@@ -234,13 +257,13 @@ def cleanup() -> None:
 def live_snapshot() -> dict[str, Any]:
     """The snapshot of the code in this checkout: server.py imported in-process on a throwaway config, its registry listed the way a client lists it."""
     import logging
-    if "server" not in sys.modules:
+    if "stackshot.web.server" not in sys.modules:
         tmp = Path(tempfile.mkdtemp(prefix="tooltext-"))
         _SCRATCH.append(tmp)
         _fixture_config(tmp)
         sys.path.insert(0, str(ROOT))
         logging.disable(logging.WARNING)
-    import server   # noqa: PLC0415
+    from stackshot.web import server   # noqa: PLC0415
     labels = labels_by_tool()
     tools: dict[str, Any] = {}
     for t in asyncio.run(server.mcp.list_tools()):
@@ -375,7 +398,7 @@ def watched(src: str | None, file: str) -> dict[str, str] | None:
     except SyntaxError:
         return None
     fns = functions(tree)
-    names = {n for f, n in ALL_HELPERS if f == file} | (tool_functions(tree) if file == "server.py" else set())
+    names = {n for f, n in ALL_HELPERS if f == file} | (tool_functions(tree) if file == SERVER_REL else set())
     return {n: body_dump(fns[n]) for n in names if n in fns}
 
 
@@ -406,8 +429,8 @@ def real_reason(reason: str) -> bool:
 def changed_since(root: Path, base: str, head: str, exact: bool = False) -> tuple[str, list[str]]:
     """(the fork point of base and head, or base itself when exact; the watched functions changed from it to head as `file:function`). Shared with tools/text_check.py."""
     mb = base if exact else (git(root, "merge-base", base, head) or base).strip()    # the fork point: a main that moved on since is not this PR's change
-    files = sorted({f for f, _ in ALL_HELPERS} | {"server.py"})
-    src = lambda rev: {f: git(root, "show", f"{rev}:{f}") for f in files}
+    files = sorted({f for f, _ in ALL_HELPERS} | {SERVER_REL})
+    src = lambda rev: {f: show_at(root, rev, f) for f in files}
     return mb, changed_functions(src(mb), src(head))
 
 
@@ -447,7 +470,7 @@ def ensure_env() -> None:
     env.setdefault("UV_PROJECT_ENVIRONMENT", str(Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "stackshot" / "test-venv"))
     if not Path(uv).exists():
         raise SystemExit("tool_text: fastmcp is missing and uv was not found: run `tests/run-suite tool_text`, or install uv")
-    os.execve(uv, [uv, "run", "--locked", "--project", str(ROOT / "tests"), "python", str(Path(__file__).resolve()), *sys.argv[1:]], env)
+    os.execve(uv, [uv, "run", "--locked", "--project", str(ROOT), "--only-group", "tests", "python", str(Path(__file__).resolve()), *sys.argv[1:]], env)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -473,12 +496,12 @@ def main(argv: list[str] | None = None) -> int:
         return rc
     sys.path.insert(0, str(ROOT))
     if a.cmd == "summary":
-        import whatschanged   # noqa: PLC0415
+        from stackshot.web import whatschanged   # noqa: PLC0415
         old = json.loads(git(ROOT, "show", f"{a.base}:{SNAPSHOT_REL}") or "{}")
         print(whatschanged.summarize(old, stored() or {}) or "(no change in the tools' text)")
         return 0
     if a.cmd == "record":
-        import whatschanged   # noqa: PLC0415
+        from stackshot.web import whatschanged   # noqa: PLC0415
         print(whatschanged.record(SNAPSHOT))
         return 0
     ensure_env()

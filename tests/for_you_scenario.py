@@ -88,9 +88,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import config as _cfg, routing, foryou as fy
-import server
-from ui import render as ui_render
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
+from stackshot.web import server
+from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
@@ -307,7 +307,7 @@ delivered = []; real_message = server._message
 server._message = lambda to, text, sender, *a, **k: delivered.append((to, text, sender)) or "delivered"
 try:
     with TestClient(server.mcp.http_app(), base_url=BOARD) as c0:
-        tok0 = open(__import__("client").mint(socket.gethostname())).read().strip()
+        tok0 = open(__import__("stackshot.fleet.client", fromlist=["_"]).mint(socket.gethostname())).read().strip()
         H0 = {"Authorization": "Bearer " + tok0}
         st0 = c0.post("/client/message", json={"to": "projects/example", "text": rel, "sender": "release"}, headers=H0)
         check("a failed release message from release.sh makes no For you row, posts nothing to Slack and republishes nothing", len(rows()) == n_before and not slack and pub[0] == pub1 and not [r for r in rows() if "FAILED" in r["what"]], (st0.status_code, rows(), slack))
@@ -419,7 +419,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r_ans = post("/items/a52/answer", {"token": atok("a52"), "act": "answer", "text": "go ahead"})
     check("his answer on the board takes the item's decision row off the list and makes no row of its own", r_ans.status_code == 303 and not of("a52") and len(rows()) == n_rows - 1 and of("a53", "decision"), (r_ans.status_code, rows()))
     # the client API
-    tok = open(__import__("client").mint(socket.gethostname())).read().strip(); H = {"Authorization": "Bearer " + tok}
+    tok = open(__import__("stackshot.fleet.client", fromlist=["_"]).mint(socket.gethostname())).read().strip(); H = {"Authorization": "Bearer " + tok}
     fy.set_flag("a51", "mute")
     rr_ = c.get("/client/for-you", headers=H); rn_ = c.get("/client/for-you")
     js = rr_.json() if rr_.status_code == 200 else {}
@@ -427,7 +427,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and js.get("rows") and js["rows"][0]["item"] == "a53" and set(js["rows"][0]) >= {"id", "kind", "item", "project", "what", "url", "urgent", "ts", "when", "slacked"}
           and js["flags"] == fy.flags() and js["flags"].get("a51") == "mute" and js["flags"].get("a7") == "watch" and "generated" in js, (rr_.status_code, rr_.text[:400]))
     check("…each row's `when` is an ISO time in the instance timezone (+04:00)", all(r["when"].endswith(f"+{ZONE_HOURS:02d}:00") for r in js.get("rows", [])), js.get("rows"))
-    import urllib.request, urllib.error, client
+    import urllib.request, urllib.error; from stackshot.fleet import client
     class _Resp:
         def __init__(s, r): s.status = r.status_code; s._b = r.content
         def read(s): return s._b

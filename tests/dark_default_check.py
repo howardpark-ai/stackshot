@@ -34,8 +34,8 @@ now = time.time(); H = 3600.0
 (T / "store/next-id").write_text("40"); (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from ui import render, colortool as ct
-import search as sm
+from stackshot.web.ui import render, colortool as ct
+from stackshot.web import search as sm
 Bd = lambda: render.Board(f"{tmp}/store", now=None)
 sm.sync(Bd())
 PAGE = T / "item.html"

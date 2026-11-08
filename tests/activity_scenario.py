@@ -53,8 +53,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import activity as A
-import server
+from stackshot.model import activity as A
+from stackshot.web import server
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 assert server._cfg.audit_agent() == AUDIT_AGENT, server._cfg.audit_agent()

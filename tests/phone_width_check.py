@@ -204,8 +204,8 @@ for k in range(3): item(160 + k, X, "projects/project-with-a-very-long-example-n
     {"url": "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOp/edit#gid=0", "items": ["a1"], "added": 1, "by": "t"},
     {"url": "https://github.com/example-owner/stackshot/pull/7123456789/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", "items": ["a75"], "added": 2, "by": "t"}]}))
 sys.path.insert(0, STACK)
-import routing, runners          # runners: the snapshot and repo helpers; the pages are drawn by the ui package
-from ui import render, runners as ui_runners, search as ui_search
+from stackshot.router import routing; from stackshot.web import runners          # runners: the snapshot and repo helpers; the pages are drawn by the ui package
+from stackshot.web.ui import render, runners as ui_runners, search as ui_search
 runners.AUTOSTART = False; runners.reset()      # the Runners section is drawn from a snapshot we hand it (a card per box, no GitHub, no ssh), not "not read yet"
 runners._CACHE["snap"] = {"ts": time.time(), "failed": [], "runners": [
     {"box": "box-a", "repo": r, "state": st, "name": f"box-a-{r}-{i}", "kind": "", "reason": "", "job": None}
@@ -213,7 +213,7 @@ runners._CACHE["snap"] = {"ts": time.time(), "failed": [], "runners": [
     {"box": "box-b", "repo": r, "state": "idle", "name": f"box-b-{r}", "kind": "", "reason": "", "job": None} for r in runners._repos()] + [
     {"box": "box-c", "repo": r, "state": "offline", "name": f"box-c-{r}", "kind": "fault", "reason": "x", "job": None} for r in runners._repos()] + [
     {"box": "other", "repo": runners._repos()[0], "state": "running", "name": f"other-{i}", "kind": "", "reason": "", "job": None} for i in range(2)]}      # every runner busy reads "full"
-import ghbudget as _gb
+from stackshot.core import ghbudget as _gb
 _led = runners._cfg.state("github", _gb.LEDGER_NAME); _led.parent.mkdir(parents=True, exist_ok=True)
 _led.write_text(json.dumps({_gb.WRITE: [time.time() - 30 * i for i in range(15)], _gb.READ: [time.time() - 10 * i for i in range(204)]}), encoding="utf-8")      # the GitHub calls card: 15 writes, 204 reads in the hour
 for j, (lab, who, txt) in enumerate([("Slack #stackshot", "Dana", "can the project page list its items too?"),
@@ -221,7 +221,7 @@ for j, (lab, who, txt) in enumerate([("Slack #stackshot", "Dana", "can the proje
          "a notice with a long unbroken token: tests/fixtures/a/very/long/path/name/without/any/space.json")]):
     routing.record("projects/alpha", kind="anchor", to="ops-falcon", label=lab, who=who, text=txt, url="https://example.invalid/n", target="project-wide", pilot=True, ts=time.time() - 600 * (j + 1))
 # the Landed list: closes of agents in long-named projects, by sessions with long names, one by the server's own done check, five uncleared and one cleared, some with a long close reason: the header's Landed link and the Landed page are measured
-import landed
+from stackshot.web import landed
 for k, (n, by) in enumerate([("project-with-a-very-long-example-name-01", LONG), ("project-with-a-very-long-example-name-02", "ops-falcon-main"), ("infrastructureandtoolingwithoutanyhyphensatallverylongname", ""),
                              ("alpha", LONG), ("alpha", "ops-falcon-engineer"), ("short-project", LONG)]):
     gid = 180 + k; pk = f"projects/{n}"
@@ -255,7 +255,7 @@ _vj = json.loads((T / "state/site/versions.json").read_text()); _vj["packages"][
 b2 = render.Board(str(T / "store"), now=now + datetime.timedelta(minutes=2))
 (OUT / "index2.html").write_text(b2.html(), encoding="utf-8")
 # the Audit card in six states: the page the server draws and the status JSON the page script reads (the script draws the same rows)
-import audit as _audit, audit_overview as _ov
+from stackshot.audit import audit as _audit; from stackshot.audit import audit_overview as _ov
 AUDIT_STATES = {}
 (OUT / "audits-findings.html").write_text(render.Board(str(T / "store"), now=now).audits_html(), encoding="utf-8")      # the Audits page with findings and a finished run
 _ago = lambda h: (now - h * H).timestamp()
@@ -272,7 +272,7 @@ for _nm, _rec in (("none", None),
 audit_run(None)
 findings_log(False)
 (OUT / "audits-empty.html").write_text(render.Board(str(T / "store"), now=now).audits_html(), encoding="utf-8")      # ... and with nothing yet: no run, no findings
-import search
+from stackshot.web import search
 (OUT / "runners.html").write_text(ui_runners.page_html(b, {"errors": {}, **runners._CACHE["snap"]}), encoding="utf-8")   # the Runners page: the same title bar and side panel, from the snapshot handed above
 # the Runners column, one runner per line: a machine with six runners (long names)
 _six = {"errors": {}, **runners._CACHE["snap"], "runners": [{"box": "box-a", "repo": runners._repos()[0], "state": st, "name": f"box-a-{runners._repos()[0]}-runner-{i}", "kind": "", "reason": "", "job": None}
@@ -1653,7 +1653,7 @@ with sync_playwright() as p:
     # init draws the button in that app's mount and the panel in the body, Reset and the original orange theme take off every property including onApply's, a light page draws nothing, "warn" lets a white page stand with notes and keeps it across a reload, and
     # remount moves the button into a new mount while the open panel stays open.
     import urllib.parse
-    import colorcombos as _cc
+    from stackshot.web import colorcombos as _cc
     import _colors as _C
     CT_FILES = {"board": PAGES["board"], **HEADER_FILES}
     CT_RECT = "(s) => { const e = document.querySelector(s); if (!e) return null; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') return null; const r = e.getBoundingClientRect(); return r.width && r.height ? {l: r.left, t: r.top, r: r.right, b: r.bottom} : null; }"
@@ -2058,7 +2058,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui}main{padd
           and pg.locator("#ct-pop").count() == 1 and pg.locator("#ct-btn").count() == 1, (gone_btn, pop2, btn2))
     ctx.close()
     # a click on a preset's dots applies the preset and keeps the panel open (the dots are built once; a rebuilt dot would be gone from the page before the outside-click test looks at it)
-    from ui import colortool as _ctm
+    from stackshot.web.ui import colortool as _ctm
     for w, h, touch in ((1100, 800, False), (390, 800, True)):
         ctx = br.new_context(viewport={"width": w, "height": h}, color_scheme="dark", has_touch=touch); pg = ctx.new_page(); pg.goto(CT_FILES["board"].as_uri()); pg.wait_for_timeout(150); ct_show(pg)
         pg.click("#ct-btn"); pg.wait_for_timeout(100)

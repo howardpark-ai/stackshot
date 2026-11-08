@@ -46,8 +46,8 @@ def put(i, status="open", project="projects/alpha", creator=MAIN, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": status,
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": creator, "project": project, **meta}}))
 
-import server
-from ui import render as ui_render
+from stackshot.web import server
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
@@ -150,7 +150,7 @@ res = server._answer("a16", "Not needed", "", "")
 check("Not needed: an ordinary answer to the mover, nothing is poked", res == "decision" and not [x for x in told if x[0] == "idle" and x[1] == "a16"], told)
 
 # ---- 8. nothing left says 'keeper of record'
-src = "".join(pathlib.Path(STACK, f).read_text(encoding="utf-8") for f in ("server.py", "render.py", "ui/render.py", "model.py", "waiting.py", "router.py", "router_live.py", "anchors.py", "ghsync.py", "pages.py", "client.py", "itempage.py", "nextlines.py", "steps.py"))
+src = "".join(pathlib.Path(STACK, f).read_text(encoding="utf-8") for f in ("stackshot/web/server.py", "stackshot/web/render.py", "stackshot/web/ui/render.py", "stackshot/model/model.py", "stackshot/waits/waiting.py", "stackshot/router/router.py", "stackshot/router/router_live.py", "stackshot/anchors/anchors.py", "stackshot/github/ghsync.py", "stackshot/projects/pages.py", "stackshot/fleet/client.py", "stackshot/web/itempage.py", "stackshot/model/nextlines.py", "stackshot/model/steps.py"))
 check("no code or tool text says 'keeper of record' (the retired term lives in tests/retired_terms.toml and the history SEED of whatschanged.py only)", "keeper of record" not in src.lower(), None)
 
 print(f"{'ok' if not fails else 'FAILED'}: drop_keeper scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

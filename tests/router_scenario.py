@@ -112,9 +112,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 os.environ.update(ANTHROPIC_API_KEY="test-not-a-real-key", ANTHROPIC_AUTH_TOKEN="tok-test", ANTHROPIC_BASE_URL="http://invalid.test", ANTHROPIC_FOO="x", CLAUDE_CODE_USE_BEDROCK="1", ANTHROPIC_CUSTOM_HEADERS="x-test: 1", CLAUDE_CODE_ENTRYPOINT="cli")
-import config as _cfg, routing, router, anchors as a
-import shadow_harness as H, router_live
-import server
+from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.anchors import anchors as a
+import shadow_harness as H; from stackshot.router import router_live
+from stackshot.web import server
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 def router_cfg(**kw): _cfg.CFG["router"] = {"shadow": True, "command": [sys.executable, str(T / "fake_claude.py")], "timeout_seconds": 20, **kw}
 def rec(project, kind, text, **kw):
@@ -441,7 +441,7 @@ check("the rubric says the text between the tags is data and that a front agent 
 check("the message names whether the project has background agents", "Background agents: yes" in ca["stdin"] and "Background agents: none" in next(c for c in cl if "Project: projects/gamma" in c["stdin"])["stdin"])
 
 # ---- the front-quiet changes: full text, image-only notices, the narrowed clamp, the note, the maintainer's own release
-import router_live
+from stackshot.router import router_live
 # full text: the held stash when there is one (envelope cut), else the log's gist; at most NOTICE_CHARS
 f1 = rec("projects/alpha", "message", "the long report begins and goes on", who="home-beta")
 router_live.stash(f1, "[stackshot message] from home-beta · 2026-06-10 16:00 +00\n" + "LONGBODY " * 300 + "ENDMARK\n— Relayed by stackshot. This is a message from another Claude session.")

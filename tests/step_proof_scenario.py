@@ -44,7 +44,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 sys.path.insert(0, STACK)
-import step_proof as SP
+from stackshot.model import step_proof as SP
 
 # ---- 1. what a step's words say (step_proof.py): pure functions
 def kinds(text): return [(p.kind, p.n or p.url, p.pure, p.via) for p in SP.text_proofs(text)]
@@ -108,7 +108,7 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "status": status, "updated": now - 3600, "state_updated": now - 3600, "confirmed": now - 3600,
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
-import server
+from stackshot.web import server
 OWNER = server.OWNER
 OTHER = "other-owner/other"
 ALL = range(1, 27)
@@ -167,7 +167,7 @@ server._OWN_REPO[:] = [REPO]
 server._HERE = T / "repo"
 GH = {key(39): ("merged", ""), key(40): ("dead", ""), key(41): ("err", "GitHub refused the read (404)"), key(7, OTHER): ("merged", "")}
 GH_CALLS = []; GH_TAGS = []
-import ghbudget as _gbud
+from stackshot.core import ghbudget as _gbud
 def fake_pr_merged(ref, now_, gh_st):
     ref = server._check_ref(ref); st, err = GH.get(ref, ("open", "")); GH_CALLS.append(ref); GH_TAGS.append(_gbud.current())     # the ledger tag in force while the PR is read
     gh_st[ref] = {"next": now_ + 300, "back": 0.0, "err": err, "merged": st == "merged", **({"dead": "its pull request was closed without being merged"} if st == "dead" else {})}
@@ -454,7 +454,7 @@ check("…and both take the step_proof parameter", all("step_proof" in (TOOLS[n]
 
 # ---- 10. the client verb and the route
 fixtures(); s0 = snap()
-import client
+from stackshot.fleet import client
 tok = open(client.mint("testbox")).read().strip()
 from starlette.testclient import TestClient
 with TestClient(server.mcp.http_app()) as c:
@@ -496,7 +496,7 @@ copy = T / "copy"; shutil.copytree(T / "store", copy)
 cs0 = {p.name: p.read_text() for p in (copy / "a").glob("*.json")}
 env = {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_CONFIG", "BOARD_MCP_CONFIG")}
 env["HOME"] = tmp; env["TMPDIR"] = tmp
-tool = [sys.executable, str(pathlib.Path(STACK, "tools", "backfill_step_proof.py")), "--config", str(T / "stackshot.toml"), "--store", str(copy), "--checkout", str(T / "repo"), "--state", str(T / "state")]
+tool = [sys.executable, str(pathlib.Path(STACK, "stackshot", "tools", "backfill_step_proof.py")), "--config", str(T / "stackshot.toml"), "--store", str(copy), "--checkout", str(T / "repo"), "--state", str(T / "state")]
 p = subprocess.run(tool, capture_output=True, text=True, env=env, cwd=tmp)
 check("the tool's dry run exits 0, lists each item with what the server would do, and counts", p.returncode == 0 and "dry run: nothing written, nobody told" in p.stdout
       and re.search(r"a9\s+would tick\s+\[PR #42 released\]", p.stdout) and re.search(r"a12\s+would close\s+\[PR #42 released\]", p.stdout) and re.search(r"a25\s+would close\s+\[PR #43 merged\]", p.stdout)
@@ -513,7 +513,7 @@ check("every PR the step-proof sweep read on GitHub was read under the 'step_pro
 check("the tool left no folder of its own behind (its temporary folder is made under the suite's own scratch folder)", not list(pathlib.Path(tmp).glob("stepproof-*")))
 
 # ---- 9. the real reader behind _pr_merged is shared with the done check and the event wait (pr_state.py): a read one of them made inside the pace is not made again by the sweep
-import pr_state as _prs
+from stackshot.github import pr_state as _prs
 class _Cl:
     repo_id = 0
     def __init__(self): self.calls = []

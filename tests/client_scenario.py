@@ -31,7 +31,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:400]}" if got is not None else ""))
 
 # ---- 1. minting
-import client
+from stackshot.fleet import client
 path = client.mint("box-far"); tok = open(path).read().strip()
 d = json.loads((T / "secrets/clients.json").read_text())
 check("the server keeps the token's hash, not the token", d["box-far"]["sha256"] == hashlib.sha256(tok.encode()).hexdigest() and tok not in (T / "secrets/clients.json").read_text(), d)
@@ -44,7 +44,7 @@ except ValueError: check("a machine name with a path in it is refused", True)
 old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting again replaces the token", tok != old)
 
 # ---- 2. whom the server takes a token for
-import server
+from stackshot.web import server
 server._publish = lambda: None
 check("a valid token names its machine", server._client_machine("Bearer " + tok) == "box-far" and server._client_machine("bearer " + mine) == me)
 check("a replaced token is dead", server._client_machine("Bearer " + old) == "")
@@ -63,7 +63,7 @@ st, ct, body = server._client_get("page-ts", {"key": "projects/none"}); check("p
 # 2026-10-16: page-ts for a page that is not in the mirror used to ask the server's own client API from inside the server (pages._api →
 # client.get over the loopback): the event loop could not answer that request until its 6 s timeout ran out, so every request waited.
 # The server never makes that call; a spy on client.get stands in for the loopback (the real one stalls the loop until its timeout).
-import pages as _pg_self
+from stackshot.projects import pages as _pg_self
 _calls = []; _real_get = client.get; client.get = lambda *a, **k: (_calls.append(a), (0, ""))[1]
 _unreach = len(_pg_self.UNREACHABLE)
 try:
@@ -263,7 +263,7 @@ with TestClient(app) as c:
     r = c.post("/client/handover", json={"to": "sparrow-main", "text": "a1 is yours", "sender": "sparrow-bg"}, headers=H)
     check("http: a handover to a front agent names nobody, an empty result", r.status_code == 200 and r.json() == {"result": ""} and "needs" not in m1(), r.text)
     # the hook side: pages.py touch on a SendMessage payload posts the handover through client.post (this machine's token) and hands the server's line to the hook
-    import pages, io as _io
+    import io as _io; from stackshot.projects import pages
     pl = {"tool_name": "SendMessage", "session_id": M, "tool_input": {"to": "sparrow-bg", "message": "take a1 please"}, "tool_response": "Message sent"}
     out = pages.handover(pl)
     check("pages.py: a SendMessage to a background agent that names an item is reported with the sender's name, and the server's line comes back",
@@ -303,7 +303,7 @@ check("poll: a held poll cancelled by the server's shutdown answers 200 with no 
 
 # ---- 6. the puller's CLI version probe starts no window on Windows (2026-10-05): pythonw has no console, so a console child
 # would get a fresh one, which Windows 11 shows as a terminal flashing every ten minutes
-import subprocess, puller
+import subprocess; from stackshot.fleet import puller
 seen = []
 class _Out: stdout = "2.1.288 (Claude Code)"
 def _fake_run(args, **kw): seen.append(kw); return _Out()
@@ -334,7 +334,7 @@ finally:
 
 # ---- 6b. the router's own `claude -p` call is not a session: the CLI registers it (cwd = <tmp>/stackshot-router-XXXX, made by
 # router.run_call with config.ROUTER_CWD_PREFIX; router_scenario checks the call's cwd), and the puller must not report it
-import tempfile as _tf, config as _cfgm
+import tempfile as _tf; from stackshot.core import config as _cfgm
 _reg = T / "registry"; _reg.mkdir()
 def _rec(n, sid, cwd):
     (_reg / f"{n}.json").write_text(json.dumps({"sessionId": sid, "name": n, "pid": os.getpid(), "messagingSocketPath": "/x/sock", "cwd": cwd, "updatedAt": 1}))

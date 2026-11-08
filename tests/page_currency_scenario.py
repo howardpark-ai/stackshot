@@ -44,11 +44,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 # ---- 1. who
-import pages as p
+from stackshot.projects import pages as p
 check("the rollout value", p.currency() == "keepers", p.currency())
 _pg = p._cfg.CFG["page_gate"]; _saved = dict(_pg); _pg.pop("keeper_currency", None); _pg["steward_currency"] = "stewards"
 check("compat dropped: the retired key steward_currency is not read (no keeper_currency = the rollout default off)", p.currency() == "off", p.currency())
-import config as _config
+from stackshot.core import config as _config
 _n_old = _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"steward_currency": "stewards"}}); _n_none = _config.notes({"instance": {"owner": "Oliver"}, "page_gate": {"mode": "auto"}}); _n_nosec = _config.notes({"instance": {"owner": "Oliver"}})
 check("…and config.notes says so, once, for a config with only the old key and for one with neither (the page rules are off, never silently)",
       len(_n_old) == 1 and "steward_currency is no longer read" in _n_old[0] and "keeper_currency" in _n_old[0] and len(_n_none) == 1 and "no keeper_currency" in _n_none[0] and len(_n_nosec) == 1, (_n_old, _n_none, _n_nosec))
@@ -145,7 +145,7 @@ check("agent-listed: a `display-name:` page makes its project's agents listed an
 check("agent-listed: with no agents: line anywhere, the page named is the one the project's name ends in", al("s-hub-main")[0] == 3 and "on projects/hub " in al("s-hub-main")[1], al("s-hub-main"))
 fmpage("projects/fresh.md", "type: project\ntitle: Fresh\ndisplay-name: s-fresh\nagents:\n  s-fresh-main: the contact")
 check("agent-listed: a line written a moment ago counts (files, not the registry)", "projects/fresh" not in R and al("s-fresh-main") == (0, "listed on projects/fresh: the contact"), al("s-fresh-main"))
-run = lambda n: subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "agent-listed", n], capture_output=True, text=True, env=os.environ)
+run = lambda n: subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "agent-listed", n], capture_output=True, text=True, env=os.environ)
 r3, r0, r1 = run("s-fresh-docs"), run("s-fresh-main"), run("")
 check("agent-listed: the command exits 3 / 0 / 1 with one line", (r3.returncode, r0.returncode, r1.returncode) == (3, 0, 1) and r3.stdout.count("\n") == 1 and r0.stdout.strip() == "listed on projects/fresh: the contact", (r3.returncode, r3.stdout, r0.returncode, r0.stdout, r1.returncode))
 for x in ("projects/other.md", "ops/hubhost.md", "projects/deeper.md", "projects/gone.md", "projects/fresh.md"): (T / "brain" / x).unlink()
@@ -192,11 +192,11 @@ a = act("look it up", [(GB + "search", {}), (ST + "brief", {})]); check("gbrain 
 
 # ---- 4. the Stop hook asks nothing about pages (the end-of-turn page question is retired; a write-up mod covers the turn's end). The page debt is still recorded, said at every prompt while it is owed, and settled by a Current-state edit.
 def stop(sid, tp):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "check"], input=json.dumps({"session_id": sid, "transcript_path": tp}),
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "check"], input=json.dumps({"session_id": sid, "transcript_path": tp}),
                        capture_output=True, text=True, env={**os.environ, "BOARD_CHECK_MODE": "off"})
     return r.returncode, r.stderr
 def nnag(sid):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "nag"], input=json.dumps({"session_id": sid}), capture_output=True, text=True)
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "nag"], input=json.dumps({"session_id": sid}), capture_output=True, text=True)
     return r.stdout
 TL = [(GB + "add_timeline_entry", {})]
 slog = lambda: (T / "touch/keeper-log.jsonl").read_text(encoding="utf-8") if (T / "touch/keeper-log.jsonl").exists() else ""
@@ -222,7 +222,7 @@ check("debt: …and the next prompt says nothing more", "[project-page] board it
 
 # ---- 4b. a keeper that is spawned: no name at its session start, its pages at the first prompt after
 def hook(cmd, sid):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), cmd], input=json.dumps({"session_id": sid, "source": "startup"}), capture_output=True, text=True)
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), cmd], input=json.dumps({"session_id": sid, "source": "startup"}), capture_output=True, text=True)
     return r.returncode, r.stdout
 N = "44444444-4444-4444-8444-444444444444"
 rc, out = hook("keeper", N); check("session start without a name: nothing shown", rc == 0 and out.strip() == "", out[:200])
@@ -239,7 +239,7 @@ check("…`steward_pages` is gone, and the state marks and the log carry the kee
 d.pop(N); fs.write_text(json.dumps(d))
 
 # ---- 5. the server's ledger
-import server
+from stackshot.web import server
 server._publish = lambda: None
 check("server: a keeper's debt is strict, an agent's is not", server._strict(S) and server._strict(B) and not server._strict(A))
 server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() - 30, "item": "s2"}}})
@@ -262,7 +262,7 @@ LEDGER = server._owed_path(); kept_ledger = LEDGER.read_text(encoding="utf-8") i
 def clear(*args, sid=S):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"}
     if sid: env["CLAUDE_CODE_SESSION_ID"] = sid
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "clear", *args], capture_output=True, text=True, env=env)
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "clear", *args], capture_output=True, text=True, env=env)
     return r.returncode, r.stdout
 def owe(sids, ledger):
     for x in (S, A, B): p.save_state(x, {})
@@ -394,7 +394,7 @@ p._cfg.CFG["pages"].pop("dirs")
 # token check, against a fixture store, and counts the calls.
 import socket, threading, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import client as _client
+from stackshot.fleet import client as _client
 _client.mint(socket.gethostname())                      # this box's own token: the hook reads it from <secrets>/client.token
 CALLS = []
 class _Items(BaseHTTPRequestHandler):
@@ -422,7 +422,7 @@ def fresh(**over):
     for n, o, e in rows: e.update(over.get(f"s{n}", {}))
     items(*rows)
 def bstop(sid, tp, mode="block", **payload):
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "check"], input=json.dumps({"session_id": sid, "transcript_path": tp, **payload}),
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "check"], input=json.dumps({"session_id": sid, "transcript_path": tp, **payload}),
                        capture_output=True, text=True, env={**os.environ, "BOARD_CHECK_MODE": mode})
     return r.returncode, r.stderr
 BASH = lambda c: ("Bash", {"command": c})
@@ -535,7 +535,7 @@ rej_ = []; got_, _ = p.board_verdicts("Board:\n- board#5: no change, the commit 
 check("bullets: board_verdicts reads each bullet for its own item", sorted(got_) == ["g5"] and rej_ == [("- board#6: no change, too short", "the reason is under three words")], (got_, rej_))
 # the board item: items are written as shown (store g12) and board-tmp-<machine>#3 (store l3), in every
 # text the check shows a session, and a Board line may name them so (#12 too), or by the store id as before
-import ghsync as _ghs
+from stackshot.github import ghsync as _ghs
 TMP = _ghs.local_prefix()
 def gl_items(*rows):
     for d in ("g", "l"):
@@ -592,7 +592,7 @@ rc, err = bstop(A, transcript("ship it", COMMIT)); check("board: …its owner is
 rc, err = bstop(S, transcript("ship it", COMMIT, "Done.\nBoard s11: no change, my step has not run yet")); check("board: …and the agent's verdict line settles it", rc == 0, err[:300])
 # the item: a Board line about an
 # item the session neither owns nor is the linked agent of, or one already closed, gets a note at the next prompt, never a block
-import render as _rm
+from stackshot.web import render as _rm
 items((40, B, {}), (41, A, {"status": "completed", "meta": {"outcome": "done"}}), (42, B, {"meta": {"agent": A}}), (43, B, {"meta": {"mover": A}}))
 CLOSED = _rm.when_words(p.datetime.datetime.fromtimestamp(OLD, server.ZONE))
 def fstop(tools, final, mode="note"):
@@ -647,7 +647,7 @@ check("note: the same, kept for the next prompt: the board question only", rc ==
 def touch(sid, tp, inp, bm="block", tool="update", resp=None):
     pl = {"session_id": sid, "transcript_path": tp, "tool_name": ST + tool, "tool_input": inp,
           "tool_response": resp if resp is not None else f"updated [{inp.get('item_id', 's5')}](https://x/items/{inp.get('item_id', 's5')}).\nproject: projects/alpha"}
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "touch"], input=json.dumps(pl), capture_output=True, text=True,
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(pl), capture_output=True, text=True,
                        env={**os.environ, "BOARD_CHECK_MODE": bm})
     if r.returncode != 0 or not r.stdout.strip(): return r.returncode, ""
     try: return r.returncode, json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
@@ -670,7 +670,7 @@ check("early: a later turn is asked again", q3.startswith("[stackshot]"), q3)
 # the other writes a turn ends on, once the hook's matcher names them: they owe no page, but the turn's first is asked
 def otouch(sid, tp, tool, inp, bm="block", resp="ok"):
     pl = {"session_id": sid, "transcript_path": tp, "tool_name": tool, "tool_input": inp, "tool_response": resp}
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "touch"], input=json.dumps(pl), capture_output=True, text=True,
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "touch"], input=json.dumps(pl), capture_output=True, text=True,
                        env={**os.environ, "BOARD_CHECK_MODE": bm})
     try: return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
     except Exception: return "UNPARSED " + r.stdout

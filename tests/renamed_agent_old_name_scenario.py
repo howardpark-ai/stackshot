@@ -65,11 +65,11 @@ fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
-import pages as p, anchors as A, projects as prj, renamed_agents as RA
-import clients as C
+from stackshot.projects import pages as p; from stackshot.anchors import anchors as A; from stackshot.projects import projects as prj; from stackshot.fleet import renamed_agents as RA
+from stackshot.fleet import clients as C
 C._links_dir = lambda: T / "links"               # a configured fleet store: the reader may run the fake sala
-import server
-from ui import render as ui_render
+from stackshot.web import server
+from stackshot.web.ui import render as ui_render
 p.cmd_registry(quiet=True)
 text = lambda h: re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", h))
 def pid(key): return prj.ref(key)["id"]
@@ -194,7 +194,7 @@ server._roles_sync(now=t0 + 860)
 check("2d: …and the next tick, with the write working again, settles the entry", "home-ren-wfail-old" not in pending("projects/ren") and "home-ren-wfail-new" in pending("projects/ren"), pending("projects/ren"))
 
 # ---- 6. the repair tool
-spec = importlib.util.spec_from_file_location("drop_renamed_pending", pathlib.Path(STACK, "tools/drop_renamed_pending.py")); tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
+spec = importlib.util.spec_from_file_location("drop_renamed_pending", pathlib.Path(STACK, "stackshot/tools/drop_renamed_pending.py")); tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
 def run(*argv):
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

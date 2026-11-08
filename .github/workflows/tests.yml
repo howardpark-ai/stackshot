@@ -1,10 +1,11 @@
 # The scenario suites, on every pull request and on main. They run on fixture data in a temp dir: no store, no
 # network beyond what uv needs to fetch fastmcp. A PR is merged by the builder (example-engineer) only when this is green, and, unless it is a small change, after a fresh reviewer subagent has read it.
-# Dependencies are pinned: every PEP 723 script (the production scripts and tools/, not the suites) has a <script>.lock beside it, the suites run
-# with --locked against tests/uv.lock, and the first step fails when a script's inline metadata no longer matches its lock or a script with dependencies has none.
-# The suites run in ONE environment: tests/run-suite is `uv run --locked --project tests python <suite>` with
+# Dependencies are pinned: the package has one pyproject.toml and one uv.lock, and the suites run with --locked against it (the `tests` dependency group); the first step fails when uv.lock is stale.
+# The root forwarders that units still start as `uv run --locked --script <file>` (server.py, anchor-hub.py, audit.py ...) keep their PEP 723 header and their <script>.lock until the units move to the package
+# (the forwarders go on 2026-11-22); the second step fails when one of those locks no longer matches its header.
+# The suites run in ONE environment: tests/run-suite is `uv run --locked --only-group tests python <suite>` with
 # UV_PROJECT_ENVIRONMENT at ~/.cache/stackshot/test-venv, so a checkout path no longer builds a new
-# set of environments in uv's cache, and a stale tests/uv.lock fails the suite instead of resolving afresh.
+# set of environments in uv's cache, and a stale uv.lock fails the suite instead of resolving afresh.
 # Suite selection: a push to main runs EVERY suite measured (tests/suitemap.py measure:
 # coverage and strace record what each suite runs and touches) and keeps that map in the Actions cache, keyed by the commit, and as the artifact `suitemap` (release.sh reads that one);
 # a pull request, a merge-queue entry (`merge_group`) and a push to a release-queue branch (`queue/**`, see below), run only the suites their change reaches by the newest map (tests/suitemap.py select; the reasons are in the
@@ -98,7 +99,7 @@ jobs:
         id: plan
         run: |
           set -o pipefail   # the default shell has no pipefail: a failing plan must fail the step, not hide behind tee's exit status
-          uv run --locked --project tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json | tee -a "$GITHUB_OUTPUT"
+          uv run --locked --only-group tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json | tee -a "$GITHUB_OUTPUT"
   measure:
     needs: shards
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'   # main only
@@ -139,7 +140,7 @@ jobs:
           case $SELECTED in *[!a-z0-9_\ ]*) echo "the plan holds only names of suites, separated by spaces"; exit 2 ;; esac
           [ -n "$SELECTED" ] || { echo "shard $SHARD has no suite"; exit 0; }
           echo "shard $SHARD: $SELECTED"
-          exec uv run --locked --project tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py
+          exec uv run --locked --only-group tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py
       - name: hand the shard's map on
         if: always() && hashFiles('.suitemap/shard-*.json') != ''
         uses: actions/upload-artifact@v4
@@ -172,6 +173,8 @@ jobs:
       # now in the measure job, which installs it; without it the map has no file half and every PR runs every suite). Nothing else was missing: a manual run of every suite on ubuntu-latest passed all but the three suites that read this workflow's own text (updated with this change); a suite needs no browser (phone_width_check is manual).
       - name: the one test environment
         run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
+      - name: uv.lock is current
+        run: uv lock --check
       - name: every script's lock is present and current
         run: |
           fail=0
@@ -196,13 +199,13 @@ jobs:
       - name: run the suites the change reaches
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/queue/'))   # not a manual run on a queue ref: that runs the step below
         run: |
-          sel=$(uv run --locked --project tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD) \
+          sel=$(uv run --locked --only-group tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD) \
             || { echo "::warning::the suite selection failed: running every suite"; sel=all; }
-          if [ "$sel" = all ]; then sel=$(uv run --locked --project tests python tests/suitemap.py list); fi
+          if [ "$sel" = all ]; then sel=$(uv run --locked --only-group tests python tests/suitemap.py list); fi
           [ -n "$sel" ] || { echo "no suite is reached by this change"; exit 0; }
           # -T 600 again (900 hosted): the stopgap 900 was for the release suite's waits starting extra Python processes, before the shell stubs and the short give-up caps
           # exec: a cancel signals this shell alone; uv in its place forwards INT and TERM to suitemap.py, which stops the suite
-          exec uv run --locked --project tests python tests/suitemap.py run -T "$SUITE_T" $sel
+          exec uv run --locked --only-group tests python tests/suitemap.py run -T "$SUITE_T" $sel
       # A manual run (gh workflow run): the suites named in the `suites` input, else every suite, plainly. No map: it is for trying a runner, not for judging a change.
       - name: run the suites named, or every suite
         if: github.event_name == 'workflow_dispatch'
@@ -210,8 +213,8 @@ jobs:
           SUITES: ${{ inputs.suites }}      # data, never shell text; checked below
         run: |
           case $SUITES in *[!a-z0-9_\ ]*) echo "the suites input holds only names of suites, separated by spaces"; exit 2 ;; esac
-          [ -n "$SUITES" ] || SUITES=$(uv run --locked --project tests python tests/suitemap.py list)
-          exec uv run --locked --project tests python tests/suitemap.py run -T "$SUITE_T" $SUITES
+          [ -n "$SUITES" ] || SUITES=$(uv run --locked --only-group tests python tests/suitemap.py list)
+          exec uv run --locked --only-group tests python tests/suitemap.py run -T "$SUITE_T" $SUITES
       # A push to main (only; the steps down to "audit the selection" skip on a queue branch and on a merge_group run): the shards measured every suite (the measure job; MEASURE_T there: -T 3600, as a suite traced and under coverage runs four to eight times its
       # plain time; release, a few minutes plainly, once ran over its limit measured, which failed it only measured: the map then carries its earlier measurement, see tests/suitemap.py). Their maps come here and are merged into one.
       - name: the shards' maps
@@ -228,7 +231,7 @@ jobs:
         run: |
           set -- .suitemap/shards/shard-*.json
           [ -e "$1" ] || { echo "::error::no shard handed on a map"; exit 1; }
-          uv run --locked --project tests python tests/suitemap.py merge --map .suitemap/new.json "$@"
+          uv run --locked --only-group tests python tests/suitemap.py merge --map .suitemap/new.json "$@"
       # release.sh (main_green) reads this step's name and the audit's: its deploy waits for them on main. It passes only when every shard passed and the merged map holds every suite once
       - name: run every suite, measured
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -266,7 +269,7 @@ jobs:
           overwrite: true
       - name: audit the selection
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('.suitemap/new.json') != ''
-        run: uv run --locked --project tests python tests/suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}
+        run: uv run --locked --only-group tests python tests/suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}
   # The tool's text changes in the same release as the tool: a pull request that changes the body of an MCP tool
   # function or of an output helper (tools/tool_text.py HELPERS) while tests/tool_text.snapshot.json is unchanged fails here, unless its body has the line
   # `tool-text: unchanged: <reason>`. The other two gates run in the suites job as suites: tool_text (the live registry equals the snapshot) and retired_terms.

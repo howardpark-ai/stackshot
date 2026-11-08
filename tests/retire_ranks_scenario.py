@@ -52,7 +52,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, render, ghsync
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -123,7 +123,7 @@ async def mcp_checks():
         check("mcp: no tool text still teaches rank=N as a work order", not any("work order" in (t.description or "") or "rank=N" in (t.description or "") for t in tools.values()), None)
 asyncio.run(mcp_checks())
 
-import client as _client
+from stackshot.fleet import client as _client
 from starlette.testclient import TestClient
 (T / "secrets").mkdir(exist_ok=True)
 tok = open(_client.mint("home-test")).read().strip()
@@ -132,7 +132,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("http: POST /client/rank is gone: not a 200, and nothing written", r.status_code in (404, 405) and rd(4) == before[4], (r.status_code, r.text[:120]))
 
 # ================================================================ reading shows no rank, before and after the cleanup
-from ui import render as r2
+from stackshot.web.ui import render as r2
 def reads():
     """Every surface that used to show the rank → {name: text}"""
     out = {}

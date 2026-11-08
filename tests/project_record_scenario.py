@@ -52,7 +52,7 @@ def idfile(): return json.loads((T / "store/project-record.json").read_text())
 RECORD_FIELDS = {"id", "key", "keeper", "agents", "title", "name", "type", "hub", "scope", "scope_set", "listed", "listed_by", "sub_page", "items_30d", "status", "retired"}   # the four sala reads, then the picker's (tests/projects_picker_scenario.py)
 
 # ---- 1. minting: the registry's pages get an id, once
-import pages as p, projects as prj
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True); R = reg()
 check("registry: every page has an id of the form prj_<8 hex>, all different", all(ID.match(e.get("id", "")) for e in R.values()) and len({e["id"] for e in R.values()}) == len(R) == 6, {k: e.get("id") for k, e in R.items()})
 check("registry: every page carries its key as a field", all(e.get("key") == k for k, e in R.items()))
@@ -87,12 +87,12 @@ stripped = json.loads((T / "store/projects.json").read_text())
 for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
-import server
+from stackshot.web import server
 server._publish = lambda: None
 check("start-time backfill: stamps every page with its existing id (none minted afresh), once", server._prj.stamp_registry() is True
       and {k: e["id"] for k, e in reg().items()} == ids0 and server._prj.stamp_registry() is False, {k: e.get("id") for k, e in reg().items()})
-check("the server's start runs the backfill before the first roles/projects write", "_prj.stamp_registry()" in open(f"{STACK}/server.py").read().split('def _start_background')[-1]
-      and open(f"{STACK}/server.py").read().split('def _start_background')[-1].index("_prj.stamp_registry()") < open(f"{STACK}/server.py").read().split('def _start_background')[-1].index("_roles_sync_safe()"))
+check("the server's start runs the backfill before the first roles/projects write", "_prj.stamp_registry()" in open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1]
+      and open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1].index("_prj.stamp_registry()") < open(f"{STACK}/stackshot/web/server.py").read().split('def _start_background')[-1].index("_roles_sync_safe()"))
 A_ID, B_ID, G_ID, SUB_ID, TOOL_ID = (ids0[k] for k in ("projects/alpha", "projects/beta", "projects/gamma", "projects/alpha/sub", "ops/alpha-tool"))
 
 # ---- 2. lookup: one function, id or key
@@ -140,7 +140,7 @@ check("projects.json: the agents are the records (front, role, mandate_line)", J
 check("projects.json: the same content as the lookup", all(prj.ref(i) == r for i, r in J["projects"].items()))
 mt = PJ.stat().st_mtime_ns
 check("fresh and unchanged: not rewritten (150 s later)", server._projects_sync(now=t0 + 150) is False and PJ.stat().st_mtime_ns == mt and pj()["generated"] == J["generated"])
-import runner as _runner_mod
+from stackshot.core import runner as _runner_mod
 SLOW_ROUND = 20.0       # a round of the minute set that takes this long (a slow tick ahead of the registry sync) still must not push a rewrite past the 5-minute promise
 check("the refresh interval, with the fleet watch's 20-s pass and with the runner's one-minute pace and a slow round of 20 s, keeps the file no older than 5 minutes",
       prj.EVERY + 20 <= 300 and prj.EVERY + _runner_mod.PACE + SLOW_ROUND <= 300, (prj.EVERY, _runner_mod.PACE, SLOW_ROUND))
@@ -163,7 +163,7 @@ check("an empty registry writes nothing (a stale file is the reader's cue, an em
 (T / "state/projects.json").unlink()
 server._roles_sync_safe()
 check("the roles pass (start, publish, the create gate, the fleet watch's 20-s tick) writes projects.json too", PJ.exists() and set(pj()["projects"]) == set(ids0.values())
-      and "_projects_sync_safe(now)" in open(f"{STACK}/server.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
+      and "_projects_sync_safe(now)" in open(f"{STACK}/stackshot/web/server.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
 os.chmod(T / "state", 0o500)      # an unwritable state dir is logged, never raised: the board does not stop for it
 try:
     err_real, sys.stderr = sys.stderr, io.StringIO(); server._projects_sync_safe(now=time.time() + 5000, force=True); logged = sys.stderr.getvalue()
@@ -182,7 +182,7 @@ check("…the reply says the record has it and the page follows", "in the projec
 check("…the record has it (no page_owed), and the page now holds its line, written from the record", agents_of(A_ID)["home-sparrow-triage"] == {"front": True, "role": "triage", "mandate_line": "sorts the incoming"}
       and "home-sparrow-triage: sorts the incoming" in (T / "brain/projects/alpha.md").read_text(), agents_of(A_ID))
 check("…and the published file shows it at once, with no page_owed", "page_owed" not in pj()["projects"][A_ID]["agents"]["home-sparrow-triage"] and "home-sparrow-triage" in pj()["projects"][A_ID]["agents"])
-import project_registry as _prr
+from stackshot.projects import project_registry as _prr
 check("…and the entry keeps who asked and when, in the record only (no pending entry is made)", _prr.entries()[A_ID]["agents"]["home-sparrow-triage"]["by"] == U["home-sparrow"] and "at" in _prr.entries()[A_ID]["agents"]["home-sparrow-triage"]
       and "by" not in pj()["projects"][A_ID]["agents"]["home-sparrow-triage"] and "home-sparrow-triage" not in idfile()["pending_agents"].get(A_ID, {}))
 st, out = post("projects/alpha", "home-sparrow-scribe", U["home-sparrow-docs"], role="scribe", front=False, mandate="writes it down")
@@ -208,7 +208,7 @@ st, out = post(A_ID, "home-sparrow-x", ""); check("no sender: 400", st == 400, (
 st, out = post(B_ID, "home-beta-x", "home-sparrow"); check("the keeper of another project may not: 403", st == 403, (st, out))
 # the first agent of a project with no entry yet: its page is read BEFORE _PROJECT_LOCK and the record's lock, so a slow page store holds up nobody else
 import threading
-import page_debt as _pdb
+from stackshot.router import page_debt as _pdb
 class SlowRead:
     def __init__(s, base, nap): s.b, s.nap = base, nap
     def get(s, k): r = s.b.get(k); time.sleep(s.nap); return r
@@ -252,7 +252,7 @@ check("…and the next write to the project's agents block restores the page's l
       and "edited on the page" not in (T / "brain/projects/alpha.md").read_text(), (st, out))
 
 # ---- 6. the HTTP API and client.py
-import client
+from stackshot.fleet import client
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
 app = server.mcp.http_app()
@@ -340,7 +340,7 @@ pushlog = T / "push.log"
 server._PUSH = [sys.executable, str(T / "fakepush.py")]
 r7 = server._message(A_ID, "hello alpha, by id", "home-outsider")
 pushes = [json.loads(l) for l in pushlog.read_text().splitlines()] if pushlog.exists() else []
-import routing
+from stackshot.router import routing
 check("message: to = the project's id is held for the router as to its key (every project is the router's), delivered to no session, the keeper's name included", r7.startswith("held for the router") and not pushes, (r7, pushes[-1:]))
 check("message: …and it is on the project's routing log under the key, with no recipient", any(n.get("label") == "message to projects/alpha" and n.get("live") is True and not n.get("to") for n in routing.read("projects/alpha")), routing.read("projects/alpha")[-1:])
 try: server._message("prj_00000000", "x", "home-outsider"); r8 = ""
@@ -414,15 +414,15 @@ check("rename onto a key that already has its own id: the moved page keeps the o
       and prj.ids_by_key()["projects/swap-new"] == so, idfile()["ids"])
 (T / "brain/projects/swap-old.md").unlink(); p.cmd_registry(quiet=True)
 check("…and the registry after the old page is gone: the new key is under the old id", reg()["projects/swap-new"]["id"] == so and "projects/swap-old" not in reg())
-r = subprocess.run([sys.executable, f"{STACK}/projects.py", "rename", "projects/swap-new", "projects/swap-final"], capture_output=True, text=True, env=os.environ)
+r = subprocess.run([sys.executable, f"{STACK}/stackshot/projects/projects.py", "rename", "projects/swap-new", "projects/swap-final"], capture_output=True, text=True, env=os.environ)
 check("python3 projects.py rename <old> <new> moves the id (exit 0) and says so", r.returncode == 0 and so in r.stdout and idfile()["ids"][so] == "projects/swap-final", (r.stdout, r.stderr[-200:]))
-r = subprocess.run([sys.executable, f"{STACK}/projects.py", "rename", "projects/no-such", "projects/x"], capture_output=True, text=True, env=os.environ)
+r = subprocess.run([sys.executable, f"{STACK}/stackshot/projects/projects.py", "rename", "projects/no-such", "projects/x"], capture_output=True, text=True, env=os.environ)
 check("…and exits non-zero with the reason for a key with no id; a wrong usage prints the usage", r.returncode != 0 and "no project id" in r.stderr
-      and subprocess.run([sys.executable, f"{STACK}/projects.py"], capture_output=True, text=True, env=os.environ).returncode != 0)
+      and subprocess.run([sys.executable, f"{STACK}/stackshot/projects/projects.py"], capture_output=True, text=True, env=os.environ).returncode != 0)
 # rename_page.py's stub step moves the id: the whole copy → stub run, against an in-memory gbrain
 page("projects/mover.md", "type: project\ntitle: Mover\ndisplay-name: home-mover\nstatus: active"); p.cmd_registry(quiet=True)
 MV = reg()["projects/mover"]["id"]
-import rename_page as rp
+from stackshot.projects import rename_page as rp
 mem = {"projects/mover": ("---\ntype: project\ntitle: Mover\ndisplay-name: home-mover\nstatus: active\nagents:\n  home-mover-main: keeps it\n---\n\n# Mover\n\n<!-- timeline -->\n\n## Timeline\n", "r1")}
 def fake_gb(args, stdin=None):
     if args[:2] == ["call", "get_page"]:
@@ -505,7 +505,7 @@ def hold():
         with prj.locked(): done.append("nested ok")
 t = threading.Thread(target=hold); t.start(); t.join(10)
 check("the lock can be taken again in the same thread (the registry rebuild holds it while ensure_ids takes it)", done == ["nested ok"] and not t.is_alive())
-src = open(f"{STACK}/pages.py").read().split("def cmd_registry")[1].split("def suggestions")[0]
+src = open(f"{STACK}/stackshot/projects/pages.py").read().split("def cmd_registry")[1].split("def suggestions")[0]
 check("pages.cmd_registry rebuilds under the same lock and writes through write_atomic", "_prj.locked()" in src and "_prj.write_atomic(REG" in src)
 
 # the state dir failing never stops the registry rebuild (fail-open), and write_atomic is durable and still whole
@@ -557,8 +557,8 @@ check("write_atomic fsyncs the temp file before the replace, then the directory,
 tgt.unlink()
 
 # ---- the board item: an agent only the record holds (page line owed) is its project's agent for `get roles` and on the board
-import anchors as _A, render as _render
-from ui import render as ui_render
+from stackshot.anchors import anchors as _A; from stackshot.web import render as _render
+from stackshot.web.ui import render as ui_render
 page("projects/omega.md", "type: project\ntitle: Omega\ndisplay-name: home-omega\nagents:\n  home-omega-main: talks to Oliver\nstatus: active")
 page("projects/psi.md", "type: project\ntitle: Psi\ndisplay-name: home-psi\nstatus: archived")
 page("projects/chi.md", "type: project\ntitle: Chi\ndisplay-name: home-chi\nstatus: active")      # a keeper and no agents yet: it reads front until an agent is listed

@@ -50,7 +50,7 @@ def git(*a): subprocess.run(["git", "-C", str(T / "store"), *a], check=True, cap
 git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "user.name", "t"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, uvicorn
+import uvicorn; from stackshot.web import server
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda *a, **k: None

@@ -4,7 +4,7 @@ What this page covers: projects whose pages live in a second notes brain: routin
 
 Some projects' pages can live in a second notes brain. The instance reaches it the same two ways as the first: a separate local git copy
 (kept in sync by another process; stackshot only reads it) and the gbrain CLI with its own home folder and sign-in. Each `[[brains]]` entry
-in `stackshot.toml` names one (`stackshot.example.toml` documents the keys). `brains.py` resolves a page key to its brain: the first entry
+in `stackshot.toml` names one (`stackshot.example.toml` documents the keys). `stackshot/projects/brains.py` resolves a page key to its brain: the first entry
 whose `slugs` list the key (or a page above it) or whose `prefixes` it starts with; every other key is in the default brain, `paths.brain`.
 
 **Where a new page starts.** `slugs` and `prefixes` name pages that already live in a second brain, so a page created later under a similar
@@ -24,7 +24,7 @@ A page that already exists is routed exactly as before: `new_prefixes` never mov
 prefix stays where it is. A bad value (not a list of strings, an empty or non-string item, a `new_prefixes` entry without a `/` or not
 ending in `-` or `/`) is named by `config.notes` at the start and on a reload and is ignored.
 
-- **Reads** use that brain's copy: the page registry (`pages.py registry` reads each brain's copy for the keys that brain holds), create's
+- **Reads** use that brain's copy: the page registry (`stackshot/projects/pages.py registry` reads each brain's copy for the keys that brain holds), create's
   page check, the page hook's freshness and Current-state checks, pages owed, the audit's page call's shadow read, the search index, and the
   page links (the brain's `mirror_url`, else the file in its copy).
 - **Writes** run the gbrain CLI with `GBRAIN_HOME=<home>` of the slug's brain (`rename_page.gb` reads the slug from the call), whatever

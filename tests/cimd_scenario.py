@@ -17,7 +17,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import cimd
+from stackshot.web import cimd
 from fastmcp.server.auth import cimd as fcimd
 from fastmcp.server.auth.cimd import CIMDDocument, CIMDFetchError, CIMDValidationError, _CIMDCacheEntry
 from fastmcp.server.auth.ssrf import SSRFFetchError

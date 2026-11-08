@@ -55,8 +55,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, render, states, model as _model, dated_wait as _dw, audit_run as AR
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.audit import audit_run as AR
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 ST = T / "state/waiting.json"
@@ -185,7 +185,7 @@ rows = {x["shown"]: x for x in json.loads(server._client_items(U["team-back"])[2
 sh = lambda n: server._gh.shown(f"g{n}")
 check("9 the items the client reads carry held: true for a basis wait (the hook skips held rows), and false for a plain doing item, a spent wake and a reminder",
       all(rows[sh(n)]["held"] for n in (1, 2, 6, 17, 22)) and not any(rows[sh(n)]["held"] for n in (3, 4, 5, 18)) and rows[sh(1)]["list"] == "waiting", {n: rows.get(sh(n), {}).get("held") for n in (1, 2, 3, 4, 5, 6, 17, 18, 22)})
-import pages as _pages
+from stackshot.projects import pages as _pages
 due = [it for it in rows.values() if not it.get("held")]
 check("9 …so the question lists no basis wait and still lists the plain doing item", sh(18) in {x["shown"] for x in due} and not ({sh(1), sh(2), sh(6), sh(17), sh(22)} & {x["shown"] for x in due}), sorted(x["shown"] for x in due))
 

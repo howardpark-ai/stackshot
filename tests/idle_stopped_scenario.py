@@ -62,7 +62,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 # ---- 0. the tail reader on its own
 check("the transcript check: the last turn ended in an error, whatever the CLI wrote after it", server._pane_stuck(U["home-stuck"]) == "Credit balance is too low", server._pane_stuck(U["home-stuck"]))
@@ -87,12 +87,12 @@ check("a pane with no transcript on this box and a running record that carries `
       server._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far", "stopped": "Credit balance is too low"}}) == "Credit balance is too low"
       and server._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far", "stopped": "x", "gone": "2026-01-01T00:00:00Z"}}) == ""
       and server._pane_stuck(U["home-far"], None, {U["home-far"]: {"name": "home-far"}}) == "" and server._pane_stuck(U["home-far"], None, {}) == "")
-import puller
+from stackshot.fleet import puller
 puller._transcript_roots = lambda: [str(T / "transcripts")]
 rep = puller.report([{"sessionId": U["home-stuck"], "name": "home-stuck"}, {"sessionId": U["home-owner"], "name": "home-owner"}])
 check("the puller reads the transcript on its own machine (said.transcript_error, the reader the server uses) and reports `stopped` per session; \"\" for one with no transcript",
       [r["stopped"] for r in rep] == ["Credit balance is too low", ""] and int(puller.VERSION) >= 7, rep)
-import clients as _cl
+from stackshot.fleet import clients as _cl
 cst = {"sessions": {}, "machines": {}}
 _cl._upsert(cst, "a", {"uuid": U["home-far"], "name": "home-far", "stopped": "Credit balance is too low"}, "puller", now0)
 kept = cst["sessions"][U["home-far"]].get("stopped")

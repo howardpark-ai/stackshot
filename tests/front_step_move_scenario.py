@@ -41,8 +41,8 @@ for d in ("store/a", "brain/projects", "fleet/a", "state"): (T / d).mkdir(parent
 (T / "store/anchors.json").write_text("{}"); (T / "store/projects.json").write_text(json.dumps({"pages": {}})); (T / "store/next-id").write_text("1")
 (T / "fleet/a/sessions.json").write_text("{}"); (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 
-import config as _cfg, audit_checks as AC, audit_run as AR, front_step as FS, steps as ST, nextlines as NL
-import server
+from stackshot.core import config as _cfg; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.model import nextlines as NL
+from stackshot.web import server
 server._cfg.CFG["audit"]["mode"] = "script"
 H = 3600; now = time.time()
 ZONE_OFFSET = 4 * H                       # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
@@ -326,7 +326,7 @@ load_fixtures()
 msgs = []
 real_msg = server._message
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (msgs.append((to, text, sender, auth, origin, fyi)), "delivered to " + to)[1]
-import anchors as _anc
+from stackshot.anchors import anchors as _anc
 real_roles = _anc.file_roles
 _anc.file_roles = lambda reg=None, live=None: ROLES
 cfg_audit["front_step_move_hours"] = 3
@@ -341,7 +341,7 @@ check("6 …and moves a step whose clock is due, telling the mover through the s
 server._message = real_msg; _anc.file_roles = real_roles
 
 # ---- 7. a moved step is chased again (the far wake does not silence it)
-import silence as SL, next_report as NR
+from stackshot.audit import silence as SL; from stackshot.tools import next_report as NR
 ZONE = dt.timezone(dt.timedelta(seconds=ZONE_OFFSET))
 def wake_in(hours): return dt.datetime.fromtimestamp(now + hours * H, ZONE).strftime("%Y-%m-%dT%H:%M")
 def items_now(): return NR.load_all(T / "store")
@@ -413,7 +413,7 @@ sent.clear(); AR.filing_pass(now=T0 + REM - 60, env=env())
 check("8 …and nothing follows before remind_hours", sent == [], sent)
 AR.filing_pass(now=T0 + REM + 60, env=env()); second = [t for to, t, _f in sent if to == "ops-other"]
 check("8 the unanswered finding is sent again after remind_hours, worded as the second try (words, not digits, so the router does not drop it as a repeat)", len(second) == 1 and "board#9020 · stuck-elsewhere · second try, no answer · " in second[0], second)
-import router as RT
+from stackshot.router import router as RT
 check("8 …and the router would not take it for a repeat of the first", not RT.same_text(RT.normal_text(first[0]), RT.normal_text(second[0])), (first[0][:200], second[0][:200]))
 sent.clear(); AR.filing_pass(now=T0 + REM + 10 * M, env=env())
 check("8 …once per due time: the next pass is quiet", sent == [], sent)

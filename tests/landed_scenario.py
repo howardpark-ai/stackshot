@@ -70,9 +70,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import config as _cfg, landed as ld, foryou as fy
-import server
-from ui import render
+from stackshot.core import config as _cfg; from stackshot.web import landed as ld; from stackshot.web import foryou as fy
+from stackshot.web import server
+from stackshot.web.ui import render
 from starlette.testclient import TestClient
 pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 server._PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -304,7 +304,7 @@ check("...the card's edge: a New row has the green New edge (data-st=new), a Las
 check("...a project's own page leaves the project line out (it says the project) and still gives its sub-page row a who line (done_row's `sub`), so the line is the Closed page's alone",
       '<div class="ir-who">sub page</div>' in board().done_row(next(r for r in board().rows if r["gid"] == "a20"), sub="sub page") and 'ir-who' not in board().done_row(next(r for r in board().rows if r["gid"] == "a20"))
       and 'ir-proj' not in board().done_row(next(r for r in board().rows if r["gid"] == "a20")) and 'ir-proj' in board().done_row(next(r for r in board().rows if r["gid"] == "a20"), named=True))
-import projects as prj
+from stackshot.projects import projects as prj
 check("the page's scope for a project is projects.py's: derive_scope for the page, the picker's order", prj.scopes() == ["work", "home", "ops"] and [board().landed_scope(k)[0] for k in ("projects/alpha", "projects/beta", "ops/gamma", "")] == ["work", "home", "ops", "home"])
 reg = json.loads((T / "store/projects.json").read_text()); reg["pages"]["ops/gamma"] = page_entry("gamma", ["ops-gamma-main"]); reg["pages"]["projects/delta"] = page_entry("delta", ["home-delta"])
 (T / "store/projects.json").write_text(json.dumps(reg))

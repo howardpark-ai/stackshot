@@ -4,16 +4,16 @@ What this page covers: what a machine needs from stackshot, setup-run reports, p
 
 A machine where Claude Code runs needs three things from stackshot, and no copy of the config:
 
-- **A machine token.** `./stackshot client mint <machine>` on the server box writes it to
+- **A machine token.** `bin/stackshot client mint <machine>` on the server box writes it to
   `<secrets>/client-tokens/<machine>.token`; the server keeps only its hash. On the machine,
-  `./stackshot client install --url <base URL> --token-file <file>` stores it at `~/.config/stackshot/client.token`,
+  `bin/stackshot client install --url <base URL> --token-file <file>` stores it at `~/.config/stackshot/client.token`,
   beside `client.url` (one line, the server's address).
-- **The puller.** One `puller.py` per machine: a user unit on Linux (`install.sh puller` renders
+- **The puller.** One `stackshot/fleet/puller.py` per machine: a user unit on Linux (`install.sh puller` renders
   `stackshot-puller.service`, and `client install` installs and starts it), a scheduled task on Windows. It delivers
   notices and messages and reports the machine's sessions and liveness. From puller 8 it reloads itself when the
-  `VERSION` in its checkout's `puller.py` differs from the one it loaded (see docs/windows.md), so a checkout update needs
+  `VERSION` in its checkout's `stackshot/fleet/puller.py` differs from the one it loaded (see docs/windows.md), so a checkout update needs
   no hand restart.
-- **The hooks.** The four scripts in `client/hooks/`, wired into `~/.claude/settings.json` by `./stackshot client install`
+- **The hooks.** The four scripts in `client/hooks/`, wired into `~/.claude/settings.json` by `bin/stackshot client install`
   (SessionStart, UserPromptSubmit, Stop, and PostToolUse on the connector's `create`, `update` and `complete`).
 
 The connector itself is per account, added once on claude.ai. See [INSTALL.md steps 6 and 7](../INSTALL.md#6-claude-code-on-the-server-box)
@@ -25,8 +25,8 @@ A machine that provisions itself (a Windows PC at logon and daily) reports how e
 on that machine's column of the board's Machines panel. The provisioning script calls, with the machine's own token:
 
 ```
-client.py setup-result --ok
-client.py setup-result --failed --step "<step name>" [--reason "<short text>"]
+stackshot/fleet/client.py setup-result --ok
+stackshot/fleet/client.py setup-result --failed --step "<step name>" [--reason "<short text>"]
 ```
 
 It prints one line and exits 0 when the server recorded the result, 1 when it was refused or not reached (the script
@@ -54,7 +54,7 @@ reported commit (`stackshot`) and it is the server's commit, the failed attempt 
 ## Permanent session ids
 
 The fleet tool gives every session an id that never changes (the permanent id, a UUID) and publishes `<letter>/session-registry.json` in the directory
-`client.session_links` names. With that file, `sessions_registry.py` turns any reference to a session (a permanent id, a name, an alias, a
+`client.session_links` names. With that file, `stackshot/fleet/sessions_registry.py` turns any reference to a session (a permanent id, a name, an alias, a
 Claude transcript id) into one permanent id, or into nothing when it cannot tell (a name two sessions carry, an id it does not list: it never
 picks). An open item stores its creator (`metadata.owner`), its needs entries and its observers as the permanent id where it resolves, and everything people read
 (`get`, `brief`, the board, the item page, the GitHub mirror, the client API) shows the session's current name, so a rename or a fresh start
@@ -63,12 +63,12 @@ when both resolve, and by the old rule otherwise. A message, a notice or an inbo
 it has now, and the inbox line keeps the permanent id it was put for, so a poll finds the session whatever name or transcript it carries when it asks. Without the file (missing, unreadable, another schema) nothing changes from before. `roles.json` keeps its name keys and gains an
 `ids` map (name → permanent id). Each entry also carries `live` (additive): whether `sala sessions --json` lists the name as a session, or as an alias of one (a session keeps the names it had before a rename); the server reads sala once per build with a 4-second limit, and leaves the field out of every entry when sala cannot be read (no `[client] session_links` store, an error, a slow read). A name-line (`keeper`) entry is `retired: true` when its page has user-facing agents or its own `status` is a finished one, and a name held by several pages takes an unfinished page over a finished one. Every tool that takes a session (`sender`, `owner`, `needs`, `observers`, `to`) accepts a permanent id.
 
-The one-time move of what is already stored: `python3 session_ids.py migrate --dry-run` (read-only) says what it would change and what it
+The one-time move of what is already stored: `python3 stackshot/fleet/session_ids.py migrate --dry-run` (read-only) says what it would change and what it
 keeps (and why). The command never writes an item. `migrate --request` writes `<state>/session-ids-migrate.request`, and the server applies
 the move at its next start, before it starts any writer thread or serves a request (so nothing else writes an item meanwhile). The request is consumed
 even when the registry is unreadable at that start (nothing is done): fix the registry and request again. It rewrites the creator (`metadata.owner`), needs and
 observers of open items only (a closed item is a record of its time and is never touched), and writes
-`<state>/session-ids-undo-<UTC time>.json` (gid, field, old, new) before it changes the first item. `python3 session_ids.py rollback <undo file>`
+`<state>/session-ids-undo-<UTC time>.json` (gid, field, old, new) before it changes the first item. `python3 stackshot/fleet/session_ids.py rollback <undo file>`
 asks the same way (the request names the undo file) and the server puts each field back where it still holds what the migration wrote. A
 failure is logged and the start goes on. A second request changes nothing. `roles.json` is written by the server's own roles sync, and the
 inbox hold lists belong to the fleet tool: neither is rewritten by the migration, and stackshot only reads the hold lists (a line may be a name, a
@@ -82,9 +82,9 @@ A script that hits a question only the owner can answer (a headless `claude -p` 
 reads the answer later, from a shell, with the machine's token:
 
 ```
-echo "<the question, a few lines>" | client.py post question --project <key|id|slug> --ask "Decide: … · Recommend: … · Stakes: … · By: …" \
+echo "<the question, a few lines>" | stackshot/fleet/client.py post question --project <key|id|slug> --ask "Decide: … · Recommend: … · Stakes: … · By: …" \
     --subject "<subject>" --request-id <token> [--option "<label>=<line>" ...] [--recommended <label>] [--sender <script label>]
-client.py get answer board#<n>
+stackshot/fleet/client.py get answer board#<n>
 ```
 
 `post question` prints the new item's id (`board#N`) and exits 0; a refusal, or a server it cannot reach, is one line on stderr and exit 1.
@@ -100,7 +100,7 @@ Underneath it is one authenticated write:
   its marker is skipped: the create gate judges it like any create). More non-blank lines
   than `[description] max_lines` less one, or more than 8000 characters, is a 400 saying so, and the script shortens it. The
   description ends with the bullet `- Filed by <sender> (a script on <machine>)`, so the item page and the GitHub issue body show
-  the owner who filed it. `sender` (default `client.py`) is also kept in
+  the owner who filed it. `sender` (default `stackshot/fleet/client.py`) is also kept in
   the item's `filed_by`; the machine is the token's.
 - `subject` is required (400 without it, naming the instance's subject prefixes): there is no default prefix, since a question filed
   under the wrong one lands in the wrong place on the board; the create gate then checks the prefix as for the tool.
@@ -109,7 +109,7 @@ Underneath it is one authenticated write:
   the same triple again answers the same item (`"repeat": true`, the same id printed, exit 0) and files nothing. If that item has since
   been removed, the call files a new one. **the fleet tool passes one per parked question**, the same token each time that question is filed
   again, with the same `--sender`.
-- It is the create tool's own code (`_create_item` in `server.py`): the subject prefix, the ask's form, the options (2 to 6, exactly
+- It is the create tool's own code (`_create_item` in `stackshot/web/server.py`): the subject prefix, the ask's form, the options (2 to 6, exactly
   one recommended), one decision per ask, the project page, the GitHub mirror and the page-debt rules apply as to a session, and a
   refusal is the tool's text (400). A script owes no page, and the owner is charged none: the page debt goes to the page's keeper
   (a page's own agent that is not a front agent, else the hub's or the scope's general `-main` agent) to no one when the page has none, and to no one when the keeper is the owner itself, so a burst of
@@ -120,9 +120,9 @@ Underneath it is one authenticated write:
   a `comment`. The label is empty when he picked none; line breaks in the text are ` / `; `<when>` is when he gave it, an ISO time in the
   instance's timezone. The line does not say which question it answers: an item answered before the question was filed on it returns
   that answer, so a caller files a fresh item per question. Older letter-and-number ids work. Like `brief` and `items`, it is not scoped to a machine.
-- Exit codes. `client.py get answer` prints the line (nothing when empty) and exits 0, or exits 1 with the reason on stderr: no id
+- Exit codes. `stackshot/fleet/client.py get answer` prints the line (nothing when empty) and exits 0, or exits 1 with the reason on stderr: no id
   given (usage; the server's own answer to an empty key is 400), an id that names no item or is not an item id (404), no token on the
-  machine (401), or a server not reached (`[0]`). It never reads the project record, so it has no 503. `client.py post question` exits 1
+  machine (401), or a server not reached (`[0]`). It never reads the project record, so it has no 503. `stackshot/fleet/client.py post question` exits 1
   on a refusal (400 the tool's checks, the missing subject or request id, a text over the limits; 404 no such project; 409 no front
   agent), on no token or a server not reached, and on 503 when the project record cannot be read right now (nothing was filed).
 - `GET /client/items?key=<session>` returns `{"items": [{gid, shown, subject, needs, state and state_fields (only for an item that stores a state), next, state_updated, confirmed, updated, held, list, mover, expected_by (null for a doing item), wait, overdue, step, roles, …}]}`:
@@ -146,14 +146,14 @@ When a session's permission prompt cannot be answered by a hook (a question to t
 so the owner has a row in Your move that links the pane, and the row goes when the pane stops waiting:
 
 ```
-client.py post terminal-prompt open  --session <name|id> --question "<one line>" --sender <label>     # prints the item id, exit 0
-client.py post terminal-prompt clear --session <name|id> --sender <label>                             # exit 0, also when nothing is open
+stackshot/fleet/client.py post terminal-prompt open  --session <name|id> --question "<one line>" --sender <label>     # prints the item id, exit 0
+stackshot/fleet/client.py post terminal-prompt clear --session <name|id> --sender <label>                             # exit 0, also when nothing is open
 ```
 
 Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is one authenticated write, `POST /client/terminal-prompt`, `Authorization: Bearer <machine token>`, body
 `{"action": "open" | "clear", "session", "sender", "question"?}` (200 `{item, session, project, repeat}` for open, `{session, cleared: [ids]}` for clear; 400 a check or a refusal; 409 no project with a front agent to file under).
 
-- **One open item per session**, marked `metadata.terminal_prompt` = the session's name as the registry has it. The session is matched through the sala registry (`sessions_registry.py`), so a name, an
+- **One open item per session**, marked `metadata.terminal_prompt` = the session's name as the registry has it. The session is matched through the sala registry (`stackshot/fleet/sessions_registry.py`), so a name, an
   old name (an alias), a sala id and a transcript id reach one item. The item: subject `<session> is waiting for your answer in its terminal` (with the instance's prefix of the project's scope, else `[subject] fallback_prefix`, else its first prefix),
   priority p1, the owner the mover, state `your-step` with the step `Answer <session>'s question in its terminal` (one line, no command), and one next line, `<owner>: open <the pane's address> and answer: `<question>``.
   The address is `[client] session_view` with the name url-quoted, else no link: the pane is named in words ("the pane of <name>"). It is filed under the session's project (the registry row's `project_key`, else its `project`) when that
@@ -163,10 +163,10 @@ Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is on
   The guard on alarming words does not judge it (the route sets what `post question` sets).
 - **A second `open` for a session** that has an open item changes its next line and files nothing (`repeat: true`, the same id); the same question again writes nothing. After a `clear`, an `open` files a new item.
 - **`clear`** closes the session's open item: outcome `done`, reason `the pane stopped waiting`, the end state in `outcome_text`, the description unchanged. None open is a no-op (200, `cleared: []`).
-- **The row owes no page and tells no session.** It is a notification that opens and closes with the pane: the writes set `_TERMINAL_ROW` (`server.py`), so no page debt is charged to the script, the mover or the page's keeper, the router
+- **The row owes no page and tells no session.** It is a notification that opens and closes with the pane: the writes set `_TERMINAL_ROW` (`stackshot/web/server.py`), so no page debt is charged to the script, the mover or the page's keeper, the router
   gets no notice of it, and the close is told to no one (the `_tell_*` notices return nothing). Otherwise it is the normal write path: `_create_item`, then `_update` for the state, and `_update` to close, with every gate.
   The create sets no step, so the state is a second write; if it is refused, the item is closed again as dropped, never left half made.
-- A deploy restarts `stackshot.service` (`server.py` changed) and `stackshot-puller.service` (`client.py` changed); a session runs `client.py` fresh at each call, so no recycle is needed for it ([docs/session-reload.md](session-reload.md)).
+- A deploy restarts `stackshot.service` (`stackshot/web/server.py` changed) and `stackshot-puller.service` (`stackshot/fleet/client.py` changed); a session runs `stackshot/fleet/client.py` fresh at each call, so no recycle is needed for it ([docs/session-reload.md](session-reload.md)).
 
 ## A gap in a scheduled job
 
@@ -174,8 +174,8 @@ sala's job-gap watcher (`sala job check`) finds a timer or service of the host t
 repository that holds the job's script, and closed by the watcher itself once the gap is fixed (it used to be one message per gap, with nothing to close):
 
 ```
-client.py post job-gap open  <timer> <code> --repo <owner/name> [--detail "<text>"] [--sender <label>]   # prints the item id, exit 0
-client.py post job-gap clear <timer> <code> [--sender <label>]                                           # prints the closed id; exit 0, also when nothing is open
+stackshot/fleet/client.py post job-gap open  <timer> <code> --repo <owner/name> [--detail "<text>"] [--sender <label>]   # prints the item id, exit 0
+stackshot/fleet/client.py post job-gap clear <timer> <code> [--sender <label>]                                           # prints the closed id; exit 0, also when nothing is open
 ```
 
 `<code>` is one of `no-description`, `no-lane`, `bad-lane`, `not-git`, `git-differs` (any lower-case word is taken, with its own name in the subject). Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is one authenticated
@@ -191,7 +191,7 @@ write, `POST /client/job-gap`, `Authorization: Bearer <machine token>`, body `{"
   other GitHub-bound text), so the mirror pings no one. A code outside the five known ones gets a neutral fix line ("see the watcher's report"), not a guess.
 - **A repeat `open` of an open (timer, code)** changes nothing and answers the existing item (`repeat: true`). After a `clear`, an `open` files a new item.
 - **`clear`** closes the open item: outcome `done`, a one-line reason within `[close] reason_max`, the end state in `outcome_text`, the description unchanged. None open is a no-op (200, `cleared: []`, a note that says so).
-- **The sender** is the script's own label, under the terminal prompt's gate: at most 80 characters on one line and never the owner's name (400); none given is `client.py`. There is no allow-list of labels (the machine token is the
+- **The sender** is the script's own label, under the terminal prompt's gate: at most 80 characters on one line and never the owner's name (400); none given is `stackshot/fleet/client.py`. There is no allow-list of labels (the machine token is the
   proof), so no config change is needed for sala's label `unit-gaps`. The item records `<label> via a script on <machine>`.
 - **The row owes no page.** It sets `_TERMINAL_ROW` as the terminal prompt does (no page debt for the script, the builder or the keeper, no router notice, a close told to no one) and the guard on alarming words does not judge the
   watcher's text; the builder's notice at the create is the one thing sent. `tool-text`: a client call only, no MCP tool changes.

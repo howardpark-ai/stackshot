@@ -27,9 +27,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import anchor_scope as AS
-import render
-import model_guards as MG
+from stackshot.anchors import anchor_scope as AS
+from stackshot.web import render
+from stackshot.model import model_guards as MG
 
 A, B, C = "projects/alpha", "projects/beta", "projects/gamma"
 DM = "https://acme.slack.com/archives/D0000000001"      # a Slack DM: its receivers sit in more than one project
@@ -59,7 +59,7 @@ check("wide lists the item's own project's project-wide anchors, flagged not sco
 check("an anchor scoped to another item does not count", PR not in urls(AS.anchor_scope(store, "a1", A)) and urls(AS.anchor_scope(store, "c3", C)) == [DM], urls(AS.anchor_scope(store, "c3", C)))
 
 # a [github.moved] rename: one repository under two names is one anchor
-import config as cfg
+from stackshot.core import config as cfg
 moved = {"https://github.com/o/r/pull/9": "https://github.com/o/r2/pull/9"}
 old_canon = cfg.canon_name
 cfg.canon_name = lambda n: "o/r" if n in ("o/r", "o/r2") else old_canon(n)
@@ -89,7 +89,7 @@ due2 = AS.completion_due(store, "b2", items2)
 check("completion_due: the same anchor on two pages is asked about on each (each page keeps its own)", [(p, e["url"]) for p, e in due2] == [(B, DM), (B, PR), (C, DM)], due2)
 
 # ---- the readers built on it
-import server
+from stackshot.web import server
 server._anc.save({k: v for k, v in store.items()})
 check("the server reads an anchor held by another project's page (_scoped_anchors)", urls(server._scoped_anchors(A, "a1")) == [SOLO, DM] and urls(server._scoped_anchors(A, "b2")) == [DM, PR]
       and server._scoped_anchors(A, "z9") == [], (urls(server._scoped_anchors(A, "a1")), urls(server._scoped_anchors(A, "b2"))))
@@ -109,7 +109,7 @@ def anchor_wait(gid, project):
                          "wake": "2099-01-01", "post_wake_mover": "home-agent", "next": "home-agent: read the thread when it moves"}}
 flagged = lambda anchors: any("b2" in ids for ids in MG.report({"b2": anchor_wait("b2", A)}, anchors=anchors).ids.values())
 check("model_guards.report: an anchor wait whose anchor is held by another page names its anchor; with no anchor anywhere it is flagged", flagged({}) and not flagged(store), (flagged({}), flagged(store)))
-import migration as MIG
+from stackshot.model import migration as MIG
 env = MIG.Env.__new__(MIG.Env)
 env.anchors = store
 check("migration's planner reads it the same way (scoped, anchored)", env.scoped(A, "a1") == [SOLO, DM] and env.anchored("b2", A)({}) and not env.anchored("z9", A)({}), env.scoped(A, "a1"))
@@ -126,7 +126,7 @@ b = render.Board(str(T / "store"))
 check("the board's scoped_urls reads every page (render.py)", b.scoped_urls("a1") == [SOLO, DM] and b.scoped_urls("b2") == [DM, PR] and b.scoped_urls() == sm, (b.scoped_urls("a1"), b.scoped_urls()))
 check("the hold reasons name an anchor held by another page, and none for an item with no anchor", render.hold_whys({"gid": "b2", "metadata": {}}, b.scoped_urls("b2")) == [render.HOLD_WHY["anchor"]]
       and render.hold_whys({"gid": "z9", "metadata": {}}, b.scoped_urls("z9")) == [], "")
-from ui import render as ur
+from stackshot.web.ui import render as ur
 ub = ur.Board(str(T / "store"))
 check("the board pages' scoped_urls reads every page too (ui/render.py), the same lists", ub.scoped_urls("a1") == b.scoped_urls("a1") and ub.scoped_urls() == sm, ub.scoped_urls())
 html = ub.item_html("a1")
@@ -136,7 +136,7 @@ check("the item page lists the anchors scoped to this item and no other", PR not
 # ---- the minute pass, the wait-set note, the receivers and the completion prompt read the anchor from the page that holds it
 # Pages: alpha and gamma have a keeper, beta has none (nobody rules its notices). Every item below is of alpha or gamma; the anchors sit on other pages.
 import time, threading
-import anchors as ANC, routing
+from stackshot.anchors import anchors as ANC; from stackshot.router import routing
 (T / "store/a/1.json").unlink()
 PAGE = lambda sess: {"title": "p", "name": "p", "org": "home", "tags": [], "type": "project", "session": sess, "status": "active", "board": [], "board_row": False, "updated": 1, "mirror": "https://example.invalid/p"}
 REG = {"pages": {A: PAGE("keep-alpha"), B: PAGE(""), C: PAGE("keep-gamma")}}

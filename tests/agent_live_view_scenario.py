@@ -40,8 +40,8 @@ page("projects/live.md", "type: project\ntitle: Live proj\ndisplay-name: work-li
                          "  background:\n    work-live-bot: sweeps\n    work-live-gone: has no session either\nstatus: active")
 page("projects/solo.md", "type: project\ntitle: Solo proj\ndisplay-name: work-solo\nstatus: active")
 page("projects/done.md", "type: project\ntitle: Done proj\ndisplay-name: work-done\nagents:\n  work-done-main: was the contact\n  work-done-docs: kept the docs\nstatus: archived")
-import pages as p, anchors as _A, projects as prj
-from ui import render as ui_render
+from stackshot.projects import pages as p; from stackshot.anchors import anchors as _A; from stackshot.projects import projects as prj
+from stackshot.web.ui import render as ui_render
 p.cmd_registry(quiet=True)
 now = time.time()
 def item(n, proj, owner):

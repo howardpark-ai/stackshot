@@ -1,7 +1,7 @@
 # stackshot.example.toml — the defaults of a stackshot instance: every path, identity, rule and label that belongs to a setup
 # rather than to the code. Copy it to ~/.config/stackshot/stackshot.toml (or point STACKSHOT_CONFIG at your copy), set your
 # values, and keep it beside your store, not in this repo: the code never carries an instance's config.
-# Read through config.py (stdlib tomllib, no dependency) by the server, the publisher, the renderer, anchor-hub, the pane
+# Read through stackshot/core/config.py (stdlib tomllib, no dependency) by the server, the publisher, the renderer, anchor-hub, the pane
 # gate on every machine, the puller and the reboot hooks. Paths may use ~. A client box (one that only runs the puller and the
 # pane gate) needs none of this: <secrets>/client.url and <secrets>/client.token are enough, and this file's defaults apply.
 # Overrides for tests: STACKSHOT_CONFIG=<file> picks another file; STACKSHOT_FLEET_DIR points the readers of the session and machine state elsewhere.
@@ -10,7 +10,7 @@
 name = "stackshot"                       # the product, written lowercase in prose; the claude.ai connector's display name is set on claude.ai, not read from here
 title = "stackshot"                      # the board page's title and heading
 owner = "the owner"                      # the person the tools speak of ("<owner>'s task board"); every text a session or the board shows names them by this, never by a fixed name.
-                                         # Set it: the start, a reload and `./stackshot doctor` warn when it is missing. A line of next that starts "<owner>:" is the owner's step. Restart-only
+                                         # Set it: the start, a reload and `bin/stackshot doctor` warn when it is missing. A line of next that starts "<owner>:" is the owner's step. Restart-only
 owner_aliases = []                       # the other names a session may open a line of next with for the owner's step, e.g. ["AE", "boss"]; `you` always is one and is not listed. [] = none. Restart-only
 timezone = "UTC"                         # an IANA zone name (e.g. "Europe/Berlin", "America/New_York"): every time the board, the hub or a notice prints, and the zone every date and clock check reads. UTC when unset
 board_url = "https://stackshot.example.com"
@@ -30,7 +30,7 @@ docs_merge_script = ""                            # the script that merges a cha
 fleet_names = "~/stackshot-data/session-names.tsv"    # os hostname → fleet name → letter (a letter with no fleet state yet)
 state = "~/.local/state/stackshot"                  # everything the instance writes for itself: site/, ledger.json, requests.json, messages.jsonl, cloud-sessions.json, publish.lock, anchor-hub/, inbox/, clients/
 secrets = "~/.config/stackshot"                     # oauth.env (Google client + portal token), portal/ (client files), anchor-hub/env, anchor-hub/google/, client.token, client.url
-claude_credentials = "~/.claude/.credentials.json"  # the CLI's own login, read by cloud.py for cloud session titles
+claude_credentials = "~/.claude/.credentials.json"  # the CLI's own login, read by stackshot/core/cloud.py for cloud session titles
 project_touch = "~/.claude/project-touch"           # the pane gate's per-session state (every machine)
 
 [pages]                                             # the project pages, under paths.brain
@@ -39,11 +39,11 @@ dirs = ["projects"]                                 # the sub-directories that h
 flavor = "plain"                                    # how a session is told to update its page: plain = edit <paths.brain>/<key>.md, commit and push ·
                                                     # gbrain = through gbrain's tools (add_timeline_entry, get_page/edit_page/put_page)
                                                     # With plain, the server itself writes the pages as markdown files in paths.brain (a new project's page, the router's timeline
-                                                    # notes, the page-debt pass) and runs no git: committing and pushing that checkout is the instance's job. `rename_page.py` and
-                                                    # `page_keeper.py` are gbrain tools and refuse under plain with a message that says so.
+                                                    # notes, the page-debt pass) and runs no git: committing and pushing that checkout is the instance's job. `stackshot/projects/rename_page.py` and
+                                                    # `stackshot/projects/page_keeper.py` are gbrain tools and refuse under plain with a message that says so.
 template_page = ""                                  # the page whose "Part 2" holds the project template a new project's page is made from (a key under the dirs, e.g. "projects/template"); "" = the short built-in page
 rules_line = ""                                     # the bullet a new project's page carries to link the rules, written as given; "" = "- Not written yet."
-timeline_source = "stackshot"                       # the source word on the timeline line a page move writes (rename_page.py; gbrain flavor)
+timeline_source = "stackshot"                       # the source word on the timeline line a page move writes (stackshot/projects/rename_page.py; gbrain flavor)
 
 [steps]                                             # where the owner runs the commands of a board step (the text of the create and update tools is built from this at start: restart-only)
 owner_shell = ""                                    # "powershell" = the owner runs a step's commands in PowerShell on a Windows machine: a command in a next line that starts "<owner>:" must say where it runs ("In PowerShell: ...")
@@ -54,7 +54,7 @@ owner_shell = ""                                    # "powershell" = the owner r
 bash_host = ""                                      # the Linux host that such a bash command is run on over ssh (powershell), or the one sala's Shell runs on (sala-shell), e.g. "myhost"; "" = none named
 shell_name = ""                                     # sala-shell only: the name of the owner's Shell session in sala, written into the tool text next to "sala's Shell" (e.g. "my-shell"); "" = none named, the text says "sala's Shell" alone
 
-[terminal]                                          # a pane waiting in its terminal for an answer (client.py post terminal-prompt, sala's hook)
+[terminal]                                          # a pane waiting in its terminal for an answer (stackshot/fleet/client.py post terminal-prompt, sala's hook)
 fallback_project = ""                               # the project page a terminal-prompt item is filed under when the session's own project lists no front agent, e.g. "projects/mine"; "" = none (the item is refused with that reason)
 
 [ids]
@@ -126,25 +126,25 @@ mode = "refuse"                                     # nag | refuse: after grace_
 grace_minutes = 30
 slack_seconds = 300                                 # a page put up to this long BEFORE the board write counts as the same turn
 
-[page_gate]                                         # the pane-side gate (pages.py, hooked on every machine): a page debt is said at the next prompt while it
+[page_gate]                                         # the pane-side gate (stackshot/projects/pages.py, hooked on every machine): a page debt is said at the next prompt while it
                                                     # is owed, and a keeper is shown its pages' Current state at session start. The Stop hook asks nothing about
                                                     # pages (the end-of-turn page question and its `mode`/`block_after` keys were retired)
 keeper_currency = "keepers"                        # a page keeper's debt settles only on a Current-state edit. "keepers" = every session that keeps an active page | "all" | "off" | a list of session names
 
-[board_check]                                       # the end-of-turn board check (pages.py check, the Stop hook): a turn that did real work (a board or
+[board_check]                                       # the end-of-turn board check (stackshot/projects/pages.py check, the Stop hook): a turn that did real work (a board or
 mode = "off"                                        # connector write, a message, a commit, a push, a PR, a deploy) while its session owns open items it did
                                                     # not update or confirm is asked once to update them, confirm them, or end with `Board: no change, <reason>`.
                                                     # off (the default) | block | note (the question is said at the next prompt instead of holding the turn).
-                                                    # A machine needs a pages.py with this check; a provision brings it there
+                                                    # A machine needs a stackshot/projects/pages.py with this check; a provision brings it there
 
-[audit]                                             # the daily board audit (audit.py): reads the board, writes one run record per run under <paths.state>/audit/, and reports.
+[audit]                                             # the daily board audit (stackshot/audit/audit.py): reads the board, writes one run record per run under <paths.state>/audit/, and reports.
 enabled = false                                     # true: install.sh installs and starts stackshot-audit.timer, which runs the audit every day at each time of `at`, and POST /audit/now (the board's
                                                     # "Audit now") runs it at once; false (the default): no timer (one installed earlier is disabled and removed), and a run is refused.
                                                     # The owner's instance sets true
-mode = "script"                                     # "script" (the default) = audit_run.py checks the board in code, with no model for the checks that read item fields, and makes one
+mode = "script"                                     # "script" (the default) = stackshot/audit/audit_run.py checks the board in code, with no model for the checks that read item fields, and makes one
                                                     # `claude -p` call per suspect item for the judgment checks (the [router] command, on the [audit] lane when one is set, else the router's lane); "agent" = the old way, one line pushed to the
                                                     # audit agent below. Switching to "agent" is the rollback
-agent = "my-audit"                                  # mode "agent": the session the cue is pushed to (push.py, as the wake notice goes)
+agent = "my-audit"                                  # mode "agent": the session the cue is pushed to (stackshot/fleet/push.py, as the wake notice goes)
 at = ["05:00", "20:00"]                             # HH:MM in [instance] timezone: when the timer runs the audit; a list runs it at each time (one OnCalendar line each), a single "HH:MM" string runs it once a day
 project = "ops/example-service"                           # <scope>/<project>: the project sala's Agents tab files the audit timer under (the unit's X-Project line; sala job check wants one)
 max_calls = 40                                      # mode "script": the most model calls one run makes (one per suspect item, one at a time; the suspects past it wait for the next run); 0 = none
@@ -160,8 +160,8 @@ wait_end = "fix"                                    # the ten-minute filing pass
                                                     # ask, "off" = no such check
 wait_end_settle_minutes = 60                        # the pass fixes nothing on an item written less than this many minutes ago; 0 = no wait
 orphan_handover = "report"                          # mode "script": an open item whose mover (or post-wake mover) is a session that is gone, a project's last retired agent included, is handed to the closest
-                                                    # live agent (the project's own, then its parent's -main, its hub's, the scope's general one: successor.py), with a History line giving the reason; an item
-                                                    # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check
+                                                    # live agent (the project's own, then its parent's -main, its hub's, the scope's general one: stackshot/waits/successor.py), with a History line giving the reason; an item
+                                                    # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`stackshot/audit/audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check
 summary_to = "projects/example"                     # mode "script": the page key (or session name) the summary of each run is sent to. The default is the stand-in page of the example config: point
                                                     # it at a page of your own, for example "projects/example-reports"
 builder = "my-engineer"                             # mode "script": who a tripped threshold, and an unmoved finding of a project with no builder, is sent to
@@ -174,11 +174,11 @@ pattern_review = "shadow"                           # mode "script": the pattern
                                                     # pattern (a hook, a mod, a tool's text, a rulebook line, or a new audit or an edit to one). "shadow" (the default) = the drafts only go onto the run record and the
                                                     # summary line; nothing is sent, opened or edited. "off" = no review, no call, no findings log. A pattern drafted in the last 7 days is not drafted again; at most 5 a run
 
-[registry_audit]                                    # the project registry check of the daily audit (tools/registry_report.py, `audit.py registry`): what is wrong with the project record and the pages it points at
-send = false                                        # false (the default): the findings go on the run record and `audit.py registry` prints them; nobody is messaged. true: each run also sends every agent
+[registry_audit]                                    # the project registry check of the daily audit (stackshot/tools/registry_report.py, `stackshot/audit/audit.py registry`): what is wrong with the project record and the pages it points at
+send = false                                        # false (the default): the findings go on the run record and `stackshot/audit/audit.py registry` prints them; nobody is messaged. true: each run also sends every agent
                                                     # its project's findings in one message, at most once a day per agent (a second run the same day sends nothing the first sent)
 
-[wait_guard]                                        # a wait a session sets on its own item (self_wait.py): a wake, or a line of its own next whose step is dated later than today, must carry
+[wait_guard]                                        # a wait a session sets on its own item (stackshot/waits/self_wait.py): a wake, or a line of its own next whose step is dated later than today, must carry
                                                     # wait_reason (what the step waits on); one model call (the [router] command and lane, no tools) then asks whether the step could be done now,
                                                     # and a yes refuses the write. Every failure of the call (no model, a timeout, an unreadable answer) lets the write through and is logged on stderr.
                                                     # Not judged: a wait on another item (after), on the owner or an outside party (needs), a park (hold with wait_basis), a wait_kind, a hand-off.
@@ -187,13 +187,13 @@ max_calls = 30                                      # model calls in any rolling
 timeout_seconds = 30                                # one call, seconds; the write goes through unjudged when it runs longer
 model = ""                                          # the call's model; "" = the [router] model
 
-[rulebook_scan]                                     # the nightly scan of the instruction files sessions read (tools/rulebook_scan.py): it runs from the audit's timer
-enabled = false                                     # (audit.py scan, after the run) and sends each file's keeper one note about a stackshot tool or parameter, a sala verb or flag, or a
+[rulebook_scan]                                     # the nightly scan of the instruction files sessions read (stackshot/tools/rulebook_scan.py): it runs from the audit's timer
+enabled = false                                     # (stackshot/audit/audit.py scan, after the run) and sends each file's keeper one note about a stackshot tool or parameter, a sala verb or flag, or a
                                                     # retired term the file names and no longer exists; a finding already sent and unchanged is not sent again. false (the default): nothing
-                                                    # is sent (`audit.py scan --dry-run` still prints what it finds). The keys below are read at each run, so a change needs no restart.
+                                                    # is sent (`stackshot/audit/audit.py scan --dry-run` still prints what it finds). The keys below are read at each run, so a change needs no restart.
                                                     # Every key is optional; what is shown is the default.
 # terms = "tests/retired_terms.toml"                # the retired-terms list (a path relative to the checkout, or absolute); absent = that check is skipped
-# server = "server.py"                              # the tools and their parameters are read from this file's `@mcp.tool` definitions, never by importing it
+# server = "stackshot/web/server.py"                              # the tools and their parameters are read from this file's `@mcp.tool` definitions, never by importing it
 # sala = "sala"                                     # `sala --help` is read, and `--help` of the verbs in help_verbs only (most verbs take --help as an argument)
 # help_verbs = ["op"]
 # sala_lib = "~/salamander/lib"                     # sala's code: a flag a file names that lib/<verb>.sh takes, though `sala --help` does not list it, is a help-text gap and goes to sala_keeper
@@ -204,10 +204,10 @@ enabled = false                                     # (audit.py scan, after the 
 # glob = "~/rules/**/*.md"
 # keeper = "my-keeper"
 
-[refusal_report]                                    # the weekly count of refused board writes (tools/refusal_report.py): the server keeps a line per create, update, complete, confirm and message call in
-enabled = false                                     # <paths.state>/calls/, and the audit's unit (audit.py refusals, after the run) sends one message that asks nothing for each finished Monday-to-Sunday week:
+[refusal_report]                                    # the weekly count of refused board writes (stackshot/tools/refusal_report.py): the server keeps a line per create, update, complete, confirm and message call in
+enabled = false                                     # <paths.state>/calls/, and the audit's unit (stackshot/audit/audit.py refusals, after the run) sends one message that asks nothing for each finished Monday-to-Sunday week:
                                                     # create and update calls refused of all, the share, the week before, the kinds, the sessions refused most, what the server corrected instead. false (the default):
-                                                    # nothing is sent (`audit.py refusals --dry-run` still prints the last week). Read at each run, so a change needs no restart. Every other key is optional.
+                                                    # nothing is sent (`stackshot/audit/audit.py refusals --dry-run` still prints the last week). Read at each run, so a change needs no restart. Every other key is optional.
 # to = ""                                           # the page key or session name the report goes to; "" = [audit] summary_to
 # top = 6                                           # how many kinds of refusal the report lists (1 to 20)
 # sender = "stackshot refusal report"
@@ -234,7 +234,7 @@ sync = false                                        # durable thread. true: an i
                                                     # (<state>/github/queue/) to an issue in `issues_repo` (the issue carries nothing else: no comments,
                                                     # labels, typed fields or blocked-by; the store's files are the backup and the item page's History is the store's
                                                     # git). A change to any other field makes no GitHub call. An outage queues, nothing waits.
-                                                    # false (the default): nothing is sent. Turn it on only after the migration (ghmigrate.py): an issue
+                                                    # false (the default): nothing is sent. Turn it on only after the migration (stackshot/github/ghmigrate.py): an issue
                                                     # opened before it takes a number the open items should get
 issues_repo = ""                                    # owner/name of the board repo: private, issues only, every issue opened through this server
 issues_repo_id = ""                                 # GitHub's numeric id of that repo (a positive integer; empty = not set). Set, every call for the repo
@@ -275,7 +275,7 @@ owner_login = ""                                    # the GitHub login the owner
                                                     # (a SIGHUP to the server and anchor-hub, which the config-reload path unit sends); no restart.
 # "oldowner/thing" = "newowner/thing"
 
-# [released.repos]                                  # optional: other repositories whose pull requests count as released here (`client.py released --pr <URL> --sha <merge commit>`, a step's pr_released
+# [released.repos]                                  # optional: other repositories whose pull requests count as released here (`stackshot/fleet/client.py released --pr <URL> --sha <merge commit>`, a step's pr_released
                                                     # proof, a pr_released event wait). "owner/repo" (compared as other repo names are: case, [github.moved]) = { checkout = "/absolute/path" }: a pull
                                                     # request of that repository is live when its merge commit is an ancestor of that checkout's HEAD, which the server reads itself (read-only git, with a
                                                     # timeout; a client never names a path). A repository not listed is refused, naming the ones that are. ABSENT = none: only this repository's pull
@@ -293,7 +293,7 @@ infra = "infra"
 [scopes.by_prefix]
 "infra/" = "infra"
 
-[project_scopes]                                    # optional: the scopes of the project picker (client.py get projects); without this section these are the defaults
+[project_scopes]                                    # optional: the scopes of the project picker (stackshot/fleet/client.py get projects); without this section these are the defaults
 order = ["general"]                                 # the scopes, in the order the picker shows them (default ["general"]); an agent of a project is called <scope>-<slug>-main
 default = "general"                                 # the scope a page falls to when none matches (also where [router] general_<scope> falls back to)
 # orgs = ["general"]                                # the scopes a page may name as its `org:` (default: every scope in order)
@@ -301,7 +301,7 @@ retired_statuses = ["archived", "retired", "closed", "done", "dropped", "complet
 # [project_scopes.by_prefix]                        # page key prefix -> scope, e.g. "infra/" = "infra"
 # [project_scopes.by_tag]                           # page tag -> scope, e.g. infra = "infra"
 
-[project_agent]                                     # optional: who may add an agent to a listed project without a session (client.py post project-agent), rename an agent's page entry (post project-agent-rename) and drop a retired agent (post project-agent-retire); without this section these are the defaults
+[project_agent]                                     # optional: who may add an agent to a listed project without a session (stackshot/fleet/client.py post project-agent), rename an agent's page entry (post project-agent-rename) and drop a retired agent (post project-agent-retire); without this section these are the defaults
 form_senders = []                                  # the labels of the fleet tool's New session form, e.g. ["sala-web", "sala-retire"] (sala-retire = sala's retire step, post project-agent-retire). A call is the form's only when its --sender is one of these AND ...
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 21 (the web terminal's project calls).
 form_machines = []                                  # ... the machine its token proves is one of these, e.g. ["myhost"] (a label alone proves nothing: any token holder can type it). [] = no call is the form's
@@ -323,7 +323,7 @@ ssh_cmd = ""                                        # the command an ssh_hosts m
                                                     # default: the `cmd:` command of `installed`, else `self_cmd` (here: ~/.local/bin/claude --version). `~` is the host's own home
 latest = "npm:@anthropic-ai/claude-code"
 
-[runners]                                           # the CI runners page, /runners (runners.py): count cards, then every CI runner GitHub lists by machine: idle, running, disabled or offline,
+[runners]                                           # the CI runners page, /runners (stackshot/web/runners.py): count cards, then every CI runner GitHub lists by machine: idle, running, disabled or offline,
                                                     # with a Disable / Enable button per machine (switch_script below). Every key is optional; what is shown is the default: nothing names a person or a machine, so a fresh install lists no runners until `owner` and `repos` are set. The whole table is optional: no [runners] table, or an empty `repos`, = the board does not use runners (the page and the side panel's Runners section say so in one plain line; nothing is read). Read where used, so a reload applies
 owner = ""                                          # GitHub owner (login) of the repos; "" = none set: only the address of a repo with no ID below, and the fallback for links; where a repo's runners live (the repo, or its organization) is read from GitHub
 repos = []                                          # the repos whose runners are read (an instance lists its own, e.g. ["myrepo"]), with the server's GitHub login (ghsync.token): each repo's own runners, GET /repos/<owner>/<repo>/actions/runners,
@@ -364,11 +364,11 @@ switch_timeout_s = 90                               # one button press is given 
 # box-b = "box-b"
 
 [gbrain]
-bin = "gbrain"                                      # the gbrain command line, a name on PATH or a path (~ allowed): only a [pages] flavor = "gbrain" instance uses it (rename_page.py, page_keeper.py, the router's timeline notes). Read at start of those tools
+bin = "gbrain"                                      # the gbrain command line, a name on PATH or a path (~ allowed): only a [pages] flavor = "gbrain" instance uses it (stackshot/projects/rename_page.py, stackshot/projects/page_keeper.py, the router's timeline notes). Read at start of those tools
 mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 # home = ""                                         # GBRAIN_HOME for the default brain's gbrain CLI calls; unset = the CLI's own default (the environment is left as it is)
 
-# [[brains]]: second notes brains that hold some projects' pages (brains.py). Optional: with no entry every page lives in the default brain
+# [[brains]]: second notes brains that hold some projects' pages (stackshot/projects/brains.py). Optional: with no entry every page lives in the default brain
 # above ([paths] brain for reads, the gbrain CLI for writes), exactly as before. Each entry is reached the same two ways as the default one:
 # its own local git copy, read only for stackshot (another process keeps it synced), and the gbrain CLI run with GBRAIN_HOME=<home>, the home
 # folder that holds that brain's own configuration and sign-in. Every page read (the registry, create's page check, the page hook, pages owed,
@@ -414,8 +414,8 @@ quiet = { drive = 1800 }                            # per event kind: after the 
 quiet_max_hold = 10800                              # s: a burst that never goes quiet still reports this often
 gmail_poll_seconds = 300                            # a mailbox Google will not push for is read this often (poll external servers sparingly)
 gmail_topics = {}                                   # per account: the Pub/Sub topic in its OAuth client's own Cloud project, "user@example.com" = "projects/<id>/topics/<name>"
-google_oauth_envs = {}                              # anchor-hub-google-auth.py: label → an oauth.env with GOOGLE_OAUTH_CLIENT_ID/SECRET, e.g. { team = "~/.config/example-google/oauth.env" }
-require_sender = false                              # push.py refuses a drop that names no sender (--from or $PUSH_FROM). false (the bridge
+google_oauth_envs = {}                              # stackshot/anchors/anchor_hub_google_auth.py: label → an oauth.env with GOOGLE_OAUTH_CLIENT_ID/SECRET, e.g. { team = "~/.config/example-google/oauth.env" }
+require_sender = false                              # stackshot/fleet/push.py refuses a drop that names no sender (--from or $PUSH_FROM). false (the bridge
                                                     # while callers switch): it is labelled with the calling program's name instead
 
 [pilot]                                             # the router-and-agent model: it holds for EVERY project page of the registry (a top-level page key, projects/ or infra/ ...), its sub-pages with it
@@ -436,7 +436,7 @@ never_named = []                                    # background agents the serv
                                                     # ["my-audit"] (the daily board audit).
                                                     # A listed agent can still be named by hand (needs=)
 
-# [job_gap.repos]                                   # `client.py post job-gap open <timer> <code> --repo <owner/name>` (sala's job-gap watcher) files one item per gap in a scheduled job, under the project page
+# [job_gap.repos]                                   # `stackshot/fleet/client.py post job-gap open <timer> <code> --repo <owner/name>` (sala's job-gap watcher) files one item per gap in a scheduled job, under the project page
                                                     # that owns the repo that holds the job's script, moved by that project's builder. This table maps "owner/name" (compared as other repo names are: case, [github.moved]) to
                                                     # the project page key; a repo it does not list is refused (400, naming the ones it does). ABSENT = no repo is listed (the code names none).
                                                     # Uncomment the header and the lines you need. Read at each call: a reload applies it
@@ -466,7 +466,7 @@ login_shell = true                                  # true = the call starts fro
 page_debt = false                                   # the page-debt call (step 3b), made with each audit run ([audit] at: twice a day in the example): true = per page, one thin call proposes the Current-state edit for the page debts that moved to the keeper; false = nothing runs
 page_debt_shadow = true                             # true = it only logs (<state>/router/page_debt.jsonl) and the 30-minute relay to the keeper stays as it is; false = LIVE: the edit is put on the page (revision-checked), the debt settled, what cannot be applied goes to the page's agent, else the builder, else the -main agent, and the 30-minute relay stops
 live_tick_seconds = 60                              # how often the live tick looks for notices the router holds (a call is made only when there are some)
-hold_notices = true                                 # a notice that asks nothing of a background agent (an item closed or changed, a place in the queue, a page-owed or audit reminder, a message marked fyi) is held and handed over with the agent's next turn instead of starting one (held.py); false delivers every notice as before. Read at each use
+hold_notices = true                                 # a notice that asks nothing of a background agent (an item closed or changed, a place in the queue, a page-owed or audit reminder, a message marked fyi) is held and handed over with the agent's next turn instead of starting one (stackshot/waits/held.py); false delivers every notice as before. Read at each use
 digest_hour = 9                                     # the hour (0-23, the instance timezone) from which the day's digest of held notices is logged (live.jsonl, kind digest_logged; not delivered), once a day per project, only when the list is not empty; a digest with a notice the router could not rule goes to the project's builder (else its -main agent, marked [for <owner>]); a server down then does it when it is back the same day. A page's quiet-hour holds go to their own agent instead. Read at each use
 notes = true                                        # a `note` on a ruling is written to the project page's timeline (source "stackshot (router)"), once per notice; false = notes are ignored. Read at each use
 
@@ -474,7 +474,7 @@ notes = true                                        # a `note` on a ruling is wr
 account_id = ""                                     # Cloudflare account id, when this instance is an MCP Portal server; empty: install.sh skips the portal-sync unit
 server_id = "stackshot"                             # this instance's entry in the portal
 token_file = "~/.config/stackshot/portal-token"
-catalog_file = ""                                   # the connector catalog `connectors.py build` writes after every sync: the portal's entries
+catalog_file = ""                                   # the connector catalog `stackshot/fleet/connectors.py build` writes after every sync: the portal's entries
                                                     # joined with the CLI's connector names, which every hook reads to tell a direct call from a call inside
                                                     # a portal Code Mode script; "" = <paths.state>/connectors.json
 catalog_commit = false                              # true: a changed catalog is committed and pushed in the git checkout that holds it (an instance's
@@ -504,10 +504,10 @@ slack_command = ""                                  # an urgent row (a due date 
                                                     # path: stackshot holds no Slack posting credential of its own, so name a script that already posts
 
 [idle]                                              # no idle pass runs any more (the stall pass and the hand-off ladder move a quiet mover); two keys of this section are still read
-hours = 4                                           # the expected time of a plain on-agent item (no needs, no hold): this many hours after its state clock (waiting.py). 0: the default days
+hours = 4                                           # the expected time of a plain on-agent item (no needs, no hold): this many hours after its state clock (stackshot/waits/waiting.py). 0: the default days
 park_days = 3                                       # only a raise stored with a "Park until" button (an older form) still reads this, as the fallback day of that button
 
-[stall]                                             # the stall pass (stall.py): an open, live item whose mover is a session (a front agent included) is moved on by stackshot when
+[stall]                                             # the stall pass (stackshot/waits/stall.py): an open, live item whose mover is a session (a front agent included) is moved on by stackshot when
                                                     # that session has no turn running for `minutes`: the CLI's registry says the pane is idle and its status changed that long ago (a pane that
                                                     # starts a turn restarts the count). Steps, each `minutes` after the one before it: the notice goes to the mover once more; the hand-off's cold
                                                     # call (`claude -p`, [model] cold_call) names who takes it, at most once per item in 24 hours; the project's builder; when none can take it the
@@ -534,7 +534,7 @@ max_per_tick = 5                                    # how many first steps (the 
                                                     # subagent running shows busy and is left alone). A front agent is never sent an item notice: its first
                                                     # step is the History line alone and a raise shows on the For-you list.
 
-[ladder]                                            # the one ladder (ladder.py): the hand-off ladder (an untaken hand-off) and the stall ladder (a pane with no turn running) become one record per item and one order:
+[ladder]                                            # the one ladder (stackshot/waits/ladder.py): the hand-off ladder (an untaken hand-off) and the stall ladder (a pane with no turn running) become one record per item and one order:
                                                     # ask the mover; `look_minutes` later, and only then, look at its pane (no turn running: the notice again; a background agent's pane is not read: its rungs go by the item's own work line, a `work` line in progress changed within 90 minutes holds the ladder, and a live pane stops at the look); the cold call; the project's builder; when none can take it, ONE message to
                                                     # the fleet's builder ([fleet] operator_session), the item staying with its mover. The hand-off audit and the silence audit still bring the item; an untaken hand-off is the hand-off audit's
                                                     # alone, so an item never climbs two ladders. The sender rung and the separate reminder are gone (a background agent is asked like any mover). The rungs after the ask are taken by the stall pass, so they wait while it
@@ -553,10 +553,10 @@ silence = false                                     # false (the default): a pan
                                                     # logged. A missing section or key means 30. Live (read at use)
 minutes = 30                                        # how long after his last prompt in a pane he counts as there
 
-[step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (step_proof.py).
+[step_proof]                                        # a step of an item's next that names the event which finishes it (a pull request merged or released) is ticked by the server (stackshot/model/step_proof.py).
                                                     # Without a switch, the first pass of the server's clock after a start only logs what it would do (and keeps it in <state>/step-proof-dry.json);
                                                     # the passes after it act. Set it to decide for yourself:
-# live = true                                       # act from the first pass; false: only ever log (`client.py sweep-step-proof` still acts when it is run by hand)
+# live = true                                       # act from the first pass; false: only ever log (`stackshot/fleet/client.py sweep-step-proof` still acts when it is run by hand)
 
 [check]                                             # the done check: an item handed to another session carries metadata.check,
                                                     # one of pr_merged <owner>/<repo>#<n> · item_closed <id> · lane <session> <lane> · unit_active <unit>;
@@ -567,7 +567,7 @@ minutes = 30                                        # how long after his last pr
 github_minutes = 5                                  # one pull request is read at most this often (one GET, shared by the items that name it; while GitHub is
                                                     # down the wait doubles up to an hour). 0 = every pass. Live
 
-[waiting]                                           # the one rule for an item that waits (waiting.py): every open item has a mover (the one party whose move it
+[waiting]                                           # the one rule for an item that waits (stackshot/waits/waiting.py): every open item has a mover (the one party whose move it
                                                     # is now: a session, the owner, an outside party, or for an `after` item the item it waits on) and an expected-by
                                                     # time (when that move is due), computed from its wake, due date, hold, pane recycle, check or needs.
                                                     # An item past its expected-by is surfaced whatever kind of wait it is in, held and `after` items included.
@@ -583,25 +583,25 @@ basis_weekday = 0                                   # the weekday (0 = Monday �
                                                     # real-world date, for a person to check the dates still hold
 default_days = 3                                    # a needs wait on the owner or an outside party with no date of its own is expected this many days after it was set (a wait on an agent session: agent_hours)
 agent_hours = 3                                     # a wait on an agent session that is not stored as doing (needs a session, or a done check whose needs names one) is expected this many hours after it was set; an item stored as doing carries no expected time
-dated_wait_min_hours = 1                            # a doing item whose wake is more than this many hours out, with every open step dated for that day or later, is shown as waiting until then (dated_wait.py); nearer, it is work in hand
+dated_wait_min_hours = 1                            # a doing item whose wake is more than this many hours out, with every open step dated for that day or later, is shown as waiting until then (stackshot/waits/dated_wait.py); nearer, it is work in hand
 
-[model]                                             # the item model's write guards (model_guards.py): dead | alive | waiting. A create or update that would leave
+[model]                                             # the item model's write guards (stackshot/model/model_guards.py): dead | alive | waiting. A create or update that would leave
                                                     # an item wrong is refused with what is wrong and the fix: an alive item with no valid mover (the owner, a live session or the
                                                     # project's background agent), a wait without its input, post-wake mover, reason (his words or a real date) or end, a decision with a
                                                     # hold, a second mover in needs, a placeholder (TBD), a next line with no `<name>:` or one that reads as a wait, a next line that defers on an open item in words (once, after,
                                                     # when, until or before, then a board#N) while `after` does not name it, an alarming word
                                                     # (the words in `model_guards.ALARM`). A guard on a field runs when the write sets that field, the state checks when it
                                                     # sets a field that defines the state or the wait; a close is never refused. The brief carries one line with what the guards would
-                                                    # refuse on the items already there (tools/model_guard_report.py has it in full); those items are only reported, never changed
+                                                    # refuse on the items already there (stackshot/tools/model_guard_report.py has it in full); those items are only reported, never changed
 guards = true                                       # false: no write is refused by these guards (the report still reads). Live
 one_mover = true                                    # false: needs may name more than one mover again (two sessions, or decision plus a session); only that one guard is off. Live
 description_guard = "note"                           # a thick description (a paragraph over 300 characters, or over 400 with no `- ` bullet; fenced code and `>` quotes do not count) draws guidance
                                                     # Note = the write goes through and the
                                                     # reply carries the guidance (this release); refuse = the write is refused with it (a later release). Live
-rebullet_machines = []                              # the machines whose token may write through /client/rebullet, e.g. ["myhost"]; [] = none, the call is refused (tools/rebullet_descriptions.py --apply: an open item's description
+rebullet_machines = []                              # the machines whose token may write through /client/rebullet, e.g. ["myhost"]; [] = none, the call is refused (stackshot/tools/rebullet_descriptions.py --apply: an open item's description
                                                     # rewritten as bullets, as the author `rebullet`, with nothing lost; the state clock and confirm stay). The server box only. Live
                                                     #
-                                                    # The waits' watchers (watchers.py). They act ONLY on an item that stores a wait_kind (time | item | anchor | relay | event);
+                                                    # The waits' watchers (stackshot/waits/watchers.py). They act ONLY on an item that stores a wait_kind (time | item | anchor | relay | event);
                                                     # every other item keeps today's wake pass and `after` release until the step 4 migration. When the wait ends
                                                     # the item turns alive with its post-wake mover, who is told in one line (several items for one recipient in one pass are one message):
                                                     # a time wait at its wake; an item wait when the last `after` item closes; an anchor wait when anchor-hub's notice for the anchor reaches
@@ -612,7 +612,7 @@ watchers = true                                     # false: none of these trans
                                                     # the `after` release). Live
 pause = false                                       # true: the board-wide pause (after an outage or a limit stop): no wait ends and no wake fires (today's wake pass included); set it back
                                                     # to false and every one that came due fires in one pass, one message per recipient. Live
-# The hand-off (handoff.py): an alive item whose mover changes to another session is handed over, and the hand-over is recorded on the item
+# The hand-off (stackshot/waits/handoff.py): an alive item whose mover changes to another session is handed over, and the hand-over is recorded on the item
 # (metadata.handoff: to, from, at, delivered_at, taken_at). The clock starts when the push to the new mover is delivered and stops at that session's first write that shows work started
 # on the item (a step marked done, a work line in progress or done, the item closed; a note or a confirm does not), or when its turn ends with no write. A hand-off nobody takes goes to the project's builder, then (cold_call) to one `claude -p` call that answers hand to
 # <session> | close with <outcome> | ask the owner; only when none can take it, back to the sender, else the fleet's builder is sent one message. The clock and the gone-mover pass act only on
@@ -625,9 +625,9 @@ cold_call = true                                    # false: no `claude -p` call
 handoff_idle_seconds = 20                           # a session idle this long without a write counts as having ended its turn on the item
 handoff_gone_days = 14                              # a mover with no pane is looked for only on items written in the last this many days (older ones are the migration's)
 #
-# The migration onto the item model (migration.py and tools/migrate_model.py: the script plans, this server applies each write through POST /client/migrate as the author
+# The migration onto the item model (stackshot/model/migration.py and stackshot/tools/migrate_model.py: the script plans, this server applies each write through POST /client/migrate as the author
 # `migration`: no hand-off recorded, no notice sent, no clock moved; the server holds the board-wide pause itself while the pass runs and lifts it at the end, when what came due fires in one
-# batch; the end sends nothing: the per-owner texts of what each owner must set by hand are written down by the script, and `tools/migrate_model.py --send-wake <dir>` sends them once a person has read them). The switchover is a separate, later switch: the model becomes the board's one rule. Run the migration first; with it on, every open item carries its mover and its wait.
+# batch; the end sends nothing: the per-owner texts of what each owner must set by hand are written down by the script, and `stackshot/tools/migrate_model.py --send-wake <dir>` sends them once a person has read them). The switchover is a separate, later switch: the model becomes the board's one rule. Run the migration first; with it on, every open item carries its mover and its wait.
 migration = false                                   # true: POST /client/migrate (the pass above) answers; false (the default): it answers 403 to everyone. The operator turns it on for the run and off after.
                                                     # Even on, only a sender in migration_senders, with a token of a machine in migration_machines, may begin, apply or end a pass (only the caller
                                                     # that began one may apply or end it), and one pass holds the board for an hour at most, whatever renews it. Live
@@ -676,7 +676,7 @@ injected_prefixes = []                              # e.g. ["[auto-note]", "Rela
 injected_phrases = []                               # e.g. ["pasted by the relay tool"]
                                                     # STOPGAP: a message that contains any of these (spawn's fixed wording) is refused as not his
 
-[client]                                            # one machine's half (client.py): where it reaches the server; the server box itself uses its local port (<secrets>/client.url)
+[client]                                            # one machine's half (stackshot/fleet/client.py): where it reaches the server; the server box itself uses its local port (<secrets>/client.url)
 url = "https://stackshot.example.com"
                                                     # (the mode keys of — reads, sessions, delivery, liveness — are gone since an earlier change: a machine off the server box
                                                     # reads through the client API, the server knows its sessions from its own clients, a line for another machine waits
@@ -705,7 +705,7 @@ session_links = ""                                  # the fleet tool's live stor
                                                     # tool writes for its transcript id there (stackshot builds none; no row or an empty url = no link, a
                                                     # missing store is logged once). e.g. "~/.local/state/salamander/fleet" (sala's heartbeat store).
                                                     # "" = no session links. Cloud/Cowork sessions keep their claude.ai link.
-                                                    # The same directory holds <letter>/session-registry.json, the fleet tool's permanent session ids (sessions_registry.py): with it a
+                                                    # The same directory holds <letter>/session-registry.json, the fleet tool's permanent session ids (stackshot/fleet/sessions_registry.py): with it a
                                                     # session is stored on an item by that id and shown by its current name; without it (or with "") nothing changes.
                                                     # (board.md and the brief still give this link; the web pages link a name to session_view instead.)
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 1 (Heartbeat fleet store); the registry file beside it is 19 (Session registry file).
@@ -726,7 +726,7 @@ lanes_file = ""                                     # the fleet tool's lane reco
 limit_file = ""                                     # the fleet tool's usage-limit watch state (sala's SALA_LIMIT_STATE, e.g. "~/.claude/salamander-limit.json"). Not read any more: it
                                                     # served the re-send of an unruled notice to a keeper, which went with the old routing; the key stays so an existing config loads
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 12 (Lanes and limit state).
-recycle_env_prefix = ""                             # `client.py recycled` (the fleet tool's end-of-recycle hook) reads a flag it is not given from
+recycle_env_prefix = ""                             # `stackshot/fleet/client.py recycled` (the fleet tool's end-of-recycle hook) reads a flag it is not given from
                                                     # <prefix>KIND, STARTED, FLAG_AT, RESULT and SKIPPED in the environment, e.g. "SALA_RECYCLE_". "" = flags only
                                                     # Contract: stackshot-contracts.md in howardpark-ai/salamander, 4 (Post-recycle hook).
 session_ttl_hours = 12                              # a session registered by its hook on a machine with no puller is marked gone after this long without a sign of life
@@ -746,7 +746,7 @@ owner_mover_kind = "legacy"                         # the `mover.kind` of an ite
 [keywords]                                          # extra words for the matchers that read free text. They ship with English words only; a language the instance writes in adds its own here.
 # Each list ADDS to the English words (it never replaces them), and a missing section or key is an empty list: the English behavior, exactly. A "words" list holds literal words or
 # phrases (case-insensitive where the script has case; a space inside a phrase stands for any run of white space); a "patterns" list holds regular expressions (Python `re` syntax).
-# Read at each use: a reload (SIGHUP) takes a change at once. A section or key this version does not read, and a pattern that does not compile, are named by `./stackshot doctor`.
+# Read at each use: a reload (SIGHUP) takes a change at once. A section or key this version does not read, and a pattern that does not compile, are named by `bin/stackshot doctor`.
 
 [keywords.step_commands]
 shell_names = []                                    # (words) other-language names of a shell (the English ones are PowerShell, pwsh, WSL, terminal, shell, console): a text that names one asks the owner to run something there

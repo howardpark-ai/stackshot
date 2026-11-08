@@ -76,7 +76,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, waiting as W, model, model_guards as mg
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -781,10 +781,10 @@ set_cfg(); server._GUARD_REPORT.update(at=0.0, rep=None)
 snap = {p.name: p.read_text() for p in (T / "store/a").glob("*.json")}
 server._model_report(0)
 check("report: existing items are only read: no file changed", snap == {p.name: p.read_text() for p in (T / "store/a").glob("*.json")}, None)
-cli = subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"})
+cli = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"})
 check("report: tools/model_guard_report.py prints the full report", cli.returncode == 0 and "model guards on 14 open and 3 closed items" in cli.stdout and "mover: 2: board#2, board#3" in cli.stdout, (cli.returncode, cli.stdout[:500], cli.stderr[-500:]))
-cl = subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--line"], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"})
-check("report: …--line the one line, --json the ids", cl.stdout.startswith("model guards would refuse on existing items: mover 2") and json.loads(subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--json"], capture_output=True, text=True,
+cl = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--line"], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"})
+check("report: …--line the one line, --json the ids", cl.stdout.startswith("model guards would refuse on existing items: mover 2") and json.loads(subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--json"], capture_output=True, text=True,
       env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"}).stdout)["guards"]["mover"] == ["a2", "a3"], cl.stdout[:300])
 
 # ---- 6d, the dry run: the open items that already have the owner-as-mover mismatch (tools/model_guard_report.py --owner-mover [--store DIR])
@@ -799,15 +799,15 @@ check("dry run: owner_mover_rows lists the open items with the owner as mover an
       and rows[0]["subject"] == "[home] the owner moves a doing item" and rows[0]["mover"] == OWN and rows[0]["state"] == "doing" and rows[1]["state"] == "doing (derived)" and rows[0]["creator"], rows)
 check("dry run: …the report's guard count agrees", sorted(mg.report({f"a{i}": rd(i) for i in range(18, 24)}, ctx).ids.get("owner_mover", [])) == ["a18", "a21"], None)
 env_ = {**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"}
-cd = subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
+cd = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
 check("dry run: tools/model_guard_report.py --owner-mover --store DIR prints a count and one line per item", cd.returncode == 0 and cd.stdout.startswith("2 open item(s) with the owner as mover and no step or ask")
       and "board#18 | [home] the owner moves a doing item | mover " + OWN + " | state doing | created by " in cd.stdout and "board#21 |" in cd.stdout and f"board#{BID_B}" not in cd.stdout and "board#22" not in cd.stdout, (cd.returncode, cd.stdout, cd.stderr[-300:]))
-cj = subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--owner-mover", "--json", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
+cj = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--owner-mover", "--json", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
 check("dry run: …--json is the list of records", cj.returncode == 0 and [r["id"] for r in json.loads(cj.stdout)] == ["a18", "a21"] and set(json.loads(cj.stdout)[0]) == {"id", "subject", "mover", "state", "creator", "gap"}, cj.stdout[:300])
 snap2 = {pth.name: pth.read_text() for pth in (T / "store/a").glob("*.json")}
-subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
+subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
 check("dry run: read only: no file of the store changed", snap2 == {pth.name: pth.read_text() for pth in (T / "store/a").glob("*.json")}, None)
-cn = subprocess.run([sys.executable, os.path.join(STACK, "tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "no-such-folder")], capture_output=True, text=True, env=env_)
+cn = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "no-such-folder")], capture_output=True, text=True, env=env_)
 check("dry run: --store with a missing folder is an error, not an empty report", cn.returncode == 2 and "not a folder" in cn.stderr, (cn.returncode, cn.stderr))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

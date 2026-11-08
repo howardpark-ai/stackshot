@@ -40,7 +40,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""), flush=True)
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 from starlette.testclient import TestClient
 
@@ -182,7 +182,7 @@ with TestClient(app) as c:
     HOME = c.get("/", cookies={"stackshot_ui": cookie()}, headers=NAV, follow_redirects=False).text          # the page as drawn, for its scripts
 
 # ================================================================= 5. the page's scripts, run
-import ui.render as R, ui.runners as RN
+import stackshot.web.ui.render as R; import stackshot.web.ui.runners as RN
 NODE = shutil.which("node")
 HARNESS = r"""
 const fs = require('fs'), vm = require('vm');
@@ -253,7 +253,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
     o = run_rcv("signedout")
     check("…and, working until the page's own poll says signed out, it asks no more after that (the interval and the swap event)", o.get("first") == 1 and o.get("total") == 1 and o.get("ints", 0) >= 1, o)
 check("the audit-now click and the panel-order save read a 401 as signed out (the old redirect wording)",
-      "if(r.redirected||r.status===401)return[0,'']" in R._AUDIT_JS and "(e===403||e===401?': sign in to the board to keep it.'" in pathlib.Path(STACK, "ui/render.py").read_text(encoding="utf-8"))
+      "if(r.redirected||r.status===401)return[0,'']" in R._AUDIT_JS and "(e===403||e===401?': sign in to the board to keep it.'" in pathlib.Path(STACK, "stackshot/web/ui/render.py").read_text(encoding="utf-8"))
 check("the page's banner has a Signed out line with a link that opens the page again (a visit signs in)", '<span class="c-out">Signed out — <a href="/" id="conn-signin">sign in again</a></span>' in HOME
       and ".conn.out .c-out{display:inline}" in HOME and 'href=""' not in HOME)
 check("the Runners page's script stops asking after a 401 (it keeps a flag, and neither the timer nor the visibility event asks again)", "if(r.status===401)throw 'login'" in RN._JS and "if(busy||gone)return" in RN._JS and "if(e==='login')gone=true" in RN._JS)

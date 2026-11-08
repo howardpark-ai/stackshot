@@ -167,8 +167,8 @@ def check(name, cond, got=None):
 def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
-import server, ghsync as G
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
@@ -538,7 +538,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("Done drops a hold and its wake, and decision and the old one-word kind from needs (the session stays)", "hold" not in m22 and "wake" not in m22 and "hold_set" not in m22 and m22["needs"] == [AGENT] and m22.get("mover") == "home-agent", m22)
     check("Done with a choice in the form is an ordinary answer, not a step (a stale option, act=done)", server._answer("a17", "Approve", "", "done") == "decision" and "Done" not in [a.get("choice") for a in rd("a", 17)["metadata"]["answers"]], rd("a", 17)["metadata"])
     # G1: Done keeps the owner's words behind a far due date (as the watcher's arrival does) and drops those behind the wake
-    import waiting as _waiting
+    from stackshot.waits import waiting as _waiting
     check("fixture: the due date's cap is lifted by the owner's words", _waiting.cap_words(rd("a", 23)["metadata"], "due"))
     post("/items/a23/answer", {"token": tok("a23"), "act": "done", "text": ""}); m23 = rd("a", 23)["metadata"]
     check("Done keeps cap_ok's due words (the cap stays lifted for the due date, so the item does not resurface early) and drops the wake, the hold and the wake's words",

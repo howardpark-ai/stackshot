@@ -63,11 +63,11 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import sessions_registry as sr
+from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-import server, client, model as M, home as H_
+from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_
 server._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:

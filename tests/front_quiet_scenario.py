@@ -68,8 +68,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, handoff as H, routing, held, quiet as Q
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.router import routing; from stackshot.waits import held; from stackshot.waits import quiet as Q
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
@@ -358,7 +358,7 @@ for name in ("_tell_owner_close", "_tell_owner_check_closed", "_close_owner_noti
     check(f"9 wiring: {name} tells a close as kind close", '_tell_kind("close"' in src(getattr(server, name)) or '_tell_kind("close" if' in src(getattr(server, name)), name)
 check("9 wiring: _tell_wait_failed tells a stuck item as kind stuck", '_tell_kind("stuck"' in src(server._tell_wait_failed))
 # (c) tag coverage: a tag passed to _tell_woken / _tell_kind is in the map (owner and observer are mapped to progress, no exemption by name), so a new tag is a decision
-sv = pathlib.Path(STACK, "server.py").read_text(encoding="utf-8")
+sv = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 tags = set(re.findall(r'tag="([a-z_]+)"', sv))
 missing = sorted(t for t in tags if t not in server._FRONT_TAG_KIND)
 check("9 tags: every tag the server passes to the gate is in _FRONT_TAG_KIND; a new tag names its kind", not missing, missing)
@@ -379,7 +379,7 @@ check("9 hand-back: …a project with no builder tells nobody (the item stays wi
 
 # ================================================================ 10. the review round
 import inspect as _insp
-import config as _config
+from stackshot.core import config as _config
 # (1) the owner-change fallback: progress, so the gate applies
 check("10 fallback: _tell_owner_change's last resort (the notice could not be recorded for the router) is a progress notice, not exempt", '_tell_kind("progress", gid, kept or stew' in _insp.getsource(server._tell_owner_change) and '_tell_kind("exempt"' not in _insp.getsource(server._tell_owner_change))
 _saved = (server._stand_in_keeper, server._anc.pilot_root, server._routing.record)

@@ -63,7 +63,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, model, watchers as wk, event_waits as EW, render, itempage, stall as S
+from stackshot.web import server; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S
 REAL_MERGED_PRS, REAL_GIT_COMMIT = server._merged_prs, server._git_commit      # before the checks below swap them for tables
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -148,7 +148,7 @@ server._merged_prs = lambda head, limit=3000: {9: ("sha9", now0 - 3600)}
 server._released_is_live = lambda sha, good, head: ""
 refused("write: a PR already merged and live is refused (nothing would ever report it)", lambda: server._update("a10", sender=BACK, wait_kind="event", wait_event="pr_released 9", ask_by=day(5), post_wake_mover=BACK), "already merged and live")
 MERGED, DEAD = {PR(9) if False else "o/r#9": True}, {"o/r#4": "its pull request was closed without being merged"}
-import ghbudget as _gbud
+from stackshot.core import ghbudget as _gbud
 GH_TAGS = []
 def fake_pr_merged(ref, now, gh_st):
     ref = server._check_ref(ref); GH_TAGS.append(_gbud.current())      # the ledger tag in force while the PR is read
@@ -195,7 +195,7 @@ check("release: the item that waits for the PR's release turns alive with its po
 check("release: …told in one line", len([x for x in sent("watch") if x[0] == "a20"]) == 1 and sent("watch")[0][1] == UB and "PR #13 is live" in sent("watch")[0][2], sent())
 check("release: …a wait for the merge of the same PR is over too (a release is a merge), another PR's wait is not", mt(22).get("mover") == BACK and mt(21).get("wait_kind") == "event" and "a21" not in [x[0] for x in sent("watch")], (mt(22), mt(21)))
 check("release: …a release again does nothing more", server._evwait_report(EW.event("pr_released", PR(13))) == [] and len(sent("watch")) == 2, sent())
-import handoff as HO
+from stackshot.waits import handoff as HO
 check("release: …and the event wake records the hand-off to the post-wake mover, from the server (the record follows the mover: none open names anyone else)",
       (mt(20).get("handoff") or {}).get("to") == BACK and (mt(20).get("handoff") or {}).get("from") == "stackshot" and not HO.stale(rd(20), BACK, server._ho_same), mt(20))
 
@@ -230,7 +230,7 @@ check("floor: a reported event older than the wait (the item was written after i
 check("floor: …a later one is", server._evwait_report(EW.event("recycle", machine="testbox"), now=now0 + 120) == ["a34"] and mt(34).get("mover") == BACK, mt(34))
 
 from starlette.testclient import TestClient
-import client
+from stackshot.fleet import client
 tok = open(client.mint("testbox")).read().strip()
 reset()
 with TestClient(server.mcp.http_app()) as c:
@@ -438,7 +438,7 @@ with contextlib.redirect_stderr(err): rc = client.main(["client.py", "event"])
 check("client.py event with no kind: usage on stderr, exit 1", rc == 1 and "usage: client.py event --kind" in err.getvalue(), err.getvalue())
 check("client.py's help names the verb and says how to wait for it", "client.py event --kind recycle|fleet_op|job_run" in client.__doc__ and 'wait_kind="event"' in client.__doc__, None)
 # ================================================================ the real reader behind _pr_merged is shared with the done check (pr_state.py)
-import pr_state as _prs
+from stackshot.github import pr_state as _prs
 class _Cl:
     repo_id = 0
     def __init__(self): self.calls = []

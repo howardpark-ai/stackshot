@@ -19,7 +19,7 @@ import _scratch, _colors as C
 
 tmp = _scratch.mkdtemp(prefix="rowsbg-"); (pathlib.Path(tmp) / "store").mkdir()
 logging.disable(logging.INFO)
-from ui import render
+from stackshot.web.ui import render
 css = render.Board(f"{tmp}/store")._css()
 
 fails = []; ran = []

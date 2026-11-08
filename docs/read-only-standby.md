@@ -11,7 +11,7 @@ again at takeover.
 
 `STACKSHOT_READ_ONLY=1` in the environment of the `stackshot.service` process and of the `anchor-hub.service`
 process. Exactly `1` turns it on; `0` or unset is normal mode (so is any other value, `true` and `yes` included). It is read once when the
-process starts (`readonly.py`, `is_read_only()` is the one place every gate asks), so a change needs a restart.
+process starts (`stackshot/core/readonly.py`, `is_read_only()` is the one place every gate asks), so a change needs a restart.
 
 It is an environment variable and not a config key on purpose: the data copy and the config file both come from
 the live box, so a key in either would be copied over and the switch would arrive on the live instance, or leave

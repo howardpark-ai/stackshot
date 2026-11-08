@@ -69,8 +69,8 @@ def refused(name, f, *want):
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server, draft as D, ghsync, home, model
-from ui import render as ui_render
+from stackshot.web import server; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.web.ui import render as ui_render
 
 def live_tools():
     """The tool text of this scenario's own instance: owner Oliver with his shell rule (box-a, PowerShell) and his aliases, as the tools render it for him. The expected
@@ -83,7 +83,7 @@ server._tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
 get = lambda i: server.stackshot_get(f"a{i}")
 
-import step_commands as SC, states
+from stackshot.model import step_commands as SC; from stackshot.model import states
 GUARDS = server._cfg.CFG.setdefault("model", {})
 HOW = dict(mover="Oliver", then="team-back", needs=["team-back"], state="your-step", next="team-back: check it")
 BOX = {"action": "/items/a4/answer", "token": "TOKEN", "sent": ""}
@@ -384,7 +384,7 @@ check("11 text: …update says which writes are refused and that the description
       all(t_ in SNAP11["update"]["description"] for t_ in ("adds a numbered line (`1.`, `2)`) or a `! ` line outside a fenced block", "the description is the background, never steps", "him as mover, in his step, or with his decision in needs")), None)
 
 # ================================================================ 12. the owner's next lines pass the step's Windows-command check
-import model_guards as mg
+from stackshot.model import model_guards as mg
 BARE = "Oliver: run `bash /home/user/notes/x.sh` in a terminal on box-a"
 WRAP = "Oliver: In PowerShell run `ssh -t box-a 'bash /home/user/notes/x.sh'`"
 BARE_BODY = "run `bash /home/user/notes/x.sh` in a terminal on box-a"
@@ -598,7 +598,7 @@ check("13 legacy: …and one that names its place goes through on a write that l
 refused_nw("13 legacy: rewriting its step still holding the command is refused (it moves to a line of next)", 92, lambda: upd(91, step="In PowerShell run `ssh -t box-a 'ls'` and say done"), "step: it carries a command")
 check("13 legacy: command_problem is still the check for a stored step with no place named", "does not say where it runs" in SC.command_problem("Run `ssh -t box-a 'ls'`") and SC.command_problem("In PowerShell run `ssh -t box-a 'ls'`") == "", None)
 check("13 text: nowhere in the step's own words, the guards or the page does a pointer 'numbered below' appear",
-      "numbered below" not in pathlib.Path(STACK, "step_commands.py").read_text(encoding="utf-8") + pathlib.Path(STACK, "states.py").read_text(encoding="utf-8") + pathlib.Path(STACK, "ui", "render.py").read_text(encoding="utf-8") + pathlib.Path(STACK, "server.py").read_text(encoding="utf-8"), None)
+      "numbered below" not in pathlib.Path(STACK, "stackshot/model/step_commands.py").read_text(encoding="utf-8") + pathlib.Path(STACK, "stackshot/model/states.py").read_text(encoding="utf-8") + pathlib.Path(STACK, "stackshot", "web", "ui", "render.py").read_text(encoding="utf-8") + pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"), None)
 
 # ================================================================ 14. no pane form on the board: a `! ` line in a step or in a Oliver: line of next is refused; the fix is the ssh form
 PANE_FIX = "\"In PowerShell:\" `ssh -t box-a '<command>'`"

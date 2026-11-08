@@ -57,7 +57,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:400]}" if got is not None else ""))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
@@ -111,7 +111,7 @@ check("a reboot on the other machine clears its owner's item (started 0 = now); 
       and told[0][1] == U["home-away"] and "the reboot you waited for has run (otherbox" in told[0][2] and "re-read a4 and resume" in told[0][2], (r, told))
 
 # ---- 3. over HTTP, with the machine's token
-import client
+from stackshot.fleet import client
 tok = open(client.mint("testbox")).read().strip()
 from starlette.testclient import TestClient
 app = server.mcp.http_app()
@@ -138,7 +138,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf): rc = client.main(["client.py", "recycle-wanted"])
 check("client.py recycle-wanted prints the count and the tokens as the server sent them", rc == 0 and buf.getvalue() == "2 a1@1700000000~salamander:pr4 a3\n", buf.getvalue())
 # puller-lag: sala's watchdog provisions the boxes whose puller is behind
-import clients as _cl
+from stackshot.fleet import clients as _cl
 _st = {"machines": {"box-c": {"fleet": "box-c", "puller_version": "2"}, "box-e": {"fleet": "box-e", "puller_version": "3"},
                     "box-a": {"fleet": "box-a", "puller_version": _cl.puller_current()}, "home-new": {"fleet": "home-new"},
                     "home-ahead": {"fleet": "home-ahead", "puller_version": "99"}}, "sessions": {}}

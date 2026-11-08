@@ -132,9 +132,9 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 (cp4 / "store/github.json").write_text(json.dumps({"repo": "o/r", "issues": {f"g{n}": n for n in (2, 3, 4, 5, 6)}, "aliases": {}}))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-import server, model, model_guards as mg, migration as M, cold_call as C, watchers as wk, handoff as ho, render
-from ui import render as ui_render
-import migrate_model as MM
+from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.web.ui import render as ui_render
+from stackshot.tools import migrate_model as MM
 OLIVER = model.owner_display()
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -188,7 +188,7 @@ check("hidden wait: a time wait needs a basis that names the real date; an item 
 # ================================================================ the plan
 items = MM.load_all()
 ctx = mg.Ctx(shown=M.shown)
-import anchors as _anc
+from stackshot.anchors import anchors as _anc
 anc = _anc.load()
 env = M.Env(items, ctx, anc, today)
 plan1 = M.plan_items(items, env)
@@ -286,7 +286,7 @@ b = call("begin")
 check("begin: the board-wide pause is held by the server itself, the config's own switch untouched", b.get("held") is True and b.get("pause") is False and wk.holding() and wk.paused() and server._handoff_paused() and not CFG.get("pause"), b)
 def _spied_runner():
     """The server's runner over its own table, every tick's function replaced by a recorder, so the table's board flags and the real hold are what is under test."""
-    import runner as _rn
+    from stackshot.core import runner as _rn
     r = server._make_runner(); _calls.clear()
     r.ticks = [_rn.Tick(t.name, (lambda n_: (lambda *a, **k: _calls.append(n_)))(t.name), t.group, t.pace, t.board) for t in r.ticks]
     return r
@@ -695,7 +695,7 @@ class OrderApp:
 try: MM.apply_writes(OrderApp(), plan.writes[:1], lambda res: [{"item": "board#36", "kind": "no_end", "fields": ["ask_by"]}], before_end=lambda pid, rows: order.append(("rows", pid, len(rows))))
 except RuntimeError: pass
 check("H3: the rows are written down before the end is called, even when the pass stops on an error", order == ["begin", "apply", ("rows", "20260101-000000-abcdef", 1), "end"], order)
-check("send-wake: it is a mode of its own (`--send-wake <dir>`), and a pass's end only keeps the texts", "--send-wake" in pathlib.Path(STACK, "tools/migrate_model.py").read_text() and "none sent" in pathlib.Path(STACK, "server.py").read_text(), None)
+check("send-wake: it is a mode of its own (`--send-wake <dir>`), and a pass's end only keeps the texts", "--send-wake" in pathlib.Path(STACK, "stackshot/tools/migrate_model.py").read_text() and "none sent" in pathlib.Path(STACK, "stackshot/web/server.py").read_text(), None)
 # H4: a row that asks for the post-wake mover is dropped once the item has one
 item(99, needs=[BACK], owner=UB, wait_kind="relay", wait_event="the notary", subject="[home] no post-wake mover yet")
 item(19, needs=[BACK], owner=UB, wait_kind="relay", wait_event="the notary", post_wake_mover=BACK, subject="[home] a post-wake mover set")
@@ -772,7 +772,7 @@ live_before = {p.name: p.read_text() for p in (T / "store/g").glob("*.json")}
 rdir = pathlib.Path(_scratch.mkdtemp(prefix="migrrep-"))
 env_ = {k: v for k, v in os.environ.items() if k != "STACKSHOT_CONFIG"}
 env_["STACKSHOT_CONFIG"] = str(T / "stackshot.toml")
-run = lambda *a, **kw: subprocess.run([sys.executable, os.path.join(STACK, "tools/migrate_model.py"), *a], capture_output=True, text=True, env={**env_, **kw.get("env", {})}, timeout=300)
+run = lambda *a, **kw: subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/migrate_model.py"), *a], capture_output=True, text=True, env={**env_, **kw.get("env", {})}, timeout=300)
 p = run("--dry-run", "--store", str(cp), "--no-cold", "--report-dir", str(rdir))
 reps = sorted(rdir.glob("*.json"))
 check("script: a dry run over a copy ends well and writes its report (JSON and markdown)", p.returncode == 0 and len(reps) == 1 and reps[0].with_suffix(".md").exists(), (p.returncode, p.stderr[-600:]))

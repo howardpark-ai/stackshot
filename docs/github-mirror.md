@@ -2,7 +2,7 @@
 
 What this page covers: mirroring items to GitHub issues, the write and read budgets, temporary ids, the inbound comment reader and anchor-hub conditional reads. Back to the [README](../README.md).
 
-**The GitHub mirror** (`ghsync.py`; slimmed by an earlier change). With `[github] sync` on, the store stays the working copy and every item has an
+**The GitHub mirror** (`stackshot/github/ghsync.py`; slimmed by an earlier change). With `[github] sync` on, the store stays the working copy and every item has an
 issue in `[github] issues_repo`, which gives it its number. The server's save calls the hook; a queue on disk (`<state>/github/queue/`)
 and a worker thread carry the writes, paced under GitHub's limits, and an outage only delays them. **An issue carries the item's subject
 (the title), whether it is open or closed (with the close reason) and its description (the body: a marker line that maps issue to item, the
@@ -12,7 +12,7 @@ issue fields (owner, needs, project, priority, due, wake), no blocked-by links, 
 store's files are the backup (the publisher pushes them to a repository you choose), and the item page's History is the store's git, with the mirror on
 or off. A change to a field the issue does not carry makes no job and so no GitHub call at all (`ghsync.mirrored`, `on_change`); what older
 versions wrote to GitHub (comments, labels, field values) stays as it is, nothing is cleaned up. With the mirror on, an `update`, `confirm` or `complete` that names no
-`sender` is refused instead of being credited to the item's mover (`client.py recycle-due` names its script). `ghmigrate.py` moves a store's open items onto issues #1 onward (old ids
+`sender` is refused instead of being credited to the item's mover (`stackshot/fleet/client.py recycle-due` names its script). `stackshot/github/ghmigrate.py` moves a store's open items onto issues #1 onward (old ids
 stay as aliases: `/items/<old id>` redirects); `[github] issue_ids` makes a new item's id its issue number, written
 `board#<n>`. A create while GitHub is down, or when the hour's write budget leaves no room within a few seconds (`ghsync.CREATE_WAIT`, so a create never hangs behind a backlog of updates), is not refused: the item gets a temporary id under `[github] local_letter`
 (`l1`, `l2`, …, never reused), its create waits in the queue, ahead of every other job, and when GitHub answers or the budget has room the worker creates the issue,

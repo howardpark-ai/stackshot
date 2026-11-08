@@ -69,7 +69,7 @@ def accepted(name, f):
     except Exception as e:
         check(name, False, str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import server
+from stackshot.web import server
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None

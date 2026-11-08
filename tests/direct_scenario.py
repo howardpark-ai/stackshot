@@ -51,8 +51,8 @@ sys.modules.update({"slack_sdk": types.SimpleNamespace(WebClient=Web), "slack_sd
                     "slack_sdk.socket_mode.request": types.SimpleNamespace(SocketModeRequest=object),
                     "slack_sdk.socket_mode.response": types.SimpleNamespace(SocketModeResponse=lambda envelope_id: envelope_id)})
 
-from anchorhub import core, slack
-import config, routing
+from stackshot.anchors.anchorhub import core, slack
+from stackshot.core import config; from stackshot.router import routing
 ZONE_OFFSET = 4 * 3600                 # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
 T0 = 1790812800.0 - ZONE_OFFSET        # 2026-10-01 00:00 +04 (1790812800 is 2026-10-01 00:00 UTC) = 2026-09-30 20:00 UTC
 clock = types.SimpleNamespace(t=T0)

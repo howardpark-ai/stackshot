@@ -69,12 +69,12 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-import pages as p
+from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-import sessions_registry as sr, anchors as A, inbox, push
+from stackshot.fleet import sessions_registry as sr; from stackshot.anchors import anchors as A; from stackshot.fleet import inbox; from stackshot.fleet import push
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
-import server
-from ui import render as ui_render
+from stackshot.web import server
+from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 def create(owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner=owner, **{"mover": owner, "next": f"{owner}: carry on", **kw})
 def item(gid): return json.loads(server._path(gid).read_text(encoding="utf-8"))
@@ -334,7 +334,7 @@ check("roles.json: `sessions` is keyed by name as before; `ids` is the extra key
       "home-sparrow-main" in j["sessions"] and j["ids"].get("home-sparrow-main") == S["main"] and j["ids"].get("site-builder") == S["eng"] and "home-sparrow" in j["ids"] and set(j) == {"generated", "sessions", "ids"}, j)
 
 # ---- 8. the migration: a read-only dry run on the command line; the apply and the rollback run inside the server, from a request file
-import session_ids as sid, threading
+import threading; from stackshot.fleet import session_ids as sid
 # an open item that stores a transcript id, one a name, a closed item, an ambiguous name, a cloud id, a person
 mig = {}
 mig["tr"] = create("home-sparrow-docs").split()[1]; it = item(mig["tr"]); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; it["metadata"]["needs"] = ["decision", "site-builder", "home-twin", "cse_0123456789abcdefghijklmn", "some-outsider"]
@@ -360,7 +360,7 @@ kept = {(g, f, v): why for g, f, v, why in rep["kept"]}
 check("dry run: an ambiguous name, a cloud id and a person are kept, each with the reason", kept.get((mig["tr"], "needs", "home-twin"), "").startswith("ambiguous")
       and (mig["tr"], "needs", "cse_0123456789abcdefghijklmn") in kept and (mig["tr"], "needs", "some-outsider") in kept and "cloud" in kept[(mig["tr"], "needs", "cse_0123456789abcdefghijklmn")], rep["kept"])
 check("dry run: the summary says what and how many", "would change: " in sid.summary(rep, False) and "kept: " in sid.summary(rep, False) and "dry run (nothing written)" in sid.summary(rep, False))
-run_py = lambda *a, **k: subprocess.run([sys.executable, str(pathlib.Path(STACK, "session_ids.py")), *a], capture_output=True, text=True, **k)
+run_py = lambda *a, **k: subprocess.run([sys.executable, str(pathlib.Path(STACK, "stackshot/fleet/session_ids.py")), *a], capture_output=True, text=True, **k)
 r = run_py("migrate", "--apply")
 check("the command has no apply of its own: --apply is a usage error and writes nothing", r.returncode != 0 and "usage" in (r.stderr + r.stdout) and digest() == d0 and not sid.request_path().exists(), (r.returncode, r.stderr[-200:]))
 r = run_py("migrate", "--dry-run", env={k: v for k, v in os.environ.items() if k != "STACKSHOT_CONFIG"} | {"HOME": str(T)})
@@ -441,7 +441,7 @@ LEDGER = server._owed_path(); E = lambda: {"ts": time.time(), "item": "s11"}
 def clear(*args, sid_=Tr["main_b"], env_extra=None):
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_SESSION_ID"} | (env_extra or {})
     if sid_: env["CLAUDE_CODE_SESSION_ID"] = sid_
-    r = subprocess.run([sys.executable, os.path.join(STACK, "pages.py"), "clear", *args], capture_output=True, text=True, env=env)
+    r = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/projects/pages.py"), "clear", *args], capture_output=True, text=True, env=env)
     return r.returncode, r.stdout
 led = lambda: json.loads(LEDGER.read_text(encoding="utf-8"))
 LEDGER.write_text(json.dumps({"projects/alpha": {S["main"]: E()}}), encoding="utf-8")

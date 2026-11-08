@@ -127,8 +127,8 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from ui import render
-import home, model, handoff, waiting
+from stackshot.web.ui import render
+from stackshot.web import home; from stackshot.model import model; from stackshot.waits import handoff; from stackshot.waits import waiting
 
 b = render.Board(str(T / "store"), now=NOW)
 b.provision = [("home-box", True)]
@@ -158,7 +158,7 @@ check("cards: one card per count, in order Your move, On agent, Queued for relea
 check("cards: the Closed card counts the items closed in the last 14 days (the Last 14 days section of the Closed page), with no new badge while no close of an agent is uncleared",
       ND > 0 and '<a class="hcard" href="/closed"' in cn and "hnew" not in cn and '<a class="hcard call" href="#your-move"' in cn and cn.count("<a ") == 5 and "hcount" not in h)
 # board.md and the brief count and list by the same three lists as the home page: the same numbers, the same items, from the same store (the root renderer draws the files, the ui one keeps a copy)
-import render as root_render
+from stackshot.web import render as root_render
 _card = {lab: int(n) for _h, n, lab in cards_of(cn)}
 _want = (_card["Your move"], _card["On agent"] + _card["Queued for release"], _card["Waiting"])      # agents = On agent and Queued for release (an agent's item either way)
 _hm = lambda md: re.search(r"_(\d+) open · (\d+) your move · (\d+) on agents · (\d+) waiting · machines:", md)
@@ -190,7 +190,7 @@ for _name, _cls in (("root", root_render.Board), ("ui", render.Board)):
           _wl0 and all(" · on " in l for l in _wl0) and len(_wl) == len(_wl0) and all(" · on" not in l and l.endswith("]") for l in _wl), (_wl0, _wl))
 # the Closed card's new badge and the Closed page's New section read one set, the uncleared closes. Mixed data: a done close, a 20-day-old one (past the
 # Last 14 days section, still uncleared, so in New), a close with no outcome, an open item's stale record, a cleared one.
-import landed as _ld
+from stackshot.web import landed as _ld
 try:
     _ld.record("a30", now - 2 * D, "done", by="team-back", project="projects/alpha"); _ld.record("a32", now - 20 * D, "done", by="team-back", project="projects/alpha")
     _ld.record("a31", now - 3 * D, "done", by="team-back", project="projects/alpha"); _ld.record("a1", now - 1 * D, "done", by="team-back", project="projects/alpha")

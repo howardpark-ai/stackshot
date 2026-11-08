@@ -68,7 +68,7 @@ item(9, "[home] no project, an owner", project="", contact=LIVE)                
 item(10, "[home] filed on a sub-page", project="projects/alpha/sub-work", contact=LIVE)                                                                                          # a sub-page of Alpha, with an owner
 item(11, "[home] closed, filed on a sub-page", project="projects/alpha/sub-work", status="completed", age=1 * H, outcome="done", reason="shipped", contact=GONE)                   # New and Last 14 days
 logging.disable(logging.INFO)
-import landed
+from stackshot.web import landed
 landed.record("a6", now - 2 * H, "done", by="team-back", project="projects/alpha")
 landed.record("a11", now - 1 * H, "done", by="team-back", project="projects/alpha/sub-work")
 
@@ -76,7 +76,7 @@ fails, ran = [], []
 def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
-from ui import render, kit
+from stackshot.web.ui import render, kit
 
 RESOLVED = {"a5": LIVE}      # the server's resolver, as a fixture: the derived contact where one differs from the stored one, else the stored one
 def resolver(r): return RESOLVED.get(r["gid"], str((r.get("metadata") or {}).get("contact") or ""))

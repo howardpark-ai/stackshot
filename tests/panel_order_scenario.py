@@ -59,9 +59,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
-import config as _cfg, search, uiprefs as up
-import server
-from ui import render as r2
+from stackshot.core import config as _cfg; from stackshot.web import search; from stackshot.web import uiprefs as up
+from stackshot.web import server
+from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 server._publish = lambda: None
 DEFAULT = ["machines", "runners", "anchorhub", "audit-panel", "projects-panel"]
@@ -159,7 +159,7 @@ COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})
 SAME = {"Origin": BOARD}
 JSON_H = {**SAME, "Content-Type": "application/json"}
 PAGES = [("home", "/"), ("item", "/items/a1"), ("project", "/projects/alpha"), ("landed", "/closed"), ("search", "/search?q=item")]
-search.sync(__import__("render").Board(str(T / "store")))
+search.sync(__import__("stackshot.web.render", fromlist=["_"]).Board(str(T / "store")))
 def sections(h):
     """The ids of the panel's sections in the order the page has them (the wrapped blocks), and the ids of the <section> elements inside the aside."""
     i = h.index('<aside id="panel"'); a = h[i:h.index("</aside>", i)]

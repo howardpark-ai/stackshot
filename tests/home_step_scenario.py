@@ -49,7 +49,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
-import ui.render as render2
+import stackshot.web.ui.render as render2
 
 def row(page, i):
     m = re.search(rf'<li class="(?:irow )?hrow" id="task-a-{i}"(?: data-st="[a-z]+")?>(.*?)</li>(?=<li class="(?:irow )?hrow"|</ul>)', page, re.S)

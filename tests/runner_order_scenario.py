@@ -38,9 +38,9 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
-import runner as R
-import config as _cfg
-import server
+from stackshot.core import runner as R
+from stackshot.core import config as _cfg
+from stackshot.web import server
 server._publish = lambda: None
 
 class Clock:

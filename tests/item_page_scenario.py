@@ -117,8 +117,8 @@ commit(22, "e1", {"needs": [], "ask": "", "options": [], "mover": "home-other"},
 commit(21, "d3", {"state": "doing", "next": "home-other: short one"}, written_by="Oliver", updated=now - H)
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from ui import render as ui_render
-import itempage, model as _mdl
+from stackshot.web.ui import render as ui_render
+from stackshot.web import itempage; from stackshot.model import model as _mdl
 bd = ui_render.Board(f"{tmp}/store")
 page = lambda g, **kw: bd.item_html(g, **kw)
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
@@ -288,7 +288,7 @@ nb = nx(page("a12"))
 check("a bullet that opens with a name is a line of its own: two lines, the marker dropped", nb.count("<li ") == 2 and '<span class="cl-t">home-other: do x</span>' in nb and '<span class="cl-t">Oliver: run <code>cmd</code></span>' in nb, nb)
 nu = nx(page("a16"))
 check("an unnamed bullet and a numbered one are steps of their own, an indented line belongs to the step above (nextlines' lines)", nu.count("<li ") == 3 and nu == OLI("home-other: do x", "an unnamed bullet", "a numbered one").replace("<span class=\"cl-t\">an unnamed bullet</span>", "<span class=\"cl-t\">an unnamed bullet</span><ul><li>an indented line</li></ul>"), nu)
-import itempage, model as _mdl
+from stackshot.web import itempage; from stackshot.model import model as _mdl
 ls = itempage.next_lines("home-other: do x\n- Oliver: run `cmd`", "home-other")
 check("itempage.next_lines counts a named bullet as a line", [x.text for x in ls] == ["home-other: do x", "Oliver: run `cmd`"] and all(not x.subs for x in ls), ls)
 nf = nx(page("a13")); lf = itempage.next_lines(json.loads((T / "store/a/13.json").read_text())["metadata"]["next"], "home-other")

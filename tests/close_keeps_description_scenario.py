@@ -79,8 +79,8 @@ try:
     def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
     def mt(i): return rd(i)["metadata"]
 
-    import server
-    from ui import render as r2
+    from stackshot.web import server
+    from stackshot.web.ui import render as r2
     server._publish = lambda: None
     server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
     def refused(name, f, *want):
@@ -174,7 +174,7 @@ try:
     for st in ("active", "activating", "deactivating", "inactive", "failed"):
         fake_systemctl(f"bin-{st}", st)
     fake_systemctl("bin-unsure", "", 1)
-    TOOL = str(pathlib.Path(STACK, "tools", "restore_close_descriptions.py"))
+    TOOL = str(pathlib.Path(STACK, "stackshot", "tools", "restore_close_descriptions.py"))
     def tool(bindir, *args):
         env = dict(os.environ, PATH=bindir + os.pathsep + os.environ.get("PATH", ""), STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet")
         return subprocess.run([sys.executable, TOOL, *args], capture_output=True, text=True, timeout=600, env=env)

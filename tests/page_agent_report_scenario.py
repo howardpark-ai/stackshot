@@ -54,7 +54,7 @@ REG = {
 }
 (T / "store/projects.json").write_text(json.dumps({"pages": REG}))
 
-import anchors as A, page_agent_report as PAR
+from stackshot.anchors import anchors as A; from stackshot.tools import page_agent_report as PAR
 fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)
@@ -109,7 +109,7 @@ check("an empty registry flags nothing", PAR.read({})["findings"] == [] and PAR.
 # ---- 5. the CLI
 def run(*a):
     r = subprocess.run([sys.executable, *a], capture_output=True, text=True, env=dict(os.environ)); return r.returncode, r.stdout, r.stderr
-tool = os.path.join(STACK, "tools", "page_agent_report.py"); audit_py = os.path.join(STACK, "audit.py")
+tool = os.path.join(STACK, "stackshot", "tools", "page_agent_report.py"); audit_py = os.path.join(STACK, "stackshot/audit/audit.py")
 rc, out, err = run(tool, "--json")
 js = json.loads(out) if rc == 0 else {}
 check("--json: the same report", rc == 0 and js.get("checked") is True and sorted((f["page"], f["line"], f["name"]) for f in js["findings"]) == sorted(want), (rc, out[:300], err[:300]))
