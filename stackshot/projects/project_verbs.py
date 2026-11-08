@@ -17,7 +17,7 @@ verbs at once leave the same page whichever writes last; a page edit by anyone e
 written the verb says so in its answer (`mirror.state` = "failed") and the record is already right: nothing is rolled back, and `mirror()` writes it again.
 
 The copy is retired per page and everywhere: a page in a brain marked `shared` ([[brains]] shared = true, brains.shared_refusal) is never written, and `[pages] copy_project_lines = false` stops it on every brain; the
-verb's answer then says `mirror.state` = "retired" with the reason, and the page store is not called. The record is what readers use: `projects.fields` (python3 -m stackshot projects fields) reads it first and the page's lines
+verb's answer then says `mirror.state` = "retired" with the reason, and the page store is not called. The switch retires the copied lines only: a page asked for with `make_page` is still made from the template on a brain not marked shared (`mirror.state` = "written", the template's own `display-name:` and `status:` lines, no `agents:` block), while a shared brain is never written, a new page included. The record is what readers use: `projects.fields` (python3 -m stackshot projects fields) reads it first and the page's lines
 for a project the record does not hold yet.
 
 A project with no entry yet (the migration has not run, or not reached it) gets its entry from the page lines the registry derives, with the migration's own function (`derive_entry`), at its
@@ -453,23 +453,32 @@ def _expire_former(pid: str, content: str) -> None:
         pass
 
 
-def copy_off(key: str) -> str:
-    """"" when the copy of the record onto the page `key` is written; else why it is retired: a brain marked `shared` never gets it, and `[pages] copy_project_lines = false`
-    retires it on every brain. The record is the one place the fields live then, and `projects.fields` is how a script reads them."""
+def shared_off(key: str) -> str:
+    """"" when the page `key` is in a brain stackshot may write; else the line that says the brain is marked `shared`: nothing at all is written to it, a new page included."""
     from stackshot.projects import brains as _brains
     why = _brains.shared_refusal(key)
-    if why:
-        return f"the page was not written: {why}"
+    return f"the page was not written: {why}" if why else ""
+
+
+def switch_off() -> str:
+    """"" when `[pages] copy_project_lines` is on; else the line that says the copy of the record onto pages is retired on every brain. The switch stops the copied lines only: a
+    new project's page is still made (mirror, `make_page`) on a brain that is not marked shared."""
     if not _cfg.copy_project_lines():
         return "the page was not written: the copy of the record onto pages is retired ([pages] copy_project_lines = false); the record holds the project's name, status and agents"
     return ""
+
+
+def copy_off(key: str) -> str:
+    """"" when the copy of the record onto the page `key` is written; else why it is retired: a brain marked `shared` never gets it, and `[pages] copy_project_lines = false`
+    retires it on every brain. The record is the one place the fields live then, and `projects.fields` is how a script reads them."""
+    return shared_off(key) or switch_off()
 
 
 def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bool = False, dry: bool = False, tries: int = MIRROR_TRIES, now: float | None = None, exclusive: bool = False,
            drop: tuple = ()) -> dict:
     """Write the project's page mirror from its entry → {"state", "key", "note"}. States: "none" (the project has no page in this instance's page store: a project with no page, or a pointer
     that is a link elsewhere), "unchanged" (the page reads as the record says), "written", "would-write" (a dry run), "no-page" (the pointer names a page the store does not have, and `make_page` was
-    not asked), "failed" (the page could not be edited or written; `note` says why), "exists" (`exclusive` only: the page store says the page the verb meant to make is there already; nothing was written to it), "retired" (copy_off says why: the page is in a brain marked `shared`, or `[pages] copy_project_lines = false`; the page store is not called and `note` names the reason). Never raises. The entry is the one given on the first try; on every later try, and for a write (not a dry run) in the verbs' own answers, it is read from the record again, so the last writer of either leaves the page the record describes.
+    not asked), "failed" (the page could not be edited or written; `note` says why), "exists" (`exclusive` only: the page store says the page the verb meant to make is there already; nothing was written to it), "retired" (shared_off or switch_off says why: the page is in a brain marked `shared`, or `[pages] copy_project_lines = false`; `note` names the reason; a shared brain's page store is never called, and with the switch off the store is called only for `make_page`, to read the page and make it when it is not there: a page made that way is "written" with the template's lines only, an existing page is "retired" and untouched). Never raises. The entry is the one given on the first try; on every later try, and for a write (not a dry run) in the verbs' own answers, it is read from the record again, so the last writer of either leaves the page the record describes.
     A page that lists an agent the record lacks gets its `agents:` block left as it is ("failed", the names in `note`; the name and status lines are still written): the page was edited since the record
     last said, and the write would delete that line for good. `drop` = the names the verb has just taken off the record on purpose (a retire, a rename), which the page may still list; the entry's
     `former_agents` keeps them until a mirror has left the page without them."""
@@ -482,8 +491,11 @@ def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bo
         key = pr.page_key(e)
         if not key:
             return {"state": "none", "key": "", "note": "its page is a link to another knowledge base: nothing is written there"}
-        off = copy_off(key)
+        off = shared_off(key)                               # a shared brain gets nothing, a new page included
         if off:
+            return {"state": "retired", "key": key, "note": off}
+        off = switch_off()                                  # the switch retires the copied lines only: a page asked for with `make_page` is still made, with none of them written
+        if off and not make_page:
             return {"state": "retired", "key": key, "note": off}
         from stackshot.router import page_debt as _pd
         if io is None:
@@ -509,7 +521,11 @@ def mirror(pid: str, io: Any = None, *, entry: dict | None = None, make_page: bo
                 if st != "ok":
                     return {"state": "failed", "key": key, "note": f"the page store refused the new page {key} ({msg})" if st == "refused" else
                             f"the page store did not answer for the new page {key} ({msg}); the page may or may not have been written: ask again, and a 409 says it was"}
+                if off:                                     # the switch is off: the page is the template's as made, and no copied line is written onto it
+                    return {"state": "written", "key": key, "note": f"the page was made from the template; the copy of the record onto it is retired ([pages] copy_project_lines = false), so its display-name: and status: lines are the template's and no agents: block is written"}
                 continue                                    # read it back and set the mirror lines on what was made
+            if off:                                         # the page is there and the switch is off: nothing of the copy is written to it
+                return {"state": "retired", "key": key, "note": off}
             guard = ""; ew = e
             if "agents" in e:
                 listed = {n.casefold() for n in e["agents"]} | {str(n).casefold() for n in drop} | {str(n).casefold() for n in e.get("former_agents") or []}

@@ -40,8 +40,10 @@ brain (a source id, not a separate home) cannot be marked yet.
 
 stackshot used to copy a project's record onto its page after every project verb: the `display-name:`, `status:` and `agents:` lines (`project_verbs.mirror`). Its own readers read the record
 first (`project_registry.apply`), so the copy only served scripts that read the lines. It is retired in two steps. Per brain, the shared mark above: such a page never gets the copy. For every
-brain at once, one switch: `[pages] copy_project_lines = false`; a verb's `mirror.state` is then `retired` everywhere, and the page's three lines stay as they last were. The switch also stops the
-creation of a page for a new project (`create --make-page` writes the record and no page); the page is made by hand or by the project's people. Nothing a reader needs is lost
+brain at once, one switch: `[pages] copy_project_lines = false`; a verb's `mirror.state` is then `retired` everywhere, and the page's three lines stay as they last were. The switch does not stop
+the creation of a page for a new project: `create --make-page` and `mirror --make-page` still make the page from the template on a brain that is not marked `shared` (`mirror.state` is `written`; the page carries
+the template's own `display-name:` and `status:` lines and no `agents:` block, and no copied line is written onto it after). On a brain marked `shared` no page is made, whatever the switch says (`mirror.state` is `retired`).
+A page that already exists is left as it is (`retired`). Nothing a reader needs is lost
 meanwhile: `stackshot projects fields <id | page key | bare slug>` (`projects.fields`, run on the server box) prints a project's `display_name`, `status`, `agents` (front or background, role, mandate line),
 `main` and `owner_key` as JSON, taking each field from the project's entry in the record and, for a field the entry does not hold or a project the record does not cover yet, from the page's own
 lines; `source` and `from` say which. `projects fields --all` lists every page that names a project or lists an agent. A script reads this, never the lines. Exit 0 found, 1 no such project, 2 the

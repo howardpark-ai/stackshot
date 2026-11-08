@@ -147,7 +147,7 @@ def gbrain_bin() -> str:
 def copy_project_lines() -> bool:
     """[pages] copy_project_lines: whether stackshot copies a project's record (name, status, agents) onto its page's `display-name:`, `status:` and `agents:`
     lines after a project verb. True unless the key is the boolean false: the one switch that retires the copy on every brain (a shared brain's pages never get
-    it, whatever this says: brains.shared_refusal)."""
+    it, whatever this says: brains.shared_refusal). It stops the copied lines only: a new project's page is still made (`make_page`) on a brain that is not marked shared."""
     return get("pages", "copy_project_lines") is not False
 
 

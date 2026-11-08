@@ -11,7 +11,8 @@
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
     tools/project.py mirror PROJECT [--make-page]                                         writes the page's three mirror lines (display-name:, agents:, status:) from the record again; state "retired" and nothing written when the
-                                                                                          page is in a brain marked shared or [pages] copy_project_lines is false (`stackshot projects fields PROJECT` reads the record instead)
+                                                                                          page is in a brain marked shared or [pages] copy_project_lines is false (`stackshot projects fields PROJECT` reads the record instead);
+                                                                                          --make-page is not tied to that switch: a missing page is made from the template on a brain not marked shared (state "written", no copied lines), never on a shared one
     tools/project.py show PROJECT                                                         the project's entry and what the registry reads of it
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent
