@@ -23,6 +23,9 @@ GH_SH = r'''#!/bin/bash
 if [ "${1:-} ${2:-}" = "pr checks" ]; then
     echo "$*" >> "$RT_DIR/gh.log"
     cn=1; [ ! -e "$RT_DIR/checkreads" ] || cn=$(( $(< "$RT_DIR/checkreads") + 1 )); echo "$cn" > "$RT_DIR/checkreads"
+    if [ "${RT_MARK_AT_CHECKS:-}" = "$cn" ]; then   # a group release hands this PR to the salamander merge queue while this release waits for its checks: its marker appears at that read
+        mkdir -p "$RT_DIR/releases/mq-on"; echo "2026-11-04T00:00:00Z handed to the salamander merge queue by the group release led by PR #26" > "$RT_DIR/releases/mq-on/pr-$3"
+    fi
     IFS=, read -ra seq <<< "${RT_CHECKS:-pass}"; i=$((cn - 1)); [ "$i" -lt "${#seq[@]}" ] || i=$((${#seq[@]} - 1)); cv="${seq[$i]}"
     # the rows carry gh's other fields too (state, link), as `--json name,state,bucket,link` returns them. Extra values for `release.sh queue`'s read of the rows: shardfail (a matrix shard row failed, the suites row
     # still pending), timedout (state TIMED_OUT, bucket fail), skipping (a skipped row and a passing one), unreadable (gh fails with an error), nochecks (gh says no checks were reported: exit 1 and the words)
@@ -49,12 +52,26 @@ open(f"{d}/gh.log", "a").write(" ".join(a) + "\n")
 def env(k, v=""): return os.environ.get(k, v)
 if a[:2] == ["pr", "view"]:
     fields = a[a.index("--json") + 1]
+    if (env("RT_PRSTATE") or env("RT_PRSTATE_AFTER")) and fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # the salamander merge queue, mode on: a group release reads each PR's state first: RT_PRSTATE = "<pr>=<OPEN|MERGED|CLOSED>[@<oid>][#<head oid>],..." (a PR not listed is OPEN; MERGED with only #<head> is a fast-forward merge GitHub names no merge commit for);
+        # once `mq add` was called (mq.log exists) RT_PRSTATE_AFTER answers instead when it is set (the queue merged the PR meanwhile);
+        # RT_PRSTATE_FAILN = n: after `mq add` the first n reads fail (a GitHub outage), counted in prstate_failed
+        if env("RT_PRSTATE_FAILN") and os.path.exists(f"{d}/mq.log"):
+            nf = int(open(f"{d}/prstate_failed").read()) if os.path.exists(f"{d}/prstate_failed") else 0
+            if nf < int(env("RT_PRSTATE_FAILN")): open(f"{d}/prstate_failed", "w").write(str(nf + 1)); sys.stderr.write("gh: HTTP 502\n"); sys.exit(1)
+        for kv in (env("RT_PRSTATE_AFTER") if env("RT_PRSTATE_AFTER") and os.path.exists(f"{d}/mq.log") else env("RT_PRSTATE")).split(","):
+            if not kv: continue
+            k, v = kv.split("=", 1)
+            if k == a[2]:
+                v, _, head = v.partition("#"); st, _, oid = v.partition("@"); print(json.dumps({"state": st, "mergeCommit": {"oid": oid} if oid else None, "headRefOid": "" if head == "-" else (head or "abc1234def5678abc1234def5678abc1234def56")})); sys.exit(0)
+        print(json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
     if "mergeable" in fields:
         mn = int(open(f"{d}/mviews").read()) + 1 if os.path.exists(f"{d}/mviews") else 1   # one value per read, the last repeated: RT_MERGEABLE (comma-separated)
         open(f"{d}/mviews", "w").write(str(mn)); mseq = env("RT_MERGEABLE", "MERGEABLE").split(",")
         vst = env("RT_VIEWSTATE", "OPEN").split(",")   # RT_VIEWSTATE: the PR's state per read, the last repeated (OPEN | CLOSED | MERGED)
         print(json.dumps({"state": vst[min(mn, len(vst)) - 1], "mergeable": mseq[min(mn, len(mseq)) - 1], "title": env("RT_TITLE", "a change"), "headRefName": "agent/topic",
                           "isCrossRepository": env("RT_CROSS") == "1", "headRefOid": (env("RT_PRHEADS") or env("RT_HEAD", "abc1234def5678abc1234def5678abc1234def56")).split(",")[min(mn, len((env("RT_PRHEADS") or "x").split(","))) - 1]})); sys.exit(0)
+    if fields in ("state,mergeCommit", "state,mergeCommit,headRefOid"):   # a group release's state read with no RT_PRSTATE: every PR is open
+        print(json.dumps({"state": "OPEN", "mergeCommit": None, "headRefOid": "abc1234def5678abc1234def5678abc1234def56"})); sys.exit(0)
     sys.exit(3)
 if a[:2] == ["pr", "list"]:   # the open PRs based on the merged head branch (retarget_and_delete_branch): RT_STACKED, comma-separated numbers, none by default; RT_LIST=fail: the call errors
     if env("RT_LIST") == "fail": print("HTTP 502: bad gateway", file=sys.stderr); sys.exit(1)
@@ -64,7 +81,8 @@ if a[:2] == ["pr", "edit"]:   # retarget one: RT_RETARGET=fail makes every retar
     sys.exit(0)
 if a[:2] == ["pr", "checks"]:
     cn = int(open(f"{d}/checkreads").read()) + 1 if os.path.exists(f"{d}/checkreads") else 1
-    open(f"{d}/checkreads", "w").write(str(cn)); cseq = env("RT_CHECKS", "pass").split(","); cv = cseq[min(cn, len(cseq)) - 1]
+    open(f"{d}/checkreads", "w").write(str(cn))
+    cseq = env("RT_CHECKS", "pass").split(","); cv = cseq[min(cn, len(cseq)) - 1]
     print(json.dumps([{"name": "lint", "bucket": "pass"}] if cv == "lint" else [{"name": "suites", "bucket": "pending"}, {"name": "tool-text", "bucket": "fail"}] if cv == "toolfail"
                      else [{"name": "suites", "bucket": cv}, {"name": "lint", "bucket": "pass"}])); sys.exit(0)
 def tclock():   # the clock the release reads (the date stub's): the start plus every sleep and every look's cost
@@ -213,6 +231,11 @@ case "$*" in
     n=$(( $(cat "$RT_DIR/logn" 2>/dev/null || echo 0) + 1 )); echo $n > "$RT_DIR/logn"
     if [ $n = 1 ]; then echo "$RT_COVERED"; else echo "$RT_REMOVED"; fi | tr ';' '\n' | sed '/^$/d' ;;
   "rev-parse origin/main") echo "${RT_TIP:-}" ;;   # main's tip after the fetch (the deploy gate reads the failed runs up to it): RT_TIP, empty = the merge commit itself
+  "rev-list --first-parent origin/main") echo "${RT_FPLIST:-}" | tr , '\n' | sed '/^$/d' ;;   # origin/main's first-parent line, newest first (RT_FPLIST, comma-separated): a PR head on it was merged by fast-forward
+  "rev-list --first-parent --ancestry-path "*"..origin/main")   # RT_LANDING = "<head>=<newest>/<...>/<oldest>,...": the first-parent commits of main that have the head in their ancestry, newest first
+    h="${4%%..*}"; for kv in $(echo "${RT_LANDING:-}" | tr , ' '); do [ "${kv%%=*}" = "$h" ] && echo "${kv#*=}" | tr / '\n'; done ;;
+  "rev-parse --verify --quiet "*"^{commit}")   # the salamander merge queue named a merge commit by its first 7 characters: the one of RT_FULLSHAS (comma-separated) that starts with it, in full
+    p="${4%%^*}"; for f in $(echo "${RT_FULLSHAS:-}" | tr , ' '); do case "$f" in "$p"*) echo "$f"; break ;; esac; done ;;
   "rev-list "*)   # the commits between the last good one and main's tip (the gate's (c)): RT_RANGE, comma-separated; up to the tip RT_TIP (the range ends "..<tip>"): RT_RANGE_TIP when given
     case "$*" in *"..${RT_TIP:-NOTIP}") echo "${RT_RANGE_TIP:-$RT_RANGE}" ;; *) echo "$RT_RANGE" ;; esac | tr , '\n' | sed '/^$/d' ;;
   "diff --diff-filter=A --name-only "*) echo "$RT_NEWUNITS" | tr , '\n' | sed '/^$/d' ;;   # unit files a rollback leaves installed (RT_NEWUNITS)
@@ -261,6 +284,57 @@ NOTIFY = ('#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a"; done >> "$RT_DIR/no
 # The default answer (none) comes from a shell stub: the measured run on main (coverage in every Python child, under strace -f) made one Python start per wait
 # cycle of every scenario cost enough to push the suite past its 1800 s limit (main's run 9000001); the Python one below answers only a scenario that sets RT_SALAMANDER.
 SALAMANDER_SH = ('#!/bin/sh\n'
+                 # `salamander mq` (THE MERGE QUEUE, SHADOW): a stand-in that logs its arguments apart from ci-runs' (mq.log) and answers from RT_MQ_ADD (ok | fail | slow) and RT_MQ_WAIT
+                 # (tested = exit 3, the shadow verdict | failed = 1 | ejected-merged = 1 with the queue's own words for a PR the old path merged first | ejected-left = 1, the PR left the group because the old path's merge closed it | ejected-conflict = 1, a real eject reason | gaveup = 2 | error = 7)
+                 'if [ "${1:-}" = mq ]; then\n  echo "$*" >> "$RT_DIR/mq.log"\n'
+                 # THE MERGE QUEUE, ON: RT_MQ_PRS = "<pr>=<kind>[@<sha7>],..." answers `mq wait <pr>` per PR (kinds: merged | failed | ejected | gaveup | error | notinline | tested), RT_MQ_STATUS = paused | blocked answers `mq status --json`,
+                 # RT_MQ_DROP = fail makes `mq drop` exit 1; RT_MQ_ADD = refused is salamander's own refusal while its ON_OPEN switch is false, timeout never answers within the release's cap
+                 '  if [ "${2:-}" = wait ] && [ -n "${RT_MQ_PRS:-}" ]; then\n'
+                 '    [ -z "${RT_MQ_DRIVERLINE:-}" ] || echo "driver started (mq-example-owner__stackshot)" >&2   # what `mq wait` prints to stderr when it had to start the driver again: the first line of 2>&1\n'
+                 '    for kv in $(echo "$RT_MQ_PRS" | tr , " "); do\n      [ "${kv%%=*}" = "$3" ] || continue; v="${kv#*=}"; k="${v%%@*}"; sh="${v#*@}"; [ "$sh" != "$v" ] || sh=a1b2c3d\n'
+                 '      case "$k" in\n'
+                 '        merged) echo "PR $3 merged: merged in group g1 at $sh [g1]"; exit 0 ;;\n'
+                 '        mergednosha) echo "PR $3 merged: merged in group g1 [g1]"; exit 0 ;;\n'
+                 '        mergedpause) echo "PR $3 merged: merged in group g1 at $sh [g1]"; echo "PR #22 failed at the main tests after its merge, 2026-11-04T00:00:00Z" > "$RT_DIR/releases/queue.paused"; exit 0 ;;   # merged, and release.sh queue is paused right after (a lone release rolled back)\n'
+                 '        failed) echo "PR $3 failed: required check suites failed in group g1 [g1]"; echo "PR $3 failed: required check suites failed in group g1 [g1]" >&2; exit 1 ;;\n'
+                 '        ejected) echo "PR $3 ejected: refused: conflicts with main or with PR #1 ahead of it (app.py) [g1]"; echo "PR $3 ejected: refused: conflicts with main or with PR #1 ahead of it (app.py) [g1]" >&2; exit 1 ;;\n'
+                 '        gaveup) echo "${RT_MQ_SLICE_COST:-300}" >> "$RT_DIR/clock-extra"; [ -z "${RT_MQ_PAUSEQ:-}" ] || echo "PR #22 failed at the main tests after its merge, 2026-11-04T00:00:00Z" > "$RT_DIR/releases/queue.paused"; echo "PR $3: gave up waiting after 5s (still grouped)" >&2; exit 2 ;;\n'   # a slice that ran out took its time on the test clock
+                 '        error) echo "salamander mq: state file unreadable" >&2; exit 1 ;;\n'
+                 '        blocked) echo "PR $3 is waiting and the queue is blocked: bad repo config" >&2; exit 2 ;;\n'   # the real line: exit 2 without "gave up"
+                 '        skipped) echo "PR $3 built, not tested (replay ci = skip: the group was built, nothing was pushed or tested; this is not a pass) [g1]"; exit 4 ;;\n'
+                 '        ejectedmerged) echo "PR $3 ejected: pull request is merged [g1]"; echo "PR $3 ejected: pull request is merged [g1]" >&2; exit 1 ;;\n'
+                 '        notinline) echo "PR $3 is not in the line" >&2; exit 2 ;;\n'
+                 '        tested) echo "PR $3 tested: group g1 passed in shadow [g1]"; exit 3 ;;\n'
+                 '      esac\n    done\n  fi\n'
+                 '  if [ "${2:-}" = status ]; then case "${RT_MQ_STATUS:-}" in\n'
+                 '    paused) echo \'{"paused": {"reason": "the merge push failed 5 times", "since": 1, "by": "driver"}, "blocked": null, "queue": []}\'; exit 0 ;;\n'
+                 '    blocked) echo \'{"paused": null, "blocked": {"reason": "bad repo config", "since": 1}, "queue": []}\'; exit 0 ;;\n'
+                 '    error) echo "salamander mq: cannot read the state file" >&2; exit 1 ;;\n'
+                 '    active) echo \'{"paused": null, "blocked": null, "queue": [{"pr": 23, "state": "waiting"}, {"pr": 25, "state": "grouped"}, {"pr": 26, "state": "merged"}]}\'; exit 0 ;;\n'
+                 '    *) echo \'{"paused": null, "blocked": null, "queue": []}\'; exit 0 ;;\n  esac; fi\n'
+                 '  if [ "${2:-}" = drop ]; then\n'
+                 '    [ -z "${RT_MQ_DROP:-}" ] || { echo "salamander mq: cannot lock the queue state" >&2; exit 1; }\n'
+                 '    case "${RT_MQ_ADD:-ok}" in ok|slow) ;; *) echo "PR $3 is not in the line" >&2; exit 1 ;; esac   # an add that was refused or never answered queued nothing: the real drop says so and exits 1\n'
+                 '    case ",${RT_MQ_PRS:-}," in *",$3=merged"*|*",$3=failed"*|*",$3=ejected"*|*",$3=ejectedmerged"*) echo "PR $3 is not in the line" >&2; exit 1 ;; esac   # settled already\n'
+                 '    echo "PR $3 dropped"; exit 0\n  fi\n'
+                 '  case "${2:-}" in\n'
+                 '    add) case "${RT_MQ_ADD:-ok}" in\n'
+                 '           refused) echo "salamander mq: mode \\"on\\" is not open yet (the merge step is built, the switch to it is a step of its own: docs/mq.md, Migration); use mode = \\"shadow\\". Nothing was queued." >&2; exit 1 ;;\n'
+                 '           timeout) exec /usr/bin/sleep 30 ;;\n'
+                 '           ok) for a in "$@"; do case "$a" in [0-9]*) echo "PR $a: queued" ;; esac; done; echo "mode on: tested groups are merged into main; driver started (mq-example-owner__stackshot)"; exit 0 ;;\n'
+                 '           fail) echo "salamander mq: mode is off for example-owner/stackshot (host config /nowhere/example-owner__stackshot.toml); nothing was queued." >&2; exit 1 ;;\n'
+                 '           slow) echo $$ > "$RT_DIR/mq-add.pid"; exec /usr/bin/sleep 6 ;;\n         esac ;;\n'
+                 '    wait) case "${RT_MQ_WAIT:-tested}" in\n'
+                 '           tested) echo "PR $3 tested: group g1 passed in shadow [g1]"; exit 3 ;;\n'
+                 '           failed) echo "PR $3 failed: required check suites failed in group g1 [g1]"; echo "PR $3 failed: required check suites failed in group g1 [g1]" >&2; exit 1 ;;\n'
+                 '           ejected-merged) echo "PR $3 ejected: pull request is merged [g1]"; echo "PR $3 ejected: pull request is merged [g1]" >&2; exit 1 ;;\n'
+                 '           ejected-left) echo "PR $3 ejected: left the group before the merge (closed, changed or moved) [g27]"; echo "PR $3 ejected: left the group before the merge (closed, changed or moved) [g27]" >&2; exit 1 ;;\n'
+                 '           ejected-conflict) echo "PR $3 ejected: conflict with main in group g27 [g27]"; echo "PR $3 ejected: conflict with main in group g27 [g27]" >&2; exit 1 ;;\n'
+                 '           gaveup) echo "PR $3: gave up waiting after 5s (still grouped)" >&2; exit 2 ;;\n'
+                 '           error) echo "salamander mq: state file unreadable" >&2; exit 7 ;;\n'
+                 '           hosterr) echo "salamander mq: /nowhere/example-owner__stackshot.toml: unknown key \'colour\'" >&2; exit 1 ;;\n'   # host_or_exit: exit 1 like a failed PR, but its own words
+                 '           titled) echo "PR $3 failed: a title with FAILED at x and done: y in it [g1]"; echo "PR $3 failed: a title with FAILED at x and done: y in it [g1]" >&2; exit 1 ;;\n         esac ;;\n'
+                 '  esac\n  exit 2\nfi\n'
                  'echo "$*" >> "$RT_DIR/salamander.log"\n'
                  'case "${RT_SALAMANDER:-none}" in none) echo "no file" >&2; exit 3;; esac\nexec python3 "$RT_DIR/bin/salamander.py" "$@"\n')
 SALAMANDER = r'''import json, os, sys, time
@@ -329,6 +403,10 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
     if units is not None:
         for p, body in ((d / "bin/systemctl", SYSTEMCTL), (d / "bin/systemd-run", SYSTEMD_RUN)): p.write_text(body); p.chmod(0o755)
         env["active"] = units
+    mqhost = env.pop("mqhost", None)   # the salamander merge queue's host file text (a bare mode word is written as `mode = "<word>"`); None = no file. The folder is the scenario's own either way, never the real ~/.config
+    if mqhost is not None:
+        (d / "xdg/mergequeue").mkdir(parents=True, exist_ok=True)
+        (d / "xdg/mergequeue/example-owner__stackshot.toml").write_text(mqhost.replace("@DIR@", str(d)) if "=" in mqhost else f'mode = "{mqhost}"\n')
     nosal = env.pop("nosalamander", False)   # no `salamander` on PATH at all (the host's own is taken off it too); else the stub above answers, exit 3 (no file) unless RT_SALAMANDER says otherwise
     for p, body, x in ((box / "config.py", CONFIG, False), (box / "client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
                        (d / "bin/gh", GH_SH, True), (d / "bin/gh.py", GH, False), (d / "bin/git", GIT, True), (d / "bin/sleep", SLEEP, True), (d / "bin/sala", SALA, True), (d / "bin/notify", NOTIFY, True), (d / "bin/date", DATE, True), *(() if nosal else ((d / "bin/salamander", SALAMANDER_SH, True), (d / "bin/salamander.py", SALAMANDER, False)))):
@@ -395,7 +473,7 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
             "bgpids": [int(x) for x in rd("bgpids").split()], "notice": [a for a in rd("notice.log").split("\0")][:-1], "notice_pid": rd("notice.pid").strip(), "sala": rd("sala.log"), "lock_at_live": rd("lock_at_live").split(),"git": rd("git.log"),
             "lockfile": pathlib.Path(e.get("DEPLOY_LOCK_FILE", d / "releases/deploy.lock")),
             "side_rc": side_res["r"].returncode if side_res.get("r") else None, "side_log": rd(f"releases/pr-{side}.log") if side else "", "paused_at_rollback": rd("paused_at_rollback").strip(),
-            "started": rd("started").split(), "queue": rd("releases/queue").split(), "started_marks": rd("releases/queue.started").split(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log")}
+            "mq": rd("mq.log").splitlines(), "started": rd("started").split(), "queue": rd("releases/queue").split(), "started_marks": rd("releases/queue.started").split(), "paused": rd("releases/queue.paused"), "qlog": rd("releases/queue.log")}
 
 def lock_free(s):   # nothing the release left behind holds the lock, and no report child got fd 9
     if s["lockfile"].exists():

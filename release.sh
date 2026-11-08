@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# release.sh — enqueue a PR in GitHub's merge queue and deploy what the queue merges, detached: the builder (example-engineer) starts it and leaves, and the result comes back as one
+# release.sh — enqueue a PR in GitHub's merge queue (or, when the host file says mode on, hand it to salamander's merge queue, `salamander mq`) and deploy what the queue merges, detached: the builder (example-engineer) starts it and leaves, and the result comes back as one
 # stackshot message to the project. Runs on the server box, in the production checkout.
 #
 # GitHub tests and merges; release.sh enqueues, deploys main and watches main's full run. The branch ruleset on main requires the merge queue (tests.yml runs on `merge_group`): GitHub
@@ -13,6 +13,8 @@
 #   - For several PRs, queue them: `release.sh queue N [N...]`. Every queued release starts at once (at most 4 at a time, release.sh's own number; the next waiting PR starts when one is deployed),
 #     so the PRs reach GitHub's merge queue together and are tested together; the deploy lock serializes the deploys. A queued PR that fails before its merge (its checks, a conflict, removed from the merge queue)
 #     is reported and skipped, and a failed main run for a merged one pauses the queue (THE RELEASE QUEUE below).
+#   - With the salamander merge queue in mode on (host file; THE TWO MERGE QUEUES below) the release queue starts one thing at a time: two or more queued PRs (at most 4 at a time, release.sh's own number) are released together by that queue
+#     (`release.sh --group N N...`, which the release queue starts itself): one deploy and one `done:` line per PR; one queued PR is released alone. GitHub's queue is the default (no host file, or mode off).
 #   - A PR whose branch is behind main is not touched: the merge queue builds it on main's tip. A PR that conflicts with main only on the generated tests/tool_text.snapshot.json is mended (2a below).
 #     Watch a release with `release.sh --status N`: the log's newest line says what is waited for.
 #   - Auto mode also refuses a loop of release.sh runs.
@@ -34,6 +36,7 @@
 #   ./release.sh --pick-files <file>...
 #                                 dry run: the same for the files named (paths relative to the checkout); no GitHub call
 #   ./release.sh --status [<pr>]  the unit's state and the log's tail (the latest release when no pr is given)
+#   ./release.sh --group N N...   mode on only (THE TWO MERGE QUEUES below): two or more different PRs (at most 4) released as one group through salamander's merge queue; starts the unit stackshot-release-<first> and returns at once. The release queue starts it itself when two or more PRs wait
 #   ./release.sh queue N [N...]   add PRs to the release queue (<paths.state>/releases/queue), in order; a PR queued already stays where it is. A PR with a failing, cancelled or timed-out check row is refused (exit 1, the rows printed, nothing queued), and so is one whose rows cannot be read. Every queued release that is not running starts at once, up to 4 running at a time (one is running from its start until it is
 #                                 deployed, the point after which it only waits on main's run; it stays in the queue file until then, so a killed one is still listed and --resume starts it again); each queued release that reaches "deployed" leaves the queue and starts the next waiting one. A queued PR that fails before its merge (its checks fail, it conflicts, it is closed, GitHub removes it from the merge queue, a lock is not had) is reported as any failure
 #                                 is, and skipped: the queue goes on. A failure after the merge (main's run failing for it, merged and not deployed or rolled back; its deploy failing) of a release the queue started pauses the queue: no new release starts, a release the queue had started already but not enqueued stops at
@@ -60,7 +63,7 @@
 #                                 one GitHub call from the hour's shared budget, so it is not polled faster; the first looks after the call come every 10 s until the entry shows, QUEUE_GRACE, 3 min). MERGED: the merge commit GitHub made is the one to deploy. A PR that was in the queue and is not any more, and is not merged
 #                                 (GitHub confirms it on a second read 10 s later, and three more reads 10 s apart find it still not MERGED): the reason GitHub gave is read from the timeline (`RemovedFromMergeQueueEvent` dated at or after the enqueue call: an older event is an earlier enqueue's),
 #                                 and the release fails "merge queue" with it before any deploy, the queue of releases going on with the others (a skip: the PR is not merged). A PR that shows MERGED on any of those reads is merged: the release goes on.
-#                                 Only a removal for a conflict with main that is only the snapshot (2a) is mended and enqueued again. A PR closed meanwhile fails "pr state"; one still in the queue after QUEUE_WAIT fails "merge queue" (it may merge later: the next release's deploy carries it).
+#                                 Only a removal for a conflict with main that is only the snapshot (2a) is mended and enqueued again. A PR closed meanwhile fails "pr state"; one still in the queue after QUEUE_WAIT fails "merge queue" (it may merge later: rerun release.sh N to carry on from the merge; the next release's deploy carries it too).
 #                                 A RERUN ON A MERGED PR (an earlier release was killed, or gave up after QUEUE_WAIT, and GitHub merged the PR later) carries on from the merge: it reads the merge commit and goes to the deploy gate, the deploy, main's run, the last-good record and the report.
 #                                 Nothing says such a merge came through the queue, so the gate is closed for it (4b) and the deploy waits for main's tests (4d).
 #                                 Then the head branch: the open PRs based on it (`gh pr list --base`) are retargeted to main (`gh pr edit --base main`, one log line each), and the branch is
@@ -130,6 +133,18 @@
 #                                 "PR #N is live; its step is ticked; the item's other open steps remain". Held items and items whose needs name a decision or a session other than the mover are left alone, the log
 #                                 saying why. A call that fails or is refused is a log line.
 #
+# THE TWO MERGE QUEUES. A PR is merged by one of two queues, chosen per host by the host file ~/.config/mergequeue/<owner>__<repo>.toml (XDG_CONFIG_HOME honoured), key `mode = "off" | "shadow" | "on"`, read by mq_host_mode (and by
+# `salamander mq status --repo <owner/repo>`). GitHub's merge queue is the default: no host file, mode off, shadow (a mode this script no longer runs) and a file that does not read all use it, steps 3 and 3a above. Mode `on` uses salamander's own
+# merge queue (docs/mq.md in salamander; the repository's own rules are .github/mergequeue.toml, the check that must pass is `suites`, tests.yml's job on a `queue/**` push; branch prefix queue/main/); that is the way back to the salamander mq hand-off
+# when GitHub's queue cannot be used. Neither is retired.
+#   off (default): run() as described above: enqueuePullRequest, wait for the merge, deploy. The release queue starts every waiting PR at once (up to 4 running).
+#   on:     the salamander merge queue merges, routed by COUNT of the PRs waiting in the release queue (THE TWO MERGE QUEUES, run_group, below): ONE PR waiting is released alone by run() (no call to `salamander mq`; mode on assumes the GitHub ruleset's queue on main is off, so enqueue_pr merges it
+#           at once with the plain merge call (--admin), its other steps unchanged); TWO OR MORE (at most 4, MQ_HANDOFF_MAX) go to the queue together through `salamander mq add`/`wait` (one chain entry each, stacked and
+#           tested at once) and are deployed once. The release queue starts ONE of these at a time in mode on (the queue's merge push and a deploy are serialized by the deploy lock); in mode off it starts up to 4 releases at once. The host file must also say
+#           `deploy_lock = "<this script's deploy lock>"` (<state>/releases/deploy.lock): without it, or with another file, mode on is refused ("FAILED at mq mode", before the PR is touched), because that lock is what keeps the queue's merge push out of a
+#           release's deploy. salamander's own `ON_OPEN` switch must be open as well (until then `salamander mq add` refuses mode on and a hand-off fails at "mq add" with its message, pausing the release queue).
+# Not restored from before the GitHub queue: the shadow mode (a comparison unit, `--mq-compare`), the fast-ok ledger and the retest skip (the salamander group deploys through the same deploy gate as a GitHub-queue release).
+#
 # THE SESSION PICK (what the running agent sessions need after a release, read from the files the merged PR changed, as deploy.sh reads the
 # restarts from the files a fast-forward changed). One map, session_need below; docs/session-reload.md has the table and the code behind each line.
 #   recycle  a file a session loads once, at its start, and never reads again while it runs (the SessionStart hook): only a restart delivers it,
@@ -188,7 +203,7 @@ START_MAX=4                                 # queued releases running at once (r
 WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"   # seconds a covering run of main may be going (main_green: counted from when it starts, status in_progress). 90 min: main's full run, every suite measured, can be slow on a loaded host, so 60 min (3600) let a slow run end a release
 CAP_MAIN="${RELEASE_CAP_MAIN:-10800}"    # seconds from the merge, at most, that main_green waits for a run that covers it (3 h): a run queued behind others uses none of WAIT_MAIN, this keeps it from waiting forever
 NOTICE_TIMEOUT="${RELEASE_NOTICE_TIMEOUT:-60}"   # seconds [fleet] notice_cmd may take (notice_send): past it the command is stopped and the notice counts as not sent, so the report loses its green flag and the next release starts
-WAIT_STEPS="${RELEASE_WAIT_STEPS:-600}"  # seconds a run of main that is completed and green may stay without the conclusion of its "run every suite, measured" step (main_green: GitHub fills in the step results some time after the job reports completed, and release.sh once read a run in that gap and failed a green one). 10 min: the gap has been seconds to a minute; past it the step results never came and the release fails as before. Counted on the clock from the first look that saw the gap; no extra GitHub call, the reads are the POLL_MAIN ones
+WAIT_STEPS="${RELEASE_WAIT_STEPS:-600}"  # seconds a run of main that is completed and green may stay without the conclusion of its "run every suite, measured" step (main_green: GitHub fills in the step results some time after the job reports completed, and release.sh once read a run in that gap and failed a green one). 10 min: the gap has been seconds to a minute; past it the step results never came and the run counts as green on its own conclusion (success), with a warning in the log and the report, never a rollback (a run that concluded failure fails at once). Counted on the clock from the first look that saw the gap; no extra GitHub call, the reads are the POLL_MAIN ones
 POLL_MAIN="${RELEASE_POLL_MAIN:-60}"     # seconds between two looks at main's runs while main_green waits (a run can take a long time, and every look costs GitHub REST calls from one shared hourly budget; polling every 20 s with several releases waiting could spend it)
 POLL_PR="${RELEASE_POLL_PR:-60}"         # seconds between two looks at a PR's checks while wait_pr_checks waits (every look is GitHub calls from one shared hourly budget; a PR's tests take a while). The read is shared between the releases on the box for GH_TTL s, like main's
 GH_CACHE="$LOGDIR/gh-cache"              # main's run list and each run's view, kept for GH_TTL s and shared by every release on this box, so releases waiting on the same run ask GitHub once between them
@@ -197,6 +212,11 @@ PENDING_DIR="$LOGDIR/pending-verify"      # one record per deploy whose main run
 PENDING_FILE=""; pv_block=""
 LAST_GOOD="$LOGDIR/last-good"            # the newest commit whose run on main passed: what a failing main run rolls back to; one sha, written by record_good
 QUEUE="$LOGDIR/queue"                    # the release queue (release.sh queue): PR numbers, one a line, in order; $QUEUE.lock its flock, $QUEUE.started the PRs whose release the queue started, $QUEUE.paused why it is paused, $QUEUE.log what it did
+MQ_ON_ADD_TIMEOUT="${RELEASE_MQ_ON_ADD_TIMEOUT:-60}"   # seconds `salamander mq add` may take in mode on (it starts the queue's driver unit, and a refusal is an answer, so a slow one is an error: THE TWO MERGE QUEUES at the top)
+MQ_WAIT_CAP="${RELEASE_MQ_WAIT_CAP:-18000}"       # seconds a group release waits for the salamander merge queue's verdicts (5 h: a queue run takes up to 100 min, and a PR behind a failure in the chain is tested again after the restack)
+MQ_HANDOFF_MAX=4                                  # PRs handed to the salamander merge queue in one hand-off (mode on): release.sh's own number, not a setting of the rules file; the chain tests those entries at once and the rest stay in release.sh's queue for the next hand-off
+MQ_SLICE="${RELEASE_MQ_SLICE:-300}"                # seconds one `salamander mq wait` of a group release may block before the release looks at whether the queue is paused or blocked (mode on)
+MQ_HANDED="$LOGDIR/mq-on"                         # mode on: one marker file per PR handed to the salamander merge queue (pr-N), so a release of one PR can refuse a PR the queue holds without calling the queue
 CIRUNS_MAX_AGE="${RELEASE_CIRUNS_MAX_AGE:-120}"   # how old salamander's CI-run poller file may be and still be believed about a run that is going (salamander ci-runs --max-age); 0 = never ask it
 # ci_going <sha> <any|main>: 0, and one line on stdout "<run id> <running|queued> <what it saw>", when salamander's CI-run poller (`salamander ci-runs`, read from a file: no GitHub call)
 # is fresh and lists a workflow run of <sha> that has not completed. `main` keeps the push runs of main only (what run_state reads); `any` every run of the commit (a PR's checks).
@@ -342,8 +362,9 @@ take_lock() {  # the deploy lock on fd 9 (exec: this shell's own), waited for up
 #   run). So a run that is completed with conclusion success whose suites step has no conclusion yet (missing, empty, or the step absent) is pending ("step results not filled in yet"): it is read
 #   again at the next POLL_MAIN poll, with no GitHub call beyond the ones a pending run costs, and decides when the step shows. Both callers (pre: the wait before a deploy whose gate is closed; post: after the
 #   deploy at the merge, which rolls back on "fail") treat it as pending, never as a failure. WAIT_STEPS (RELEASE_WAIT_STEPS, 600 s = 10 min, counted on the clock from the first look that saw the gap on that run)
-#   bounds it: past it the run fails as it did before ("finished successfully, but its step results never arrived"), and the post caller rolls back like any failure. A run whose job itself did not
-#   succeed, with the suites step missing, still fails at once.
+#   bounds it: past it the run counts as GREEN on its own conclusion (it concluded success, and a job that succeeded has every step succeeded; only GitHub's step list is missing), with a WARNING line in the log and the
+#   report going to the keeper ("finished successfully, but its step results never arrived ... counted as green"), never a rollback: a green main was once rolled back on this gap (PR 48, run 42442246277). A run whose job
+#   itself did not succeed (conclusion failure), with the suites step missing, still fails at once.
 # Two callers:
 #   main_green pre <M>     before a deploy whose gate is closed (4d at the top): its suites failing stops the release (merged, not deployed: fix forward); every suite
 #                          passing deploys, and what else the run found (a suite that failed only when measured and passed plainly, the audit's
@@ -553,7 +574,7 @@ mg_stop() {   # $1 = fail|unknown, $2 = why. Before the deploy it fails the rele
     return 1
 }
 main_green() {   # $1 = pre|post, $2 = M, the merge commit of the release; the rule is in the comment above run_state
-    local mg_mode="${1:-pre}" m="${2:-}" steps_run="" steps_start=0 steps_waited=0 ci_line="" ci_st="" ci_what="" ci_said=0 t0 now waited=0 run_start=0 run_waited=0 fetch_since="" fetch_waited=0 cur_run="" out rid verdict rsha detail err via="" by="" cnote="" cn_said=0 pn_said=0
+    local mg_mode="${1:-pre}" m="${2:-}" steps_run="" steps_start=0 steps_waited=0 steps_gap=0 ci_line="" ci_st="" ci_what="" ci_said=0 t0 now waited=0 run_start=0 run_waited=0 fetch_since="" fetch_waited=0 cur_run="" out rid verdict rsha detail err via="" by="" cnote="" cn_said=0 pn_said=0
     t0="$(date +%s)"   # the waits are read off the clock, not counted in sleeps: a poll takes time too, so 3 h is 3 h
     mg_kind=""; mg_why=""; mg_rid=""; mg_rsha=""; mg_notlive=""
     [[ "$m" =~ ^[0-9a-f]{7,64}$ ]] || { mg_stop unknown "no merge commit to look for on main"; return 1; }
@@ -579,10 +600,11 @@ main_green() {   # $1 = pre|post, $2 = M, the merge commit of the release; the r
             via=""; [ "$rsha" = "$m" ] || via=", on ${rsha:0:7}, which contains ${m:0:7}"
             cnote=""
         fi
-        if [ "$verdict" = pending ] && [ "$detail" = steps ]; then   # the run is completed and green but GitHub has not filled in its step results yet: read again at the next poll, WAIT_STEPS at most (from the first look that saw the gap on this run); past it, a failure like any other, so the rollback handling below applies
+        if [ "$verdict" = pending ] && [ "$detail" = steps ]; then   # the run is completed and green but GitHub has not filled in its step results yet: read again at the next poll, WAIT_STEPS at most (from the first look that saw the gap on this run); past it the run counts as green on its own conclusion (success), with a warning: never a failure
             [ "$rid" = "$steps_run" ] || { steps_run="$rid"; steps_start=$now; say "main's run $rid on ${rsha:0:7} is completed and green, but GitHub has not filled in its step results yet: reading it again every $POLL_MAIN s, for $((WAIT_STEPS/60)) min at most"; }
             steps_waited=$((now - steps_start))
-            [ $steps_waited -lt $WAIT_STEPS ] || { verdict=fail; detail="finished successfully, but its step results never arrived in $((steps_waited/60)) min: no conclusion for \"run every suite, measured\""; }
+            [ $steps_waited -lt $WAIT_STEPS ] || { steps_gap=1; verdict=pass; detail="finished successfully, but its step results never arrived in $((steps_waited/60)) min: no conclusion for \"run every suite, measured\", so the suites step was not read"
+                say "WARNING: main's run $rid on ${rsha:0:7} concluded success but GitHub never filled in its step results in $((steps_waited/60)) min: counted as green (not rolled back); the suites step itself could not be read"; }
         else steps_run=""   # any other state ends the gap: a re-run keeps the run id, so a later gap on it starts a fresh wait, never from the old start
         fi
         case "$verdict" in
@@ -603,7 +625,10 @@ main_green() {   # $1 = pre|post, $2 = M, the merge commit of the release; the r
                     [ "$rsha" = "$m" ] || say "deploying ${rsha:0:7}, the newest commit containing the merge ${m:0:7} whose run passed"
                     record_good "$rsha"
                 fi
-                if [ -n "$detail" ]; then
+                if [ "$steps_gap" = 1 ]; then
+                    audit_note="; main's run concluded success and is counted as green, but $detail (https://github.com/$REPO/actions/runs/$rid)"
+                    say "main's run: $detail: counted as green, the report goes to the keeper"
+                elif [ -n "$detail" ]; then
                     audit_note="; every suite passed on main, but $detail (https://github.com/$REPO/actions/runs/$rid)"
                     say "main's run: $detail: the report goes to the keeper"
                 fi
@@ -825,9 +850,11 @@ rollback() {   # main's run failed on $verified, deployed at the merge: go back 
         for e in "${merges_arr[@]}"; do [ "${e%% *}" = "$m" ] || others+=("$e"); done
         if [ "${#others[@]}" -gt 0 ]; then
             removed="; the rollback also takes out the other merges between ${good:0:7} and the live checkout (releases deployed before it whose runs were still waiting, and on top of it): $(printf '%s\n' "${others[@]}" | short_merges)"
+            # relies on the merge queue's merge method being "merge": each PR then lands as a "Merge pull request #N" commit (squash or rebase would leave no such subject)
             bs="$(printf '%s\n' "${others[@]}" | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+' | tr '\n' ' ')"
         fi
     fi
+    if [ -n "$bs" ] && [ -n "${prs[*]-}" ]; then local nb="" rb; for rb in $bs; do case " ${prs[*]} " in *" $rb "*) ;; *) nb="$nb$rb " ;; esac; done; bs="$nb"; fi   # a group's own members are not riders ("rolled back with" themselves); $prs is run_group's (unset in a lone release)
     if [ -n "$why_not" ]; then
         exec 9>&-; pending_clear; [ -z "${RB_DONE:-}" ] || : > "$RB_DONE"   # a verdict was reached (not rolled back, and the report says why)
         fail "main's tests" "$mg_why: NOT rolled back, $why_not; deployed at ${m:0:7}$covered · $recyc"
@@ -974,11 +1001,77 @@ wait_merged() {   # after the enqueue call, in run(): reads the PR until it is M
                     fi ;;
             esac
         else
-            unread=$((unread+1)); [ $((now - said)) -lt 300 ] || { said=$now; say "GitHub's answer about the PR could not be read ($unread read(s) in a row); trying again"; }
+            unread=$((unread+1)); poll="$POLL_QUEUE"   # an answer GitHub did not give (a 403/429 is a wait) is not asked again in 10 s: the slow poll from the first unreadable read on
+            [ $((now - said)) -lt 300 ] || { said=$now; say "GitHub's answer about the PR could not be read ($unread read(s) in a row); trying again"; }
         fi
-        [ $waited -lt "$QUEUE_WAIT" ] || fail "merge queue" "still $([ -n "$gq_entry" ] && echo "in the merge queue ($gq_entry)" || echo "not merged") $((waited/60)) min after the enqueue, which is as long as this release waits; the PR may still merge, and the next release's deploy carries it"
+        [ $waited -lt "$QUEUE_WAIT" ] || fail "merge queue" "still $([ -n "$gq_entry" ] && echo "in the merge queue ($gq_entry)" || echo "not merged") $((waited/60)) min after the enqueue, which is as long as this release waits; the PR may still merge later: rerun release.sh $pr to carry on from the merge (the next release's deploy carries it too)"
         sleep "$poll"
     done
+}
+
+# ---- the salamander merge queue (THE TWO MERGE QUEUES at the top): the host file's mode, and what mode on needs. A host file that is absent, says off, says shadow (no longer run) or does not read is GitHub's merge queue.
+mq_host_mode() {   # prints off | shadow | on, or "bad: <why>". No host file is off. The file and the default folder are the ones salamander reads
+    local f="${XDG_CONFIG_HOME:-$HOME/.config}/mergequeue/${REPO//\//__}.toml"
+    [ -e "$f" ] || { echo off; return 0; }
+    python3 -c '
+import sys
+try:
+    import tomllib
+    with open(sys.argv[1], "rb") as fh: d = tomllib.load(fh)
+    m = d.get("mode", "off")
+    print(m if m in ("off", "shadow", "on") else "bad: mode %r is not off, shadow or on" % (m,))
+except Exception as e:
+    print("bad: " + (str(e).splitlines() or [type(e).__name__])[0][:120])' "$f" 2>/dev/null || echo "bad: cannot read $f"
+}
+mq_host_key() {   # $1 = a string key of the host file: its value, nothing when the file or the key is missing or does not read
+    local f="${XDG_CONFIG_HOME:-$HOME/.config}/mergequeue/${REPO//\//__}.toml"
+    [ -e "$f" ] || return 0
+    python3 -c '
+import sys
+try:
+    import tomllib
+    with open(sys.argv[1], "rb") as fh: v = tomllib.load(fh).get(sys.argv[2], "")
+    print(v if isinstance(v, str) else "")
+except Exception: pass' "$f" "$1" 2>/dev/null
+}
+mq_landing() {   # $1 = the head commit of a PR the merge queue merged and GitHub names no merge commit for: prints the commit of origin/main's first-parent line that brought it in. The queue merges each PR into its entry with
+                 # `merge --no-ff` and pushes the entry head to main by fast-forward, so a PR head is only the second parent of its merge commit: the earliest first-parent commit of main that has the head in its ancestry is the PR's landing commit.
+                 # A head that is on the first-parent line itself (a PR merged by fast-forward) is its own landing commit. Nothing is printed when the head is not a known commit or is not in main. Needs main fetched
+    local full fp land
+    full="$(git rev-parse --verify --quiet "$1^{commit}" 2>/dev/null)"; [[ "$full" =~ ^[0-9a-f]{40,64}$ ]] || return 0
+    fp="$(git rev-list --first-parent origin/main 2>/dev/null)"
+    if grep -qx -- "$full" <<<"$fp"; then printf '%s\n' "$full"; return 0; fi   # a here-string, not a pipe: under pipefail a grep that stops at its match could end the writer with SIGPIPE on a long list
+    land="$(git rev-list --first-parent --ancestry-path "$full..origin/main" 2>/dev/null | tail -n 1)"
+    [[ "$land" =~ ^[0-9a-f]{40,64}$ ]] && printf '%s\n' "$land"
+    return 0
+}
+mq_on_check() {   # mode on, both paths ($1 = a PR of this release, for the read of GitHub's merge queue): 0 when the host file names the deploy lock this script takes (deploy_lock = $LOCK_FILE) and GitHub's own merge queue on main is
+                  # off; else 1 with $mq_why. The queue's merge push takes THAT file, without waiting, and this script holds it from its deploy gate to the end of its deploy, so the lock keeps the queue's push out of a release's DEPLOY
+                  # (and a group deploy from overlapping a push); it does not cover a lone PR's merge, which run() makes before it takes the lock (the marker check and the GitHub-queue check below are what keep the two queues off one PR).
+                  # GitHub's queue on as well would be a second queue merging into main beside the salamander one, so mode on refuses it (the ruleset's queue is turned off first, or the mode set to off)
+    local dl; dl="$(mq_host_key deploy_lock)"
+    if [ -z "$dl" ]; then mq_why="the host file ${XDG_CONFIG_HOME:-~/.config}/mergequeue/${REPO//\//__}.toml has no deploy_lock: in mode on it must say deploy_lock = \"$LOCK_FILE\", the lock this script takes, or the queue could push to main while a release deploys; nothing was merged"; return 1; fi
+    [ "$(realpath -m "$dl" 2>/dev/null)" = "$(realpath -m "$LOCK_FILE" 2>/dev/null)" ] || { mq_why="the host file's deploy_lock is $dl, not the lock this script takes ($LOCK_FILE): the queue and the releases would not exclude each other; set deploy_lock = \"$LOCK_FILE\"; nothing was merged"; return 1; }
+    [ -n "${1:-}" ] || return 0
+    local tries; gq_mq=""; gq_prid=""
+    for tries in 1 2 3; do ghq_target "$1" && break; [ $tries = 3 ] || sleep 10; done
+    [ -n "$gq_mq" ] || { mq_why="GitHub's answer about the repository's merge queue cannot be read, so it is not known whether GitHub's queue is on as well as the salamander one; nothing was merged"; return 1; }
+    [ "$gq_mq" != 1 ] || { mq_why="GitHub's merge queue is on for main (the ruleset's queue) as well as the host file's mode on: two queues would merge into main. Turn the ruleset's queue off, or set the host file's mode to off; nothing was merged"; return 1; }
+}
+mq_marker_lead() { sed -n 's/.*led by PR #\([0-9][0-9]*\).*/\1/p' "$MQ_HANDED/pr-$1" 2>/dev/null | head -n 1; }   # $1 = a PR with a marker: the lead of the group release that wrote it
+mq_group_running() {   # prints the lead of a group release that is running: a live stackshot-release-<lead> named in any marker. The queue's started mark of the lead goes when the queue ejects it (member_fail), the marker of the members stays
+    local f ql
+    for f in "$MQ_HANDED"/pr-*; do
+        [ -e "$f" ] || continue
+        ql="$(mq_marker_lead "${f##*/pr-}")"
+        if [ -n "$ql" ] && q_alive "$ql"; then printf '%s\n' "$ql"; return 0; fi
+    done
+    return 1
+}
+mqh_set() { mkdir -p "$MQ_HANDED" && printf '%s\n' "$(date -u +%FT%TZ) handed to the merge queue by the group release led by PR #${lead:-?}" > "$MQ_HANDED/pr-$1"; }
+mqh_clear() { rm -f "$MQ_HANDED/pr-$1"; }
+mq_plain() {   # stdin to stdout: the words a waiter on a release log looks for (` FAILED `, ` done: `) made harmless, so a PR title in a queue line never reads as a release's result
+    sed -e 's/ FAILED/ failed/g' -e 's/ done:/ done/g'
 }
 
 # THE RELEASE QUEUE. Several PRs have to reach GitHub's merge queue together to be tested together, and each release then waits for the merge queue, the deploy lock and main's full run. `release.sh queue N [N...]` records PR numbers
@@ -1022,15 +1115,46 @@ q_unqueue() {   # under the lock: PR $1 out of the queue file, and no longer one
     for e in "${q[@]}"; do [ "$e" = "$1" ] || kept+=("$e"); done
     q=("${kept[@]}"); q_write || return 1; q_unmark_started "$1"
 }
+q_start_next_on() {   # under the lock, mode on (THE TWO MERGE QUEUES): the release queue starts ONE thing at a time, as it did when the salamander merge queue was its only one, and routes by COUNT at this moment: two or more waiting
+                      # (at most MQ_HANDOFF_MAX) go to the salamander merge queue as one group (`release.sh --group`, its unit stackshot-release-<lead>, the lead marked started), one waiting is released alone (`release.sh N`).
+                      # Nothing starts while a release the queue started is running; it starts the next one when it is deployed. One that cannot be started is logged and taken out. $1 = who asks (for the log)
+    local n out lead cmdword; local -a waiting=() gq=() cmd=()
+    q_read
+    for n in "${q[@]}"; do if q_is_started "$n" && ! q_alive "$n"; then say "release queue: PR #$n was started by the queue but its release is not running (killed?): nothing else starts; release.sh queue --resume starts it again"; return 0; fi; done
+    for n in "${q[@]}"; do if q_is_started "$n" && q_alive "$n"; then say "release queue: PR #$n (started by the queue) is running; it starts the next one when it is deployed (the salamander merge queue is on: one at a time)"; return 0; fi; done
+    if lead="$(mq_group_running)"; then say "release queue: the group release led by PR #$lead is running (its PRs are held by the salamander merge queue): nothing else starts; the queue goes on when it ends"; return 0; fi   # its lead may be out of the queue and unmarked already (the queue ejected it), its members are not
+    while :; do
+        q_read; waiting=()
+        for n in "${q[@]}"; do q_is_started "$n" || waiting+=("$n"); done
+        if [ "${#waiting[@]}" -eq 0 ]; then say "release queue: nothing to start (${#q[@]} listed, all started already)"; return 0; fi
+        lead="${waiting[0]}"
+        if [ "${#waiting[@]}" -ge 2 ]; then gq=("${waiting[@]:0:$MQ_HANDOFF_MAX}"); cmd=(--group "${gq[@]}"); else gq=("$lead"); cmd=("$lead"); fi
+        q_mark_started "$lead"   # before the start: the release reads it at its start to know that the queue started it
+        if out="$("$HERE/release.sh" "${cmd[@]}" 2>&1 </dev/null 4>&- 6>&- 7>&- 8>&- 9>&-)" || [[ "$out" == *"is already running"* ]]; then
+            if [ "${#gq[@]}" -ge 2 ]; then
+                q_log "started PRs ${gq[*]} as one group through the salamander merge queue ($1); ${#q[@]} in the queue"
+                say "release queue: ${#waiting[@]} PRs are waiting (${waiting[*]}) and the salamander merge queue is on: started the group release of ${gq[*]}, led by PR #$lead$([ "${#waiting[@]}" -le "${#gq[@]}" ] || echo "; the others (${waiting[*]:${#gq[@]}}) wait for the next hand-off")"
+            else
+                q_log "started PR #$lead ($1); ${#q[@]} in the queue"
+                say "release queue: started the release of PR #$lead (the salamander merge queue is on and one PR is waiting: released alone)"
+            fi
+            return 0
+        fi
+        q_unmark_started "$lead"; q_unqueue "$lead" || return 1   # a start that failed: the lead is skipped and the count is taken again
+        q_log "could not start $([ "${#gq[@]}" -ge 2 ] && echo "the group led by ")PR #$lead ($1): $(echo "$out" | tail -1)"; say "release queue: could not start the release led by PR #$lead ($(echo "$out" | tail -1)); PR #$lead skipped"
+    done
+}
 q_start_next() {   # under the lock: the release of every waiting PR (not started yet), in order, until START_MAX queued releases are running. A PR stays in the queue file until it is deployed. One that cannot be
                    # started is logged and taken out. $1 = who asks (for the log)
     local n out live=0 started=0 s; local -a gone=()
     if [ -f "$QUEUE.paused" ]; then say "the release queue is paused ($(head -1 "$QUEUE.paused")): no release started; release.sh queue --resume goes on"; return 0; fi
     q_read
     if [ "${#q[@]}" -eq 0 ]; then rm -f "$QUEUE.started"; say "the release queue is empty: nothing more to start"; return 0; fi
+    if [ "$(mq_host_mode)" = on ]; then q_start_next_on "$1"; return $?; fi   # the salamander merge queue: one thing at a time, by count (THE TWO MERGE QUEUES at the top)
     for n in "${q[@]}"; do if q_is_started "$n" && q_alive "$n"; then live=$((live+1)); fi; done
     for n in "${q[@]}"; do
         q_is_started "$n" && continue   # started already (running, or killed: --resume clears the mark and starts it again)
+        if [ -e "$MQ_HANDED/pr-$n" ]; then q_log "PR #$n not started ($1): the salamander merge queue holds it (marker $MQ_HANDED/pr-$n)"; say "release queue: PR #$n is held by the salamander merge queue (a group release handed it over, whatever the host file says now): not started alone; release.sh queue --drop $n takes it out of this queue"; continue; fi
         [ "$live" -lt "$START_MAX" ] || break
         q_mark_started "$n"   # before the start: the release reads it at its start to know that the queue started it
         if out="$("$HERE/release.sh" "$n" 2>&1 </dev/null 4>&- 6>&- 7>&- 8>&- 9>&-)" || [[ "$out" == *"is already running"* ]]; then   # its own unit (systemd-run): it outlives this release
@@ -1182,6 +1306,24 @@ queue_drop_locked() {
     q_read
     for e in "${q[@]}"; do if [ "$e" = "$1" ]; then hit=1; else kept+=("$e"); fi; done
     [ $hit = 1 ] || { echo "PR #$1 is not in the release queue"; return 1; }
+    if [ -e "$MQ_HANDED/pr-$1" ]; then   # mode on: a group release handed it to salamander's queue; taking it out of this file would not take it out of that one
+        local ql st act; ql="$(sed -n 's/.*led by PR #\([0-9][0-9]*\).*/\1/p' "$MQ_HANDED/pr-$1" 2>/dev/null | head -n 1)"
+        if q_alive "$ql"; then act=live   # its group release is running: the marker is its own
+        elif [ "$(mq_host_mode)" != on ] && [[ "$(mq_host_mode)" != bad:* ]]; then act=gone   # the host file does not say on (any more): nothing reads markers then. A file that does not read (bad: ...) says nothing: mq status decides, and a status that cannot be read refuses
+        else
+            st="$(timeout 30 salamander mq status --json --repo "$REPO" 2>/dev/null 4>&- 6>&- 7>&- 8>&- 9>&-)" || st=""
+            act="$(printf '%s' "$st" | K="$1" python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin); k = int(os.environ["K"])
+    print("active" if any(e.get("pr") == k and e.get("state") in ("waiting", "grouped") for e in d.get("queue", [])) else "gone")
+except Exception: print("")' 2>/dev/null)"
+        fi
+        if [ "$act" = gone ]; then rm -f "$MQ_HANDED/pr-$1"; q_log "removed the stale merge queue marker of PR #$1 ($MQ_HANDED/pr-$1): the merge queue no longer holds it"; echo "(the merge queue no longer holds PR #$1; its stale marker $MQ_HANDED/pr-$1 was removed)"
+        else
+            echo "PR #$1 was handed to the merge queue ($(cut -c1-120 "$MQ_HANDED/pr-$1")): it is not dropped here, the queue may still merge it. salamander mq drop $1 --repo $REPO takes it out of the queue (the group release then reports it); nothing was changed in the release queue. The marker is $MQ_HANDED/pr-$1$([ "$act" = live ] || echo "; it goes by itself once the merge queue no longer holds the PR and this command is run again")"; return 1
+        fi
+    fi
     q=("${kept[@]}"); q_write || return 1; q_unmark_started "$1"; q_log "dropped PR #$1"
     echo "dropped PR #$1; release queue, in order: ${q[*]:-(empty)}"
 }
@@ -1195,6 +1337,382 @@ queue_resume_locked() {
     q_start_next "release.sh queue --resume"
 }
 
+# THE TWO MERGE QUEUES, MODE ON: the release queue (above) routes by COUNT at the moment it would start a release. One PR waiting takes run() (see mq_on_check and the marker check there). Two or more waiting (at most 4, release.sh's own number) go to
+# the salamander merge queue together: `release.sh --group N N...` (unit stackshot-release-<first>; the lead is marked started in $QUEUE.started, the others are not) runs run_group. It hands them all to the queue in one `salamander mq add`, waits for each
+# (`salamander mq wait N`: exit 0 merged, 1 ejected/failed/dropped with the reason, 2 gave up, not in the line or blocked, 3 tested in shadow, 4 replay), then deploys what the queue merged ONCE, through the same steps as a release through GitHub's
+# queue: the deploy lock, deploy_gate (the salamander queue tested exactly the tree it merged), ./deploy.sh pinned to the merge, the session pick, one report and one `done:` line per PR, then main's run for the merge with the rollback and the pause.
+# HOW THE TWO PATHS EXCLUDE EACH OTHER. (0) Mode on is refused while GitHub's own merge queue is on for main too (mq_on_check): two queues would merge into main. (1) The host file's deploy_lock is THIS script's deploy lock (mq_on_check refuses mode on otherwise): the queue's merge push takes it without waiting (busy: tried again next tick), and a release holds it from
+# its deploy gate to the end of its deploy, so the queue never pushes while a release deploys, and a group deploy (also under the lock) never overlaps a push (a lone PR's merge is made before the lock is taken: the marker check keeps the queues off one PR). The release queue counts a group release as running while any marker names a live stackshot-release-<lead> (the queue's ejecting the lead clears its started mark). (2) The release queue starts one thing at a time in mode on: a group, or a lone release.
+# (3) A PR is never in both: a group release writes a marker per PR (MQ_HANDED/pr-N) before `mq add` and removes it once the queue no longer holds the PR (settled, dropped by `mq drop`, or "not in the line"), and run() in EVERY mode refuses a PR with a
+# marker ("mq line": a host file changed mid-group does not take the PR out of the salamander queue, and the release queue's plain start skips it too), at its start and again just before it is enqueued (a hand-run release can wait for its checks while a group takes the PR); the group release in turn refuses a PR whose own release unit (stackshot-release-N) is running, and
+# `queue --drop` of a PR the queue holds says so. A hand-off is at most MQ_HANDOFF_MAX PRs (4, release.sh's own number: the chain tests those entries at once and merges them one PR at a time, so a larger hand-off would leave the first merges
+# undeployed while the later ones wait); the rest stay in release.sh's queue for the next hand-off. Design choices: the deploy waits for EVERY PR of the group to settle (a PR behind a failure is rebuilt and tested again; the chain merges one PR a push in
+# line order, and the last merge contains the earlier ones, so one deploy of it covers all); a failed or ejected PR is reported as a failed release of that PR with the queue's reason and the rest still go out; a PR that is merged on GitHub already
+# (an earlier run of the group was killed after the queue merged it) is read before `mq add`, deployed with the group and not handed over again. An mq error, a timeout (RELEASE_MQ_WAIT_CAP, 5 h), a queue paused or blocked, a `salamander mq:` message,
+# a pause of release.sh's own queue while the group waits: the PRs still open are dropped from the queue (best effort) and reported FAILED, release.sh's queue is PAUSED, and what the queue merged BEFORE is deployed all the same (never reported FAILED,
+# but "merged, not live" where it cannot be deployed: only the unresolved PRs are FAILED, and they stay first in release.sh's queue); before any merge the PRs stay first in the queue so --resume tries them again. Where a merged PR cannot be deployed
+# (main cannot be fetched, its commit is unknown, the deploy fails) it is reported "merged, not live". A forced --recycle/--no-recycle does not exist for a group: its session pick is made from the files of all its PRs.
+qg_pause_locked() {   # under the lock: the pause file, the merged PRs out of the queue file (the others stay, first), the group's lead no longer one the queue is running. $1 = the step, $2 = held|pause
+    local e m kept=() gone; q_read
+    [ -f "$QUEUE.paused" ] || printf '%s\n' "group of PRs ${prs[*]} (led by #$lead): $1 $([ "$2" = pause ] && echo "after the merge queue's merge" || echo "before anything was merged"), $(date -u +%FT%TZ)" > "$QUEUE.paused"   # a pause that is there already keeps its own reason
+    for e in "${q[@]}"; do gone=0; for m in "${merged_prs[@]}" ${lost_prs[@]+"${lost_prs[@]}"}; do [ "$e" != "$m" ] || gone=1; done; [ $gone = 1 ] || kept+=("$e"); done
+    q=("${kept[@]}"); q_write
+    q_unmark_started "$lead"
+    q_log "paused: the group of PRs ${prs[*]} failed at $1 ($2); merged and out of the queue: ${merged_prs[*]:-none}"
+}
+qg_held_locked() {   # under the lock: the queue is paused already; the group's lead is not running any more, its PRs stay first in the queue
+    q_unmark_started "$lead"
+    q_log "the group of PRs ${prs[*]} stopped by the pause before any merge: still first in the queue"
+}
+qg_after_fail() {   # fail() of a group release: what the failure does to the release queue, by $q_fail (held: before any merge, pause it and keep the PRs; hold: it is paused already; pause: after a merge; none: no failure of the code). Sets $q_note
+    q_note=""
+    [ "$qstart" = 1 ] || return 0   # only a group the release queue started touches it (the started mark names the lead); one run by hand pauses nothing
+    case "${q_fail:-none}" in
+        held) q_locked qg_pause_locked "$1" held; say "release queue: paused (the group of PRs ${prs[*]} failed at $1 before anything was merged): they stay first in the queue; release.sh queue --resume once it is fixed"
+              q_note="; the release queue is paused with them still queued: release.sh queue --resume once it is fixed" ;;
+        hold) q_locked qg_held_locked; say "release queue: the group stopped before any merge, the queue is paused: the PRs stay first in the queue"
+              q_note="; stopped before any merge, still first in the release queue: release.sh queue --resume once main is fixed" ;;
+        pause) q_locked qg_pause_locked "$1" pause; say "release queue: paused (the group of PRs ${prs[*]} failed at $1 after the merge): no new release starts; release.sh queue --resume once main is fixed"
+               q_read; q_note="; the release queue is paused$([ "${#q[@]}" -eq 0 ] || echo " with ${#q[@]} queued (${q[*]})"): release.sh queue --resume once main is fixed"
+               [ -z "${q_riders:-}" ] || q_note="$q_note; rolled back with it, merged and not live: $q_riders; they go live with the next release once main is fixed, or ./deploy.sh once main's tip run is green" ;;
+        none) q_locked qg_unqueue_merged; qg_handoff "ended with main's run not read"; q_note="; the release queue goes on (main's run not being read is not a failure of the code)" ;;
+    esac
+}
+qg_unqueue_merged() { local m; for m in "${merged_prs[@]}"; do q_unqueue "$m" || return 1; done; }   # under the lock
+qg_handoff_locked() {   # under the lock: the group's PRs (those the queue could not merge stay, first) leave the queue file, the lead is not running any more, and the next waiting ones start
+    if q_in_queue "$lead" && ! q_is_started "$lead"; then return 0; fi   # read again under the lock: the lead is still queued but no longer marked, so a resume took the group over meanwhile (a lead that member_fail already took out of the queue is still ours)
+    local m h; for m in "${prs[@]}"; do for h in ${held_prs[@]+"${held_prs[@]}"}; do [ "$h" != "$m" ] || continue 2; done; q_unqueue "$m" || return 1; done
+    q_unmark_started "$lead"; q_start_next "the group of PRs ${prs[*]} $1"
+}
+qg_handoff() {   # $1 = why: the group's PRs leave the queue file and the next waiting ones start, when the release queue started this group
+    [ "$qstart" = 1 ] || return 0
+    [ -f "$QUEUE" ] || return 0
+    q_locked qg_handoff_locked "$1"
+}
+run_group() {   # $@ = the PRs of one group, in queue order (two or more, at most MQ_HANDOFF_MAX). See THE MERGE QUEUE, ON above
+    local -a prs=("$@") live_prs=("$@") merged_prs=() shas=() held_prs=() addprs=() lost_prs=()
+    local ar unk_why=""; local -a unk=()
+    local lead="$1" pr="$1" glog="$LOGDIR/group-$1.log" m recycle="" rc_note="" audit_note="" verified="" mg_notlive="" q_fail=held q_note="" q_riders="" qstart=0 out rc title
+    local gfailed=0 ROLLED_MARK="$LOGDIR/pr-$1.rolledback" names="" sha restarted fast=0 live_now=0 gate_why="" nonq_why="" good="" mergeoid="" abort_step="" abort_why="" pre_note="" premerged="" k unn="" live_names="" live_pr="" live_is=""; local -a keep=()
+    for m in "${prs[@]}"; do names="${names:+$names }#$m"; done
+    exec > >(tee -a "$glog") 2>&1
+    gsay() { local l k; l="$(say "$@")"; echo "$l"; for k in "${prs[@]}"; do printf '%s\n' "$l" | mq_plain >> "$LOGDIR/pr-$k.log"; done; }   # progress, into the group log and (the words a waiter looks for made harmless) every PR's own log
+    mn() { local k r=""; for k in "${merged_prs[@]}"; do r="${r:+$r }#$k"; done; printf '%s' "$r"; }   # the merged PRs as "#a #b"
+    set_live() { live_names="$(mn)"; case "$live_names" in *" "*) live_pr="PRs $live_names"; live_is=are ;; *) live_pr="PR $live_names"; live_is=is ;; esac; }   # from the merge on, the messages name the PRs this group merged, not every member: a member the queue ejected was never merged
+    plog() { printf '%s\n' "$(say "$2")" >> "$LOGDIR/pr-$1.log"; }                                                                               # a result line, into one PR's log only
+    fail() {   # a failure of the whole group: every PR still open (live_prs: the merged ones too once their deploy is what failed) gets its FAILED line, the release queue is dealt with by $q_fail, one red report
+        local k who="PRs $names"; say "FAILED at $1: $2"
+        [ -z "$live_names" ] || who="$live_pr"   # once the merge is settled, only the merged PRs are named
+        for k in "${live_prs[@]}"; do plog "$k" "FAILED at $1: $(printf '%s' "$2" | mq_plain)"; done
+        qg_after_fail "$1"
+        tell "[release] $who FAILED at $1: $2$q_note · log $glog"
+        exit 1
+    }
+    mq_settle() {   # $1 = a PR: let go of it in the queue (best effort). Its marker goes once the queue no longer holds it: dropped, or "is not in the line" (never added: the add was refused, or it settled already), or no active entry in `mq status`
+        local k="$1" o rc st act
+        o="$(timeout 20 salamander mq drop "$k" --repo "$REPO" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
+        if [ $rc -eq 0 ] || [[ "$o" == *"is not in the line"* ]]; then mqh_clear "$k"; return 0; fi
+        st="$(timeout 30 salamander mq status --json --repo "$REPO" 2>/dev/null 4>&- 6>&- 7>&- 8>&- 9>&-)" || st=""
+        act="$(printf '%s' "$st" | K="$k" python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin); k = int(os.environ["K"])
+    print("active" if any(e.get("pr") == k and e.get("state") in ("waiting", "grouped") for e in d.get("queue", [])) else "gone")
+except Exception: print("")' 2>/dev/null)"
+        if [ "$act" = gone ]; then mqh_clear "$k"; return 0; fi
+        say "PR #$k could not be dropped from the merge queue (salamander mq drop $k: $(printf '%s' "$o" | tail -n 1 | cut -c1-160)): its marker $MQ_HANDED/pr-$k stays, the old path will not take it. salamander mq drop $k by hand, then delete the marker"; return 1
+    }
+    mq_fail() {   # fail() after the queue is told to let go of every PR that is not merged
+        local k
+        for k in "${live_prs[@]}"; do
+            case " ${merged_prs[*]} " in *" $k "*) continue ;; esac
+            mq_settle "$k" || true
+        done
+        fail "$@"
+    }
+    wait_abort() {   # $1 = the step, $2 = why: the queue cannot go on (an error, a cap, a pause, a block). The PRs still open are let go of below; what the queue merged already is deployed all the same
+        abort_step="$1"; abort_why="$2"
+        [ "$1" != "queue paused" ] || [ ${#merged_prs[@]} -gt 0 ] || q_fail=hold   # the release queue is paused already: nothing to pause again
+    }
+    member_fail() {   # $1 = a PR, $2 = the step, $3 = why: this PR alone failed before its merge (the queue ejected or failed it): a failed release of it, and the rest still go out
+        local k keep=() why; why="$(printf '%s' "$3" | mq_plain)"
+        for k in "${live_prs[@]}"; do [ "$k" = "$1" ] || keep+=("$k"); done; live_prs=("${keep[@]}")
+        say "PR #$1 FAILED at $2: $why"; printf '%s\n' "$(say "FAILED at $2: $why")" >> "$LOGDIR/pr-$1.log"
+        mqh_clear "$1"; gfailed=1   # the unit ends 1 when a PR of the group failed, though the others went out
+        [ "$qstart" != 1 ] || { q_locked q_unqueue "$1"; q_log "skipped PR #$1: $2 before its merge (group of ${prs[*]})"; }
+        tell "[release] PR #$1 FAILED at $2: $why; it was in a merge queue group with ${names}$([ "$qstart" != 1 ] || echo "; skipped in the release queue, which goes on") · log $LOGDIR/pr-$1.log"
+    }
+    pr_state() {   # $1 = a PR: OPEN, CLOSED or "MERGED <merge commit>" as GitHub says now; nothing when it cannot be read
+        gh pr view "$1" --repo "$REPO" --json state,mergeCommit,headRefOid 2>/dev/null 4>&- 6>&- 7>&- 8>&- 9>&- | python3 -c '
+import json, sys
+d = json.load(sys.stdin); s = d.get("state") or ""
+oid = ""
+if s == "MERGED":   # the queue merges by fast-forward push, so GitHub may name no merge commit: the PR head is then given as head:<oid>, and the commit on main that brought it in is found once main is fetched (mq_landing)
+    oid = (d.get("mergeCommit") or {}).get("oid") or ("head:" + d["headRefOid"] if d.get("headRefOid") else "")
+print(s + (" " + oid if oid else ""))' 2>/dev/null
+    }
+    lose_pr() {   # $1 = a PR the queue merged, $2 = what is known: no commit can be named for it, so this group cannot deploy it: reported merged, not live; the others go on
+        local k keep=()
+        lost_prs+=("$1"); for k in "${live_prs[@]}"; do [ "$k" = "$1" ] || keep+=("$k"); done; live_prs=("${keep[@]}"); gfailed=1
+        plog "$1" "FAILED at merge commit: $2: merged, not live (./deploy.sh by hand)"
+        tell "[release] PR #$1 was merged by the merge queue but its merge commit is not known: merged, not live (./deploy.sh by hand once main's tip run is green) · log $LOGDIR/pr-$1.log"
+        q_fail=pause; mqh_clear "$1"
+    }
+    adopt_merged() {   # $1 = a PR the queue gave up on, ejected ("pull request is merged") or has not answered for. Returns 0 when GitHub says it is merged (the queue merged it in a push with the earlier ones, or an earlier run of the group did) and it then goes out
+                       # with the group (or is reported merged, not live when no commit can be named for it); 1 when it is not merged; 2 when GitHub's answer cannot be read (twice): the PR is then neither dropped nor called not merged
+        local s; s="$(pr_state "$1")"
+        if [ -z "$s" ]; then sleep 3; s="$(pr_state "$1")"; fi
+        case "$s" in
+            "MERGED "*) mqh_clear "$1"; merged_prs+=("$1"); shas+=("${s#MERGED }"); q_fail=pause; gsay "PR #$1 is merged on GitHub although the merge queue gave no merged answer for it: it is deployed with this group"; return 0 ;;
+            MERGED) lose_pr "$1" "GitHub says PR #$1 is merged but names no merge commit or head for it"; return 0 ;;
+            "") gsay "PR #$1: its state on GitHub could not be read (twice): pr state unreadable, so it is neither dropped from the merge queue nor called not merged"; return 2 ;;
+        esac
+        return 1
+    }
+    ! q_is_started "$lead" || qstart=1   # the release queue started this group (it marked the lead before the start)
+    gsay "release of PRs $names starts in $HERE ($REPO): the merge queue (mode on) tests them as one group and merges it once"
+    recover_pending   # a fast deploy of an earlier release whose process ended before main's run was read: looked at first
+    local mqmode; mqmode="$(mq_host_mode)"
+    [ "$mqmode" = on ] || fail "mq mode" "the host file's merge queue mode is now \"${mqmode#bad: }\", not on, so this group cannot go through the queue; nothing was merged. Set it to on again, or release.sh queue --resume to release the PRs one by one"
+    mq_on_check "$lead" || fail "mq mode" "$mq_why"
+    command -v salamander >/dev/null 2>&1 || fail "mq" "salamander is not on PATH, so the merge queue cannot take the group; nothing was merged"
+    if [ "$qstart" = 1 ] && [ -f "$QUEUE.paused" ]; then q_fail=hold; fail "queue paused" "the release queue is paused ($(head -1 "$QUEUE.paused")): this group was started by the queue before the pause and nothing was merged; release.sh queue --resume starts it once main is fixed"; fi
+    for m in "${prs[@]:1}"; do   # a PR with a release unit of its own running (a lone release, by hand) is not taken: that release may be mid-merge. The lead's own unit is this one
+        ! q_alive "$m" || fail "release running" "PR #$m has its own release running (stackshot-release-$m): a PR is never released by both; nothing was merged. Wait for it, or take PR #$m out of the queue (release.sh queue --drop $m)"
+    done
+    # each PR as GitHub says it now: one that is merged already (an earlier run of this group was killed after the queue merged it) is deployed with the group and not handed to the queue again, which would eject it
+    local pst
+    for m in "${prs[@]}"; do
+        pst="$(pr_state "$m")"
+        case "$pst" in
+            "MERGED "*) mqh_clear "$m"; merged_prs+=("$m"); shas+=("${pst#MERGED }"); premerged="${premerged:+$premerged }#$m"; gsay "PR #$m is merged already (${pst#MERGED }): it is deployed with this group and not handed to the merge queue again" ;;
+            MERGED) member_fail "$m" "pr state" "the PR is merged but GitHub names no merge commit for it: merged, not live (./deploy.sh by hand)" ;;
+            CLOSED) member_fail "$m" "pr state" "the PR is closed" ;;
+            *) addprs+=("$m") ;;
+        esac
+    done
+    [ -z "$premerged" ] || pre_note="; $premerged had been merged by an earlier run of this group and went out with it"
+    [ ${#merged_prs[@]} -eq 0 ] || q_fail=pause
+    if [ ${#addprs[@]} -gt 0 ]; then
+        for m in "${addprs[@]}"; do mqh_set "$m"; done   # before the add: from here the old path refuses these PRs
+        out="$(timeout "$MQ_ON_ADD_TIMEOUT" salamander mq add "${addprs[@]}" --repo "$REPO" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
+        if [ $rc -ne 0 ] || printf '%s\n' "$out" | grep -q '^salamander mq: '; then
+            wait_abort "mq add" "salamander mq add ${addprs[*]} $([ $rc -eq 124 ] && echo "took more than ${MQ_ON_ADD_TIMEOUT}s" || echo "exited $rc"): $(printf '%s' "$out" | tail -n 2 | tr '\n' ' ' | cut -c1-300)"
+        else
+            gsay "merge queue: PRs ${addprs[*]} handed over in one call ($(printf '%s' "$out" | tail -n 1 | cut -c1-160 | mq_plain)); waiting for each"
+            # one `mq wait` per PR, in slices of MQ_SLICE, up to MQ_WAIT_CAP in all; between slices the release queue's pause and the merge queue's own state are looked at once. A PR that merged, failed or was ejected is settled
+            local deadline now left slice line st why_q
+            deadline=$(( $(date +%s) + MQ_WAIT_CAP ))
+            for m in "${addprs[@]}"; do
+                while :; do
+                    now="$(date +%s)"; left=$((deadline - now))
+                    [ ${#merged_prs[@]} -eq 0 ] || q_fail=pause   # a merge has happened: every failure from here pauses and does not keep the merged PRs queued
+                    if [ "$qstart" = 1 ] && [ -f "$QUEUE.paused" ]; then wait_abort "queue paused" "the release queue was paused while this group waited ($(head -1 "$QUEUE.paused")), so it stops waiting for PR #$m"; break 2; fi
+                    if [ $left -le 0 ]; then wait_abort "mq wait" "the merge queue gave no verdict on PR #$m within ${MQ_WAIT_CAP}s"; break 2; fi
+                    slice=$MQ_SLICE; [ $slice -le $left ] || slice=$left
+                    out="$(timeout $((slice + 30)) salamander mq wait "$m" --repo "$REPO" --timeout "$slice" 2>&1 4>&- 6>&- 7>&- 8>&- 9>&-)"; rc=$?
+                    line="$(printf '%s\n' "$out" | grep -m1 -E '^PR [0-9]+[ :]' | cut -c1-300)"   # the verdict line: a line before it on stderr (the driver started again) is not it
+                    [ -n "$line" ] || line="$(printf '%s\n' "$out" | head -n 1 | cut -c1-300)"
+                    if printf '%s\n' "$out" | grep -q '^salamander mq: '; then   # salamander's own error (a host file, a state file), not a verdict on the PR, even at exit 1
+                        wait_abort "mq wait" "salamander mq wait $m: $(printf '%s' "$out" | grep '^salamander mq: ' | head -n 1 | cut -c1-300)"; break 2
+                    fi
+                    case $rc in
+                        0) sha="$(printf '%s' "$line" | sed -n 's/^PR [0-9]* merged: .* at \([0-9a-f]\{7,40\}\)\( \[.*\]\)\{0,1\}$/\1/p')"
+                           if [ -z "$sha" ]; then   # the answer names no merge commit: GitHub knows it
+                               pst="$(pr_state "$m")"; case "$pst" in "MERGED "*) sha="${pst#MERGED }" ;; esac
+                           fi
+                           mqh_clear "$m"
+                           if [ -z "$sha" ]; then   # merged and cannot be found: not deployed by this group, and said so; the others go on
+                               lose_pr "$m" "the merge queue merged PR #$m but neither its answer ($(printf '%s' "$line" | mq_plain)) nor GitHub names the merge commit"
+                               break
+                           fi
+                           merged_prs+=("$m"); shas+=("$sha"); q_fail=pause; gsay "merge queue: $(printf '%s' "$line" | mq_plain)"; break ;;
+                        1) adopt_merged "$m"; ar=$?
+                           case $ar in 0) ;; 2) unk+=("$m"); unk_why="${unk_why:+$unk_why; }PR #$m: $(printf '%s' "${line:-no reason given}" | mq_plain)" ;;   # unresolved, not failed: it may be merged. Handled with the stop of the queue below (kept first in the release queue, its marker kept, not dropped)
+                                       *) member_fail "$m" "merge queue" "the queue did not merge PR #$m: ${line:-no reason given}" ;; esac
+                           break ;;   # "pull request is merged": the queue merged it in an earlier push, it is on main
+                        2) if printf '%s' "$out" | grep -q 'gave up waiting'; then   # this slice ran out: is the queue still able to merge?
+                               st="$(timeout 30 salamander mq status --json --repo "$REPO" 2>/dev/null 4>&- 6>&- 7>&- 8>&- 9>&-)" || st=""
+                               why_q="$(printf '%s' "$st" | python3 -c '
+import json, sys
+d = json.load(sys.stdin); p = d.get("paused"); b = d.get("blocked")
+print(("paused: " + str(p.get("reason", ""))) if p else ("blocked: " + str(b.get("reason", ""))) if b else "")' 2>/dev/null)"
+                               [ -z "$why_q" ] || { wait_abort "mq" "the merge queue is $why_q, so PR #$m cannot be merged"; break 2; }
+                               continue
+                           fi
+                           if printf '%s' "$out" | grep -q 'the queue is blocked'; then wait_abort "mq" "the merge queue is blocked ($(printf '%s' "$line" | mq_plain)), so PR #$m cannot be merged"; break 2; fi
+                           wait_abort "mq wait" "salamander mq wait $m: $line"; break 2 ;;
+                        *) wait_abort "mq wait" "salamander mq wait $m exited $rc ($(printf '%s' "$line" | mq_plain)): not a verdict the release can use"; break 2 ;;
+                    esac
+                done
+            done
+        fi
+    fi
+    if [ -z "$abort_step" ] && [ ${#unk[@]} -gt 0 ]; then abort_step="pr state"; abort_why="GitHub's state of the PRs the merge queue ejected could not be read to check whether they are merged anyway ($unk_why)"; fi   # handled below like any other stop of the queue
+    local -a un=()
+    if [ -n "$abort_step" ]; then   # the queue could not go on: the PRs still open are let go of; what it merged before is deployed below, and the release queue is paused
+        unk=()   # read again below
+        for k in "${live_prs[@]}"; do   # the queue merges a group in one push: a PR whose wait was not reached may be on main already, and is deployed, never failed
+            case " ${merged_prs[*]} " in *" $k "*) continue ;; esac
+            adopt_merged "$k"; ar=$?
+            case $ar in 0) ;; 2) un+=("$k"); unk+=("$k") ;; *) un+=("$k") ;; esac
+        done
+        if [ ${#un[@]} -eq 0 ]; then abort_step=""; say "the merge queue could not go on ($abort_why), but every PR of the group is merged on GitHub: nothing is left to drop"; fi
+    fi
+    if [ -n "$abort_step" ]; then
+        local unk_note="" dep_note="" lostn=""
+        for k in "${un[@]}"; do
+            unn="${unn:+$unn }#$k"
+            case " ${unk[*]:-} " in *" $k "*) continue ;; esac   # its state is unknown: it is not dropped (it may be merged), and keeps its marker
+            mq_settle "$k" || true
+        done
+        [ ${#unk[@]} -eq 0 ] || unk_note="; PRs ${unk[*]} were not dropped from the merge queue and keep their markers: their state on GitHub could not be read (pr state unreadable), check them by hand (gh pr view, salamander mq status)"
+        if [ ${#merged_prs[@]} -eq 0 ] && [ ${#lost_prs[@]} -eq 0 ]; then
+            local -a keep_live=()   # fail() writes FAILED for every PR still live: not for those whose state is unknown (they may be merged); they get their unresolved line first
+            for k in "${live_prs[@]}"; do
+                case " ${unk[*]:-} " in *" $k "*) plog "$k" "unresolved at $abort_step: $(printf '%s' "$abort_why" | mq_plain); pr state unreadable: not dropped from the merge queue, marker kept" ;; *) keep_live+=("$k") ;; esac
+            done
+            live_prs=(${keep_live[@]+"${keep_live[@]}"})
+            fail "$abort_step" "$abort_why; $([ ${#unk[@]} -eq 0 ] && echo "the PRs still open were dropped from the merge queue (best effort); nothing was merged" || echo "no PR is known to be merged")$unk_note"
+        fi
+        for k in "${un[@]}"; do
+            case " ${unk[*]:-} " in *" $k "*) plog "$k" "unresolved at $abort_step: $(printf '%s' "$abort_why" | mq_plain); pr state unreadable: not dropped from the merge queue, marker kept" ;;
+                                    *) plog "$k" "FAILED at $abort_step: $(printf '%s' "$abort_why" | mq_plain); dropped from the merge queue, not merged" ;; esac
+        done
+        for k in "${lost_prs[@]}"; do lostn="${lostn:+$lostn }#$k"; done
+        if [ ${#merged_prs[@]} -gt 0 ]; then dep_note="PRs $(mn), merged by the same group, are deployed next"; else dep_note="PRs $lostn were merged by the queue but this group cannot deploy them (merged, not live)"; fi
+        held_prs=("${un[@]}"); live_prs=("${merged_prs[@]}"); gfailed=1
+        say "FAILED at $abort_step: $abort_why; PRs $unn $([ ${#unk[@]} -gt 0 ] || echo "dropped from the merge queue and ")not merged$unk_note; $dep_note"
+        tell "[release] PRs $unn FAILED at $abort_step: $abort_why; they $([ ${#unk[@]} -gt 0 ] && echo "are" || echo "were dropped from the merge queue and are") not merged$unk_note$([ "$qstart" != 1 ] || echo ", still first in the release queue (release.sh queue --resume once it is fixed)"); $dep_note · log $glog"
+        if [ "$abort_step" != "queue paused" ] && [ "$qstart" = 1 ]; then   # release.sh's queue is paused now, before the deploy (the pause text names the group, not one failed PR); a pause that is there already stands
+            q_locked qg_pause_locked "$abort_step" pause; say "release queue: paused (the group of PRs ${prs[*]} could not go on at $abort_step after the merge queue's merge): no new release starts; release.sh queue --resume once it is fixed"
+        fi
+        q_fail=pause
+    fi
+    if [ ${#merged_prs[@]} -eq 0 ]; then   # nothing merged: every PR was reported failed on its own; the release queue goes on with what is behind them
+        gsay "the merge queue gave this group no merged PR to deploy ($names); nothing to deploy"
+        if [ ${#lost_prs[@]} -gt 0 ]; then merged_prs=("${lost_prs[@]}"); qg_after_fail "merge commit"; exit 1; fi   # merged and not live: the queue is paused (they leave it) and does not hand on
+        qg_handoff "ended with none of them merged"; exit 1
+    fi
+    q_fail=pause   # from here a failure is one of merged PRs
+    set_live
+    # ---- what the queue merged goes out together. The merge commit is the one every other is an ancestor of (the chain merges one PR a push, each on top of the last)
+    fetch_retry || fail "merge commit" "the merge queue merged $(mn) but main cannot be fetched to find its merge commit; merged, not live (./deploy.sh by hand)"
+    local s7 c T="" M="" ok i hd land; local -a fulls=() uniq
+    for i in "${!merged_prs[@]}"; do   # a PR GitHub named no merge commit for (head:<oid>) is found on main now that main is fetched
+        case "${shas[$i]}" in head:*) ;; *) continue ;; esac
+        hd="${shas[$i]#head:}"; land="$(mq_landing "$hd")"
+        if [ -n "$land" ]; then gsay "PR #${merged_prs[$i]}: GitHub names no merge commit; its head ${hd:0:7} landed on main as ${land:0:7}"; shas[$i]="$land"
+        else lose_pr "${merged_prs[$i]}" "GitHub names no merge commit for PR #${merged_prs[$i]} and its head ${hd:0:7} is not on main's first-parent line"; unset "merged_prs[$i]" "shas[$i]"; fi
+    done
+    merged_prs=(${merged_prs[@]+"${merged_prs[@]}"}); shas=(${shas[@]+"${shas[@]}"})
+    if [ ${#merged_prs[@]} -eq 0 ]; then gsay "none of the merged PRs can be deployed by this group ($names)"; merged_prs=("${lost_prs[@]}"); qg_after_fail "merge commit"; exit 1; fi
+    set_live
+    mapfile -t uniq < <(printf '%s\n' "${shas[@]}" | sort -u)
+    for s7 in "${uniq[@]}"; do
+        c="$(git rev-parse --verify --quiet "$s7^{commit}" 2>/dev/null)"
+        [[ "$c" =~ ^[0-9a-f]{40,64}$ ]] || fail "merge commit" "the merge queue's merge commit $s7 is not a commit this checkout knows after fetching main (or the abbreviation is ambiguous); merged, not live (./deploy.sh by hand)"
+        fulls+=("$c")
+    done
+    T="$(git rev-parse origin/main 2>/dev/null)"
+    for c in "${fulls[@]}"; do
+        ok=1; for k in "${fulls[@]}"; do git merge-base --is-ancestor "$k" "$c" || ok=0; done
+        [ $ok = 0 ] || { M="$c"; break; }
+    done
+    [ -n "$M" ] || fail "merge commit" "the merge commits the queue reported (${uniq[*]}) are not in one line; merged, not live (./deploy.sh by hand)"
+    git merge-base --is-ancestor "$M" "$T" || fail "merge commit" "the merge commit ${M:0:7} is not in main's history (tip ${T:0:7}); merged, not live (./deploy.sh by hand)"
+    gsay "merged by the merge queue: $(mn) at ${M:0:7} (main's tip ${T:0:7}); deploying them once"
+    take_lock "merged, not live (./deploy.sh by hand once it is free)"
+    # the same gate as a release through GitHub's queue (deploy_gate): the salamander merge queue tested exactly the tree it merged (its group's run on the queue branch), so M deploys at once when the live checkout is behind it,
+    # a last-good commit is recorded and nothing since it failed on main; a closed gate waits for main's tests. M already in the live checkout (a later release deployed past it) deploys nothing
+    local cur; cur="$(git rev-parse HEAD)"
+    local why_fast="the merge queue tested exactly this tree (its group's run on the queue branch)" fast_note=""
+    if git merge-base --is-ancestor "$M" "$cur"; then
+        live_now=1; fast=1; verified="$M"
+        say "already live: the live checkout (${cur:0:7}) contains the merge ${M:0:7} (a later release deployed past it, or deploy.sh was run by hand); nothing to deploy, main's full run is waited for as after a deploy"
+        fast_note="; already live: the live checkout ${cur:0:7} contained the merge when this group took the deploy lock; nothing was deployed here, and main's full run is waited for"
+    elif deploy_gate "$M" 1 ""; then
+        fast=1; verified="$M"; say "deploying ${verified:0:7} at once: $why_fast; main's full run follows; ${good:0:7} is the last good commit to go back to"
+        fast_note="; deployed at the merge ($why_fast): main's full run follows and rolls it back to ${good:0:7} on a failure"
+        pending_set "$verified" "$pr"   # before deploy.sh: production changes at its fast-forward; a kill in there must leave the record
+    else
+        say "not deployed at the merge yet: $gate_why; the deploy waits for main's tests"
+        fast_note="; the deploy gate was closed ($gate_why), so the deploy waited for main's tests"
+        exec 9>&-   # the wait for main's run is outside the lock, as for a release alone
+        main_green pre "$M"
+        take_lock "merged, not live (./deploy.sh by hand once it is free)"
+    fi
+    out=""; rc=0
+    if [ $live_now = 1 ]; then exec 9>&-; sha="$(git rev-parse --short HEAD)"; restarted=nothing
+    else
+        out="$(DEPLOY_TO="$verified" ./deploy.sh 2>&1 9>&- 7>&- 6>&-)"; rc=$?; echo "$out"
+        sha="$(git rev-parse --short HEAD)"
+        [ $rc -eq 0 ] || q_pause_now "deploy"   # a failed deploy pauses the queue before the lock is let go, as for a release alone
+        exec 9>&-
+        [ $rc -eq 0 ] || { pending_clear; fail "deploy" "$(echo "$out" | tail -1) (main is merged at $sha; the checkout is at $(git rev-parse --short HEAD)): merged, not live"; }
+        restarted="$(echo "$out" | sed -n 's/^  restarted //p' | tr '\n' ' ')"; restarted="${restarted:-nothing}"
+    fi
+    if [ $live_now = 1 ]; then say "done: $sha, already live, restarted nothing"; else say "done: $sha, restarted $restarted"; fi
+    for m in "${merged_prs[@]}"; do plog "$m" "done: $sha, $([ $live_now = 1 ] && echo "already live, ")restarted $restarted"; done   # the line a waiter and the board hooks look for, in each PR's own log
+    # THE SESSION PICK for the whole group: the highest need among the files of all its PRs (a forced --recycle does not exist here)
+    local pf="" pfa pk_note="" pk_files_ok=1 nt_note="" nrc=0 nsum="nothing to reload" flagged=0 rd
+    for m in "${merged_prs[@]}"; do
+        if pfa="$(pr_files "$m" 2>"$LOGDIR/pick-err-$lead")"; then pf="$pf$pfa"$'\n'; else pk_files_ok=0; pk_note="the files of PR #$m could not be read ($(tail -1 "$LOGDIR/pick-err-$lead" 2>/dev/null | cut -c1-160))"; fi
+    done
+    rm -f "$LOGDIR/pick-err-$lead"
+    if [ $pk_files_ok = 1 ]; then pick_session <<< "$pf"; printf '%s' "$PICK_TABLE"; else PICK=nothing; PICK_NOTICE=0; PICK_FROM="$pk_note; release.sh --pick <pr> shows what it would have been"; fi
+    say "session pick: $(pick_label) (from $PICK_FROM)"
+    pk_note="; sessions: $(pick_label) (from $PICK_FROM)"
+    recycle=""; [ "$PICK" = recycle ] && recycle=--recycle
+    NOTICE_SENT=""
+    if [ "${PICK_NOTICE:-0}" = 1 ]; then
+        [ "$recycle" != --recycle ] || nsum="a recycle does not deliver it"
+        notice_send "release: stackshot $live_pr" "stackshot $live_pr $live_is live at $sha; what sessions are told changed in $NOTICE_FROM; $nsum" || nrc=$?
+        case $nrc in
+            0) nt_note="; notice: sent with [fleet] notice_cmd"; NOTICE_SENT=1 ;;
+            1) nt_note="; notice: none sent, no [fleet] notice_cmd is set" ;;
+            3) nt_note="; notice NOT sent: [fleet] notice_cmd timed out after ${NOTICE_TIMEOUT}s and was stopped" ;;
+            *) nt_note="; notice NOT sent: [fleet] notice_cmd failed or is not on PATH" ;;
+        esac
+        say "${nt_note#; }"; rc_note="$nt_note"
+    fi
+    if [ "$recycle" = --recycle ]; then   # flag the items the PRs serve; with none flagged, the fleet tool is asked once for a recycle when the box is idle
+        for m in "${merged_prs[@]}"; do
+            if rd="$(python3 client.py recycle-due --pr "https://github.com/$REPO/pull/$m" 2>&1)"; then flagged=1; rc_note="$rc_note; recycle (PR #$m): $(echo "$rd" | sed 's/^stackshot: //' | paste -sd ';' -)"; fi
+        done
+        if [ $flagged = 1 ]; then :
+        elif idle_recycle "release: stackshot $live_pr"; then rc_note="$rc_note; recycle: no item flagged, so the fleet tool was asked for one once the box is idle"
+        else rc_note="$rc_note; recycle NOT marked: no item was flagged and the fleet tool could not be asked"; fi
+        say "recycle: ${rc_note#; }"
+    fi
+    local green_ok=1
+    case "$rc_note" in *"recycle NOT marked"*|*"notice NOT sent"*) green_ok=0 ;; esac
+    [ $pk_files_ok = 1 ] || green_ok=0
+    [ -z "$audit_note" ] || green_ok=0
+    for m in "${merged_prs[@]}"; do   # one report per PR, each green on its own (--release green --pr), so every PR's items settle
+        title="$(gh pr view "$m" --repo "$REPO" --json title 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("title") or "")' 2>/dev/null)"
+        local -a green=(); [ $green_ok = 1 ] && green=(--release green --pr "https://github.com/$REPO/pull/$m")
+        tell "[release] PR #$m $([ $live_now = 1 ] && echo "merged and already live" || echo "merged and deployed") — ${title:-PR #$m} — main at $sha, restarted: $restarted, healthz ok; merged by the merge queue in one group with $(mn)$pre_note$fast_note$audit_note$pk_note$rc_note · log $LOGDIR/pr-$m.log" "${green[@]}"
+    done
+    qg_handoff deployed   # deployed: the group's PRs leave the queue file (those the queue could not merge stay, first) and the next waiting ones start
+    if [ $fast = 0 ]; then for m in "${merged_prs[@]}"; do released "$m" "$M"; done; return $gfailed; fi   # deployed only after main's tests passed on the merge: it is live now
+    # after a deploy at the merge: main's full run for that commit, outside the lock; a pass is a log line, a failure rolls back (rollback() reports the lead and each rider it took out)
+    if main_green post "$verified"; then
+        pending_clear
+        if [ -n "$mg_notlive" ]; then
+            tell "[release] $live_pr: main's tests passed on ${verified:0:7}, but it is not live ($mg_notlive); it goes live with the next release once main is fixed, or ./deploy.sh once main's tip run is green · log $glog"
+            return $gfailed
+        fi
+        [ -z "$audit_note" ] || tell "[release] $live_pr deployed at ${verified:0:7}${audit_note} · log $glog"
+        for m in "${merged_prs[@]}"; do released "$m" "$verified"; done
+        return $gfailed
+    fi
+    case "$mg_kind" in
+        fail) rollback ;;
+        *) pending_clear; q_fail=none; fail "main's tests" "$mg_why: deployed at ${verified:0:7} and NOT rolled back, main's run was not read; look at it" ;;
+    esac
+}
+
 run() {
     local pr="$1" recycle="${2:-}" log="$LOGDIR/pr-$1.log" title sha restarted step rc_note="" merge_note="" audit_note="" verified="" ROLLED_MARK="$LOGDIR/pr-$1.rolledback" mg_notlive="" q_fail=skip q_note="" q_riders="" qstart=0
     exec > >(tee -a "$log") 2>&1
@@ -1202,6 +1720,24 @@ run() {
     ! q_is_started "$pr" || qstart=1   # the queue started this release (it wrote the mark before the start): its pause and its pre-enqueue stop apply to it
     fail() { say "FAILED at $1: $2"; queue_after_fail "$1"; tell "[release] PR #$pr FAILED at $1: $2$q_note · log $log"; exit 1; }
     recover_pending   # a deploy of an earlier release whose process ended before main's run was read (killed, the box restarted): looked at first
+    local mqmode; mqmode="$(mq_host_mode)"   # THE TWO MERGE QUEUES: only `on` changes this release (off, shadow, no file and a file that does not read are GitHub's queue, below)
+    mq_line_check() {   # every mode: a PR the salamander merge queue holds (the marker of a group release) is never merged here, whatever the host file says now (a mode changed mid-group does not take the PR out of that queue)
+        [ -e "$MQ_HANDED/pr-$pr" ] || return 0
+        local ql how; ql="$(mq_marker_lead "$pr")"
+        if [ -n "$ql" ] && q_alive "$ql"; then how="its group release (PR #$ql, stackshot-release-$ql) is still running: wait for it"
+        else how="its group release ${ql:+(PR #$ql) }is not running: if salamander mq status --repo $REPO no longer lists the PR, release.sh queue --drop $pr removes the stale marker (or delete $MQ_HANDED/pr-$pr); otherwise salamander mq drop $pr --repo $REPO takes it out of the queue, and release.sh queue --resume goes on with the group release"; fi
+        fail "mq line" "PR #$pr was handed to the salamander merge queue ($(cut -c1-120 "$MQ_HANDED/pr-$pr")) and may still be in its line: merging it here would merge what the queue also holds; nothing was merged. $how"
+    }
+    case "$mqmode" in
+        on) # THE TWO MERGE QUEUES: a PR released alone in mode on (one PR waiting in the release queue, or released by hand) takes this path with no call to the salamander merge queue. Two things differ: the host file must name the
+            # deploy lock this script takes (mq_on_check: it is what keeps the queue's merge push out of this release's deploy), and a PR the queue holds is never merged here (the marker of a group release, MQ_HANDED)
+            mq_on_check "$pr" || fail "mq mode" "$mq_why"
+            say "salamander merge queue (mode on): PR #$pr is released alone, by this release's own path; the queue is not called for it" ;;
+        off) ;;
+        shadow) say "the host file says shadow, a mode this script no longer runs: GitHub's merge queue is used as with off" ;;
+        *) say "the host file's merge queue mode does not read (${mqmode#bad: }): GitHub's merge queue is used as with off" ;;
+    esac
+    mq_line_check
     local view state mergeable regens=0 regen_pushed=0 headsha="" mergeoid="" removed_why="" via_queue=0 nonq_why="" resumed=0 enq_epoch=0 good="" gate_why="" fast=0 live_now=0 fast_note=""
     read_view() {   # the PR as GitHub says it now: $view, $title, $state, $mergeable
         view="$(gh pr view "$pr" --repo "$REPO" --json state,mergeable,title,headRefName,isCrossRepository,headRefOid 2>&1)" || fail "pr view" "$(echo "$view" | tail -1)"
@@ -1315,6 +1851,7 @@ print("; ".join(m for m in msgs if m) or (lines[-1] if lines else "no answer"))'
     if [ "$regen_pushed" = 1 ]; then wait_pr_checks "pr tests" progress "the PR's tests pass on the pushed head ${headsha:0:7}"   # as after a regeneration below: a quick check alone must not read as a pass on the new head
     else wait_pr_checks checks quiet "checks pass"; fi
     q_paused_stop   # the wait for the checks can be long: a pause that came meanwhile stops this release before it enqueues the PR
+    mq_line_check   # a group release may have handed this PR to the salamander merge queue while this release waited for its checks (a hand-run release races a group that includes it): looked at again just before the merge
     # 3, 3a: enqueue and wait for GitHub to merge. A PR removed from the merge queue for a conflict that is only the snapshot is mended and enqueued again (at most REGEN_MAX times in the release); any other removal fails the release before a deploy
     while :; do
         enqueue_pr
@@ -1451,10 +1988,19 @@ case "${1:-}" in
         [ -n "$pr" ] || { echo "no release yet"; exit 0; }
         echo "unit stackshot-release-$pr: $(systemctl --user is-active "stackshot-release-$pr.service" 2>/dev/null || echo finished)"
         tail -n 15 "$LOGDIR/pr-$pr.log" 2>/dev/null; exit 0 ;;
+    --run-group) shift; [ $# -ge 2 ] && ! printf '%s\n' "$@" | grep -qvE '^[0-9]+$' && [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "usage: release.sh --run-group <pr> <pr> [<pr>...]  (two or more different PR numbers)" >&2; exit 2; }; run_group "$@"; exit $? ;;   # the steps themselves (what the group's unit runs; THE MERGE QUEUE, ON)
+    --group)   # mode on: the PRs the release queue holds, released as one group through the merge queue (what the queue starts when two or more wait). Starts the unit and returns at once, as `release.sh N` does
+        shift; [ $# -ge 2 ] && ! printf '%s\n' "$@" | grep -qvE '^[0-9]+$' && [ -z "$(printf '%s\n' "$@" | sort | uniq -d)" ] || { echo "usage: release.sh --group <pr> <pr> [<pr>...]  (two or more different PR numbers; needs the merge queue in mode on)" >&2; exit 2; }
+        [ $# -le "$MQ_HANDOFF_MAX" ] || { echo "release.sh --group: $# PRs are more than one hand-off ($MQ_HANDOFF_MAX at most, release.sh's own number): hand over $MQ_HANDOFF_MAX at most" >&2; exit 2; }
+        if systemctl --user is-active --quiet "stackshot-release-$1.service" 2>/dev/null; then echo "release of PR #$1 is already running (release.sh --status $1)"; exit 1; fi
+        systemd-run --user --quiet --collect --unit "stackshot-release-$1" -p WorkingDirectory="$HERE" \
+            --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run-group "$@" \
+            || { echo "could not start stackshot-release-$1 (systemd-run failed): nothing was started" >&2; exit 1; }
+        echo "started stackshot-release-$1: hands the PRs $* to the merge queue as one group, deploys what it merges once, and reports to $REPORT_TO · log $LOGDIR/group-$1.log (and each PR's pr-N.log)"; exit 0 ;;
     queue) shift; queue_cmd "$@"; exit $? ;;
     ''|-h|--help) sed -n '2,/^set -uo pipefail/{/^set -uo pipefail/!p}' "$0"; exit 2 ;;   # the header comment, up to the first line of code
     *)
-        pr="$1"; [[ "$pr" =~ ^[0-9]+$ ]] && [[ "${2:-}" =~ ^(|--recycle|--no-recycle)$ ]] && [ $# -le 2 ] || { echo "usage: release.sh <pr> [--recycle | --no-recycle] | --status [pr] | --run <pr> [--recycle | --no-recycle] | --pick <pr> | --pick-files <file>... | queue N [N...] | queue --list | queue --drop N | queue --resume" >&2; sed -n '/^# How to run it/,/^#   - Auto mode/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+        pr="$1"; [[ "$pr" =~ ^[0-9]+$ ]] && [[ "${2:-}" =~ ^(|--recycle|--no-recycle)$ ]] && [ $# -le 2 ] || { echo "usage: release.sh <pr> [--recycle | --no-recycle] | --status [pr] | --run <pr> [--recycle | --no-recycle] | --pick <pr> | --pick-files <file>... | queue N [N...] | queue --list | queue --drop N | queue --resume | --group N N..." >&2; sed -n '/^# How to run it/,/^#   - Auto mode/p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
         if systemctl --user is-active --quiet "stackshot-release-$pr.service" 2>/dev/null; then echo "release of PR #$pr is already running (release.sh --status $pr)"; exit 1; fi
         systemd-run --user --quiet --collect --unit "stackshot-release-$pr" -p WorkingDirectory="$HERE" \
             --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" "$HERE/release.sh" --run "$pr" ${2:+"$2"} \
