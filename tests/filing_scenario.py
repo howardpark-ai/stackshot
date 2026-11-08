@@ -211,6 +211,16 @@ check("4 …the findings it sent are on the record", fp.exists() and len(json.lo
 msgs.clear()
 server._filing_tick()
 check("4 the next tick sends nothing new", msgs == [])
+seen_env = []
+import audit_run as _AR4
+real_filing_pass = _AR4.filing_pass
+_AR4.filing_pass = lambda **kw: (seen_env.append(kw.get("env")), {"findings": 0})[1]
+try:
+    server._filing_tick()
+finally:
+    _AR4.filing_pass = real_filing_pass
+check("4 the tick hands the pass the server's wait-end fix and facts (wait_end.py), as it hands the front-step and park functions",
+      len(seen_env) == 1 and seen_env[0].wait_end is server._wait_end_fix and seen_env[0].wait_facts is server._wait_end_facts and seen_env[0].wake_park is server._wake_park)
 def refuse(*a, **k): raise server.ToolError("Refused: nobody by that name")
 server._message = refuse
 check("4 a refusal is a failed delivery (False and the refusal's words), as the message route's 400 is", server._filing_deliver("x", "t") == (False, "Refused: nobody by that name"))

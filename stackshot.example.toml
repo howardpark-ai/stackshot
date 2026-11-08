@@ -155,6 +155,10 @@ front_step_move_hours = 3                           # the ten-minute filing pass
                                                     # stuck-elsewhere finding up, for this many hours is reworded to open with the item's mover, with a History line and one message to the mover; 0 = off
 remind_hours = 6                                    # the ten-minute passes: a finding its item has not answered (no write since) is sent again this many hours after its last send, marked as a later try, up
                                                     # to 3 sends in all and then once to the project's builder as unmoved; 0 = sent once, as before
+wait_end = "fix"                                    # the ten-minute filing pass: an open item whose next line waits for something nothing tells the item has happened (another item, a pull request, a machine coming
+                                                    # online, a link) gets the wait the line names set by the server, with a History line the mover can send back, and the mover is asked about the rest; "ask" = only
+                                                    # ask, "off" = no such check
+wait_end_settle_minutes = 60                        # the pass fixes nothing on an item written less than this many minutes ago; 0 = no wait
 orphan_handover = "report"                          # mode "script": an open item whose mover (or post-wake mover) is a session that is gone, a project's last retired agent included, is handed to the closest
                                                     # live agent (the project's own, then its parent's -main, its hub's, the scope's general one: successor.py), with a History line giving the reason; an item
                                                     # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check
