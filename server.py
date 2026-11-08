@@ -1262,7 +1262,7 @@ def _gate_bare_urls(fields: dict[str, str], stored: dict[str, Any] | None = None
 
 
 def _owner_command(line: str) -> bool:
-    """`<owner>: `a command in backticks``: the line the owner runs, whole in one backtick span (the README's form); prose after the name is not one."""
+    """`<owner>: `a command in backticks``: the line the owner runs, whole in one backtick span (the form docs/configuration.md shows); prose after the name is not one."""
     return re.fullmatch(rf"{re.escape(OWNER)}:\s*`[^`\n]+`[.,;]?", line.strip(), re.I) is not None
 
 
@@ -11724,7 +11724,7 @@ def _notice_report(nid: str) -> str:
     return "\n".join(out)
 
 
-# What an agent does when the stall pass takes a wrong step; the same path is in stall.py's docstring and the README.
+# What an agent does when the stall pass takes a wrong step; the same path is in stall.py's docstring and docs/stall-and-ladder.md.
 _STALL_FORM = (
     f" A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as mover, follow-ups after the first notice go by the item's work line, not its pane): resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
     f"recovery (nobody could take it: the fleet's builder is sent one message, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "

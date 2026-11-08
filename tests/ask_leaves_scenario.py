@@ -698,15 +698,16 @@ check("the update text says it: the reminder, the one plain sentence, what stand
       and not any(x in d for x in ("two plain shapes", "shape (2)", "approve-type request", "replacement chain", "taken off by the record")), [x for x in ("reminder", "in one case only") if x not in d])
 cf = server._CLOSE_FORM
 check("the close text carries the same words as the update text (one rule, one paragraph) and no longer says a close acts on asks", server._ASK_RULE in cf and server._ASK_RULE in d and "applies shape" not in cf and "A dropped dependency removes nothing" in cf, None)
-readme = pathlib.Path(STACK, "README.md").read_text(encoding="utf-8")
-check("the README states the limit with its After wording", "Never by the server: closing an item, writing an ask, answering for the owner, altering his words" in readme, None)
-check("the README says the server removes an ask only on the author's own plain sentence, a dropped dependency only reminds the author, and names the reader's words",
-      "only on its author's own plain sentence" in readme and "a dropped dependency only reminds" in readme and "after/once/when/until/waiting for/depends on" in readme and "two plain shapes" not in readme, None)
-check("the README says which parameters are read (every one of the text list, by name), which are not and why, that a part of a longer held line is new, and that the clause repeats on each write",
+import _docs
+readme = _docs.page("asks-and-answers")
+check("the docs state the limit with its After wording", "Never by the server: closing an item, writing an ask, answering for the owner, altering his words" in readme, None)
+check("the docs say the server removes an ask only on the author's own plain sentence, a dropped dependency only reminds the author, and names the reader's words",
+      "only on its author's own plain sentence" in readme and "a dropped dependency only reminds" in readme and "after/once/when/until/waiting for/depends on" in readme and "two plain shapes" not in _docs.pages(), None)
+check("the docs say which parameters are read (every one of the text list, by name), which are not and why, that a part of a longer held line is new, and that the clause repeats on each write",
       all(f"`{p}`" in readme for p in server._ASK_TEXT_PARAMS + server._ASK_NONTEXT_PARAMS if not p.startswith("clear_") and p not in ("item_id", "hold", "recycle"))
       and "a line that only appears inside a longer held line is new" in readme and "with each of his writes to the item for as long as the dependency stays dropped and the ask stands" in readme
       and "an ask stored before the record has none, and then the item's mover and creator count as its author" in readme and "naming each such item once in the clause" in readme, [p for p in server._ASK_TEXT_PARAMS + server._ASK_NONTEXT_PARAMS if f"`{p}`" not in readme][:6])
-check("the ask rule never says 'nothing after it' and the config's own help says the same as the README", "nothing after it" not in server._ASK_RULE
+check("the ask rule never says 'nothing after it' and the config's own help says the same as the docs", "nothing after it" not in server._ASK_RULE
       and "its author's write is, whole, one plain sentence" in pathlib.Path(STACK, "config.py").read_text(encoding="utf-8") and "the record shows it moot" not in pathlib.Path(STACK, "config.py").read_text(encoding="utf-8"), None)
 check("the example config says the same", "only on its author's own plain sentence" in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), None)
 

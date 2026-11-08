@@ -401,8 +401,9 @@ with TestClient(app) as c:
 help_text = " ".join(client.__doc__.split())    # the help wraps its lines
 check("the client help documents both verbs, the key, the shape and the exit codes", "client.py post terminal-prompt open" in help_text and "client.py post terminal-prompt clear" in help_text
       and "terminal_prompt" in help_text and "the pane stopped waiting" in help_text and "Your move" in help_text and "200 characters" in help_text, help_text[help_text.find("post terminal-prompt") - 50:][:300])
-readme = open(f"{STACK}/README.md", encoding="utf-8").read()
-check("the README documents the post kind: both verbs, the route, the item's shape, the idempotency and the page-debt rule", "POST /client/terminal-prompt" in readme and "post terminal-prompt open" in readme
+import _docs
+readme = _docs.page("client-contract")
+check("the docs document the post kind: both verbs, the route, the item's shape, the idempotency and the page-debt rule", "POST /client/terminal-prompt" in readme and "post terminal-prompt open" in readme
       and "post terminal-prompt clear" in readme and "metadata.terminal_prompt" in readme and "the pane stopped waiting" in readme)
 check("the 404 list of the client API names the new write", "terminal-prompt" in server._client_post(me, "nope", {})[1]["error"])
 check("the server's docstring and the client's usage line carry the shape", "terminal-prompt" in client.TERMINAL_PROMPT_USAGE and "Answer <session>'s question in its terminal" in " ".join(server._terminal_prompt.__doc__.split()))

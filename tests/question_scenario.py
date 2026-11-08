@@ -403,8 +403,9 @@ help_text = client.__doc__
 check("the client help documents both verbs, the stable answer line and the fresh-item-per-question rule", "client.py post question" in help_text and "client.py get answer" in help_text
       and "TAB" in help_text and "a fresh item for each question" in help_text and "answer <board#N>" in help_text
       and "A caller resumes only on a line\n                                whose kind is decision" in help_text and "his newest decision on the item" in help_text and "<when>" in help_text and "503" in help_text and "--request-id is required" in help_text and "Filed by <label>" in help_text and "clipped as it reads" in help_text)
-readme = open(f"{STACK}/README.md", encoding="utf-8").read()
-check("the README's client contract documents POST /client/question and GET /client/answer", "POST /client/question" in readme and "GET /client/answer" in readme and "fresh item per question" in readme
+import _docs
+readme = _docs.page("client-contract")
+check("the docs' client contract documents POST /client/question and GET /client/answer", "POST /client/question" in readme and "GET /client/answer" in readme and "fresh item per question" in readme
       and "A caller resumes only on `decision`" in readme and "**the fleet tool passes one per parked question**" in readme and "Filed by <sender> (a script on" in readme and "GitHub issue comment" not in readme and "the keeper is the owner itself" in readme and "never reads the project record" in readme and "newest `decision`" in readme)
 check("the _pilot_charge docstring says a script's filing is never charged to the owner, the keeper being the owner included", "the owner itself" in server._pilot_charge.__doc__)
 check("the 404 lists of the client API name the new entries", "question" in server._client_post(me, "nope", {})[1]["error"] and "answer?key=" in server._client_get("nope", {})[2])

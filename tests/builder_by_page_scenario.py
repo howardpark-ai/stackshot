@@ -3,7 +3,7 @@
 Covers: `[handoff.builder_by_page]` maps a project page key to a background agent of the project. The DEFAULT hand-off of an item with no mover (server._fallback_mover, which the item model
 and the notices read) goes to the mapped builder when the item is filed on the mapped page or on a page under it (a prefix at a page boundary, the longest key first), and only when that
 agent is listed on the item's project as a background agent; an unmapped page, a mapped agent the project does not list, and an empty, missing or malformed map all keep the first
-builder, never an error. An explicit mover on a create always wins. The example config carries the table only as a comment, and the README and create's description say so.
+builder, never an error. An explicit mover on a create always wins. The example config carries the table only as a comment, and the docs and create's description say so.
 
     tests/run-suite builder_by_page        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -119,8 +119,9 @@ ex = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 live = [l for l in ex.splitlines() if re.match(r"\s*\[handoff", l)]
 check("the example config holds the table only as a comment", not live and "# [handoff.builder_by_page]" in ex, live)
 check("the example config has no uncommented entry for it", not any(re.match(r'\s*"projects/[^"]*"\s*=', l) for l in ex.splitlines()))
-rm = pathlib.Path(STACK, "README.md").read_text(encoding="utf-8")
-check("the README says how to set it", "`handoff.builder_by_page`" in rm and "[handoff.builder_by_page]" in rm and "falls back to the first builder" in rm)
+import _docs
+rm = _docs.pages()
+check("the docs say how to set it", "`handoff.builder_by_page`" in rm and "[handoff.builder_by_page]" in rm and "falls back to the first builder" in rm)
 _cdecl = server._CREATE_DESC
 check("create's description names the mapped builder", "for a page the instance maps to a builder, that one when the project lists it" in _cdecl, _cdecl[:200])
 check("the tool-text snapshot carries it", "for a page the instance maps to a builder, that one when the project lists it" in pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))
