@@ -44,6 +44,11 @@ flavor = "plain"                                    # how a session is told to u
 template_page = ""                                  # the page whose "Part 2" holds the project template a new project's page is made from (a key under the dirs, e.g. "projects/template"); "" = the short built-in page
 rules_line = ""                                     # the bullet a new project's page carries to link the rules, written as given; "" = "- Not written yet."
 timeline_source = "stackshot"                       # the source word on the timeline line a page move writes (stackshot/projects/rename_page.py; gbrain flavor)
+copy_project_lines = true                           # the copy of a project's record onto its page: `display-name:`, `status:` and the `agents:` block, written after every project verb (project_verbs.mirror).
+                                                    # false retires the copy on every brain at once: the record is the one place those fields live, and a script that needs them reads
+                                                    # `stackshot projects fields <project>` (the record first, the page's lines for a project the record does not cover yet). A brain marked
+                                                    # `shared` never gets the copy, whatever this says. false also stops the creation of a page for a new project (`create --make-page` writes the
+                                                    # record and no page). Turn it off once nothing outside stackshot reads the page lines
 
 [steps]                                             # where the owner runs the commands of a board step (the text of the create and update tools is built from this at start: restart-only)
 owner_shell = ""                                    # "powershell" = the owner runs a step's commands in PowerShell on a Windows machine: a command in a next line that starts "<owner>:" must say where it runs ("In PowerShell: ...")
@@ -367,6 +372,7 @@ switch_timeout_s = 90                               # one button press is given 
 bin = "gbrain"                                      # the gbrain command line, a name on PATH or a path (~ allowed): only a [pages] flavor = "gbrain" instance uses it (stackshot/projects/rename_page.py, stackshot/projects/page_keeper.py, the router's timeline notes). Read at start of those tools
 mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 # home = ""                                         # GBRAIN_HOME for the default brain's gbrain CLI calls; unset = the CLI's own default (the environment is left as it is)
+# shared = false                                    # true: other people's pages live in this brain too, so stackshot writes nothing of its board onto them (see [[brains]] shared)
 
 # [[brains]]: second notes brains that hold some projects' pages (stackshot/projects/brains.py). Optional: with no entry every page lives in the default brain
 # above ([paths] brain for reads, the gbrain CLI for writes), exactly as before. Each entry is reached the same two ways as the default one:
@@ -394,6 +400,9 @@ mirror_url = "https://github.com/example/brain/blob/main/{key}.md"
 #                                                   # A page that exists is routed as before; the first entry whose new_prefixes match wins
 # keep = ["beta-old"]                               # optional: a page key containing one of these fragments stays in the default brain, whatever new_prefixes says
 # stale_hours = 24                                  # its copy not synced (git fetch or a new commit) for this long counts as stale; 0 = never stale
+# shared = false                                    # true: the brain is shared with other people. stackshot then writes nothing of its board onto its pages: a page-store write for one of its slugs
+#                                                   # (a Current-state edit, a timeline line, a new page, the copy of a project's lines) is refused with a line that names this mark, and a page of it owes no
+#                                                   # page update to a session. Reads are unchanged. false (the default) = as before
 
 [anchor_hub]
 enabled = false                                     # true: install.sh installs and enables anchor-hub's user unit (the receivers need their tokens

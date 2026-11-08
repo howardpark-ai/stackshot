@@ -3,14 +3,15 @@
     tools/project.py create NAME --scope S [--page KEY|LINK] [--make-page] [--title T]    a new project; with no --page it has no page and none is made
     tools/project.py adopt PAGE [--name N] [--scope S]                                    a project from a page that never had one: reads the page once, writes the entry (how: adopted); the page is a pointer after
     tools/project.py rename PROJECT NEW_NAME                                              the name changes, the id stays, the old name goes to former_names
-    tools/project.py move-page PROJECT NEW_KEY [--phase plan|copy|stub ...] [--why W]    runs rename_page.py (copy, then stub), then the record: the pointer is the new key, the old key a former key
+    tools/project.py move-page PROJECT NEW_KEY [--phase plan|copy|stub ...] [--why W]    runs rename_page.py (copy, then stub), then the record: the pointer is the new key, the old key a former key; refused (403) for a page in a shared brain
     tools/project.py archive PROJECT [--why W]                                            status archived (by, at, how); the page's status: line follows
     tools/project.py reopen PROJECT                                                       status active again
     tools/project.py agent-add PROJECT NAME (--front | --back) --mandate "one line"        the agent on the project's agents map, then the page's agents: block
     tools/project.py agent-mandate PROJECT NAME --mandate "one line"                      the mandate line of an agent already on the map changed (record first, then the page's agents: block)
     tools/project.py agent-retire PROJECT NAME                                            the agent off the map; the archive rule is applied (no agent and no open item archives)
     tools/project.py agent-rename PROJECT OLD NEW                                         the entry renamed in place
-    tools/project.py mirror PROJECT [--make-page]                                         writes the page's three mirror lines (display-name:, agents:, status:) from the record again
+    tools/project.py mirror PROJECT [--make-page]                                         writes the page's three mirror lines (display-name:, agents:, status:) from the record again; state "retired" and nothing written when the
+                                                                                          page is in a brain marked shared or [pages] copy_project_lines is false (`stackshot projects fields PROJECT` reads the record instead)
     tools/project.py show PROJECT                                                         the project's entry and what the registry reads of it
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent

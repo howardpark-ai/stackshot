@@ -54,8 +54,8 @@ next ticks (three times a day); its notices then wait for the next day's digest.
 NOTE. A ruling line from the call may carry `note` (one line, at most 300 characters): what the router learned that belongs on the
 project's page. After the ruling is written, the note goes to the page's timeline with the gbrain CLI as page_debt.GbrainIO runs it
 (`gbrain call add_timeline_entry '{"slug", "date", "summary", "source": "stackshot (router)", ...}'`; the date is today in the instance
-timezone), once per notice (live.jsonl `noted`). A failure is logged on the line (`note_error`) and never blocks the ruling.
-[router] notes (default true) is the switch.
+timezone), once per notice (live.jsonl `noted`). A failure is logged on the line (`note_error`) and never blocks the ruling. A page in a brain marked
+`shared` takes no note: it is skipped, with no `note_error` and no `noted`, and the ruling is as it was. [router] notes (default true) is the switch.
 
 HOLD FOR A BACKGROUND AGENT. A pass to a BACKGROUND agent of a notice that asks nothing of it is not
 delivered as a turn: _hold_kind is the one decision (held.decide), and the notice is held for the agent's next turn (held.py: stored server-side,
@@ -423,6 +423,9 @@ def _note(base: dict[str, Any], root: str, nid: str) -> None:
     note = " ".join(str(base.get("note") or "").split())[:NOTE_MAX]
     if not note or not notes_enabled():
         return
+    from stackshot.projects import brains as _brains
+    if _brains.shared_refusal(root):
+        return                      # a shared brain's page takes no line of this board: skipped without a `note_error` (status() counts that as a router fault); the ruling stands
     try:
         today = dt.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
         why = add_timeline(root, today, note, f"router notice {nid}, ruled {base.get('ruling')}", f"stackshot-router-note-{nid}")

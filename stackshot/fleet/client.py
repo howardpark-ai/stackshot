@@ -103,7 +103,7 @@ runs on every box.
                                 <transcript id | cse_ id>; a bare name is refused) must resolve to the project's keeper or a front agent its page lists;
                                 the New session form's label does not apply. Prints the server's JSON, exit 0: {"project", "key", "agent": {name:
                                 {front, role, mandate_line}}, "previous", "mirror" {state, key, note}, "note"}; the same line again is 200 "nothing
-                                changed". "mirror" state "failed" = the page was not written (the record is right; the project's next change writes it).
+                                changed". "mirror" state "failed" = the page was not written (the record is right; the project's next change writes it); "retired" = the page is in a brain marked shared (or [pages] copy_project_lines is false) and gets no copy: read the record with `projects fields`.
                                 Refused, reason on stderr, exit 1, nothing changed: 400 a missing field, a bad name, an empty line (to remove the agent use
                                 post project-agent-retire), a line over 600 characters or with a control character or a backslash, an ambiguous slug, a page that is not
                                 a hub · 403 a name as --sender, or a session that is neither the keeper nor a front agent · 404 unknown project, or <name>
@@ -142,7 +142,7 @@ runs on every box.
                                 200 "dropped" = the agent was only pending here: the pending entry is removed · 200 "not listed" (with a "reason") = the
                                 agent is on the project's map nowhere and not pending: nothing was changed (a repeat call after a lost reply is this).
                                 The answer carries "mirror" {state, key, note}: "failed" means the page was not written (the record is right; the project's
-                                next change writes it). Refused, reason on stderr, exit 1: 404 unknown project · 400 a
+                                next change writes it), "retired" that the page gets no copy of the record (a shared brain, or [pages] copy_project_lines off). Refused, reason on stderr, exit 1: 404 unknown project · 400 a
                                 missing field, a bad name, an ambiguous slug, a page that is not a hub · 403 not the form · 409 "a rename or retire of
                                 <page> is in progress; try again" · 503 the record cannot be written.
   client.py post for-you-seen --id <row id | all> --sender <label>

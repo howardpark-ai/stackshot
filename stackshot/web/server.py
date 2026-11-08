@@ -1528,7 +1528,7 @@ def _owed_mark(project: str, owner: str, item: str, settle: str = "", moves: str
     write, for a next-only change or a hold) and moves (the keeper it moves to after the grace, with `what` for its notice)."""
     if _prj.is_id(project):         # a project the item names by id: the page debt is on its page, and a project with no page in this instance's page store owes none
         project = _pr.page_key_of(project)
-    if not project:
+    if not project or _brains.shared_refusal(project):      # a page of a brain marked shared owes nothing: stackshot writes none of its board there, and no session is asked to
         return
     o = _session_id(owner) or "?"
     with _OWED_LOCK:
@@ -1571,6 +1571,9 @@ def _owed_settle() -> dict[str, dict[str, dict[str, Any]]]:
     with _OWED_LOCK:
         d = _owed_load(); changed = False
         for key in list(d):
+            if _brains.shared_refusal(key):     # a debt an earlier run charged on a page of a brain now marked shared: it owes nothing, so it is dropped
+                del d[key]; changed = True
+                continue
             if _owed_brain_skip(key):       # a second brain whose copy cannot be read: its debts are kept as they are, not settled or charged this run
                 continue
             pt: float | None = None         # the page's time (a git log), read once per key
@@ -17554,7 +17557,7 @@ def _project_agent_rename_write(rec: dict[str, Any], old: str, new: str, prefixe
         return 503, {"error": f"the project record cannot be read or written right now, nothing was changed: {e}"}
     _projects_sync_safe(force=True)
     m = res["mirror"]
-    tail = ("" if m["state"] in ("none", "unchanged", "written", "would-write") else
+    tail = ("" if m["state"] in ("none", "unchanged", "written", "would-write", "retired") else
             f" The page's agents block was not updated ({m['note']}); the record is right and the next change to this project writes the page again.")
     if res["result"] == "already renamed":
         return 200, {"project": rec["id"], "key": key, "result": "already renamed", "old": old, "new": res["new"], "front": res["front"],
@@ -17638,7 +17641,7 @@ def _project_agent_retire_write(rec: dict[str, Any], name: str, sender: str) -> 
     _projects_sync_safe(force=True)
     m = res["mirror"]
     today = dt.datetime.now(_cfg.tz()).strftime("%Y-%m-%d")
-    tail = ("" if m["state"] in ("none", "unchanged", "written", "would-write") else
+    tail = ("" if m["state"] in ("none", "unchanged", "written", "would-write", "retired") else
             f" The page's agents block was not updated ({m['note']}); the record is right and the next change to this project writes the page again.")
     if res["result"] == "not listed":
         return 200, {"project": rec["id"], "key": key, "result": "not listed", "agent": name, "page_owed": False, "mirror": m,
@@ -17777,7 +17780,8 @@ def _new_project(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
     note = (f"Made {name} ({pid}) in scope {scope}: its entry is in the project record and the project is listed" + (f"; its page {key} is written through {_page_store()}." if make_page and state == "ok" else
             f"; its page is {key}." if key else "; it has no page.") + f" Add the first agent with `client.py post project-agent {pid} {name}-main --role main --front --mandate \"…\"`.")
     if make_page and state != "ok":
-        note += f" The page {key} was not made ({m['note']}); the record is right, and the next change to the project makes it."
+        note += (f" The page {key} was not made ({m['note']}); the record holds the project." if state == "retired" else
+                 f" The page {key} was not made ({m['note']}); the record is right, and the next change to the project makes it.")
     return 200, {"project": rec, "created": True, "page": {"key": key, "state": state, "display_name": name}, "page_yaml": "", "mirror": m, "note": note}
 
 

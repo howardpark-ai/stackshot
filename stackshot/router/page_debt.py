@@ -418,20 +418,27 @@ class BrainIO:
         return getattr(io, "get_strict", io.get)(slug)
 
     def put(self, slug: str, content: str, rev: str) -> tuple[str, str]:
+        if why := _brains.shared_refusal(slug):
+            return "refused", why
         return self._io(slug).put(slug, content, rev)
 
     def create(self, slug: str, content: str) -> tuple[str, str]:
+        if why := _brains.shared_refusal(slug):
+            return "refused", why
         return self._io(slug).create(slug, content)
 
     def add_timeline(self, slug: str, date: str, summary: str, detail: str, source: str, request_id: str = "") -> str:
+        if why := _brains.shared_refusal(slug):
+            return why
         return self._io(slug).add_timeline(slug, date, summary, detail, source, request_id)
 
 
 def page_io() -> Any:
     """The page store of this instance: PlainIO for `[pages] flavor = "plain"`, GbrainIO (the gbrain CLI) for "gbrain"; with second brains
-    ([[brains]]) a BrainIO in front, which sends a second brain's slugs to the gbrain CLI with that brain's home."""
+    ([[brains]]) a BrainIO in front, which sends a second brain's slugs to the gbrain CLI with that brain's home, and which refuses every write
+    onto a page of a brain marked `shared` (also when the default brain is the shared one: `[gbrain] shared = true`)."""
     base = GbrainIO() if _cfg.page_flavor() == "gbrain" else PlainIO()
-    return BrainIO(base) if _brains.configured() else base
+    return BrainIO(base) if (_brains.configured() or _brains.default().shared) else base
 
 
 def put_state(r: Any) -> tuple[str, str]:
