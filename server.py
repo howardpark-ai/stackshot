@@ -1715,7 +1715,7 @@ def _pilot_charge(project: str, writer: str) -> tuple[str, str]:
 # session keeps a connector's old tool list for about a day.
 _NEEDS_FORM = (
     "needs: whose move it is now, a list: \"decision\" ({OWNER}'s: decide, judge, review, give the go-ahead), \"external\" (someone outside, named in next) "
-    "and session names (the item's project's own background agents, or, as the one mover, any other session (another user-facing agent is refused: its part becomes its own item, linked with after=)), "
+    "and session names (a background agent of any project, or the item's one mover; a user-facing agent that is not the mover is refused: its part becomes its own item, linked with after=), "
     "e.g. needs=[\"decision\", \"my-engineer\"] or one comma-separated string. An item has one mover: a session named that is not a background agent of the item's project counts as a mover, "
     "and two of them, or decision beside one, are refused (name the one who moves it now, and who takes it after his answer in then=); a background agent of this project never counts as a second mover; "
     "empty means the item's mover (mover=, else the project's builder, else its -main agent) moves it. The lane follows the first of decision, external, a session (your call · on others · on agent). "
