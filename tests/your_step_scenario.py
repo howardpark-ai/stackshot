@@ -84,6 +84,8 @@ item(17, step="Send the note", draft=MSG, next="Oliver: Email Sam, then paste th
 item(18, step="Check the key", owner_step="Oliver: Check the key", next="Oliver: Check the key\nOliver: Paste the key into the shell\nOliver: PASTE THE KEY INTO THE SHELL\noliver: paste the key into the shell\nhome-agent: check")      # three of his own lines that differ only in case, none the server's line
 for i, w in ((21, "email\uB85C \uBCF4\uB0B4\uAE30"), (22, "Email\uC744 \uC5F4\uACE0 \uBD99\uC5EC\uB123\uAE30"), (23, "e-mail\uC5D0 \uBD99\uC5EC\uB123\uAE30")):
     item(i, step="Send the note", draft=MSG, next=f"Oliver: {w}\nhome-agent: check")
+item(24, step="Run the command, then post the note", draft=MSG, next="Oliver:\n```\nuv run x y\n```\nhome-agent: check")      # his only step is a fenced block alone: no line of text to hold the message
+item(25, step="Run the command", draft="uv run x y", next="Oliver:\n```\nuv run x y\n```\nhome-agent: check")        # the draft is that command: drawn once
 (T / "store/next-id").write_text("30"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
@@ -154,8 +156,7 @@ def row(i):
 h1 = row(1)
 sn = re.search(r'<div class="istepnext">(.*?)</div>(?=<div class="hask">|</span></div><div class="ir-act">)', h1, re.S)
 check("4 home: the row of the same item is a Your move row", bool(h1) and 'id="your-move"' in page_home, page_home[:300])
-check("4 home: ...it draws the same numbered block as the item page: the same list, byte for byte", bool(sn) and sn.group(0) == re.search(r'<div class="istepnext">.*?</div>(?=</div></div><form class="ianswer")', p1, re.S).group(0)
-      if re.search(r'<div class="istepnext">.*?</div>(?=</div></div><form class="ianswer")', p1, re.S) else bool(sn) and sn.group(1) in b1, h1[:1500])
+check("4 home: ...it draws the same numbered block as the item page: the same list, byte for byte (fails when the row's block is not found)", bool(sn) and bool(b1) and sn.group(0) == b1, (h1[:1500], b1[:600]))
 check("4 home: ...no summary line, no \"Draft\", the command once in one box, the agent's step absent",
       "create an admin key" not in h1 and "Draft" not in h1 and h1.count('<div class="cmd">') == 1 and h1.count(ec(CMD)) == 1 and "check the spend card" not in h1, h1)
 check("4 home: ...then the note box with its Send, as the item page has it", h1.index('<div class="istepnext">') < h1.index('<form class="hanswer hstep"') and 'name="act" value="send"' in h1, h1[-700:])
@@ -202,6 +203,16 @@ check("7 draft_label unit: Korean particles after Latin email read as email; ema
       [chk(t) for t in ("email\uB85C \uBCF4\uB0B4\uAE30", "Email\uC744 \uC5F4\uACE0", "e-mail\uC5D0 \uBD99\uC5EC\uB123\uAE30", "email_alerts", "emailed", "sam@email.com", "#email-alerts", "gmail")] == ["Email text to paste"] * 3 + ["Message to paste"] * 5, [chk(t) for t in ("email\uB85C \uBCF4\uB0B4\uAE30", "Email\uC744 \uC5F4\uACE0", "e-mail\uC5D0 \uBD99\uC5EC\uB123\uAE30", "email_alerts", "emailed", "sam@email.com", "#email-alerts", "gmail")])
 check("7 draft_label unit: email, e-mail, emails; not a channel, an address, gmail or mailing; Korean \uBA54\uC77C", [chk(t) for t in ("send the email", "an e-mail", "emails to Sam", "post in #email-alerts", "write to sam@email.com", "in the gmail draft", "the mailing list", "\uC774\uBA54\uC77C", "\uBA54\uC77C\uC744")]
       == ["Email text to paste"] * 3 + ["Message to paste"] * 4 + ["Email text to paste"] * 2, [chk(t) for t in ("send the email", "an e-mail", "emails to Sam", "post in #email-alerts", "write to sam@email.com", "in the gmail draft", "the mailing list", "\uC774\uBA54\uC77C", "\uBA54\uC77C\uC744")])
+
+# ---- 8. the message is never lost when his steps hold no line of text
+b24 = block(page(24)); h24 = row(24)
+check("8 page: a step that is a fenced block alone, with a draft: the command box and the message after it, escaped, once",
+      b24.count('class="cmd"') == 1 and b24.count(ec(" ".join(["uv", "run", "x", "y"]))) == 1 and '<b class="dlab">Message to paste</b>' in b24 and b24.count("Hi Sam") == 1 and "&lt;b&gt;Please&lt;/b&gt;" in b24
+      and "<b>Please</b>" not in b24 and b24.index("uv run x y") < b24.index("Hi Sam") and "<li>" not in b24, b24)
+check("8 home: the same shape on the row: the message is there, collapsed under its label, escaped, after the command box",
+      bool(h24) and "Message to paste" in h24 and h24.count("Hi Sam") == 1 and "&lt;b&gt;Please&lt;/b&gt;" in h24 and "<b>Please</b>" not in h24 and h24.index("uv run x y") < h24.index("Hi Sam"), h24[:1500])
+b25 = block(page(25))
+check("8 page: a draft that is the command shown is not drawn twice", b25.count("uv run x y") == 1 and 'class="draft"' not in b25, b25)
 
 # ---- 6. the summary stays where space is short
 check("6 summary: the step field still holds the summary (the tab title, the Slack notice read it)", json.loads((T / "store/a/1.json").read_text())["metadata"]["step"] == f"Oliver: {S1}", None)

@@ -4,7 +4,7 @@ A your-step item is written by update(step=…), which stores the state with the
 
   1  the field: a step with a numbered line or a fenced block keeps its lines (caps relaxed: 3000 characters, 20 lines, 500 on a line); any other step stays one line of at most 300
   2  the parts: numbered lines make one ordered list, commands (a span with a space in it, a fenced block) go under their item, a fenced block outside a list stands alone
-  3  the page: the item page's Your step block and the home row's step draw an <ol> with a copy block for each command, escaped, the draft after the list; a one-line step is drawn as ever
+  3  the page: the item page's Your step block and the home row's step draw an <ol> with a copy block for each command, escaped, the draft inside the step that uses it; a one-line step is drawn as ever
   4  guard 1: a shell command in the description of a your-step item with the owner as the mover is refused, pointing at step (Japanese and English text around it)
   5  guard 2: a step with a command names where it runs (PowerShell, Windows, パワーシェル, ウィンドウズ; a `! ` pane line is refused since); a terminal on box-a is no place
   6  guard 3: bash for box-a is refused with the ssh form named; ssh, a cmdlet and the cross-platform tools pass

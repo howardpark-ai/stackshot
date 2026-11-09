@@ -3393,14 +3393,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return f'<div class="istepnext">{self.step_parts_html(parts, r["gid"], self.draft_inside(r, parts, draft))}</div>' if parts else ""
     def draft_inside(self, r, parts, draft):
         """{the position of the step that holds the draft: the drawn draft} for step_parts_html, {} for an item with no draft or with no `draft` function. The step that uses the text is the last one that
-        names text to post, send or paste (draft.names_text, the write guard's own reading), else the last without a command, else the last. A draft that is one of the commands the steps already
-        show is the same text twice: it is not drawn again."""
+        names text to post, send or paste (draft.names_text, the write guard's own reading), else the last without a command, else the last. With no line of text to hold it (the steps are
+        fenced blocks alone) it is drawn after the list, as key -1, so the text is never lost. A draft that is one of the commands the steps already show is the same text twice: it is not drawn again."""
         d = _draft.of(r)
         if not d or draft is None: return {}
         items = [it for p in parts if p.kind != "cmd" for it in (p.items if p.kind == "ol" else [_sc.Item(p.text)])]     # the lines step_parts_html numbers for `inside`
-        if not items: return {}
         cmds = [_sc.split_spans(it.text)[1] + it.fences for it in items]
-        if any(_draft.clean(c) == _draft.clean(d) for cs in cmds for c in cs): return {}
+        if any(_draft.clean(c) == _draft.clean(d) for c in [p.text for p in parts if p.kind == "cmd"] + [c for cs in cmds for c in cs]): return {}
+        if not items: return {-1: draft("")}
         texts = [_sc.split_spans(it.text)[0] for it in items]
         at = ([i for i, t in enumerate(texts) if _draft.names_text(t)] or [i for i, cs in enumerate(cmds) if not cs] or [len(items) - 1])[-1]
         return {at: draft(texts[at])}
@@ -3429,7 +3429,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
     def step_parts_html(self, parts, gid, inside=None):
         """A step that is a numbered list or holds a fenced block (step_commands.parse), drawn part by part: a plain line as a paragraph (inline markdown, mentions linked), a run of numbered lines as one
         ordered list (the first number kept), each item's text with the commands taken out of it (a span with a space in it, or a fenced block) into code blocks with a Copy button under that item, a fenced block
-        outside any item as a block of its own. `inside` ({n: html}) puts a drawn block (the draft) at the end of the n-th line, counting the lines of every list and the plain lines from 0.
+        outside any item as a block of its own. `inside` ({n: html}) puts a drawn block (the draft) at the end of the n-th line, counting the lines of every list and the plain lines from 0, and key -1 after the last part.
         Everything is escaped (the markdown subset takes no raw HTML; a command goes through esc)."""
         def blocks(cmds): return "".join(_cmd_block(c) for c in cmds)
         inside = inside or {}; n = -1
@@ -3448,10 +3448,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                     text, cmds = _sc.split_spans(it.text)
                     lis.append(f"<li>{self.md_line(text, gid) if text else ''}{blocks(cmds + it.fences)}{inside.get(n, '')}</li>")
                 out.append(f'<ol class="stepol"{f" start={p.start}" if p.start != 1 else ""}>' + "".join(lis) + "</ol>")
-        return "".join(out)
+        return "".join(out) + inside.get(-1, "")
     def draft_label(self, *texts):
         """What the text to paste is called: "Email text to paste" when the words of the step it sits under speak of an email (email, e-mail, or the Korean words for it), else "Message to paste". Never "Draft". A word that only
-        looks like one (a channel `#email-alerts`, an address, `gmail`) is no email, and the item's summary is not asked: a Slack post under a summary that says e-mail is a message."""
+        looks like one (a channel `#email-alerts`, an address, `gmail`) is no email, and the item's summary is not asked where a step is: a Slack post under a summary that says e-mail is a message. Only the paths with no step line of his (the step field drawn alone, a draft with no step block)
+        pass the step field's words, since the step field is the step there."""
         # \uBA54\uC77C is the Korean word for "mail" (also inside the one for "email"); it is written as escapes so the public scan finds no Hangul in the repo
         return "Email text to paste" if re.search(r"(?<![\w#@/.-])e-?mails?(?![A-Za-z0-9_-])|\uBA54\uC77C", " ".join(str(t or "") for t in texts), re.I) else "Message to paste"
     def draft_html(self, r, label, home=False):
