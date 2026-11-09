@@ -76,7 +76,7 @@ def save(d: dict[str, list[dict[str, Any]]]) -> None:
     _ro.guard("machine anchors write")
     f = _file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(".machine-anchors.json.tmp")
+    tmp = f.with_name(f".machine-anchors.json.{os.getpid()}.{threading.get_ident()}.tmp")
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({k: v for k, v in sorted(d.items()) if v}, fh, ensure_ascii=False, indent=1)
     os.replace(tmp, f)
@@ -162,7 +162,7 @@ def seen_save(d: dict[str, float]) -> None:
     _ro.guard("machine anchor state write")
     f = _seen_file()
     f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(".machine-anchor.json.tmp")
+    tmp = f.with_name(f".machine-anchor.json.{os.getpid()}.{threading.get_ident()}.tmp")      # a name of its own per writer: two writers never share a temp file
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(d, fh, indent=1, sort_keys=True)
     os.replace(tmp, f)

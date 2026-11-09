@@ -6086,9 +6086,9 @@ def _evwait_pr_event(kind: str, repo: str, n: int, what: str = "") -> dict[str, 
     return _ew.event(kind, f"{_cfg.canon_repo(repo)}#{n}", what=what)
 
 
-def _evwait_box_poll(now: float, told: dict[str, str]) -> list[str]:
+def _evwait_box_poll(now: float, told: dict[str, str], turned: set[tuple[str, str]] | None = None) -> list[str]:
     """The pass for box_online waits, which are a state like a pull request's merge: each open wait whose machine is online now (its puller checked in within [client] online_minutes) turns its item to
-    its post-wake mover, with the machine named. A wait set while the machine was online is refused at the write, so a wait that is open and finds its machine online means the machine came back. → the gids turned."""
+    its post-wake mover, with the machine named (`turned`, when given, collects (gid, lower-cased fleet name) of each wait that turned: the machine anchors skip exactly those pairs). A wait set while the machine was online is refused at the write, so a wait that is open and finds its machine online means the machine came back. → the gids turned."""
     waits: list[tuple[str, "_ew.Spec"]] = []
     for gid, _p in _item_files():
         try:
@@ -6106,7 +6106,10 @@ def _evwait_box_poll(now: float, told: dict[str, str]) -> list[str]:
         try:
             hit = _evw_boxes().get(machine)
             if hit and hit[1] and _lv.puller_online(hit[1], now):
-                fired += _evwait_report(_ew.event(_ew.BOX_ONLINE, machine=hit[0], what=f"{hit[0]} is online again: its puller checked in"), now, told)
+                got = _evwait_report(_ew.event(_ew.BOX_ONLINE, machine=hit[0], what=f"{hit[0]} is online again: its puller checked in"), now, told)
+                fired += got
+                if turned is not None:
+                    turned.update((g, hit[0].lower()) for g in got)
         except Exception as e:  # noqa: BLE001  — one machine's read never stops the others
             print(f"event wait: box_online {machine} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return fired
@@ -6118,8 +6121,9 @@ def _evwait_poll(now: float | None = None, told: dict[str, str] | None = None) -
         return []
     now = time.time() if now is None else now
     told = _told_recent() if told is None else told
-    fired = _evwait_box_poll(now, told)
-    _machine_anchor_poll(now, set(fired))        # a notice only: no item turns, so nothing is added to the gids this returns
+    turned: set[tuple[str, str]] = set()
+    fired = _evwait_box_poll(now, told, turned)
+    _machine_anchor_poll(now, turned)        # a notice only: no item turns, so nothing is added to the gids this returns
     return fired + _evwait_poll_prs(now, told)
 
 
@@ -6223,11 +6227,11 @@ def _machine_state(name: str, boxes: "dict[str, tuple[str, dict[str, Any]]] | No
     return fleet, _lv.ts(rec.get("online_since")), bool(rec and _lv.puller_online(rec)), [k for k, (f, _r) in boxes.items() if f.lower() == fleet.lower()]
 
 
-def _machine_anchor_poll(now: float, skip: set[str]) -> list[str]:
+def _machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
     """The machine anchors' pass (machine_anchor.py), run with the event waits' minute: a machine whose puller checked in again since the last notice (its record's `online_since` newer than the mark in
     state/machine-anchor.json) tells the mover of each open item a machine anchor counts for, once per check-in, in one message per mover that names the machine, the items and the step. Nothing
-    turns or is saved on the item. Not told: an item in `skip` (a box_online wait turned it in this pass and told its mover), an item with its own box_online wait on that machine, an item the owner
-    moves, and, under a project-wide anchor, an item none of whose open steps names the machine. Closed items leave the scopes. The mark moves on even when nobody is told. → the gids told."""
+    turns or is saved on the item. Not told: an (item, machine) pair in `skip` (a box_online wait on that machine turned the item in this pass and told its mover; its other machines are still told), an item with its own box_online wait on that machine, an item the owner
+    moves or will move when its wait ends, and, under a project-wide anchor, an item none of whose open steps names the machine. Closed items leave the scopes. The mark moves on even when nobody is told. → the gids told."""
     try:
         with _ma.LOCK:
             store = _ma.load()
@@ -6236,17 +6240,19 @@ def _machine_anchor_poll(now: float, skip: set[str]) -> list[str]:
             if _ma.prune(store, lambda g: (_load_or_none(g) or {}).get("status") == "open"):
                 _ma.save(store)
         boxes = _evw_boxes()
-        marks, news, moved = _ma.seen_load(), {}, False
-        for m in sorted({e["machine"] for es in store.values() for e in es}, key=str.lower):
-            fleet, since, _on, _names = _machine_state(m, boxes)
-            if not fleet:
-                continue
-            if m.lower() not in marks:      # no mark (the state was lost): what is past is not told
-                marks[m.lower()], moved = since, True
-            elif since > marks[m.lower()]:
-                news[m.lower()], marks[m.lower()], moved = (fleet, since), since, True
-        if moved:
-            _ma.seen_save(marks)
+        news: dict[str, tuple[str, float]] = {}
+        with _ma.LOCK:                      # the marks are read, changed and saved under the lock the anchors tool's seed() takes: a stale snapshot never overwrites a freshly raised mark
+            marks, moved = _ma.seen_load(), False
+            for m in sorted({e["machine"] for es in store.values() for e in es}, key=str.lower):
+                fleet, since, _on, _names = _machine_state(m, boxes)
+                if not fleet:
+                    continue
+                if m.lower() not in marks:      # no mark (the state was lost): what is past is not told
+                    marks[m.lower()], moved = since, True
+                elif since > marks[m.lower()]:
+                    news[m.lower()], marks[m.lower()], moved = (fleet, since), since, True
+            if moved:
+                _ma.seen_save(marks)
         if not news:
             return []
         out: dict[str, list[tuple[str, str, str, str]]] = {}      # session id → [(machine, gid, subject, step)]
@@ -6254,15 +6260,15 @@ def _machine_anchor_poll(now: float, skip: set[str]) -> list[str]:
             try:
                 it = _load(gid)
                 meta = it.get("metadata") or {}
-                if gid in skip or it.get("status") != "open":
+                if it.get("status") != "open":
                     continue
-                hits = [(k, scoped) for k, (_n, scoped) in _ma.counts(store, gid, str(meta.get("project") or "")).items() if k in news]
+                hits = [(k, scoped) for k, (_n, scoped) in _ma.counts(store, gid, str(meta.get("project") or "")).items() if k in news and (gid, k) not in skip]
                 if not hits:
                     continue
-                who, alive = _item_mover_model(it)
+                who, _alive = _item_mover_model(it)
                 sid = _session_id(_holder(it))
-                if (alive and _model.is_owner(who)) or not sid:
-                    continue
+                if _model.is_owner(who) or _model.is_owner(_model.norm_who(meta.get("post_wake_mover"))) or not sid:
+                    continue                  # the owner moves it now (alive) or takes it when its wait ends (waiting): an agent-facing notice never stands in for his queue
                 own = _evw_spec(meta.get("wait_event")) if _watch.stored_kind(meta) == "event" else None
                 steps = [_steps.first_line(s["text"])[:140] for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN]
                 for k, scoped in hits:

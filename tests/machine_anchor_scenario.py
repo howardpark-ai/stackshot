@@ -218,6 +218,53 @@ go_offline("host-b"); tick(); reset()
 checkin("host-b"); tick()
 check("own wait: a wait on another machine does not stop the notice for this one", any("a34" in x[0].split(",") and "machine anchor" in x[2] for x in notices()), SENT)
 
+# an item that waits on someone else and is moved after its wait by the owner is never told, however a notice could be routed (`then`, the stored mover): his queue is the board
+reset()
+for i in (60, 61, 62):
+    (T / f"store/a/{i}.json").unlink(missing_ok=True)
+item(60, mover=BACK, then=BACK, subject="[home] waits on box-d, then his", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=server.OWNER, needs=[])
+item(61, mover=BACK, then=BACK, subject="[home] waits on box-d, then the back agent", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=BACK, needs=[])
+anchors(add=["machine:box-b"], items=["a60", "a61"])
+go_offline("host-b"); tick(); reset()
+checkin("host-b"); tick()
+told_gids = [g for x in notices() for g in x[0].split(",")]
+check("waiting item: one whose post-wake mover is the owner gets no notice, though `then` and its stored mover are sessions; the same item with a session after the wait still does",
+      "a60" not in told_gids and "a61" in told_gids, (SENT, mt(60)))
+check("waiting item: ...and the owner's item stays as it was (nothing turned, nothing saved)", mt(60).get("post_wake_mover") and mt(60).get("wait_kind") == "event", mt(60))
+
+# a box_online wait on machine A that turns an item and an anchor on machine B for it: A is told by the wait only, B is still told
+reset()
+item(62, mover=BACK, subject="[home] waits on box-c, anchored on box-b and box-c", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-c", ask_by=day(5), post_wake_mover=BACK, needs=[])
+anchors(add=["machine:box-b", "machine:box-c"], items=["a62"])
+go_offline("host-b"); go_offline("host-c"); tick(); reset()
+checkin("host-b"); checkin("host-c")
+fired = tick()
+mine = [x for x in SENT if "a62" in x[0].split(",")]
+check("per machine: the wait on box-c turns the item and tells its mover once; the anchor adds no box-c notice but tells box-b's check-in, in the same pass",
+      "a62" in fired and mt(62).get("mover") == BACK and any("box-b checked in" in x[2] for x in mine) and not any("box-c checked in" in x[2] for x in mine) and len(mine) == 2, (fired, mine))
+reset()
+check("per machine: ...and the next pass tells nothing more for either", tick() == [] and not [x for x in SENT if "a62" in x[0].split(",")], SENT)
+
+# the marks are changed under the lock the anchors tool's seed() takes: a pass waits for it, and a mark raised meanwhile is not overwritten with an older reading
+import threading
+reset()
+go_offline("host-b"); tick(); reset()
+checkin("host-b")
+since_b = server._machine_state("box-b")[1]
+raised = since_b + 5000.0
+with MA.LOCK:
+    th = threading.Thread(target=tick, daemon=True); th.start()
+    th.join(0.5)
+    waited = th.is_alive()
+    MA.seed("box-b", raised)
+th.join(10)
+check("lock: the pass does not read the marks while the lock is held, and ends after it is let go", waited and not th.is_alive(), (waited, th.is_alive()))
+check("lock: a mark raised by seed() meanwhile survives the pass, and the check-in it covers is not told", MA.seen_load().get("box-b") == raised and not notices(), (MA.seen_load(), SENT))
+MA.seed("box-b", since_b)      # the mark only ever rises
+check("lock: seed() never lowers a mark", MA.seen_load().get("box-b") == raised, MA.seen_load())
+MA.seen_save({**MA.seen_load(), "box-b": since_b}); tick()      # put the mark back for what follows
+check("lock: no temp file is left behind by the writers", not [f.name for f in (T / "state").glob(".machine-anchor*.tmp")] and not [f.name for f in (T / "store").glob(".machine-anchors*.tmp")], list((T / "state").iterdir()))
+
 # the mark: a lost state tells nothing for the past; a machine that checks in later does
 reset()
 (T / "state/machine-anchor.json").unlink()
