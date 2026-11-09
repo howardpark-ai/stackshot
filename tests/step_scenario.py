@@ -4,7 +4,7 @@ A your-step item is written by update(step=…), which stores the state with the
 
   1  the field: a step with a numbered line or a fenced block keeps its lines (caps relaxed: 3000 characters, 20 lines, 500 on a line); any other step stays one line of at most 300
   2  the parts: numbered lines make one ordered list, commands (a span with a space in it, a fenced block) go under their item, a fenced block outside a list stands alone
-  3  the page: the item page's Your step block and the home row's step draw an <ol> with a copy block for each command, escaped, the draft after the list; a one-line step is drawn as ever
+  3  the page: the item page's Your step block and the home row's step draw an <ol> with a copy block for each command, escaped, the draft inside the step that uses it; a one-line step is drawn as ever
   4  guard 1: a shell command in the description of a your-step item with the owner as the mover is refused, pointing at step (Japanese and English text around it)
   5  guard 2: a step with a command names where it runs (PowerShell, Windows, パワーシェル, ウィンドウズ; a `! ` pane line is refused since); a terminal on box-a is no place
   6  guard 3: bash for box-a is refused with the ssh form named; ssh, a cmdlet and the cross-platform tools pass
@@ -586,8 +586,10 @@ upd(90, step="In PowerShell: run the commands in your Next lines and say done", 
 check("13 write: the summary step that names his Next line is accepted with the command in a `Oliver:` line of next, both in the one write",
       mt(90)["step"] == "In PowerShell: run the commands in your Next lines and say done" and "ssh -t box-a 'ls'" in mt(90)["next"] and mt(90)["state"] == "your-step", mt(90))
 p90 = page(90, answer=BOX)
-check("13 page: and the Your step block shows the summary, then the command line in full with a Copy button",
-      'class="istepnext"' in p90 and p90.index("run the commands in your Next lines") < p90.index('class="istepnext"') and p90.count('class="cmd"') >= 1 and "ssh -t box-a" in p90, None)
+b90 = re.search(r'<div class="iask istep"><b>Your step</b><div class="istepbody">(.*?)</div></div><form class="ianswer"', p90, re.S)
+b90 = b90.group(1) if b90 else ""
+check("13 page: and the Your step block shows his line in full with a Copy button, and not the summary beside it",
+      b90.startswith('<div class="istepnext"><ol class="stepol">') and b90.count("<li>") == 1 and b90.count('class="cmd"') == 1 and "ssh -t box-a" in b90 and "run the commands in your Next lines" not in b90, b90[:600])
 item(91, desc=DESC, **HOW, step="Run `ssh -t box-a 'ls'` and say done")
 upd(91, priority="p2")
 refused_nw("13 legacy: a step stored with a command and no place keeps the older judgement on a write that leaves the step alone (a command needs a place)", 91,

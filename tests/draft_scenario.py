@@ -3,8 +3,8 @@ data, no live store, no network, no server socket.
 
   1  the field: create and update take `draft`, the text as written (many lines, Japanese, indentation), at most 20000 characters; get shows a `draft:` block, the brief only says it is there;
      clear_draft=true and draft="none" remove it; a clear does not go with a new text; a close and his Done drop it; a completed item takes none
-  2  the page: the item page draws the draft inside the Your step block as one code-style block with a Copy button, escaped, its lines kept; a draft on an item that is not in that block still
-     shows; the home row's Your move entry puts it under the step line, labelled "draft" with the same Copy; an Agents row does not
+  2  the page: the item page draws the draft inside the Your step block (inside the step that uses it, labelled "Message to paste", "Email text to paste" for an email, never "Draft") as one code-style block with a Copy button, escaped, its lines kept; a draft on an item that is not in that block still
+     shows; the home row's Your move entry puts it under the step line, labelled "Message to paste" with the same Copy; an Agents row does not
   3  the write guard: an update (step=, which stores your-step; an old your-step item is fixture data) that leaves an item in your-step with the owner as the mover, whose step names a text to post, send or paste (Japanese and English stems), is refused
      unless the item has a draft (stored or in the write) or its step or description links the document; the refusal is one line that names `draft` and the link; a write that sets none of
      step, mover or draft is never held up by it; [model] guards = false skips it
@@ -199,11 +199,11 @@ page = lambda i, **kw: ui_render.Board(f"{tmp}/store").item_html(f"a{i}", **kw)
 item(20, subject="[home] post it", mover="Oliver", then="team-back", needs=["team-back"], state="your-step", step=POST, draft=JA, next="team-back: check it")
 p20 = page(20, answer=BOX)
 blk = re.search(r'<div class="iask istep"><b>Your step</b><div class="istepbody">(.*?)</div></div><form class="ianswer"', p20, re.S)
-check("2 page: the Your step block holds the draft under a \"Draft\" label with the Copy button just beside it", bool(blk) and '<div class="draft"><div class="dhead"><b class="dlab">Draft</b><button type="button" class="b copy" aria-label="Copy the draft">Copy</button></div><pre><code>' in blk.group(1), (blk.group(1) if blk else p20[:600]))
+check("2 page: the Your step block holds the draft under a \"Message to paste\" label with the Copy button just beside it", bool(blk) and '<div class="draft"><div class="dhead"><b class="dlab">Message to paste</b><button type="button" class="b copy" aria-label="Copy the message to paste">Copy</button></div><pre><code>' in blk.group(1) and ">Draft<" not in blk.group(1), (blk.group(1) if blk else p20[:600]))
 check("2 page: ...and it is no command block (not .cmd, so not monospace)", bool(blk) and 'class="cmd' not in blk.group(1) and "draft below" not in p20.lower(), None)
 code = re.search(r'<div class="draft"><div class="dhead">.*?<pre><code>(.*?)</code></pre>', p20, re.S).group(1)
 check("2 page: the text is escaped and keeps every line, space and Japanese character", html.unescape(code) == JA and "<b>リンク</b>" not in code and "&lt;b&gt;リンク&lt;/b&gt;" in code and "\n\n  - 第一" in code, code)
-check("2 page: ...and sits right under the step's own text, before the note box and the buttons", p20.index("Post the message") < p20.index('<b class="dlab">Draft</b>') < p20.index('<form class="ianswer"') < p20.index('name="act" value="send"'), None)
+check("2 page: ...and sits right under the step's own text, before the note box and the buttons", p20.index("Post the message") < p20.index('<b class="dlab">Message to paste</b>') < p20.index('<form class="ianswer"') < p20.index('name="act" value="send"'), None)
 CSS = ui_render.Board(f"{tmp}/store")._css()
 DPRE = CSS.split(".draft pre{")[1].split("}")[0]
 check("2 page: the Copy script and the block's style are on the page", "closest('button.copy')" in p20 and "navigator.clipboard" in p20 and "select" in p20 and ".cmd button.copy{" in CSS and "white-space:pre-wrap" in CSS, None)
@@ -211,7 +211,7 @@ check("2 page: the draft's text takes the page's own font and keeps its breaks; 
 check("2 page: the copy script reads a draft's text from its own block, beside the label", "closest('.draft')" in p20, None)
 item(25, mover="Oliver", then="team-back", needs=["team-back"], state="your-step", step="Post the message in the channel, then run `uv run x y`", draft=JA, next="team-back: check it")
 p25 = page(25, answer=BOX)
-check("2 page: with a command in the step too, the draft sits between the step's text and the command block", p25.index("Post the message") < p25.index('<b class="dlab">Draft</b>') < p25.index('<div class="cmd"><pre><code>uv run x y'), p25[p25.find("Your step"):][:900])
+check("2 page: with a command in the step too, the draft sits between the step's text and the command block", p25.index("Post the message") < p25.index('<b class="dlab">Message to paste</b>') < p25.index('<div class="cmd"><pre><code>uv run x y'), p25[p25.find("Your step"):][:900])
 p20b = page(20)
 check("2 page: signed out, the step block still carries the draft", 'class="draft"' in p20b and "Your step" in p20b, None)
 HOST = "<script>alert(1)</script> & \"q\" <img src=x onerror=alert(1)>"
@@ -220,7 +220,7 @@ p21 = page(21, answer=BOX)
 check("2 page: a hostile draft is only text", "<script>alert(1)</script>" not in p21 and "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;q&quot; &lt;img" in p21 and "<img src=x" not in p21, p21[p21.find('class="draft"') - 50:p21.find('class="draft"') + 400])
 item(22, mover="Oliver", then="team-back", needs=["team-back"], state="your-step", step="run `uv run x y` and say done", next="team-back: check it")
 p22 = page(22, answer=BOX)
-check("2 page: an item with no draft draws none", "Your step" in p22 and 'class="draft"' not in p22 and '>Draft</b>' not in p22, None)
+check("2 page: an item with no draft draws none", "Your step" in p22 and 'class="draft"' not in p22 and '>Draft<' not in p22, None)
 item(23, mover="team-back", needs=["team-back"], draft=JA, next="team-back: write it")
 p23 = page(23, answer=BOX)
 check("2 page: a draft on an item that is not in the Your step block is still drawn, in a block of its own", 'class="iask idraft"' in p23 and 'class="draft"' in p23 and "Your step" not in p23, p23[:300])
@@ -239,8 +239,8 @@ pairs = b.home_pairs()
 ym = {r["gid"]: (r, m) for r, m in pairs[home.YOUR_MOVE]}
 aw = {r["gid"]: (r, m) for r, m in pairs[home.AGENTS]}
 r20 = b.home_row(*ym["a20"], home.YOUR_MOVE)
-dr = re.search(r'<div class="draft hdraft"><details><summary><span class="dlab">draft</span><button type="button" class="b copy" aria-label="Copy the draft">Copy</button></summary><pre><code>(.*?)</code></pre></details></div>', r20, re.S)
-check("2 home: a Your move row labels the draft \"draft\" (not \"draft below\"), Copy beside the label inside the summary, the text behind it", bool(dr) and html.unescape(dr.group(1)) == JA and "draft below" not in r20, r20[-900:])
+dr = re.search(r'<div class="draft hdraft"><details><summary><span class="dlab">Message to paste</span><button type="button" class="b copy" aria-label="Copy the message to paste">Copy</button></summary><pre><code>(.*?)</code></pre></details></div>', r20, re.S)
+check("2 home: a Your move row labels the draft \"Message to paste\" (never \"draft\"), Copy beside the label inside the summary, the text behind it", bool(dr) and html.unescape(dr.group(1)) == JA and "draft below" not in r20, r20[-900:])
 check("2 home: ...under the step line, before the note box and the one Send button", r20.index("Post the message") < r20.index('class="draft hdraft"') < r20.index('<form class="hanswer hstep"') < r20.index('name="act" value="send"'), r20[:900])
 check("2 home: ...and still inside the row's detail block", r20.index('class="ir-det"') < r20.index('class="draft hdraft"'), None)
 check("2 home: ...the step and its Send form are still the row's", "Send" in r20 and "Post the message" in r20, r20[:300])

@@ -18259,11 +18259,11 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
 
 def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
     """his Send with an empty box (his word that his step is done) checks the open steps of the item's checklist that are his, the lines the Your step block shows
-    (steps.is_his: named for him, or naming no one), whoever wrote them. Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
+    (steps.is_his: named for him, or naming no one), whoever wrote them, the server's own line for the summary included (the block does not draw that line or a repeat, but his Send is his word that all of it is done). Sets metadata.steps and takes the lines out of next with their writers (nextlines.prune), the
     other lines staying. → the first checked step's first line, "" when none was his (nothing written). A note on the step (step-reply) never comes here: it ticks only the server's step (owner_steps.tick), and the session that takes the item
-    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: the block shows all of his, so his Send finishes all of them."""
+    marks the lines it wrote when it judges the step finished. `step` (the item's one-line summary) is not looked for in the lines: his Send finishes all of his open lines."""
     cl = _steps.view(meta)
-    mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]      # the same reading as the Your step block's lines (render.step_nexts_html)
+    mine = [i for i, x in enumerate(cl) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]      # the open lines render.his_open_steps starts from, before it leaves out the server's summary line and repeats
     if not mine:
         return ""
     for i in mine:

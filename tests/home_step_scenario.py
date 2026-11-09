@@ -1,7 +1,7 @@
 """Scenario test for the Your step block on the home page's Your move rows (ui/render.py: Board.home_step) — fixture data, no live store, no network, no server.
 
 Covers:
-  * a your-step item whose Next holds two open lines of the owner's, each with a command: the home row draws the step line, then both lines in one numbered list, without their
+  * a your-step item whose Next holds two open lines of the owner's, each with a command: the home row draws both lines in one numbered list and no summary line, without their
     `Oliver:` openers, each command in a code block with its Copy box, as the item page's Your step block does; the agent's lines are not in it; the note box and Send follow;
   * a your-step item with no open line of the owner's draws its step as before: the step line and nothing more, no list.
 
@@ -61,8 +61,8 @@ for label, mod in (("ui/render.py", render2),):
     check(f"{label}: both your-step items are rows of Your move", bool(r1) and bool(r2), page[page.find('id="your-move"'):][:600])
     sn = re.search(r'<div class="istepnext">(.*?)</div>(?=<div class="hask">|</span></div><div class="ir-act">)', r1, re.S)
     sn_html = sn.group(1) if sn else ""
-    check(f"{label}: the row with two open lines of his draws the step line, then his lines in one numbered list, before the note box",
-          -1 < r1.find(STEP) < r1.find('<div class="istepnext">') < r1.find('<form class="hanswer hstep"') and sn_html.startswith('<ol class="stepol"')
+    check(f"{label}: the row with two open lines of his draws his lines in one numbered list and no summary line, before the note box",
+          STEP not in r1 and -1 < r1.find('<div class="istepnext">') < r1.find('<form class="hanswer hstep"') and sn_html.startswith('<ol class="stepol"')
           and sn_html.count("<li>") == 2 and "and read the output" in sn_html and "and paste it" in sn_html, r1[:1500])
     check(f"{label}: each of his two commands is a code block with its own Copy box",
           sn_html.count('<div class="cmd">') == 2 and "uv run tool.py --check</code></pre><button" in sn_html and "git log --oneline -3</code></pre><button" in sn_html
@@ -74,7 +74,7 @@ for label, mod in (("ui/render.py", render2),):
     b = mod.Board(str(T / "store"))
     r2_item = next(x for x in b.rows if x["gid"] == "a2")
     check(f"{label}: home_step of an item with no line of his returns the step block exactly as before (the step with its draft, nothing added)",
-          b.home_step(r2_item)[0] == b.step_block_html(r2_item, b.home_draft_html(r2_item)), b.home_step(r2_item)[0][:400])
+          b.home_step(r2_item)[0] == b.step_block_html(r2_item, home=True), b.home_step(r2_item)[0][:400])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
