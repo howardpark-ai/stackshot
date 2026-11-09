@@ -9,6 +9,7 @@ record is always the one that is right and the page is a copy stackshot writes f
     move_page    the project's page moves to another key (rename_page.py does the page half): the old key goes to `former_keys`
     archive      status archived, with who, when and how; reopen puts it back to active
     agent_add / agent_mandate / agent_retire / agent_rename   the project's agents map, with its mandate lines (agent_mandate changes the line of an agent already listed)
+    restore      the record, or one project of it, put back from a past revision of the store's history in its repository (project_restore.py): a dry run unless asked to apply, with an undo file
 
 Each verb is one atomic change of the record under the record's own lock (projects.locked: the same flock every writer of the file takes), then a write of the page mirror if
 the project has a page in this instance's page store. The mirror is three lines of the page's frontmatter and nothing else: `display-name:` (the project's name), `agents:` (the
@@ -24,6 +25,7 @@ A project with no entry yet (the migration has not run, or not reached it) gets 
 first verb; the project's pending agents (agents the form registered before this) are folded into the entry in the same write. A project with no page has no mirror and no page store call at all.
 
 Every verb takes `dry=True`: the answer is what would be written (the new entry, the page text it would put as a diff summary), and nothing is written to the record or the page.
+`restore` is the one verb that is a dry run unless `apply=True`, and the one that writes no page mirror: it puts the record back as it was saved, and `mirror` writes the page lines from it after.
 
 Stdlib plus the repo's modules (config, projects, project_registry, pages, page_debt); no network, no gbrain call except through the page store the caller passes."""
 from __future__ import annotations
@@ -1134,6 +1136,27 @@ def move_page(project: str, new_key: str, *, by: str = "", phases: tuple = ("cop
     warning = "; ".join(w for w in (st.get("warning"), warning) if w)
     res = _finish(pid, ents, changed, False, io, by=by, extra={"moved": True, "steps": steps, **({"warning": warning} if warning else {})})
     return res
+
+
+# ----------------------------------------------------------------------------- restore from the store's history
+def restore(project: str = "", *, rev: str = "", before: str = "", apply: bool = False, by: str = "", run_dir: Any = None, now: str | None = None) -> dict:
+    """The record (or `project`'s entry, its id rows and its marks, merged into the current record) put back from a past revision `rev` of the store's repository, or the last one before the
+    date `before`. A dry run unless `apply`: the answer says what would change and writes nothing. With `apply` the undo file is written first, then the record, through the save path and the lock
+    every record writer uses. VerbError (404 no such revision or project, 409 a collision, a record being written or a store outside a repository, 422 a record that does not read), nothing written. See project_restore.py."""
+    from stackshot.projects import project_restore as rs
+    return rs.restore(project, rev=rev, before=before, apply=apply, by=by, run_dir=run_dir, now=now)
+
+
+def restore_list(limit: int = 20, *, rev: str = "") -> dict:
+    """The last `limit` revisions of the record file in the store's history, newest first, with the date and what changed in the project count."""
+    from stackshot.projects import project_restore as rs
+    return rs.restore_list(limit, rev=rev)
+
+
+def restore_undo(path: Any, *, apply: bool = False) -> dict:
+    """Take back a restore through the undo file it kept (a dry run unless `apply`)."""
+    from stackshot.projects import project_restore as rs
+    return rs.restore_undo(path, apply=apply)
 
 
 # ----------------------------------------------------------------------------- what the server's gates read
