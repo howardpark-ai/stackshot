@@ -125,7 +125,7 @@ Underneath it is one authenticated write:
   machine (401), or a server not reached (`[0]`). It never reads the project record, so it has no 503. `stackshot/fleet/client.py post question` exits 1
   on a refusal (400 the tool's checks, the missing subject or request id, a text over the limits; 404 no such project; 409 no front
   agent), on no token or a server not reached, and on 503 when the project record cannot be read right now (nothing was filed).
-- `GET /client/items?key=<session>` returns `{"items": [{gid, shown, subject, needs, state and state_fields (only for an item that stores a state), next, state_updated, confirmed, updated, held, list, mover, expected_by (null for a doing item), wait, overdue, step, roles, …}]}`:
+- `GET /client/items?key=<session>` returns `{"items": [{gid, shown, subject, needs, state and state_fields (only for an item that stores a state), next, state_updated, confirmed, updated, held, list, mover, expected_by, wait, overdue (these three are kept so that a reader written against them does not break and are always empty: `expected_by` null, `wait` "", `overdue` null; they go in a later release), step, roles, …}]}`:
   the open items the session moves, takes after the owner's answer or is named in (the board check's read). `list` is the home page's list the item is in, one of
   `"your-move"` (alive, the owner moves it), `"agents"` (alive, a session moves it) or `"waiting"` (waiting on a time, an anchor, another item or a relay), from `home.list_of` on the item
   model's reading. It is never empty: an item the page cannot place (a dead or unreadable one) is `"agents"`, as `home.classify` puts it, so the fleet tool's items sheet groups exactly as the page does.

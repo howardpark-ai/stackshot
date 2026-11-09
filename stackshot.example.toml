@@ -513,8 +513,7 @@ slack_command = ""                                  # an urgent row (a due date 
                                                     # (e.g. "/path/to/post-to-slack.sh"), the text on its standard input, exit 0 = posted. "" (the default) = no Slack
                                                     # path: stackshot holds no Slack posting credential of its own, so name a script that already posts
 
-[idle]                                              # no idle pass runs any more (the stall pass and the hand-off ladder move a quiet mover); two keys of this section are still read
-hours = 4                                           # the expected time of a plain on-agent item (no needs, no hold): this many hours after its state clock (stackshot/waits/waiting.py). 0: the default days
+[idle]                                              # no idle pass runs any more (the stall pass and the hand-off ladder move a quiet mover); one key of this section is still read (an older `hours` key is no longer read: a config file that has it loads, and it does nothing)
 park_days = 3                                       # only a raise stored with a "Park until" button (an older form) still reads this, as the fallback day of that button
 
 [stall]                                             # the stall pass (stackshot/waits/stall.py): an open, live item whose mover is a session (a front agent included) is moved on by stackshot when
