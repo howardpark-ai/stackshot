@@ -489,8 +489,40 @@ def owner_mover_kind() -> str:
 
 def owner_shell_mode() -> str:
     """Where the owner runs the commands of a board step ([steps] owner_shell): "powershell" (also written pwsh), "sala-shell" (also sala_shell, salashell), or "" for anything else (no place is asked for)."""
-    v = str(get("steps", "owner_shell", default="") or "").strip().lower()
+    return _shell_mode_of(get("steps", "owner_shell", default=""))
+
+
+def _shell_mode_of(v: Any) -> str:
+    v = str(v or "").strip().lower()
     return "powershell" if v in ("powershell", "pwsh") else "sala-shell" if v in ("sala-shell", "sala_shell", "salashell") else ""
+
+
+def shell_url_ok(v: Any) -> bool:
+    """Is `v` a page address a link may point at: an http(s) URL with a host (no user name or password in it, a port from 1 to 65535 when one is written), or a path that starts with one "/" (not "//", which names
+    another host)? No space or control character in it."""
+    from urllib.parse import urlsplit
+    if not isinstance(v, str) or not v or re.search(r"[\s\x00-\x1f\x7f\\]", v):
+        return False
+    if v.startswith("/"):
+        return not v.startswith("//")
+    try:
+        u = urlsplit(v)
+    except ValueError:
+        return False
+    if u.scheme.lower() not in ("http", "https") or not u.netloc or not u.hostname or "@" in u.netloc:
+        return False
+    try:
+        port = u.port
+    except ValueError:
+        return False
+    return port is None or 1 <= port <= 65535
+
+
+def shell_url() -> str:
+    """[steps] shell_url: the page that opens the owner's shell, which a command's box links to as "Open shell"; "" when it is unset or is not an http(s) URL or a path starting with "/" (notes() says so)."""
+    v = get("steps", "shell_url", default="")
+    v = v.strip() if isinstance(v, str) else ""
+    return v if shell_url_ok(v) else ""
 
 
 def owner_aliases() -> list[str]:
@@ -988,6 +1020,11 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     pgs = get("pages", cfg=cfg)
     if isinstance(pgs, dict) and "copy_project_lines" in pgs and not isinstance(pgs["copy_project_lines"], bool):
         out.append(f"[pages] copy_project_lines = {pgs['copy_project_lines']!r} is not true or false, so the copy stays on (true): write copy_project_lines = false to stop writing project lines onto pages")
+    su = get("steps", "shell_url", cfg=cfg)
+    if su is not None and (not isinstance(su, str) or (su.strip() and not shell_url_ok(su.strip()))):
+        out.append(f"[steps] shell_url = {su!r} is not an http(s) URL with a host (no user name or password in it, a port from 1 to 65535 if any) or a path starting with \"/\", so no Open shell link is drawn: write shell_url = \"https://shell.example.com/terminal\" or \"/shell\", or remove the key")
+    elif isinstance(su, str) and su.strip() and _shell_mode_of(get("steps", "owner_shell", cfg=cfg)) != "sala-shell":
+        out.append('[steps] shell_url only applies with owner_shell = "sala-shell", so no Open shell link is drawn: set owner_shell = "sala-shell" or remove shell_url')
     out.extend(released_notes(cfg))
     out.extend(report_notes(cfg))
     pm = get("presence", "minutes", cfg=cfg)

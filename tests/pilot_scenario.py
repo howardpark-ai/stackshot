@@ -974,11 +974,11 @@ _c4 = bq.cmd_step("Oliver: in PowerShell run `ssh -t box-a 'tool check --all'` a
 _c5 = bq.cmd_step("Oliver: read [`a b`](https://x.invalid/r) first")
 ui_render._OWNER = _o
 check("command: its own block with a copy button, the line pointing at it", _c1 == ("Oliver: in PowerShell run the command below and type <code>yes</code> when asked"
-      '<div class="cmd"><pre><code>ssh -t box-a &#x27;/x/tool check&#x27;</code></pre><button type="button" class="b copy" aria-label="Copy the command">Copy</button></div>'), _c1)
-check("command: several are numbered; a line not addressed to the owner keeps them inline", _c2.startswith("Oliver: run command 1 below then command 2 below<div class=\"cmd\">")
+      '<div class="cplace"><span>Runs on box-a</span></div><div class="cmd"><pre><code>ssh -t box-a &#x27;/x/tool check&#x27;</code></pre><button type="button" class="b copy" aria-label="Copy the command">Copy</button></div>'), _c1)
+check("command: several are numbered; a line not addressed to the owner keeps them inline", _c2.startswith("Oliver: run command 1 below then command 2 below<div class=\"cplace\"><span>In PowerShell</span></div><div class=\"cmd\">")
       and _c2.count('class="b copy"') == 2 and _c3 == "Then run <code>a b</code>", (_c2, _c3))
 check("command: the item's line comes out as one block; code in a link's label is never a command",
-      _c4.startswith("Oliver: in PowerShell run the command below and type yes when asked<div class=\"cmd\">")
+      _c4.startswith("Oliver: in PowerShell run the command below and type yes when asked<div class=\"cplace\"><span>Runs on box-a</span></div><div class=\"cmd\">")
       and "<code>ssh -t box-a &#x27;tool check --all&#x27;</code>" in _c4 and _c4.count('class="b copy"') == 1
       and 'class="cmd"' not in _c5 and "<code>a b</code> ↗</a>" in _c5, (_c4, _c5))
 check("command: the item page carries the copy script and the block style", "closest('button.copy')" in ip and "navigator.clipboard" in ip and ".cmd button.copy{" in bq._css())

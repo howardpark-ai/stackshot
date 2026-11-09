@@ -139,7 +139,7 @@ check("a description equal to the subject still says none", '<h2>Background</h2>
 n10 = next_of("a10")
 check("Next keeps a line whole (item model, step 3: one line, one mover) with its mover's name added, and its sub-step, the id linked", n10.startswith(OPEN1 + "home-here: pick vendor A or B; then tell the keeper</span><ul><li>ask about " + IA("a1", "[home] other") + "a1</a></li></ul></div></li>"), n10)
 n14 = next_of("a14")
-check("Next: bold in a step, an id in it linked", "then <strong>confirm</strong> it; see " + BN5 + "#5</a><div class=\"cmd\">" in n14, n14)
+check("Next: bold in a step, an id in it linked", "then <strong>confirm</strong> it; see " + BN5 + "#5</a><div class=\"cplace\"><span>Runs on host</span></div><div class=\"cmd\">" in n14, n14)
 check("Next: a step addressed to the owner keeps its command block", '<div class="cmd"><pre><code>ssh -t host &#x27;x y&#x27;</code></pre><button type="button" class="b copy"' in n14 and "the command below" in n14, n14)
 check("Next: a sub-step renders inline markdown, a raw tag stays text", "<li>sub <strong>step</strong> with <code>code</code></li>" in n14 and "&lt;script&gt;alert(1)&lt;/script&gt; now" in n14 and "<script>" not in n14, n14)
 
