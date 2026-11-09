@@ -5,7 +5,7 @@ an item, one machine per item, and only when its mover had set it by hand. A mac
 (`anchors(project, add=["machine:box-a"], items=["board#N"])`), and every item the anchor counts for has its mover told, once, each time that machine checks in again
 (offline to online). An item may name several machines; each notice says which one came back. The item is not turned and not saved: a machine anchor is a notice, never a wait.
 
-Why a store of its own and not anchors.json. An anchor in anchors.json is a thing anchor-hub reads, the board pages draw on an item, the model guards read as a hold and a completion
+Why a store of its own and not anchors.json. An anchor in anchors.json is a thing the anchor hub reads, the board pages draw on an item, the model guards read as a hold and a completion
 asks its page's keeper about. None of that fits a machine, so a machine anchor lives in `machine-anchors.json` beside it: {"<project key>": [{"machine": fleet name, "items": [ids] | null,
 "added": ts, "by": who}, …]}, the same shape of entry and the same scope rule as an anchor (items = the item ids it is about, null = project-wide), and nothing else reads it.
 
