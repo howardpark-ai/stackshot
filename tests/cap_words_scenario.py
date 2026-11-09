@@ -79,9 +79,6 @@ server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))   # no rollout runway in the way
-def W_of(i, at=None, letter="a"):
-    at = now0 if at is None else at
-    return server._waiting_of(f"{letter}{i}", rd(i, letter), at, server._WaitCtx(at))
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 OWNER = server.OWNER
 CAP = W.cap_days()
@@ -91,16 +88,14 @@ TS = now0 - 9 * DAY + 5.25
 TB = now0 - 9 * DAY      # a base for answer times: after the default state clock (now0 - 10 days)
 park = {"ts": TS, "kind": "decision", "text": "park this until Jun 4th", "via": "board"}
 item(13, hold=True, wake=day(30), answers=[{"ts": now0 - 12 * DAY, "kind": "decision", "choice": "Approve", "text": "sent", "via": "board"}, park])
-w = W_of(13)
-check("A: before: a wake a month out with no words recorded is capped to the cap after the last move, and past due (10 days on)", "capped" in w["basis"] and w["overdue"], w)
+check("A: before: a wake a month out has no words recorded behind it", not W.words_of(rd(13)["metadata"]), rd(13)["metadata"])
 before = rd(13)
 out = server._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS, "quote": "park this until Jun 4th", "commit": "010AC0DZZ"}, "testbox")
 m = rd(13)["metadata"]; co = m.get("cap_ok") or {}
 check("A: recorded: the reply names the item, the wake, the quote and the source", out["action"] == "set" and out["wake"] == day(30) and out["quote"] == park["text"] and "board" in out["source"], out)
 check("A: cap_ok holds the wake it covers, who vouches, the quote and where it came from (the answer and the commit, hex only)",
       co.get("wake") == day(30) and co.get("by") == "home-test via a script on testbox" and co.get("quote") == park["text"] and f"{OWNER}'s answer on the board" in co.get("source", "") and "first in store commit 010ac0d" in co["source"], co)
-w = W_of(13)
-check("A: it counts as cap_ok: the wake stands uncapped at its own date and the item is no longer past due", "capped" not in w["basis"] and abs(w["expected_by"] - W.wake_epoch(day(30))) < 1 and not w["overdue"], w)
+check("A: it counts as cap_ok: his words are on record for that very wake", W.words_of(rd(13)["metadata"]).get("quote") == park["text"], rd(13)["metadata"])
 check("A: a filing edit: the state clock and the confirm did not move", rd(13)["state_updated"] == before["state_updated"] and rd(13)["confirmed"] == before["confirmed"], rd(13))
 check("A: the answers on the item are as they were", rd(13)["metadata"]["answers"] == before["metadata"]["answers"], rd(13)["metadata"]["answers"])
 out2 = server._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS}, "testbox")
@@ -114,7 +109,7 @@ server._update("a13", wake=day(3), sender="home-owner")
 check("A: a different wake does not keep the old record: his answer on the item (given since it last moved) is recorded again for the new wake, as a time wait's reason",
       rd(13)["metadata"]["cap_ok"]["wake"] == day(3) and rd(13)["metadata"]["cap_ok"]["quote"] == "park this until Jun 4th" and W.words_of(rd(13)["metadata"])["quote"] == "park this until Jun 4th", rd(13)["metadata"])
 item(102, hold=True, wake=day(30), cap_ok={"wake": day(31), "by": "his recorded words", "quote": "park this", "source": "x"}, answers=[park])
-check("A: words recorded for another wake do not cover this one", "capped" in W_of(102)["basis"] and not W.words_of(rd(102)["metadata"]), W_of(102))
+check("A: words recorded for another wake do not cover this one", not W.words_of(rd(102)["metadata"]), rd(102)["metadata"])
 
 # a GitHub comment of his, by its id
 item(17, hold=True, wake=day(30), answers=[{"ts": TS + 1, "kind": "comment", "text": "Postpone this one, nothing urgent", "via": "github", "url": "https://github.com/x/y/issues/1#issuecomment-5", "comment_id": 5}])
@@ -181,23 +176,21 @@ check("A: park_words reads \"postpone\", a Japanese hold and a park, not a bare 
 
 # ================================================================ B. a real-world date
 B = lambda n: f"The vendor visits Tue {day(n)} 14:00"
-item(22, hold=True, wake=day(30))                                            # stored with no words (like): capped and past due
-check("B: before: capped and past due", "capped" in W_of(22)["basis"] and W_of(22)["overdue"], W_of(22))
+item(22, hold=True, wake=day(30))                                            # stored with no words (like): a wake past the cap
+check("B: before: no words and no basis behind the wake", not W.words_of(rd(22)["metadata"]) and not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 sc = rd(22)["state_updated"]
 out = server._update("a22", wait_basis=B(33), sender="home-owner")
 m = rd(22)["metadata"]; wb = m.get("wait_basis") or {}
 check("B: on a wake already stored the basis is recorded for that wake: text, wake, who, when", wb.get("text") == B(33) and wb.get("wake") == day(30) and wb.get("by") and wb.get("at"), m)
-w = W_of(22)
-check("B: it lifts the cap for that wake: expected at the wake, not capped, not past due, and the basis shown in the line",
-      abs(w["expected_by"] - W.wake_epoch(day(30))) < 1 and "capped" not in w["basis"] and not w["overdue"] and "real-world date: " + B(33) in w["basis"], w)
+check("B: it lifts the cap for that wake: the basis is read for it", W.basis_of(rd(22)["metadata"]) == B(33), rd(22)["metadata"])
 check("B: it is a filing edit: the state clock did not move, and no cap_ok words are claimed", rd(22)["state_updated"] == sc and "cap_ok" not in m, rd(22))
 g = server.stackshot_get("a22")
-check("B: get shows the wait basis and what it lifts", f"wait basis: {B(33)} (lifts the 7-day cap for the wake {day(30)} only; set by " in g and "real-world date" in g.split("waiting:")[1], g)
+check("B: get shows the wait basis and what it lifts", f"wait basis: {B(33)} (lifts the 7-day cap for the wake {day(30)} only; set by " in g and "waiting:" not in g, g)
 ph = ui_render.Board(f"{tmp}/store").item_html("a22")
 check("B: the item page shows it in its sidebar", f"<dt>Waits on</dt><dd>{B(33)}</dd>" in ph, re.findall(r"<dt>Waits on</dt>.{0,200}", ph))
 # only for its date
 d = rd(22); d["metadata"]["wake"] = day(31); (T / "store/a/22.json").write_text(json.dumps(d))
-check("B: the same item with its wake moved by hand to another date reads capped again (the basis is bound to its wake)", "capped" in W_of(22)["basis"] and W_of(22)["overdue"] and not W.basis_of(rd(22)["metadata"]), W_of(22))
+check("B: the same item with its wake moved by hand to another date has no basis for it any more (the basis is bound to its wake)", not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 d["metadata"]["wake"] = day(30); (T / "store/a/22.json").write_text(json.dumps(d))
 refused("B: moving the wake to another date past the cap with no words is refused (the cap), and the basis stays on the old wake",
         lambda: server._update("a22", wake=day(31), sender="home-owner"), "at most 7 days", "wait_basis=")
@@ -216,7 +209,7 @@ refused("B: wait_basis=\"none\" the same", lambda: server._update("a22", wait_ba
 server._update("a22", clear_wait_basis=True, clear_hold=True, sender="home-owner")
 check("B: clear_wait_basis with the hold released (no wait is left) drops it, and the wake alone is a reminder again", "wait_basis" not in rd(22)["metadata"] and "hold" not in rd(22)["metadata"], rd(22)["metadata"])
 d_ = rd(22); d_["metadata"].update(hold=True, wake=day(42)); (T / "store/a/22.json").write_text(json.dumps(d_))
-check("B: …and a stored hold with that wake and no basis reads capped again", "capped" in W_of(22)["basis"], W_of(22))
+check("B: …and a stored hold with that wake and no basis has none", not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 
 # refusals
 item(23, wake=day(3))
@@ -601,8 +594,7 @@ check("again: his answer given after the clear, the last thing before the curren
 # (wait_basis bound to the new wake) and the basis gate asks whether the item is held; the two agreed only for a stored hold.
 VER = dict(state="verifying", proof="the link opens on the phone", end=day(9), needs=["team-back"])
 item(80, **VER)
-w = W_of(80)
-check("C: before: the verifying item reads as a wait on its end date, with no hold flag", w["basis"] and not rd(80)["metadata"].get("hold") and abs(w["expected_by"] - W.end_epoch(rd(80))) < 1, w)
+check("C: before: the verifying item has no hold flag and no wake: it waits on its end date", not rd(80)["metadata"].get("hold") and not rd(80)["metadata"].get("wake") and rd(80)["metadata"]["end"] == day(9), rd(80)["metadata"])
 refused("C: an earlier wake alone on a verifying item asks a time wait for its reason", lambda: server._update("a80", wake=day(1), sender="team-back"), "no reason", "wait_basis=")
 check("C: …and nothing was written", "wake" not in rd(80)["metadata"], rd(80)["metadata"])
 def tried(f):
@@ -614,8 +606,7 @@ check("C: the call with a wait_basis of its own goes through (one call satisfies
 m = rd(80)["metadata"]
 check("C: the same call with a wait_basis of its own works: the wake is stored, the basis is bound to it, the item stays verifying and unheld",
       m["wake"] == day(1) and W.basis_of(m) == f"the soak ends {day(1)}" and m["state"] == "verifying" and m["end"] == day(9) and not m.get("hold"), m)
-w = W_of(80)
-check("C: …and the wait now ends at the new wake", abs(w["expected_by"] - W.wake_epoch(day(1))) < 1, w)
+check("C: …and the wait now ends at the new wake", W.wake_epoch(rd(80)["metadata"]["wake"]) == W.wake_epoch(day(1)), rd(80)["metadata"])
 server._update("a80", wake=day(2), wait_basis=f"the soak ends {day(2)} after all", sender="team-back")
 check("C: a later wake with its own basis replaces both", rd(80)["metadata"]["wake"] == day(2) and W.basis_of(rd(80)["metadata"]) == f"the soak ends {day(2)} after all", rd(80)["metadata"])
 item(81, **VER)

@@ -13,7 +13,7 @@ What the pass does per open item (retire_fields.py has the rules): the stored st
 verifying item's proof becomes the text of a wait_basis on its wake; on an item that stores a wait_kind (the watchers read its party and a chase day) the party stays, and so does a chase with no ask_by; supplies becomes a "- Needs: …" bullet at the end of the description (held when the description would pass its limits); a verifying item's end day becomes a wake at 23:59 of that day; a party the wait_event does not name and a
 chase day the ask_by does not start with stay; expected_by and expected_reason (retired already) are dropped. Agent work in hand (a stored state doing with a session as mover: its wait is read from the stored state alone), a your-step item
 (its step stands on the stored state), a step with no home and a proof outside a verifying item are HELD: left as they are and listed. wait_kind stays. The server refuses (and leaves as it is) an item whose phase, kind of
-wait, mover, watched status, wait (waiting.compute: kind, past due or not, expected-by) or followers' waits would read differently, so the pass can never change what the board shows.
+wait, mover or watched status would read differently, so the pass can never change what the board shows.
 
 The dry run prints one row per item that has something to retire (the fields it stores, the moves, whether it reads the same), the totals by field, the supplies lines the pass would add to descriptions, the items held back and
 the reads that would change; it exits 1 when any would, or when a new description would break a limit (a Needs line that would is held, never written). Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
@@ -47,13 +47,13 @@ FIELDS = ("state", *RF.MOVES, "proof", "supplies", "step", *RF.DROPPED, "wait_ki
 say = MM.say
 
 
-def reading(server: Any, it: dict[str, Any], gid: str, now: float, afters: dict[str, list[str]]) -> dict[str, Any]:
-    """What the fields give for the item at the clock now (server._retire_reading: phase, kind of wait, mover, watched, and the wait of the item and of every item that waits after it) and, apart, the list and the old
+def reading(server: Any, it: dict[str, Any], gid: str, now: float) -> dict[str, Any]:
+    """What the fields give for the item at the clock now (server._retire_reading: phase, kind of wait, mover, watched) and, apart, the list and the old
     state word it reads as."""
     probe = {**it, "gid": gid}
     ao = lambda i_: server._after_open(i_.get("metadata") or {})      # noqa: E731
     with SP.frozen(now), SP.fields_only(server):
-        r = server._retire_reading(gid, it, now, afters)
+        r = server._retire_reading(gid, it)
         mod = server._model_of(probe)
         return {**r, "list": server._item_list(probe), "word": mod.today}
 
@@ -80,11 +80,10 @@ def dry_run(a: argparse.Namespace) -> int:
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
         max_lines = int(server._cfg.CFG["description"].get("max_lines", 8))
-        afters = server._retire_afters()
-        before = {g: reading(server, items[g], g, now, afters) for g in opens}
-        planned = {g: server._retire_one(g, dry=True, afters=afters) for g in opens}
-        wrote = {g: server._retire_one(g, afters=afters) for g in opens}
-        again = {g: server._retire_one(g, afters=afters) for g in opens}
+        before = {g: reading(server, items[g], g, now) for g in opens}
+        planned = {g: server._retire_one(g, dry=True) for g in opens}
+        wrote = {g: server._retire_one(g) for g in opens}
+        again = {g: server._retire_one(g) for g in opens}
         after_items = SP.load_dir(d)
         rows: list[dict[str, Any]] = []
         stores: collections.Counter[str] = collections.Counter()
@@ -93,7 +92,7 @@ def dry_run(a: argparse.Namespace) -> int:
             for f in FIELDS:
                 if meta.get(f) not in (None, ""):
                     stores[f] += 1
-            aft = reading(server, after_items[g], g, now, afters)
+            aft = reading(server, after_items[g], g, now)
             why = server.retire_same(before[g], aft)
             same = not why and before[g]["list"] == aft["list"]
             if before[g]["list"] != aft["list"]:

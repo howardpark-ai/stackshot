@@ -2137,9 +2137,9 @@ del CF["freshness"]
 # _fmt's lines
 fm = lambda **kw: server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"owner": B, "project": "projects/beta", "needs": "decision", "ask": ASK, "priority": "p1"}, **kw})
 c_ = time.time() - 2 * DAY - 100; out_ = fm(confirmed=c_)
-out_nw = "\n".join(ln for ln in out_.splitlines() if not ln.startswith("waiting: "))      # Oliver's one rule adds a waiting line after priority (its own scenario, waiting, covers it)
+out_nw = out_
 check("_fmt: ask after needs, before priority; confirmed in words with its staleness", f"needs: decision\nask: {ASK}\npriority: p1\nconfirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, server.ZONE))} (stale 2 d)" in out_nw, out_)
-check("_fmt: the waiting line, after priority and before confirmed: whose move and what gives its date, with no computed date", "\npriority: p1\nwaiting: the owner · needs set + the default\nconfirmed: " in out_ and "expected by" not in out_, out_)
+check("_fmt: no waiting line (no expected time is computed): priority is followed by confirmed", "\npriority: p1\nconfirmed: " in out_ and "waiting:" not in out_ and "expected by" not in out_, out_)
 cline = lambda out: out.split("\nconfirmed: ", 1)[1].split("\n", 1)[0]
 check("_fmt: a fresh item says (fresh)", cline(fm(confirmed=time.time() - 600)).endswith(" (fresh)"), fm(confirmed=time.time() - 600))
 check("_fmt: a held item says (held)", server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"hold": True}, "confirmed": c_}).split("\nconfirmed: ", 1)[1].endswith(" (held)"))

@@ -513,8 +513,7 @@ slack_command = ""                                  # an urgent row (a due date 
                                                     # (e.g. "/path/to/post-to-slack.sh"), the text on its standard input, exit 0 = posted. "" (the default) = no Slack
                                                     # path: stackshot holds no Slack posting credential of its own, so name a script that already posts
 
-[idle]                                              # no idle pass runs any more (the stall pass and the hand-off ladder move a quiet mover); two keys of this section are still read
-hours = 4                                           # the expected time of a plain on-agent item (no needs, no hold): this many hours after its state clock (stackshot/waits/waiting.py). 0: the default days
+[idle]                                              # no idle pass runs any more (the stall pass and the hand-off ladder move a quiet mover); one key of this section is still read (an older `hours` key is no longer read: a config file that has it loads, and it does nothing)
 park_days = 3                                       # only a raise stored with a "Park until" button (an older form) still reads this, as the fallback day of that button
 
 [stall]                                             # the stall pass (stackshot/waits/stall.py): an open, live item whose mover is a session (a front agent included) is moved on by stackshot when
@@ -553,7 +552,7 @@ enabled = false                                     # false (the default): the t
 look_minutes = 30                                   # how long after the ask the mover's pane is looked at (a value that is not a positive number is 30)
 silence = false                                     # false (the default): a pane with no turn running for [stall] minutes still starts a ladder, as with `enabled` alone. true (with `enabled = true`; alone it does nothing): the
                                                     # ten-minute silence pass and the dates pass bring the item instead, and a pane with no turn running starts none. The message the pass sends to the mover (an item on an agent with no
-                                                    # activity for 45 minutes, or past its own expected time with no write since) is the ask; the entry (`via` = "silence") then waits `look_minutes` for the look, then the cold call and the builder as
+                                                    # activity for 45 minutes, or past its own wake with no write since) is the ask; the entry (`via` = "silence") then waits `look_minutes` for the look, then the cold call and the builder as
                                                     # above, and ends when the item has activity, or its mover changes. A write or a confirm that is no activity (the mover's bare "still on it") does not restart it. An item the pass already
                                                     # asked before this is switched on is not entered (no flood); it climbs from its next silence. An untaken hand-off still starts its own ladder (the hand-off audit). Only a TOML true turns it on. Live
 
@@ -577,22 +576,20 @@ minutes = 30                                        # how long after his last pr
 github_minutes = 5                                  # one pull request is read at most this often (one GET, shared by the items that name it; while GitHub is
                                                     # down the wait doubles up to an hour). 0 = every pass. Live
 
-[waiting]                                           # the one rule for an item that waits (stackshot/waits/waiting.py): every open item has a mover (the one party whose move it
-                                                    # is now: a session, the owner, an outside party, or for an `after` item the item it waits on) and an expected-by
-                                                    # time (when that move is due), computed from its wake, due date, hold, pane recycle, check or needs.
-                                                    # An item past its expected-by is surfaced whatever kind of wait it is in, held and `after` items included.
+[waiting]                                           # what an item waits on (stackshot/waits/waiting.py): every open item has a mover (the one party whose move it is now: a session, the owner, an
+                                                    # outside party, or for an `after` item the item it waits on). No "expected by" time is computed for it and a parked item (on hold, or after
+                                                    # an open item) carries no stale mark: it is held until its wake or its blocker closes. default_days and agent_hours, which timed that
+                                                    # computed date, are no longer read: a config file that still has them loads, and they do nothing.
                                                     # All live (read at use).
 cap_days = 7                                        # the longest a wake a session sets may lie after the item's last move; no wait is exempt (anchored too). A due date is
-                                                    # not refused, but an item's expected-by is never later than its last move + cap_days unless his words are recorded for that wake or due date
+                                                    # a deadline and is not refused
 cap_needs_owner = true                             # true: a longer wake is refused unless the owner's words are on the item (an Acked-by said= entry checked against a
-                                                    # real transcript, a message from the last cap_days; or his board answer given since the item's last state change); false: allowed,
-                                                    # and nothing is clamped
+                                                    # real transcript, a message from the last cap_days; or his board answer given since the item's last state change); false: allowed.
+                                                    # The cap gates the write only; a date stored earlier is read as it is.
                                                     # A wake past the cap may also stand on a real-world date instead of his words: update(wait_basis="<what happens> YYYY-MM-DD"),
                                                     # for that wake only (metadata.wait_basis; a different wake drops it). Not for a wake within the cap, nor for a hold with no date.
 basis_weekday = 0                                   # the weekday (0 = Monday … 6 = Sunday; -1 = every day) on which board.md's head and the brief list the waits that stand on a
                                                     # real-world date, for a person to check the dates still hold
-default_days = 3                                    # a needs wait on the owner or an outside party with no date of its own is expected this many days after it was set (a wait on an agent session: agent_hours)
-agent_hours = 3                                     # a wait on an agent session that is not stored as doing (needs a session, or a done check whose needs names one) is expected this many hours after it was set; an item stored as doing carries no expected time
 dated_wait_min_hours = 1                            # a doing item whose wake is more than this many hours out, with every open step dated for that day or later, is shown as waiting until then (stackshot/waits/dated_wait.py); nearer, it is work in hand
 
 [model]                                             # the item model's write guards (stackshot/model/model_guards.py): dead | alive | waiting. A create or update that would leave

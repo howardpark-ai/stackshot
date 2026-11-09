@@ -269,8 +269,8 @@ LIVE_DROP = ("hold", "hold_set", "wake", "wait_basis", "waiting", "wait_failed",
 
 
 def end_wait(meta: dict[str, Any]) -> None:
-    """A wait ends (the watcher's arrival, the owner's Done on a step): what LIVE_DROP lists goes, and cap_ok keeps only what lifts the cap on a due date (the owner's words for the
-    wake go with the wake), so the item's expected-by is not cut back to the cap and does not resurface early."""
+    """A wait ends (the watcher's arrival, the owner's Done on a step): what LIVE_DROP lists goes, and the owner's words for the wake go with the wake. A cap_ok record from an
+    earlier version that still holds a `due` key keeps that key as it was: nothing writes one now, and nothing here depends on it."""
     for k in LIVE_DROP:
         meta.pop(k, None)
     if isinstance(meta.get("cap_ok"), dict):

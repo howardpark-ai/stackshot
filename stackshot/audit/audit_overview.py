@@ -47,7 +47,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
     {"key": "wording", "name": "Wording", "desc": "next steps and asks", "log": True, "audits": (
         ("ask-missing", EACH_RUN, None), *((f"next rules N{n}", EACH_RUN, None) for n in range(1, 8)),
         ("next-done (model)", EACH_RUN, None), ("ask no longer fits (model)", EACH_RUN, None), ("unneeded-escalation (model)", EACH_RUN, None), ("goal-unclear (model)", EACH_RUN, None))},
-    {"key": "dates", "name": "Dates", "desc": "expected times and due dates", "log": True, "audits": (
+    {"key": "dates", "name": "Dates", "desc": "due dates and wake dates", "log": True, "audits": (
         ("dates pass", EVERY_TEN, None), ("For-you due-date look", EVERY_TEN, None), ("wake catch-up", EVERY_TEN, None))},
     {"key": "proof", "name": "Proof and patterns", "desc": "waits for proof, and repeat patterns", "log": True, "audits": (
         ("proof-waits stage", EACH_RUN, None), ("pattern review", "each run, last", "pattern"))},

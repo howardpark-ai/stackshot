@@ -1772,7 +1772,7 @@ def read_dates() -> dict[str, Any]:
 
 def dates_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | None = None, anchors: dict[str, Any] | None = None, store: Path | None = None,
                env: Env | None = None, dry: bool = False, entered: Any = None) -> dict[str, Any]:
-    """The dates rule (audit_checks.dates_findings: an item's own expected time has passed with no write since) over the open items, and what a finding owes. Delivered as the filing pass delivers:
+    """The dates rule (audit_checks.dates_findings: an item's own wake has passed with no write since) over the open items, and what a finding owes. Delivered as the filing pass delivers:
     to the recipient the daily run's `stale` finding goes to (`deliver_findings`), once, not again while its item has not been written since (the newest daily record counts too, so a send an earlier run made still holds), and again once the item has been written since. The record is `<paths.state>/audit/dates.json`, rewritten each pass. Nothing is sent or written while a
     daily run is in progress (the pass stands still then, and what falls due is sent by the first pass after the run) or with `dry`. `entered(gid, mover, now, detail)`, when given (the server gives it
     with `[ladder] silence` on), is called for each fresh finding that reached someone, as the silence pass calls it: the message is the ask of the one ladder.

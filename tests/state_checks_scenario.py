@@ -231,23 +231,15 @@ refused_nw("4: …three moves with the same basis text are refused as before", 2
 # verifying (a stored one, fixture data: no call sets an end or a state any more): the end date is the wait
 item(30, needs=[BACK], state="verifying", proof="one real stuck-pane notice arrives", end=day(25))
 check("4: a stored verifying end 25 days out reads with no wake (the cap on a wake does not apply to an end)", mt(30)["end"] == day(25) and "wake" not in mt(30), mt(30))
-w = W.compute({**rd(30), "gid": "a30"}, time.time())
-check("4: …the end is the item's expected-by (the end of that day), its wait is `end`, and it is not overdue", w["wait"] == "end" and not w["overdue"]
-      and abs(w["expected_by"] - W.due_epoch(day(25))) < 1 and w["mover"]["kind"] == "session", w)
+check("4: …the item's mover is the session in needs, and nothing derives an expected time from the end", W.mover_for({**rd(30), "gid": "a30"})["kind"] == "session" and not hasattr(W, "compute"), W.mover_for({**rd(30), "gid": "a30"}))
 upd(30, priority="p2")
 check("4: …a write that moves nothing it stands on keeps the stored state, proof and end, and counts no re-park", mt(30)["state"] == "verifying" and mt(30)["end"] == day(25) and mt(30)["proof"] == "one real stuck-pane notice arrives" and "repark" not in mt(30), mt(30))
-# an end that has passed: overdue
-item(33, needs=[BACK], state="verifying", proof="p", end=day(-1))
-w = W.compute({**rd(33), "gid": "a33"}, time.time())
-check("4: a verifying item past its end is overdue, kind `end`", w["wait"] == "end" and w["overdue"], w)
 # a verifying item with a wake of its own: the wake is read as before
 item(34, needs=[BACK], state="verifying", proof="p", end=day(20), wake=day(2), hold=False)
-w = W.compute({**rd(34), "gid": "a34"}, time.time())
-check("4: …a wake of its own (an explicit reminder) is still read as a wake", w["wait"] == "wake", w)
+check("4: …a wake of its own (an explicit reminder) is still read as a wake, ahead of the end", W.wake_epoch(mt(34)["wake"]) is not None and W.wake_epoch(mt(34)["wake"]) < W.due_epoch(mt(34)["end"]), mt(34))
 # the item stays fresh until its end: render.freshness reads the end as a wait
 r30 = {**rd(30), "gid": "a30", "L": "a", "id": "30"}; r30["metadata"] = dict(r30["metadata"]); r30["confirmed"] = now0 - 10 * DAY
-r30["_wait"] = W.compute(r30, time.time())
-r30n = json.loads(json.dumps(r30)); r30n["metadata"].pop("state"); r30n["_wait"] = W.compute(r30n, time.time())
+r30n = json.loads(json.dumps(r30)); r30n["metadata"].pop("state")
 check("4: no stale mark before the end date: freshness reads `held`; without the state the same item reads stale", render.freshness(r30, time.time())[0] == "held" and render.freshness(r30n, time.time())[0] == "stale",
       (render.freshness(r30, time.time()), render.freshness(r30n, time.time())))
 # the tool text says so

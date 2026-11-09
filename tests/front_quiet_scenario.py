@@ -322,16 +322,13 @@ def stuck_case(i, writer):
 try:
     stamp("home-beta-front", 60)
     n = stuck_case(50, "home-beta-front")
-    w = server._waiting_of("a50", server._load("a50"))
-    check("8 board: a stuck notice that reaches the pane (present and touched) is a push, and the item carries the stuck mark: wait_failed on the item, past due from now", n == 1 and (mt(50).get("wait_failed") or {}).get("why") == "the item it waits for was dropped" and w.get("overdue"), (n, mt(50), w))
+    check("8 board: a stuck notice that reaches the pane (present and touched) is a push, and the item carries the stuck mark: wait_failed on the item", n == 1 and (mt(50).get("wait_failed") or {}).get("why") == "the item it waits for was dropped", (n, mt(50)))
     unstamp("home-beta-front")
     n = stuck_case(51, "home-beta-front")
-    w = server._waiting_of("a51", server._load("a51"))
-    check("8 board: …the same stuck notice held (Oliver not there) tells nobody, and the mark and the past-due state are all the same", n == 0 and held_log("a51") and (mt(51).get("wait_failed") or {}).get("why") and w.get("overdue"), (n, mt(51), w, held_log("a51")))
+    check("8 board: …the same stuck notice held (Oliver not there) tells nobody, and the mark is all the same", n == 0 and held_log("a51") and (mt(51).get("wait_failed") or {}).get("why"), (n, mt(51), held_log("a51")))
     stamp("home-beta-front", 60)
     n = stuck_case(52, "home-send")
-    w = server._waiting_of("a52", server._load("a52"))
-    check("8 board: …held because the agent did not touch the item: the mark stays", n == 0 and held_log("a52") and (mt(52).get("wait_failed") or {}).get("what") and w.get("overdue"), (n, mt(52), w))
+    check("8 board: …held because the agent did not touch the item: the mark stays", n == 0 and held_log("a52") and (mt(52).get("wait_failed") or {}).get("what"), (n, mt(52)))
 finally:
     server._keeper = real_keeper
 # (g) the pass that tells a front pane is never the only record: for every told case above there is a record on the item

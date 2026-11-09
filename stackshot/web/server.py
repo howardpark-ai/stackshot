@@ -111,7 +111,7 @@ from stackshot.model import item_project as _ip  # noqa: E402  — an item's pro
 from stackshot.model import item_project_pass as _ipp  # noqa: E402  — the project-id pass: the ids stored on the items already there, and put back (item_project_pass.py)
 from stackshot.model import retire_fields as _retire  # noqa: E402  — the data change that takes the stored state words and carry fields out of storage: the plan and the undo entry (retire_fields.py)
 from stackshot.core import retired_inputs as _retired  # noqa: E402  — the old item-state inputs of create and update, and the refusal naming what to pass instead (retired_inputs.py)
-from stackshot.waits import waiting as _wt  # noqa: E402  — the one rule for an item that waits: its mover and expected-by (waiting.py)
+from stackshot.waits import waiting as _wt  # noqa: E402  — what an item waits on and whose move it is (waiting.py)
 from stackshot.model import model as _model  # noqa: E402  — the item model of the redesign: dead | alive | waiting, the mover and the wait, derived from the fields (model.py)
 from stackshot.waits import dated_wait as _dw  # noqa: E402  — a doing item the board lists as waiting for its wake (dated_wait.py; the end-of-turn question skips a basis wait)
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
@@ -405,9 +405,7 @@ def _migrate_owner_mover() -> list[str]:
 def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
     """Ranks are retired: a builder starts every item handed to it, and no item waits in a numbered line. Once per start, before the server serves; idempotent (an item without the
     field or the state is not written, so a store that is clean writes nothing). Every OPEN item that still stores `metadata.rank` loses the field, whatever its value, and one whose stored
-    state is the retired `queued` (a state that stood on the rank alone) loses the state, so it reads as derived from its fields (doing for an item in a builder's hands). An item with a session in
-    needs also gets `metadata.agent_from = now`, so the 3-hour agent ladder counts from the cleanup and not from an old state clock (an item that sat queued for 3 hours to 3 days would otherwise read
-    as overdue and be nudged at the first pass). Nothing else changes: `updated`, `state_updated`, `confirmed` and every other field stay as they were,
+    state is the retired `queued` (a state that stood on the rank alone) loses the state, so it reads as derived from its fields (doing for an item in a builder's hands). Nothing else changes: `updated`, `state_updated`, `confirmed` and every other field stay as they were,
     a closed item is not read as a candidate (its record keeps whatever it held), and nothing is posted to GitHub (mirror off).
     The save is quiet (_NO_SETTLE): no mover is settled and no hand-off record is ended. The item's History says it, because it reads the item's revisions: `rank cleared (was N)` and,
     for a queued item, `state cleared (was queued)`. `apply=False` is the dry run: the same rows, nothing written.
@@ -433,8 +431,6 @@ def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
                     m.pop("rank", None)
                     if m.get("state") == "queued":
                         m.pop("state", None)
-                    if _needs_sessions(m):
-                        m["agent_from"] = time.time()           # the 3-hour ladder counts from here
                     was_no_settle = getattr(_NO_SETTLE, "on", False)
                     _NO_SETTLE.on = "quiet"
                     try:
@@ -2483,7 +2479,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
 
 # The server's state checks. They note, and refuse only where the design says so:
 #   3  next opens with the owner while the state (stored or derived) is an agent's: a note in get and on the write's reply
-#   4  a third re-park in a row (a move of a parked or verifying item's wake or end with nothing else changed) is refused; a verifying item's end date is its wait (waiting.end_epoch)
+#   4  a third re-park in a row (a move of a parked or verifying item's wake or end with nothing else changed) is refused; a verifying item's end date is its wait (the watchers end the wait that day)
 #   5  next may be stale: another session changed needs, state, hold, wake or after and not next (metadata.next_stale), or next names a date that has passed
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
@@ -5320,7 +5316,7 @@ def _tell_close_mentions(gid: str, outcome: str, reason: str, writer: str, skip:
 
 def _tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip: list[str] | None = None) -> str:
     """A wait that can no longer end (a check whose pull request was closed unmerged) is told at once to the keeper of the item's
-    page (_keeper: its builder or -main agent): the item stays open, past due from now (waiting.py), and the keeper
+    page (_keeper: its builder or -main agent): the item stays open, and the keeper
     decides what it waits on now. (An `after` item that is dropped or closed undone is not one: the item is released with the wake
     notice, which says so.) `skip` = session ids already
     told of the same event. → the session id told, "" when nobody."""
@@ -5333,7 +5329,7 @@ def _tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip:
             print(f"waiting: {gid} wait failed ({why}); no keeper to tell", file=sys.stderr, flush=True)
         return ""
     _tell_kind("stuck", gid, kid, f"[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({project}){_then_part(item)}: its wait ({what}) can no longer end: {why}. "
-                          f"The item stays open and is past due from now. As {_keeper_words(project, k)}: see that its mover or the session doing the work "
+                          f"The item stays open. As {_keeper_words(project, k)}: see that its mover or the session doing the work "
                           f"gives it what it waits on now (a new check, a wake, an item to wait after) or closes it. → {_notice_link(gid)}", tag="wait")
     return kid
 
@@ -6624,7 +6620,7 @@ def _filing_tick() -> "dict[str, Any] | None":
 
 
 def _dates_expected_tick() -> "dict[str, Any] | None":
-    """The expected-time half of the dates pass (audit_run.dates_pass over audit_checks.dates_findings): an item whose own expected time (its wake) has passed with no write since goes to
+    """The wake half of the dates pass (audit_run.dates_pass over audit_checks.dates_findings): an item whose own wake has passed with no write since goes to
     its mover once, as the daily audit sends a stale one. Stands still when the audit is off or runs in agent mode (the rollback), like the filing pass."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
@@ -6978,7 +6974,7 @@ def _idle_live(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]]) -> 
 # decision (_check_wait, once per check: the pass's record items[gid]["met"] keeps it), and the first pass after the decision is cleared closes
 # the item as for any passed check. Every other needs (external, a session) closes as before.
 # The same rule makes the other end fail at once: a pr_merged whose pull request was closed without being merged can never pass,
-# so the wait is recorded as failed (metadata.wait_failed), past due from then, and the keeper told (_check_fail). A check the server cannot read (GitHub down, a unit name not found, no lane
+# so the wait is recorded as failed (metadata.wait_failed) and the keeper told at once (_check_fail). A check the server cannot read (GitHub down, a unit name not found, no lane
 # data) never closes: it is logged once per error and tried again each pass. The gate: an update that creates the hand-off is
 # refused unless the item carries a check or a wake (a front agent's hand-off is not asked for either, and its own wake or check on an item another
 # session moves is refused: _gate_sender_watch). A hand-off is a line of next in its form `<session>: <action>`: a session
@@ -7289,8 +7285,8 @@ def _tell_check_closed(gid: str, item: dict[str, Any], label: str) -> list[str]:
 
 def _check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) -> None:
     """A done check that can no longer pass (a pr_merged whose pull request was closed unmerged, the owner's one rule) fails at once
-    instead of reading "not yet" for ever: the check goes, the failure is recorded on the item (metadata.wait_failed, which makes
-    it past due from now: waiting.py), the item stays open and both clocks move, as a wait ending does. The server's own act:
+    instead of reading "not yet" for ever: the check goes, the failure is recorded on the item (metadata.wait_failed),
+    the item stays open and both clocks move, as a wait ending does. The server's own act:
     no page owed, the History says it. The item's mover is told at once (_tell_wait_failed)."""
     meta = dict(it.get("metadata") or {})
     meta.pop("check", None); meta.pop("idle", None); meta.pop("waiting", None); meta.pop("watch_reason", None)
@@ -7298,7 +7294,7 @@ def _check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) 
     meta["wait_failed"] = {"what": f"check {label}", "why": why, "at": now}
     it["metadata"] = meta
     it["updated"] = it["state_updated"] = now
-    _save(gid, it, note=f"check failed: {label}: {why}; the item stays open, past due from now")
+    _save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
     print(f"check: {gid} failed, {label}: {why} — {it.get('subject')}", file=sys.stderr, flush=True)
     _tell_wait_failed(gid, it, f"check {label}", why)
 
@@ -7410,18 +7406,12 @@ def _check_tick(now: float | None = None) -> list[str]:
     return closed
 
 
-# ----------------------------------------------------------------------------- the one rule for waiting
-# stackshot had eight ways for an item to wait (hold, wake, after, check, needs, recycle, anchors, idle), and a waiting item was left
-# out of every other watch: a held or `after` item was never idle-poked, never stale, never in the audit's count of what is late. One
-# rule replaces the exemptions (waiting.py): every open item always has a MOVER (the one party whose move it is now) and an
-# EXPECTED-BY (derived from its wake, due date, check, needs set-time + a default, the item it waits after, a pane recycle, or
-# now + [waiting] cap_days for a hold that names nothing), and an item past its expected-by is surfaced (the board, `get`, the item page)
-# whatever wait it is in. Nothing here escalates such an item: the stall pass and the hand-off clock move an item whose mover has gone quiet.
-# A wait that can no longer end (a check whose pull request closed unmerged) is recorded as failed when it happens and is past due from
-# then; an `after` item that closes releases the item, whatever way it closed, and the wake notice says so.
-# The server's old record, out of the store: <state>/waiting.json {baseline, seen}, read and never written (waiting.load_state). The baseline gives
-# every item stored before the rule a fresh runway (a derived date is never earlier than baseline + default_days) and `seen` keeps a hold
-# with no wake, after or recycle from sliding.
+# ----------------------------------------------------------------------------- whose move it is
+# Every open item has a MOVER (the one party whose move it is now: waiting.mover_for). No date is derived for it: an item has no "expected by" time
+# and is not marked late for one. A parked item (on hold, or after an open item) is held until its wake or its blocker closes; a wait that went wrong
+# is caught by the passes that read the item's own fields (the wake pass and the watchers, the dates pass, the failed-check notice, the wait-end audit).
+# A wait that can no longer end (a check whose pull request closed unmerged) is recorded as failed when it happens (metadata.wait_failed) and the mover
+# is told at once; an `after` item that closes releases the item, whatever way it closed, and the wake notice says so.
 
 
 _STARTED = time.time()      # when this server started: a machine is not called unreachable for downtime that was the server's own
@@ -7445,12 +7435,9 @@ def _session_down(who: str, nm: dict[str, str], idx: dict[str, dict[str, Any]], 
 
 
 class _WaitCtx:
-    """What one reader needs to compute the rule for many items: a cache of the items read, and the server's old record
-    (waiting.load_state: the baseline, whose floor (waiting.floor_of) gives items stored before the rule their runway, and the holds' first-seen dates)."""
+    """What one reader needs to work out the mover of many items: a cache of the items read (an `after` blocker is read once)."""
     def __init__(self, now: float) -> None:
         self.now = now
-        self.state = _wt.load_state()
-        self.floor = _wt.floor_of(self.state, now)
         self._items: dict[str, dict[str, Any] | None] = {}
 
     def load(self, gid: str) -> dict[str, Any] | None:
@@ -7461,25 +7448,9 @@ class _WaitCtx:
                 self._items[gid] = None
         return self._items[gid]
 
-    def seen(self, gid: str) -> float | None:
-        v = self.state["seen"].get(gid)
-        return float(v) if isinstance(v, (int, float)) else None
-
-    def of(self, gid: str, item: dict[str, Any]) -> dict[str, Any]:
-        """The item's mover, expected-by and whether it is past due (waiting.compute)."""
-        return _wt.compute({**item, "gid": gid}, self.now, self.load, None, self.seen, self.floor)
-
-
-def _waiting_of(gid: str, item: dict[str, Any], now: float | None = None, ctx: "_WaitCtx | None" = None) -> dict[str, Any]:
-    """The one rule for one item (get and the client API read it): {mover, expected_by, wait, basis, overdue, why, down, nodate},
-    plus `line` (the words, waiting.line). {} for an item that is not open."""
-    if item.get("status") != "open":
-        return {}
-    now = time.time() if now is None else now
-    ctx = ctx or _WaitCtx(now)
-    w = ctx.of(gid, item)
-    w["line"] = _wt.line(w, now, _session_label, _gh.shown)
-    return w
+    def mover(self, gid: str, item: dict[str, Any]) -> dict[str, str]:
+        """The item's mover (waiting.mover_for)."""
+        return _wt.mover_for({**item, "gid": gid}, self.load)
 
 
 def _session_roster() -> set[str]:
@@ -10516,7 +10487,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
                    else _stall.episode(old, who, _stall_ver(it), _ho_same, mine))
             keep[gid] = rec
             if silence_on and not quiet and _ladder.via_of(rec) != "handoff":
-                continue                 # a pane with no turn running starts no ladder here: the silence audit (an item with no activity) and the dates pass (an expected time passed) do, and the hand-off audit its own
+                continue                 # a pane with no turn running starts no ladder here: the silence audit (an item with no activity) and the dates pass (a wake passed) do, and the hand-off audit its own
             if _stall.spent(rec, now):
                 continue
             floor = max(float(it.get("state_updated") or it.get("updated") or 0), 0.0 if rec.get("capped") else float(rec.get("conf") or 0))      # the mover's own last confirm, kept in the entry (another session's later confirm does not erase it): the minutes count from it, up to stall.RESTARTS times
@@ -10747,13 +10718,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
                 sp_.append(f"{i}. {_steps.first_line(s_['text'])[:70]} ← {pv}" + (" (dead: that pull request was closed without being merged; reword or drop the step)" if isdead else ""))
         if sp_:
             out.append("step proof: " + "; ".join(sp_) + ("" if dead_ and all("(dead:" in x for x in sp_) else " (the server ticks the step when it happens)"))
-    if item.get("status") == "open" and _GID.match(gid):   # the one rule: whose move it is, and by when
-        try:
-            w = _waiting_of(gid, item)
-        except Exception:  # noqa: BLE001  — a reading that fails never fails the get
-            w = {}
-        if w:
-            out.append("waiting: " + w["line"])
+    if item.get("status") == "open" and _GID.match(gid):   # a wait that can no longer end
         fail = _wt.failed_of(m)
         if fail:
             out.append(f"wait failed: {fail.get('what') or 'a wait'}: {fail.get('why') or 'it can no longer end'} ({_rmod.when_words(dt.datetime.fromtimestamp(float(fail['at']), ZONE))})")
@@ -10820,7 +10785,6 @@ def _world_waits_text() -> str:
 _BRIEF_DESC = (
     "\"What is outstanding?\" brief() shows the board at a glance: counts, the Machines panel, the receivers and the project index (every open item: your move, on agents, waiting), then every open item in full as get shows it (its mover, its open next steps, its `model:` line and, once a step is done or dropped, its `checklist:`), the items on hold after them. "
     "For a doing item the board lists as waiting (see `model:` in get) the `model:` line ends with `· the board lists it as waiting until <time> (<why>)`. "
-    "An item's `waiting:` line names its mover and what the wait stands on (a wake, a due date, an item it waits after), and adds `past due` once that date has passed; it prints no computed date and only shows the wait, nothing is sent when the time passes, so close the item or move it through update. An item stored as doing has no expected time: its `waiting:` line names the mover and says it is doing, and it is never past due. "
     "A `state:` line shows only for an item that stores a state. An item's `project:` line reads as in get. A line at the top says what changed in stackshot for 7 days after a release that changes a tool. The item model: docs/design. "
     f"The full board is at {_shared.BOARD_URL} (markdown: board.md next to it)."
 )
@@ -10957,7 +10921,7 @@ _STALL_SHORT = f" A wrong `stall:` step is undone with update (mover, next, clea
 @mcp.tool(name="get", description=_lead("Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), "
                                          "`after:` (the items that must close first, each with its state), `observers:` and `contact:` (the front agent the person talks to about the item). `project:` is the item's top-level project; `(filed on <page>)` is the page it is filed on, the one update(project=) takes. "
                                          "It leads with `mover:` (who moves the item now) and `then:` (who takes it after "
-                                         "the answer or the wait); History says who created it. A `state:` line (with the fields that state carries) shows only for an item that stores a state; an item that stores none shows no state line and no derived one, and its `model:` line says alive or waiting and who moves it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)`: the item is stored as doing, but its wake is more than an hour away (`[waiting] dated_wait_min_hours`) and every open step is dated for that day or later, so it is listed as waiting until then; a wake alone, with a step not dated, shows no wait, except on a stored doing item that is on hold: with a wake more than that hour away it is listed as waiting until the wake (`on hold until its wake`), and on a stored doing item that is not on hold whose wake is still ahead and carries a wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item on hold keeps `on hold until its wake` as the reason, a basis or not; a wake with no wait_basis is a reminder and the item stays active). `waiting:` names the mover and what the wait stands on, and adds `past due` once its date has passed (no computed date is printed: an item shows only its real dates, wake, due and ask by); it only shows the wait, nothing is sent when the time passes, so whoever reads it closes the item or moves it through update. A doing item has no expected time: `waiting:` names its mover and says it is doing, and it is never past due. `next:` holds the open steps (the first open step first), followed by a `named in next:` block with one line for each board#N the next names (up to 8, the item itself left out) and that item's live state, so nobody relays a stale status: `board#N: closed Tue Feb 3rd 2099 14:10 (done)`, `board#N: open, mover my-engineer`, `board#N: open, waiting after board#N`, `board#N: not found`; and once a step is done or dropped a `checklist:` block lists every step in order with its position, status, who marked it and when: the positions `update` takes in done=[…] and dropped=[…]. What a write recorded with `said` shows as one line each: `Acked-by:`, `Suggested-by:`, `Reported-by:` or `Done-by:` (a pasted result that proves a step, not his words) with the session, the time, checked or unchecked, and the quote. The item model is on docs/design. "
+                                         "the answer or the wait); History says who created it. A `state:` line (with the fields that state carries) shows only for an item that stores a state; an item that stores none shows no state line and no derived one, and its `model:` line says alive or waiting and who moves it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)`: the item is stored as doing, but its wake is more than an hour away (`[waiting] dated_wait_min_hours`) and every open step is dated for that day or later, so it is listed as waiting until then; a wake alone, with a step not dated, shows no wait, except on a stored doing item that is on hold: with a wake more than that hour away it is listed as waiting until the wake (`on hold until its wake`), and on a stored doing item that is not on hold whose wake is still ahead and carries a wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item on hold keeps `on hold until its wake` as the reason, a basis or not; a wake with no wait_basis is a reminder and the item stays active). An item shows only its real dates (wake, due, ask by) and no expected time: nothing is sent when a date passes, so whoever reads it closes the item or moves it through update. `next:` holds the open steps (the first open step first), followed by a `named in next:` block with one line for each board#N the next names (up to 8, the item itself left out) and that item's live state, so nobody relays a stale status: `board#N: closed Tue Feb 3rd 2099 14:10 (done)`, `board#N: open, mover my-engineer`, `board#N: open, waiting after board#N`, `board#N: not found`; and once a step is done or dropped a `checklist:` block lists every step in order with its position, status, who marked it and when: the positions `update` takes in done=[…] and dropped=[…]. What a write recorded with `said` shows as one line each: `Acked-by:`, `Suggested-by:`, `Reported-by:` or `Done-by:` (a pasted result that proves a step, not his words) with the session, the time, checked or unchecked, and the quote. The item model is on docs/design. "
                                          "item_id can also be a notice id, the six hex characters a message to a project returns (\"notice a1b2c3\"): get then shows the notice instead of an item, with its `sender:`, `sent:` and `project:`, a one-line `text:` excerpt, "
                                          "the router's `ruling:` (passed to whom, merged, held or dropped) with its `reason:`, its `rule:` (a rule in code, or the router's call) and who it was `ruled by:`, the `item:` it went onto and when it was `ruled:`; a repeat dropped by the rule in code also names the notice it repeats on a `repeat of:` line; "
                                          "a notice not ruled yet shows that it is still held for the router and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router gave up on shows `ruling: none, stuck` and its `reason:`); an id no routing log holds answers \"no notice <id>\"." + _STALL_FORM))
@@ -11091,25 +11055,21 @@ _CHECK_FORM = (
     "the result lands through stackshot when the mover closes the item or hands it back to you, so a front agent's own reminder wake on an alive item another session moves is refused (a done check, a park with its wake and ask_by stay allowed). "
     "To watch anyway, pass watch_reason=<why no push reaches you> (at least 15 characters) on update, in the same call; it is recorded on the item. check=\"none\" clears it; "
     "a check alone owes no page. "
-    f"A check does not set the item's due time: with a needs that names an agent session (an item not stored as doing) its wait is timed {_wt.agent_hours():g} hours from when the check was set; "
-    f"a check that waits on {OWNER} or on an outside party, or that names no one, keeps the {_wt.cap_days():g}-day cap. "
+    "A check does not set the item's due time. "
 )
 
 
 
-# The one rule for waiting: every open item has a mover and an expected-by, whatever wait it is in (waiting.py).
+# What an item waits on: every open item has a mover, whatever wait it is in (waiting.py); no date is derived for it.
 _CAP_FORM = (
-    f" A wait or date runs at most {_wt.cap_days():g} days from the item's last move: a wake further out is refused without {OWNER}'s words, a due date "
-    "is accepted but its wait is capped there (the reply says so) unless his words are behind it. "
+    f" A wake runs at most {_wt.cap_days():g} days from the item's last move: a wake further out is refused without {OWNER}'s words. A due date is a deadline and is accepted as it is. "
 )
 _AGENT_DUE_FORM = (
-    " Agent work carries no expected time: a create sets none, and the item shows how long its work has run. A doing item is never past due. "
+    " Agent work carries no expected time: a create sets none, and the item shows how long its work has run. "
     "Doing is work in hand (a session building, running tests, reviewing, a release running); a wait on a date, a timer, another release or someone else's step is not doing: park it with "
     "update(hold=true, wake=\"YYYY-MM-DD\" or \"YYYY-MM-DDTHH:MM\", wait_basis=\"<what it waits for, with its date YYYY-MM-DD>\"), or after=[\"board#N\"], or wait_kind=\"relay\" with wait_event, ask_by and needs=[\"external\"]. "
     f"A doing item whose wake is more than {_wt.dated_wait_min_hours():g} hour(s) away (`[waiting] dated_wait_min_hours`) while every open step of its next is dated for that day or later is listed as waiting "
     "(one undated step means it can act now; a wake alone shows no wait unless the item is on hold or the wake carries a wait_basis): date a step only when it really cannot run before then; the daily audit asks the item's mover why such a step cannot run now. "
-    f"A wait on an agent session that is not stored as doing (needs a session, or a done check whose needs name one) is timed in hours: {_wt.agent_hours():g} hours from when the wait was set, never days. "
-    f"An item that waits on {OWNER} (needs decision), an outside party, a hold, a wake or another item is timed in days. "
 )
 _MODEL_FORM = (
     " The item model (design: docs/design): an item is dead (closed), alive (someone in the perimeter is working: one mover) or waiting (nothing happens until something outside arrives). "
@@ -11152,12 +11112,11 @@ _SELF_WAIT_FORM = (
 
 
 _WAIT_FORM = (
-    " Every open item has a mover (the one party whose move it is now: a session, " + OWNER + ", an outside party, or the item it waits `after`). Every open item but agent "
-    "work in progress (state doing) also has a wait date the board reads (it is not printed: an item shows only its real dates); an item past it is shown as past due. Agent work in progress (state doing) has no expected time and is never past due. A wait a session sets runs at most "
+    " Every open item has a mover (the one party whose move it is now: a session, " + OWNER + ", an outside party, or the item it waits `after`). An open item "
+    "waits on its real dates only (wake, due, ask by): no expected time is derived for any item, and a parked item is held until its wake or its blocker closes, with no stale mark. A wake a session sets runs at most "
     f"{_wt.cap_days():g} days from the item's last move: a wake further out, an anchored thread's included, is refused without {OWNER}'s words "
     "(said=[Acked-by …] checked against a transcript, a message from those days; or his answer on the item, given since its last move: ask him to answer there). "
-    "A due date is a deadline and is not refused, but the item's wait never runs past its last move + that many days, so an item due in three weeks "
-    "still surfaces if nobody moves it. "
+    "A due date is a deadline and is not refused. "
     "Parameter wait_basis: the reason a time wait's wake carries, one line with its date (wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a wait for a date outside the board, such as a vendor's reply date or a release freeze, reads \"<what happens> YYYY-MM-DD\"). "
     "Three wakes take it: a hold's wake (it parks the item, which reads as waiting, not on agent, until the wake), a stored verifying item's wake, and a wake past the cap (it lifts the cap for that wake alone; clear_wait_basis=true drops it). "
     "A wake alone on an item you keep moving (a doing item) within the cap is a check-back: a basis for it is refused as not needed. "
@@ -11174,7 +11133,6 @@ _WAIT_FORM = (
     "ask_by=<the day to chase>, post_wake_mover and needs=[\"external\"]. Work in hand needs next and its mover, carries no expected time (the item shows how long it has run), and expected_by and expected_reason, which older calls pass, are accepted and not kept (the reply says so). "
     "Work in hand is not a wait: a wait (a date, a timer, another release, someone else's step) is parked in the turn it starts, with update(hold=true, wake=\"YYYY-MM-DD\" or \"YYYY-MM-DDTHH:MM\", wait_basis=\"<what it waits for, with its date YYYY-MM-DD>\"), "
     "update(after=[\"board#N\"]) for another item, or the relay wait above for someone outside (a write that leaves an item with wait wording in its next, such as overnight, in the morning, once the run finishes, gets a note saying to park it). "
-    f"A wait on an agent session (needs a session, or a done check) is {_wt.agent_hours():g} hours from when it was set; every other wait (needs decision or external, a hold, a wake, after) is timed in days. "
     "No clock renewal without progress: a write that moves a wake or ask_by to a later time while the item's reason (description, wait_basis text) and its open steps are as they were is refused (a wait_reason does not count: it is not stored); "
     f"in the same write mark a step done or dropped, write the next step or state the new reason (or send {OWNER}'s own words in said), or change what the wait stands on to a shape the item never held (wait_kind, wait_event, wait_anchor, after: a flip back to an earlier one does not count; such a shape change alone lets a clock push through twice in a row and the third is refused, until a step, the reason, his new words or a hand-off resets the count); or, if the item now waits, park it (hold=true, wake, wait_basis) or use the event-wait form (wait_kind=\"event\", wait_event, ask_by, post_wake_mover). Setting a clock for the first time, pulling one in, clearing it and handing the item to another session are not renewals. On a parked item give a new wait_basis; an item on his decision cannot be held. "
     "Take a wake from the real schedule of the wait (a timer, a watch tick, a catch-up run), or check it live; never a guessed round time. "
@@ -11514,10 +11472,6 @@ def _create_item(
         meta["draft"] = draft_txt
     if anchors:
         raise ToolError("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one")
-    if due:                                # a far due date stands when his words are behind it (a said entry; no board answer exists yet)
-        dwords = _due_cap_words({}, said_l, due)
-        if dwords:
-            _cap_ok_put(meta, "due", due, dwords)
     _gate_metadata(meta, creating=True)
     lifted = "" if ask else _lift_ask(meta, writer=owner, keeper=owner)   # a client without the ask parameter: the ask's form as next's first line
     asked = lifted + _ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
@@ -11596,7 +11550,7 @@ def _create_item(
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _capped_note(gid, item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + machine_note
+    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + machine_note
                  + then_note + _similar_note(gid, subject, str(meta.get("project") or "")) + told + _nag("" if by else owner))
 
 
@@ -11928,33 +11882,9 @@ def _cap_ok_drop(meta: dict[str, Any], key: str) -> None:
     meta.pop("cap_ok", None)
 
 
-def _due_cap_words(item: dict[str, Any], said_l: list[dict[str, Any]], due: str) -> str:
-    """The words that let a due date past the cap stand (the same two kinds as for a wake, _owner_words_on), "" when the date is within
-    the cap, the gate is off or his words are not there. A due date is never refused: without them waiting.py clamps its expected-by."""
-    ep = _wt.due_epoch(due)
-    if ep is None or not _wt.cap_needs_owner() or (ep - time.time()) / 86400.0 <= _wt.cap_days():
-        return ""
-    return _owner_words_on(item, said_l, _wt.cap_days())
-
-
-def _capped_note(gid: str, item: dict[str, Any]) -> str:
-    """The reply line for a due date or wake that reads as capped: the wait is cut to the cap after the item's last move (no date is printed), "" when not."""
-    meta = item.get("metadata") or {}
-    if item.get("status") != "open" or not (meta.get("due") or meta.get("wake")):
-        return ""
-    try:
-        w = _wt.compute({**item, "gid": gid}, time.time())
-        if "capped" not in str(w.get("basis") or ""):
-            return ""
-    except Exception:  # noqa: BLE001
-        return ""
-    return f"\n(the wait is capped at {_wt.cap_days():g} days after the item's last move: longer needs {OWNER}'s words)"
-
-
 def _gate_cap(item: dict[str, Any], said_l: list[dict[str, Any]], what: str, shown: str, when: float, basis: str = "") -> str:
     """The owner's rule for a wake a session sets: more than [waiting] cap_days after the item's last move (this write is one), it is refused
-    unless his words are behind it (_owner_words_on). A due date is not gated: it is a deadline, not a wait (waiting.py clamps the
-    item's expected-by to the cap after its last move whatever its due says, so an item due in three weeks surfaces if nobody moves it).
+    unless his words are behind it (_owner_words_on). A due date is not gated: it is a deadline, not a wait.
     [waiting] cap_needs_owner = false lifts the gate. No wait is exempt, an anchored thread's included. Only a write is gated: a date
     stored earlier is read as it is. → the words that allowed a wake past the cap ("a checked said entry" | "a board answer"), else ""."""
     if not _wt.cap_needs_owner():
@@ -11972,8 +11902,7 @@ def _gate_cap(item: dict[str, Any], said_l: list[dict[str, Any]], what: str, sho
                     f"A longer one needs {OWNER}'s words behind it: ask {OWNER} to answer on the item (his answer there counts until the item moves again); "
                     f"or, when his words are in your own transcript on this box, pass said=[{{tag: Acked-by, quote: his sentence verbatim, msg: the uuid of his message}}] "
                     f"(checked against the transcript, a message from the last {cap:g} days); or, when the item waits for a date outside the board (a vendor's reply date, a release freeze), "
-                    f"pass wait_basis=\"<what happens> YYYY-MM-DD\" with it; or set a {what} within {cap:g} days and set it again then. "
-                    f"A wait that has no date of its own is given the cap ({cap:g} days) and is surfaced as past due once it has run.")
+                    f"pass wait_basis=\"<what happens> YYYY-MM-DD\" with it; or set a {what} within {cap:g} days and set it again then.")
 
 
 _BASIS_WORDS = "a real-world date"
@@ -12849,82 +12778,30 @@ def _description_fit_why(desc: str) -> str:
     return f"{n} lines, the limit is {max_lines}" if kind == "lines" else "a line that is not a `- ` bullet" if kind == "marker" else f"a bullet of {n} characters, the limit is {line_max}"
 
 
-def _retire_afters() -> dict[str, list[str]]:
-    """{item: [the open items that wait `after` it, and those that wait after them]} for every open item in the store: whose expected-by moves when the item's own wait does (waiting.compute reads an `after` blocker's wait)."""
-    direct: dict[str, list[str]] = {}
-    for g, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:  # noqa: BLE001
-            continue
-        if it.get("status") != "open":
-            continue
-        for b in _after_of(it.get("metadata") or {}):
-            direct.setdefault(b, []).append(g)
-    out: dict[str, list[str]] = {}
-    for g in direct:
-        seen: list[str] = []
-        todo = list(direct[g])
-        while todo:
-            x = todo.pop()
-            if x not in seen and x != g:
-                seen.append(x)
-                todo.extend(direct.get(x, []))
-        out[g] = sorted(seen)
-    return out
-
-
-def _retire_reading(gid: str, item: dict[str, Any], now: float, afters: dict[str, list[str]]) -> dict[str, Any]:
-    """What the fields give for an item now: {"pair": (phase, kind of the wait), "mover": the mover of an alive one, "watched": whether the watchers own its wait, "waits": {item: (the kind of wait waiting.compute gives, past due or not,
-    the expected-by)}} for the item and for every open item that waits after it. The pass writes an item only when this is the same before and after (retire_same)."""
+def _retire_reading(gid: str, item: dict[str, Any]) -> dict[str, Any]:
+    """What the fields give for an item now: {"pair": (phase, kind of the wait), "mover": the mover of an alive one, "watched": whether the watchers own its wait}. The pass writes an item only when this is the same before and after (retire_same)."""
     probe = {**json.loads(json.dumps(item)), "gid": gid}
     _legacy_hold(probe)
     _legacy_needs(probe)
     shown = _model.view(probe, _model_of(probe), after_open=lambda i_: _after_open(i_.get("metadata") or {}), check=False)
-
-    def load(g: str) -> dict[str, Any] | None:
-        if g == gid:
-            return probe
-        try:
-            return _load(g)
-        except Exception:  # noqa: BLE001
-            return None
-    waits: dict[str, tuple[str, bool, float]] = {}
-    for g in (gid, *afters.get(gid, [])):
-        it = probe if g == gid else load(g)
-        if not it or it.get("status") != "open":
-            continue
-        w = _wt.compute({**it, "gid": g}, now, load, None, None, 0.0)
-        kind = "wake" if g == gid and w["wait"] == "end" else w["wait"]      # a verifying item's end day becomes a wake at the end of that day: the same wait under its new name
-        waits[g] = (kind, bool(w["overdue"]), float(w["expected_by"]))
-    return {"pair": list(_model.shown_pair(shown)), "mover": shown.mover if shown.state == _model.ALIVE else "", "watched": bool(_watch.watches(probe)), "waits": waits}
-
-
-RETIRE_EB_SLOP = 61.0       # seconds: the end of a verifying item's end day is the next midnight; its wake names the minute 23:59
+    return {"pair": list(_model.shown_pair(shown)), "mover": shown.mover if shown.state == _model.ALIVE else "", "watched": bool(_watch.watches(probe))}
 
 
 def retire_same(r0: dict[str, Any], r1: dict[str, Any]) -> str:
     """"" when two readings are the same, else what differs, in words."""
-    diffs = [f"{k} {r0[k]} -> {r1[k]}" for k in ("pair", "mover", "watched") if r0[k] != r1[k]]
-    for g in sorted(set(r0["waits"]) | set(r1["waits"])):
-        a, b = r0["waits"].get(g), r1["waits"].get(g)
-        if a is None or b is None or a[:2] != b[:2] or abs(a[2] - b[2]) > RETIRE_EB_SLOP:
-            diffs.append(f"{_gh.shown(g)} wait {a[:2] if a else None} -> {b[:2] if b else None}" + (f", expected-by {b[2] - a[2]:+.0f} s" if a and b and a[:2] == b[:2] else ""))
-    return "; ".join(diffs)
+    return "; ".join(f"{k} {r0[k]} -> {r1[k]}" for k in ("pair", "mover", "watched") if r0[k] != r1[k])
 
 
 def _retire_holds(item: dict[str, Any]) -> bool:
-    """Is the item left whole by the retire pass: agent work in hand (the stored state doing with a session as mover, waiting.doing_agent). Its wait is read from the stored state alone, so without the word it would
-    wait on a date or count hours from its clock and fall past due; the reading check below would refuse it, this holds it first and lists it."""
+    """Is the item left whole by the retire pass: agent work in hand (the stored state doing with a session as mover, waiting.doing_agent). Its wait is read from the stored state alone, so without the word the reading check
+    below might refuse it; this holds it first and lists it."""
     return _wt.doing_agent(item)
 
 
-def _retire_one(gid: str, dry: bool = False, afters: dict[str, list[str]] | None = None) -> dict[str, Any]:
+def _retire_one(gid: str, dry: bool = False) -> dict[str, Any]:
     """Take the stored state word and the carry fields out of one open item (retire_fields.plan_for): → {"item", "action": set | same | moved | refused | would_set, "why", "before", "after", "held", "sha256_before"}
     (before and after = the keys the plan touches as the item holds them, None = absent; `description` is the top-level field). Worked out HERE under _ITEM_LOCK from the file as it stands, written like a stamp
-    (_stamp_write: nothing else in the file changes, no event on the item). An item whose phase, kind of wait, mover, watched status, wait (waiting.compute: kind, past due or not, expected-by) or whose followers' waits (the
-    items that wait `after` it) would read differently is `refused` and left as it is. `afters` (_retire_afters) is the index of those followers, built here when not given. `same`: nothing to retire.
+    (_stamp_write: nothing else in the file changes, no event on the item). An item whose phase, kind of wait, mover or watched status would read differently is `refused` and left as it is. `same`: nothing to retire.
     `moved`: a writer that takes no lock wrote the item between the read and the replace; its write stands. `dry`: nothing is written (`would_set`)."""
     shown = _gh.shown(gid)
     try:
@@ -12933,7 +12810,7 @@ def _retire_one(gid: str, dry: bool = False, afters: dict[str, list[str]] | None
             if refusal is not None:
                 return refusal
             h0 = _stamp_sha(data)
-            if _retire_holds(raw):         # agent work in hand: waiting.compute reads it as kind `doing` (no expected time, never past due) from the stored state alone; without the word it would count hours from its clock and fall past due
+            if _retire_holds(raw):         # agent work in hand: left whole
                 return {"item": shown, "action": "same", "why": "held whole: the stored state doing stands (without it the item's wait would read differently)", "held": ["state"], "sha256_before": h0}
             plan = _retire.plan_for(raw["metadata"], str(raw.get("description") or ""), time.time(), _description_fit_why)
             held = [f for f, _w in plan["held"]]
@@ -12941,10 +12818,7 @@ def _retire_one(gid: str, dry: bool = False, afters: dict[str, list[str]] | None
                 return {"item": shown, "action": "same", "why": "nothing to retire" + (f" (held: {', '.join(held)})" if held else ""), "held": held, "sha256_before": h0}
             new = _retire.apply_edits(raw, plan)
             out = {"item": shown, **_retire.entry_for(raw, plan), "held": held, "sha256_before": h0}
-            if afters is None:
-                afters = _retire_afters()
-            now = time.time()
-            why = retire_same(_retire_reading(gid, raw, now, afters), _retire_reading(gid, new, now, afters))
+            why = retire_same(_retire_reading(gid, raw), _retire_reading(gid, new))
             if why:
                 return {**out, "action": "refused", "why": f"the item would read differently: {why}; left as it is"}
             if dry:
@@ -13021,7 +12895,6 @@ def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
     if dry and op != "retire":
         raise ToolError("Refused: dry goes with retire only")
     results: list[dict[str, Any]] = []
-    afters = _retire_afters() if op == "retire" else None      # the items that wait after each item: read once for the batch (the retire pass changes no `after` link)
     for it in items:
         if op == "unretire":
             results.append(_unretire_one(it))
@@ -13031,7 +12904,7 @@ def _retire_write_op(spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         except ToolError as e:
             results.append(_migrate_refuse(str(it or "?"), str(e)))
             continue
-        results.append(_retire_one(gid, dry=dry, afters=afters))
+        results.append(_retire_one(gid, dry=dry))
     if any(r["action"] == "set" for r in results):
         _publish()
     if pid and not dry:
@@ -13447,7 +13320,7 @@ def _update_unlocked(
             raise ToolError(f"Refused: wake must be in the future ({_cfg.tz_abbr()})")
         words = _gate_cap(item, said_l, "wake", stored, _wake_at(stored).timestamp(), basis_ok)    # The owner's one rule: no wait runs past the cap without his words
         meta["wake"] = stored
-        if words and words != _BASIS_WORDS:   # recorded for this wake: waiting.py then lets its expected-by stand past the cap, with his sentence (the reason a time wait carries)
+        if words and words != _BASIS_WORDS:   # recorded for this wake: the cap is lifted for it, with his sentence (the reason a time wait carries)
             _, q_text, q_src = _owner_quote_on(item, said_l, _wt.cap_days())
             _cap_ok_put(meta, "wake", stored, words, quote=q_text, source=q_src)
         else:                     # (a real-world date is its own record, wait_basis, below)
@@ -13530,12 +13403,6 @@ def _update_unlocked(
     if next_touch:                # the sender's lines are replaced (or removed), everyone else's stay; a line stored with no writer is the creator's as it stood before this write
         merged = _next_put(meta, next, next_writer, keeper_was, wipe=clear_next, drop_own=next_drop)
         merged_note = "".join(f"\n(next: \"{_steps.first_line(e)[:120]}\" is already an open step of {_session_label(w) or w or 'another session'}: it stays as it is, not added a second time)" for e, w in merged)
-    if due:                       # a far due date stands like a far wake when his words are behind it; accepted without them it is clamped (waiting.py)
-        dwords = _due_cap_words(item, said_l, due)
-        if dwords:
-            _cap_ok_put(meta, "due", due, dwords)
-        elif old_due != due:
-            _cap_ok_drop(meta, "due")
     if state_change:              # an update, a park or a completion ends the idle record an earlier version stored
         meta.pop("idle", None)
         for k in ("waiting", "wait_failed", "undelivered"):   # the item moved: a failed wait is the mover's to fix, a lost notice is stale, and a `waiting` record an earlier version wrote goes
@@ -13806,7 +13673,7 @@ def _update_unlocked(
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never on hold: the hold is dropped"
                  + (f"; its wake {meta['wake']} stays as a reminder" if meta.get("wake") else "") + ")")
-    return (f"updated {_gh.shown(gid)}.\n" + _fmt(item) + hint + wait_fixed + (_capped_note(gid, item) if (due or wake) else "") + work_note + steps_note + asked + watch_note + _form_notes(description, next_judged, bool(hold or wake) and now_held, meta, gid,
+    return (f"updated {_gh.shown(gid)}.\n" + _fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + _form_notes(description, next_judged, bool(hold or wake) and now_held, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
                                                                  ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(meta) if wake else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor)) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + _nag(debtor))
@@ -15001,20 +14868,20 @@ def _client_get(what: str, params: dict[str, str]) -> tuple[int, str, str]:
 
 
 def _wait_fields(gid: str, it: dict[str, Any], ctx: "_WaitCtx") -> dict[str, Any]:
-    """The one rule's fields on an item as the items API carries them (the web board and the fleet tool read them): mover {kind, who, via?},
-    expected_by (epoch, null for agent work in progress), wait (which kind of wait gives the date, or doing), overdue."""
+    """The wait fields on an item as the items API carries them (the web board and the fleet tool read them): mover {kind, who, via?}. The fields that
+    carried a computed expected-by time stay in the answer so that a reader written against them does not break, always empty (expected_by null, wait "",
+    overdue null): they go in a later release."""
     try:
-        w = ctx.of(gid, it)
+        mv = dict(ctx.mover(gid, it))
     except Exception:  # noqa: BLE001  — a reading that fails never fails the list
         return {}
-    mv = dict(w["mover"])
     if mv.get("kind") == _wt.OWNER_KIND:
         mv["kind"] = _cfg.owner_mover_kind()      # [items_api] owner_mover_kind: the word a reader of the API matches for the owner's move ("legacy" by default, or "owner")
     elif mv.get("kind") == "session":
         mv["who"] = _session_label(str(mv.get("who") or "")) or str(mv.get("who") or "")
     if mv.get("via"):
         mv["via"] = _gh.shown(str(mv["via"]))
-    return {"mover": mv, "expected_by": None if w["wait"] == "doing" else w["expected_by"], "wait": w["wait"], "overdue": bool(w["overdue"])}      # agent work in progress has no expected time: null
+    return {"mover": mv, "expected_by": None, "wait": "", "overdue": None}
 
 
 _ROLE_MOVER, _ROLE_THEN, _ROLE_NEEDS = "mover", "then", "needs"     # the values of a client items row's `roles` (pages.py words them)
@@ -15035,7 +14902,7 @@ def _client_items(key: str) -> tuple[int, str, str]:
     me.discard("")
     out = []
     now = time.time()
-    ctx = _WaitCtx(now)                # The owner's one rule: every open item has a mover and an expected-by, listed whatever wait it is in
+    ctx = _WaitCtx(now)                # every open item has a mover, listed whatever wait it is in
     for gid, p in _item_files():
         try:
             with open(p, encoding="utf-8") as f:
@@ -17480,7 +17347,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
             if res is not None:
                 return 200, {"result": res}
         # No For you row for a failed release: release.sh's raw text told him nothing he could act on and stayed after the fix.
-        # The builder gets the message below; he hears of a failure through the item it serves, once that is past its expected-by.
+        # The builder gets the message below; he hears of a failure through the item it serves.
         try:
             return 200, {"result": _message(to, text, sender, f"machine:{machine}", machine, **({"fyi": True} if body.get("fyi") is True else {}))}
         except ToolError as e:
@@ -18180,7 +18047,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)
-            _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; cap_ok keeps what lifts the cap on a due date)
+            _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
             if then and not _model.is_owner(then):
                 _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else _notice_to falls back to the page's keeper)

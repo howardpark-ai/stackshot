@@ -11,7 +11,7 @@ the filing pass (every ten minutes, in the server) share one copy of the rules.
                                               whole of a wait (date_only_wait: the shape the write parks, found in code every ten minutes, no model call, no cap); → (findings, flags)
   check_ask_options(meta)                     an ask that shows Yes / No under an open question or whose Recommend is no yes or no while it lists no options, or whose Recommend does not match its Decide or its options (reads with ask_read.py, the write gates' own matchers)
   check_step_handover(item, meta, mover, known, roles, now)   a finished step that did not hand the item on: a delivery step with no proof before another session's step, or a next session never reached after a done step
-  dates_findings(items, anchors, now, env)    the dates rule (has the item's own expected time passed with nobody acting?): the stale check's date half; → (findings, idle-pass entries)
+  dates_findings(items, anchors, now, env)    the dates rule (has the item's own wake passed with nobody acting?): the stale check's date half; → (findings, idle-pass entries)
   goal_view(item) / goal_sig(subject, goal)   the goal-unclear check's texts (the subject and the first bullet's `Goal:` sentence) and their stamp; the judgment itself is audit_run's (one call per suspect)
   wait_words(item, after_open)                the words of an alive item's next that read as a wait (precise list) or can hide one (broad list: when, once, after, until), read from the stored next
   proof_wait_findings(items, anchors, now, env)   the proof-waits rule (the daily run's, after its model checks): an open item held for a real event, in code: the fix is live (close it) or the event can be staged now; → (findings, left alone with their basis, candidates read)
@@ -519,13 +519,13 @@ def filing_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], n
 
 
 
-# ---------- the dates rule: has the item's own expected time passed with nobody acting? ----------
+# ---------- the dates rule: has the item's own wake passed with nobody acting? ----------
 CHECKS_DATES = ("stale",)      # the category the dates pass can raise: the daily run's own, so a finding either sends is one finding to both
 
 
 def dates_findings(items: dict[str, dict[str, Any]], anchors: dict[str, Any], now: float, env: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(findings, idle-pass entries) of the dates rule over the open items; reads only. An item's expected time is the one waiting.py derives from what it carries: its wake (the date of a dated
-    wait too, a hold's wake included). The rule is the date half of `check_stale`, with its exemptions: agent work in progress with no wake carries no expected time and is never past due; a wake
+    """(findings, idle-pass entries) of the dates rule over the open items; reads only. The date it reads is the item's wake (the date of a dated
+    wait too, a hold's wake included); no expected-by time is derived. The rule is the date half of `check_stale`, with its exemptions: agent work in progress with no wake has no date to pass; a wake
     still ahead, a hold with no wake, an item on the owner or an outside party, behind an open item or in a state that is itself a wait (parked, outside, blocked, your-call, your-step, verifying)
     are left alone. A finding has the daily run's shape, its category (`stale`) and its evidence ("past its wake (...) with no write since"), as the daily run's had before the pass took it over (the run no longer
     finds it). As in the daily run, an item the server's idle pass poked is an idle-pass entry, no finding. The silence of an item with no date of its own is the silence pass's (silence.py)."""

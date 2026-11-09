@@ -9,8 +9,8 @@ and a bare confirm do not move it, so the pass's message cannot reset the clock 
   read_silence()                        the pass's record, `<state>/audit/silence.json`
 
 An item is silent when it is open, in the state doing (stored or derived), on a session (not the owner, not an outside party), and has had no activity for `LIMIT` seconds. It is left alone when it
-is on hold, waits on an after item, a stored wait (a release, a CI run or any other event, a relay, an outside party: the model reads it as waiting), carries a wake of its own (a wake ahead is its
-expected time; a wake that passed is the dates pass's), or has a hand-off that nobody took yet (the hand-off audit's alone, so one item never climbs two ladders at once). The count starts at the later of the item's last activity and
+is on hold, waits on an after item, a stored wait (a release, a CI run or any other event, a relay, an outside party: the model reads it as waiting), carries a wake of its own (a wake ahead covers it;
+a wake that passed is the dates pass's), or has a hand-off that nobody took yet (the hand-off audit's alone, so one item never climbs two ladders at once). The count starts at the later of the item's last activity and
 the moment it left a hold, a wait or an after link (those releases carry no writer, so the activity clock does not move for them). Silence is judged per item, never per pane: the mover's pane being busy (a builder directing subagents is nearly always busy) says nothing about one item,
 so the pass does not read the pane and a busy pane hides no silent item. What counts as activity on the item is the clock's (a write, a message, an event on an anchor, a pull request's review or CI
 run); a subagent's work that writes nothing to the item is not activity, so a builder keeps a long job visible by writing it onto the item (a `work` line, an update). One signal is read beyond the

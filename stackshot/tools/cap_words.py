@@ -1,5 +1,5 @@
 """tools/cap_words.py — the one-time job after an earlier states audit: stop the
-parked items it is given from reading overdue once the 7-day cap runs out. Stdlib only, Python 3.11+.
+parked items it is given from being refused or re-asked once the 7-day cap runs out. Stdlib only, Python 3.11+.
 
   A. Items the owner parked himself ("snooze until the sprint ends", "postpone"), whose answer was never saved as his words (named with --a-item). The job finds, in each item's metadata.answers, the newest sentence of his that parks it (a board answer, or his own
      hand-written comment on the issue: the entries the store attributes to him), and records it as metadata.cap_ok for the item's wake
@@ -104,11 +104,7 @@ def agent_text(item: dict[str, Any]) -> list[str]:
 
 
 def status_line(gid: str, item: dict[str, Any], now: float) -> str:
-    w = _wt.compute({**item, "gid": gid}, now)
-    cap = "capped" if "capped" in str(w.get("basis") or "") else "not capped"
-    when = "no expected time (doing)" if w.get("wait") == "doing" else f"wait: {w.get('basis')}"
-    return (f"{cap}; {when}; " + ("PAST DUE" if w.get("overdue") else "not yet due")
-            + f"; last move {local_time(_wt.clock_of(item, now))}")
+    return f"last move {local_time(_wt.clock_of(item, now))}"
 
 
 def plan_a(n: int, use: str, now: float) -> dict[str, Any]:

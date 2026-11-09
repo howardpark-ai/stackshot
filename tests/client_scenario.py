@@ -367,11 +367,10 @@ st, ct, body2 = server._client_get("items", {"key": "sparrow"}); check("items: b
 st, ct, body3 = server._client_get("items", {"key": V}); check("items: another session sees only its own", st == 200 and gids(body3) == ["a6"], body3[:300])
 st, ct, body4 = server._client_get("items", {"key": "nobody-at-all"}); check("items: a session that owns nothing: an empty list", st == 200 and json.loads(body4) == {"items": []}, body4)
 x = {i["gid"]: i for i in json.loads(body)["items"]}
-eb2, od2 = x["a2"].pop("expected_by"), x["a2"].pop("overdue")
+eb2, od2 = x["a2"].pop("expected_by"), x["a2"].pop("overdue")      # kept as keys, always empty (they go in a later release)
 check("items: the fields", x["a2"] == {"gid": "a2", "shown": "a2", "subject": "[home] item 2", "needs": ["decision"], "contact": "", "next": "first\nsecond", "state_updated": 100.0, "confirmed": 200.0, "updated": 300.0, "held": False, "list": "your-move",
-      "mover": {"kind": server._cfg.owner_mover_kind(), "who": server.OWNER}, "wait": "needs", "roles": ["then"]}, x["a2"])   # roles = the asking session's live roles (the owner's item, Oliver moves it: keeper only); the stored item state (derived here); the one rule's fields (waiting.py): whose move, by when
-check("items: expected_by and overdue: before the server has a baseline there is none, so a date derived from an old state clock is lifted to now + default_days and is not late",
-      isinstance(eb2, float) and eb2 >= 100.0 + 3 * 86400 and eb2 > time.time() and od2 is False, (eb2, od2))
+      "mover": {"kind": server._cfg.owner_mover_kind(), "who": server.OWNER}, "wait": "", "roles": ["then"]}, x["a2"])   # roles = the asking session's live roles (the owner's item, Oliver moves it: keeper only); the stored item state (derived here); the one rule's fields (waiting.py): whose move, by when
+check("items: expected_by and overdue stay as keys and are always empty (no expected time is computed), wait is the empty string", eb2 is None and od2 is None and x["a2"]["wait"] == "" and all(i["expected_by"] is None for i in json.loads(body)["items"]), (eb2, od2))
 check("items: held, from metadata.hold and from the retired status", x["a3"]["held"] and x["a4"]["held"] and not x["a1"]["held"], (x["a3"], x["a4"]))
 check("items: an older file without the clocks: state_updated and updated null, confirmed from its fallback", x["a1"]["state_updated"] is None and x["a1"]["updated"] is None and x["a1"]["confirmed"] > 0, x["a1"])
 for bad in ("", "a\nb", "x" * 201):

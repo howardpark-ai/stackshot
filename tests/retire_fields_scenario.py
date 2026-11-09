@@ -153,10 +153,9 @@ check("1 queued (the rank queue's word) stays", P[16]["edits"] == {}, P[16])
 # ---- 2/3. the readings are the same, and only the planned keys moved
 before_r = {i: reading(i) for i in OPEN}
 def wc(i):
-    """waiting.compute for an item as the server reads it (its `after` blockers loaded from the store), at the clock now."""
+    """waiting.mover_for for an item as the server reads it (its `after` blockers loaded from the store): whose move it is."""
     ctx = server._WaitCtx(time.time())
-    w = W.compute({**raw(i), "gid": f"g{i}"}, ctx.now, ctx.load, None, ctx.seen, ctx.floor)
-    return w
+    return W.mover_for({**raw(i), "gid": f"g{i}"}, ctx.load)
 WAIT_IDS = (1, 5, 7, 8, 12, 14, 31)
 wait_before = {i: wc(i) for i in WAIT_IDS}
 orig = {i: raw(i) for i in OPEN}
@@ -187,14 +186,14 @@ check("4 the supplies line is the last bullet of the description", raw(5)["descr
 it7 = dict(raw(7), gid="g7")
 m7 = server._model.view(it7, server._model_of(it7), None, lambda i_: server._after_open(i_.get("metadata") or {}), check=False)
 check("5 the verifying item reads waiting on its end day, with the proof as the text of the wait", m7.state == server._model.WAITING and W.basis_of(mt(7)) == "the nightly run is green" and mt(7)["wake"] == END_WAKE, (m7.state, mt(7)))
-check("5 …and it waits to the end of that day, as the verifying state read it (the kind of wait is a wake now, the expected-by the same minute but for the 23:59)",
-      wait_before[7]["wait"] == "end" and wc(7)["wait"] == "wake" and abs(wc(7)["expected_by"] - wait_before[7]["expected_by"]) <= 61 and wc(7)["overdue"] == wait_before[7]["overdue"] and not wc(7)["overdue"], (wait_before[7], wc(7)))
-check("5 waiting.compute: the stored-doing items (a session as mover, nothing waited on) read doing, never past due, before and after the pass",
-      all(wait_before[i]["wait"] == "doing" and wc(i)["wait"] == "doing" and not wc(i)["overdue"] and wc(i)["expected_by"] == 0.0 for i in (1, 8, 12, 31)), [(i, wait_before[i]["wait"], wc(i)["wait"]) for i in (1, 8, 12, 31)])
+check("5 …and it waits to the end of that day, as the verifying state read it (its end is now its wake, and whose move it is stays the same)",
+      W.wake_epoch(mt(7)["wake"]) is not None and wc(7) == wait_before[7], (wait_before[7], wc(7), mt(7)))
+check("5 waiting.mover_for: the stored-doing items (a session as mover, nothing waited on) are a session's move, before and after the pass",
+      all(wait_before[i]["kind"] == "session" and wc(i) == wait_before[i] for i in (1, 8, 12, 31)), [(i, wait_before[i], wc(i)) for i in (1, 8, 12, 31)])
 st_, d_ = call(op="retire", items=["g31"])
-check("5 …a doing item is held whole, so the items that wait after it (g5, g14) keep their wait: the kind, past due or not and the expected-by (12 h after the blocker's last write)",
-      st_ == 200 and d_["results"][0]["action"] == "same" and d_["results"][0]["held"] == ["state"] and mt(31)["state"] == "doing" and all((wc(i)["wait"], wc(i)["overdue"], round(wc(i)["expected_by"])) == (wait_before[i]["wait"], wait_before[i]["overdue"], round(wait_before[i]["expected_by"])) for i in (5, 14, 31)) and wc(5)["wait"] == "after",
-      [(i, wait_before[i]["wait"], wc(i)["wait"], wait_before[i]["expected_by"] - wc(i)["expected_by"]) for i in (5, 14, 31)])
+check("5 …a doing item is held whole, so the items that wait after it (g5, g14) keep their mover (the blocker's, named by `via`)",
+      st_ == 200 and d_["results"][0]["action"] == "same" and d_["results"][0]["held"] == ["state"] and mt(31)["state"] == "doing" and all(wc(i) == wait_before[i] for i in (5, 14, 31)) and wc(5).get("via") == "g31",
+      [(i, wait_before[i], wc(i)) for i in (5, 14, 31)])
 put(31, needs=[BACK], state="doing")      # the blocker as it was, for the undo below
 snap1 = snapshot()
 st_, d_ = call(op="retire", items=[f"g{i}" for i in OPEN])
@@ -212,14 +211,6 @@ b22, b23, b24 = bytes_of(22), bytes_of(23), bytes_of(24)
 st_, d_ = call(op="retire", items=["g22", "g23", "g24"])
 check("7 a stored doing item with a due date, with a check, with a mover from the fallback: held whole, byte for byte, not refused",
       st_ == 200 and [r["action"] for r in d_["results"]] == ["same"] * 3 and all(r["held"] == ["state"] for r in d_["results"]) and (bytes_of(22), bytes_of(23), bytes_of(24)) == (b22, b23, b24), d_)
-_held_doing = server._retire_holds
-server._retire_holds = lambda it: False                                 # the safety net alone: were the hold not there, the reading would catch each of them
-try:
-    st_, d_ = call(op="retire", items=["g22", "g23", "g24"])
-finally:
-    server._retire_holds = _held_doing
-check("7 …and the reading of the wait (waiting.compute: the kind, past due or not, the expected-by) refuses each of them on its own, left byte for byte",
-      st_ == 200 and [r["action"] for r in d_["results"]] == ["refused"] * 3 and all("wait" in r["why"] for r in d_["results"]) and (bytes_of(22), bytes_of(23), bytes_of(24)) == (b22, b23, b24), d_)
 FULL8 = "\n".join(f"- bullet {n}" for n in range(8))
 put(25, needs=[BACK], state="blocked", after=["g31"], supplies="its output feeds the build", description=FULL8)
 put(26, needs=[BACK], state="blocked", after=["g31"], supplies="z" * 130)

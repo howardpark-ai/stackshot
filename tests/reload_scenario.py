@@ -79,10 +79,19 @@ out, log = reload_with(LIVE)
 check("valid, unchanged: an empty list, nothing logged", out == [] and log == "", (out, log))
 
 # a live file that still carries the retired [idle] stuck_to key is read as it is: the key is ignored, with no warning and no refusal
-OLDKEY = edit(LIVE, (r"(?m)^hours = 4", 'stuck_to = "home-old"\nhours = 4'))
+OLDKEY = edit(LIVE, (r"(?m)^park_days = 3", 'stuck_to = "home-old"\npark_days = 3'))
 out, log = reload_with(OLDKEY)
 check("retired key: a file that still has [idle] stuck_to loads, the key is only listed as changed, nothing reads it and nothing is logged", out == ["idle.stuck_to"] and log == "" and not hasattr(server, "_stuck_to") and server._fleet_builder() == (config.get("fleet", "operator_session") or ""), (out, log))
 check("retired key: config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
+out, log = reload_with(LIVE)
+
+# a live file that still carries the keys that timed the computed expected-by date ([waiting] default_days and agent_hours, [idle] hours) loads as it is: nothing reads them, nothing is logged
+OLDEB = edit(LIVE, (r"(?m)^cap_days = 7", "default_days = 3\nagent_hours = 3\ncap_days = 7"), (r"(?m)^park_days = 3", "hours = 4\npark_days = 3"))
+out, log = reload_with(OLDEB)
+check("retired keys: a file that still has [waiting] default_days and agent_hours and [idle] hours loads, they are only listed as changed, and nothing is logged",
+      sorted(out) == ["idle.hours", "waiting.agent_hours", "waiting.default_days"] and log == "", (out, log))
+check("retired keys: …the waiting module reads neither (its defaults hold only the cap, the basis weekday and the dated-wait minimum)", set(server._wt.DEFAULTS) == {"cap_days", "cap_needs_owner", "basis_weekday", "dated_wait_min_hours"}, sorted(server._wt.DEFAULTS))
+check("retired keys: …config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
 out, log = reload_with(LIVE)
 
 # ---- 2. an invalid file keeps the running config, and says why

@@ -85,10 +85,10 @@ _ITEM_LINES = [   # the item as get shows it, which create, update and complete 
     ("stackshot/web/server.py", "_fmt"), ("stackshot/web/server.py", "_mover_lines"), ("stackshot/web/server.py", "_model_lines"), ("stackshot/web/server.py", "_handoff_lines"),
     ("stackshot/web/server.py", "_state_check_notes"), ("stackshot/web/server.py", "_next_names_lines"), ("stackshot/web/server.py", "_check_words"), ("stackshot/web/server.py", "_answer_words"), ("stackshot/web/server.py", "_nag"),
     ("stackshot/model/states.py", "words"), ("stackshot/model/states.py", "carry_of"), ("stackshot/model/model.py", "words"), ("stackshot/waits/handoff.py", "words"), ("stackshot/waits/watchers.py", "woke_line"),
-    ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"), ("stackshot/waits/waiting.py", "line"),
+    ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"),
 ]
 _WRITE_NOTES = [   # the notes a create or an update reply ends with
-    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_capped_note"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/decision_gates.py", "_options_note"), ("stackshot/web/server.py", "_owner_param"),
+    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/decision_gates.py", "_options_note"), ("stackshot/web/server.py", "_owner_param"),
     ("stackshot/web/server.py", "_owner_then_default"),
 ]
 _GET_ONLY = [("stackshot/web/server.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
