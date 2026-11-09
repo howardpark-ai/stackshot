@@ -75,7 +75,7 @@ def pushes(): return [json.loads(l) for l in push_log.read_text().splitlines()] 
 def settle(until=30):
     """wait until the board's relay threads have ended: each push runs in a thread of its own. A fixed
     0.5 s was too short under coverage on a busy box (a measured run on main, for 0110c0d). The Slack worker
-    (for-you-slack) lives on once started, so it is not waited for: a check of its posts joins its queue (server._foryou_slack_wait)."""
+    (for-you-slack) lives on once started, so it is not waited for: a check of its posts joins its queue (server._fyslack._foryou_slack_wait)."""
     end = time.time() + until
     while time.time() < end and any(t is not threading.main_thread() and t.is_alive() and t.name != "for-you-slack" for t in threading.enumerate()):
         time.sleep(0.02)
@@ -92,7 +92,7 @@ from stackshot.core import config as _cfg; from stackshot.router import routing;
 from stackshot.web import server
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = server._fyev._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about the notice's shape and
 # who is named in it, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
@@ -104,7 +104,7 @@ slack = []
 REAL_SLACK_POST, REAL_SLACK_ON = server._fyslack._for_you_slack_post, server._fyslack._for_you_slack_on
 server._fyslack._for_you_slack_post = lambda text: slack.append(text) or ""      # the Slack hook is stubbed: nothing leaves this process
 server._fyslack._for_you_slack_on = lambda: True
-pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
+pub = [0]; server._publish = server._fyev._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 NEWD = "- The thing works and is in use"
 def cl(i, sender="osprey-x", reason="PR 14 is live", description=NEWD): return server.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 def rows(): return fy.rows()
@@ -284,7 +284,7 @@ fy.set_flag("a32", "mute")
 end30 = server._wt.due_epoch(d_soon)
 slack.clear(); server._FORYOU_LAST[0] = 0.0
 pub0 = pub[0]
-made = server._foryou_tick(end30 - 10 * 3600); server._foryou_slack_wait()      # the Slack post is the worker thread's: wait for its queue
+made = server._foryou_tick(end30 - 10 * 3600); server._fyslack._foryou_slack_wait()      # the Slack post is the worker thread's: wait for its queue
 due = lambda g: of(g, "due")
 check("the board is republished (the debounced _publish) after a due-date pass that made rows", made and pub[0] == pub0 + 1, (made, pub0, pub))
 check("a due date ending in 10 h on a watched item: one urgent due row", made.count("a30") == 1 and len(due("a30")) == 1 and due("a30")[0]["urgent"] and due("a30")[0]["what"].startswith("due "), (made, due("a30")))
@@ -292,7 +292,7 @@ check("…an unwatched item with a due date makes none, nor a muted one", not du
 check("…a due date 10 days off and one 10 days past make none (the first pass after a deploy must not raise every old overdue item)", not due("a33") and not due("a34"))
 check("…an item with his board answer and a near due date is watched: a row", len(due("a35")) == 1)
 check("…each urgent row was posted to Slack once, with the text and the link", len(slack) == 2 and all(s.startswith("[stackshot] For you (urgent): ") and "/items/" in s for s in slack) and all(r["slacked"] for r in (due("a30")[0], due("a35")[0])), (slack, due("a30")))
-server._FORYOU_LAST[0] = 0.0; made2 = server._foryou_tick(end30 - 10 * 3600 + 3600); server._foryou_slack_wait()
+server._FORYOU_LAST[0] = 0.0; made2 = server._foryou_tick(end30 - 10 * 3600 + 3600); server._fyslack._foryou_slack_wait()
 check("the next pass makes no second row and posts nothing again", made2 == [] and len(due("a30")) == 1 and len(slack) == 2, (made2, slack))
 server._FORYOU_LAST[0] = 0.0; made3 = server._foryou_tick(end30 + 3600)
 check("an hour after the due date's end the same due date still has its one row (a due date makes one row, overdue or not)", made3 == [] and len(due("a30")) == 1)
@@ -324,10 +324,10 @@ except ValueError: check("foryou.add refuses the retired kind", True)
 def urgent(text, key=None, **kw):
     """An urgent row for the Slack tests below (a due row stands in for what a failed release used to make)."""
     row = fy.add(key=key or f"urgent:{text}", kind="due", what=text, urgent=True, **kw)
-    if row: server._foryou_slack(row)
+    if row: server._fyslack._foryou_slack(row)
     return row
 
-server._foryou_slack_wait()
+server._fyslack._foryou_slack_wait()
 
 # ---- 7. the stub every later section reads
 server._wt.cap_needs_owner = lambda: False
@@ -556,33 +556,33 @@ posts = []; script = ["boom: network down", ""]      # the first post fails, the
 server._fyslack._for_you_slack_post = lambda text: (posts.append(text), script.pop(0) if script else "")[1]
 err9 = io.StringIO()
 with contextlib.redirect_stderr(err9):
-    urgent("PR #18 FAILED at the build: it broke"); server._foryou_slack_wait()
+    urgent("PR #18 FAILED at the build: it broke"); server._fyslack._foryou_slack_wait()
 byid = lambda rid: fy.row_by_id(rid)
 r9 = next(r for r in rows() if "PR #18" in r["what"])
 check("a Slack post that failed: the row stays on the list, unposted, with one try counted, and the failure is logged with the reason",
       not r9["slacked"] and r9["slack_tries"] == 1 and len(posts) == 1 and "row %d not posted to Slack (try 1 of 3" % r9["id"] in err9.getvalue() and "boom: network down" in err9.getvalue(), (r9, err9.getvalue()))
-server._foryou_slack_wait()
+server._fyslack._foryou_slack_wait()
 check("…nothing posts it again before the next pass", len(posts) == 1)
-server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 400); server._foryou_slack_wait()
+server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 400); server._fyslack._foryou_slack_wait()
 r9 = byid(r9["id"])
 check("…the next pass tries it again, and this time it is posted: the row is marked (slacked) with two tries", r9["slacked"] and r9["slack_tries"] == 2 and len(posts) == 2 and posts[0] == posts[1], (r9, posts))
-server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 800); server._foryou_slack_wait()
+server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 800); server._fyslack._foryou_slack_wait()
 check("…a posted row is not posted again", len(posts) == 2 and byid(r9["id"])["slack_tries"] == 2)
 posts.clear(); server._fyslack._for_you_slack_post = lambda text: (posts.append(text), "still down")[1]
 err9 = io.StringIO()
 with contextlib.redirect_stderr(err9):
-    urgent("PR #22 FAILED at the build: again"); server._foryou_slack_wait()
+    urgent("PR #22 FAILED at the build: again"); server._fyslack._foryou_slack_wait()
     for k in range(4):
-        server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 400 * (k + 1)); server._foryou_slack_wait()
+        server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 400 * (k + 1)); server._fyslack._foryou_slack_wait()
 r9 = next(r for r in rows() if "PR #22" in r["what"])
 check("a post that keeps failing is tried three times in all (the first and two retries), then left: unposted, tries stored on the row, every failure logged, the last saying no more tries",
       not r9["slacked"] and r9["slack_tries"] == 3 and len(posts) == 3 and err9.getvalue().count("not posted to Slack") == 3 and "(try 3 of 3, no more tries)" in err9.getvalue(), (r9, len(posts), err9.getvalue()))
 posts.clear(); old = fy.add(key="old:slack", kind="due", what="PR #1 FAILED long ago", urgent=True, ts=time.time() - 90000)
-server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 100); server._foryou_slack_wait()
+server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 100); server._fyslack._foryou_slack_wait()
 check("a row more than 24 h old is not retried", not posts and not byid(old["id"])["slacked"] and byid(old["id"])["slack_tries"] == 0, (posts, byid(old["id"])))
 server._fyslack._for_you_slack_on = lambda: False
 fresh = fy.add(key="fresh:slack", kind="due", what="PR #2 FAILED", urgent=True)
-server._foryou_slack(fresh); server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 100); server._foryou_slack_wait()
+server._fyslack._foryou_slack(fresh); server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 100); server._fyslack._foryou_slack_wait()
 check("with no Slack path set nothing is queued or retried, and nothing is counted", not posts and byid(fresh["id"])["slack_tries"] == 0)
 server._fyslack._for_you_slack_on = lambda: True
 
@@ -596,7 +596,7 @@ with contextlib.redirect_stderr(err10):
     urgent("PR #23 FAILED at the restart: hung")
     server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 400)
     t_enq = time.time() - t0
-    server._foryou_slack_wait()
+    server._fyslack._foryou_slack_wait()
 t_all = time.time() - t0
 r10 = next(r for r in rows() if "PR #23" in r["what"])
 check("the row write and the tick only queue the post: both return at once while the command is still running", t_enq < 1.0, t_enq)
@@ -612,14 +612,14 @@ for _ in range(30):
 check("…the command and the child it started (a sleep 60 holding its output) are both gone: the whole process group was killed", not alive(pid_) and not alive(kid_), (pid_, kid_))
 _cfg.CFG["for_you"] = {"slack_command": f"sh -c 'cat > {outf}'"}
 server._fyslack._FORYOU_SLACK_TIMEOUT = 10.0
-urgent("PR #25 FAILED at the build: fine"); server._foryou_slack_wait()
+urgent("PR #25 FAILED at the build: fine"); server._fyslack._foryou_slack_wait()
 r11 = next(r for r in rows() if "PR #25" in r["what"])
 check("a real command that works gets the text on its standard input and the row is marked (the worker went on after the killed one)",
       r11["slacked"] and r11["slack_tries"] == 1 and "PR #25 FAILED" in outf.read_text(), (r11, outf.read_text() if outf.exists() else None))
 _cfg.CFG["for_you"] = {"slack_command": "sh -c 'cat >/dev/null; exit 3'"}
 err10 = io.StringIO()
 with contextlib.redirect_stderr(err10):
-    urgent("PR #26 FAILED at the build: nope"); server._foryou_slack_wait()
+    urgent("PR #26 FAILED at the build: nope"); server._fyslack._foryou_slack_wait()
 check("a command that exits non-zero is a failed try with its exit status in the log", "sh exited 3" in err10.getvalue(), err10.getvalue())
 _cfg.CFG["for_you"] = {"slack_command": ""}
 server._fyslack._for_you_slack_post = lambda text: slack.append(text) or ""; server._fyslack._for_you_slack_on = lambda: True

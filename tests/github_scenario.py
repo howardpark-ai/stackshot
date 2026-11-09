@@ -1428,7 +1428,7 @@ try:
     check("handover (c): the driver's 'group g<n>, split from g<n>' form and an upper-case G name no item either, and nothing in them is rewritten",
           server._item_refs(txt_g) == [] and server._shown_ids(txt_g) == txt_g and server._item_refs(f"group {ge.upper()} [{gf.upper()}]") == [], (server._item_refs(txt_g), server._shown_ids(txt_g)))
     check("handover (c): a bare g<n>, a g<n> link and a g<n> beside a group number still name; only the two release forms are skipped",
-          server._item_refs(f"take {ge}") == [ge] and server._item_refs(f"[{ge}]({server.BOARD_URL}/items/{ge[1:]})") == [ge] and server._item_refs(f"group {ge} [{ge}] and {gf}") == [gf], (server._item_refs(f"group {ge} [{ge}] and {gf}"),))
+          server._item_refs(f"take {ge}") == [ge] and server._item_refs(f"[{ge}]({server._shared.BOARD_URL}/items/{ge[1:]})") == [ge] and server._item_refs(f"group {ge} [{ge}] and {gf}") == [gf], (server._item_refs(f"group {ge} [{ge}] and {gf}"),))
 finally:
     server._PUSH, server._gate_front, server._back_agent, server._tell_owner, server._name_on_handover = _push, _gf, _ba, _to, _hand
 

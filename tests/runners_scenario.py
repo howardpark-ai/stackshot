@@ -801,18 +801,18 @@ try:
 finally:
     R.RETRY_S, R.RETRY_MAX_S = real_retry; R.ON_CHANGE = None; fresh()
 # the server's wrapper: False while the debounce timer's publish is alive (it stays alive through the whole publish), else it schedules one and says True
-published = []; real_pub, real_timer = server._publish, server._PUB_TIMER
-server._publish = lambda: published.append(1)
+published = []; real_pub, real_timer = server._shared._publish, server._shared._PUB_TIMER
+server._shared._publish = lambda: published.append(1)
 live = threading.Timer(60, lambda: None); live.daemon = True; live.start()
 try:
-    server._PUB_TIMER = live; a = server._publish_if_idle()
+    server._shared._PUB_TIMER = live; a = server._publish_if_idle()
     check("server._publish_if_idle: False and no publish asked while the debounce timer's publish is alive", a is False and published == [], (a, published))
-    live.cancel(); live.join(5); server._PUB_TIMER = live; b = server._publish_if_idle()
+    live.cancel(); live.join(5); server._shared._PUB_TIMER = live; b = server._publish_if_idle()
     check("…True and one publish asked once that timer is dead", b is True and published == [1], (b, published))
-    server._PUB_TIMER = None; c2 = server._publish_if_idle()
+    server._shared._PUB_TIMER = None; c2 = server._publish_if_idle()
     check("…and True with no timer at all", c2 is True and published == [1, 1], published)
 finally:
-    live.cancel(); server._publish, server._PUB_TIMER = real_pub, real_timer
+    live.cancel(); server._shared._publish, server._shared._PUB_TIMER = real_pub, real_timer
 
 # 9h. [runners] panel = false stops the background read; a thread that cannot start never breaks a render; no test-started server reaches GitHub
 import types
@@ -1306,7 +1306,7 @@ try:
           (re.findall(r"<title>[^<]*", page), '<main id="top">' in page))   # the side panel (outside <main>) keeps its own GitHub calls card
 
     # 12e. the route: POST only, signed in, the board's own origin, the form's token, read-only refusal, validated machine
-    EMAIL = "oliver@example.org"; BOARD12 = server.BOARD_URL
+    EMAIL = "oliver@example.org"; BOARD12 = server._shared.BOARD_URL
     COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
     SAME = {"Origin": BOARD12}; JSONH = {"Origin": BOARD12, "Accept": "application/json"}
     allowed_was = server._cfg.CFG["auth"].get("allowed_emails"); ui_open_was = server._cfg.CFG["auth"].get("ui_open"); real_mode = server._signin._auth_mode

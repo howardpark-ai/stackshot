@@ -150,8 +150,7 @@ from stackshot.waits import held as _held  # noqa: E402  — notices that ask no
 from stackshot.waits import reports as _reports  # noqa: E402  — does a background agent's message to a front agent ask for anything: a report goes onto the item it names instead (reports.py)
 from stackshot.web import uiprefs as _uiprefs  # noqa: E402  — a signed-in person's settings for the pages, kept on the server: the side panel's section order (uiprefs.py)
 from stackshot.web import foryou as _fy  # noqa: E402  — the owner's For you list: rows for what he should see, in place of messages to a front agent (foryou.py)
-from stackshot.web import foryou_slack as _fyslack  # noqa: E402  — the For you list's Slack hook, its queue and its worker thread; the suites stub the hook and read its switch on this module (foryou_slack.py)
-from stackshot.web.foryou_slack import _foryou_slack, _foryou_slack_wait  # noqa: E402,F401  — the row's call and the suite's join, kept on this module as well (foryou_slack.py)
+from stackshot.web import foryou_slack as _fyslack  # noqa: E402,F401  — the For you list's Slack hook, its queue and its worker thread; the suites stub the hook and read its switch on this module (foryou_slack.py)
 from stackshot.web import landed as _ld  # noqa: E402  — the closes of agents that the owner did not make, and which he has seen: the header's Landed count and the /landed page (landed.py)
 from stackshot.model import step_commands as _sc  # noqa: E402  — the step of a your-step item: a one-line summary, the guards that keep the commands out of it and in the <owner>: lines of next, and the parts the page draws (step_commands.py)
 from stackshot.core import lanes as _lanes  # noqa: E402  — the fleet tool's lane names: a lane word to its code, a code to its display name, read from the tool's lane-names file (lanes.py)
@@ -161,7 +160,6 @@ from stackshot.web import search as _search  # noqa: E402  — the board's searc
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
 # every other setting is read where it is used, so a reload (SIGHUP) is live at once.
 from stackshot.web.common import NAME, OWNER, _CODE_FENCE, _CODE_SPAN, _NEEDS_KINDS, _canon_needs, _clip_line, _needs_kinds, _needs_list, _needs_of, _needs_store, _without_mq_groups  # noqa: E402  — pieces shared with the server's other modules (common.py); NAME and OWNER are read from [instance] once, at this import
-BOARD_URL = str(_cfg.get("instance", "board_url") or "")
 OPERATOR = str(_cfg.get("fleet", "operator_label") or "operator session")
 _FOR_OWNER = f"[for {OWNER}]"   # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance)
 # Tool text that names the owner's names and the shell the owner runs steps in: built here once from [instance] owner_aliases and [steps] owner_shell / bash_host / shell_name.
@@ -216,14 +214,6 @@ _NOT_FOR_OWNER_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in _NOT_FO
 # not a move to needs=decision either, since the board's "Waiting on you" (now Need your call (agents)) view is where he reads it. The reply
 # line a writer gets when its write would have told the mover.
 _FRONT_QUIET = "\n(its {word} {owner} is a front agent: not told; the board shows it)"
-# A close with the owner's own words on the item was told to a
-# front agent mover in one line, and no other close was; that close is a row on his For you list (foryou.py),
-# and the same words make an item watched there (_foryou_watched). The front agent mover is told of any close by another
-# session, his words or not, in its own marked line (_tell_owner_close), beside that row. His words are on it when (1) a `said` entry is (metadata.said: his sentences
-# cut from his own message, checked against his transcript), or (2) the description or the close's reason quotes him: his name and a colon
-# before an opening quote mark, or his name, a comma and a weekday. The second is the loosest and deliberately
-# narrow. A board answer alone does not count: answering a decision picks an option, it does not ask to hear of the close.
-_OWNER_QUOTED = re.compile(rf"\b{re.escape(OWNER)}\b[^:\n]{{0,40}}:\s*[\"\u201c]|\b{re.escape(OWNER)}, (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b")
 ZONE = _cfg.tz()
 
 
@@ -640,12 +630,6 @@ def _is_held(item: dict[str, Any]) -> bool:
     return _hold_flag(item) and not _waits_decision(item.get("metadata") or {})
 
 
-def _waits_decision(meta: dict[str, Any]) -> bool:
-    """Its needs hold decision: the item is in the owner's queue, never on hold (render.is_held
-    reads the lane the same way, needs_kind "call")."""
-    return any(x.lower() == "decision" for x in _needs_of(meta))
-
-
 def _migrate_holds() -> list[str]:
     """Once, at server start: every stored item with the retired status "on_hold" becomes status open + metadata.hold (its
     wake kept). `updated` and `state_updated` stay as they were: a migration is not a state change, and the renderer orders
@@ -853,7 +837,7 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
         print(f"owner: {old} is now {new}; its mover {_session_label(owner)} is a front agent, not told (the old id still resolves)", file=sys.stderr, flush=True)
         return
     _tell_woken(new, _session_id(owner) if owner else "", f"[stackshot] {_gh.shown(old)} is now {_gh.shown(new)} (the item took its issue number; "
-                f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
+                f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {_shared.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
 
 
 _gh.on_rekey = _rekeyed
@@ -1373,17 +1357,6 @@ def _session_id(value: str) -> str:
     store holds the id and the board follows a /rename on its own; ids and unknown names pass through.
     The same rule the anchor bindings use (anchors.canonical)."""
     return _anc.canonical(value)
-
-
-def _session_label(value: str) -> str:
-    """The human name for a session reference: the name the fleet tool's registry gives the session now (a stored permanent id, an old transcript id or
-    an old name all read as the name in use), else the heartbeat name, else the value itself."""
-    v = str(value or "")
-    n = _sr.display_name(v) if v else None
-    if n:
-        return n
-    x = _sessions_index().get(v) or {}
-    return str(x.get("name") or v)
 
 
 def _shown_ref(value: str) -> str:
@@ -2876,82 +2849,9 @@ def _gate_after(after: Any, gid: str = "") -> list[str]:
     return out
 
 
-# every session's role, as a file the server keeps (<state>/roles.json) and the client API serves (`roles`), so a box's
-# hooks can tell a front agent without parsing the registry. Written at start, after each registry rebuild (publish, the
-# create gate's rebuild) and from the runner's fleet pass (every 60 s), when the roles changed or the file is ROLES_EVERY old: a
-# reader treats a file over an hour old as stale, so a live server keeps it fresh even when nothing changes.
-ROLES = _cfg.state("roles.json")
-ROLES_EVERY = 30 * 60
-_ROLES_LOCK = threading.Lock()
-
-
-def _roles_sync(now: float | None = None) -> bool:
-    """Rewrite roles.json ({"generated": <UTC ISO Z>, "sessions": anchors.file_roles()}) atomically when the roles changed or
-    the file is ROLES_EVERY old. file_roles is session_roles with the pane-named keeper of an active one-session project as
-    "front"; the server's own gates keep session_roles. Each entry also says whether sala lists the name as a session (`"live"`, one
-    `sala sessions --json` read per build: anchors.sala_live; the field is left out when sala cannot be read), and a change in who is listed rewrites the file. An empty registry (none yet, or unreadable) writes nothing: a stale file is the reader's cue,
-    an empty one would say nobody is front. → True when written."""
-    now = time.time() if now is None else now
-    reg = _anc.registry()
-    if not reg:
-        return False
-    rows = _anc.sala_rows()                                # sala is read once per build; `live` on every entry, or on none when sala cannot be read
-    renames = _renamed.renames_of(rows)                    # old name → new name of the sessions sala renamed: an alias reads live, but names nobody
-    try:
-        _renamed.sweep(renames, reg, now)                  # a pending agent under an old name is no agent: dropped (the new name is registered) or renamed (it is not), before the roles read it
-    except ValueError:                                     # a damaged id file: nothing is dropped, and the roles are built from the record as it stands
-        pass
-    except Exception as e:  # noqa: BLE001 — a record write that failed (a full disk, a lock file): the next tick sweeps again; the roles are rebuilt now all the same
-        print(f"renamed agents: the sweep failed ({e!r}); roles.json is built from the record as it stands", file=sys.stderr, flush=True)
-    live = None if rows is None else set().union(*_anc.sessions_of(rows))
-    sessions = _anc.file_roles(reg, live, renames)
-    ids = _anc.role_ids(sessions)          # step B: beside each name its permanent id where the registry resolves it (an extra top-level key; the keys of `sessions` stay names)
-    with _ROLES_LOCK:
-        try:
-            old = json.loads(ROLES.read_text(encoding="utf-8"))
-            age = now - dt.datetime.fromisoformat(str(old["generated"]).replace("Z", "+00:00")).timestamp()
-        except Exception:
-            old, age = {}, float("inf")
-        if old.get("sessions") == sessions and (old.get("ids") or {}) == ids and 0 <= age < ROLES_EVERY:
-            return False
-        gen = dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ROLES.parent.mkdir(parents=True, exist_ok=True)
-        tmp = ROLES.with_name(".roles.json.tmp")
-        tmp.write_text(json.dumps({"generated": gen, "sessions": sessions, **({"ids": ids} if ids else {})}, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
-        os.replace(tmp, ROLES)
-    return True
-
-
-def _roles_sync_safe(now: float | None = None) -> None:
-    if _ro.is_read_only():                  # roles.json and projects.json are files the standby does not write
-        return
-    try:
-        _roles_sync(now)
-    except Exception as e:
-        print(f"roles.json: {e}", file=sys.stderr, flush=True)
-    _projects_sync_safe(now)                # phase A: projects.json beside it, on the same calls (start, publish, the create gate's rebuild, the 20-s pass)
-
-
-# phase A: the project record's published file, <state>/projects.json ({schema, generated, projects: {<id>: {id, key, keeper,
-# agents}}, by_key}), kept as roles.json is: rewritten when a record changed and at least every projects.EVERY (3 min) seconds, so a
-# reader treats a file over 10 minutes old as stale. Ids are minted in <store>/project-record.json (projects.py), once and for good.
-PROJECTS = _cfg.state("projects.json")
-
-
 def project_ref(x: str) -> dict[str, Any] | None:
     """A project's record by id, full page key or bare slug (projects.ref, on the registry this server reads); None when it names none."""
     return _prj.ref(x, _registry("projects"))
-
-
-def _projects_sync(now: float | None = None, force: bool = False) -> bool:
-    return _prj.sync(now=now, force=force, path=PROJECTS)
-
-
-def _projects_sync_safe(now: float | None = None, force: bool = False) -> None:
-    try:
-        _projects_sync(now, force)
-    except Exception as e:
-        print(f"projects.json: {e}", file=sys.stderr, flush=True)
 
 
 def _front_keeper(who: str, project: str = "") -> tuple[bool, str]:
@@ -3366,22 +3266,6 @@ def _notice_link(gid: str) -> str:
     _item_url), never the board card's anchor (#task-g-7), which spells the store id. The id the notice names is
     ghsync.shown(gid)."""
     return _item_url(gid) or f"/items/{_gh.href_id(gid)}"
-
-
-def _owner_words(item: dict[str, Any]) -> str:
-    """What shows the owner's own words (the owner's) are on the item, in the order of how certain it is: "a said entry", "quoted in
-    the text"; "" when none (see _OWNER_QUOTED). A board answer alone is not his words about the close: answering a decision is
-    picking an option, not asking to hear of the close."""
-    meta = item.get("metadata") or {}
-    if any(e["quote"] and e["tag"] in _said.TAGS for e in _said.entries_of(meta)):     # unchecked counts on purpose: a quote attached with Acked-by is still his words on record
-        return "a said entry"
-    if item.get("status") == "completed" and str(meta.get("outcome_text") or "").strip():      # a close keeps the description (the item's background, which may quote him for any reason): what the close wrote is its outcome text and its reason
-        text = f"{meta.get('outcome_text')}\n{meta.get('reason') or ''}"
-    else:
-        text = f"{item.get('description') or ''}\n{meta.get('reason') or ''}"
-    if _OWNER_QUOTED.search(text):
-        return "quoted in the text"
-    return ""
 
 
 def _tell_close_owner(gid: str, item: dict[str, Any], owner: str, project: str, writer: str, by: str = "") -> str:
@@ -4517,7 +4401,6 @@ def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None
     return out
 
 
-from stackshot.web import publish as _pub  # noqa: E402
 from stackshot.anchors import anchors as _anc  # noqa: E402
 from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
 from stackshot.fleet import fleet as _fleet  # noqa: E402
@@ -4534,9 +4417,12 @@ from stackshot.projects import projects as _prj  # noqa: E402  — the project r
 from stackshot.projects import project_registry as _pr  # noqa: E402  — the project record's entries (what a project is, read first)
 from stackshot.projects import project_verbs as _verbs  # noqa: E402  — the verbs that write a project's identity: the record first, the page's mirror lines after
 from stackshot.projects import project_archive as _archive  # noqa: E402  — a project whose last agent is retired, with no open item, is archived (project_archive.py)
-from stackshot.fleet import renamed_agents as _renamed  # noqa: E402  — a renamed session's old name is no agent: swept from the record, left out of the roles' live agents
 from stackshot.fleet import session_ids as _sid  # noqa: E402  — the migration to permanent session ids: applied from here at start, under the item lock
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
+from stackshot.web import shared as _shared  # noqa: E402  — the helpers more than one area reads: a session's name, an item's page and the board's URL (`_shared.BOARD_URL`), the owner's words, the debounced publish (and its timer, `_shared._PUB_TIMER`), the roles and projects files, the board home's drop (shared.py)
+from stackshot.web.shared import ROLES, _BOARD_GEN_LOCK, _BOARD_HOME, _board_home_drop, _item_url, _owner_words, _projects_sync, _projects_sync_safe, _publish, _publish_every, _publish_if_idle, _publish_now, _roles_sync, _roles_sync_safe, _session_label, _sessions_index, _waits_decision  # noqa: E402,F401  — kept on this module as well: the writes, the tools and the suites call `server.<name>` (shared.py)
+from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
+from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `_save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
 from stackshot.audit import audit as _audit  # noqa: E402  — the daily board audit's cue and status
 from stackshot.audit import audit_overview as _audit_overview  # noqa: E402  — what the Audits page and the side panel's audit card say: the audit groups and their findings in 24 hours
@@ -4925,55 +4811,6 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
 
 # The other decision gates (an ask that names alternatives, an open question, a mockup link, one decision per item, the owner's own action, the two notes) are decision_gates.py's;
 # their names are imported at `_OPT_FORM` above.
-
-
-_PUB_LOCK = threading.Lock()
-_PUB_TIMER: threading.Timer | None = None
-
-
-def _publish_debounce() -> float:
-    return float(_cfg.get("publish", "debounce_seconds", default=5))
-
-
-def _publish_every() -> float:
-    return float(_cfg.get("publish", "every_minutes", default=10)) * 60   # default as in the example
-
-
-def _publish_now(force_versions: bool = False, host: str = "") -> str:
-    if _ro.is_read_only():                  # a standby copy renders in memory when asked (_ro_board), and publishes nothing
-        return "(read-only standby: nothing published)"
-    try:
-        return _pub.publish(force_versions=force_versions, host=host)
-    except Exception as e:  # never let a publish failure surface as a tool error
-        return f"(publish failed: {e})"
-    finally:
-        _roles_sync_safe()                  # the publish rebuilt the registry; roles.json follows it
-
-
-def _publish() -> None:
-    """Debounced: a burst of writes in one turn publishes once, ~5 s after the first."""
-    global _PUB_TIMER
-    _board_home_drop()                         # the home is drawn per request: a write is on it at the next read, not at the publish
-    if _ro.is_read_only():                  # no timer is started on a standby copy
-        return
-    with _PUB_LOCK:
-        if _PUB_TIMER is not None and _PUB_TIMER.is_alive():
-            return
-        _PUB_TIMER = threading.Timer(_publish_debounce(), _publish_now)
-        _PUB_TIMER.daemon = True
-        _PUB_TIMER.start()
-
-
-def _publish_if_idle() -> bool:
-    """For the Runners panel (runners.ON_CHANGE): True when a publish was scheduled; False while the debounce timer's publish is still running (it stays alive through
-    the whole _publish_now, git push included, and _publish returns silently then, so a request made in that time would be lost): the panel asks again a few seconds later."""
-    if _ro.is_read_only():
-        return True
-    with _PUB_LOCK:
-        if _PUB_TIMER is not None and _PUB_TIMER.is_alive():
-            return False
-    _publish()
-    return True
 
 
 _RUNNER_STALL = [False]     # True while a stall episode is told: set when the builder is messaged, cleared by the first look that finds the runner current again
@@ -6845,158 +6682,7 @@ def _inbox_flag_tick(now: float | None = None) -> list[str]:
     return told
 
 
-# ----------------------------------------------------------------------------- the For you list
-# A notice for the owner is a row in the For you list (foryou.py: the board's section, `client.py get for-you` for the fleet tool's web server), never a front
-# agent's turn. A row is made for a WATCHED item's state change he should see: a close, a reopen, a move to needs=decision, a done check
-# that can never pass, and a due date within 24 h (the pass below). A failed release makes no row (_client_post `message`). Watched by default: an item with
-# his words on it (a `said` entry, a board or GitHub answer, a quote in the text; there is no separate creator field, and an item he asked
-# for carries his words) and an item that needs his decision. His own setting on the item's page wins: Mute stops its rows, Watch adds an
-# item that is not watched. The rows are made where the change is saved (`_save` compares the file before and after, so every path that
-# changes an item counts: a session's write, the server's own pass, his board answer), never where a session's message is sent: a message a
-# session sends on purpose with [for <owner>] (a decision or a go-ahead asked for) is not touched. A decision row goes when the decision
-# leaves the item's needs (answered, or closed). The urgent rows (a due date within 24 h) are also posted once to Slack
-# through _for_you_slack_post, the one hook (foryou_slack.py, with the queue and the worker thread that post it).
-_FORYOU_EVERY = 300.0        # seconds between passes of the due-date look; the dates pass opens the gate itself, every ten minutes
-_FORYOU_LAST = [0.0]
-_FORYOU_DUE_S = 24 * 3600.0  # "within 24 h": a due date whose end is at most this far ahead, or past by less than this
-_FORYOU_WHAT = 300           # characters of a row's line
-
-
-def _foryou_watched(gid: str, item: dict[str, Any]) -> tuple[bool, str]:
-    """Is this item one he watches, and why: his own flag first (mute / watch), then the defaults. → (watched, the reason in words)."""
-    mode = _fy.flag(gid)
-    if mode == "mute":
-        return False, "muted by him"
-    if mode == "watch":
-        return True, "watched by him"
-    meta = item.get("metadata") or {}
-    if item.get("status") == "open" and _waits_decision(meta):
-        return True, "it needs his decision"
-    if _owner_words(item):
-        return True, "his words are on it"
-    if any(isinstance(a, dict) for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])):
-        return True, "he answered on it"
-    return False, "not watched"
-
-
-def _foryou_stamp(item: dict[str, Any]) -> int:
-    try:
-        return int(float(item.get("state_updated") or item.get("updated") or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _foryou_key(gid: str, kind: str, item: dict[str, Any]) -> str:
-    """The key of one event on an item: the same event never makes two rows (foryou.add). The state clock tells one close from the next."""
-    return f"{gid}:{kind}:{_foryou_stamp(item)}"
-
-
-_FORYOU_FAILED: set[str] = set()         # keys of closes whose row could not be written (the fallback in _tell_close_owner reads it)
-
-
-def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, urgent: bool = False) -> dict[str, Any] | None:
-    """One row for a watched item's event (None when the item is not watched or the event already has its row). A write that fails is
-    raised after a close's key is noted in _FORYOU_FAILED, so the close can still reach someone (_tell_close_owner)."""
-    watched, _why = _foryou_watched(gid, item)
-    if not watched:
-        return None
-    meta = item.get("metadata") or {}
-    try:
-        row = _fy.add(key=f"{gid}:{kind}:{disc}", kind=kind, gid=gid, item=_gh.shown(gid), project=str(meta.get("project") or ""),
-                      what=_clip_line(what, _FORYOU_WHAT), url=_item_url(gid), urgent=urgent)
-    except Exception:
-        if kind == "closed":
-            if len(_FORYOU_FAILED) > 500:
-                _FORYOU_FAILED.clear()
-            _FORYOU_FAILED.add(f"{gid}:{kind}:{disc}")
-        raise
-    if row and urgent:
-        _foryou_slack(row)
-    return row
-
-
-def _foryou_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str = "", own: bool = False) -> None:
-    """Called by _save with the item as the file held it (`before`, None for a create) and as it is now: the rows for what changed.
-    `own` = his own answer from the board, which makes no row (he did it) but still takes a decision row off the list."""
-    b = before or {}
-    bm, am = b.get("metadata") or {}, item.get("metadata") or {}
-    bs, as_ = b.get("status"), item.get("status")
-    was_dec = bs == "open" and _waits_decision(bm)
-    is_dec = as_ == "open" and _waits_decision(am)
-    if was_dec and not is_dec:
-        try:
-            _fy.resolve(gid, "decision")
-        except Exception as e:  # noqa: BLE001  — the close below must still be tried
-            print(f"for-you: {gid} decision row not taken off: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if own:
-        return
-    subject, who = str(item.get("subject") or ""), (_session_label(writer) if writer else "") or "the server"
-    if as_ == "completed" and bs == "open":
-        outcome, sup, reason = str(am.get("outcome") or "done"), str(am.get("superseded_by") or ""), str(am.get("reason") or "").strip()
-        _foryou_make(gid, item, "closed", f"closed by {who} ({outcome}{' by ' + _gh.shown(sup) if sup else ''}): {subject}" + (f" — {reason}" if reason else ""),
-                     _foryou_stamp(item))
-    elif as_ == "open" and bs == "completed":
-        _foryou_make(gid, item, "reopened", f"reopened by {who}: {subject}", _foryou_stamp(item))
-    if is_dec and not was_dec:
-        pa = _rmod.parse_ask(str(am.get("ask") or ""))
-        _foryou_make(gid, item, "decision", "needs your decision: " + (pa["decide"] if pa else subject), _foryou_stamp(item))
-    wf, wb = am.get("wait_failed"), bm.get("wait_failed")
-    if as_ == "open" and isinstance(wf, dict) and wf and wf != wb:
-        _foryou_make(gid, item, "check_failed", f"{wf.get('what') or 'a wait'} can no longer end: {wf.get('why') or 'it failed'} ({subject})",
-                     int(float(wf.get("at") or 0)) or _foryou_stamp(item))
-
-
-def _landed_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str = "", own: bool = False) -> None:
-    """The Landed list (every close is a count to a page), called by _save beside _foryou_on_save. A close of an open item to outcome done
-    or dropped that the owner did not make is a record, unseen: whoever the writer is (a session, or no one for the server's own done check). The owner's own close is
-    `own` (his answer on the board, e.g. "drop it" on a watcher's ask) or a write whose sender is he (the tools refuse that sender, _sender_not_owner, but a server path may
-    write as him); it lands nothing and takes any record of the item off. A reopen takes the record off too: the item has not landed any more, and its next close is a new record."""
-    bs, as_ = (before or {}).get("status"), item.get("status")
-    if as_ == "completed" and bs == "open":
-        am = item.get("metadata") or {}
-        if own or (writer and (_model.is_owner(writer) or _model.is_owner(_session_label(writer)))):
-            _ld.forget(gid)
-        else:
-            _ld.record(gid, _foryou_stamp(item) or time.time(), str(am.get("outcome") or "done"), by=writer, project=str(am.get("project") or ""))
-    elif as_ == "open" and bs == "completed":
-        _ld.forget(gid)
-
-
-def _foryou_tick(now: float | None = None) -> list[str]:
-    """The due-date look (every ten minutes, the dates pass opening the gate): an open watched item whose due date ends
-    within 24 h, or ended less than 24 h ago, gets one URGENT row per due date (also posted to Slack once). A due date longer past is
-    not looked at: the first pass after a deploy must not raise every old overdue item. The same pass hands an urgent row whose Slack post
-    failed (or never went, a command named later) to the worker again: under 24 h old, at most _fy.SLACK_TRIES tries in all. The board is
-    republished (debounced) when a row was made. → the gids that got a row."""
-    now = time.time() if now is None else now
-    if now - _FORYOU_LAST[0] < _FORYOU_EVERY:
-        return []
-    _FORYOU_LAST[0] = now
-    made: list[str] = []
-    for gid, _p in _item_files():
-        try:
-            it = _load(gid)
-            meta = it.get("metadata") or {}
-            due = str(meta.get("due") or "")
-            if it.get("status") != "open" or not due:
-                continue
-            end = _wt.due_epoch(due)
-            if end is None or not -_FORYOU_DUE_S < end - now <= _FORYOU_DUE_S:
-                continue
-            when = "overdue since" if end <= now else "due"       # the due date is a day: its end is when it is due
-            if _foryou_make(gid, it, "due", f"{when} {_rmod.when_words(dt.date.fromisoformat(due[:10]))}: {it.get('subject') or ''}", due, urgent=True):
-                made.append(gid)
-        except Exception as e:  # noqa: BLE001  — one item never stops the pass
-            print(f"for-you: {gid} due-date look failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        if _fyslack._for_you_slack_on():
-            for r in _fy.slack_pending(now):
-                _foryou_slack(r)
-    except Exception as e:  # noqa: BLE001
-        print(f"for-you: Slack retry pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if made:
-        _publish()
-    return made
+# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are foryou_events.py's; its names are imported at `_shared` above.
 
 
 # ----------------------------------------------------------------------------- pane liveness and the park fallback
@@ -8178,7 +7864,7 @@ mcp = FastMCP(
     "stackshot",
     icons=[_Icon(src=_ICON, mime_type="image/svg+xml")],
     instructions=(
-        f"{NAME} — {OWNER}'s task board (web UI: {BOARD_URL}). Items are HUMAN-LEVEL: a deliverable a session owns, a decision or "
+        f"{NAME} — {OWNER}'s task board (web UI: {_shared.BOARD_URL}). Items are HUMAN-LEVEL: a deliverable a session owns, a decision or "
         f"input {OWNER} must give, a blocker on someone outside, a handoff — never a working step. Subject starts with "
         f"{_cfg.CFG['subject']['prefixes']}. Description = the item's background: what the item is + where it lives + what done means, as short `- ` bullets (one fact each, at most "
         f"{_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters; parallel bullets under one parent, indented two spaces; the server refuses prose), live state only, never steps or commands for {OWNER} (those go in step). metadata.project = the item's gbrain page, projects/<slug> or infra/<slug> for a machine/service item (required; a bare slug is accepted and stored as the full key). sender = your "
@@ -8228,18 +7914,11 @@ _LINK_RX = re.compile(_LINK_SKIP + r"|(?<![\w\-/#.:@])(?P<tid>board-tmp-[a-z0-9-
                       r"|(?<![\w\-/#.:@])(?P<bid>board#[1-9]\d*)(?![\w\-/]|\.\d)|(?<![\w\-/#.:@])(?P<id>[a-z][1-9]\d*)(?![\w\-/]|\.\d)")
 
 
-def _item_url(gid: str) -> str:
-    """An item's page: <board_url>/items/<gid>, an issue-numbered one's at /items/<n>, a temporary id's at
-    /items/board-tmp-<machine>-<n> (ghsync.href_id)."""
-    base = BOARD_URL.rstrip("/")
-    return f"{base}/items/{_gh.href_id(gid)}" if base else ""
-
-
 def _link_ids(text: str) -> str:
     """Tool text → the same, each item id that names an item in the store written as it is shown, linked to its page:
     [board#N](<board_url>/items/<n>) for g7 or board#N, [board-tmp-<machine>#3](<board_url>/items/board-tmp-<machine>-3) for a
     temporary id (l3), [s5](<board_url>/items/s5) for a letter id (a session copied the store id g7 to the owner)."""
-    if not text or not BOARD_URL:
+    if not text or not _shared.BOARD_URL:
         return text
     if text.lstrip()[:1] in "{[":
         try:
@@ -8264,7 +7943,7 @@ def _link_ids(text: str) -> str:
 def _unlink_ids(text: str) -> str:
     """The reverse, for what a write stores: [s1](<board_url>/items/s1) → s1, so a reply copied back into a subject,
     description, next or reason keeps the store plain (the board links ids itself)."""
-    base = BOARD_URL.rstrip("/")
+    base = _shared.BOARD_URL.rstrip("/")
     if not base or "](" not in text:
         return text
     text = re.sub(r"\[([a-z][1-9]\d*)\]\(" + re.escape(base) + r"/items/\1\)", r"\1", text)
@@ -9853,7 +9532,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         gs = [g for g, w, _l, _t in to_remind if w == sid]
         text = next(t for g, w, _l, t in to_remind if g == gs[0]) if len(gs) == 1 else _ho.message(
             lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {_handoff_minutes():g} min:",
-            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a work line in progress) counts as taking it; a note does not. → {BOARD_URL}")
+            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a work line in progress) counts as taking it; a note does not. → {_shared.BOARD_URL}")
         try:
             _tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
         except Exception as e:  # noqa: BLE001
@@ -9862,7 +9541,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         gids = ",".join(g for w, g, _l in to_new if w == who)
         if _front_keeper(who, "")[0]:
             continue                                 # a front agent is never pushed to unmarked: the board shows it
-        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{BOARD_URL}")
+        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{_shared.BOARD_URL}")
         _tell_woken(gids, _session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
                     tag="handoff")
     for who, lines in _ho.batch(to_sender).items():
@@ -10563,7 +10242,7 @@ def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, 
     else:
         head = f"{_FOR_OWNER}\n[stackshot] {len(items)} items have had no write from their background movers, and those sessions are live, so the ladder asks no one else:"
         tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
-                f"→ {BOARD_URL}")
+                f"→ {_shared.BOARD_URL}")
         text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
     _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
 
@@ -10783,7 +10462,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
     for who, ls in _ho.batch(lines).items():
         gids = ",".join(g for w, g, _l in lines if w == who)
         tail = (f" Work it, hand it on (update sender=<you>) or close it. If nothing is written to it and your pane has no turn running for {minutes:g} more minutes, a fresh session is asked who takes it. → "
-                + (_notice_link(gids) if len(ls) == 1 else f"{BOARD_URL}"))
+                + (_notice_link(gids) if len(ls) == 1 else f"{_shared.BOARD_URL}"))
         _tell_woken(gids, _session_id(who) or who,
                     _ho.message(ls, f"[stackshot] you have had no turn running for {minutes:g} minutes and this is still yours:",
                                 f"[stackshot] you have had no turn running for {minutes:g} minutes and these {{n}} items are still yours:", tail), tag="stall")
@@ -11024,7 +10703,7 @@ _BRIEF_DESC = (
     "For a doing item the board lists as waiting (see `model:` in get) the `model:` line ends with `· the board lists it as waiting until <time> (<why>)`. "
     "An item's `waiting:` line names its mover and what the wait stands on (a wake, a due date, an item it waits after), and adds `past due` once that date has passed; it prints no computed date and only shows the wait, nothing is sent when the time passes, so close the item or move it through update. An item stored as doing has no expected time: its `waiting:` line names the mover and says it is doing, and it is never past due. "
     "A `state:` line shows only for an item that stores a state. An item's `project:` line reads as in get. A line at the top says what changed in stackshot for 7 days after a release that changes a tool. The item model: docs/design. "
-    f"The full board is at {BOARD_URL} (markdown: board.md next to it)."
+    f"The full board is at {_shared.BOARD_URL} (markdown: board.md next to it)."
 )
 
 
@@ -11061,7 +10740,7 @@ def stackshot_brief() -> str:
             it["gid"] = gid; (held if _is_held(it) else mine).append(_fmt(it, brief=True))
     hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
     return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
-            + "\n\nFull board: " + BOARD_URL + " · any item by id: the get tool") + _nag()
+            + "\n\nFull board: " + _shared.BOARD_URL + " · any item by id: the get tool") + _nag()
 
 
 # ----------------------------------------------------------------------------- a notice's ruling (get with a notice id)
@@ -11791,7 +11470,7 @@ def _create_item(
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({BOARD_URL}) now.\n" + _fmt(item) + _capped_note(gid, item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note
+    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _capped_note(gid, item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note
                  + then_note + _similar_note(gid, subject, str(meta.get("project") or "")) + told + _nag("" if by else owner))
 
 
@@ -14234,42 +13913,6 @@ MSG_MAX = 4000
 def _fleet_names() -> dict[str, str]:
     """letter → fleet name, from each machine's live state (a letter with no state stays a letter)."""
     return {L: _fleet.read(L, "machine").get("fleet") or L for L in _fleet.letters()}
-
-
-class _Index(dict):
-    """The heartbeat index (transcript UUID → row) that also answers for a permanent session id: a lookup (get, [], in) by an id the registry
-    holds finds the row of that session's present transcript (the running one, else the latest seen), its name the registry's. Iteration
-    (items, values, keys) is the heartbeat's own and lists each session once, by transcript."""
-    def _via(self, k: Any) -> dict[str, Any] | None:
-        if not isinstance(k, str) or not _sr.is_perm_id(k):
-            return None
-        best = None
-        for t in _sr.transcripts(k):
-            r = dict.get(self, t)
-            if r is not None and (best is None or (_lv.running(r), str(r.get("seen", ""))) >= (_lv.running(best), str(best.get("seen", "")))):
-                best = r
-        if best is None:
-            return None
-        return {**best, "name": _sr.display_name(k) or best.get("name")}
-    def __missing__(self, k: Any) -> dict[str, Any]:
-        r = self._via(k)
-        if r is None:
-            raise KeyError(k)
-        return r
-    def get(self, k: Any, default: Any = None) -> Any:
-        return dict.get(self, k) if dict.__contains__(self, k) else (self._via(k) or default)
-    def __contains__(self, k: Any) -> bool:
-        return dict.__contains__(self, k) or self._via(k) is not None
-
-
-def _sessions_index() -> dict[str, dict[str, Any]]:
-    """transcript UUID → {name, url, seen, machine} from every machine's live heartbeat (fleet.py; out of git). A permanent session
-    id looks up the same way (see _Index)."""
-    out = _Index()
-    for L in _fleet.letters():
-        for k, v in _fleet.read(L, "sessions").items():
-            if isinstance(v, dict) and not dict.__contains__(out, k): out[k] = {"machine": L, **v}
-    return out
 
 
 def _machine_states() -> dict[str, str]:
@@ -18028,7 +17671,7 @@ def _origin_of(url: str) -> str:
 def _answer_same_origin(request: Request) -> bool:
     """The POST came from the board's own pages: its Origin (else, when a browser sent none, its Referer) is the board's
     address ([auth] base_url or [instance] board_url). Neither header, or "null", is refused."""
-    allowed = {o for o in (_origin_of(_cfg.get("auth", "base_url")), _origin_of(BOARD_URL)) if o}
+    allowed = {o for o in (_origin_of(_cfg.get("auth", "base_url")), _origin_of(_shared.BOARD_URL)) if o}
     got = str(request.headers.get("origin") or "").strip()
     if got:
         return got != "null" and _origin_of(got) in allowed
@@ -19141,19 +18784,9 @@ def _receivers_response():
 # ----------------------------------------------------------------------------- the board at the root
 # The board is drawn by the page renderers in ui/ (ui/render.py, ui/search.py, ui/runners.py), on request, from the store, behind the sign-in. The home is drawn on request and kept for
 # _BOARD_HOME_TTL_S, and dropped at once by a publish and by a write from a page of the board.
-_BOARD_HOME: dict[str, Any] = {"at": 0.0, "html": None, "gen": 0, "drawn": 0, "failed": 0.0}
 _BOARD_HOME_LOCK = threading.Lock()         # one render at a time: a burst of requests after a drop makes one
-_BOARD_GEN_LOCK = threading.Lock()
 _BOARD_HOME_TTL_S = 30.0
 _BOARD_FAIL_BACKOFF_S = 10.0                # after a failed draw no other is tried for this long: the last good copy (or the plain 503) is served meanwhile
-
-
-def _board_home_drop() -> None:
-    """The root home is drawn again on its next read (a write happened). A render that started before the drop is not kept. A recent failed draw still holds its back-off: a write
-    does not make every request draw again."""
-    with _BOARD_GEN_LOCK:
-        _BOARD_HOME["gen"] += 1
-        _BOARD_HOME["at"] = 0.0
 
 
 def _board_home_draw_locked() -> None:
