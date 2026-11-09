@@ -355,9 +355,9 @@ check("far-by list: every stored doing item is listed under Agents at work, a fa
 mod = _model.derive(dict(rd(21, "g"), gid="g21"), now_, after_open=lambda it: [], anchored=lambda it: False)
 vw = _model.view(dict(rd(21, "g"), gid="g21"), mod, now_)
 check("far-by model: view leaves the doing item with a far stored expected_by alive: no wait on a time, derive unchanged", mod.state == _model.ALIVE and vw.state == _model.ALIVE and mod.today == "doing", (mod, vw))
-check("far-by wait: …its wait kind is `doing`, with no date and never past due, however far or long past the stored time is",
-      all((lambda w: w["wait"] == "doing" and w["expected_by"] == 0.0 and not w["overdue"])(server._waiting_of(f"g{n}", rd(n, "g"), now_, server._WaitCtx(now_))) for n in (20, 21, 25, 28)),
-      [server._waiting_of(f"g{n}", rd(n, "g"), now_, server._WaitCtx(now_)) for n in (20, 25)])
+check("far-by items API: …the items API sends no expected time for them, however far or long past the stored time is",
+      all(x["expected_by"] is None and x["overdue"] is None and x["wait"] == "" for x in items_for(BACK) if x["gid"] in ("g20", "g21", "g25", "g28")) and any(x["gid"] == "g20" for x in items_for(BACK)),
+      [x for x in items_for(BACK) if x["gid"] == "g20"])
 bf0 = render.Board(str(T / "store")).brief()
 check("far-by brief: the brief carries no line about doing items with a far expected_by (the line is gone)", "have an expected_by more than 12 h out" not in bf0 and "expected_by" not in bf0, [l for l in bf0.splitlines() if "doing items" in l][:5])
 g(34, needs=[BACK], next="home-peer: wait for board#21 and board#23", state="doing")

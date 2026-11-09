@@ -155,11 +155,6 @@ check("read: the client items carry no rank key", cl and all("rank" not in x for
 check("read: render keeps no rank helpers", not any(hasattr(render, n) or hasattr(r2, n) for n in ("rank_of", "builder_of", "queue_key", "queues", "rank_words", "rank_badge")) and not hasattr(server, "_rank_queues"), None)
 
 # ================================================================ the cleanup
-def W_of(i, at=None):
-    at = time.time() if at is None else at
-    return server._waiting_of(f"a{i}", rd(i), at, server._WaitCtx(at))
-w_before = {i: W_of(i) for i in (1, 2, 3, 6)}
-check("cleanup: before it, an item that sat for days reads as overdue on the 3-hour agent ladder (a1, a2, a3)", all(w_before[i]["overdue"] and w_before[i]["wait"] == "needs" for i in (1, 2, 3)), w_before)
 dry = server._retire_rank_pass(apply=False)
 check("cleanup: a dry run lists the open items that store a rank or a queued state, in id order, and writes nothing",
       [x["item"] for x in dry] == ["a1", "a2", "a3", "a6"] and [x["rank"] for x in dry] == [2, 1, None, 4] and [x["queued"] for x in dry] == [True, False, True, False]
@@ -168,13 +163,9 @@ done = server._retire_rank_pass()
 check("cleanup: the pass reports the same four items", [x["item"] for x in done] == ["a1", "a2", "a3", "a6"], done)
 for i in (1, 2, 3, 6):
     m = rd(i)["metadata"]
-    keep = lambda d: {k: v for k, v in d.items() if k not in ("rank", "state", "agent_from", "phase")}      # the stored phase apart: every save of an open item writes it
+    keep = lambda d: {k: v for k, v in d.items() if k not in ("rank", "state", "phase")}      # the stored phase apart: every save of an open item writes it
     check(f"cleanup: a{i} lost its rank and its queued state, nothing else", "rank" not in m and m.get("state") != "queued" and keep(m) == keep(before[i]["metadata"]), m)
-check("cleanup: …each cleaned item with a session in needs got agent_from = now (and no other item did)", all(rd(i)["metadata"].get("agent_from", 0) >= now0 for i in (1, 2, 3, 6))
-      and all("agent_from" not in rd(i)["metadata"] for i in (4, 5)), [(i, rd(i)["metadata"].get("agent_from")) for i in range(1, 7)])
-w_after = {i: W_of(i) for i in (1, 2, 3, 6)}
-check("cleanup: …so an old cleaned item is not overdue right after it: its 3 hours count from the cleanup",
-      all(not w_after[i]["overdue"] and w_after[i]["wait"] == "needs" and w_after[i]["agent"] for i in (1, 2, 3)) and all(abs(w_after[i]["expected_by"] - (time.time() + 3 * 3600)) < 120 for i in (1, 2, 3)), w_after)
+check("cleanup: …and no item got an agent_from stamp (nothing reads one any more)", all("agent_from" not in rd(i)["metadata"] for i in range(1, 7)), [(i, rd(i)["metadata"].get("agent_from")) for i in range(1, 7)])
 check("cleanup: …a state doing next to a rank stays doing", rd(6)["metadata"].get("state") == "doing", rd(6)["metadata"])
 check("cleanup: …no clock moved: updated, state_updated and confirmed are as they were", all(rd(i)[k] == before[i][k] for i in (1, 2, 3, 6) for k in ("updated", "state_updated", "confirmed")),
       [(i, rd(i)["updated"], before[i]["updated"]) for i in (1, 2, 3, 6)])

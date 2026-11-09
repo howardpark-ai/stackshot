@@ -404,7 +404,7 @@ check("STATE_WORDS is looked up safely: a list, None and an unknown word give no
 # the item page prints no computed date: a wait on a date shows no Expected by row, on time or late, and no 'past due by'
 import datetime as _dt
 ZONE = _dt.timezone(_dt.timedelta(hours=4))   # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
-EB = Bd().item("a6")["_wait"]["expected_by"]      # a wait on a date keeps its date in the read model (the doing items a4 and a5 carry none), and the page does not print it
+EB = time.time()      # no wait carries a computed date in the read model, and the page prints none, whatever the clock
 def late_page(sec): return r2.Board(str(T / "store"), now=_dt.datetime.fromtimestamp(EB + sec, ZONE)).item_html("a6", answer=None, watch=None)
 check("expected-by: late or not, the item page has no Expected by row and no 'past due by'", all("Expected by" not in late_page(x) and "past due by" not in late_page(x) for x in (-3600, 30, 300, 3 * 3600 + 60, 2 * 86400 + 60)))
 # agent work in progress has no expected time: a4 and a5 are stored as doing and still carry a far expected_by from before it was retired
@@ -413,7 +413,7 @@ bd5 = Bd(); home5 = bd5.html(); ag5, wt5 = section(home5, "agents-at-work"), sec
 check("doing, no expected time: a4 and a5 are in On agent, not Waiting, with the age stamp as the run time", li_of(ag5, "a4") and li_of(ag5, "a5") and not li_of(wt5, "a4") and not li_of(wt5, "a5")
       and all(re.search(r'<span class="tip [^"]*ir-age[^"]*" data-ts="\d+"', li_of(ag5, g)) for g in ("a4", "a5")), (re.findall(r'ir-id">(a\d+)', ag5), re.findall(r'ir-id">(a\d+)', wt5)))
 check("doing, no expected time: the rows show no 'Expected by', no 'past due' and no overdue marker", not any(x in li_of(ag5, g) for g in ("a4", "a5") for x in ("Expected by", "past due", "overdue", "iwarn")), li_of(ag5, "a4")[:400])
-check("doing, no expected time: the read model says doing, with no expected time and not overdue", all(Bd().item(g)["_wait"]["wait"] == "doing" and not Bd().item(g)["_wait"].get("overdue") and not Bd().item(g)["_wait"].get("expected_by") for g in ("a4", "a5")), Bd().item("a4")["_wait"])
+check("doing, no expected time: the read model carries no computed wait at all (no `_wait`)", all("_wait" not in Bd().item(g) for g in ("a4", "a5", "a6")), sorted(Bd().item("a4")))
 def far_late(gid, sec): return r2.Board(str(T / "store"), now=_dt.datetime.fromtimestamp(time.time() + sec, ZONE)).item_html(gid, answer=None, watch=None)
 pg4, pg4_late = Bd().item_html("a4", answer=None, watch=None), far_late("a4", 30 * 86400)
 check("doing, no expected time: the item page has no 'Expected by' and no 'past due', not even a month on", "Expected by" not in pg4 and "past due" not in pg4 and "Expected by" not in pg4_late and "past due" not in pg4_late, re.findall(r"Expected by.{0,80}", pg4_late)[:2])
