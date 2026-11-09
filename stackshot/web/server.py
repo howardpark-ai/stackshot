@@ -4402,6 +4402,7 @@ def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None
 
 
 from stackshot.anchors import anchors as _anc  # noqa: E402
+from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
 from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
 from stackshot.fleet import fleet as _fleet  # noqa: E402
 from stackshot.core import cloud as _cloud  # noqa: E402
@@ -6117,7 +6118,9 @@ def _evwait_poll(now: float | None = None, told: dict[str, str] | None = None) -
         return []
     now = time.time() if now is None else now
     told = _told_recent() if told is None else told
-    return _evwait_box_poll(now, told) + _evwait_poll_prs(now, told)
+    fired = _evwait_box_poll(now, told)
+    _machine_anchor_poll(now, set(fired))        # a notice only: no item turns, so nothing is added to the gids this returns
+    return fired + _evwait_poll_prs(now, told)
 
 
 def _evwait_poll_prs(now: float, told: dict[str, str]) -> list[str]:
@@ -6207,6 +6210,116 @@ def _evwait_tick() -> list[str]:
         return []
     _EVW_LAST[0] = now
     return _evwait_poll(now)
+
+
+def _machine_state(name: str, boxes: "dict[str, tuple[str, dict[str, Any]]] | None" = None) -> tuple[str, float, bool, list[str]]:
+    """A machine name (fleet name or hostname) as the machine anchors read it: (the fleet name, the stamp of its latest check-in from offline (the record's `online_since`; 0 while it has never
+    checked in), whether it is online now, every name a step may call it by: the fleet name and the hostnames); ("", 0, False, []) for none."""
+    boxes = _evw_boxes() if boxes is None else boxes
+    hit = boxes.get(str(name).lower())
+    if not hit:
+        return "", 0.0, False, []
+    fleet, rec = hit[0], hit[1] or {}
+    return fleet, _lv.ts(rec.get("online_since")), bool(rec and _lv.puller_online(rec)), [k for k, (f, _r) in boxes.items() if f.lower() == fleet.lower()]
+
+
+def _machine_anchor_poll(now: float, skip: set[str]) -> list[str]:
+    """The machine anchors' pass (machine_anchor.py), run with the event waits' minute: a machine whose puller checked in again since the last notice (its record's `online_since` newer than the mark in
+    state/machine-anchor.json) tells the mover of each open item a machine anchor counts for, once per check-in, in one message per mover that names the machine, the items and the step. Nothing
+    turns or is saved on the item. Not told: an item in `skip` (a box_online wait turned it in this pass and told its mover), an item with its own box_online wait on that machine, an item the owner
+    moves, and, under a project-wide anchor, an item none of whose open steps names the machine. Closed items leave the scopes. The mark moves on even when nobody is told. → the gids told."""
+    try:
+        with _ma.LOCK:
+            store = _ma.load()
+            if not store:
+                return []
+            if _ma.prune(store, lambda g: (_load_or_none(g) or {}).get("status") == "open"):
+                _ma.save(store)
+        boxes = _evw_boxes()
+        marks, news, moved = _ma.seen_load(), {}, False
+        for m in sorted({e["machine"] for es in store.values() for e in es}, key=str.lower):
+            fleet, since, _on, _names = _machine_state(m, boxes)
+            if not fleet:
+                continue
+            if m.lower() not in marks:      # no mark (the state was lost): what is past is not told
+                marks[m.lower()], moved = since, True
+            elif since > marks[m.lower()]:
+                news[m.lower()], marks[m.lower()], moved = (fleet, since), since, True
+        if moved:
+            _ma.seen_save(marks)
+        if not news:
+            return []
+        out: dict[str, list[tuple[str, str, str, str]]] = {}      # session id → [(machine, gid, subject, step)]
+        for gid, _p in _item_files():
+            try:
+                it = _load(gid)
+                meta = it.get("metadata") or {}
+                if gid in skip or it.get("status") != "open":
+                    continue
+                hits = [(k, scoped) for k, (_n, scoped) in _ma.counts(store, gid, str(meta.get("project") or "")).items() if k in news]
+                if not hits:
+                    continue
+                who, alive = _item_mover_model(it)
+                sid = _session_id(_holder(it))
+                if (alive and _model.is_owner(who)) or not sid:
+                    continue
+                own = _evw_spec(meta.get("wait_event")) if _watch.stored_kind(meta) == "event" else None
+                steps = [_steps.first_line(s["text"])[:140] for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN]
+                for k, scoped in hits:
+                    fleet = news[k][0]
+                    if own is not None and own.kind == _ew.BOX_ONLINE and _machine_state(own.machine, boxes)[0].lower() == fleet.lower():
+                        continue                  # its own box_online wait on this machine tells its mover when the wait ends
+                    step = next((t for t in steps if _ma.names_in(t, _machine_state(fleet, boxes)[3])), "")
+                    if scoped or step:
+                        out.setdefault(sid, []).append((fleet, gid, str(it.get("subject") or ""), step or (steps[0] if steps else "")))
+            except Exception as e:  # noqa: BLE001  — one item never stops the others
+                print(f"machine anchor: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        told: list[str] = []
+        for sid, rows in out.items():
+            for fleet in dict.fromkeys(r[0] for r in rows):
+                mine = [r for r in rows if r[0] == fleet]
+                at = dt.datetime.fromtimestamp(news[fleet.lower()][1], ZONE).strftime("%H:%M %Z") if news[fleet.lower()][1] else ""
+                _tell_woken(",".join(r[1] for r in mine), sid, _ma.notice(fleet, at, [(_gh.shown(g), subj + (f" (step: {step})" if step else ""), _notice_link(g)) for _f, g, subj, step in mine]), tag="watch")
+                told += [r[1] for r in mine]
+                print(f"machine anchor: {fleet} checked in: {', '.join(r[1] for r in mine)} told to {sid}", file=sys.stderr, flush=True)
+        return told
+    except Exception as e:  # noqa: BLE001  — a pass that fails never stops the event waits' pass
+        print(f"machine anchor: pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+
+
+def _machine_note(gid: str, item: dict[str, Any], keeper: str = "") -> str:
+    """The reply line of a write that leaves an open step naming a machine of the fleet that is offline now, while the item has no machine anchor for it and no box_online wait on it: a note naming the anchors
+    call, never a refusal. A machine is named when a step has its fleet name or a hostname as a whole word (machine_anchor.names_in); only the item's open steps are read; once per write, every machine in one line.
+    "" for a closed item, when nothing is named and when the machines cannot be read (a stderr line)."""
+    if item.get("status") != "open":
+        return ""
+    try:
+        meta = item.get("metadata") or {}
+        texts = [s["text"] for s in _steps.view(meta, keeper=keeper or str(meta.get("owner") or "")) if s["status"] == _steps.OPEN]
+        if not texts:
+            return ""
+        project = str(meta.get("project") or "")
+        have = set(_ma.counts(_ma.load(), gid, project))
+        if _watch.stored_kind(meta) == "event":
+            try:
+                sp = _evw_spec(meta.get("wait_event"))
+                if sp.kind == _ew.BOX_ONLINE:
+                    have.add(_machine_state(sp.machine)[0].lower() or sp.machine.lower())
+            except _ew.EventWaitError:
+                pass
+        off: dict[str, str] = {}              # an offline machine named by an open step → when it last checked in
+        boxes = _evw_boxes()
+        for fleet in sorted({f for f, _r in boxes.values()}, key=str.lower):
+            _f, _since, online, aliases = _machine_state(fleet, boxes)
+            if online or fleet.lower() in have or not any(_ma.names_in(t, aliases) for t in texts):
+                continue
+            seen = _lv.ts((boxes[fleet.lower()][1] or {}).get("puller"))
+            off[fleet] = f"last checked in {dt.datetime.fromtimestamp(seen, ZONE).strftime('%Y-%m-%d %H:%M %Z')}" if seen else "has not checked in yet"
+        return _ma.missing_note(_gh.shown(gid), project, list(off), off)
+    except Exception as e:  # noqa: BLE001  — the write is saved: a note that fails is a stderr line
+        print(f"machine anchor: {gid} note not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
 
 
 def _evwait_hook(kind: str, repo: str, n: int, what: str = "", told: dict[str, str] | None = None) -> None:
@@ -11015,6 +11128,12 @@ _MODEL_FORM = (
     f"anchor-hub's notice for wait_anchor reaches the server; an event when the server is told of it; a relay on its ask_by day, when it comes to {OWNER} as a question (arrived / not yet, ask again on a date / drop); "
     "a date beside it is its backstop. The item then turns alive with its post_wake_mover. A moved ask_by or wake resets the backstop. "
 )
+_MACHINE_FORM = (
+    "A step of next that names a machine of the fleet which is offline now (its fleet name or hostname as a whole word, an open step only) gets one `(note: …)` line in the reply when the item has no machine anchor for it "
+    "and no box_online wait on it, naming the fix: anchors(project=<its project>, add=[\"machine:<name>\"], items=[<its id>]) tells the item's mover each time that machine checks in again, without parking the item. A note, never a refusal. "
+)
+
+
 _SELF_WAIT_FORM = (
     " A wait on your own item names its blocker: when the item's mover (you) sets a wake, or writes a line of its own next whose step is dated later than today (a date, \"next week\", \"until Monday\", \"retry tomorrow\", \"after the weekend\", \"at the next nightly run\"; "
     "a date after by, due, before, target or ETA is a deadline, no wait; a day named about the past is none), pass wait_reason=<what the step waits on that is not available now, at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters> "
@@ -11189,7 +11308,7 @@ _CREATE_DESC = (
     f"An item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`). "
     "A step of next that opens with a front agent (a session the owner talks to) is refused on an item another session moves: open it with the mover's name, or message the front agent. "
     "owner is not a parameter any more: it is still accepted for a few days with a note in the reply and then refused. owner_name: the sender's session title as claude.ai shows it, nothing appended. priority: p1 | p2 | p3, shown but not sorted. "
-    + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _CONTACT_FORM
+    + _ITEM_FORM + " " + _NEEDS_FORM + " " + _SAID_FORM + _CHECK_FORM + _STEP_PROOF_FORM + _CAP_FORM + _AGENT_DUE_FORM + _MODEL_FORM + _DRAFT_FORM + _SELF_WAIT_FORM + _MACHINE_FORM + _CONTACT_FORM
     + "The reply may end with a line listing up to 3 similar open or recently completed items: the create always goes through, so check them for a duplicate before working the new item. request_id: any random string of yours; a retry with the same one returns the item already created."
 )
 
@@ -11466,11 +11585,12 @@ def _create_item(
     told += _handoff_notify(gid, item)     # step 2: the hand-off at creation is told, unless the notice above did
     _publish()
     item["gid"] = gid
+    machine_note = _machine_note(gid, item, owner)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     if local:
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _capped_note(gid, item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note
+    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _capped_note(gid, item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + machine_note
                  + then_note + _similar_note(gid, subject, str(meta.get("project") or "")) + told + _nag("" if by else owner))
 
 
@@ -13676,12 +13796,13 @@ def _update_unlocked(
     except Exception as e:  # noqa: BLE001  — the write is saved and published; a note that fails is a stderr line, never a failed write
         print(f"update: {gid} stale-wait notes not made: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         stale_wait = ""
+    machine_note = _machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never on hold: the hold is dropped"
                  + (f"; its wake {meta['wake']} stays as a reminder" if meta.get("wake") else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + _fmt(item) + hint + wait_fixed + (_capped_note(gid, item) if (due or wake) else "") + work_note + steps_note + asked + watch_note + _form_notes(description, next_judged, bool(hold or wake) and now_held, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(meta) if wake else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor)) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(meta) if wake else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor)) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + _nag(debtor))
 
 
@@ -13700,7 +13821,7 @@ import functools as _functools  # noqa: E402
 _update = _functools.wraps(_update_unlocked)(_update_locked)      # the tool's own signature stays visible to anything that reads it
 
 
-@mcp.tool(name="update", description=_lead(_UPDATE_DESC + _CONTACT_FORM +_MODEL_FORM + _CHECKLIST_FORM + _STEP_PROOF_FORM + _DRAFT_FORM + _STEP_FORM + _STALL_SHORT + _SELF_WAIT_FORM + _WAIT_FORM))
+@mcp.tool(name="update", description=_lead(_UPDATE_DESC + _CONTACT_FORM +_MODEL_FORM + _CHECKLIST_FORM + _STEP_PROOF_FORM + _DRAFT_FORM + _STEP_FORM + _STALL_SHORT + _SELF_WAIT_FORM + _MACHINE_FORM + _WAIT_FORM))
 def stackshot_update(
     item_id: str,
     subject: str = "",
@@ -14403,6 +14524,8 @@ _ANCHORS_DESC = (
     "Anchor anything you create on GitHub (an issue, a PR, a fork branch you keep re-fitting) in the same turn, project-wide when it is the project's thread (a repo's issues or releases). "
     "Anchors belong to the PROJECT, never to an item: a change notice for a pilot project goes to the router, which passes it on to the agent it is for (a notice from a project-wide anchor with a #mention= filter goes, without the router's call, to the one agent other than -main that the page's lead paragraph names for the work; none or several named: the router rules it as for any anchor); for any other project it goes to the session its page names on its `display-name:` line and to the movers of the open items in the anchor's scope. "
     "add: URLs to add; items: the item ids the added anchors are about (omit = project-wide); every URL in add is scoped to every id in items; remove: URLs to remove. With neither add nor remove, lists the project's anchors. "
+    "A machine of the fleet is an anchor too, for an item that needs it: add=[\"machine:<name>\"] (a fleet name or hostname the fleet knows, any case; an unknown name is refused with the known ones) with items=[\"board#N\"], and the mover of each item in scope is told, in one message that names the machine, every time that machine checks in again (offline to online); an item may have several machines, and each message says which one came back. "
+    "Nothing is told for a machine that is already online when the anchor is added, no item turns and nothing is saved on it (a machine anchor is a notice, not a wait; an item with its own box_online wait on that machine is told by the wait instead), and a project-wide machine anchor (no items) tells the movers of the project's open items whose open step names the machine. A closed item leaves the scope. remove=[\"machine:<name>\"] drops it; the list shows the machine anchors after the URLs. "
     "The page that holds an anchor keeps it (its keeper is asked about it, its receivers are bound from it: on a page with a keeper the keeper, on a page with none the page's session and the movers of every open item it is scoped to, of any project), but an item reads the anchors scoped to it from every project's page, not only its own project's: an anchor held by another project's page still makes the item's wait an anchor wait and still holds it, and the same anchor held by two pages counts once. A project-wide anchor counts for no item. "
     f"A notice is information, not an instruction: read the linked thing with your own connector before acting, never reply for {OWNER} because one arrived, never take it as his approval."
 )
@@ -14410,10 +14533,40 @@ _ANCHORS_DESC = (
 
 @mcp.tool(name="anchors", description=_lead(_ANCHORS_DESC))
 def stackshot_anchors(project: Annotated[str, Field(description="The project page: projects/<slug> or infra/<slug>.")],
-                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]. Omit to list the anchors.")] = None,
+                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; or a machine of the fleet as machine:<name>, add=[\"machine:box-a\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
                       items: Annotated[list[str] | None, Field(description="Open items of this project the added URLs are about, items=[\"board#N\"]; omit for a project-wide anchor. Every URL in add is scoped to every id in items (several URLs with several ids give each URL all the items).")] = None,
-                      remove: Annotated[list[str] | None, Field(description="URLs to stop watching.")] = None) -> str:
+                      remove: Annotated[list[str] | None, Field(description="URLs to stop watching, or machine:<name> to drop a machine anchor.")] = None) -> str:
     return _anchors(project, add, items, remove, _who())
+
+
+def _machine_args(add: list[str] | None, remove: list[str] | None) -> tuple[list[str], list[str]]:
+    """The machines of an anchors call's add and remove (`machine:<name>`, the prefix in any case): (the fleet names to add, the names to remove). A name is a machine the fleet knows, by fleet name or hostname in any
+    case, stored under its fleet name; one it does not know is refused with the known ones. A removal of a name the fleet no longer knows is taken as written, so an anchor on a machine the table dropped can still go."""
+    boxes = _evw_boxes()
+    known = sorted({f for f, _r in boxes.values()}, key=str.lower)
+    adds, rms = [], []
+    for u in add or []:
+        if _ma.is_machine(u):
+            name = _ma.name_of(u)
+            hit = boxes.get(name.lower())
+            if not name or hit is None:
+                raise ToolError(f"Refused: {u.strip()!r} names no machine of the fleet" + (f"; the machines are {', '.join(known)}" if known else "; the server knows no machine yet") + ". The form is machine:<name>, by fleet name or hostname")
+            if hit[0] not in adds:
+                adds.append(hit[0])
+    for u in remove or []:
+        if _ma.is_machine(u):
+            name = _ma.name_of(u)
+            rms.append((boxes.get(name.lower()) or (name,))[0])
+    return adds, rms
+
+
+def _machine_listing(entries: list[dict[str, Any]]) -> str:
+    """The machine anchors of a page for the anchors tool's list: each with whether the machine is online now."""
+    if not entries:
+        return ""
+    boxes = _evw_boxes()
+    online = {e["machine"].lower(): _machine_state(e["machine"], boxes)[2] for e in entries if _machine_state(e["machine"], boxes)[0]}
+    return "\nmachine anchors (the item's mover is told each time the machine checks in again):\n" + _ma.fmt(entries, online)
 
 
 def _anchors(project: str, add: list[str] | None = None, items: list[str] | None = None, remove: list[str] | None = None, who: str = "") -> str:
@@ -14451,6 +14604,8 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
             if t.get("status") == "completed":
                 raise ToolError(f"Refused: {g} is completed — scope an anchor to open items, or leave it project-wide")
             scope.append(g)
+    mach_add, mach_rm = _machine_args(add, remove)       # `machine:<name>` entries are a machine of the fleet (machine_anchor.py), not a URL
+    add, remove = [u for u in add or [] if not _ma.is_machine(u)], [u for u in remove or [] if not _ma.is_machine(u)]
     for u in add or []:
         base, _ = _anc.split_fragment(u)
         if not _anc.anchor_id(base):
@@ -14462,6 +14617,16 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
     if add or remove:
         _anc.save(store)
         _publish()
+    with _ma.LOCK:
+        mstore = _ma.load()
+        if mach_add or mach_rm:
+            for fleet in mach_add:
+                _ma.seed(fleet, _machine_state(fleet)[1])        # a check-in that is past tells nothing: the notice is for the next one
+            if mach_add:
+                _ma.add(mstore, key, mach_add, scope, who)
+            if mach_rm:
+                _ma.remove(mstore, key, mach_rm)
+            _ma.save(mstore)
     keeper = _anc.name_line(key)
     stew = _anc.notice_name(key) or keeper           # a sub-page's notices go to the root's name, not its keeper
     kept = f"; kept by {keeper}" if keeper and keeper != stew else ""
@@ -14471,10 +14636,13 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         hub = {}
     kp = _page_keeper(key)                               # its keeper, not the retired name-line session
     who_gets = f"router: rules this project; keeper: {kp or 'none: no page, hub or scope general agent lists a -main agent'}{kept}"
-    out = f"{key} anchors ({who_gets}):\n" + _anc.fmt(store.get(key, []), hub)
+    out = f"{key} anchors ({who_gets}):\n" + (_anc.fmt(store.get(key, []), hub) if store.get(key) or not mstore.get(key) else "") + _machine_listing(mstore.get(key, []))
     if add:
         out += ("\nanchor-hub reads each new anchor within two minutes: one it cannot read (not shared with it, a mailbox it has no access to, a wrong link) "
                 "is reported once to the project's keeper and marked UNREADABLE in this list. A line without a name after the scope has not been read yet.")
+    if mach_add:
+        out += (f"\nmachine anchor{'s' if len(mach_add) > 1 else ''} added: {', '.join(mach_add)}. Nothing is told for a check-in that is past; the mover of each item in scope is told at the machine's next check-in "
+                "(offline to online), once per check-in, naming the machine. The item is not turned and not saved: park it with a wait only when nothing else is open.")
     return out
 
 
