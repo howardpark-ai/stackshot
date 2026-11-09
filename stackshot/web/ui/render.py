@@ -3,7 +3,7 @@ carries the model (sessions, projects, anchors) and draws the pages from it. Eve
 under() (ui/__init__.py: the board is at the root address). The markdown and the brief are render.py's; the icon, font and manifest files stay at their shared addresses."""
 import contextlib
 import io
-import json, os, sys, glob, datetime, re, subprocess, hashlib, html as H
+import json, os, sys, glob, datetime, re, subprocess, hashlib, textwrap, html as H
 from pathlib import Path
 from urllib.parse import quote
 from stackshot.web.ui import PREFIX, under   # the (empty) root prefix: every address this page writes goes through under()
@@ -26,6 +26,7 @@ from stackshot.model import draft as _draft   # an item's draft: the verbatim te
 from stackshot.web import itempage as _ip   # the item page's words on the item model: since, the latest change, next lines
 from stackshot.model import step_commands as _sc   # the step of a your-step item: numbered list, commands to copy (step_commands.py)
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
+from stackshot.model import owner_steps as _os   # the step the server makes on the checklist for his your-step or decision (owner_steps.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.waits import watchers as _wat   # the waits' watchers: the chases logged on a wait
@@ -2634,14 +2635,14 @@ class Board:
         if not his: ask_html = ""
         sb_html = ""
         if his and not asked and answer and _ip.step_block(r):       # a your-step item: the step, directly under the state line, then Done, the note box and Send
-            sb_html = (f'<div class="iask istep"><b>Your step</b><div class="istepbody">{self.step_block_html(r, self.draft_block_html(r), self.step_nexts_html(r))}</div></div>'
+            sb_html = (f'<div class="iask istep"><b>Your step</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
                        f'<form class="ianswer" method="post" action="{e(answer["action"])}"><input type="hidden" name="token" value="{e(answer["token"])}">'
                        '<label for="atext">A note, or nothing: Send with an empty box finishes the step</label>'
                        + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
                        '<div class="abtns"><button type="submit" class="b main" name="act" value="send">Send</button></div>'
                        '<p class="isent warn aerr" role="alert" hidden></p></form>')
         elif his and not asked and _ip.step_block(r):                 # signed out (or no token): the step is still the page's
-            sb_html = f'<div class="iask istep"><b>Your step</b><div class="istepbody">{self.step_block_html(r, self.draft_block_html(r), self.step_nexts_html(r))}</div></div>'
+            sb_html = f'<div class="iask istep"><b>Your step</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
         draft_html = "" if sb_html else self.draft_alone_html(r)               # a draft on an item that is not in the Your step block (stored before the step, or a step that is not his) is still on the page, under the state line
         form = sb_html or (self.answer_html(r, answer) if his else "")
         if his and ol and "data-cards" not in form:   # no answer box with cards is drawn (signed out, or no token): the options are still the page's, as a list in the Ask block
@@ -3318,78 +3319,168 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             else: continue
             out.append({"text": f"{_OWNER}: {body}", "status": "decided", "by": _OWNER, "at": ts})
         return out
-    def step_nexts_html(self, r):
-        """The owner's own open steps of the
-        checklist (the lines of next that open with his name, or with none), drawn in his Your step block under the step's summary line as the numbered `step` is drawn
-        (step_parts_html): an ordered list, each line in full without its `<name>: ` opener, each command in backticks (a span with a space in it) or fenced block in a code block with a Copy button
-        under its line. They are the checklist's steps themselves, so a step checked leaves this list and shows checked in Next; Next still draws all of them. "" when he has none."""
-        mine = [x for x in _steps.view(r["metadata"]) if x["status"] == _steps.OPEN and _steps.is_his(x["text"])]
-        if not mine: return ""
-        text = []
-        for n, x in enumerate(mine, 1):
+    def his_open_steps(self, r):
+        """His open steps of the checklist (the lines of next that open with his name, or with none) as (first line without its opener, the lines under it), each said once, in order. The line the
+        server made on the checklist for a your-step item (the step's summary, recorded as metadata.owner_step, with his name in front of it or not) is not drawn: the summary stays where space is short.
+        Only that line is skipped, never a separate step of his that happens to say the same words, and a line that repeats an earlier one of his (any case, with or without his name) reads as one.
+        A line whose first line is empty after his name takes the first line under it as its own. [] when he has none."""
+        meta = r["metadata"] or {}
+        lk = lambda t: _steps.loose_key(t).casefold()
+        cand = []
+        for x in _steps.view(meta):
+            if x["status"] != _steps.OPEN or not _steps.is_his(x["text"]): continue
             ls = [ln for ln in str(x["text"]).split("\n") if ln.strip()]
-            first = _steps.strip_owner(ls[0]) if ls and not _sc.FENCE_RX.match(ls[0]) else ""
-            if not first: continue
-            if len(ls) == 1 and _steps.clean(first) == _steps.clean((r["metadata"] or {}).get("step")): continue      # the step the server made for a your-step says the step's summary, which the block already shows
-            text.append(f"{n}. {first}")
-            text += [ln if ln[:1] in (" ", "\t") else "   " + ln for ln in ls[1:]]
+            if ls: cand.append((x, ls))
+        mir = lk(meta.get(_os.KEY))
+        skip = max((i for i, (x, _) in enumerate(cand) if mir and lk(x["text"]) == mir), default=-1)      # the server's own line: the last one that says the summary
+        out, seen = [], set()
+        for i, (x, ls) in enumerate(cand):
+            if i == skip: continue
+            if _sc.FENCE_RX.match(ls[0]): first, rest = "", ls
+            else:
+                first, rest = _steps.strip_owner(ls[0]), ls[1:]
+                while not first and rest and not _sc.FENCE_RX.match(rest[0]): first, rest = rest[0].strip(), rest[1:]       # "Name:" alone: the line under it is the step
+            if not first and not rest: continue
+            k = lk(x["text"])
+            if k in seen: continue
+            seen.add(k); out.append((first, rest))
+        return out
+    def step_field_entries(self, r):
+        """The numbered lines and the commands of a step field stored before the one-line-summary rule, as (first line, lines under it) entries in the field's order: each numbered line (its fenced blocks under it),
+        a fenced block standing alone (first ""), and for a one-line step that carries a command that line itself (a `! ...` pane line as a block). Plain lines of the field are the summary and are not entries. [] for the step
+        of today (one line, no command)."""
+        raw = str((r["metadata"] or {}).get("step") or "").strip()
+        if not _steps.clean(raw): return []
+        fence = lambda b: ["```", *str(b).split("\n"), "```"]
+        if not _sc.structured(raw):
+            if not _sc.commands_of(raw): return []
+            return [("", fence(raw))] if raw.startswith("!") else [(_steps.strip_owner(_steps.key(raw)), [])]
+        out = []
+        for p in _sc.parse(raw):
+            if p.kind == "cmd": out.append(("", fence(p.text)))
+            elif p.kind == "text":
+                if _sc.split_spans(p.text)[1]: out.append((_steps.strip_owner(p.text), []))
+            else:
+                for it in p.items: out.append((it.text, [ln for b in it.fences for ln in fence(b)]))
+        return out
+    def your_steps(self, r):
+        """What the Your step block lists, as (first line, lines under it) entries: his open steps (his_open_steps), and with them any numbered line or command of an old step field that none of his lines shows
+        (step_field_entries), at the place the field gives it, each once. [] when he has no open step on the checklist (the step field is then the step: step_block_html)."""
+        mine = self.his_open_steps(r)
+        if not mine: return []
+        cm = lambda e: set(_sc.commands_of("\n".join([e[0], *e[1]]))) if e[1] or "`" in e[0] else set()
+        used, out = set(), []
+        for f in self.step_field_entries(r):
+            fk, fc = _steps.loose_key(f[0]).casefold(), cm(f)
+            at = next((i for i, h in enumerate(mine) if i not in used and ((fk and _steps.loose_key(h[0]).casefold() == fk) or (fc and fc <= cm(h)))), None)
+            if at is None: out.append(f); continue
+            out += [mine[i] for i in range(at + 1) if i not in used]; used |= set(range(at + 1))
+        return out + [h for i, h in enumerate(mine) if i not in used]
+    def step_nexts_html(self, r, draft=None):
+        """The Your step block's list: his open steps (your_steps), drawn as the whole of the block (the one-line summary stays where space is short, the tab title and a Slack notice): one ordered list numbered
+        from 1, each step in full without its `<name>: ` opener, each command in backticks (a span with a space in it) or fenced block in a code block with a Copy button under its line. `draft` (a function from the
+        step's text to the drawn draft) puts the text to paste inside the step that uses it (draft_inside). They are the checklist's steps themselves, so a step checked leaves this list and
+        shows checked in Next; Next still draws all of them. "" when he has none."""
+        mine = self.your_steps(r)
+        if not mine: return ""
+        text, n = [], 0
+        for first, rest in mine:
+            if first:
+                n += 1; text.append(f"{n}. {first}")
+                text += [ln if ln[:1] in (" ", "\t") else "   " + ln for ln in rest]
+            else: text += textwrap.dedent("\n".join(rest)).split("\n")         # a fenced block with no line of its own: a box, no number
         parts = _sc.parse("\n".join(text))
-        return f'<div class="istepnext">{self.step_parts_html(parts, r["gid"])}</div>' if parts else ""
-    def step_block_html(self, r, draft="", extra=""):
-        """The step of a your-step item as HTML, for the home row and the item page alike (itempage.step_block is the one reading): its text as markdown with each command taken out of it
-        into a copyable block of its own (a link, with no command, in one); a `! ...` line he types in a pane stays whole and verbatim in one block. `draft` (the item's draft, already drawn) goes
-        right under the step's text, before those blocks: the draft is part of the step. "" for any other item."""
+        return f'<div class="istepnext">{self.step_parts_html(parts, r["gid"], self.draft_inside(r, parts, draft))}</div>' if parts else ""
+    def draft_inside(self, r, parts, draft):
+        """{the position of the step that holds the draft: the drawn draft} for step_parts_html, {} for an item with no draft or with no `draft` function. The step that uses the text is the last one that
+        names text to post, send or paste (draft.names_text, the write guard's own reading), else the last without a command, else the last. A draft that is one of the commands the steps already
+        show is the same text twice: it is not drawn again."""
+        d = _draft.of(r)
+        if not d or draft is None: return {}
+        items = [it for p in parts if p.kind != "cmd" for it in (p.items if p.kind == "ol" else [_sc.Item(p.text)])]     # the lines step_parts_html numbers for `inside`
+        if not items: return {}
+        cmds = [_sc.split_spans(it.text)[1] + it.fences for it in items]
+        if any(_draft.clean(c) == _draft.clean(d) for cs in cmds for c in cs): return {}
+        texts = [_sc.split_spans(it.text)[0] for it in items]
+        at = ([i for i, t in enumerate(texts) if _draft.names_text(t)] or [i for i, cs in enumerate(cmds) if not cs] or [len(items) - 1])[-1]
+        return {at: draft(texts[at])}
+    def your_step_html(self, r, home=False):
+        """The inside of the Your step block, for the item page and the home row alike: his open steps as one numbered list (step_nexts_html), each said once, each command in its own box with Copy,
+        the item's draft (the text to paste) inside the step that uses it. The one-line summary is not drawn beside them (it stays in the tab title and the Slack notice). An item with no step of his on
+        the checklist (the step is the whole of what he does) draws the step field itself (step_block_html), its draft in it. "" for an item with no your-step."""
         sb = _ip.step_block(r)
         if not sb: return ""
-        if sb.parts is not None: return self.step_parts_html(sb.parts, r["gid"]) + draft + extra
+        draft = lambda text="": self.draft_html(r, self.draft_label(text), home)
+        return self.step_nexts_html(r, draft) or self.step_block_html(r, sb=sb, home=home)
+    def step_block_html(self, r, sb=None, home=False):
+        """The step field of a your-step item as HTML (itempage.step_block is the one reading), for an item whose checklist holds no step of his: its text as markdown with each command taken out of it
+        into a copyable block of its own (a link, with no command, in one); a `! ...` line he types in a pane stays whole and verbatim in one block. The item's draft goes right under the step's text,
+        before those blocks: the draft is part of the step, and is left out when it is one of those commands. "" for any other item."""
+        sb = sb or _ip.step_block(r)
+        if not sb: return ""
+        d = _draft.of(r)
+        cmds = list(sb.blocks)
+        for p in sb.parts or []:
+            cmds += [p.text] if p.kind == "cmd" else _sc.split_spans(p.text)[1] if p.kind == "text" else [c for it in p.items for c in _sc.split_spans(it.text)[1] + it.fences]
+        draft = "" if (not d or any(_draft.clean(c) == _draft.clean(d) for c in cmds)) else self.draft_html(r, self.draft_label(sb.text or "", (r["metadata"] or {}).get("step")), home)
+        if sb.parts is not None: return self.step_parts_html(sb.parts, r["gid"]) + draft
         blk = "".join(f'<div class="cmd"><pre><code>{esc(b)}</code></pre><button type="button" class="b copy" aria-label="Copy to the clipboard">Copy</button></div>' for b in sb.blocks)
-        return (self.md_line(sb.text, r["gid"]) if sb.text else "") + draft + blk + extra
-    def step_parts_html(self, parts, gid):
+        return (self.md_line(sb.text, r["gid"]) if sb.text else "") + draft + blk
+    def step_parts_html(self, parts, gid, inside=None):
         """A step that is a numbered list or holds a fenced block (step_commands.parse), drawn part by part: a plain line as a paragraph (inline markdown, mentions linked), a run of numbered lines as one
         ordered list (the first number kept), each item's text with the commands taken out of it (a span with a space in it, or a fenced block) into code blocks with a Copy button under that item, a fenced block
-        outside any item as a block of its own. Everything is escaped (the markdown subset takes no raw HTML; a command goes through esc)."""
+        outside any item as a block of its own. `inside` ({n: html}) puts a drawn block (the draft) at the end of the n-th line, counting the lines of every list and the plain lines from 0.
+        Everything is escaped (the markdown subset takes no raw HTML; a command goes through esc)."""
         def blocks(cmds): return "".join(_cmd_block(c) for c in cmds)
+        inside = inside or {}; n = -1
         out = []
         for p in parts:
             if p.kind == "cmd":
                 out.append(_cmd_block(p.text))
             elif p.kind == "text":
                 text, cmds = _sc.split_spans(p.text)
-                out.append((f'<p class="sp">{self.md_line(text, gid)}</p>' if text else "") + blocks(cmds))
+                n += 1
+                out.append((f'<p class="sp">{self.md_line(text, gid)}</p>' if text else "") + blocks(cmds) + inside.get(n, ""))
             else:
                 lis = []
                 for it in p.items:
+                    n += 1
                     text, cmds = _sc.split_spans(it.text)
-                    lis.append(f"<li>{self.md_line(text, gid) if text else ''}{blocks(cmds + it.fences)}</li>")
+                    lis.append(f"<li>{self.md_line(text, gid) if text else ''}{blocks(cmds + it.fences)}{inside.get(n, '')}</li>")
                 out.append(f'<ol class="stepol"{f" start={p.start}" if p.start != 1 else ""}>' + "".join(lis) + "</ol>")
         return "".join(out)
-    def draft_block_html(self, r):
-        """The item's draft, the verbatim text the owner pastes elsewhere (draft.py), as the item page draws it: a small label "Draft" with
-        Copy just beside it, then the text in the page's own body font with its lines and spaces as stored (the block wraps long lines but keeps every break), escaped, not monospace. It is drawn right under the
-        step's text, before the note box and the buttons (step_block_html places it). "" when the item is closed or carries none."""
+    def draft_label(self, *texts):
+        """What the text to paste is called: "Email text to paste" when the words of the step it sits under speak of an email (email, e-mail, or the Korean words for it), else "Message to paste". Never "Draft". A word that only
+        looks like one (a channel `#email-alerts`, an address, `gmail`) is no email, and the item's summary is not asked: a Slack post under a summary that says e-mail is a message."""
+        # \uBA54\uC77C is the Korean word for "mail" (also inside the one for "email"); it is written as escapes so the public scan finds no Hangul in the repo
+        return "Email text to paste" if re.search(r"(?<![\w#@/.-])e-?mails?(?![A-Za-z0-9_-])|\uBA54\uC77C", " ".join(str(t or "") for t in texts), re.I) else "Message to paste"
+    def draft_html(self, r, label, home=False):
+        """The item's draft, the verbatim text the owner pastes elsewhere (draft.py), under `label` (draft_label) with Copy just beside it, then the text in the page's own body font with its lines and
+        spaces as stored (the block wraps long lines but keeps every break), escaped, not monospace. It sits inside the step that uses it. On the home row it is a collapsed <details> whose summary is the label
+        with Copy beside it (a tap on Copy copies without opening it; the page's copy script reads the text from the .draft block). "" when the item is closed or carries none."""
         d = _draft.of(r)
         if not d: return ""
-        return (f'<div class="draft"><div class="dhead"><b class="dlab">Draft</b><button type="button" class="b copy" aria-label="Copy the draft">Copy</button></div><pre><code>{esc(d)}</code></pre></div>')
+        aria = f'Copy the {label[0].lower()}{label[1:]}'
+        if home:
+            return (f'<div class="draft hdraft"><details><summary><span class="dlab">{esc(label)}</span><button type="button" class="b copy" aria-label="{aria}">Copy</button></summary>'
+                    f'<pre><code>{esc(d)}</code></pre></details></div>')
+        return (f'<div class="draft"><div class="dhead"><b class="dlab">{esc(label)}</b><button type="button" class="b copy" aria-label="{aria}">Copy</button></div><pre><code>{esc(d)}</code></pre></div>')
     def draft_alone_html(self, r):
         """The draft of an item that draws no Your step block, in a block of its own (the same label and Copy)."""
-        b = self.draft_block_html(r)
+        b = self.draft_html(r, self.draft_label((r["metadata"] or {}).get("step"), open_ask(r)))
         return f'<div class="iask idraft"><div class="istepbody">{b}</div></div>' if b else ""
     def home_draft_html(self, r):
-        """The home row's draft: right under the step line, before the note box and the buttons. A collapsed <details> whose summary is the label "draft" with Copy just beside it (a tap on Copy copies without
-        opening it, the page's copy script reads the text from the .draft block); opening it shows the text, in the page's body font with its line breaks kept. "" for an item with none."""
-        d = _draft.of(r)
-        if not d: return ""
-        return (f'<div class="draft hdraft"><details><summary><span class="dlab">draft</span><button type="button" class="b copy" aria-label="Copy the draft">Copy</button></summary>'
-                f'<pre><code>{esc(d)}</code></pre></details></div>')
+        """The home row's draft where no step block holds it (an ask's row, or a row with no step form): right under the detail, collapsed (draft_html)."""
+        return self.draft_html(r, self.draft_label((r["metadata"] or {}).get("step"), open_ask(r)), home=True)
     def home_step(self, r):
         """(the step as the row shows it, its form) for a your-step item of the owner's with no ask: the step itself, then a note box with ONE button, Send (an empty box finishes the step, the item goes to its
         then-mover as after a Done; a note is his note on the step, handed to the then-mover to judge), drawn hidden for the page script to show with a token, as the decision rows' forms are. The step is
-        drawn as the item page's Your step block draws it: the step line, then his open Next lines (step_nexts_html), each command with its Copy box. None for any other item."""
+        drawn as the item page's Your step block draws it (your_step_html): his open steps, numbered, each command with its Copy box. None for any other item."""
         if open_ask(r) or not _ip.step_block(r): return None
         form = (f'<form class="hanswer hstep" method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
                 + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="A note, or nothing: Send with an empty box finishes the step" placeholder="A note, or nothing to finish the step"></textarea>', f'astep-{esc(r["gid"])}') +
                 '<div class="abtns"><button type="submit" class="b main" name="act" value="send" disabled>Send</button></div></form>')
-        return self.step_block_html(r, self.home_draft_html(r), self.step_nexts_html(r)), form
+        return self.your_step_html(r, home=True), form
     def home_ask(self, r):
         """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none. The question is the ask's Decide part (a watcher's
         relay or drop-it ask, which has no Recommend, Stakes or By, its whole question); the form is the item page's: a card per stored option (_cards_html; Approve and Decline

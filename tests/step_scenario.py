@@ -586,8 +586,10 @@ upd(90, step="In PowerShell: run the commands in your Next lines and say done", 
 check("13 write: the summary step that names his Next line is accepted with the command in a `Oliver:` line of next, both in the one write",
       mt(90)["step"] == "In PowerShell: run the commands in your Next lines and say done" and "ssh -t box-a 'ls'" in mt(90)["next"] and mt(90)["state"] == "your-step", mt(90))
 p90 = page(90, answer=BOX)
-check("13 page: and the Your step block shows the summary, then the command line in full with a Copy button",
-      'class="istepnext"' in p90 and p90.index("run the commands in your Next lines") < p90.index('class="istepnext"') and p90.count('class="cmd"') >= 1 and "ssh -t box-a" in p90, None)
+b90 = re.search(r'<div class="iask istep"><b>Your step</b><div class="istepbody">(.*?)</div></div><form class="ianswer"', p90, re.S)
+b90 = b90.group(1) if b90 else ""
+check("13 page: and the Your step block shows his line in full with a Copy button, and not the summary beside it",
+      b90.startswith('<div class="istepnext"><ol class="stepol">') and b90.count("<li>") == 1 and b90.count('class="cmd"') == 1 and "ssh -t box-a" in b90 and "run the commands in your Next lines" not in b90, b90[:600])
 item(91, desc=DESC, **HOW, step="Run `ssh -t box-a 'ls'` and say done")
 upd(91, priority="p2")
 refused_nw("13 legacy: a step stored with a command and no place keeps the older judgement on a write that leaves the step alone (a command needs a place)", 91,

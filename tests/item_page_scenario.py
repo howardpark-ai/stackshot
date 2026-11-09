@@ -77,7 +77,8 @@ LONGN = "go through the open review comments one by one and answer each of them 
 item(18, "[home] long next with a link", mover="home-other", next="home-other: " + LONGN)
 item(23, "[home] your step", mover="Oliver", state="your-step", step="\n`uv run tools/x.py --go` and say done\nsecond line of the step", next="home-other: check the result once he has run it")
 item(24, "[home] agent with a step field", mover="home-other", state="your-step", step="`uv run y`", next="home-other: do the other thing")
-item(25, "[home] hostile step", mover="Oliver", state="your-step", step="<script>alert(1)</script> `<b>x</b>` & more", next="Oliver: fallback <i>line</i>", written_by="<u>who</u>")
+item(25, "[home] hostile step", mover="Oliver", state="your-step", step="<script>alert(1)</script> `<b>x</b>` & more", next="Oliver: <script>alert(1)</script> then `<b>x</b>` & so on\nOliver: fallback <i>line</i>", written_by="<u>who</u>")
+item(28, "[home] hostile step field only", mover="Oliver", state="your-step", step="<script>alert(1)</script> `<b>x</b>` & more", next="home-other: check it", written_by="<u>who</u>")      # no line of his on the checklist: the step field itself is drawn (the fallback)
 item(26, "[home] hostile mover", mover="<i>evil</i>", next="<i>evil</i>: do <img src=x onerror=alert(1)>", written_by="<u>who</u>", handoff={"to": "<i>evil</i>", "from": "home-here", "at": now - 600, "delivered_at": now - 590, "taken_at": None})
 item(27, "[home] fenced step", mover="Oliver", state="your-step", step="```\nuv run x\n```", next="Oliver: fallback line")
 item(21, "[home] dump item", mover="home-other", state="your-step", step="run x", next="home-other: x", written_by="home-other")
@@ -346,7 +347,7 @@ check("your-step, his move: the step form is under the state line and shows the 
 check("…and a mover who is not Oliver keeps no Your step block", 'class="iask istep"' not in w24 and 'class="iask istep"' not in page("a10"), None)
 
 # ---- 14. review of the state line's latest change: a hostile step, mover and author; italics in clip_md; the comment box's words
-w25, w26 = page("a25"), page("a26")
+w25, w26, w28 = page("a25"), page("a26"), page("a28")
 top = lambda h: h[h.find('<div class="istat">'):h.find("<h2>Next</h2>")]      # the state line, the step form under it and the ask: everything above Next
 check("a hostile step and mover label are escaped above Next",
       all("<script>" not in top(x) and "<img" not in top(x) and "<i>evil" not in top(x) and "<u>" not in top(x) and "<b>x</b>" not in top(x) for x in (w25, w26))
@@ -357,6 +358,8 @@ check("clip_md protects *italic* and _italic_ spans like bold (no stray marker a
       all(c.count("*") % 2 == 0 for c in cuts.values())
       and all(("*careful" not in c) or ("pass*" in c) for c in cuts.values()) and all(("_every" not in c) or ("other_" in c) for c in cuts.values())
       and any("snake_case_names" in c for c in cuts.values()) and all(len(c) <= n for n, c in cuts.items()), [c for c in cuts.values() if "*careful" in c and "pass*" not in c or "_every" in c and "other_" not in c][:3])
+check("a hostile step field with no line of his on the checklist is drawn escaped (the step field is the fallback)",
+      "<script>" not in top(w28) and "<b>x</b>" not in top(w28) and "<u>" not in top(w28) and "&lt;script&gt;alert(1)&lt;/script&gt;" in top(w28) and "more" in top(w28), top(w28))
 check("on a non-decision item the box says it is a comment; on a decision item it is the answer",
       "Write a comment; the agent on it is told" in page("a9", answer=BOX) and "Your answer" not in page("a9", answer=BOX) and "Your answer" in page("a1", answer=BOX) and "Note (optional)" in page("a1", answer=BOX) and "Note (optional)" not in page("a9", answer=BOX))
 

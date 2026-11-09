@@ -159,7 +159,7 @@ item(65, A, "projects/alpha", "[home] a step item with a long command", age=2 * 
      step="run the one line `uv run --locked tests/pilot_scenario.py --a-very-long-flag-name-that-does-not-wrap=tests/fixtures/a/long/path/x.json` on box-a and say done", next="ops-falcon-engineer: check it")
 item(66, A, "projects/alpha", "[home] a step item typed in a pane", age=1 * DAYS, state="your-step", step="! sala op reauth ops-falcon-engineer-background-builder-with-a-long-name --from me --words \"go\"", next="ops-falcon-engineer: check it")
 item(67, A, "projects/alpha", "[home] a step item of plain words", age=1 * DAYS, state="your-step", step="Open the side gate and tell the guard the long-named visitor " + LONG + " is on the way, then say done", next="ops-falcon-engineer: check it",
-     draft="こんにちは、オリバーです。\n\n  - 第一: 日程はそのままです。 " + LONG + "\n  - 第二: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOp/edit#heading=h.abcdefghijkl\n\nよろしくお願いします。\nThanks, Alex.")   # a draft (draft.py): the block wraps and keeps its lines, the row's "draft" label, with Copy beside it, fits
+     draft="こんにちは、オリバーです。\n\n  - 第一: 日程はそのままです。 " + LONG + "\n  - 第二: https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEfGhIjKlMnOp/edit#heading=h.abcdefghijkl\n\nよろしくお願いします。\nThanks, Alex.")   # a draft (draft.py): the block wraps and keeps its lines, the row's "Message to paste" label, with Copy beside it, fits
 item(68, A, "projects/alpha", "[home] a numbered step with two ssh commands", age=1 * DAYS, state="your-step", step="In PowerShell, do these in order:\n1. Run `ssh -t box-a 'sala op reauth ops-falcon-engineer-background-builder-with-a-long-name --from me --words \"go\"'` and wait for the line that says queued\n2. Run `ssh -t box-a 'tmux ls'` and read the list\n3. Say done on the item", next="ops-falcon-engineer: check it")   # a numbered step (step_commands.py): one list, a copy block per command
 item(69, A, "projects/alpha", "[home] Move the widget to shelf-2 and let it sync by itself when shelf-1 is full", age=4 * H, needs=["decision"], next="Oliver: decide", contact=LONG,       # a long Your move title is cut on the top line while the age stays at the right edge
      ask="Decide: how a returning shelf-1 is kept from syncing beside shelf-2 after a switch · Recommend: Check at boot · Stakes: low · By: Fri",
@@ -349,7 +349,7 @@ with sync_playwright() as p:
             check(f"search box {nm} {w}: one box, inside the screen, 200 px or wider, 28 px or taller, clear of the theme button", bool(d) and d["n"] == 1 and d["l"] >= 0 and d["r"] <= w + 0.5 and d["w"] >= 200 and d["h"] >= 28
                   and (d["r"] <= d["tl"] + 0.5 or d["l"] >= d["tr"] - 0.5 or d["b"] <= d["tt"] + 0.5 or d["t"] >= d["tb"] - 0.5), d)
             ctx.close()
-    # ---- the item page's Your step block with a draft: "Draft" label with Copy beside it, right under the step's text, above the note box and buttons, in the body font, inside the screen
+    # ---- the item page's Your step block with a draft: "Message to paste" label with Copy beside it, right under the step's text, above the note box and buttons, in the body font, inside the screen
     DSHOTS = os.environ.get("PHONE_WIDTH_SHOTS", "")
     ITEMDRAFT = """() => { const o = [], d = document.querySelector('.istepbody .draft'), form = document.querySelector('form.ianswer'), vw = innerWidth; if (!d || !form) return ['no draft or no form'];
       const lab = d.querySelector('.dhead .dlab'), btn = d.querySelector('.dhead button.copy'), pre = d.querySelector('pre'), c = pre.querySelector('code'), body = getComputedStyle(document.body).fontFamily;
@@ -490,7 +490,7 @@ with sync_playwright() as p:
       return [c('#your-move .ir-age.red'), c('#your-move .ir-age.amber'), c('#your-move li.hrow .ir-age:not(.amber):not(.red)')]; }"""
     DRAFTROW = """() => { const li = document.getElementById('task-a-67'), o = []; if (!li) return ['row missing']; const d = li.querySelector('.hdraft'); if (!d) return ['no draft'];
       const det = d.querySelector('details'), lab = d.querySelector('summary .dlab'), btn = d.querySelector('summary button.copy'), step = li.querySelector('.hnext'), form = li.querySelector('form.hstep');
-      if (!lab || !btn) return ['no label or no Copy inside the summary']; if (det.open) o.push('open on load'); if (lab.textContent.trim() !== 'draft') o.push('label reads ' + lab.textContent);
+      if (!lab || !btn) return ['no label or no Copy inside the summary']; if (det.open) o.push('open on load'); if (lab.textContent.trim() !== 'Message to paste') o.push('label reads ' + lab.textContent);
       const l = lab.getBoundingClientRect(), b = btn.getBoundingClientRect(), r = d.getBoundingClientRect(), rg = document.createRange(); rg.setStart(step, 0); rg.setEndBefore(d); const s = rg.getBoundingClientRect();
       if (Math.abs((l.top + l.bottom) / 2 - (b.top + b.bottom) / 2) > 8) o.push('Copy is not on the label line');
       if (b.left - l.right < 0 || b.left - l.right > 24) o.push('Copy is not just beside the label: ' + Math.round(b.left - l.right) + ' px');
