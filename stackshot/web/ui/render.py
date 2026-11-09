@@ -2650,7 +2650,6 @@ class Board:
         elif tk in self.proj: prj = f'<a href="{e(under("/" + tk))}">{e(self.proj_label(tk))}</a>'      # the filed page has no row of its own: the project's page stands in
         elif pk: prj = (f'<code>{e(tk)}</code> <span class="dim">·</span> ' if tk != pk else "") + f'<code>{e(pk)}</code> <span class="aflag">page missing</span>'      # the flag sits beside the page that is missing, the one the item is filed on
         else: prj = '<span class="dim">no project</span>'
-        prj_head = prj                                  # the header line names the project only; the details add the gbrain page
         if mirror: prj += f' <span class="dim">·</span> <a href="{e(mirror)}" target="_blank" rel="noopener">gbrain page ↗</a>'
         then_v = who_html(mod.then) if (alive and mod.then) else who_html(post) if (waiting and post) else ""      # who takes it after: the mover is on the header line, not here
         pr = str(m.get("priority") or "p2")
@@ -2678,14 +2677,13 @@ class Board:
                 + grp(("GitHub", ghl))
                 + self.watch_html(watch)
                 + self.more_html(r, done))
-        # ---- the header line: [state tag] · since · mover · then · project (the words and colors of the lists), then why it ended when it has
+        # ---- the header line: [state tag] · since · mover · then (the words and colors of the lists; the project is the sidebar's Project row, never this line), then why it ended when it has
         bits = [_ui.tag(self.state_kind(r))]
         if since: bits.append(("" if done else "since ") + self.stamp(datetime.datetime.fromtimestamp(since, self.now.tzinfo)))
         if alive and mod.mover and not _model.is_owner(mod.mover): bits.append(f"mover <b>{who_html(mod.mover)}</b>")
         if then_v: bits.append(f"then <b>{then_v}</b>")
         if done and by: bits.append(f'by <a href="{e(id_href(by))}">{e(shown(by))}</a>')
         if not_taken: bits.append('<span class="iwarn">handed over, not yet taken</span>')
-        bits.append(prj_head)
         sline = " · ".join(bits)
         said = "" if not done else ("no outcome recorded" if oc == "unrecorded" else (_ip.clean(why) or ("no outcome recorded" if not by else "")))
         reason_html = f'<p class="ireason">{M(said)}</p>' if said else ""
