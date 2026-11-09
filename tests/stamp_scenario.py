@@ -284,7 +284,7 @@ def clock_diff(freeze):
     return [g for g in gids if d_a[g] != d_b[g]], len(gids)
 st_text = ST.read_text(encoding="utf-8")
 try:
-    ST.write_text("{}")                                          # no baseline, as in a copy of the store: every default wait sits on a floor of now + default_days, which slides with the clock
+    ST.write_text("{}")                                          # no baseline, as in a copy of the store
     moved, n_open = clock_diff(False); held, _ = clock_diff(True)
 finally:
     ST.write_text(st_text, encoding="utf-8")
