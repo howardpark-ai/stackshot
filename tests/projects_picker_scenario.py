@@ -220,7 +220,7 @@ class FakeIO:
         if slug not in s.pages or rev != f"r{s.revs.get(slug, 1)}": return "refused", "the page changed since it was read"
         s.pages[slug] = content; s.revs[slug] = s.revs.get(slug, 1) + 1; return "ok", ""
     def add_timeline(s, slug, date, summary, detail, source, request_id=""): s.timeline.append((slug, summary)); return ""
-gio = FakeIO(); server.PAGE_IO = gio
+gio = FakeIO(); server._pform.PAGE_IO = gio
 def mk(key, scope, title="", sender="fleet-web", **kw): return server._client_post("box-c", "project", {"key": key, "scope": scope, "title": title, "sender": sender, **kw})
 st, out = mk("projects/new-one", "work", "New one")
 r = out.get("project", {})
@@ -692,7 +692,7 @@ def in_thread(fn, *a, **k):
         except BaseException as e_: box["exc"] = e_
         box["took"] = time.time() - t0
     t = threading.Thread(target=run, daemon=True); t.start(); return t, box
-blk = BlockIO({"projects/slow-one"}); server.PAGE_IO = blk
+blk = BlockIO({"projects/slow-one"}); server._pform.PAGE_IO = blk
 t1, b1 = in_thread(mk, "projects/slow-one", "home", "Slow one", "fleet-web")
 try:
     entered = blk.entered.wait(10)
@@ -717,13 +717,13 @@ st, out = mk("projects/slow-one", "home", "Slow one third")
 check("slow gbrain: …and a later make of the key is the ordinary 409 'already exists' (post project-list)", st == 409 and "already exists" in out["error"], (st, out))
 class RaisingIO(FakeIO):
     def create(s, slug, content): raise RuntimeError("gbrain exploded")
-server.PAGE_IO = RaisingIO()
+server._pform.PAGE_IO = RaisingIO()
 st, out = mk("projects/boom", "home", "Boom")
 check("slow gbrain: a gbrain call that raises is a 502 (the mirror never raises), and nothing is recorded", st == 502 and rec("projects/boom") is None and "projects/boom" not in idfile()["ids"].values(), (st, out))
-server.PAGE_IO = gio
+server._pform.PAGE_IO = gio
 st, out = mk("projects/boom", "home", "Boom")
 check("slow gbrain: …and the same make said again goes through (the failed one left nothing behind)", st == 200 and rec("projects/boom") is not None, (st, out))
-server.PAGE_IO = gio
+server._pform.PAGE_IO = gio
 
 # ---- 6d. post project-agent-rename: the agent renamed in the project record (its place and mandate kept), the page's agents block written from the record
 class RenameIO:
@@ -757,7 +757,7 @@ ren_page("projects/ren-quo", "type: project\ntitle: Ren quoted\norg: home\ndispl
 ren_page("projects/ren-cli", REN_FRONT.replace("home-ren", "home-rcli").replace("Ren", "Rcli"))
 ren_page("projects/ren-http", REN_FRONT.replace("home-ren", "home-rhttp").replace("Ren", "Rhttp"))
 p.cmd_registry(quiet=True); fresh()
-server.PAGE_IO = rio
+server._pform.PAGE_IO = rio
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": ["box-a"]}
 def rn(project, old, new, sender="fleet-web", machine="box-a", **kw):
     b = {"project": project, "old": old, "new": new, **kw}
@@ -897,20 +897,20 @@ check("rename concurrency: …and the retry of the refused one is the ordinary 2
 pverbs.agent_retire(REN, "home-ren-quick", by="fleet-web", io=rio)
 class RaisingGet(RenameIO):
     def get(s, slug): raise RuntimeError("gbrain exploded")
-server.PAGE_IO = RaisingGet()
+server._pform.PAGE_IO = RaisingGet()
 st, out = rn("projects/ren", "home-ren-alpha", "home-ren-omega")
 check("rename concurrency: a page store call that raises is told (mirror 'failed'), the record is renamed, and the page key is released (a later rename is not stuck on 'in progress')", st == 200 and out["mirror"]["state"] == "failed" and server._RENAMING == set()
       and rec_agents(REN)[0][0] == "home-ren-omega", (st, out))
-server.PAGE_IO = rio
+server._pform.PAGE_IO = rio
 check("rename concurrency: …and the next one goes through and writes the page again", rn("projects/ren", "home-ren-omega", "home-ren-final")[0] == 200 and server._RENAMING == set() and agents_of("projects/ren")[0][0][0] == "home-ren-final")
 st, out = rn("projects/ren", "home-ren-omega", "home-ren-final")
 check("rename: 'already renamed' also carries NEW's front, role and mandate, so the caller can see it is the entry it expects", st == 200 and out["result"] == "already renamed" and out["role"] == "final" and out["mandate"] == "talks to Oliver" and out["front"] is True, (st, out))
-server.PAGE_IO = gio
+server._pform.PAGE_IO = gio
 
 # ---- 6e. post project-agent-retire: sala retired a session; the record drops the agent, the page's agents block follows with a timeline line there (or a leftover pending entry is dropped)
 import copy as _copy
 CFG_PA_6E = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))      # put back at the end of the section
-server.PAGE_IO = rio
+server._pform.PAGE_IO = rio
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 ren_page("projects/rtr", REN_FRONT.replace("home-ren", "home-rtr").replace("Ren", "Rtr"))
 ren_page("projects/rtr-solo", "type: project\ntitle: Rtr solo\norg: home\ndisplay-name: home-rts\nagents:\n  home-rts-main: talks\n  background:\n    home-rts-bg: in the back\nstatus: active")
@@ -1057,7 +1057,7 @@ check("pages.remove_agent: a longer name that starts with the name is not touche
 check("pages.remove_agent: the entry after a wrapped one, a quoted key and the field after the map are kept as they were", p.remove_agent("---\nagents:\n  \"a\": x\n    wrapped\n  b: y\nowner: z\n---\nbody\n", "a")[0] == "---\nagents:\n  b: y\nowner: z\n---\nbody\n")
 if CFG_PA_6E is None: server._cfg.CFG.pop("project_agent", None)
 else: server._cfg.CFG["project_agent"] = CFG_PA_6E
-server.PAGE_IO = gio
+server._pform.PAGE_IO = gio
 
 # the retire lines an earlier release kept on the ledger: gone, a debt on the same entry stays
 real_page_ts = server._page_ts
@@ -1158,7 +1158,7 @@ with TestClient(app) as c:
     check("client.py: …and the list shows the project with that agent, front, as main", len(mine) == 1 and mine[0]["main"] == "ops-by-cli-main" and "page_owed" not in mine[0]["agents"]["ops-by-cli-main"] and mine[0]["listed_by"] == "agents", mine)
     check("client.py: get projects is one of the reads", "projects" in client.READS)
     # post project-agent-rename over HTTP and through client.py (the token's machine is this one: let it be a form machine for the checks, then put the config back)
-    server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": [me]}; server.PAGE_IO = rio
+    server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web"], "form_machines": [me]}; server._pform.PAGE_IO = rio
     try:
         r = c.post("/client/project-agent-rename", json={"project": "projects/ren-http", "old": "home-rhttp-engineer", "new": "home-rhttp-builder", "sender": "fleet-web"})
         check("http: POST project-agent-rename without a token → 401, nothing written", r.status_code == 401 and "home-rhttp-builder" not in rio.pages["projects/ren-http"], r.status_code)
@@ -1227,7 +1227,7 @@ with TestClient(app) as c:
         with prj._Locked():
             d_ = prj._read(); [d_["pending_agents"].get(k, {}).pop(n, None) for k, n in ((RH, "home-rhttp-pend"), (RC, "home-rcli-pend"))]; prj._write(d_)
     finally:
-        server.PAGE_IO = gio
+        server._pform.PAGE_IO = gio
         if CFG_PA_8 is _NOCFG: server._cfg.CFG.pop("project_agent", None)
         else: server._cfg.CFG["project_agent"] = copy.deepcopy(CFG_PA_8)
 
@@ -1312,7 +1312,7 @@ del cfgps["retired_statuses"]; fresh()
 check("retired: with the key absent the defaults apply", prj.retired_statuses() == set(prj._RETIRED) and rec("projects/live-paused")["retired"] is False)
 cfgps["retired_statuses"] = had; fresh()
 
-server.PAGE_IO = rio
+server._pform.PAGE_IO = rio
 CFG_PA_6F = _copy.deepcopy(server._cfg.CFG.get("project_agent", None))
 server._cfg.CFG["project_agent"] = {"form_senders": ["fleet-web", "sala-retire"], "form_machines": ["box-a"]}
 
@@ -1474,7 +1474,7 @@ finally:
 
 if CFG_PA_6F is None: server._cfg.CFG.pop("project_agent", None)
 else: server._cfg.CFG["project_agent"] = CFG_PA_6F
-server.PAGE_IO = gio
+server._pform.PAGE_IO = gio
 
 
 print(("ok" if not fails else "FAILED") + f": projects picker scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

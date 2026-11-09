@@ -19,7 +19,7 @@ a row is posted once (`slacked`). The post runs on a worker thread of its own, i
 
 **For the fleet tool's web server**, which holds the machine token and has no board cookie or page token, the same two writes are machine-token routes:
 `POST /client/for-you/seen` (mark a row, or all, seen) and `POST /client/items/{key}/watch` (Watch / Mute / Default; `stackshot/fleet/client.py post for-you-seen`
-and `stackshot/fleet/client.py post watch`). They are the New session form's caller only (`_form_call`: `sender` is a label in `[project_agent] form_senders` and
+and `stackshot/fleet/client.py post watch`). They are the New session form's caller only (`_form_call` in `stackshot/web/project_form.py`: `sender` is a label in `[project_agent] form_senders` and
 the token's machine is in `form_machines`; defaults: no sender label, so the form is off until `form_senders` names one, and no machine, `form_machines` = `[]`). Any other caller gets 403 with the reason: a session
 that holds the machine token must not be able to mute his items or clear his list. Each change is logged to stderr with the sender and publishes the board.
 (The label is the caller's own word, as for the form's other calls: the machine check is what the token proves.)

@@ -1,7 +1,7 @@
 """shared.py: the helpers of the server that more than one area reads and that keep a little state of their own, which common.py (the pure pieces) has no place for: a session's name (`_session_label`
 and the heartbeat index it falls back to), an item's page (`_item_url`, with the board's URL), what shows the owner's own words on an item (`_owner_words`, `_OWNER_QUOTED`), whether an item waits on his
-decision (`_waits_decision`), the debounced publish (`_publish`, `_publish_now`, `_publish_if_idle`, with the timer and the lock they share), the roles and projects files the publish rebuilds, and the
-drop of the board's kept home (`_board_home_drop`, with the cache's dict and its generation lock).
+decision (`_waits_decision`), the debounced publish (`_publish`, `_publish_now`, `_publish_if_idle`, with the timer and the lock they share), the roles and projects files the publish rebuilds, the registry
+files of the store (`_registry`), and the drop of the board's kept home (`_board_home_drop`, with the cache's dict and its generation lock).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). A module of an area cannot import server.py, and server.py runs as `__main__`, so what the areas share lives here, below
 both, and server.py imports each name back: `server.<name>` stays the name its callers and the suites use. The exceptions are the two names a suite sets that code in this module reads. The timer
@@ -30,6 +30,7 @@ from stackshot.github import ghsync as _gh
 from stackshot.model import said as _said
 from stackshot.projects import projects as _prj
 from stackshot.web import publish as _pub
+from stackshot.web import store as _store
 from stackshot.web.common import OWNER, _needs_of
 
 # Read once, at import: [instance] board_url is among the settings config.RESTART_ONLY keeps for the run.
@@ -242,6 +243,18 @@ def _projects_sync_safe(now: float | None = None, force: bool = False) -> None:
         _projects_sync(now, force)
     except Exception as e:
         print(f"projects.json: {e}", file=sys.stderr, flush=True)
+
+
+# A registry file of the store ([registries]), read by the project areas and the client API; `projects` has the project record's entries laid over the pages' lines.
+def _registry(name: str) -> dict[str, Any]:
+    r = _cfg.CFG["registries"][name]
+    try:
+        with open(_store.STORE / f"{name}.json", encoding="utf-8") as f:
+            data = json.load(f)
+        data = data[r["key"]] if r.get("key") else data
+        return _prj.with_record(data) if name == "projects" else data      # the project record's entries first, the page lines for the rest
+    except Exception:
+        return {}
 
 
 # The kept home of the board's root (its cache and its renders are server.py's): the dict, the lock that numbers its generations, and the drop a publish and a write from a page make.
