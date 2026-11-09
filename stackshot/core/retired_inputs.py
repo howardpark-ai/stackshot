@@ -7,7 +7,7 @@ An item stores alive or waiting directly now (the item model: docs/design), so t
   proof                what proves a checked item works
   chase_note           one logged follow-up on a relay or anchor wait
 
-They are gone from the tools' signatures, so a client's cached schema could still send one; the server's middleware (server._RetiredInputs) reads the call's arguments before the tool does and refuses
+They are gone from the tools' signatures, so a client's cached schema could still send one; the server's middleware (web/middleware.py _RetiredInputs) reads the call's arguments before the tool does and refuses
 one with a ToolError that names what to pass instead. A call is never silently let through and never reaches the tool's own argument check (which would answer with a bare "unexpected argument").
 `step` and `supplies` are not here: they have no home in the new model yet and stay as they were.
 

@@ -3,7 +3,7 @@
   1  the end-of-turn board texts (the early question and the Stop hook's board question, pages.py) name the session's live role beside each item, as the server holds it
      now (the client items read's `roles`): "you are still its mover", "you are its then", "named in its needs", several joined with "; ", an item the session has
      no role on is not listed at all, and a row from a server that sends no roles reads as before;
-  2  the server logs why a tool call was refused (_RefusalLog): tool, item id, sender and the reason clipped to REFUSAL_LOG_MAX, nothing else from the call, and the
+  2  the server logs why a tool call was refused (_RefusalLog, web/middleware.py): tool, item id, sender and the reason clipped to REFUSAL_LOG_MAX, nothing else from the call, and the
      refusal still reaches the caller unchanged.
 
 Fixture data, no live store, no network, no server socket.    tests/run-suite live_role        → exit 0 / 1"""
