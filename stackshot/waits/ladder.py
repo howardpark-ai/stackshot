@@ -10,7 +10,10 @@ Two orders, two records (`metadata.handoff` and the stall pass's entry), and an 
     rung 0  ask      the mover is sent the notice again (a hand-off's own notice for an untaken hand-off, the stall notice for a silent pane; a front agent only gets the History line)
     rung 1  look     `LOOK` (30) minutes after the ask, and only then, the pane is looked at: a pane with no turn running is sent the notice again; a pane with a turn running is left alone. A background
                      agent's pane is never looked at (it is nearly always busy or showing a background shell): it is sent the notice again, unless a work line of the item in progress, changed within 90
-                     minutes, shows it at work on it, and a live one is asked and nothing more (the cold call and the builder are for a mover whose pane is not live)
+                     minutes, shows it at work on it, and a live one is asked and then handed up, not replaced (the cold call and the builder are for a mover whose pane is not live)
+    main     `minutes` after the look, for a live background mover that is still silent: a notice to the project's -main agent (one per -main agent per pass, listing every item due for it), which decides whether the item needs a nudge or a different mover; the
+             same notice again every `MAIN_EVERY` (4 hours) while the silence lasts. It is no step of its own (the entry stays on its rung, so the cold call and the builder stay reachable if the pane stops
+             being live): the entry's `main_at` is its clock
     rung 2  cold     `minutes` (10) later, still no turn and no write: one `claude -p` call names who takes it, or closes the item (it never asks the owner)
     rung 3  builder  `minutes` later (at once when the cold call named no taker): the project's builder; when none can take it, ONE message asks the fleet's builder to recover the session. The
                      item stays with its mover and is not put to the owner
@@ -40,6 +43,8 @@ from stackshot.waits import stall as _stall
 RUNGS = ("ask", "look", "cold", "builder")
 LOOK = 30.0                  # [ladder] look_minutes: how long after the ask the pane is looked at
 VIAS = ("stall", "handoff", "silence")  # who brought the item to the ladder
+MAIN = "main"                # the notice to the project's -main agent for a live background mover that stays silent after the look: not one of RUNGS (the entry's step does not move)
+MAIN_EVERY = 4 * 3600.0      # how often that notice is sent again while the item stays silent: a given silence reaches -main once per interval, never once per pass
 
 
 def via_of(rec: dict[str, Any] | None) -> str:
@@ -120,14 +125,15 @@ def unwind(rec: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def action(rec: dict[str, Any], status: str, at: float, floor: float, now: float, minutes: float, look: float = LOOK, background: bool = False, live: bool = False) -> str:
-    """What is due now for this episode: "" (nothing), "ask", "look", "cold" or "builder". `status`/`at`: the pane's registry status and when it changed; `floor`: when the item reached its mover
+    """What is due now for this episode: "" (nothing), "ask", "look", "cold", "builder" or "main" (the notice to the project's -main agent: `MAIN`). `status`/`at`: the pane's registry status and when it changed; `floor`: when the item reached its mover
     (its last state change, the mover's own last confirm). Only a pane whose turn is over counts (`liveness.is_idle`: idle, or shell with a background task running); a mover whose pane is gone
     (`rec["gone"]`) has none to wait for. The ask of an item the hand-off audit entered is due the moment it enters. Each later rung waits from the later of the pane going idle, the floor and the
     previous rung: `look` (30 minutes) after the ask (the pane only has to be idle then), the others `minutes`.
 
     `background`: the mover is a background agent. The rungs after the ask (the look, the cold call, the builder) then wait on the clock alone, never on its pane: a background agent's pane is nearly always
     busy or showing a background shell, and that says nothing about this item (the server holds the ladder for an item whose own work line shows work in progress, `silence.subagent_running`). `live`: its pane
-    is live (running now): the ladder then stops at the look, since the cold call and the builder replace a mover that cannot answer, and one that is live can. A pane that is not live goes on to both, and so does an entry marked `gone` whatever the heartbeat shows. The ask
+    is live (running now): the ladder then goes no further than the look on the mover, since the cold call and the builder replace a mover that cannot answer, and one that is live can; a live mover
+    that stays silent after the look is handed up instead (`main`, see `_main_due`). A pane that is not live goes on to both, and so does an entry marked `gone` whatever the heartbeat shows. The ask
     of a ladder a pane with no turn running brought still waits for that pane (`background` changes nothing at step 0)."""
     step = int(rec.get("step") or 0)
     if step >= len(RUNGS):
@@ -138,7 +144,7 @@ def action(rec: dict[str, Any], status: str, at: float, floor: float, now: float
         return name               # the hand-off audit decided it is due (its clock, a turn that ended with no write): the mover is asked whatever its pane shows
     clock_only = background and step >= 1      # a background mover's later rungs are timed by the ladder's own clock
     if clock_only and live and not gone and name in ("cold", "builder"):
-        return ""                 # a live background agent is asked, not replaced; an item the hand-off audit entered as gone (two failed pushes, no delivery) is not held by a heartbeat that still shows the pane
+        return _main_due(rec, floor, now, minutes)      # a live background agent is asked, not replaced (an item the hand-off audit entered as gone, two failed pushes with no delivery, is not held by a heartbeat that still shows the pane): its silence goes to the project's -main agent instead
     if not gone and not clock_only and not _lv.is_idle(status, at):
         return ""
     start = max(0.0 if gone or clock_only or name == "look" else float(at), float(floor or 0), float(rec.get("last") or 0))      # the look is due `look` minutes after the ask, whenever the pane went idle: it only has to be idle then
@@ -149,8 +155,20 @@ def action(rec: dict[str, Any], status: str, at: float, floor: float, now: float
     return name
 
 
+def _main_due(rec: dict[str, Any], floor: float, now: float, minutes: float) -> str:
+    """"main" when the notice to the project's -main agent is due for a live background mover that is silent after the look, else "". The first one is due `minutes` after the later of the look and the
+    floor (where the cold call would have come); after it, the next is due `MAIN_EVERY` after the last (`main_at`, stamped by `advance`), or after the floor if that is later (the item reached its mover
+    again), so the item reaches -main once per interval however many passes run."""
+    f = float(floor or 0)
+    if rec.get("main_at"):
+        return MAIN if now - max(float(rec["main_at"]), f) >= MAIN_EVERY else ""
+    return MAIN if now - max(float(rec.get("last") or 0), f) >= minutes * 60.0 else ""
+
+
 def advance(rec: dict[str, Any], did: str, now: float) -> None:
-    """The rung `did` has been taken: the next waits its time. The cold call is stamped for its 24-hour bound."""
+    """The rung `did` has been taken: the next waits its time. The cold call is stamped for its 24-hour bound, and the notice to the -main agent (`MAIN`, not a rung: the step stays) for its repeat interval."""
+    if did == MAIN:
+        rec["main_at"] = now
     if did in RUNGS:
         rec["step"] = RUNGS.index(did) + 1
         rec["ladder"] = True      # the step numbers are the one ladder's (`unwind` reads them back for the old table)
