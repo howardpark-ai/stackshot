@@ -2576,8 +2576,8 @@ check("sala link: with [client] session_view unset no name links", mb.sess_href(
 
 # ---- the writer owes the page update; the keeper gets it only past the grace ([pilot] writer_owes_page)
 from stackshot.projects import pages as _pg
-_ct0, _pts0 = _pg.ct_changed_since, server._page_ts
-server._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False      # no page written yet
+_ct0, _pts0 = _pg.ct_changed_since, server._pdebts._page_ts
+server._pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False      # no page written yet
 server._owed_save({}); server._cfg.CFG["pilot"]["writer_owes_page"] = True
 (T / "store/a/40.json").write_text(json.dumps({"id": "40", "subject": "[home] item 40", "description": "A thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": A, "project": "projects/alpha"}, "updated": 1.0}))
 n0 = len(wait_push(0))
@@ -2599,12 +2599,12 @@ except ToolError: ok = False
 check("the writer is never refused for a pilot debt", ok)
 check("the nag says it moves instead", "Still missing after 30 min, it moves to the router" in server._nag(A) and "refuses your next board write" not in server._nag(A), server._nag(A))
 d = server._owed_load(); d["projects/alpha"][A]["ts"] += 3600; server._owed_save(d)
-server._page_ts = lambda key: time.time() + 5           # a timeline line: the page is newer, its Current state is not
+server._pdebts._page_ts = lambda key: time.time() + 5           # a timeline line: the page is newer, its Current state is not
 o = server._owed_settle().get("projects/alpha", {})
 check("a timeline line settles the next-only debt, not the state change", list(o) == [A], o)
 _pg.ct_changed_since = lambda key, ts: True
 check("a Current-state edit settles it", "projects/alpha" not in server._owed_settle(), server._owed_load())
-server._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
+server._pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
 # the fallback: still missing past the grace → the keeper's, with today's notice saying who left it
 server._update("a1", next="one more step", sender="work-osprey-main")
 check("inside the grace nothing moves", server._pilot_fallback_tick() == 0)
@@ -2669,7 +2669,7 @@ check("the keeper's own write is its own, as before", S in server._owed_load()["
 server._cfg.CFG["pilot"]["writer_owes_page"] = False; server._owed_save({}); n0 = len(wait_push(0))
 res = server._update(gid_new, next="switch off again", sender="work-osprey-main"); p = wait_push(n0 + 1)
 check("off: today's behaviour (the keeper charged and told at once)", "charged to the keeper work-osprey" in res and list(server._owed_load()["projects/alpha"]) == [S] and len(p) == n0 + 1 and p[-1][0] == S, res)
-server._page_ts, _pg.ct_changed_since = _pts0, _ct0
+server._pdebts._page_ts, _pg.ct_changed_since = _pts0, _ct0
 # ---- the pane gate follows [pilot] writer_owes_page, and settles as the server does
 from stackshot.projects import pages as _pg2
 _pg2._cfg.CFG["pilot"]["writer_owes_page"] = True
