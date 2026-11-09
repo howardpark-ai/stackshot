@@ -18,6 +18,8 @@ refuse such an ask now; this finds the ones written before them, or that got thr
   3b5 [keywords.ask_options] `refusals_after` (invented stand-ins: "nay", "instead"; particles "xa", "xo"): the label right before the word is turned away, with an optional particle and spaces between and no word boundary after it
   3c options the page cannot read (one option, no single recommended, a non-boolean recommended) count as Yes / No, so an open question over them is found and the detail says so
   3d an ask that cannot be split into Decide and Recommend is not read
+  3e no options and a Recommend that is no yes or no (a person, a topic, a date; any language of the Decide part) is found, once, with the same fix line; not found: options listed, a Recommend of yes / no /
+     approve / go ahead, a decision-less item, a watcher's ask, a closed item; the yes/no words are the English ones plus [keywords.ask_options] yes_no_words (stand-ins: Greek words, "vey") and a `particles` suffix
   4  the pass: the finding is a filing-pass finding, sent once to where the daily run's findings go (the project's -main agent, marked for the owner, for the owner's own item) with the fix line; sent again after a write
      only while it stands; quiet once the ask is rewritten with options (no message, gone from the record); the check is the write gates' own matchers (the server's names are ask_read's)
 
@@ -80,7 +82,7 @@ def found(items):
     return {f["id"]: f for f in fs if f["category"] == "ask-options"}, fs
 
 OPEN = ask("which layout the item page uses", "the narrow one")
-YESNO = ask("whether to ship the retry change", "ship")
+YESNO = ask("whether to ship the retry change", "yes")
 ALT = ask("the side panel's left line: A (full height, as now) or B (starts below the cards)", "A")
 OPT_PAIR = [{"label": "Yes", "line": "Answer yes.", "recommended": True}, {"label": "No", "line": "Answer no.", "recommended": False}]
 GO_PAIR = [{"label": "Approve", "line": "Go ahead.", "recommended": True}, {"label": "Decline", "line": "Hold it.", "recommended": False}]
@@ -127,7 +129,7 @@ fine = build(
     asking(22, ask("whether to ship the retry change", "yes, ship it")),                    # "yes" in a Recommend that answers a yes/no
     asking(23, ask("which layout the item page uses", "Narrow, the one that fits a phone"), opts("Wide", "Narrow", rec="Narrow")),      # an open question that lists its answers, Recommend names the recommended one
     asking(24, ask("whether what we shipped is enough", "yes")),                              # "what" only later in a yes/no frame
-    asking(25, ask("should we ship A or hold", "ship")),                                      # a "should" frame passes the read the write gates use
+    asking(25, ask("should we ship A or hold", "yes")),                                      # a "should" frame passes the read the write gates use
     item(26, state="doing", needs=["home-agent"], ask=OPEN, mover="home-agent", next="home-agent: build it"),      # needs no decision
     item(27, state="your-call", needs=["decision"], mover="Oliver", ask="Decide: when does the vendor reply arrive? · Options: arrived / not yet, ask again on <date> / drop", next="Oliver: decide", watch={"asked": "relay"}),      # a watcher's own ask
     asking(28, OPEN, status="completed", outcome="done"),                                     # closed
@@ -323,6 +325,64 @@ check("3c …a yes/no Decide over them is none", "board#9080" not in got)
 sep = build(asking(90, "which layout the item page uses?"), asking(91, "Decide: which layout - Recommend: narrow - Stakes: none"), asking(92, "which layout the item page uses?", opts("Wide", "Narrow")))
 got, _all = found(sep)
 check("3d an ask with no Decide / Recommend separators is not read (the shape gate's and ask-missing's): no finding, no open-question wording", got == {}, got)
+
+BID = lambda n: "board" + chr(35) + str(n)      # the shown id, built at run time
+# ---- 3e. no options and a Recommend that is no yes or no: the page's Yes / No cannot answer it, whatever words the Decide part is in (ask_read.recommend_not_stance)
+def stance_set(words=(), particles=()):
+    sec = _cfg.CFG.setdefault("keywords", {}).setdefault("ask_options", {}); sec["yes_no_words"] = list(words); sec["particles"] = list(particles)
+GREEK_Q = "ποιος θα συμμετάσχει και ποιο θέμα"          # "who joins and which topic": no English question word
+GREEK_YES, GREEK_NO = "ναι", "όχι"                      # stand-in yes and no words of another language
+try:
+    kw_off()
+    cases = build(
+        asking(9400, ask("the guest and the topic for Friday", "Elena, on pricing")),                 # a noun phrase, Recommend names a person and a topic
+        asking(9401, ask(GREEK_Q, "η Ελένη και το θέμα των τιμών")),                                    # another language, Recommend names a person and a topic
+        asking(9402, ask("whether the guest joins", "Friday at ten")),                                  # a yes/no Decide, Recommend a date
+    )
+    got, _all = found(cases)
+    check("3e no options and a Recommend naming a person, a topic or a date is found, whatever the Decide part's words (an English noun phrase, a yes/no frame, Greek)",
+          set(got) == {BID(9400), BID(9401), BID(9402)}, sorted(got))
+    d = got[BID(9400)]["detail"]
+    check("3e …the detail says it lists no options, quotes the Recommend and says the page shows only Yes / No; the fix is the ask-options fix line",
+          "lists no options" in d and "'Elena, on pricing'" in d and "is not a yes or a no" in d and "only Yes / No under it" in d and got[BID(9400)]["fix"] == AC.FIX["ask-options"], got[BID(9400)])
+    check("3e …it is one finding kind (ask-options) with the item id, and the shape of the others (project, mover, source code)",
+          all(f["category"] == "ask-options" and f["project"] == "projects/alpha" and f["mover"] == "Oliver" and f["source"] == "code" for f in got.values()), got)
+    got2, _all = found(build(asking(9410, ask("which layout the item page uses", "the narrow one"))))
+    check("3e an open question already found for its Decide part is not found a second time for its Recommend: one finding, one sentence", BID(9410) in got2 and got2[BID(9410)]["detail"].count("; ") == 0
+          and "open question" in got2[BID(9410)]["detail"], got2)
+    fine = build(
+        asking(9420, ask("the guest and the topic for Friday", "Elena, on pricing"), opts("Elena on pricing", "Nikos on pricing")),    # options listed: the Recommend names an option
+        asking(9421, ask("whether the guest joins", "yes")),                                               # a yes
+        asking(9422, ask("whether the guest joins", "No, not on Friday")),                                   # a no
+        asking(9423, ask("whether to ship", "Yes, ship it now")),
+        asking(9424, ask("whether to ship", "Approve")),
+        asking(9425, ask("whether to ship", '"yes"')),                                                      # behind a quote
+        asking(9426, ask("whether to ship", "Go ahead")),
+        asking(9427, ask("whether to ship", "Go.")),
+        item(9428, state="doing", needs=["home-agent"], ask=ask("the guest and the topic", "Elena"), mover="home-agent", next="home-agent: build it"),     # needs no decision
+        item(9429, state="your-call", needs=["decision"], mover="Oliver", ask="Decide: who has arrived? · Options: arrived / not yet / drop", next="Oliver: decide", watch={"asked": "relay"}),   # a watcher's own ask
+        asking(9430, ask("the guest and the topic", "Elena"), status="completed", outcome="done"),           # closed
+    )
+    got3, _all = found(fine)
+    check("3e not found: options listed, a Recommend of yes, no, approve, go ahead (also behind a quote or a no with words), an item that needs no decision, a watcher's own ask, a closed item", got3 == {}, got3)
+    nonyes = build(*[asking(9440 + i, ask("whether to ship", r)) for i, r in enumerate(("Yesterday", "Nothing yet", "Notion", "Go with Elena", "Hold the 12th", "Elena"))])
+    got4, _all = found(nonyes)
+    check("3e a Recommend that only starts with the letters of a yes/no word (Yesterday, Nothing, Notion), or with go / hold as the first word of a phrase that names something, is found", len(got4) == 6, sorted(got4))
+    gk = lambda rec: bool(found(build(asking(9450, ask(GREEK_Q, rec))))[0])      # True when found: the Recommend is no yes or no
+    check("3e with the settings empty a Greek yes or no is no yes or no (only the English words ship)", gk(GREEK_YES) and gk(GREEK_NO + ", αύριο"), (gk(GREEK_YES), gk(GREEK_NO)))
+    stance_set(words=[GREEK_YES, GREEK_NO])
+    check("3e [keywords.ask_options] yes_no_words: the configured words make a Recommend a yes or a no (alone, with a comma, behind a quote), through the audit; a Greek name is still not",
+          not gk(GREEK_YES) and not gk(GREEK_NO + ", αύριο") and not gk("«" + GREEK_YES + "»") and gk("η Ελένη"), (gk(GREEK_YES), gk(GREEK_NO + ", αύριο"), gk("η Ελένη")))
+    check("3e …the same words answer ask_read.recommend_stance, the English ones still work beside them, and a word that only starts with one is none",
+          ask_read.recommend_stance(GREEK_YES) and ask_read.recommend_stance("Yes") and not ask_read.recommend_stance("Elena") and ask_read.recommend_stance(GREEK_NO.upper() + "!")
+          and not ask_read.recommend_stance(GREEK_YES + "φ"))
+    stance_set(words=["vey"], particles=["zz"])
+    check("3e a `particles` suffix may follow a configured word ('veyzz' counts, 'veyq' does not)",
+          ask_read.recommend_stance("veyzz, do it") and not ask_read.recommend_stance("veyq") and ask_read.recommend_stance("vey"), (ask_read.recommend_stance("veyzz"), ask_read.recommend_stance("veyq")))
+    kw_off()
+    check("3e …off again, 'vey' is no yes or no", not ask_read.recommend_stance("vey"))
+finally:
+    kw_off()
 
 # ---- 4. the pass: delivery, once, quiet once rewritten
 clear_state()

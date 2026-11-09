@@ -437,7 +437,7 @@ upd(123, next=BARE)
 check("12 update: [model] guards = false skips it", nx(123) == BARE, mt(123)["next"])
 GUARDS["guards"] = True
 # ---- create
-ASK12 = "Decide: run the script now · Recommend: run it · Stakes: a day of delay · By: no date"      # a create has no state to store, so a Oliver next line goes with needs=decision and an ask (an agent state under it would be refused)
+ASK12 = "Decide: run the script now · Recommend: yes · Stakes: a day of delay · By: no date"      # a create has no state to store, so a Oliver next line goes with needs=decision and an ask (an agent state under it would be refused)
 refused("12 create: a Oliver next line with a bare box-a command is refused with the step's text",
         lambda: server._create(subject="[home] case-a bare", description=DESC, project="projects/alpha", owner="home-front", next=BARE, needs=["decision"], ask=ASK12), "next line: `bash /home/user/notes/x.sh` is bash for box-a")
 out12 = server._create(subject="[home] case-a wrapped", description=DESC, project="projects/alpha", owner="home-front", next=WRAP, needs=["decision"], ask=ASK12)

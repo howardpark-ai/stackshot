@@ -263,7 +263,7 @@ refused_nw("wait structure: …the same wake push with no after is refused", 25,
 upd(25, wake=day(5), after=["a24"])
 check("wait structure: an added after with a later wake is accepted", mt(25)["wake"] == day(5) and mt(25).get("after"), mt(25))
 item(46, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
-refused_nw("holder: needs moved to decision is no hand-off (it holds no session)", 46, lambda: upd(46, wake=day(5), needs=["decision"], ask="Decide: keep it parked or drop it · Recommend: keep it parked · Stakes: low · By: tomorrow"), "clock pushed out")
+refused_nw("holder: needs moved to decision is no hand-off (it holds no session)", 46, lambda: upd(46, wake=day(5), needs=["decision"], ask="Decide: keep it parked or drop it · Recommend: yes · Stakes: low · By: tomorrow"), "clock pushed out")
 item(21, mover=BACK, next="team-back: do the thing")
 upd(21, wait_kind="event", wait_event="recycle", ask_by=day(4), post_wake_mover=BACK, mover="none")
 check("ask_by: the event-wait form itself (a first ask_by) is accepted", mt(21)["ask_by"] == day(4) and mt(21)["wait_kind"] == "event", mt(21))

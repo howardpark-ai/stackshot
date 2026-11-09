@@ -62,7 +62,7 @@ now = time.time()
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                 "session": "home-keeper", "agents": {"home-here": "builds it"}, "back_agents": {"home-here": "builds it"}, "status": "active", "board": [], "board_open": 0}}}))
 DESC = "A thing. It lives here. Finished when it works."
-ASK = "Decide: whether to ship · Recommend: ship · Stakes: none either way · By: no date"
+ASK = "Decide: whether to ship · Recommend: yes · Stakes: none either way · By: no date"
 YESNO = "Decide: whether to go ahead · Recommend: go · Stakes: a day either way · By: no date"
 YN = [{"label": "Approve", "line": "Go ahead as proposed", "recommended": True}, {"label": "Decline", "line": "Do not go ahead", "recommended": False}]   # Approve and Decline are options like any other: only an owner who lists them gets them
 OPTS = [{"label": "Wait", "line": "Wait for the next release", "recommended": False}, {"label": "Ship", "line": "Ship it now as it is", "recommended": True},

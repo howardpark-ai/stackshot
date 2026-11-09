@@ -83,7 +83,7 @@ check("2 create: the item's own mover as the opener of its steps is accepted", r
 r = server.stackshot_create(subject="[home] a background agent's step", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, needs=[BUILD], next=f"{REVIEW}: review it\n{BUILD}: then build it")
 check("2 create: a background agent's step on another session's item is accepted", r.startswith("created"), r)
 r = refusal(lambda: server.stackshot_create(subject="[home] the owner's call", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
-                                            ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", then=BUILD))
+                                            ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", then=BUILD))
 check("2 create: an item the owner moves, with a front agent's next on it, is not judged as a session's (control: the owner's own create passes)", r == "", r)
 put(9, mover=BUILD, needs=[BUILD], next=f"{BUILD}: the item a check can name")
 put(1, project="projects/solo", needs=[], next=f"{MAIN}: look at the page")           # a project with no builder and no -main agent: nobody moves the item

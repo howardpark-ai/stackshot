@@ -497,7 +497,7 @@ server._handback_tick(now=time.time() + 999)
 check("3g negative: an item that moved on while the line was held (the builder is named again) is not announced as back with the keeper", not hb_notes("a24", n0) and held() == {}, (hb_notes("a24", n0), held()))
 n0 = len(pushes())
 server._update("a25", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
-server._update("a25", needs=["decision"], ask="Decide: whether to ship · Recommend: ship · Stakes: none · By: no date", sender="osprey-x"); settle()
+server._update("a25", needs=["decision"], ask="Decide: whether to ship · Recommend: yes · Stakes: none · By: no date", sender="osprey-x"); settle()
 server._handback_tick(now=time.time() + 999)
 check("…nor one that now waits on his decision", not hb_notes("a25", n0) and held() == {}, (hb_notes("a25", n0), held()))
 # 0 = no hold

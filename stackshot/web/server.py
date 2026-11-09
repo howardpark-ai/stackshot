@@ -4861,7 +4861,7 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
 # The decision gates live in decision_gates.py (_OPT_FORM and _OPT_RELAUNCH, the matchers' names, _gate_alternatives, _gate_open_question, _gate_mockup, _gate_one_decision, _gate_own_action,
 # _options_note, _actor_note); every name stays on this module as well, which is how the writes below, the tests and the tools reach them.
 from stackshot.web.decision_gates import (  # noqa: E402,F401
-    _OPT_FORM, _OPT_RELAUNCH, _lettered_alternatives, _alternatives, _gate_alternatives, _decide_of, _open_question, _gate_open_question, _MOCKUP_ASK,
+    _OPT_FORM, _OPT_RELAUNCH, _lettered_alternatives, _alternatives, _gate_alternatives, _decide_of, _open_question, _gate_open_question, _gate_recommend_stance, _MOCKUP_ASK,
     _gate_mockup, _CODE_ID, _CODE_REF_RX, _CODE_BARE_RX, _CODE_BARE_AFTER, _CODE_UNIT_RX, _CODE_PAREN_RX, _MANY_DECISIONS_RX, _URL_ENTITY_RX,
     _code_defined, _one_decision_kind, _one_decision, _gate_one_decision, _OWN_VERBS, _OWN_DONE, _OWN_JUDGE_RX, _OWN_NOT_DO, _OWN_END, _OPEN_Q_RX,
     _OWN_ALT_RX, _OWN_STOP, _OWN_MATCH_SHARE, _own_word, _own_words, _YESNO_LABELS, _GOAHEAD_LABELS, _own_action_rx, _labels_in, _yes_no_options,
@@ -11248,7 +11248,7 @@ _ITEM_FORM = (
     f"A command for {OWNER} to run, or a paste, belongs on the item: in next when it is short (a code span), otherwise on the project page, with next linking to it. "
     "options: when the decision is a pick between alternatives, list them, each on one line, "
     f"{_OPT_FORM}; the ask's Recommend names the recommended one's label. The server refuses a needs=decision item whose ask or "
-    f"description names alternatives while it lists none: words such as \"which of the two\", \"pick one\", \"x, y or z\", \"x vs y\", \"Option A\", and labeled choices in the Decide part (\"A or B\", \"A (…) or B (…)\", \"A: … or B: …\"); put each alternative in as one option, or the page draws only Yes / No for it. A needs=decision item with no options whose Decide part opens with what, which, how, who, when, where or why is refused (create; an update that sets the ask or options or puts it on his call), since Yes / No cannot answer it: list its answers as options or reword it as a yes/no (\"Decide: whether to …\"). Option labels and the ask line name who acts ({OWNER}, a session's name, a role), never \"you\" or \"I\" (the reply notes one). A yes/no decision lists two options, \"Approve\" and \"Decline\" (the one you recommend marked recommended: true), so {OWNER} gets one-click buttons. options=\"none\" clears them (refused while the ask is an open question). Write the project page first, then the board: a page write up to five minutes before the change counts."
+    f"description names alternatives while it lists none: words such as \"which of the two\", \"pick one\", \"x, y or z\", \"x vs y\", \"Option A\", and labeled choices in the Decide part (\"A or B\", \"A (…) or B (…)\", \"A: … or B: …\"); put each alternative in as one option, or the page draws only Yes / No for it. A needs=decision item with no options whose Decide part opens with what, which, how, who, when, where or why is refused (create; an update that sets the ask or options or puts it on his call), since Yes / No cannot answer it: list its answers as options or reword it as a yes/no (\"Decide: whether to …\"). The same goes for a needs=decision item with no options whose Recommend part is not a yes or a no (it names a person, a topic, a date, whatever the Decide part's wording or language), since the page draws only Yes / No under it: put the choices as options, or make it a yes/no question with a Recommend of yes or no. Option labels and the ask line name who acts ({OWNER}, a session's name, a role), never \"you\" or \"I\" (the reply notes one). A yes/no decision lists two options, \"Approve\" and \"Decline\" (the one you recommend marked recommended: true), so {OWNER} gets one-click buttons. options=\"none\" clears them (refused while the ask is an open question). Write the project page first, then the board: a page write up to five minutes before the change counts."
 )
 
 
@@ -11426,8 +11426,8 @@ _NEXT_CREATE_PARAM = Annotated[str, Field(description="The checklist, one step p
 
 _DESCRIPTION_PARAM = Annotated[str, Field(description=f"The item's background as short `- ` bullets, at most {_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters, live state only (never steps or commands): description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\". The first bullet opens `Goal:` (case-sensitive), a symptom or cause goes in a later `Problem:` bullet, {OWNER}'s words go in a bullet such as `- {OWNER}: …`, and parallel bullets go under one parent bullet, indented two spaces.")]
 
-_ASK_PARAM = Annotated[str, Field(description="The one line a needs=decision item carries, at most 240 characters: ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099\" (By is a date in words, or no date). A real choice, not \"have you done X?\"; one decision per ask. \"none\" or clear_ask=true withdraws it.")]
-_ASK_PARAM_NEW = Annotated[str, Field(description="The one line a needs=decision item carries, at most 240 characters: ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099\" (By is a date in words, or no date). A real choice, not \"have you done X?\"; one decision per ask.")]      # create: no ask exists yet to withdraw, and create has no clear_ask
+_ASK_PARAM = Annotated[str, Field(description="The one line a needs=decision item carries, at most 240 characters: ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099\" (By is a date in words, or no date). A real choice, not \"have you done X?\"; one decision per ask. With no options listed the Recommend is a yes or a no. \"none\" or clear_ask=true withdraws it.")]
+_ASK_PARAM_NEW = Annotated[str, Field(description="The one line a needs=decision item carries, at most 240 characters: ask=\"Decide: whether to approve the sample schema · Recommend: Approve · Stakes: waiting a week delays the demo · By: Mon Jun 8th 2099\" (By is a date in words, or no date). A real choice, not \"have you done X?\"; one decision per ask. With no options listed the Recommend is a yes or a no.")]      # create: no ask exists yet to withdraw, and create has no clear_ask
 
 _OPTIONS_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=f"The alternatives of a decision, one per line: options=[{{\"label\": \"Approve\", \"line\": \"Approve the schema\", \"recommended\": true}}, {{\"label\": \"Decline\", \"line\": \"Wait a week\", \"recommended\": false}}] ({_rmod.OPTIONS_MIN}-{_rmod.OPTIONS_MAX} entries, exactly one recommended, each line at most {_rmod.OPTION_LINE_MAX} characters). A yes/no decision lists Approve and Decline.")]
 
@@ -11719,6 +11719,7 @@ def _create_item(
     _gate_alternatives(meta, description)  # alternatives named, none listed
     if not getattr(_QUESTION, "on", False):    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
         _gate_open_question(meta)          # an open question with no options: the page would draw Yes / No under it
+        _gate_recommend_stance(meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
     _gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
     _gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += _options_note(meta) + _actor_note(meta)
@@ -13836,6 +13837,7 @@ def _update_unlocked(
     if item.get("status") != "completed" and not closing and (ask or meta.get("ask") != ask_was or opts is not None
                                                                or (needs_set and "decision" not in [str(x).lower() for x in was_needs])):   # a write that sets the ask or the options, or puts the item on his call: an open question needs options
         _gate_open_question(meta)
+        _gate_recommend_stance(meta)       # the same writes: no options and a Recommend that is no yes or no
     if item.get("status") != "completed" and not closing and (ask or (description and not reformat) or next_touch or needs_set or opts is not None):   # a write that sets the ask or the text it is read against
         _gate_mockup(meta, item.get("description") or "")
     if item.get("status") != "completed" and not closing and (ask or needs_set or opts is not None or next_touch):   # his own action asked as a decision: only a call that writes what it reads

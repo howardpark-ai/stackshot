@@ -127,7 +127,7 @@ check("board: Oliver's item sits under its `then` agent", bd.lab(bd.item("a12"))
 check("board: Oliver's item with no `then` sits in the 'no agent' group, not under its creator", bd.lab(bd.item("a13")) == ui_render.Board.NO_AGENT == "no agent", bd.lab(bd.item("a13")))
 
 # ---- 6. D9: `then` defaults to the builder doing the work
-ASK = "Decide: pick a vendor · Recommend: A, it is cheaper · Stakes: B costs a month · By: no date"
+ASK = "Decide: pick a vendor · Recommend: yes · Stakes: B costs a month · By: no date"
 put(14, project="projects/alpha", creator=MAIN, needs=[REVIEW])
 res = server._update("a14", needs=["decision"], ask=ASK, sender=REVIEW)
 check("D9: a background mover that hands the item to Oliver becomes its `then`", rd(14)["metadata"].get("then") == REVIEW and "then" in res, (rd(14)["metadata"], res[-300:]))

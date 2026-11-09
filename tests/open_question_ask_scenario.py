@@ -115,7 +115,7 @@ check("1 create: …and the alternatives refusal no longer says an open question
 passes("1 create: an item that is no decision is not judged (the ask is read only on a decision)", lambda: server._create(subject="[home] build the layout", description=DESC, project="projects/alpha", owner="home-front",
                                                                                                                       next="team-back: build it", needs=["team-back"], ask=OPEN("which layout to ship")))
 
-out = passes("1 create: “ship X now or hold” names no interrogative and no list: this gate leaves it alone", lambda: mk(ask=OPEN("ship the layout now or hold", "ship")))
+out = passes("1 create: “ship X now or hold” names no interrogative and no list: this gate leaves it alone", lambda: mk(ask=OPEN("ship the layout now or hold", "yes")))
 check("1 create: …it is stored", bool(re.match(r"created \w\d+", out or "")), out)
 
 # ================================================================ 2. the open-question gate on an update

@@ -854,7 +854,7 @@ check("a non-front owner (the keeper) named alone by the builder is told as befo
       len(d55) == 1 and d55[0][1].startswith("[stackshot] a55 now needs you") and "back with you alone" not in d55[0][1] and not hb_notes(55, n55) and "back with them alone" not in out55, (d55, out55[-300:]))
 item(56, "projects/alpha", A, then=A, needs=[X]); p56 = len(pushes()); n56 = len(routing.read("projects/alpha"))
 server._cfg.CFG.setdefault("model", {})["one_mover"] = False      # this case writes decision beside the front agent on purpose (the hand-back notice is what is tested); the guard has its own suite
-out56 = hb(56, ["decision", A], ask="Decide: a or b \u00b7 Recommend: a \u00b7 Stakes: none \u00b7 By: no date"); settle(); server._cfg.CFG["model"]["one_mover"] = True
+out56 = hb(56, ["decision", A], ask="Decide: a or b \u00b7 Recommend: yes \u00b7 Stakes: none \u00b7 By: no date"); settle(); server._cfg.CFG["model"]["one_mover"] = True
 check("needs = decision beside the owner: Oliver's, not a hand-back; nothing is told to the owner",
       not hb_pushes(56, p56) and not hb_notes(56, n56) and "back with them alone" not in out56, (pushes()[p56:], out56[-300:]))
 item(57, "projects/alpha", A, then=A, needs=[X]); p57 = len(pushes()); n57 = len(routing.read("projects/alpha"))

@@ -78,7 +78,7 @@ from stackshot.model.model import Model, Wait   # noqa: E402
 OWN = model.owner_display()            # the owner as the instance names him ("the owner" in the example config)
 NOW = now0
 FUT, PAST = day(5), day(-3)
-ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 mt = lambda i, letter="a": rd(i, letter)["metadata"]
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 def upd(i, **kw): return server._update(f"a{i}", sender="home-front", **kw)
@@ -402,7 +402,7 @@ item(43, needs=[BACK], subject="[home] no ask_by", wait_kind="relay", wait_event
 refused_nw("hint: a stored wait with no end names clear_wait=true too", 43, lambda: upd(43, wait_event="Acme replies"), "has no end", "clear_wait=true")
 check("hint: …a stored wait is dropped by clear_wait=true in one write", (upd(43, clear_wait=True), "wait_kind" not in mt(43))[1], mt(43))
 # asking the owner on an item that still waits: refused with the hint, nothing written; clear_wait=true in the same update goes through
-ASK2 = "Decide: merge now · Recommend: merge · Stakes: a day · By: no date"
+ASK2 = "Decide: merge now · Recommend: yes · Stakes: a day · By: no date"
 refused_nw("ask: needs=decision on an item that stores a wait is refused, naming the wait and clear_wait=true", 40, lambda: upd(40, needs=["decision"], ask=ASK2),
            "a40 still waits on an anchor event (the PR merges)", "pass clear_wait=true with this update", "do not ask")
 out40 = upd(40, needs=["decision"], ask=ASK2, clear_wait=True)

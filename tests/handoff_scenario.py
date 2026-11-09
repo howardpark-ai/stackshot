@@ -152,7 +152,7 @@ server.CLI_SESSIONS = T / "cli"
 OWN = model.owner_display()
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
-ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 def upd(i, sender, **kw): return server._update(f"a{i}", sender=sender, **kw)
 def tick(at, *ids):
     """One pass of the hand-off clock at `at` (None: now) over the named items only (none named: the whole board)."""

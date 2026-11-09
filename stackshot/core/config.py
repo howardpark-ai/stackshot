@@ -599,6 +599,7 @@ KEYWORDS: dict[str, dict[str, tuple[str, str]]] = {
         "particles": ("words", "the suffixes that may follow the last word of an option's label in a Recommend sentence (a language that glues them on): the label still counts as named"),
         "refusals": ("words", "other-language words or phrases that say 'not this option' right before a label, letter or place (the English ones are not, no, avoid, never, skip, except, don't, instead of, rather than): the option after one is turned away"),
         "refusals_after": ("words", "other-language words that say 'not this option' right after a label (a language that puts the refusing word after it): the option right before one is turned away"),
+        "yes_no_words": ("words", "other-language words for yes, no, approve, decline, go and hold: a decision with no options is accepted only when its Recommend part opens with one of these or an English one; a `particles` suffix may follow"),
     },
     "server": {
         "command_cues": ("words", "other-language words that say an item waits on the owner running or pasting a command"),

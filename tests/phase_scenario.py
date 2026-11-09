@@ -177,7 +177,7 @@ out = server._create(subject="[home] phase create blocked", description=DESC, pr
 gid_b = created(out)
 check("3 a create with an open after link stores phase waiting and waits_on item", server._load(gid_b)["metadata"].get("phase") == "waiting" and server._load(gid_b)["metadata"].get("waits_on") == "item", server._load(gid_b)["metadata"])
 out = server._create(subject="[home] phase create decision", description=DESC, project="projects/alpha", owner="home-front", next=f"{OWN}: decide", needs=["decision"],
-                     ask="Decide: ship it · Recommend: ship it · Stakes: a week · By: no date")
+                     ask="Decide: ship it · Recommend: yes · Stakes: a week · By: no date")
 gid_d = created(out)
 check("3 a create that asks the owner stores phase alive", server._load(gid_d)["metadata"].get("phase") == "alive", server._load(gid_d)["metadata"])
 out = server._create(subject="[home] phase create relay", description=DESC, project="projects/alpha", owner="home-front", next="team-back: wait for the reply", needs=[BACK],

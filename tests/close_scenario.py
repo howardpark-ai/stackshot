@@ -113,7 +113,7 @@ snap("a2 a4 superseded")
 
 # ---- 5. reopening
 refused("reopening without a new next", lambda: server._update("a4", status="open"), "reopening a4 needs a new next")
-out = server._update("a4", status="open", next="Oliver: pick it up again", needs=["decision"], ask="Decide: pick it up again now · Recommend: pick it up · Stakes: a day of delay · By: no date")
+out = server._update("a4", status="open", next="Oliver: pick it up again", needs=["decision"], ask="Decide: pick it up again now · Recommend: yes · Stakes: a day of delay · By: no date")
 m = rd(4)["metadata"]
 check("reopening drops outcome, outcome_text, reason and superseded_by and takes the new next",
       rd(4)["status"] == "open" and not any(k in m for k in ("outcome", "outcome_text", "reason", "superseded_by")) and rd(4)["description"] == DESC and m.get("next", "").split("\n")[0] == "Oliver: pick it up again", m)      # the server's step of his follows it on the list

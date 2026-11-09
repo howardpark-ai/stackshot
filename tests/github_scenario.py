@@ -218,7 +218,7 @@ now = time.time()
 (T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "Alpha", "name": "Alpha", "org": "home", "tags": [], "type": "project",
                                                                                 "session": "home-here", "status": "active", "board": [], "board_open": 0}}}))
 DESC = "- A thing\n- It lives here\n- Finished when it works"
-ASK = "Decide: whether to ship · Recommend: ship · Stakes: none either way · By: no date"
+ASK = "Decide: whether to ship · Recommend: yes · Stakes: none either way · By: no date"
 OPTS = [{"label": "Ship", "line": "Ship it now as it is", "recommended": True}, {"label": "Wait", "line": "Wait for the next release", "recommended": False}]
 def item(L, i, status="open", **meta):
     (T / f"store/{L}/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {L}{i}", "description": DESC, "status": status,
@@ -1365,7 +1365,7 @@ check("create: g<n> in subject, description, next and the options is stored as b
       and dw["metadata"]["next"] == f"ping {nk} owner" and dw["metadata"]["options"][0]["label"] == f"After {nk}" and dw["metadata"]["options"][0]["line"] == f"Wait for {nk} to close", dw)
 check("create: the reply echoes the shown form, never the store id", nk in out and not re.search(rf"(?<![\w#/`-]){gk}(?![\w`])", out), out[:600])
 out = server._update(gw, next=f"after {gk} closes", description=f"- Now waits on {gk}\n- It lives here\n- Done when it works", subject=f"[home] after {gk}",
-                     ask=f"Decide: whether to wait on {gk} · Recommend: wait · Stakes: none either way · By: no date", work={"text": f"watch {gk}", "state": "in progress"}, sender="home-here")
+                     ask=f"Decide: whether to wait on {gk} · Recommend: yes · Stakes: none either way · By: no date", work={"text": f"watch {gk}", "state": "in progress"}, sender="home-here")
 dw = rd(gw[0], gw[1:])
 check("update: g<n> in subject, description, next, ask and a work line is stored as board#<n>",
       dw["subject"] == f"[home] after {nk}" and dw["description"].startswith(f"- Now waits on {nk}") and dw["metadata"]["next"] == f"after {nk} closes"

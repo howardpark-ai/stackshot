@@ -45,7 +45,7 @@ p.cmd_registry(quiet=True)
 from stackshot.web import server
 server._publish = lambda: None
 DESC = "- Goal: The side panel's left line\n- It lives in the board's stylesheet\n- Done when the line is picked"
-ASKB = lambda decide, rec="A": f"Decide: {decide} · Recommend: {rec} · Stakes: the panel looks different · By: no date"
+ASKB = lambda decide, rec="yes": f"Decide: {decide} · Recommend: {rec} · Stakes: the panel looks different · By: no date"
 LABELS = [{"label": "A", "line": "Full height, as now.", "recommended": True}, {"label": "B", "line": "Starts below the cards.", "recommended": False}]
 def items():
     return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit() and p_.stem != "1")
@@ -69,10 +69,10 @@ REFUSED = {"the exact shape (A (…) or B (…) after a which-way question)": AS
            "a pair in the middle of a chain (D or A or B)": ASKB("D or A or B for the header"), "a pair at the end of a chain (C or B or D)": ASKB("C or B or D for the header", "B"),
            "a nested parenthesis": ASKB("which way: A (full height (as now)) or B (below the cards)")}
 ACCEPTED = {"a plain yes/no question": "Decide: ship it? · Recommend: yes · Stakes: a day · By: no date", "whether to": ASKB("whether to take vendor A"), "one letter alone": ASKB("whether plan A goes ahead"),
-            "lowercase a or b": ASKB("a or b"), "the article": ASKB("a new column or the old one", "the old one"), "an or between unlabeled words": ASKB("merge now or later", "now"),
-            "letters out of order": ASKB("B or A"), "A/B test": ASKB("ship the A/B test", "yes"), "a code, not a pair": ASKB("Q3 or B2 as the target date", "Q3"), "a pair of words": ASKB("keep Alpha or Beta", "Alpha"),
+            "lowercase a or b": ASKB("a or b"), "the article": ASKB("a new column or the old one"), "an or between unlabeled words": ASKB("merge now or later"),
+            "letters out of order": ASKB("B or A"), "A/B test": ASKB("ship the A/B test", "yes"), "a code, not a pair": ASKB("Q3 or B2 as the target date"), "a pair of words": ASKB("keep Alpha or Beta"),
             "quoted words (TODO or FIXME)": ASKB('treat "TODO" or "FIXME" comments as failures?', "yes"), "quoted words (yes or no)": ASKB('accept "yes" or "no" in the form field?', "yes"),
-            "curly-quoted words": ASKB("keep “Alpha” or “Beta” as the name", "Alpha"), "a chain with no pair in order (D or C or B)": ASKB("D or C or B", "B")}
+            "curly-quoted words": ASKB("keep “Alpha” or “Beta” as the name"), "a chain with no pair in order (D or C or B)": ASKB("D or C or B")}
 
 # ---- 1. create: refused without options, nothing written
 for name, a_ in REFUSED.items():

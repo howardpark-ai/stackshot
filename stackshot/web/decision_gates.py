@@ -66,6 +66,26 @@ def _gate_open_question(meta: dict[str, Any]) -> None:
                     "Or reword the Decide part as a yes/no (pass ask=\u201cDecide: whether to \u2026 \u00b7 Recommend: yes or no \u00b7 Stakes: \u2026 \u00b7 By: \u2026\u201d on the update) with a Recommend part that answers yes or no." + _OPT_RELAUNCH)
 
 
+# A decision with no options is a yes/no: the page draws Yes / No under it, so its Recommend part is a yes or a no. The Decide part's wording cannot tell (a noun phrase, a question in another
+# language: "who joins and which topic"), so the Recommend part does: one that names a person, a topic, a date or anything else than a stance is an answer to a different question, and the owner
+# would see Yes / No under it. Refused with the same conditions as the open-question gate (_gate_open_question's callers), which runs first: an English question word has its own refusal.
+# Which words count as a yes or a no is decided in ask_read (`recommend_stance`): the English list it ships plus the instance's `yes_no_words` setting.
+_recommend_not_stance = _ar.recommend_not_stance
+
+
+def _gate_recommend_stance(meta: dict[str, Any]) -> None:
+    """Refuse a needs=decision item that lists no options while the Recommend part of its ask is not a yes or a no: the page would draw Yes / No under a question they cannot answer."""
+    if "decision" not in _needs_kinds(meta) or meta.get("options") or _watch.asked_of(meta):
+        return
+    rec = _recommend_not_stance(meta)
+    if not rec:
+        return
+    raise ToolError(f"Refused: this needs=decision item lists no options and its Recommend part (\u201c{_clip_line(rec, 90)}\u201d) is not a yes or a no. "
+                    f"With no options the item page draws only Yes / No under the ask, which cannot answer a question whose answer is a person, a topic, a date or anything else than a yes or no. "
+                    f"Put the choices as options, {_OPT_FORM}, each an answer {OWNER} could pick, exactly one recommended, and name the recommended option's label in the ask's Recommend part. "
+                    "Or rephrase the Decide part as a yes/no question (\u201cDecide: whether to \u2026\u201d) with a Recommend part of yes or no." + _OPT_RELAUNCH)
+
+
 # ----------------------------------------------------------------------------- a design decision's mockup rides on the ask
 # A needs=decision item whose text links a mockup (a claude.ai artifact page or a fleet tool's /mockup/<n> page) carries that link on the ask, the line the owner answers, and not only in the
 # background: the home row and the item page draw "Mockup \u2197" beside the question (render.mockup_url), and an ask with no link leaves him to hunt for it.
