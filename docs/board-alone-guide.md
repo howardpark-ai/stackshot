@@ -245,6 +245,7 @@ The verbs that exist today:
 | `agent-retire PROJECT NAME`, `agent-rename PROJECT OLD NEW` | Take an agent off, or rename its entry. Retiring the last agent of a project with no open item archives it. |
 | `mirror PROJECT [--make-page]` | Writes the page's three mirror lines again. |
 | `show PROJECT` | Prints the entry. |
+| `restore (--from-git REV \| --before DATE) [PROJECT] [--apply]`, `restore --list`, `restore --undo FILE` | Puts the project record, or one project of it, back from a past revision of the store's git history. A dry run until `--apply`; it keeps the file as it was and an undo file first. It restores the record as saved at that revision, so a change made after it is not in it. See `docs/projects.md`, "Restore a lost project". |
 
 `PROJECT` is the id (printed by `create`), the page key or a bare slug. `show` also resolves the project's name or a former name, but `mirror <name>` returned 404 for a page-less project where `show <name>` found it: give `mirror` the id. A key below another page (`projects/acme/notes`) is a sub-page, and sub-pages are never projects.
 

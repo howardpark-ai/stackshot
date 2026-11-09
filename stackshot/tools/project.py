@@ -14,11 +14,23 @@
                                                                                           page is in a brain marked shared or [pages] copy_project_lines is false (`stackshot projects fields PROJECT` reads the record instead);
                                                                                           --make-page is not tied to that switch: a missing page is made from the template on a brain not marked shared (state "written", no copied lines), never on a shared one
     tools/project.py show PROJECT                                                         the project's entry and what the registry reads of it
+    tools/project.py restore --list [--limit N]                                           the last revisions of the record file in the store's history: date and what changed in the project count
+    tools/project.py restore (--from-git REV | --before DATE) [PROJECT] [--apply]         the record, or one project of it, put back from a past revision (a dry run unless --apply; an undo file is kept first)
+    tools/project.py restore --undo FILE [--apply]                                        takes a restore back through the undo file it kept (a dry run unless --apply)
 
 PROJECT is an id (prj_<8 hex>), a page key, a bare slug, the project's name or a former name. A sub-page is never a project: its key names the top-level project that owns it for rename and the agent
 verbs, and is refused (400) by archive, reopen and move-page, which act on the whole project; the id of a sub-page is refused by every verb. Every verb is one atomic change of the record under the record's own lock (safe beside the running
 server), then a write of the page's mirror through the instance's page store when the project has a page there; a mirror that fails is reported and the record is right already.
 A page edit made by hand to one of the three mirrored lines is overwritten by the next mirror write.
+
+restore is the one verb that changes nothing unless `--apply` is given, and it writes no page lines (run `mirror PROJECT` after if the page should follow). A restore that changes a project's status says so on a line of its own ("THIS UN-ARCHIVES IT"). It reads the store's git repository (the server
+commits the record there within seconds of each change) with read-only git commands, never a checkout or a pull. REV is any git revision of that repository (a sha, `HEAD~5`, a branch, a tag);
+`--before DATE` takes the last revision of the record file from before that date: YYYY-MM-DD, or YYYY-MM-DD HH:MM[:SS], read in the instance's timezone unless it names its own zone ("2026-11-08 12:00", "2026-11-08 12:00 +0900", Z or +09:00, up to +1400; a date alone is its midnight; years 1970 to 2099); anything else is refused. `--list` shows which revisions there are. With PROJECT (an id, a page key, a bare slug, the name or a
+former name, looked up in that revision) only the project's entry, its row of the id table (and those of its sub-pages and former keys that are missing) and its mark come back, merged into the current
+record; without it the whole file comes back as saved, and the dry run names the projects made since, which would be gone. The record is put back as it was saved: a change made after that revision is not in it.
+Refused (exit 1, nothing written): a revision git does not know or one with no record file, a record at that revision that does not read, a PROJECT it does not hold, an entry that would take the page key or the name of a live
+project with another id, or a page key (its page, a former key or its id row) that another live id holds, a record that is being written (its lock stays held for 5 seconds), and a store that is not in a git repository. `--apply` keeps the file as it was in `--run-dir` (default
+`$XDG_DATA_HOME/stackshot-runs/project-restore/<time>/`, that is ~/.local/share/stackshot-runs/project-restore/) before it writes, and prints the `--undo` command.
 
     --dry-run             what would be written (the new entry, the page change in lines), and nothing is written to the record or the page
     --by LABEL            who the record names as the actor (default: `cli`)
@@ -60,7 +72,37 @@ def _parser() -> argparse.ArgumentParser:
     an = sub.add_parser("agent-rename"); an.add_argument("project"); an.add_argument("old"); an.add_argument("new")
     mi = sub.add_parser("mirror"); mi.add_argument("project"); mi.add_argument("--make-page", action="store_true")
     sh = sub.add_parser("show"); sh.add_argument("project")
+    global _RESTORE
+    _RESTORE = rs = sub.add_parser("restore", description="put the record, or one project, back from a past revision of the store's git history (a dry run unless --apply)")
+    rs.add_argument("project", nargs="?", default="", help="a project to restore alone (id, page key, slug or name, as that revision knows it); leave out for the whole record")
+    rs.add_argument("--from-git", metavar="REV", default="", help="any git revision of the store's repository: a sha, HEAD~5, a branch or a tag")
+    rs.add_argument("--before", metavar="DATE", default="", help="the last revision of the record file from before this date, in place of --from-git: YYYY-MM-DD [HH:MM[:SS]] [+0900], in the instance's timezone unless a zone is given (for example \"2026-11-08 12:00\")")
+    rs.add_argument("--list", action="store_true", help="list the last revisions of the record file with date and what changed in the project count")
+    rs.add_argument("--limit", type=int, default=20, help="how many revisions --list shows (default %(default)s)")
+    rs.add_argument("--apply", action="store_true", help="write it (the default is a dry run that changes nothing)")
+    rs.add_argument("--undo", metavar="FILE", default="", help="take back a restore through the undo.json it kept")
+    rs.add_argument("--run-dir", metavar="DIR", default="", help="where --apply keeps its undo copy (default ~/.local/share/stackshot-runs/project-restore)")
     return ap
+
+
+_RESTORE: argparse.ArgumentParser | None = None
+
+
+def _restore_usage(a: argparse.Namespace) -> str:
+    """"" when the restore arguments make sense together, else what is wrong with them."""
+    if a.apply and a.dry_run:
+        return "--apply and --dry-run contradict each other (restore is a dry run unless --apply)"
+    if a.list:
+        if a.project or a.before or a.apply or a.undo:
+            return "--list takes no PROJECT, --before, --apply or --undo (it may start from --from-git REV)"
+        return "" if a.limit >= 1 else "--limit is at least 1"
+    if a.undo:
+        if a.project or a.from_git or a.before:
+            return "--undo FILE takes no PROJECT, --from-git or --before"
+        return ""
+    if bool(a.from_git) == bool(a.before):
+        return "name the revision to restore from with --from-git REV (or --before DATE); --list shows the revisions, --undo FILE takes a restore back"
+    return ""
 
 
 def _copy_runner(args: list[str]) -> tuple[int, str]:
@@ -113,6 +155,12 @@ def run(a: argparse.Namespace) -> dict:
         if not pid:
             raise pv.VerbError(404, f"no project {a.project!r}")
         return {"project": pid["id"], "mirror": pv.mirror(pid["id"], io, make_page=a.make_page, dry=a.dry_run)}
+    if a.cmd == "restore":
+        if a.list:
+            return pv.restore_list(a.limit, rev=a.from_git)
+        if a.undo:
+            return pv.restore_undo(a.undo, apply=a.apply)
+        return pv.restore(a.project, rev=a.from_git, before=a.before, apply=a.apply, by=a.by, run_dir=a.run_dir or None)
     if a.cmd == "show":
         from stackshot.projects import project_registry as pr
         pid = pv.pid_of(a.project)
@@ -130,6 +178,12 @@ def main(argv: list[str]) -> int:
         a = ap.parse_args(argv)
     except SystemExit as e:
         return 2 if e.code else 0
+    if a.cmd == "restore":
+        bad = _restore_usage(a)
+        if bad:
+            _RESTORE.print_usage(sys.stderr)
+            print(f"project restore: {bad}", file=sys.stderr)
+            return 2
     from stackshot.core import config as _cfg
     for key, val in (("store", a.store), ("brain", a.brain), ("state", a.state)):
         if val:
@@ -143,6 +197,9 @@ def main(argv: list[str]) -> int:
     except ValueError as e:
         print(f"project {a.cmd}: the record cannot be read or written: {e}", file=sys.stderr)
         return 1
+    except OSError as e:                      # an undo folder that cannot be made or written (restore --run-dir), a full disk: before the record is written
+        print(f"project {a.cmd}: a file could not be read or written: {e}", file=sys.stderr)
+        return 1
     m = res.get("mirror") or {}
     if res.get("warning"):
         print(f"project {a.cmd}: {res['warning']}", file=sys.stderr)
@@ -150,6 +207,8 @@ def main(argv: list[str]) -> int:
         print(f"project {a.cmd}: the record is right, but the page was not written: {m.get('note')}", file=sys.stderr)
     if a.json:
         print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
+    elif a.cmd == "restore":
+        print("\n".join(res["lines"]))
     elif a.cmd == "show":
         v, rec = res.get("entry") or {}, res.get("record") or {}
         print(f"{v.get('id') or rec.get('id')}  name {v.get('name') or rec.get('keeper') or '-'}  status {v.get('status') or rec.get('status') or '-'}  scope {v.get('scope') or rec.get('scope') or '-'}")
