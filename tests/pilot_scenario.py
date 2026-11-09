@@ -902,12 +902,13 @@ ip = bq.item_html("a61")
 check("item page: titled by its id and subject, back link to the board, theme switch", '<h1><span class="hid">a61</span> queue item 61</h1>' in ip and '<p class="site"><a href="/"><img class="logo"' in ip and '<a href="/">← ' not in ip and ip.count('id="theme"') == 1 and "<title>a61 · queue item 61</title>" in ip, ip[:900])
 _side = lambda h: h[h.find('<aside class="iside"'):h.find("</aside>")]       # the right-hand sidebar (GitHub's issue layout)
 _istat = lambda h: h[h.find('<div class="istat">'):h.find("</div>", h.find('<div class="istat">'))]
-check("item page: the state line (item model) — the state tag, since, then who takes it; due and priority are in the sidebar, not here (the id in the title)",
-      _istat(ip).startswith('<div class="istat"><p class="istate"><span class="tag t-you">Your move</span> · since ') and " · then <b>" in _istat(ip) and "your call" not in _istat(ip) and "Due " not in _istat(ip)
+check("item page: the state line (item model) — the state tag and since; the mover and who takes it next are the sidebar's Mover and Then rows, due and priority are in the sidebar too, not here (the id in the title)",
+      _istat(ip).startswith('<div class="istat"><p class="istate"><span class="tag t-you">Your move</span> · since ') and " · then " not in _istat(ip) and "mover" not in _istat(ip) and "your call" not in _istat(ip) and "Due " not in _istat(ip)
       and "prio-" not in _istat(ip) and 'class="iid"' not in _istat(ip), _istat(ip))
-check("item page: the sidebar holds project, then, priority, expected by, each a small heading over its value; mover and due sit in the closed More details fold",
+check("item page: the sidebar opens with the mover, then holds project, then, priority, expected by, each a small heading over its value; due sits in the closed More details fold, the mover does not",
       '<dl class="sgrp"><dt>Then</dt><dd>' in _side(ip) and '<dt>Expected by</dt><dd>' in _side(ip)
-      and _side(ip).find("<h3>More details</h3>") < _side(ip).find('<dt>Mover</dt><dd><a href="https://sala.example.org/#s=home-beta"') and '<dt>Project</dt><dd><a href="/projects/beta">home/Beta</a>' in _side(ip)
+      and _side(ip).startswith('<aside class="iside" aria-label="Details"><dl class="sgrp"><dt>Mover</dt><dd><a href="https://sala.example.org/#s=home-beta"') and _side(ip).count("<dt>Mover</dt>") == 1
+      and _side(ip).find("<h3>More details</h3>") > _side(ip).find("<dt>Mover</dt>") and "<dt>Mover</dt>" not in _side(ip).split("<h3>More details</h3>")[1] and '<dt>Project</dt><dd><a href="/projects/beta">home/Beta</a>' in _side(ip)
       and '<dt>Priority</dt><dd>P2</dd></dl>' in _side(ip) and _side(ip).find("<h3>More details</h3>") < _side(ip).find('<dt>Due</dt><dd><span class="badge due">Due in 5 d')
       and '<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>' in _side(ip) and "<dt>Whose move</dt>" not in _side(ip), _side(ip))
 check("item page: two columns — the title over a wrapper holding the sidebar (first in the source, for the phone) and the main column",
@@ -925,7 +926,7 @@ check("item page: on a phone the Ask and the answer box come before the fields: 
       ".imain{display:contents}.imain>*{order:2}.imain>.istat,.imain>.iask,.imain>.ianswer,.imain>.iwait,.imain>.ioutcome{order:0}.iside{order:1}" in ip[ip.find("@media(max-width:767px)"):], ip[ip.find("@media(max-width:767px)"):][:400])
 check("item page: the id in the h1 is the title's first word, drawn as the title is, and the <title> starts with the id",
       ip.find("<title>a61 · ") > 0 and "main.itempage h1 .hid{font-family:inherit;font-weight:400;color:inherit}" in bq._css(), ip[:400])
-check("item page: the model's state as a tag for an outside wait (Waiting) and an agent's item (On agent)", '<span class="tag t-wait">Waiting</span>' in bq.item_html("a64") and '<span class="tag t-agent">On agent</span> · since ' in bq.item_html("a63") and " · mover <b>" in bq.item_html("a63"), bq.item_html("a64")[bq.item_html("a64").find("istate"):][:300])
+check("item page: the model's state as a tag for an outside wait (Waiting) and an agent's item (On agent)", '<span class="tag t-wait">Waiting</span>' in bq.item_html("a64") and '<span class="tag t-agent">On agent</span> · since ' in bq.item_html("a63") and " · mover <b>" not in bq.item_html("a63") and "<dt>Mover</dt>" in bq.item_html("a63"), bq.item_html("a64")[bq.item_html("a64").find("istate"):][:300])
 # every badge is a GitHub-style label: a pill with a tinted fill, text and border in the value's colour, 12px medium;
 # one colour per value, from the theme tokens, so the board's rows and the item page draw the same label
 _css = bq._css()

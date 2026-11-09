@@ -1,7 +1,7 @@
 """itempage.py — the words of the item page on the item model (the design: docs/design, section 8).
 
-The item page (render.py, Board.item_html) says an item in the model's terms: the goal as the title, one state line (alive · mover · since; waiting on · watched by · until · then;
-done · date · outcome) with the latest change beside it, the ask when the owner is the mover, Next as numbered lines each naming its mover, the wait and its chases.
+The item page (render.py, Board.item_html) says an item in the model's terms: the goal as the title, one state line (state · since; the wait block: waiting on · watched by · until · then;
+done · date · outcome; the mover is the sidebar's first row) with the latest change beside it, the ask when the owner is the mover, Next as numbered lines each naming its mover, the wait and its chases.
 This module is the pure half: plain text in, plain text out, no HTML, no Board and no server import (it reads model.py, watchers.py, handoff.py and model_guards.py for the one
 copy of the model's words). The renderer escapes and links what comes out. Nothing here is stored: every sentence is generated from fields the item already has.
 """
