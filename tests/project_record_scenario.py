@@ -215,14 +215,14 @@ class SlowRead:
     def __getattr__(s, n): return getattr(s.b, n)
 NAPS = 1.5
 assert B_ID not in _prr.entries(), "setup: beta has no entry yet"
-server.PAGE_IO = SlowRead(_pdb.page_io(), NAPS); box = {}
+server._pform.PAGE_IO = SlowRead(_pdb.page_io(), NAPS); box = {}
 th = threading.Thread(target=lambda: box.update(r=post(B_ID, "home-beta-main", "home-beta", role="main", mandate="talks")))
 th.start(); time.sleep(0.2); held_up = 0.0
 while th.is_alive():                                     # a second writer tries both locks all through the call: none of its page reads may sit inside either
     t1 = time.monotonic()
     with server._PROJECT_LOCK: prj.ensure_ids(["projects/alpha"])
     held_up = max(held_up, time.monotonic() - t1); time.sleep(0.1)
-th.join(); server.PAGE_IO = None
+th.join(); server._pform.PAGE_IO = None
 check("server project-agent: the page of a project with no entry is read before _PROJECT_LOCK and the record's lock: a second writer takes both at once while the slow read runs (it waited far under the read's sleep)",
       held_up < NAPS / 3 and box["r"][0] == 200 and "home-beta-main" in prj.ref(B_ID)["agents"], (held_up, box))
 st, out = post(B_ID, "home-beta-main", "home-beta", role="main", mandate="talks")
