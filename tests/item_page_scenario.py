@@ -2,12 +2,12 @@
 
 The page says an item in the model's terms:
   * the id and the subject as the title, the goal under it (none when there is no goal);
-  * one state line: the state tag (Your move | On agent | Waiting | Done), since <age>, the post-wake or current mover, the project; a closed item's reason under it;
+  * one state line: the state tag (Your move | On agent | Waiting | Done), since <age>, and the warnings (handed over, not yet taken); never the mover or the `then` (the sidebar's Mover and Then rows), a closed item's reason under it;
   * no "Where it stands" section;
   * the ask, its option cards and the answer box only while the item is alive with the owner as mover (anyone else's item has the comment box in the same place, open);
   * Next: every line, each `<mover>: <action>` (an unnamed line gets the item's mover), a waiting item's headed "After the wait";
   * for a waiting item the wait (what, watched by, until, then, his words) and the chases logged on it;
-  * the sidebar (project, then, priority, expected by or wake, anchors, the GitHub issue), today's other fields in a closed More details fold;
+  * the sidebar (Mover, Owner and Creator first, then project, then, priority, expected by or wake, anchors, the GitHub issue), today's other fields in a closed More details fold;
   * Background (the stored description; open), History and Comments (closed) as folds, in the order: state line, Your step or the ask, Next, Background, History, Comments; History is one line per revision with its author (`written_by`), Comments the people's words.
 
     tests/run-suite item_page        → exit 0 / 1"""
@@ -136,14 +136,14 @@ wt = lambda h: html.unescape(re.sub(r"<[^>]+>", " ", (re.search(r'<section class
 p1, p2, p3, p4, p5, p6, p7 = (page(f"a{i}", answer=BOX) for i in (1, 2, 3, 4, 5, 6, 7))
 check("the title is the id and the subject (the prefix dropped), the goal under it; no goal, no goal line", '<h1><span class="hid">a1</span> ask item</h1><p class="igoal">Ship the thing</p>' in p1 and "<title>a1 · ask item</title>" in p1
       and '<h1><span class="hid">a2</span> agent item</h1>' in p2 and 'class="igoal"' not in p2, re.findall(r"<h1>.*?</h1>(?:<p class=.igoal.>.*?</p>)?", p1 + p2))
-check("alive with the owner as mover: Your move · since <age> · then <the post-handback mover>", re.fullmatch(r"Your move · since 3h ago · then home-other", istate(p1)) is not None, istate(p1))
-check("alive with a session as mover, handed over and not yet taken", re.match(r"On agent · since .* · mover home-other · handed over, not yet taken", istate(p2)) is not None, istate(p2))
+check("alive with the owner as mover: Your move · since <age>; the post-handback mover is the sidebar's Then row, not on the line", re.fullmatch(r"Your move · since 3h ago", istate(p1)) is not None, istate(p1))
+check("alive with a session as mover, handed over and not yet taken: no mover on the line (the sidebar's Mover row names it)", re.match(r"On agent · since .* · handed over, not yet taken", istate(p2)) is not None and "mover" not in istate(p2), istate(p2))
 p60, p61, p62, p63 = (page(f"a{i}", answer=BOX) for i in (60, 61, 62, 63))
 check("a your-call item handed to Oliver shows no 'not yet taken' warning", istate(p60).startswith("Your move") and "not yet taken" not in p60, istate(p60))
 check("a your-step item handed to Oliver shows no 'not yet taken' warning", istate(p61).startswith("Your move") and "not yet taken" not in p61, istate(p61))
 check("a hand-off to a session that has not taken it shows the warning; one taken does not", "handed over, not yet taken" in istate(p62) and "not yet taken" not in p63, (istate(p62), istate(p63)))
 check("waiting on a time: the state line says Waiting and the post-wake mover; the wait block has what (his reason), watched by the scheduler, until",
-      istate(p3) == "Waiting · since 3h ago · then home-other" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Then\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
+      istate(p3) == "Waiting · since 3h ago" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Then\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
 check("waiting on an item: its close, watched by the server", istate(p4).startswith("Waiting · since") and re.search(r"Waits on\s+a2\s+\(open\)\s+Watched by\s+the server\s+End\s+no end date set\s+Then\s+home-other", wt(p4)) is not None, (istate(p4), wt(p4)))
 check("waiting on an anchor: the event, watched by the anchor module, the backstop", istate(p5).startswith("Waiting · since") and re.search(r"the review lands\s+Watched by\s+the anchor module\s+Backstop\s+Sun Feb 1st\s+Then\s+home-other", wt(p5)) is not None, (istate(p5), wt(p5)))
 check("waiting on news only he relays: the party's event, ask by", istate(p6).startswith("Waiting · since") and re.search(r"Acme's the contract\s+\(news only Oliver relays\)\s+Watched by\s+the scheduler\s+Ask by\s+Sun Mar 1st\s+Then\s+home-other", wt(p6)) is not None, (istate(p6), wt(p6)))
@@ -225,14 +225,29 @@ check("an item wait names the item and whether it is open", 'href="/items/a2"' i
 
 # ---- 6. the sidebar
 sd1 = side(p1)
-check("the sidebar's fields in order: project, then, priority, expected by or wake, anchors, then the More details fold with the mover",
-      [x.strip() for x in re.findall(r"<dt>([^<]*?)(?: <span|</dt>)", sd1)] == ["Project", "Then", "Priority", "Expected by", "Anchors", "Mover", "Confirmed"], re.findall(r"<dt>([^<]*)", sd1))
-check("then: the session that takes the item after the owner's move (the owner's own move is the header's)", re.search(r"<dt>Then</dt><dd>home-other</dd>", sd1) is not None and "Mover and then" not in sd1, sd1[:600])
+labels = lambda h: [re.sub(r"<[^>]+>", "", x).strip() for x in re.findall(r"<dt>(.*?)</dt>", h)]      # every row's label, tags dropped (Owner and Creator carry a hover span, Anchors a count)
+check("the sidebar's fields in order: mover, creator (no contact), project, then, priority, expected by or wake, anchors, then the More details fold with the rest",
+      labels(sd1) == ["Mover", "Creator", "Project", "Then", "Priority", "Expected by", "Anchors 1", "Confirmed"], labels(sd1))
+check("then: the session that takes the item after the owner's move, a sidebar row (the line under the title no longer says it)", re.search(r"<dt>Then</dt><dd>home-other</dd>", sd1) is not None and "Mover and then" not in sd1 and " then " not in istate(p1), sd1[:600])
 check("priority is a tag, the anchor scoped to the item is listed", '<span class="tag t-p1">P1</span>' in sd1 and "slack.com" in sd1 and '<dt>Anchors <span class="count">1</span></dt>' in sd1)
 check("a waiting item's sidebar: the post-wake mover (Then), and its wake, backstop or ask by", "<dt>Then</dt><dd>home-other</dd>" in side(p3) and "<dt>Wake</dt><dd>Thu Jan 1st</dd>" in side(p3) and "<dt>Backstop</dt>" in side(p5) and "<dt>Ask by</dt>" in side(p6), side(p3))
 check("a closed item's sidebar has no expected-by and no then; the header says how it ended", "<dt>Expected by</dt>" not in side(p7) and "<dt>Then</dt>" not in side(p7) and istate(p7).startswith("Done"), side(p7))
-check("today's other fields (owner, due, confirmed) sit in a closed More details fold; Whose move is gone", '<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>' in sd1
-      and "<dt>Mover</dt>" in sd1.split("More details")[1] and "<dt>Owner</dt>" not in sd1 and "<dt>Whose move</dt>" not in sd1)
+check("today's other fields (due, confirmed) sit in a closed More details fold; the Mover row is not among them (it opens the panel); Whose move is gone", '<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>' in sd1
+      and "<dt>Mover</dt>" not in sd1.split("More details")[1] and "<dt>Confirmed</dt>" in sd1.split("More details")[1] and "<dt>Whose move</dt>" not in sd1)
+
+# ---- 6a. the Mover row: first in the panel (Mover, Owner, Creator in one group), drawn once, on every kind of item; the title line names neither the mover nor the `then`
+grp1 = lambda h: re.search(r'<aside class="iside"[^>]*><dl class="sgrp">(.*?)</dl>', h, re.S).group(1)
+kinds = {"alive, a session moves it": ("a2", "home-other"), "alive, the owner moves it, a session next": ("a1", "home-other"), "alive, no mover and no then": ("a23", "no agent"),
+         "waiting on a time": ("a3", "home-other"), "waiting on an item": ("a4", "home-other"), "closed": ("a7", "no agent")}
+for what, (g, who) in kinds.items():
+    h_ = page(g); sl_ = istate(h_)
+    check(f"the Mover row opens the panel ({what}): Mover, then Creator, in the first group; it names {who}; drawn once on the whole page",
+          labels(grp1(h_)) == ["Mover", "Creator"] and re.match(rf"<dt>Mover</dt><dd>{who}\b", grp1(h_)) is not None and h_.count("<dt>Mover</dt>") == 1 and "mover" not in sl_ and "then" not in sl_, (labels(grp1(h_)), sl_))
+check("with a contact the group is Mover, Owner, Creator, in that order, and every other row keeps its place after it",
+      labels(grp1(page("a1", contact="home-other"))) == ["Mover", "Owner", "Creator"] and labels(side(page("a1", contact="home-other")))[:6] == ["Mover", "Owner", "Creator", "Project", "Then", "Priority"], labels(side(page("a1", contact="home-other"))))
+check("a hostile mover name is escaped in the Mover row", "<dt>Mover</dt><dd>&lt;i&gt;evil&lt;/i&gt;</dd>" in grp1(page("a26")) and "<i>evil" not in page("a26").split("<h2>")[0], grp1(page("a26")))
+check("a waiting item says its `then` in the sidebar's Then row and in the wait block, never on the line under the title (nothing is lost with it)",
+      all("<dt>Then</dt><dd>home-other</dd>" in side(h_) and re.search(r"Then\s+home-other", wt(h_)) is not None and "then" not in istate(h_) for h_ in (p3, p4, p5, p6)), [istate(h_) for h_ in (p3, p4)])
 
 # ---- 6b. the Creator row: under Owner, on open and closed items, the History's name, a clear label when there is none
 CR_LBL = '<dt><span title="who created this item">Creator</span></dt>'
@@ -241,9 +256,9 @@ created_by = lambda g: re.search(r"created by ([^<]*?)$", [html.unescape(re.sub(
 hist = lambda h: re.findall(r'<li class="ev ev-[a-z]+">.*?</li>', h[h.find('id="history"'):h.find('id="comments"')], re.S)
 p80, p81, p82 = page("a80"), page("a81"), page("a82")
 check("a Creator row is in the sidebar of an open item and of a closed one", all(CR_LBL in side(h) for h in (p1, p2, p7, p80)), side(p1)[:500])
-check("…right below Owner when the item has a contact (the same group), and it is the first row when it has none",
-      re.search(r'<dl class="sgrp"><dt><span title="[^"]*">Owner</span></dt><dd>home-other</dd>' + re.escape(CR_LBL), side(page("a1", contact="home-other"))) is not None
-      and side(p1).startswith('<aside class="iside" aria-label="Details"><dl class="sgrp">' + CR_LBL), side(page("a1", contact="home-other"))[:500])
+check("…right below Owner when the item has a contact (the same group, Mover above them), and right below Mover when it has none",
+      re.search(r'<dl class="sgrp"><dt>Mover</dt><dd>[^\n]*?</dd><dt><span title="[^"]*">Owner</span></dt><dd>home-other</dd>' + re.escape(CR_LBL), side(page("a1", contact="home-other"))) is not None
+      and re.match(r'<aside class="iside" aria-label="Details"><dl class="sgrp"><dt>Mover</dt><dd>.*?</dd>' + re.escape(CR_LBL), side(p1)) is not None, side(page("a1", contact="home-other"))[:500])
 check("…and it names the creator, the same name as the History's \"created by\" (home-here, and home-other for a session that is not the mover's)",
       cre(p1).group(1) == "home-here" == created_by("a1") and cre(p7).group(1) == "home-here" == created_by("a7") and cre(p80).group(1) == "home-other" == created_by("a80"), (cre(p1), cre(p80)))
 check("an item that names no creator reads \"unknown\" in a muted span, never blank, on an open and a closed item",
@@ -348,9 +363,9 @@ check("…and a mover who is not Oliver keeps no Your step block", 'class="iask 
 # ---- 14. review of the state line's latest change: a hostile step, mover and author; italics in clip_md; the comment box's words
 w25, w26 = page("a25"), page("a26")
 top = lambda h: h[h.find('<div class="istat">'):h.find("<h2>Next</h2>")]      # the state line, the step form under it and the ask: everything above Next
-check("a hostile step and mover label are escaped above Next",
+check("a hostile step and mover label are escaped above Next and in the sidebar's Mover row",
       all("<script>" not in top(x) and "<img" not in top(x) and "<i>evil" not in top(x) and "<u>" not in top(x) and "<b>x</b>" not in top(x) for x in (w25, w26))
-      and "&lt;script&gt;alert(1)&lt;/script&gt;" in top(w25) and "&lt;i&gt;evil&lt;/i&gt;" in top(w26), (top(w25), top(w26)))
+      and "<i>evil" not in side(w26) and "&lt;script&gt;alert(1)&lt;/script&gt;" in top(w25) and "&lt;i&gt;evil&lt;/i&gt;" in side(w26), (top(w25), side(w26)))
 IT = "run the *careful pass* over snake_case_names and _every other_ file, then go on with the rest of the list for the day, one at a time"
 cuts = {n: itempage.clip_md(IT, n) for n in range(12, len(IT))}
 check("clip_md protects *italic* and _italic_ spans like bold (no stray marker after a cut) and leaves snake_case alone",

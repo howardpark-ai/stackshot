@@ -2522,9 +2522,18 @@ class Board:
         if not name: return ("", "")
         val = self.sess_html(name, arrow=True)      # the page's one rule: a link to the session's view while its pane lives, plain text otherwise
         return (f'<span title="{esc(self.OWNER_TIP)}">Owner</span>', val)
+    def mover_row(self, r) -> tuple:
+        """The side column's first row → (the "Mover" label, the value): the agent the item sits under (its mover; for an item the owner moves, its `then`; for a waiting one, the session
+        that takes it when the wait ends), drawn as every session on the page is (sess_html) with the machine it runs on, or "no agent" when none. The creator is no one's agent (a History
+        line, "created by"). The row is drawn once, first in the column, in the group with Owner and Creator; the line under the title no longer names the mover."""
+        e = esc
+        x = self._sess_obj(r) or {}; mach = str(x.get("machine") or "")
+        where = "cloud" if mach == "c" else (self.fleet.get(mach) or mach)
+        nm = x.get("name") or x.get("id") or self.NO_AGENT
+        return ("Mover", self.sess_html(nm, arrow=True) + (f' <span class="dim">· {e(where)}</span>' if where else ""))
     CREATOR_TIP = "who created this item"      # the hover text on the side column's "Creator" label
     def creator_row(self, r) -> tuple:
-        """The side column's row under Owner → (the "Creator" label with its hover text, the value): whoever created the item, by the name the History's first line gives (creator_name),
+        """The side column's row under Owner (Mover, Owner, Creator are its first three) → (the "Creator" label with its hover text, the value): whoever created the item, by the name the History's first line gives (creator_name),
         drawn as every session on the page is (sess_html). It is on every item, open or closed; one that names no creator reads as a muted "unknown", never blank."""
         name = self.creator_name(r)
         val = self.sess_html(name, arrow=True) if name else '<span class="dim">unknown</span>'
@@ -2532,14 +2541,14 @@ class Board:
     def item_html(self, gid, answer=None, watch=None, contact=None) -> str:
         """An item's own page at /items/<gid>, on the item model (the layout is GitHub's: a main column beside a right-hand sidebar, one
         column under 768px). The goal as the title (the subject when it has none; the id first, muted, beside the item's GitHub issue link), then in the main column: one state line in
-        words (alive · mover · since; waiting on · watched by · until · then; done · date · outcome) on its own (the History keeps every change),
+        words (alive · since; waiting on · watched by · until · then; done · date · outcome; the mover and the `then` are the sidebar's Mover and Then rows) on its own (the History keeps every change),
         the ask with its buttons and box (or the Your step block) while it is alive with the owner as mover, Next (every line, numbered, each
-        `<mover>: <action>`), the wait and its chases while it waits, the Outcome of a closed item (the stored `outcome_text`, first among the sections, under the state line; none for an open item or a close with no outcome text), the Background (the stored `description`, which a close leaves as it was), and History and Comments, closed folds. The sidebar holds six
-        fields (project, mover and then, priority, expected by or wake, anchors, the GitHub issue) and the For you control; today's other fields (owner, due, confirmed, work, after,
+        `<mover>: <action>`), the wait and its chases while it waits, the Outcome of a closed item (the stored `outcome_text`, first among the sections, under the state line; none for an open item or a close with no outcome text), the Background (the stored `description`, which a close leaves as it was), and History and Comments, closed folds. The sidebar opens with Mover, Owner and Creator (one group, in that order) and holds
+        project, then, priority, expected by or wake, anchors, the GitHub issue and the For you control; today's other fields (agent at work, due, confirmed, work, after,
         observers) sit in a closed "More details" fold below them. The History is one line per revision with its author. Rendered on request; KeyError for an unknown id.
         answer: the server's {"action", "token", "sent"} for a signed-in viewer: the answer box under the Ask (an item the owner does not move has the comment box in the same place, open).
         watch (the For you list): the server's {"action", "token", "flag", "watched", "why"} for a signed-in viewer: the Watch / Mute control in the sidebar.
-        contact: the item's contact as the server derives it (server._contact_label), the sidebar's first row, "Owner"; None reads the stored one; no contact, no row."""
+        contact: the item's contact as the server derives it (server._contact_label), the sidebar's second row, "Owner" (after Mover); None reads the stored one; no contact, no row."""
         r = self.item(gid); m = r["metadata"]; e = esc
         done = r.get("status") == "completed"
         L = lambda x: self.linkify(x, r["gid"])       # session-written free text: links, and item and session mentions
@@ -2644,14 +2653,14 @@ class Board:
         cform = "" if his else self.answer_html(r, answer, comment_only=True)     # an item he does not move: the comment box takes the answer box's slot, open
         # ---- the wait and its chases
         wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else ("End", "no end date set")), post, who_html) if waiting and w_ else ""
-        # ---- the sidebar: project, mover and then, priority, expected by or wake, anchors, the GitHub issue (and the For you control)
+        # ---- the sidebar: mover, owner and creator first, then project, then, priority, expected by or wake, anchors, the GitHub issue (and the For you control)
         tk = proj_top(r) or pk                        # the project it shows is the top-level one; the link stays the page the item is filed on (pk), as the gbrain page link below does
         if pk in self.proj: prj = f'<a href="{e(under("/" + pk))}">{e(self.proj_label(tk))}</a>'
         elif tk in self.proj: prj = f'<a href="{e(under("/" + tk))}">{e(self.proj_label(tk))}</a>'      # the filed page has no row of its own: the project's page stands in
         elif pk: prj = (f'<code>{e(tk)}</code> <span class="dim">·</span> ' if tk != pk else "") + f'<code>{e(pk)}</code> <span class="aflag">page missing</span>'      # the flag sits beside the page that is missing, the one the item is filed on
         else: prj = '<span class="dim">no project</span>'
         if mirror: prj += f' <span class="dim">·</span> <a href="{e(mirror)}" target="_blank" rel="noopener">gbrain page ↗</a>'
-        then_v = who_html(mod.then) if (alive and mod.then) else who_html(post) if (waiting and post) else ""      # who takes it after: the mover is on the header line, not here
+        then_v = who_html(mod.then) if (alive and mod.then) else who_html(post) if (waiting and post) else ""      # who takes it after: the sidebar's Then row (and the wait block's), no longer the header line
         pr = str(m.get("priority") or "p2")
         prio = '<span class="tag t-p1">P1</span>' if pr == "p1" else e(pr.upper())      # P1 red; P2 and P3 plain
         wk = wake_of(r)
@@ -2670,18 +2679,17 @@ class Board:
             return f'<dl class="sgrp">{body}</dl>' if body else ""
         ol, ov = self.owner_row(r, contact)
         cl, cv = self.creator_row(r)
-        who_rows = (f'<dt>{ol}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Owner, then Creator under it, in one group
+        ml, mv = self.mover_row(r)
+        who_rows = f'<dt>{ml}</dt><dd>{mv}</dd>' + (f'<dt>{ol}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Mover first, then Owner, then Creator, in one group
         side = (f'<dl class="sgrp">{who_rows}</dl>' + grp(("Project", prj)) + grp(("Then", then_v)) + grp(("Priority", prio))
                 + grp(("Expected by", expb), (wlabel if waiting else "Wake", wakev))
                 + (f'<dl class="sgrp"><dt>Anchors <span class="count">{alist.count("<li>")}</span></dt><dd><ul class="alist">{alist}</ul></dd></dl>' if alist else "")
                 + grp(("GitHub", ghl))
                 + self.watch_html(watch)
                 + self.more_html(r, done))
-        # ---- the header line: [state tag] · since · mover · then (the words and colors of the lists; the project is the sidebar's Project row, never this line), then why it ended when it has
+        # ---- the header line: [state tag] · since (the words and colors of the lists; the mover, the then and the project are the sidebar's Mover, Then and Project rows, never this line), then why it ended when it has
         bits = [_ui.tag(self.state_kind(r))]
         if since: bits.append(("" if done else "since ") + self.stamp(datetime.datetime.fromtimestamp(since, self.now.tzinfo)))
-        if alive and mod.mover and not _model.is_owner(mod.mover): bits.append(f"mover <b>{who_html(mod.mover)}</b>")
-        if then_v: bits.append(f"then <b>{then_v}</b>")
         if done and by: bits.append(f'by <a href="{e(id_href(by))}">{e(shown(by))}</a>')
         if not_taken: bits.append('<span class="iwarn">handed over, not yet taken</span>')
         sline = " · ".join(bits)
@@ -2744,7 +2752,7 @@ class Board:
         elif w.kind in _wat.CHASE_KINDS: rows.append(("Chases", '<span class="dim">none yet</span>'))
         return '<section class="iwait"><h2>Waiting</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
     def more_html(self, r, done) -> str:
-        """The sidebar's closed "More details" fold: the fields the page showed before the item model and the six fields do not cover (mover, agent on the item, due, confirmed and
+        """The sidebar's closed "More details" fold: the fields the page showed before the item model and the sidebar's rows do not cover (agent at work on the item, due, confirmed and
         stale, work lines, after and observers, a wait's basis and his words). Nothing is dropped, and it is one fold to delete once the owner has seen the page."""
         e = esc; m = r["metadata"]; L = lambda x: self.mentions(e(x), r["gid"])
         def grp(*fields):
@@ -2754,10 +2762,6 @@ class Board:
         ca = confirmed_at(r); conf = ""
         if not done and ca > 0:            # when the item was last confirmed true; " · stale" past its lane's limit
             conf = (f'{e(self.when(ca))}' + (f' <span class="iwarn stw" title="{e(stale_tip(r, self.mover_name))}">· stale</span>' if r.get("_fresh") == "stale" else ""))
-        x = self._sess_obj(r) or {}; mach = str(x.get("machine") or "")      # the agent the item sits under (its mover, else its `then`); the creator is a History line, "created by"
-        where = "cloud" if mach == "c" else (self.fleet.get(mach) or mach)
-        nm = x.get("name") or x.get("id") or self.NO_AGENT
-        own = self.sess_html(nm, arrow=True) + (f' <span class="dim">· {e(where)}</span>' if where else "")
         waits = ""                                    # what it waits on, who observes it (open items only)
         if not done:
             af = after_of(r)
@@ -2770,7 +2774,7 @@ class Board:
         wbasis = "" if done else e(_wt.basis_of(m))
         wwords = {} if done else _wt.words_of(m)
         wwhy = (f'{e(wwords["quote"])} <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else e(wwords["quote"])) if wwords else ""
-        body = (grp(("Mover", own), ("On agent", " · ".join(L(a) for a in agents)))
+        body = (grp(("On agent", " · ".join(L(a) for a in agents)))
                 + grp(("Due", due_b), ("Confirmed", conf))
                 + (f'<dl class="sgrp">{wk}</dl>' if (wk := self.work_html(r)) else "")
                 + (f'<dl class="sgrp">{waits}</dl>' if waits else "")

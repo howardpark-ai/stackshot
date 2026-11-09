@@ -366,9 +366,10 @@ def page(gid, **kw): return bd.item_html(gid, answer=None, watch=None)
 p14, p1, p6, p10 = page("a14"), page("a1"), page("a6"), page("a10")
 check("item page: the title is `#id subject` (no '[work]', no ' · ' between), never the goal", re.search(r'<h1><span class="hid">a14</span> An item with steps behind it</h1>', p14) is not None and "<title>a14 · An item with steps behind it</title>" in p14, re.findall(r"<h1>.*?</h1>", p14))
 check("item page: the goal is the line under the title", '<p class="igoal">Ship the review</p>' in p14)
-check("item page: the header line is the state tag, since, mover, and never the project (the sidebar's Project row names it)",
-      re.search(r'<p class="istate"><span class="tag t-agent">On agent</span> · since <span class="tip[^>]*>[^<]+</span> · mover <b>[^<]*</b></p>', p14, flags=re.S) is not None
-      and "projects/alpha" not in re.search(r'<p class="istate">.*?</p>', p14, flags=re.S).group(0) and re.search(r'<dt>Project</dt><dd><a href="[^"]*projects/alpha', p14) is not None, re.findall(r'<p class="istate">.*?</p>', p14))
+check("item page: the header line is the state tag and since, never the mover (the sidebar's Mover row opens the panel and names it, once)",
+      re.search(r'<p class="istate"><span class="tag t-agent">On agent</span> · since <span class="tip[^>]*>[^<]+</span></p>', p14, flags=re.S) is not None
+      and re.search(r'<aside class="iside"[^>]*><dl class="sgrp"><dt>Mover</dt><dd>[^<]*(?:<[^>]*>[^<]*)*?</dd><dt><span title="[^"]*">Creator</span>', p14) is not None and p14.count("<dt>Mover</dt>") == 1
+      and "<dt>Mover</dt>" not in p14.split("More details")[-1], re.findall(r'<p class="istate">.*?</p>', p14))
 check("item page: Your move and Waiting say so in the tag", 'class="tag t-you">Your move</span>' in p1 and 'class="tag t-wait">Waiting</span>' in p6)
 check("item page: a closed item says Done with its reason in plain words", 'class="tag t-done">Done</span>' in p10 and '<p class="ireason">' in p10 and "Alive" not in p10)
 check("item page: no 'Last change' line under the title (the state line stands alone); the state line and the History still render",

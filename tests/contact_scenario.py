@@ -4,7 +4,7 @@ Covers: create and update store `metadata.contact`; a front agent that creates a
 project's -main agent; any other name is refused with the project's front agents and their mandates (nothing is written); an update changes it with the same check; filing the item under
 another project makes that project's -main agent the contact (unless the contact is a front agent there too, or contact is passed); a retired contact falls to the project's -main agent
 and a renamed one is followed; get shows `contact:` (not the brief); the client JSON rows carry it; the backfill (dry run first, counts by rule, second run changes nothing);
-the same through the retire and rename endpoints; a front agent of another project that created the item stays its contact; the item page through the routes; no notice is sent; the item page's side column: the Owner row first, the hover text as a title, the value linked to the fleet tool's view, no explanatory line, no row without a contact.
+the same through the retire and rename endpoints; a front agent of another project that created the item stays its contact; the item page through the routes; no notice is sent; the item page's side column: the Owner row right after Mover, the hover text as a title, the value linked to the fleet tool's view, no explanatory line, no row without a contact.
 
     tests/run-suite contact        → exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -249,7 +249,7 @@ snap2 = {i: bytes_of(f"a{i}") for i in range(20, 27)}
 out = server._contact_backfill(dry=False)
 check("backfill: a second run writes nothing", out["written"] == 0 and all(bytes_of(f"a{i}") == snap2[i] for i in range(20, 27)) and out["counts"]["has_contact"] == 5, out["counts"])
 
-# ---- the item page: the side column's first row, "Owner"
+# ---- the item page: the side column's second row, "Owner" (the Mover row is the first)
 from stackshot.web.ui import render as r2
 for p in (T / "store").glob("?/*.json"): p.unlink()
 put(30, contact=SIDE); put(31); put(32, contact="home-delta-gone"); put(33, status="completed", contact=SIDE, outcome="done", reason="done")
@@ -260,13 +260,13 @@ def dts_of(h): return [re.sub(r"<[^>]+>", "", d) for d in re.findall(r"<dt>(.*?)
 TIP = "the front agent to talk to about this item"
 s30 = side_of(board().item_html("a30", answer=None, watch=None))
 dts = re.findall(r"<dt>(.*?)</dt>", s30)
-check("item page: the Owner row is the side column's first row, above Project", dts and dts[0].startswith("<span") and re.sub(r"<[^>]+>", "", dts[0]) == "Owner" and "Project" in [re.sub(r"<[^>]+>", "", d) for d in dts][1:], dts)
+check("item page: the Owner row is the side column's second row, right after Mover and above Creator and Project", len(dts) > 3 and dts[0] == "Mover" and dts[1].startswith("<span") and re.sub(r"<[^>]+>", "", dts[1]) == "Owner" and [re.sub(r"<[^>]+>", "", d) for d in dts][2:4] == ["Creator", "Project"], dts)
 check("item page: the label carries the hover text as a title", f'<dt><span title="{TIP}">Owner</span></dt>' in s30, s30[:400])
 check("item page: the value is the contact's session name linked to sala", f'<a href="https://sala.example.org/#s={SIDE}"' in s30 and f">{SIDE} ↗</a>" in s30, s30[:600])
-grp0 = s30.split("</dl>", 1)[0]
+grp0 = re.search(r"<dt><span title=\"[^\"]*\">Owner</span></dt><dd>.*?</dd>", s30, re.S).group(0)      # the Owner row alone (the Mover row above it carries the machine in a dim span)
 check("item page: no explanatory line under the row (the text is only the title)", grp0.count(TIP) == 1 and "<p" not in grp0 and 'class="dim"' not in grp0 and s30.count(TIP) == 1, grp0)
 s31 = side_of(board().item_html("a31", answer=None, watch=None))
-check("item page: an item with no contact shows no Owner row (the Creator row leads)", "Owner" not in s31 and TIP not in s31 and [re.sub(r"<[^>]+>", "", x) for x in re.findall(r"<dt>(.*?)</dt>", s31)[:2]] == ["Creator", "Project"], re.findall(r"<dt>(.*?)</dt>", s31)[:3])
+check("item page: an item with no contact shows no Owner row (the Creator row follows Mover)", "Owner" not in s31 and TIP not in s31 and [re.sub(r"<[^>]+>", "", x) for x in re.findall(r"<dt>(.*?)</dt>", s31)[:3]] == ["Mover", "Creator", "Project"], re.findall(r"<dt>(.*?)</dt>", s31)[:3])
 s32 = side_of(board().item_html("a32", answer=None, watch=None, contact=MAIN))
 check("item page: the contact the server passes (the derived one) is the row's value", f"#s={MAIN}" in s32 and "home-delta-gone" not in s32, s32[:500])
 check("item page: an empty contact from the server (nobody to name) draws no row", "Owner" not in side_of(board().item_html("a32", answer=None, watch=None, contact="")))
@@ -281,7 +281,7 @@ from starlette.testclient import TestClient
 with TestClient(server.mcp.http_app(), base_url="http://localhost") as c:
     ra32, ra31 = c.get("/items/a32"), c.get("/items/a31")
     check("route: /items/<n> answers 200 with the Owner row, the derived contact (a stored one that is no front agent any more reads as the project's -main agent)",
-          ra32.status_code == 200 and dts_of(ra32.text)[:1] == ["Owner"] and f"#s={MAIN}" in side_of(ra32.text) and "home-delta-gone" not in side_of(ra32.text), (ra32.status_code, dts_of(ra32.text)[:3]))
+          ra32.status_code == 200 and dts_of(ra32.text)[:3] == ["Mover", "Owner", "Creator"] and f"#s={MAIN}" in side_of(ra32.text) and "home-delta-gone" not in side_of(ra32.text), (ra32.status_code, dts_of(ra32.text)[:3]))
     check("route: an item with no contact (a31 stores none; its project has a -main agent) shows the -main agent as its Owner", ra31.status_code == 200 and f"#s={MAIN}" in side_of(ra31.text), ra31.status_code)
 server._cfg.CFG["client"]["session_view"] = ""; server._cfg.CFG["fleet"]["tool_name"] = ""
 
