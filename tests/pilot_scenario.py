@@ -820,15 +820,21 @@ check("panel: the pinned look is only in the wide media query, so a phone's firs
 check("panel: the script starts from the rendered class, pinned only when wide, corrects the button at once, and sets the page's same default when the width crosses 800 px; a swap never touches the body",
       "D=b.classList.contains('panel-pin'),s={peek:false,pin:D&&!M.matches,open:false,t:0}" in ui_render._PANEL_JS and "apply();reveal();" in ui_render._PANEL_JS
       and "s.pin=!M.matches&&D;apply()" in ui_render._PANEL_JS and "panel-pin" not in ui_render._LIVE_JS and "panel-open" not in ui_render._LIVE_JS and "classList" not in ui_render._LIVE_JS.replace("B.className", ""))
-check("panel: nothing is stored (the panel keeps no state): no localStorage, sessionStorage, cookie, history or indexedDB call in the panel's script, no stored key, no pre-paint read in the page; a click pins or unpins until the reload",
+check("panel: nothing is stored in the browser (the state is the person's, kept on the server): no localStorage, sessionStorage, cookie, history or indexedDB call in the panel's script, no stored key, no pre-paint read in the page; a click on a wide screen pins or unpins and saves it (POST /prefs/panel-open), the drawer never saves",
       re.search(r"localStorage|sessionStorage|cookie|history|indexedDB|stored\(|save\(", ui_render._PANEL_JS) is None and "stackshot.panel" not in ui_render._PANEL_JS and "stackshot.fold" not in ui_render._PANEL_JS
-      and not hasattr(render, "_PANEL_KEY") and not hasattr(render, "_PANEL_PRE") and "stackshot.panel" not in qh and "s.pin=!s.pin;s.peek=false;apply()" in ui_render._PANEL_JS
+      and not hasattr(render, "_PANEL_KEY") and not hasattr(render, "_PANEL_PRE") and "stackshot.panel" not in qh and "s.pin=!s.pin;s.peek=false;D=s.pin;apply();keep(s.pin)" in ui_render._PANEL_JS
+      and "if(narrow()){if(s.open)shut();else{s.open=true;apply();if(X)X.focus({preventScroll:true})}return}\ns.pin=!s.pin" in ui_render._PANEL_JS and ui_render._PANEL_JS.count("keep(") == 2 and "'/prefs/panel-open'" in ui_render._PANEL_JS and "@ROOT@" not in ui_render._PANEL_JS
       and "panel-pin" not in ui_render._LIVE_JS and "panel-open" not in ui_render._LIVE_JS and ui_render._PANEL_JS in qh and "localStorage" not in qh[qh.find('<aside id="panel"'):qh.find("</aside>")])
-check("panel: every page but the item page renders pinned (<body class=\"panel-pin\">, nothing before the layout); the item page renders a bare <body> and its button offering to show the panel",
+check("panel: every page, the item page too, is drawn pinned (<body class=\"panel-pin\">, nothing before the layout) and the closed form is a bare <body> with the button offering to show the panel (apply_panel_open)",
       ui_render._PANEL_BODY == '<body class="panel-pin">' and ui_render._PANEL_BODY in qh and ui_render._PANEL_BODY_CLOSED == '<body>'
       and ui_render._PANEL_BTN_CLOSED.count('aria-expanded="false" title="Show summary panel"') == 1 and 'aria-expanded="true"' not in ui_render._PANEL_BTN_CLOSED
       and 'aria-expanded="true" title="Hide summary panel"' in ui_render._PANEL_BTN and '<header class="top">\n' + ui_render._THEME_BTN + ui_render._PANEL_BTN + "\n" in bq.page_header()
-      and '<header class="top">\n' + ui_render._THEME_BTN + ui_render._PANEL_BTN_CLOSED + "\n" in bq.page_header(pinned=False) and 'class="panel-pin"' not in bd.item_html("a1") and ui_render._PANEL_BODY_CLOSED + '<div id="layout"><main class="itempage"' in bd.item_html("a1"))
+      and 'class="panel-pin"' in bd.item_html("a1") and ui_render._PANEL_BODY + '<div id="layout"><main class="itempage"' in bd.item_html("a1")
+      and 'aria-expanded="true" title="Hide summary panel"' in bd.item_html("a1")
+      and ui_render.apply_panel_open(qh, True) == qh and ui_render.apply_panel_open("<p>no panel</p>", False) == "<p>no panel</p>"
+      and ui_render._PANEL_BODY_CLOSED + '<div id="layout"><main id="top">' in ui_render.apply_panel_open(qh, False) and 'class="panel-pin"' not in ui_render.apply_panel_open(qh, False)
+      and '<header class="top">\n' + ui_render._THEME_BTN + ui_render._PANEL_BTN_CLOSED + "\n" in ui_render.apply_panel_open(qh, False)
+      and ui_render.apply_panel_open(qh, False).count('aria-expanded="false" title="Show summary panel"') == 1)
 check("theme button: the markup keeps a space between its attributes (id=\"theme\" aria-label=), on every page that carries it",
       'id="theme" aria-label=' in ui_render._THEME_BTN and 'id="theme"aria-label' not in ui_render._THEME_BTN and 'id="theme" aria-label=' in qh and 'id="theme"aria-label' not in qh and 'id="theme"aria-label' not in bd.item_html("a1"))
 _BMQ = re.search(r'<meta name="stackshot-blocks" content="([^"]*)">', qh).group(1)
