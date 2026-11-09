@@ -163,7 +163,7 @@ check("an empty registry writes nothing (a stale file is the reader's cue, an em
 (T / "state/projects.json").unlink()
 server._roles_sync_safe()
 check("the roles pass (start, publish, the create gate, the fleet watch's 20-s tick) writes projects.json too", PJ.exists() and set(pj()["projects"]) == set(ids0.values())
-      and "_projects_sync_safe(now)" in open(f"{STACK}/stackshot/web/server.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
+      and "_projects_sync_safe(now)" in open(f"{STACK}/stackshot/web/shared.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
 os.chmod(T / "state", 0o500)      # an unwritable state dir is logged, never raised: the board does not stop for it
 try:
     err_real, sys.stderr = sys.stderr, io.StringIO(); server._projects_sync_safe(now=time.time() + 5000, force=True); logged = sys.stderr.getvalue()

@@ -6,7 +6,7 @@ the first two, and router_live.py is the third (it takes the notices, applies th
  now rules every project; the earlier shadow mode, which ruled beside those sessions and compared, is gone with them.
 
   1. RULES IN CODE for what is checkable (code_rule): a notice already ruled automatically by the turn-rule builds, a page proposal from a
-     job named in [router] page_senders (held for the page pass), a wake notice for the item's own mover (dropped), a close with the owner's own words on the item (merged: a row on his For you list, server._foryou_on_save, not a pass to its mover), an item handed back to its front agent mover alone (passed to it), an anchor notice on
+     job named in [router] page_senders (held for the page pass), a wake notice for the item's own mover (dropped), a close with the owner's own words on the item (merged: a row on his For you list, server._foryou_on_save, made in foryou_events.py, not a pass to its mover), an item handed back to its front agent mover alone (passed to it), an anchor notice on
      a filtered anchor (`#mention=<text>`: every notice on it goes to the agent the page's lead names for the work, anchor-work),
      an item's own anchor (a notice on a pull request whose head branch is a background agent's, `<agent>/<topic>`, goes to that builder instead: anchor-builder; a CI or check-run result on any pull request goes to the project's builder, never to a front agent: anchor-ci),
      a message that names one open item (to whoever does the item's work, item_route; held when it only names the owner), an exact repeat
@@ -878,7 +878,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
       wake          a board wake notice ("woke") for the mover of the item it is about: dropped, the mover is the one reminded.
       close-words   a board notice that an item was closed and carries the `words` mark (the owner's own words are on the item:
                     a `said` entry or a quoted attribution). The server no longer records one: such a close
-                    is a row on the owner's For you list (foryou.py, server._foryou_on_save), never a pass to a front agent. The rule
+                    is a row on the owner's For you list (foryou.py, server._foryou_on_save, made in foryou_events.py), never a pass to a front agent. The rule
                     stays only to settle a notice recorded before that: merged, with the reason.
       hand-back     a board notice that an item was handed back to its mover alone and carries the `handback` mark (a session other than the
                     mover left the item's needs naming only the mover, a front agent, who is never woken by item notices otherwise,
@@ -955,7 +955,7 @@ def code_rule(key: str, n: dict[str, Any], root: str, cx: Context, peers: list[d
         from stackshot.router import router_live as _live        # at call time: router_live imports this module
         owner = cx.agent_of(m.group(1).strip(), _live.agent_root(root, cx.reg)) if m else ""      # a hub component's owner is listed on its hub's page (as router_live._act marks it)
         named = cx.items_named(n.get("label"), root)
-        if owner:       # Such a close is a row on the owner's For you list now (server._foryou_on_save), no longer a pass to the front agent; this settles one recorded before that
+        if owner:       # Such a close is a row on the owner's For you list now (server._foryou_on_save, made in foryou_events.py), no longer a pass to the front agent; this settles one recorded before that
             return _line(n, key, root, source="code", rule="close-words", ruling="merged", item=shown(named[0]["gid"]) if len(named) == 1 else "",
                          reason=f"the owner's own words are on the closed item ({n['words']}): it is a row on his For you list, not a message to its mover {owner}")
     if kind == "board" and n.get("handback") and re.match(r"hand-back\b", str(n.get("label") or ""), re.I) and re.match(r"handed back\b", str(n.get("text") or ""), re.I):
