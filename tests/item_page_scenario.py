@@ -7,7 +7,7 @@ The page says an item in the model's terms:
   * the ask, its option cards and the answer box only while the item is alive with the owner as mover (anyone else's item has the comment box in the same place, open);
   * Next: every line, each `<mover>: <action>` (an unnamed line gets the item's mover), a waiting item's headed "After the wait";
   * for a waiting item the wait (what, watched by, until, then, his words) and the chases logged on it;
-  * the sidebar (Mover, Owner and Creator first, then project, then, priority, expected by or wake, anchors, the GitHub issue), today's other fields in a closed More details fold;
+  * the sidebar (Mover, Owner and Creator first, then project, then, priority, wake, anchors, the GitHub issue), today's other fields in a closed More details fold;
   * Background (the stored description; open), History and Comments (closed) as folds, in the order: state line, Your step or the ask, Next, Background, History, Comments; History is one line per revision with its author (`written_by`), Comments the people's words.
 
     tests/run-suite item_page        → exit 0 / 1"""
@@ -226,12 +226,12 @@ check("an item wait names the item and whether it is open", 'href="/items/a2"' i
 # ---- 6. the sidebar
 sd1 = side(p1)
 labels = lambda h: [re.sub(r"<[^>]+>", "", x).strip() for x in re.findall(r"<dt>(.*?)</dt>", h)]      # every row's label, tags dropped (Owner and Creator carry a hover span, Anchors a count)
-check("the sidebar's fields in order: mover, creator (no contact), project, then, priority, expected by or wake, anchors, then the More details fold with the rest",
-      labels(sd1) == ["Mover", "Creator", "Project", "Then", "Priority", "Expected by", "Anchors 1", "Confirmed"], labels(sd1))
+check("the sidebar's fields in order: mover, creator (no contact), project, then, priority, wake, anchors, then the More details fold with the rest",
+      labels(sd1) == ["Mover", "Creator", "Project", "Then", "Priority", "Anchors 1", "Confirmed"], labels(sd1))
 check("then: the session that takes the item after the owner's move, a sidebar row (the line under the title no longer says it)", re.search(r"<dt>Then</dt><dd>home-other</dd>", sd1) is not None and "Mover and then" not in sd1 and " then " not in istate(p1), sd1[:600])
 check("priority is a tag, the anchor scoped to the item is listed", '<span class="tag t-p1">P1</span>' in sd1 and "slack.com" in sd1 and '<dt>Anchors <span class="count">1</span></dt>' in sd1)
 check("a waiting item's sidebar: the post-wake mover (Then), and its wake, backstop or ask by", "<dt>Then</dt><dd>home-other</dd>" in side(p3) and "<dt>Wake</dt><dd>Thu Jan 1st</dd>" in side(p3) and "<dt>Backstop</dt>" in side(p5) and "<dt>Ask by</dt>" in side(p6), side(p3))
-check("a closed item's sidebar has no expected-by and no then; the header says how it ended", "<dt>Expected by</dt>" not in side(p7) and "<dt>Then</dt>" not in side(p7) and istate(p7).startswith("Done"), side(p7))
+check("a closed item's sidebar has no Expected by (an open one has none either) and no then; the header says how it ended", "<dt>Expected by</dt>" not in side(p7) and "<dt>Then</dt>" not in side(p7) and istate(p7).startswith("Done"), side(p7))
 check("today's other fields (due, confirmed) sit in a closed More details fold; the Mover row is not among them (it opens the panel); Whose move is gone", '<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>' in sd1
       and "<dt>Mover</dt>" not in sd1.split("More details")[1] and "<dt>Confirmed</dt>" in sd1.split("More details")[1] and "<dt>Whose move</dt>" not in sd1)
 

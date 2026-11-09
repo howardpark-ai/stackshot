@@ -26,7 +26,7 @@ writes them on the items nobody has saved since, without being an event on the i
                                 (skipped when PHASE_REPLAY_STORE names no store to copy, as in tests/phase_scenario.py)
 
     tests/run-suite stamp        → exit 0 / 1"""
-import collections, contextlib, copy, fcntl, io, json, logging, os, pathlib, re, shutil, subprocess, sys, threading, time
+import collections, contextlib, copy, datetime, fcntl, io, json, logging, os, pathlib, re, shutil, subprocess, sys, threading, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="pr2stamp-"); T = pathlib.Path(tmp)
@@ -264,11 +264,14 @@ check("8 …a store that is the live store is refused", pl.returncode != 0 and "
 check("8 …a dry run needs --store; --apply and --undo need --sender", run("--dry-run").returncode != 0 and run("--apply").returncode != 0 and run("--undo", "x.json").returncode != 0, None)
 
 # ---- 8b. one clock for both display passes of the proof
+SEED = "g9999"
 def clock_diff(freeze):
     """display_of over every open item twice with the clock moved on 61 s between the passes (the stamp between them takes that long), the way the dry run reads them: → the items whose display differs, and how many were read.
-    `freeze` holds one clock for both passes (SP.frozen), as the dry run does."""
+    `freeze` holds one clock for both passes (SP.frozen), as the dry run does. The board prints no computed date any more, so what the clock still moves is a past-due mark: one seeded copy of a held item (SEED) has its wake on the next minute, which falls between the two passes (the first reads it not yet due, the second past due)."""
     its = SP.load_dir(T / "store"); gids = sorted((g for g, it in its.items() if it.get("status") == "open"), key=SP.num)
     t_a = time.time(); clk = [t_a]; real_time = time.time; time.time = lambda: clk[0]
+    seed = copy.deepcopy(its["g8"]); seed["metadata"]["wake"] = datetime.datetime.fromtimestamp((t_a // 60 + 1) * 60, server.ZONE).strftime("%Y-%m-%dT%H:%M"); seed["metadata"].pop("cap_ok", None)
+    its[SEED] = seed; gids.append(SEED)
     def read():
         with (SP.frozen(t_a) if freeze else contextlib.nullcontext()):
             return {g: SP.display_of(server, its[g], g) for g in gids}
@@ -283,7 +286,7 @@ try:
     moved, n_open = clock_diff(False); held, _ = clock_diff(True)
 finally:
     ST.write_text(st_text, encoding="utf-8")
-check("8b the clock moves 61 s between two unfrozen display passes: some floor-bound item reads differently (the test bites)", len(moved) > 0 and n_open > 20, (moved, n_open))
+check("8b the clock moves 61 s between two unfrozen display passes: the seeded item whose wake falls between them reads differently (the test bites)", moved == [SEED] and n_open > 20, (moved, n_open))
 check("8b …with SP.frozen holding one clock for both passes, no item reads differently", held == [], held)
 with SP.frozen(123.0):
     in_ = (time.time(), time.time())

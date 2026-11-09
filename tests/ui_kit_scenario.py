@@ -376,7 +376,7 @@ check("item page: no 'Last change' line under the title (the state line stands a
       all("ilast" not in p_ and "Last change" not in p_ and "· updated" not in p_ for p_ in (p14, p1, p6, p10)) and re.search(r'<p class="istate">', p14) is not None and re.search(r'<p class="istate">', p10) is not None
       and 'id="history"' in p14 and '<ul class="hist">' in p14)
 check("item page: the old state words are gone (Alive, Mover and then, whose move)", not re.search(r"\bAlive\b|Mover and then|whose move", p14 + p1 + p6))
-check("item page: Details say Then and Expected by without the owner's name or the basis", ">Then</dt>" in p6 and "needs set" not in p6 + p1 + p14 and "no date of its own" not in p6 + p1 + p14)
+check("item page: Details say Then, and no Expected by, without the owner's name or the basis", ">Then</dt>" in p6 and "Expected by" not in p6 and "needs set" not in p6 + p1 + p14 and "no date of its own" not in p6 + p1 + p14)
 check("item page: priority P1 is a red tag, P2 is plain text", 'class="tag t-p1">P1</span>' in p14 and "<dd>P2</dd>" in p1 and "badge prio" not in p14 + p1)
 check("item page: Next shows the open step, then one fold of the earlier ones with their count", re.search(r'<ul class="inext" aria-label="Next steps">(?:(?!<details).)*review the PR.*?</ul><details class="iearlier"><summary>2 earlier steps: 1 done, 1 dropped</summary>.*?write the code.*?try the old way', p14, flags=re.S) is not None, re.findall(r'<details class="iearlier">.*?</summary>', p14))
 check("item page: the open step is not inside the fold, the earlier ones are", "review the PR" not in p14.split('<details class="iearlier">')[1])
@@ -401,16 +401,12 @@ check("History: the creation line says the list's word (item 32 was born asking 
 check("History: no page carries 'your call', 'on others' or 'on agent' as a whose-move word", not re.search(r"· (?:your call|on others|on agent)\b|whose move", h31 + h32 + h33 + p1 + p6 + p14), None)
 check("History: a stored state that is no string does not raise", "<h1>" in h33 and "state cleared" in h33, re.findall(r"state cleared[^<]*", h33))
 check("STATE_WORDS is looked up safely: a list, None and an unknown word give no word", [r2.list_word(x) for x in (["a"], None, "nonsense", {"a": 1})] == ["", "", "", ""] and r2.list_word("your-step", "") == "Your move" and r2.list_word(["a"], "relay") == "Waiting")
-# the expected-by line on the item page: past due says how late in the rows' words (5m, 3h, 2d); under a minute it says only 'past due'
+# the item page prints no computed date: a wait on a date shows no Expected by row, on time or late, and no 'past due by'
 import datetime as _dt
 ZONE = _dt.timezone(_dt.timedelta(hours=4))   # the pinned instance timezone, Asia/Dubai: UTC+4, no DST
-def late_line(sec):
-    b_ = r2.Board(str(T / "store"), now=_dt.datetime.fromtimestamp(EB + sec, ZONE)); h = b_.item_html("a6", answer=None, watch=None)
-    return re.findall(r'<span class="iwarn">[^<]*past due[^<]*</span>', h)
-EB = Bd().item("a6")["_wait"]["expected_by"]      # a wait on a date keeps its date (the doing items a4 and a5 carry none)
-check("expected-by: under a minute late says 'past due' with no duration", late_line(30) and all(re.search(r"past due</span>$", x) for x in late_line(30)) and not any(" by " in x for x in late_line(30)), late_line(30))
-check("expected-by: 5 minutes late says 'past due by 5m'", any("past due by 5m<" in x for x in late_line(300)), late_line(300))
-check("expected-by: hours and days use the rows' h and d", any("past due by 3h<" in x for x in late_line(3 * 3600 + 60)) and any("past due by 2d<" in x for x in late_line(2 * 86400 + 60)), (late_line(3 * 3600 + 60), late_line(2 * 86400 + 60)))
+EB = Bd().item("a6")["_wait"]["expected_by"]      # a wait on a date keeps its date in the read model (the doing items a4 and a5 carry none), and the page does not print it
+def late_page(sec): return r2.Board(str(T / "store"), now=_dt.datetime.fromtimestamp(EB + sec, ZONE)).item_html("a6", answer=None, watch=None)
+check("expected-by: late or not, the item page has no Expected by row and no 'past due by'", all("Expected by" not in late_page(x) and "past due by" not in late_page(x) for x in (-3600, 30, 300, 3 * 3600 + 60, 2 * 86400 + 60)))
 # agent work in progress has no expected time: a4 and a5 are stored as doing and still carry a far expected_by from before it was retired
 def li_of(sec, gid): return next((li for li in lis(sec) if f'<span class="ir-id">{gid}</span>' in li), "")
 bd5 = Bd(); home5 = bd5.html(); ag5, wt5 = section(home5, "agents-at-work"), section(home5, "waiting-list")
@@ -421,7 +417,7 @@ check("doing, no expected time: the read model says doing, with no expected time
 def far_late(gid, sec): return r2.Board(str(T / "store"), now=_dt.datetime.fromtimestamp(time.time() + sec, ZONE)).item_html(gid, answer=None, watch=None)
 pg4, pg4_late = Bd().item_html("a4", answer=None, watch=None), far_late("a4", 30 * 86400)
 check("doing, no expected time: the item page has no 'Expected by' and no 'past due', not even a month on", "Expected by" not in pg4 and "past due" not in pg4 and "Expected by" not in pg4_late and "past due" not in pg4_late, re.findall(r"Expected by.{0,80}", pg4_late)[:2])
-check("a wait on a date keeps its 'Expected by' on the item page", "Expected by" in Bd().item_html("a6", answer=None, watch=None))
+check("a wait on a date shows no 'Expected by' on the item page", "Expected by" not in Bd().item_html("a6", answer=None, watch=None))
 check("doing, no expected time: no On agent row carries the 7-hour marker either", "ir-age red" not in ag5 and "ir-age amber" not in ag5, re.findall(r'ir-age [a-z ]*', ag5))
 
 # ---- 10. Queued for release: an agent's item whose pull request has a release in the release script's queue (its unit is running) leaves On agent for its own open list, count card and tag
