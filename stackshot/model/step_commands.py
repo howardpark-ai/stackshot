@@ -595,6 +595,236 @@ def other_host_form() -> str:
     return "ssh <host> '<command>'"
 
 
+# The ssh options whose value is the next word (`-p 22`, `-i key`), as the letters of a flag: `-p` and a bundle that ends in one (`-tp 22`, `-tl bob`) take the next word, `-p22` and `-oBatchMode=yes` carry
+# their value glued on. Every other flag stands alone (`-t`, `-tt`).
+_SSH_ARG_LETTERS = frozenset("BbcDEeFIiJLlmOopPQRSWw")
+_HOST_RX = re.compile(r"[A-Za-z0-9_.\[\]:-]+")
+_base = lambda w: re.split(r"[/\\]", w.lower())[-1]
+# The failure mode of the label is NO label, and nothing decides where an ssh word sits in a command. A box whose text has an ssh-like word anywhere (every line, comments and quoted strings too, nothing parsed)
+# names a machine only when its first command line starts with ssh itself and the host is read; every other such box names none, because what a wrapper, a script or a substitution logs in to cannot be told. A box
+# with no ssh-like word keeps the default place, unless a line starts with a word that is not plain (`$CMD`, `ls${x}`, a quoted name), which may build an ssh command.
+_SSH_WORD_RX = re.compile(r"(?<![\w.-])(?:ssh|ssh\.exe|autossh|mosh|slogin|plink|dbclient)(?![\w-])", re.I)
+_SHELL_KEYWORDS = frozenset("if then do else elif while until ! { } time".split())
+_ENV_PREFIX_RX = re.compile(r"""[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s"'])*\s+""")
+_PLAIN_WORD_RX = re.compile(r"[A-Za-z0-9_./\\+@:-]+")
+
+
+def _plain_word(w: str) -> bool:
+    """Is a command's first word plain, so that it names the command it reads as? A backslash inside it may hide a name (`s\\sh`, `\\slogin`): only a drive path (`C:\\x\\ssh.exe`) or `.\\name` may have one."""
+    if "\\" in w and not re.match(r"[A-Za-z]:\\", w) and not re.fullmatch(r"\.{1,2}\\[^\\]*", w):
+        return False
+    return bool(_PLAIN_WORD_RX.fullmatch(w))
+
+
+def _is_ssh_cmd(w: str) -> bool:
+    return _base(w) in ("ssh", "ssh.exe")
+
+
+def _host_of(a: list[str]) -> tuple[str, bool]:
+    """(the host of an ssh command from its words after `ssh`, whether ssh is not left as an interactive login: a word follows the host, or -f / -N). The host is the first word that is no option (nor an option's value),
+    `user@` and a port left off; "" when it cannot be read: a query option, or a redirection or separator among the words up to the host (it would shift the host)."""
+    i, bg = 0, False
+    while i < len(a):
+        t = a[i]
+        if t == "--":
+            i += 1
+            break
+        if not t.startswith("-") or t == "-":
+            break
+        i += 1
+        if not t.startswith("--"):
+            for k, ch in enumerate(t[1:], 2):
+                if ch in "GVQ":          # -G prints the configuration, -V the version, -Q a query: no login
+                    return "", False
+                if ch == "o" and re.match(r"\s*hostname\s*[=\s]", t[k:] if k < len(t) else (a[i] if i < len(a) else ""), re.I):
+                    return "", False         # -o HostName=x logs in to x, whatever the word after the options says
+                if ch in "fN":           # -f goes to the background, -N runs no command: nothing is typed into it
+                    bg = True
+                if ch in _SSH_ARG_LETTERS:
+                    if k >= len(t):          # the flag ends here: its value is the next word
+                        i += 1
+                    break
+    host = a[i] if i < len(a) else ""
+    if any(re.search(r"[<>;|&]", w) for w in a[:i]) or re.match(r"^\d*[<>&]", host):
+        return "", False
+    host = re.split(r"[;|&]", host)[0]
+    m = re.match(r"^ssh://(?:[^@/]*@)?(\[[^\]]*\]|[^:/\s]+)(?::\d+)?(?:/.*)?$", host, re.I)
+    host = m.group(1) if m else host.rsplit("@", 1)[-1]
+    return (host, bg or len(a) > i + 1) if _HOST_RX.fullmatch(host) and not host.startswith("-") else ("", False)
+
+
+_HEREDOC_RX = re.compile(r"""<<-?[ \t]*(?:'([^']*)'|"([^"]*)"|([^\s;&|<>()'"]+))""")
+
+
+def _scan_line(line: str, state: str) -> tuple[str, str, bool, list[str], int]:
+    """Walk one physical line of a command with its quotes and escapes: (its characters outside quotes and comments, the quote still open at its end or "", whether it ends in a backslash, the heredoc delimiters it opens,
+    the index of its first separator `;` `|` `&` outside quotes, -1 when none)."""
+    out, hd, i, n, cont, sep = [], [], 0, len(line), False, -1
+    while i < n:
+        c = line[i]
+        if state:
+            i += 2 if (c == "\\" and state == '"' and i + 1 < n) else 1
+            if c == state:
+                state = ""
+            continue
+        if c == "\\":
+            cont = i + 1 >= n
+            i += 2
+            continue
+        if c in "'\"":
+            state = c
+        elif c == "#" and (i == 0 or line[i - 1] in " \t"):
+            break
+        elif line.startswith("<<", i) and not line.startswith("<<<", i):
+            m = _HEREDOC_RX.match(line, i)
+            if m:
+                hd.append(next(g for g in m.groups() if g is not None))
+                i = m.end()
+                continue
+        else:
+            out.append(c)
+            if sep < 0 and c in ";|&":
+                sep = i
+        i += 1
+    return "".join(out), state, cont, hd, sep
+
+
+def _command_line_of(ln: str) -> bool:
+    """Is this physical line of a box a command line (not blank, not a prose comment)?"""
+    t = ln.strip()
+    return bool(t) and not (t.startswith("#") and not looks_like_command(t, fenced=True))
+
+
+def _first_word(line: str) -> "str | None":
+    """The first word of a command line as written (after the prompt, VAR=value words and shell keywords), None when there is none."""
+    t = _PROMPT.sub("", line.strip(), count=1)
+    while t:
+        m = _ENV_PREFIX_RX.match(t)
+        if m:
+            t = t[m.end():]
+            continue
+        w = re.split(r"[\s;&|]", t, maxsplit=1)[0]
+        if w not in _SHELL_KEYWORDS:
+            return w
+        t = t[len(w):].lstrip()
+    return None
+
+
+def _indirect(text: str) -> bool:
+    """Does a command line of the box start with a word that is not plain (`$CMD`, a backtick, `{`, `*`, a quote that builds the name)? Then it may build any command, ssh included."""
+    for ln in str(text).splitlines():
+        t = ln.strip()
+        if not t or (t.startswith("#") and not looks_like_command(t, fenced=True)):
+            continue
+        w = _first_word(t)
+        if w is not None and not _plain_word(w):
+            return True
+    return False
+
+
+def _first_command(cmd: str) -> tuple[str, str]:
+    """(the first line of a command box that holds a command, the lines after it): blank lines and prose comment lines are skipped; ("", "") for a box with none."""
+    ls = str(cmd).splitlines()
+    for n, ln in enumerate(ls):
+        t = ln.strip()
+        if t and not (t.startswith("#") and not looks_like_command(t, fenced=True)):
+            return t, "\n".join(ls[n + 1:])
+    return "", ""
+
+
+def command_line(cmd: str) -> str:
+    """The first line of a command box that holds a command: blank lines and comment lines are skipped. A line that starts with `#` is a comment unless the module reads it as a command (`# systemctl restart x`
+    is a root prompt and a command: `looks_like_command`), so a comment is skipped only when it is prose; when unsure the line is kept. "" for a box with none."""
+    return _first_command(cmd)[0]
+
+
+_ENV_WORD_RX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _ssh_host(cmd: str) -> tuple[bool, str]:
+    """(does the box run ssh, or may it, so that its place is not the default; the host it logs in to, "" when none can be read: no label).
+    A box with an ssh-like word anywhere in its text (ssh, ssh.exe, autossh, mosh; comments and quoted strings count) names a machine only when its first command line starts with ssh itself (after VAR=value words,
+    `exec` or `time`) and the host is read; later lines are not read. Any other box with one names none. A box without one is no ssh, unless a line starts with a word that is not plain."""
+    text = str(cmd)
+    s = _first_command(text)[0]
+    if not s:
+        return False, ""
+    if not _SSH_WORD_RX.search(text):
+        return _indirect(text), ""
+    s = re.sub(r"^(?:\$|PS>|PS [^>]*>|>)\s+", "", s.strip(), count=1)          # a `# ` prompt is no ssh command
+    w = _first_word(s)
+    if s.startswith("#") or w is None or not _plain_word(w):
+        return True, ""
+    import shlex
+    try:
+        if any(len(x) > 20000 for x in s.split()):           # shlex is quadratic in a word's length
+            raise ValueError
+        lex = shlex.shlex(re.sub(r"\\(?=[A-Za-z0-9._])", "/", s), posix=True)          # a Windows path (C:\x\ssh.exe) is a path, not escapes
+        lex.whitespace_split, lex.commenters = True, ""
+        toks = list(lex)
+    except ValueError:        # a quote that never closes: the words before it can still be read (`ssh h '` + lines of script)
+        toks = []
+        for t in s.split():
+            if "'" in t or '"' in t:
+                break
+            toks.append(t)
+    while toks and (_ENV_WORD_RX.match(toks[0]) or toks[0] in ("exec", "time")):
+        toks.pop(0)
+    if not toks or not _is_ssh_cmd(toks[0]):
+        return True, ""
+    host, follows = _host_of(toks[1:])
+    if not host:
+        return True, ""
+    # Lines after the first command run locally, unless they are typed into an interactive `ssh h` (nothing follows the host) or are inside the ssh command: an open quote, a heredoc body, a continued line.
+    after = _first_command(text)[1].split("\n")
+    unq, state, cont, hds, sep = _scan_line(s, "")
+    if sep >= 0:          # a chained command: what is on the later lines runs after it, and a second ssh in the chain logs in elsewhere
+        return True, "" if _SSH_WORD_RX.search(s[sep:]) or any(map(_command_line_of, after)) else host
+    if not (follows or state or cont or hds):
+        return True, host
+    k = 0
+    while k < len(after):
+        if state or cont:
+            _, state, cont, more, sep = _scan_line(after[k], state)
+            hds += more
+            k += 1
+            if sep >= 0 and _SSH_WORD_RX.search(after[k - 1][sep:]):          # `ssh h '` ... `' && ssh g`
+                return True, ""
+        elif hds:
+            d = hds.pop(0)
+            while k < len(after):
+                k += 1
+                if after[k - 1].strip() == d:
+                    break
+        else:
+            break
+    return True, "" if any(map(_command_line_of, after[k:])) else host
+
+
+def ssh_target(cmd: str) -> str:
+    """The machine an ssh command logs in to (`ssh h 'x'`, `ssh -t h x`, `ssh -p 22 user@h x`, `ssh ssh://user@h:2222 x` -> h), "" when the command is not ssh or no host can be read from it. A user@ and a port are left off."""
+    s = command_line(cmd)
+    return "" if not s or is_pane_line(s) else _ssh_host(cmd)[1]
+
+
+def runs_on(cmd: str) -> tuple[str, bool]:
+    """(the place a command box names, whether it is typed in the owner's sala Shell), for the box a command is drawn in, read from its first command line (blank lines and `#` comments skipped). With
+    [steps] owner_shell = "sala-shell": "Runs on <host>", the ssh target of an ssh command, else [steps] bash_host (empty when none is named). With "powershell": "In PowerShell", and "Runs on <host>" for an ssh command.
+    An ssh command whose host cannot be read names no place (the local shell is not where it runs). With none: ("", False): no place is named. A `! ` pane line and a bare link are no shell command: ("", False)."""
+    mode = shell_mode()
+    s = command_line(cmd)
+    if not mode or not s or is_pane_line(s) or re.match(r"^https?://\S+$", s):
+        return "", False
+    is_ssh, host = _ssh_host(cmd)
+    if is_ssh:
+        place = f"Runs on {host}" if host else ""
+    elif mode == "powershell":
+        place = "In PowerShell"
+    else:
+        place = f"Runs on {bash_host()}" if bash_host() else ""
+    return place, mode == "sala-shell"
+
+
 # What a sala Shell (bash) cannot run on its own: a PowerShell cmdlet, a call operator, a drive path, a Windows-only program. Inside `ssh <host> '…'` the command is the other machine's, so it passes.
 WINDOWS_ONLY = frozenset("winget choco scoop wsl ipconfig netsh taskkill tasklist powershell pwsh cmd".split())
 

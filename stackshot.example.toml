@@ -58,6 +58,7 @@ owner_shell = ""                                    # "powershell" = the owner r
                                                     # "" (the default) = no place is asked for: a command only has to be in backticks
 bash_host = ""                                      # the Linux host that such a bash command is run on over ssh (powershell), or the one sala's Shell runs on (sala-shell), e.g. "myhost"; "" = none named
 shell_name = ""                                     # sala-shell only: the name of the owner's Shell session in sala, written into the tool text next to "sala's Shell" (e.g. "my-shell"); "" = none named, the text says "sala's Shell" alone
+shell_url = ""                                      # sala-shell only: the page that opens the owner's shell, e.g. "https://shell.example.com/terminal" or "/shell"; a command's box then carries an "Open shell" link to it (a new tab). Only an http(s) URL (no user name or password in it, a port from 1 to 65535 if any) or a path starting with "/" counts; "" = no link
 
 [terminal]                                          # a pane waiting in its terminal for an answer (stackshot/fleet/client.py post terminal-prompt, sala's hook)
 fallback_project = ""                               # the project page a terminal-prompt item is filed under when the session's own project lists no front agent, e.g. "projects/mine"; "" = none (the item is refused with that reason)
