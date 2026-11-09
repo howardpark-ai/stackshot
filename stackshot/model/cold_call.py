@@ -223,7 +223,7 @@ HIDDEN_RUBRIC = (
     '{"wait": "yes", "kind": "time" | "anchor" | "item" | "relay", "input": {...}, "end": "YYYY-MM-DD", "post_wake_mover": "<a name copied exactly from the list given>", '
     '"basis": "<for a time wait: the real outside date as `<what happens> YYYY-MM-DD`>", "reason": "<one line, at most 240 characters>", "confidence": "high" | "medium" | "low"}\n'
     'kind time: it waits for a date. input {"wake": "YYYY-MM-DD"} (add THH:MM only when the text gives a time of day), and basis names the real-world event of that date (a delivery, a certificate renewal). '
-    'kind anchor: it waits for something to happen at a link (a pull request merging, a thread replying, a page changing). input {"anchor": "<a URL that appears in the text or in the anchors given>", "event": "<what must happen there>"}, '
+    'kind anchor: it waits for something to happen at a link (a pull request merging, a thread replying, a page changing). input {"anchor": "<a URL that appears in the text or in the anchors given>", "event": "<what you expect there>"}, '
     'and end is the day it comes back to someone if nothing has arrived. '
     'kind item: it waits for other board items to close. input {"after": ["board#N", ...]} (items named in the text only), and end is the backstop day. '
     f'kind relay: it waits for news only {_cfg.owner()} relays (an outside party\'s answer, a person who will tell him). input {{"event": "<who or what, one line>"}}, and end is the day to ask him whether it arrived. '

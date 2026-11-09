@@ -990,7 +990,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             if not (w.anchor or (anchored(item) if anchored else False)):
                 miss.append("an anchor wait names its anchor: wait_anchor=<url>, or an anchor scoped to the item (anchors tool)")
             if not w.event:
-                miss.append("and the event it expects: wait_event=<what must happen there>")
+                miss.append("and the event it expects: wait_event=<what you expect there>")
         elif w.kind == "item":
             if not w.after:
                 miss.append("an item wait names the items it waits after: after=[\"board#N\"]")
