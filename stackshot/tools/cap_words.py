@@ -104,11 +104,7 @@ def agent_text(item: dict[str, Any]) -> list[str]:
 
 
 def status_line(gid: str, item: dict[str, Any], now: float) -> str:
-    w = _wt.compute({**item, "gid": gid}, now)
-    cap = "capped" if "capped" in str(w.get("basis") or "") else "not capped"
-    when = "no expected time (doing)" if w.get("wait") == "doing" else f"wait: {w.get('basis')}"
-    return (f"{cap}; {when}; " + ("PAST DUE" if w.get("overdue") else "not yet due")
-            + f"; last move {local_time(_wt.clock_of(item, now))}")
+    return f"last move {local_time(_wt.clock_of(item, now))}"
 
 
 def plan_a(n: int, use: str, now: float) -> dict[str, Any]:

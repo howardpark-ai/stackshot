@@ -20,7 +20,7 @@ from stackshot.github import ghsync as _gh   # how an id is written for a person
 from stackshot.model import work as _work   # an item's work lines, what is in motion on it (a row's "engineer: migrating", the item page's list, the History)
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
-from stackshot.waits import waiting as _wt   # the one rule for an item that waits: its mover and its expected-by (waiting.py)
+from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.model import draft as _draft   # an item's draft: the verbatim text the owner pastes elsewhere, drawn in a block with a Copy button (draft.py)
 from stackshot.web import itempage as _ip   # the item page's words on the item model: since, the latest change, next lines
@@ -229,6 +229,10 @@ def n_apart(rs):
     """(the rows that are not verifying, how many are): a project's or the board's open count, and its verifying count beside it."""
     rest = [r for r in rs if not is_verifying(r)]
     return rest, len(rs) - len(rest)
+def waits_on_end(r):
+    """A verifying item whose wait is its end date (no wake of its own): held until then, like a parked item."""
+    m = r.get("metadata") or {}
+    return is_verifying(r) and not m.get("wake") and bool(m.get("end"))
 def anchor(r): return f"task-{r['L']}-{r['id']}"
 def is_held(r):
     """On hold: parked, out of the queue; drawn as a kind of on agent, never your call or on others. A
@@ -451,15 +455,14 @@ _FRESH_KEY = {"call": "call_days", "": "agent_days", "relay": "external_days"}
 def freshness(r, now):
     """("fresh" | "stale" | "held", age in seconds) of an item; computed only, never sent. age = now − confirmed_at(r)
     (the wake pass moves state_updated but never `confirmed`, so a woken item reads stale until its owner refreshes it). An
-    item on hold, or after an open item, is "held" while it is inside its expected-by (waiting.py: the one rule), and stale once
-    it is past it: a wait is no longer an exemption, whatever kind it is; a completed one is never stale. Otherwise stale once
+    item on hold, or after an open item, and a verifying item that waits on its end date, is "held", never stale: it is held
+    until its own wake, its blocker's close or its end date (waiting.py); a completed one is never stale. Otherwise stale once
     the age reaches its lane's limit ([freshness] call_days for your call, agent_days for on agent, external_days for on others;
     config.freshness_days). now = an aware datetime or epoch seconds."""
     t = now.timestamp() if isinstance(now, datetime.datetime) else float(now)
     age = max(0.0, t - confirmed_at(r))
-    if is_parked(r) or (r.get("_wait") or {}).get("wait") == "end":     # a verifying item's end date is its wait, like a wake's
-        w = r.get("_wait") or {}
-        return ("stale" if w.get("overdue") else "held"), age
+    if is_parked(r) or waits_on_end(r):     # held until its own wake, its blocker's close or its end date: no stale mark
+        return "held", age
     if r.get("status") == "completed": return "fresh", age
     days = _cfg.freshness_days()[_FRESH_KEY[needs_kind({"metadata": r.get("metadata") or {}})]]
     return ("stale" if age >= days * 86400 else "fresh"), age
@@ -492,11 +495,7 @@ def mockup_link(r, shown=""):
     if u and u in shown: return ""
     return f' <a class="mockup" href="{esc(u)}" target="_blank" rel="noopener" title="open the mockup this decision is about">Mockup ↗</a>' if u else ""
 def stale_tip(r, label=str):
-    """The tooltip of a stale item's ⚠: a your-call item's ask may be out of date; any other lane has gone unconfirmed; a
-    parked item (on hold, or after an open item) is past due (its date is not printed: only real dates are)."""
-    w = r.get("_wait") or {}
-    if (is_parked(r) or w.get("wait") == "end") and w.get("overdue"):
-        return _wt.line(w, r.get("_now") or 0, label, shown_full)
+    """The tooltip of a stale item's ⚠: a your-call item's ask may be out of date; any other lane has gone unconfirmed (a parked item is never stale)."""
     a = age_words(r.get("_age") or 0)
     return (f"ask last confirmed {a} ago — may be out of date" if needs_kind(r) == "call"
             else f"no confirmation for {a} — may be out of date")
@@ -1672,15 +1671,8 @@ class Board:
                 t["_updated"] = datetime.datetime.fromtimestamp(float(t.get("updated") or os.path.getmtime(t["_path"])), ZONE)   # item clock first, file mtime for legacy items
                 rows.append(t)
         open_ids = {r["gid"] for r in rows if r.get("status") != "completed"}
-        by_gid = {r["gid"]: r for r in rows}
-        wst = _wt.load_state()                          # the server's own record of the undated waits and of its first tick (waiting.py)
-        tnow = now.timestamp()
-        wseen, wfloor = (lambda g: (wst.get("seen") or {}).get(g)), _wt.floor_of(wst, tnow)   # before the server's first pass there is no baseline: nothing derived reads as late yet
         for t in rows:
             t["_after"] = [g for g in after_of(t) if g in open_ids and g != t["gid"]] if t.get("status") != "completed" else []   # the open items it waits on
-            if t.get("status") != "completed":          # the one rule: every open item has a mover and an expected-by (waiting.py), parked or not
-                t["_now"] = tnow
-                t["_wait"] = _wt.compute(t, tnow, lambda g: by_gid.get(g), None, wseen, wfloor)
         for t in rows:
             t["_fresh"], t["_age"] = freshness(t, now)   # "fresh" | "stale" | "held", seconds since last confirmed; for the queue's ⚠ (drawn by the board side)
 
@@ -1735,7 +1727,6 @@ class Board:
         open_w = [r for r in rows if r.get("status") != "completed"]
         self.undelivered = [r for r in open_w if isinstance(r["metadata"].get("undelivered"), list) and r["metadata"]["undelivered"]]   # a notice that could not be delivered, on the item
         self.basis_waits = sorted([r for r in open_w if _wt.basis_of(r["metadata"])], key=lambda r: (wake_key(r), sort_key(r)))   # waits that stand on a real-world date (wait_basis): listed once a week in the head
-        self.nodate = [r for r in open_w if r["_wait"].get("nodate")]    # held with no wake, after or recycle: given now + the cap, reported here, never rewritten
         self.provision = provision_lag(now)            # [(hostname, online)] of the boxes whose stackshot puller is behind
         self.mfacts = {L: _fleet.read(L, "machine") for L in _fleet.letters()}   # each machine's view: its last setup run, update attempts and checkout commit (machine_alerts)
         self.server_commit = server_commit()           # the commit the boxes follow: a box's checkout is judged against it (machine_alerts)
@@ -2900,7 +2891,7 @@ class Board:
         if not self.rows: return "Board: empty.\n"
         T = self.phase_counts(); pairs = self.home_pairs()
         n_basis = sum(1 for r in self.agent if _dw.basis_wait(r, self.now.timestamp(), after_open) is not None)    # the items the board lists as waiting for a wake that states its reason
-        stale = sum(1 for r in self.needs + self.agent + self.held if r.get("_fresh") == "stale")   # every open item; a parked one is stale once it is past its expected-by (waiting.py)
+        stale = sum(1 for r in self.needs + self.agent + self.held if r.get("_fresh") == "stale")   # every open item; a parked one is held and never stale
         lines = [f"Board: {T['open']} open ({T['your_move']} your move, {T['agents']} on agents, {T['waiting']} waiting), {len(self.done)} completed in 14d"
                  + (f" · {stale} stale" if stale else "")
                  + (f" · {len(self.undelivered)} with an undelivered notice" if self.undelivered else "") + "."]
@@ -3002,12 +2993,9 @@ class Board:
                     return inst + (" (offline)" if off else f" → **{v.get('latest')}**" if cli_behind(inst, v.get("latest")) else "")
                 if L != PUB or not v: return "—"
                 return v.get("installed", "") + (f" → **{v.get('latest')} update available**" if v.get("state") == "update" else " (latest)" if v.get("state") == "latest" else "")
-            if self.undelivered or self.nodate:    # the one rule's surfaces (waiting.py): notices nobody got, waits with no date
-                print("## Undelivered notices and undated waits"); print()
-                if self.undelivered:
-                    print(f"- Undelivered notices: {', '.join(f'[{rid_full(r)}](#{anchor(r)})' for r in self.undelivered)}")
-                if self.nodate:
-                    print(f"- Waits with no date of their own, given now + the cap: {', '.join(f'[{rid_full(r)}](#{anchor(r)})' for r in self.nodate)}")
+            if self.undelivered:    # notices nobody got
+                print("## Undelivered notices"); print()
+                print(f"- Undelivered notices: {', '.join(f'[{rid_full(r)}](#{anchor(r)})' for r in self.undelivered)}")
                 print()
             if self.basis_waits and self.basis_due():     # once a week: the waits the 7-day cap lets stand on a real-world date, for a person to read the dates
                 print("## Waits on a real-world date (weekly)"); print()
