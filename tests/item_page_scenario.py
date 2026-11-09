@@ -136,18 +136,27 @@ wt = lambda h: html.unescape(re.sub(r"<[^>]+>", " ", (re.search(r'<section class
 p1, p2, p3, p4, p5, p6, p7 = (page(f"a{i}", answer=BOX) for i in (1, 2, 3, 4, 5, 6, 7))
 check("the title is the id and the subject (the prefix dropped), the goal under it; no goal, no goal line", '<h1><span class="hid">a1</span> ask item</h1><p class="igoal">Ship the thing</p>' in p1 and "<title>a1 · ask item</title>" in p1
       and '<h1><span class="hid">a2</span> agent item</h1>' in p2 and 'class="igoal"' not in p2, re.findall(r"<h1>.*?</h1>(?:<p class=.igoal.>.*?</p>)?", p1 + p2))
-check("alive with the owner as mover: Your move · since <age> · then <the post-handback mover>", re.fullmatch(r"Your move · since 3h ago · then home-other · home/Alpha", istate(p1)) is not None, istate(p1))
+check("alive with the owner as mover: Your move · since <age> · then <the post-handback mover>", re.fullmatch(r"Your move · since 3h ago · then home-other", istate(p1)) is not None, istate(p1))
 check("alive with a session as mover, handed over and not yet taken", re.match(r"On agent · since .* · mover home-other · handed over, not yet taken", istate(p2)) is not None, istate(p2))
 p60, p61, p62, p63 = (page(f"a{i}", answer=BOX) for i in (60, 61, 62, 63))
 check("a your-call item handed to Oliver shows no 'not yet taken' warning", istate(p60).startswith("Your move") and "not yet taken" not in p60, istate(p60))
 check("a your-step item handed to Oliver shows no 'not yet taken' warning", istate(p61).startswith("Your move") and "not yet taken" not in p61, istate(p61))
 check("a hand-off to a session that has not taken it shows the warning; one taken does not", "handed over, not yet taken" in istate(p62) and "not yet taken" not in p63, (istate(p62), istate(p63)))
 check("waiting on a time: the state line says Waiting and the post-wake mover; the wait block has what (his reason), watched by the scheduler, until",
-      istate(p3) == "Waiting · since 3h ago · then home-other · home/Alpha" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Then\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
+      istate(p3) == "Waiting · since 3h ago · then home-other" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Then\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
 check("waiting on an item: its close, watched by the server", istate(p4).startswith("Waiting · since") and re.search(r"Waits on\s+a2\s+\(open\)\s+Watched by\s+the server\s+End\s+no end date set\s+Then\s+home-other", wt(p4)) is not None, (istate(p4), wt(p4)))
 check("waiting on an anchor: the event, watched by the anchor module, the backstop", istate(p5).startswith("Waiting · since") and re.search(r"the review lands\s+Watched by\s+the anchor module\s+Backstop\s+Sun Feb 1st\s+Then\s+home-other", wt(p5)) is not None, (istate(p5), wt(p5)))
 check("waiting on news only he relays: the party's event, ask by", istate(p6).startswith("Waiting · since") and re.search(r"Acme's the contract\s+\(news only Oliver relays\)\s+Watched by\s+the scheduler\s+Ask by\s+Sun Mar 1st\s+Then\s+home-other", wt(p6)) is not None, (istate(p6), wt(p6)))
-check("dead: Done <age>, and the close's reason under the state line", re.fullmatch(r"Done · \d+d ago · home/Alpha", istate(p7)) is not None and '<p class="ireason">shipped as asked</p>' in p7, istate(p7))
+check("dead: Done <age>, and the close's reason under the state line", re.fullmatch(r"Done · \d+d ago", istate(p7)) is not None and '<p class="ireason">shipped as asked</p>' in p7, istate(p7))
+# the project is not on the line under the title: it stays on the sidebar's Project row. The page is one document in both layouts (the stylesheet moves the side panel beside the item from 768px and stacks it on a phone), so one read of the markup covers both
+_proj = "Alpha"
+_stat = lambda h: h[h.find('<div class="istat">'):h.find("</div>", h.find('<div class="istat">'))]
+_row = lambda h: re.search(r'<dt>Project</dt><dd>(.*?)</dd>', h, re.S)
+check("the line under the title never names the project, on an alive, a waiting and a closed item; the Project row of the sidebar still does, linked",
+      all(_proj not in _stat(h_) and "<a " not in re.sub(r"<a href=\"/items/[^\"]*\">[^<]*</a>", "", re.search(r'<p class="istate">(.*?)</p>', h_, re.S).group(1)) and _row(h_) is not None and _proj in _row(h_).group(1) and "<a href=" in _row(h_).group(1)
+          for h_ in (p1, p2, p3, p7)), [(_stat(h_), _row(h_) and _row(h_).group(1)) for h_ in (p1, p7)])
+check("both layouts read the same markup: the sidebar sits before the main column in the source, the line under the title only in the main column, and the phone's order keeps the sidebar out of that line",
+      p7.index('<aside class="iside"') < p7.index('<div class="istat">') and p7.index("</h1>") < p7.index('<div class="istat">') and ".iside{order:1}" in p7)
 
 # ---- 2. the latest change in plain words (itempage.plain_change, last_change) and the page without a Where it stands section
 PC = itempage.plain_change
