@@ -103,7 +103,7 @@ os.environ.update(ANTHROPIC_API_KEY="[masked secret]", ANTHROPIC_AUTH_TOKEN="tok
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import page_debt; from stackshot.projects import pages as _pg
 _ct_changed_since = _pg.ct_changed_since       # the real one: section 9 patches it
 from stackshot.web import server
-server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]; server._page_ts = lambda key: 0.0
+server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]; server._pdebts._page_ts = lambda key: 0.0
 server._cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
 ZONE = _cfg.tz()
 DAY = lambda h, m=0, d=16: dt.datetime(2026, 10, d, h, m, tzinfo=ZONE).timestamp()
@@ -340,10 +340,10 @@ check("the day marks are in the state dir, per page and mode", page_debt.read_da
 
 # ---- 9. the debts a keeper already settled are not called for
 reset(); owe("projects/alpha", A, "a1", "changed (description)"); server._pilot_fallback_tick(); time.sleep(0.3)
-server._page_ts = lambda key: time.time() + 500; _pg.ct_changed_since = lambda key, ts: True
+server._pdebts._page_ts = lambda key: time.time() + 500; _pg.ct_changed_since = lambda key, ts: True
 nc = len(calls()); out = server._page_debt_pass(now=DAY(14, d=18))
 check("a debt whose page changed meanwhile is settled by the ledger and costs no call", out == {"pages": 0} and len(calls()) == nc and "projects/alpha" not in server._owed_load(), (out, server._owed_load()))
-server._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
+server._pdebts._page_ts = lambda key: 0.0; _pg.ct_changed_since = lambda key, ts: False
 reset(); owe("projects/alpha", A, "a1", "changed (description)"); server._pilot_fallback_tick(); time.sleep(0.3)
 d = server._owed_load(); d["projects/gamma"] = {"work-gamma": {"ts": time.time(), "item": "a3"}}; server._owed_save(d)
 nc = len(calls()); out = server._page_debt_pass(now=DAY(14, d=19), io=FakeIO(**{"projects/alpha": alpha_page()}))

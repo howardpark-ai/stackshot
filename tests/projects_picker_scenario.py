@@ -1060,14 +1060,14 @@ else: server._cfg.CFG["project_agent"] = CFG_PA_6E
 server._pform.PAGE_IO = gio
 
 # the retire lines an earlier release kept on the ledger: gone, a debt on the same entry stays
-real_page_ts = server._page_ts
+real_page_ts = server._pdebts._page_ts
 try:
     server._owed_save({"projects/rtr": {"home-old-keeper": {"ts": time.time(), "item": "", "retired_only": True, "retired": [{"name": "home-rtr-x", "line": "x", "ts": time.time(), "seen": True}]},
                                         "home-debtor": {"ts": time.time(), "item": f"board#{BID_A}", "retired": [{"name": "home-rtr-y", "line": "y", "ts": time.time(), "seen": True}]}}})
-    server._page_ts = lambda key: 0.0              # the page did not change since: the debt stays
+    server._pdebts._page_ts = lambda key: 0.0              # the page did not change since: the debt stays
     left = server._owed_settle()
 finally:
-    server._page_ts = real_page_ts
+    server._pdebts._page_ts = real_page_ts
 check("retire: a leftover retire-lines-only entry on the ledger is dropped at the next settle, and the line on an entry that also owes a debt goes with the debt kept", set(left.get("projects/rtr", {})) == {"home-debtor"} and "retired" not in left["projects/rtr"]["home-debtor"]
       and left["projects/rtr"]["home-debtor"]["item"] == f"board#{BID_A}" and "AGENTS RETIRED" not in server._nag("home-debtor"), left)
 d_ = server._owed_load(); d_.pop("projects/rtr", None); server._owed_save(d_)
