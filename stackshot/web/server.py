@@ -26,7 +26,6 @@ import json
 import logging
 import math
 import os
-import queue
 import re
 import shlex
 import signal
@@ -151,6 +150,8 @@ from stackshot.waits import held as _held  # noqa: E402  — notices that ask no
 from stackshot.waits import reports as _reports  # noqa: E402  — does a background agent's message to a front agent ask for anything: a report goes onto the item it names instead (reports.py)
 from stackshot.web import uiprefs as _uiprefs  # noqa: E402  — a signed-in person's settings for the pages, kept on the server: the side panel's section order (uiprefs.py)
 from stackshot.web import foryou as _fy  # noqa: E402  — the owner's For you list: rows for what he should see, in place of messages to a front agent (foryou.py)
+from stackshot.web import foryou_slack as _fyslack  # noqa: E402  — the For you list's Slack hook, its queue and its worker thread; the suites stub the hook and read its switch on this module (foryou_slack.py)
+from stackshot.web.foryou_slack import _foryou_slack, _foryou_slack_wait  # noqa: E402,F401  — the row's call and the suite's join, kept on this module as well (foryou_slack.py)
 from stackshot.web import landed as _ld  # noqa: E402  — the closes of agents that the owner did not make, and which he has seen: the header's Landed count and the /landed page (landed.py)
 from stackshot.model import step_commands as _sc  # noqa: E402  — the step of a your-step item: a one-line summary, the guards that keep the commands out of it and in the <owner>: lines of next, and the parts the page draws (step_commands.py)
 from stackshot.core import lanes as _lanes  # noqa: E402  — the fleet tool's lane names: a lane word to its code, a code to its display name, read from the tool's lane-names file (lanes.py)
@@ -6854,7 +6855,7 @@ def _inbox_flag_tick(now: float | None = None) -> list[str]:
 # changes an item counts: a session's write, the server's own pass, his board answer), never where a session's message is sent: a message a
 # session sends on purpose with [for <owner>] (a decision or a go-ahead asked for) is not touched. A decision row goes when the decision
 # leaves the item's needs (answered, or closed). The urgent rows (a due date within 24 h) are also posted once to Slack
-# through _for_you_slack_post, the one hook.
+# through _for_you_slack_post, the one hook (foryou_slack.py, with the queue and the worker thread that post it).
 _FORYOU_EVERY = 300.0        # seconds between passes of the due-date look; the dates pass opens the gate itself, every ten minutes
 _FORYOU_LAST = [0.0]
 _FORYOU_DUE_S = 24 * 3600.0  # "within 24 h": a due date whose end is at most this far ahead, or past by less than this
@@ -6890,108 +6891,7 @@ def _foryou_key(gid: str, kind: str, item: dict[str, Any]) -> str:
     return f"{gid}:{kind}:{_foryou_stamp(item)}"
 
 
-# The Slack post never runs on a thread that does other work (the runner, the /client/message pool): _foryou_slack only queues the
-# row, and a worker thread of its own posts it. A post that failed or timed out is tried again by the due-date pass (_foryou_tick), at most
-# _fy.SLACK_TRIES times in all and only while the row is under 24 h old; every failure is a stderr line.
-_FORYOU_Q: "queue.Queue[int]" = queue.Queue()
-_FORYOU_INFLIGHT: set[int] = set()       # row ids queued or being posted: a row is never queued twice
-_FORYOU_WLOCK = threading.Lock()
-_FORYOU_WORKER: list[threading.Thread] = []
-_FORYOU_SLACK_TIMEOUT = 30.0             # seconds a Slack command may run before its whole process group is killed
 _FORYOU_FAILED: set[str] = set()         # keys of closes whose row could not be written (the fallback in _tell_close_owner reads it)
-
-
-def _for_you_slack_on() -> bool:
-    """Is there a Slack path at all ([for_you] slack_command set)? The scenario suite replaces this with the hook."""
-    return bool(str(_cfg.get("for_you", "slack_command") or "").strip())
-
-
-def _foryou_slack(row: dict[str, Any]) -> None:
-    """An urgent row is also posted to Slack, from the worker thread (this only queues it, so no write waits on a command). → nothing."""
-    if not _for_you_slack_on():
-        return
-    rid = int(row["id"])
-    with _FORYOU_WLOCK:
-        if rid in _FORYOU_INFLIGHT:
-            return
-        _FORYOU_INFLIGHT.add(rid)
-        if not _FORYOU_WORKER or not _FORYOU_WORKER[0].is_alive():
-            t = threading.Thread(target=_foryou_slack_work, name="for-you-slack", daemon=True)
-            _FORYOU_WORKER[:] = [t]
-            t.start()
-    _FORYOU_Q.put(rid)
-
-
-def _foryou_slack_work() -> None:
-    while True:
-        rid = _FORYOU_Q.get()
-        try:
-            _foryou_slack_one(rid)
-        except Exception as e:  # noqa: BLE001  — the worker never dies on one row
-            print(f"for-you: row {rid} Slack worker error: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        finally:
-            with _FORYOU_WLOCK:
-                _FORYOU_INFLIGHT.discard(rid)
-            _FORYOU_Q.task_done()
-
-
-def _foryou_slack_wait() -> None:
-    """Block until the queue is posted (the scenario suite's join; the server never calls it)."""
-    _FORYOU_Q.join()
-
-
-def _foryou_slack_one(rid: int) -> None:
-    row = _fy.row_by_id(rid)
-    if row is None or row.get("slacked"):
-        return                             # marked seen meanwhile, or already posted
-    try:
-        text = f"[stackshot] For you (urgent): {row['item'] + ' ' if row.get('item') else ''}{row['what']}" + (f" → {row['url']}" if row.get("url") else "")
-        err = _for_you_slack_post(text)
-    except Exception as e:  # noqa: BLE001
-        err = f"{e.__class__.__name__}: {e}"
-    tries = _fy.slack_result(rid, not err)
-    if err:
-        left = "tried again on a later pass" if tries < _fy.SLACK_TRIES else "no more tries"
-        print(f"for-you: row {rid} not posted to Slack (try {tries} of {_fy.SLACK_TRIES}, {left}): {err}", file=sys.stderr, flush=True)
-
-
-def _for_you_slack_post(text: str) -> str:
-    """THE SLACK HOOK of the For you list. stackshot has no Slack posting path of its own (anchor-hub only receives Slack, and holds no
-    posting credential), and this adds no credential: `[for_you] slack_command` names an argv (a script that already posts, such as the
-    one a briefing already uses) that gets the text on its standard input; empty (the default) = no Slack path, the row is on the list only.
-    The command runs in a session of its own and its output goes to a file, so a child it leaves behind holds no pipe of ours; past
-    _FORYOU_SLACK_TIMEOUT the whole process group is killed. → "" when posted, else why not. The scenario suite replaces this function."""
-    import shlex
-    cmd = str(_cfg.get("for_you", "slack_command") or "").strip()
-    if not cmd:
-        return "no Slack path configured ([for_you] slack_command is empty)"
-    with tempfile.TemporaryFile() as err:
-        try:
-            p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
-        except (OSError, ValueError) as e:
-            return f"{e.__class__.__name__}: {e}"
-        try:
-            p.stdin.write(text.encode("utf-8"))
-            p.stdin.close()
-        except (BrokenPipeError, OSError):
-            pass                          # it did not read its input; its exit status says how it went
-        try:
-            p.wait(timeout=_FORYOU_SLACK_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(p.pid, signal.SIGKILL)      # the group is the command and whatever it started: none outlives the post
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            return f"{cmd.split()[0]} did not finish in {_FORYOU_SLACK_TIMEOUT:g} s; killed"
-        if p.returncode == 0:
-            return ""
-        err.seek(0)
-        tail = err.read(300).decode("utf-8", "replace").strip().splitlines()
-        return f"{cmd.split()[0]} exited {p.returncode}" + (f": {tail[-1]}" if tail else "")
 
 
 def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any, urgent: bool = False) -> dict[str, Any] | None:
@@ -7089,7 +6989,7 @@ def _foryou_tick(now: float | None = None) -> list[str]:
         except Exception as e:  # noqa: BLE001  — one item never stops the pass
             print(f"for-you: {gid} due-date look failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
-        if _for_you_slack_on():
+        if _fyslack._for_you_slack_on():
             for r in _fy.slack_pending(now):
                 _foryou_slack(r)
     except Exception as e:  # noqa: BLE001
@@ -15102,7 +15002,7 @@ def stackshot_bump_versions(host: str = "") -> str:
 # The signed-in address is kept in a signed cookie; only [auth] allowed_emails get in.
 # The cookie, the guard and the board's own OAuth client are signin.py's (imported here, where they were defined, apart from `_auth_mode`, `_ui_now`, `_ui_http` and `_ui_client_id`: those four
 # are read and set on that module (`_signin.`), as the suites set them there). The three /ui/ routes and `_ui_exchange` stay here: they use `mcp`.
-from stackshot.web.signin import (_APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_COOKIE, _UI_FLOW, _UI_PUBLIC, _UI_CLIENT, _ui_days, _ui_email, _ui_guard, _ui_is_board_client,  # noqa: E402
+from stackshot.web.signin import (_APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_COOKIE, _UI_FLOW, _UI_PUBLIC, _UI_CLIENT, _ui_days, _ui_email, _ui_guard, _ui_is_board_client,  # noqa: E402,F401
                                   _ui_is_navigation, _ui_key, _ui_open, _ui_redirect_uri, _ui_renewed, _ui_session, _ui_set_session, _ui_sign, _ui_unsign)
 
 
