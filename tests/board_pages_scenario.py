@@ -191,6 +191,18 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         if name != "home":
             check(f"header: {name} page (the route): the cards go to home's lists ('/#your-move' and so on) and /closed, all at the root",
                   [h for h, _n in hdr_cards(t)] == ["/#your-move", "/#agents-at-work", "/#queued-release", "/#waiting-list", "/closed"] and all(inside(h) for h, _n in hdr_cards(t)), hdr_cards(t))
+    # the search box: a search from any page opens its results in a new tab (the page it started from stays as it was); the Search page's own box searches in place so tabs do not pile up
+    sbox_tag = lambda t: (re.search(r'<header class="top">.*?</header>', t, re.S) and re.search(r'<form class="sbox"[^>]*>', re.search(r'<header class="top">.*?</header>', t, re.S).group(0)) or [""])[0]
+    for name, r in root_pages.items():
+        tag = sbox_tag(r.text)
+        if name == "search":
+            check("header search box: the Search page's own box searches in place (no target, no rel)", tag.startswith("<form") and "target=" not in tag and "rel=" not in tag, tag)
+        else:
+            check(f"header search box: on the {name} page it opens the results in a new tab (target=_blank, rel=noopener, a plain GET to /search)",
+                  tag.startswith("<form") and 'target="_blank"' in tag and 'rel="noopener"' in tag and 'method="get"' in tag and 'action="/search"' in tag, tag)
+    check("header search box: the pages checked include home, an item, a project page, Closed and Projects, and the Search page", {"home", "item", "project", "landed", "Projects", "search"} <= set(root_pages), list(root_pages))
+    check("header search box: an app window (no tabs) sends the form's results to the window itself, as it does a link's: one submit listener in head, same-origin GET forms with target=_blank only",
+          all(r.text.count("document.addEventListener('submit',function(ev){var f=ev.target;if(ev.defaultPrevented||!app()") == 1 and "u.search=new URLSearchParams(new FormData(f)).toString()" in r.text for r in root_pages.values()))
     check("header: a card's target on home is a section of that id (the hash opens it)", all(f'<section id="{x}">' in got["home"].text for x in ("your-move", "agents-at-work", "queued-release", "waiting-list")))
     check("home: no Completed or Task board section", all(x not in got["home"].text for x in ('id="completed"', 'id="by-project"', 'table class="pidx"')))
     check("/projects: not a project's details page (the route comes before /<page key>)", get("/projects/alpha").status_code == 200 and "<h1>Projects</h1>" not in get("/projects/alpha").text)

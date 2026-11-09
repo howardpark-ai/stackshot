@@ -92,9 +92,13 @@ _JS = ("<script>(function(){var f=document.getElementById('se-form');if(!f)retur
        "if(e.target&&e.target.type==='search')return;if(f.requestSubmit)f.requestSubmit();else f.submit()})})()</script>")
 
 
-def box(q: str = "") -> str:
-    """The search box, a plain GET form to /search: what every page's header draws (its style is in CSS, which Board._css carries)."""
-    return (f'<form class="sbox" action="{under("/search")}" method="get" role="search"><input type="search" name="q" value="{esc(str(q or "")[:MAX_Q])}" '
+def box(q: str = "", in_place: bool = False) -> str:
+    """The search box, a plain GET form to /search: what every page's header draws (its style is in CSS, which Board._css carries).
+    The form opens its results in a new tab (target="_blank", rel="noopener"), so the page the search started from stays as it was; no script is involved, so Enter and the button both do it.
+    `in_place=True` is the Search page's own header box: there the results replace the page, so tabs do not pile up (the filters under it are a plain in-place form too).
+    An installed app window has no tabs: head's script (render.py _APP_HEAD) sends a same-origin target="_blank" form's results to the window itself, as it does a link's."""
+    tab = "" if in_place else ' target="_blank" rel="noopener"'
+    return (f'<form class="sbox" action="{under("/search")}" method="get" role="search"{tab}><input type="search" name="q" value="{esc(str(q or "")[:MAX_Q])}" '
             f'placeholder="{HINT}" data-hint="{HINT}" data-hint-short="{HINT_SHORT}" aria-label="Search the board" maxlength="{MAX_Q}" autocomplete="off" enterkeyhint="search">'
             f'<button type="submit" class="b ico" aria-label="Search" title="Search">{_ICON}</button></form>{_HINT_JS}')
 
@@ -302,7 +306,7 @@ def results_html(board: Any, q: str, opts: Any = None) -> str:
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{esc(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
-            + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header(q=q)}'
+            + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header(q=q, search_page=True)}'
             f'<h1>Search</h1>{_controls(q, f, board.now, n_kind, n_state)}<div class="se-summary" role="status">{note}</div>{results}{more}</main>'
             + board.panel_tail() + R._FAB_PAIR + R._THEME_JS + R._RELOAD_JS + R._TOTOP_JS + R._BFCACHE_JS + '</body></html>')
 
