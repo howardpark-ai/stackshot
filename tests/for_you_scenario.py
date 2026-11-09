@@ -101,9 +101,9 @@ _real_verdict = server._front_verdict
 server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 def cfg(live=False): _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, **({"live": True} if live else {})}
 slack = []
-REAL_SLACK_POST, REAL_SLACK_ON = server._for_you_slack_post, server._for_you_slack_on
-server._for_you_slack_post = lambda text: slack.append(text) or ""      # the Slack hook is stubbed: nothing leaves this process
-server._for_you_slack_on = lambda: True
+REAL_SLACK_POST, REAL_SLACK_ON = server._fyslack._for_you_slack_post, server._fyslack._for_you_slack_on
+server._fyslack._for_you_slack_post = lambda text: slack.append(text) or ""      # the Slack hook is stubbed: nothing leaves this process
+server._fyslack._for_you_slack_on = lambda: True
 pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 NEWD = "- The thing works and is in use"
 def cl(i, sender="osprey-x", reason="PR 14 is live", description=NEWD): return server.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
@@ -553,7 +553,7 @@ check("the server's own read gives the same", server._client_get("for-you", {})[
 # ---- 9. a Slack post that failed is tried again on the next pass, then marked; at most three tries; only young rows; only with a Slack path
 fy.seen("all")
 posts = []; script = ["boom: network down", ""]      # the first post fails, the second goes
-server._for_you_slack_post = lambda text: (posts.append(text), script.pop(0) if script else "")[1]
+server._fyslack._for_you_slack_post = lambda text: (posts.append(text), script.pop(0) if script else "")[1]
 err9 = io.StringIO()
 with contextlib.redirect_stderr(err9):
     urgent("PR #18 FAILED at the build: it broke"); server._foryou_slack_wait()
@@ -568,7 +568,7 @@ r9 = byid(r9["id"])
 check("…the next pass tries it again, and this time it is posted: the row is marked (slacked) with two tries", r9["slacked"] and r9["slack_tries"] == 2 and len(posts) == 2 and posts[0] == posts[1], (r9, posts))
 server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 800); server._foryou_slack_wait()
 check("…a posted row is not posted again", len(posts) == 2 and byid(r9["id"])["slack_tries"] == 2)
-posts.clear(); server._for_you_slack_post = lambda text: (posts.append(text), "still down")[1]
+posts.clear(); server._fyslack._for_you_slack_post = lambda text: (posts.append(text), "still down")[1]
 err9 = io.StringIO()
 with contextlib.redirect_stderr(err9):
     urgent("PR #22 FAILED at the build: again"); server._foryou_slack_wait()
@@ -580,17 +580,17 @@ check("a post that keeps failing is tried three times in all (the first and two 
 posts.clear(); old = fy.add(key="old:slack", kind="due", what="PR #1 FAILED long ago", urgent=True, ts=time.time() - 90000)
 server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 100); server._foryou_slack_wait()
 check("a row more than 24 h old is not retried", not posts and not byid(old["id"])["slacked"] and byid(old["id"])["slack_tries"] == 0, (posts, byid(old["id"])))
-server._for_you_slack_on = lambda: False
+server._fyslack._for_you_slack_on = lambda: False
 fresh = fy.add(key="fresh:slack", kind="due", what="PR #2 FAILED", urgent=True)
 server._foryou_slack(fresh); server._FORYOU_LAST[0] = 0.0; server._foryou_tick(time.time() + 100); server._foryou_slack_wait()
 check("with no Slack path set nothing is queued or retried, and nothing is counted", not posts and byid(fresh["id"])["slack_tries"] == 0)
-server._for_you_slack_on = lambda: True
+server._fyslack._for_you_slack_on = lambda: True
 
 # ---- 10. a Slack command that hangs is killed with everything it started, and no write or tick waits for it
 pidf, kidf, outf = T / "hang.pid", T / "hang.kid", T / "slack.out"
 _cfg.CFG["for_you"] = {"slack_command": f"sh -c 'echo $$ > {pidf}; sleep 60 & echo $! > {kidf}; wait'"}
-server._for_you_slack_post, server._for_you_slack_on = REAL_SLACK_POST, REAL_SLACK_ON
-server._FORYOU_SLACK_TIMEOUT = 1.5
+server._fyslack._for_you_slack_post, server._fyslack._for_you_slack_on = REAL_SLACK_POST, REAL_SLACK_ON
+server._fyslack._FORYOU_SLACK_TIMEOUT = 1.5
 err10 = io.StringIO(); t0 = time.time()
 with contextlib.redirect_stderr(err10):
     urgent("PR #23 FAILED at the restart: hung")
@@ -611,7 +611,7 @@ for _ in range(30):
     time.sleep(0.1)
 check("…the command and the child it started (a sleep 60 holding its output) are both gone: the whole process group was killed", not alive(pid_) and not alive(kid_), (pid_, kid_))
 _cfg.CFG["for_you"] = {"slack_command": f"sh -c 'cat > {outf}'"}
-server._FORYOU_SLACK_TIMEOUT = 10.0
+server._fyslack._FORYOU_SLACK_TIMEOUT = 10.0
 urgent("PR #25 FAILED at the build: fine"); server._foryou_slack_wait()
 r11 = next(r for r in rows() if "PR #25" in r["what"])
 check("a real command that works gets the text on its standard input and the row is marked (the worker went on after the killed one)",
@@ -622,7 +622,7 @@ with contextlib.redirect_stderr(err10):
     urgent("PR #26 FAILED at the build: nope"); server._foryou_slack_wait()
 check("a command that exits non-zero is a failed try with its exit status in the log", "sh exited 3" in err10.getvalue(), err10.getvalue())
 _cfg.CFG["for_you"] = {"slack_command": ""}
-server._for_you_slack_post = lambda text: slack.append(text) or ""; server._for_you_slack_on = lambda: True
+server._fyslack._for_you_slack_post = lambda text: slack.append(text) or ""; server._fyslack._for_you_slack_on = lambda: True
 
 # ---- 11. a for-you.json that does not parse is moved aside, the list starts empty, ids go on, nothing crashes
 fp = fy.path()

@@ -723,7 +723,7 @@ _KIND_ORDER = ["Slack", "Notion", "Gmail", "Drive", "GitHub", "Link"]
 # an installed app (Chrome, Android) takes its icons through the browser's HTTP cache and Cloudflare's edge, and an icon
 # under an unchanged URL never reached it (the maskable icon stayed the old white one). The
 # versions are read once, when this module is imported (the server's start; deploy.sh restarts it when icons/ changes),
-# from the committed icons/ (server.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
+# from the committed icons/ (signin.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
 # file names stay: the Cloudflare Access bypass names the icons' exact paths, which a query string keeps and a new name would
 # not. server.py serves a request whose ?v= is the version of the bytes it sends as immutable; any other, as before.
 ICON_DIR = _paths.ROOT / "icons"
@@ -740,7 +740,7 @@ def icon_href(name: str) -> str:
     v = ICON_V.get(name)
     return f"/{name}?v={v}" if v else f"/{name}"
 # D2Coding (Naver, SIL OFL 1.1), the font of command blocks and inline code on the board and the item pages,
-# served by stackshot itself from the committed fonts/ (server.py _FONT_PATH): one regular-weight WOFF2 of Naver's
+# served by stackshot itself from the committed fonts/ (signin.py _FONT_PATH): one regular-weight WOFF2 of Naver's
 # Ver 1.4.0 release, converted without subsetting (fonts/README.md). Its URL carries the version of its bytes, like the icons',
 # so the file is kept a year; the @font-face has font-display:swap, so the text shows in the fallback stack until it is in.
 FONT_DIR = _paths.ROOT / "fonts"
