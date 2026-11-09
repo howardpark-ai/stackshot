@@ -10605,6 +10605,67 @@ def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
     return True
 
 
+def _ladder_main_to(gid: str, who: str) -> str:
+    """Who the ladder's notice about a silent live background mover goes to: the item's project's -main agent (`_main_agent`, a front agent), "" when the project has none or when it is the mover itself."""
+    try:
+        to = _main_agent(str((_load(gid).get("metadata") or {}).get("project") or ""))
+    except Exception:  # noqa: BLE001
+        return ""
+    return "" if not to or _session_id(to) == _session_id(who) else to
+
+
+def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list[tuple[str, str, str]] | None" = None, info: "dict[str, dict[str, str]] | None" = None) -> str:
+    """The rung a live background mover's silence climbs to after the look (ladder.MAIN): a notice to the project's -main agent, which asks it to decide whether the item needs a nudge or a
+    different mover, because the cold call and the builder replace a mover that cannot answer and this one can, so without it the item would sit unseen. A History line on the item says it. Not taken
+    ("" so it is tried again at the next tick) when the item has had activity since the entry's silence began; taken with a History line alone when the project has no -main agent to tell.
+    With `rows` (the stall tick gives it) the notice is not sent here: the item's (-main agent, gid, line) is added to `rows` and the tick sends ONE notice per -main agent for all its items due in the pass
+    (`_ladder_main_tell`, as the resend path batches with `_ho.batch`), `info` keeping what a lone item's wording needs; without it the notice for this one item goes at once. → the rung taken."""
+    from stackshot.audit import silence as _silence
+    with _ITEM_LOCK:
+        item = _load(gid)
+        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
+            return ""
+        last = _silence.clock(item, who)
+        if last > 0 and now - last < _silence.LIMIT:
+            return ""            # the item is not silent now (activity since the entry was made): nothing to hand up
+        meta = item.setdefault("metadata", {})
+        to = _ladder_main_to(gid, who)
+        span = _silence.minutes(now - last) if last > 0 else "a long time"
+        since = _rmod.when_words(dt.datetime.fromtimestamp(last, ZONE)) if last > 0 else "it was handed over"
+        before = float(rec.get("main_at") or 0)      # when -main was told about this silence last, if it was
+        told = _rmod.when_words(dt.datetime.fromtimestamp(before, ZONE)) if before else ""
+        data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
+        _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else "the project has no -main agent to tell"))
+        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, no -main agent to tell"))
+    if to:
+        line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no write since {since} ({span})" + (f", told before {told}" if told else "")
+        if rows is not None and info is not None:
+            rows.append((to, gid, line)); info[gid] = data
+        else:
+            _ladder_main_tell(to, [(gid, line)], {gid: data})
+    print(f"ladder: {gid} {who} is live and silent after the look: " + (f"{to} told" if to else "no -main agent to tell"), file=sys.stderr, flush=True)
+    return _ladder.MAIN
+
+
+def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]") -> None:
+    """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a notice that asks a front agent to act (tag
+    "stall", kind exempt), marked for the owner as every message a front agent takes is, and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
+    gids = [g for g, _l in items]
+    every = f"{_ladder.MAIN_EVERY / 3600.0:g} hours"
+    stop = f"To stop the repeats, write to the item, hold it or set its wait; it comes again in {every} while the item stays silent. "
+    if len(items) == 1:
+        d = info[gids[0]]
+        again = f" {_session_label(to)} was told about this at {d['told']} and nothing has been written since." if d["told"] else ""
+        text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has had no write from its background mover {d['mover']} since {d['since']} ({d['span']}), and that session is live, so the ladder asks no one else.{again} "
+                f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop}→ {_notice_link(gids[0])}")
+    else:
+        head = f"{_FOR_OWNER}\n[stackshot] {len(items)} items have had no write from their background movers, and those sessions are live, so the ladder asks no one else:"
+        tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
+                f"→ {BOARD_URL}")
+        text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
+    _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
+
+
 def _laddered(gid: str, who: str, now: float, at: float | None = None) -> bool:
     """Is the item on the one ladder for this mover and this hand-off (`at`: the record's) already (an entry the hand-off audit made, within its bounds)? Then the hand-off audit leaves it."""
     rec = _stall_load().get(gid)
@@ -10657,6 +10718,8 @@ def _ladder_do(act: str, gid: str, who: str, rec: dict[str, Any], now: float, mi
         if _ladder.quiet(rec) or (act == "look" and _stall_background(who)):      # a background agent's look says what the item shows, never what its pane does
             return act if _ladder_quiet_look(gid, who, now, minutes) else ""
         return act if _stall_resend(gid, who, now, minutes, lines) else ""
+    if act == _ladder.MAIN:
+        return _ladder_main(gid, who, rec, now)
     if act == "cold":
         return _stall_cold(gid, who, now, minutes)
     return _stall_builder(gid, who, now, minutes)
@@ -10742,7 +10805,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
             back = bool(ladder_on and not front and _stall_background(who))
             if back:
                 # the one ladder: a background agent's pane says nothing about this item (it is nearly always busy, or shows a background shell for a CI watch or a release), so the pane no longer holds
-                # the rungs after the ask; the item's own work line does: a line in progress, changed within 90 minutes, is a subagent at work on it. A live pane stops at the look (ladder.action).
+                # the rungs after the ask; the item's own work line does: a line in progress, changed within 90 minutes, is a subagent at work on it. A live pane gets no cold call or builder: its silence goes to the project's -main agent (ladder.action, `_ladder_main`).
                 if _silence.subagent_running(it, now, who, _ho_same):      # only the mover's own line: another agent's stale one holds nothing
                     continue
             elif not front and status == "shell" and _stall_background(who):
@@ -10774,6 +10837,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
     lines: list[tuple[str, str, str]] = []
     sent = 0
     told: set[str] = set()      # background agents sent a notice this pass: one each, the next item's follows on the next pass
+    main_rows: list[tuple[str, str, str]] = []      # (-main agent, gid, line) of the silent live background movers due this pass: one notice per -main agent lists them all (`_ladder_main_tell`)
+    main_info: dict[str, dict[str, str]] = {}
     for act, gid, who, rec in todo:
         try:
             if ladder_on and act in ("ask", "look") and who in told:
@@ -10782,7 +10847,9 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 if sent >= cap:
                     continue             # the rest of the first steps wait for the next tick (a deploy or a restart must not send a flood); their episodes are kept as they are
                 sent += 1
-            if ladder_on:
+            if ladder_on and act == _ladder.MAIN:
+                did = _ladder_main(gid, who, rec, now, main_rows, main_info)
+            elif ladder_on:
                 did = _ladder_do(act, gid, who, rec, now, minutes, lines)
             elif act == "resend":
                 did = _stall_resend(gid, who, now, minutes, lines)
@@ -10818,6 +10885,12 @@ def _stall_tick(now: float | None = None) -> list[str]:
         _tell_woken(gids, _session_id(who) or who,
                     _ho.message(ls, f"[stackshot] you have had no turn running for {minutes:g} minutes and this is still yours:",
                                 f"[stackshot] you have had no turn running for {minutes:g} minutes and these {{n}} items are still yours:", tail), tag="stall")
+    for to in _ho.batch(main_rows):      # ONE notice per -main agent for every silent live background mover's item that came due in this pass
+        mine = [(g, l) for t, g, l in main_rows if t == to]
+        try:
+            _ladder_main_tell(to, mine, main_info)
+        except Exception as e:  # noqa: BLE001  — the History lines are written; the next interval tells again
+            print(f"stall: the notice to {to} about {len(mine)} silent items failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if acted:
         _publish()
     return acted
