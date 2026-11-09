@@ -1,15 +1,14 @@
-"""tests/agent_due_scenario.py — agent work in progress carries no expected time; every other wait keeps its date.
+"""tests/agent_due_scenario.py — agent work in progress carries no expected time (and no item has a computed one).
 
-An item an agent moves (the stored state doing, a session in needs) shows how long it has run and nothing else: the wait's kind is `doing`, it has no date and is never past due.
+An item an agent moves (the stored state doing, a session in needs) shows how long it has run and nothing else.
 Checked here, against a scratch store and config (no port, no real server, nothing outside the scratch folder):
 
-  * an item that stores the old word doing (written as fixture data: no call sets a state any more) has no expected time, and a write's reply says nothing of one; the wait is `doing`, whatever the item's age, however far or long past an old stored expected_by is;
+  * an item that stores the old word doing (written as fixture data: no call sets a state any more) has no expected time, and a write's reply says nothing of one, whatever the item's age and however far or long past an old stored expected_by is;
   * expected_by and expected_reason, which older calls pass, are accepted whatever they hold (a far time, a past one, text that is no time) and are not stored; the reply carries one note that names
     the park calls; a call that passes neither carries no note;
-  * an item's clock starts when its work does: a derived wait on an agent is counted in hours; an item that stores doing is `doing`;
-  * decision, external, hold, wake and after keep the day-based default and cap (a check or a derived doing on an agent is timed in hours, tests/agent_derived_scenario.py);
+  * the wake cap (7 days, refused without the owner's words) is a write gate and stays;
   * a doing item whose next reads as a wait gets a note (the write still goes through); a wake alone whose next waits for that date, or whose only steps are timed or start on an event, gets a note;
-  * an item stored before (an expected_by on disk) keeps working: the stored value is not read, a write that does not touch it does not rewrite it;
+  * an item stored before (an expected_by on disk) keeps working: the stored value is not read, a write that does not touch it does not rewrite it, and the items API sends expected_by as null;
   * the tool text (update, create, client.py) says so; the retired inputs' own refusals are in tests/retired_inputs_scenario.py.
 
     tests/run-suite agent_due        → exit 0 / 1"""
@@ -76,20 +75,11 @@ def refused_nw(name, i, f, *want):
 ZONE_OFFSET = 4 * HOUR      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 def stamp(ts): return time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts + ZONE_OFFSET))          # a time as an agent writes it, in the instance timezone
 def stamp_t(ts): return time.strftime("%Y-%m-%dT%H:%M", time.gmtime(ts + ZONE_OFFSET))
-def epoch_of(v): return W.expected_parse(v)[0]
-def W_of(i, at=None):
-    at = now0 if at is None else at
-    return server._waiting_of(f"a{i}", rd(i), at, server._WaitCtx(at))
 
 # ================================================================ 1. a doing item carries no expected time
 item(1, needs=[BACK], state="doing", su=now0 - 3 * DAY)
 out = upd(1, priority="p2")
 check("doing: a stored doing item has no expected time and a write's reply does not mention one", mt(1)["state"] == "doing" and mt(1)["priority"] == "p2" and "expected_by" not in mt(1) and "expected_reason" not in mt(1) and "expected_by" not in out and "the default" not in out and "no longer kept" not in out, (mt(1), out))
-w = W_of(1)
-check("doing: …the wait is `doing`: no date, not overdue though the item is 3 days old, and it is agent work", w["wait"] == "doing" and w["expected_by"] == 0.0 and w["agent"] and not w["overdue"], w)
-check("doing: …the wait line says it is work in hand with no expected time, and carries no date or 'past due'", "doing (work in hand; no expected time)" in W.line(w, now0) and "past due" not in W.line(w, now0) and "expected by" not in W.line(w, now0), W.line(w, now0))
-w_late = W_of(1, now0 + 30 * DAY)
-check("doing: …a month later it is still not overdue (an item that has run long is not 'late')", w_late["wait"] == "doing" and not w_late["overdue"], w_late)
 txt = server.stackshot_get("a1")
 check("doing: get shows no expected_by under the state", "state: doing" in txt and "expected_by" not in txt, txt[:600])
 
@@ -111,26 +101,12 @@ check("retired: …the brief shows no expected_reason", "expected_reason" not in
 upd(2, needs=["decision"], ask="Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date")
 check("retired: a later write that sets his decision keeps the item clean (nothing was stored, nothing to drop)", "expected_by" not in mt(2) and "expected_reason" not in mt(2), mt(2))
 
-# ================================================================ 3. an item's clock starts when its work does
-item(5, needs=[BACK], su=now0 - 10 * DAY)
-w = W_of(5)
-check("start: an item with no stored state and a session in needs is a wait on an agent counted in hours from the item's clock (long past)", w["wait"] == "needs" and w["agent"] and w["overdue"], w)
-item(6, needs=[BACK], state="doing", su=now0 - 10 * DAY)
-w = W_of(6)
-check("start: …an item of the same age that stores doing is `doing` with no date, not overdue though it is 10 days old", w["wait"] == "doing" and not w["overdue"] and w["expected_by"] == 0.0, (mt(6), w))
-
 # ================================================================ 4. a stored doing item is never past due and nothing else happens: no step, no notice
 for p in (T / "store/a").glob("*.json"): p.unlink()          # the items of the sections above are not in this pass
 LD = 30
 eb_ld = now0 - 2 * HOUR
 item(LD, needs=[BACK], state="doing", expected_by=stamp(eb_ld), su=now0 - 6 * HOUR)          # stored before the time was dropped, and long past
-e_ld = epoch_of(stamp(eb_ld))
-w = W_of(LD, e_ld + 60)
-check("past due: a doing item with an old stored time long past is `doing`, not overdue: the stored time is not read, and no grace or step is part of the reading", w["wait"] == "doing" and not w["overdue"] and not hasattr(W, "grace_for"), w)
 check("past due: …get does not show it as past due, and shows no step of a ladder", not re.search(r"past due", server.stackshot_get(f"a{LD}")) and not re.search(r"step \d of \d|stuck", server.stackshot_get(f"a{LD}")), server.stackshot_get(f"a{LD}"))
-item(31, needs=["external"], su=now0 - 5 * DAY)           # needs external, past its 3 days
-w = W_of(31)
-check("past due: an item waiting on an outside party is past due as before, kind `needs`", w["wait"] == "needs" and w["overdue"], w)
 
 # ================================================================ 5. every other wait keeps its day-based default and cap
 for p in (T / "store/a").glob("*.json"): p.unlink()
@@ -148,26 +124,11 @@ item(47, needs=[BACK], state="doing", su=now0 - DAY)
 item(48, needs=[BACK], state="doing", after=["a41"], su=now0 - DAY)
 item(49, needs=["decision", BACK], ask=ASK, state="doing", su=now0 - DAY)     # a stored state that is not the section's: Oliver's move wins
 item(57, needs=[BACK], state="doing", expected_by=stamp(now0 + 2 * HOUR), su=now0 - DAY)     # an old stored time beside the state: not read
-kinds = {i: W_of(i)["wait"] for i in range(40, 50) if i != 46}
-check("others: decision keeps `needs`", kinds[40] == "needs" and abs(W_of(40)["expected_by"] - (now0 - DAY + 3 * DAY)) < 1, kinds[40])
-check("others: external keeps `needs` (3 days from its clock)", kinds[41] == "needs" and abs(W_of(41)["expected_by"] - (now0 - DAY + 3 * DAY)) < 1, kinds[41])
-check("others: a hold with its wake on a doing item keeps `hold` and the wake", kinds[42] == "hold" and abs(W_of(42)["expected_by"] - W.wake_epoch(stamp_t(now0 + 2 * DAY))) < 1, kinds[42])
-check("others: a wake on a doing item keeps `wake`, its date and past-due reading", kinds[43] == "wake" and abs(W_of(43)["expected_by"] - W.wake_epoch(stamp_t(now0 + 2 * DAY))) < 1 and not W_of(43)["overdue"]
-      and W_of(43, now0 + 3 * DAY)["overdue"] and "past due" in W.line(W_of(43, now0 + 3 * DAY), now0 + 3 * DAY), (W_of(43), W_of(43, now0 + 3 * DAY)))
-check("others: a done check beside a doing item no longer sets a due: the item is `doing`", kinds[44] == "doing" and W_of(44)["expected_by"] == 0.0, W_of(44))
-check("others: a derived doing (no stored state, a session in needs) is `needs` counted in hours: 3 hours from its clock", kinds[45] == "needs" and W_of(45)["agent"] and abs(W_of(45)["expected_by"] - (now0 - DAY + 3 * HOUR)) < 1, kinds[45])
-check("others:: a session in needs is an agent wait even when it is the item's creator: `needs` in hours, 3 from its clock (no creator special case)",
-      W_of(54)["wait"] == "needs" and W_of(54)["agent"] and abs(W_of(54)["expected_by"] - (now0 - DAY + 3 * HOUR)) < 1, W_of(54))
-check("others: …and a done check beside needs on the creator is `check` in hours (3), not the 7-day cap",
-      W_of(55)["wait"] == "check" and W_of(55)["agent"] and abs(W_of(55)["expected_by"] - (now0 - DAY + 3 * HOUR)) < 1, W_of(55))
-check("others: a stored doing is `doing`, whatever time an old write left on disk", kinds[47] == "doing" and W_of(57)["wait"] == "doing" and W_of(57)["expected_by"] == 0.0, (kinds[47], W_of(57)))
-check("others: …an `after` link on it keeps the blocker's wait", kinds[48] == "after", kinds[48])
-check("others: …needs decision beside the state makes it Oliver's move", kinds[49] == "needs" and W_of(49)["mover"]["kind"] == "owner", kinds[49])
 # a mover waiting on its own PR (a session in needs, the creator included, with a check): doing, no time to set
 item(56, needs=[U["home-front"]], check="pr_merged o/r#8", state="doing", su=now0 - DAY)
 o_ = upd(56, expected_by=stamp(now0 + 30 * HOUR), expected_reason="waiting for CI on the pull request")
 check("own PR: …a mover waiting on its own PR is doing: the old time and reason are accepted and not stored, the check still stands beside it, the wait is `doing`",
-      mt(56)["state"] == "doing" and "expected_by" not in mt(56) and "expected_reason" not in mt(56) and mt(56).get("check") == "pr_merged o/r#8" and W_of(56)["wait"] == "doing" and "no longer kept" in o_, (mt(56), W_of(56)))
+      mt(56)["state"] == "doing" and "expected_by" not in mt(56) and "expected_reason" not in mt(56) and mt(56).get("check") == "pr_merged o/r#8" and "no longer kept" in o_, mt(56))
 # the caps of the others are untouched: a wake past 7 days is still refused without his words
 refused("others: a wake past the 7-day cap is still refused without his words", lambda: upd(43, wake=stamp_t(now0 + 20 * DAY)), "Refused")
 
@@ -266,8 +227,6 @@ item(126, needs=[BACK])
 out = bupd(126, next=f"team-back: collect logs until {w2}, then review", hold=True, wake=w2, wait_basis=f"log collection ends {w2}; logs reviewed then")
 check("window note: hold=true + wake + wait_basis on the mover's own item is accepted and parked (no note)", mt(126).get("hold") is True and mt(126).get("wake") == w2 and isinstance(mt(126).get("wait_basis"), dict) and WN_HEAD not in out, (out, mt(126)))
 check("window note: …and the derived state is exactly parked", states.derive(json.loads(raw(126)), None) == "parked", states.derive(json.loads(raw(126)), None))
-check("window note: …and its wait line shows the wait_basis though the wake is within the cap (real-world date: log collection ends <the wake day>)",
-      f"real-world date: log collection ends {w2}" in W_of(126)["basis"], W_of(126))
 NX = f"team-back: collect logs until {w2}, then review"
 item(127, needs=[BACK], next=NX)
 out = bupd(127, wake=f"{w2}T09:00")
@@ -408,14 +367,12 @@ check("step text: update's description names the note for a mover's timed or eve
 for p in (T / "store/a").glob("*.json"): p.unlink()
 d2 = time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + 2 * DAY))
 item(50, needs=[BACK], state="doing", expected_by=d2, su=now0 - DAY)
-w = W_of(50)
-check("legacy: a stored date-only expected_by on a doing item is not read: the wait is `doing`, no date", w["wait"] == "doing" and w["expected_by"] == 0.0 and not w["overdue"], w)
 upd(50, priority="p1")
 check("legacy: a write that does not touch it does not rewrite it", mt(50)["expected_by"] == d2 and mt(50)["priority"] == "p1", mt(50))
 item(51, needs=[BACK], state="doing", expected_by=time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET - 2 * DAY)), su=now0 - 3 * DAY)
-check("legacy: a lapsed date-only value is not overdue; a write that leaves it alone is not refused for it", not W_of(51)["overdue"] and (upd(51, priority="p2") is not None) and mt(51)["priority"] == "p2", W_of(51))
+check("legacy: a lapsed date-only value: a write that leaves it alone is not refused for it", (upd(51, priority="p2") is not None) and mt(51)["priority"] == "p2", mt(51))
 item(52, needs=[BACK], state="doing", expected_by="garbage", su=now0 - DAY)
-check("legacy: a stored value that is no time breaks nothing: the item is `doing`", W_of(52)["wait"] == "doing", W_of(52))
+check("legacy: a stored value that is no time breaks nothing: get still reads the item", "state: doing" in server.stackshot_get("a52"), server.stackshot_get("a52")[:300])
 
 # ================================================================ 8. the routes and the text
 item(60, needs=[BACK])
@@ -434,13 +391,12 @@ check("text: update's description says a doing item carries no expected time, th
       "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and "update(hold=true, wake=" in ud and 'wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, post_wake_mover and needs=["external"]' in ud
       and "ladder" not in ud and "stuck list" not in ud and "3 hours from this write" not in ud and "at most 12 hours ahead" not in ud, None)
 check("text: update's parameters still include expected_reason, a string (so an older call is not rejected)", tl["update"].parameters["properties"].get("expected_reason", {}).get("type") == "string", tl["update"].parameters["properties"].get("expected_reason"))
-check("text: create's description says agent work in progress has no expected time and a wait on an agent that is not doing is hours", "Agent work is timed in hours" not in cd and "Agent work carries no expected time" in cd and "not stored as doing" in cd and "A doing item is never past due" in cd, None)
-check("text: update's wait form excepts agent work in progress from the expected-by rule: it has no expected time and is never past due",
-      "Every open item but agent work in progress (state doing) also has a wait date the board reads" in ud and "Agent work in progress (state doing) has no expected time and is never past due" in ud
-      and "(the one party whose move it is now: a session, " in ud and "and an expected-by time, which get shows" not in ud, None)
-check("text: waiting.py's rule says the same, and the audit rubric's why-not-now reads the wake only",
-      "except agent work in progress (state doing)" in pathlib.Path(STACK, "stackshot/waits/waiting.py").read_text(encoding="utf-8")
-      and "but its wake is hours or a day away" in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8") and "wake, or expected-by" not in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8"), None)
+check("text: create's description says agent work carries no expected time, and no tool text derives one or says past due for a wait",
+      "Agent work carries no expected time: a create sets none" in cd and "never past due" not in cd and "A doing item is never past due" not in cd and "timed in hours" not in cd + ud, None)
+check("text: update's wait form says an open item waits on its real dates only, that no expected time is derived for any item, and that a parked item carries no stale mark",
+      "waits on its real dates only (wake, due, ask by): no expected time is derived for any item" in ud and "held until its wake or its blocker closes, with no stale mark" in ud and "is shown as past due" not in ud, None)
+check("text: the audit rubric's why-not-now reads the wake only",
+      "but its wake is hours or a day away" in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8") and "wake, or expected-by" not in pathlib.Path(STACK, "audit_rubric.txt").read_text(encoding="utf-8"), None)
 cli = pathlib.Path(STACK, "stackshot/fleet/client.py").read_text(encoding="utf-8")
 check("text: client.py's usage lists neither --expected-by nor --expected-reason (post state, which took them, is retired: tests/retired_inputs_scenario.py)",
       "[--expected-reason" not in cli and "[--expected-by T]" not in cli and "--expected-by" not in cli, None)

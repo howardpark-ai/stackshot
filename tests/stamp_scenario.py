@@ -267,10 +267,12 @@ check("8 …a dry run needs --store; --apply and --undo need --sender", run("--d
 SEED = "g9999"
 def clock_diff(freeze):
     """display_of over every open item twice with the clock moved on 61 s between the passes (the stamp between them takes that long), the way the dry run reads them: → the items whose display differs, and how many were read.
-    `freeze` holds one clock for both passes (SP.frozen), as the dry run does. The board prints no computed date any more, so what the clock still moves is a past-due mark: one seeded copy of a held item (SEED) has its wake on the next minute, which falls between the two passes (the first reads it not yet due, the second past due)."""
+    `freeze` holds one clock for both passes (SP.frozen), as the dry run does. The board prints no computed date and no past-due mark, so what the clock still moves is the age in words of a stale item: one seeded copy of an item (SEED) was confirmed 30 s short of two days before the first pass, which reads "stale 1 d" and, 61 s later, "stale 2 d"."""
     its = SP.load_dir(T / "store"); gids = sorted((g for g, it in its.items() if it.get("status") == "open"), key=SP.num)
     t_a = time.time(); clk = [t_a]; real_time = time.time; time.time = lambda: clk[0]
-    seed = copy.deepcopy(its["g8"]); seed["metadata"]["wake"] = datetime.datetime.fromtimestamp((t_a // 60 + 1) * 60, server.ZONE).strftime("%Y-%m-%dT%H:%M"); seed["metadata"].pop("cap_ok", None)
+    seed = copy.deepcopy(its["g8"]); seed["confirmed"] = t_a - 2 * 86400 + 30
+    for k in ("hold", "wake", "after", "cap_ok", "end"): seed["metadata"].pop(k, None)            # not held (a held item is never stale), so its age shows
+    seed["metadata"]["needs"] = "decision"; seed["metadata"]["mover"] = server.OWNER
     its[SEED] = seed; gids.append(SEED)
     def read():
         with (SP.frozen(t_a) if freeze else contextlib.nullcontext()):
@@ -286,7 +288,7 @@ try:
     moved, n_open = clock_diff(False); held, _ = clock_diff(True)
 finally:
     ST.write_text(st_text, encoding="utf-8")
-check("8b the clock moves 61 s between two unfrozen display passes: the seeded item whose wake falls between them reads differently (the test bites)", moved == [SEED] and n_open > 20, (moved, n_open))
+check("8b the clock moves 61 s between two unfrozen display passes: the seeded item whose age in words rolls over between them reads differently (the test bites)", moved == [SEED] and n_open > 20, (moved, n_open))
 check("8b …with SP.frozen holding one clock for both passes, no item reads differently", held == [], held)
 with SP.frozen(123.0):
     in_ = (time.time(), time.time())

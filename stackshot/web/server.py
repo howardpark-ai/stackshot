@@ -11116,8 +11116,8 @@ _SELF_WAIT_FORM = (
 
 
 _WAIT_FORM = (
-    " Every open item has a mover (the one party whose move it is now: a session, " + OWNER + ", an outside party, or the item it waits `after`). Every open item but agent "
-    "work in progress (state doing) waits on its real dates only (wake, due, ask by); no expected time is derived for it and a parked item is held until its wake or its blocker closes, with no stale mark. A wake a session sets runs at most "
+    " Every open item has a mover (the one party whose move it is now: a session, " + OWNER + ", an outside party, or the item it waits `after`). An open item "
+    "waits on its real dates only (wake, due, ask by): no expected time is derived for any item, and a parked item is held until its wake or its blocker closes, with no stale mark. A wake a session sets runs at most "
     f"{_wt.cap_days():g} days from the item's last move: a wake further out, an anchored thread's included, is refused without {OWNER}'s words "
     "(said=[Acked-by …] checked against a transcript, a message from those days; or his answer on the item, given since its last move: ask him to answer there). "
     "A due date is a deadline and is not refused. "
