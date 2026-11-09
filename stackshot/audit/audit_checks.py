@@ -9,7 +9,7 @@ the filing pass (every ten minutes, in the server) share one copy of the rules.
   check_stale / check_ask_missing / check_stuck_elsewhere / idle_pass    the per-item rules behind it
   filing_findings(items, anchors, now, env)   the filing rules (is the item filed in the right state?): stuck-elsewhere, arbitrary-hold, mislabeled-state, reads-as-wait, step-handover, ask-options (check_ask_options), and why-not-now for a wake that is the
                                               whole of a wait (date_only_wait: the shape the write parks, found in code every ten minutes, no model call, no cap); → (findings, flags)
-  check_ask_options(meta)                     an ask that shows Yes / No under an open question, or whose Recommend does not match its Decide or its options (reads with ask_read.py, the write gates' own matchers)
+  check_ask_options(meta)                     an ask that shows Yes / No under an open question or whose Recommend is no yes or no while it lists no options, or whose Recommend does not match its Decide or its options (reads with ask_read.py, the write gates' own matchers)
   check_step_handover(item, meta, mover, known, roles, now)   a finished step that did not hand the item on: a delivery step with no proof before another session's step, or a next session never reached after a done step
   dates_findings(items, anchors, now, env)    the dates rule (has the item's own expected time passed with nobody acting?): the stale check's date half; → (findings, idle-pass entries)
   goal_view(item) / goal_sig(subject, goal)   the goal-unclear check's texts (the subject and the first bullet's `Goal:` sentence) and their stamp; the judgment itself is audit_run's (one call per suspect)
@@ -323,10 +323,11 @@ _YESNO_FIRST_RX = re.compile(r"\s*(?:yes|no|approve|decline)\b", re.I)      # a 
 
 
 def check_ask_options(meta: dict[str, Any]) -> str:
-    """Why an open item's ask to the owner cannot be answered as it stands, "" when it can. Two things, read with the matchers the write gates use (ask_read.py), so the audit and the gates never disagree on what an
+    """Why an open item's ask to the owner cannot be answered as it stands, "" when it can. Three things, read with the matchers the write gates use (ask_read.py), so the audit and the gates never disagree on what an
     open question is: (a) the page offers a bare Yes / No under the ask (no options stored, options it cannot read, or only a Yes / No or Approve / Decline pair) while its Decide part is an open question (what, which,
     how, who, when, where, why) or names alternatives with no option listed; (b) the Recommend part plainly does not match the options (ask_read.recommend_mismatch: it names no option by label, letter, place or leading
-    word, or names another one), or, with Yes / No under an open Decide, it answers yes or no to a question that is not one. In doubt nothing is found. An ask that does not read as "Decide: … · Recommend: …", a watcher's own
+    word, or names another one), or, with Yes / No under an open Decide, it answers yes or no to a question that is not one; (c) the item lists no options and its Recommend part is not a yes or a no (ask_read.recommend_not_stance:
+    it names a person, a topic, a date), so the Yes / No the page draws cannot answer the ask whatever words the Decide part is in (not repeated when (a) found the ask already). In doubt nothing is found. An ask that does not read as "Decide: … · Recommend: …", a watcher's own
     ask and an item that needs no decision are no case (the shape gate's and ask-missing's). Quiet by itself once the ask is rewritten: the check reads the stored fields each pass."""
     if "decision" not in [k.lower() for k in _states.kinds_of(meta)] or _watch.asked_of(meta):
         return ""
@@ -343,6 +344,9 @@ def check_ask_options(meta: dict[str, Any]) -> str:
             out.append(f"the ask is an open question ({_clip(q, 70)!r}) but the page shows only Yes / No under it, which cannot answer it{broken}")
         elif alt:
             out.append(f"the ask names alternatives ({_clip(alt, 50)!r}) but lists no options, so the page shows only Yes / No under it")
+    stance = _ar.recommend_not_stance(meta)      # no options, and a Recommend that names a person, a topic, a date: the page's Yes / No cannot answer it (the open question above is its own wording of this)
+    if stance and not open_q:
+        out.append(f"it lists no options and its Recommend part ({_clip(stance, 60)!r}) is not a yes or a no, so the page shows only Yes / No under it, which cannot answer it")
     miss = _ar.recommend_mismatch(meta)
     if miss:
         rec = next(o["label"] for o in _ar.valid_options(meta) if o["recommended"])

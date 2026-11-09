@@ -56,7 +56,7 @@ from stackshot.web import server; from stackshot.fleet import client
 server._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
-ASK = "Decide: whether to cut the retry to three · Recommend: cut it · Stakes: the run waits an hour either way · By: Fri Mar 13th"
+ASK = "Decide: whether to cut the retry to three · Recommend: yes · Stakes: the run waits an hour either way · By: Fri Mar 13th"
 OPTS = [{"label": "Cut", "line": "Cut the retry to three and go on.", "recommended": True}, {"label": "Keep", "line": "Keep five retries and wait.", "recommended": False}]
 SUBJ = "[home] Cut the nightly retry?"
 BODY = "The nightly run failed twice on the same step.\nCut the retry to three, or keep five and wait?"
@@ -83,7 +83,7 @@ check("…owned by the project's -main agent (not the first front agent by name)
 check("…the text is the description, ending with the line that says who filed it; the subject is the one given", it["description"] == desc() and it["subject"] == SUBJ, (it["description"], it["subject"]))
 check("…the sender is recorded as the creator, a script on this machine", it["filed_by"] == f"q-script (a script on {me})", it.get("filed_by"))
 check("…the item is in the board's brief as waiting on the owner's decision", out["item"] in server.stackshot_get(out["item"]) and "needs: decision" in server.stackshot_get(out["item"]), server.stackshot_get(out["item"])[:300])
-st, out2 = q(project="projects/alpha", subject="[work] Decide the nightly retry", options=None, ask="Decide: whether to cut the retry to three · Recommend: cut it · Stakes: an hour either way · By: no date")
+st, out2 = q(project="projects/alpha", subject="[work] Decide the nightly retry", options=None, ask="Decide: whether to cut the retry to three · Recommend: yes · Stakes: an hour either way · By: no date")
 check("a given subject is the subject; no options is fine for a yes/no ask; the project by key", st == 200 and item(out2["item"])["subject"] == "[work] Decide the nightly retry" and "options" not in item(out2["item"])["metadata"], (st, out2))
 A_ID = server.project_ref("alpha")["id"]
 st, out3 = q(project=A_ID); check("the project by its id", st == 200 and out3["project"] == "projects/alpha", (st, out3))
@@ -108,7 +108,7 @@ def tool_says(**kw):
     try: server.stackshot_create(**a); return ""
     except server.ToolError as e: return str(e)
 e = refused("a bad ask is refused with the tool's own text", 400, "Refused: ask must read", ask="please decide")
-ALARM_ASK = "Decide: whether to kill the stuck run and rotate the credentials · Recommend: kill it · Stakes: the quota is nearly spent · By: Fri Mar 13th"
+ALARM_ASK = "Decide: whether to kill the stuck run and rotate the credentials · Recommend: yes · Stakes: the quota is nearly spent · By: Fri Mar 13th"
 st, out = q(subject="[home] Kill the run? The credentials leaked", ask=ALARM_ASK)
 check("a script's question with alarming words (kill, credentials, quota, leaked) is filed: guard 11 does not judge that route", st == 200 and item(out["item"])["metadata"]["ask"] == ALARM_ASK, (st, out))
 check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in tool_says(subject="[home] Kill the run?", ask=ALARM_ASK) and not getattr(server._QUESTION, "on", False), tool_says(subject="[home] Kill the run?", ask=ALARM_ASK))

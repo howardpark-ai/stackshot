@@ -234,7 +234,7 @@ check("next and needs naming the session in one write: in needs, so its turn-end
 refused("next handing it to one session while needs names another: the one in next is a hand-off", lambda: server._update("a17", needs=["home-owner"], next="team-back: merge the PR", sender="home-owner"), "hands a17 to team-back", "a line of next in the form")
 server._update("a17", needs=["home-owner"], next="team-back: merge the PR", check="item_closed a5", sender="home-owner")
 check("…accepted with a check", rd(17)["metadata"].get("check") == "item_closed a5" and rd(17)["metadata"].get("needs") == ["home-owner"], rd(17)["metadata"])
-server._update("a5", needs=["decision"], ask="Decide: x · Recommend: y · Stakes: z · By: no date", sender="home-owner")
+server._update("a5", needs=["decision"], ask="Decide: x · Recommend: yes · Stakes: z · By: no date", sender="home-owner")
 check("needs=decision alone is not a hand-off", rd(5)["metadata"].get("needs") == ["decision"], rd(5)["metadata"])
 server._update("a6", needs=["home-owner"], sender="home-owner")
 check("needs naming the owner is not a hand-off", rd(6)["metadata"].get("needs") == ["home-owner"], rd(6)["metadata"])
@@ -513,7 +513,7 @@ check("the check pass does not read it again", tick(5) == [] and "a35" not in st
 
 # ---- 6c. a check met while his decision is open waits (one line, once) and closes the item once the decision is cleared; clear_check takes the check off
 import inspect
-ASKD = "Decide: x · Recommend: y · Stakes: z · By: no date"
+ASKD = "Decide: x · Recommend: yes · Stakes: z · By: no date"
 _saves = []; _orig_save = server._save
 def _spy_save(gid, it, writer="", note="", **kw):
     _saves.append((gid, note)); return _orig_save(gid, it, writer=writer, note=note, **kw)

@@ -88,7 +88,7 @@ hrs = lambda n: time.strftime("%Y-%m-%d %H:%M", time.gmtime(now0 + n * 3600 + ZO
 BACK, OTHER, FRONT, IDLE = "team-back", "home-other", "home-front", "home-idle"
 OWN = model.owner_display()
 FUT = day(5)
-ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 mt = lambda i, letter="a": rd(i, letter)["metadata"]
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 def upd(i, **kw): return server._update(f"a{i}", sender="home-front", **kw)

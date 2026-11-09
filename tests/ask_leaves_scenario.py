@@ -49,8 +49,8 @@ now = time.time()
                                                                                 "session": "home-other", "agents": {"home-here": "builds it", "home-agent": "builds it too"},
                                                                                 "back_agents": {"home-here": "builds it", "home-agent": "builds it too"}, "status": "active", "board": [], "board_open": 0}}}))
 DESC = "- Goal: A thing\n- It lives here\n- Finished when it works"
-ASK = "Decide: whether to ship the export · Recommend: ship · Stakes: none either way · By: no date"
-ASK2 = "Decide: whether to ship the report · Recommend: ship · Stakes: none either way · By: no date"
+ASK = "Decide: whether to ship the export · Recommend: yes · Stakes: none either way · By: no date"
+ASK2 = "Decide: whether to ship the report · Recommend: yes · Stakes: none either way · By: no date"
 OPTS = [{"label": "Ship", "line": "Ship it now as it is", "recommended": True}, {"label": "Wait", "line": "Wait for the next release", "recommended": False}]
 STEP = "run the one line in a terminal"
 

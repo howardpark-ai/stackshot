@@ -108,7 +108,7 @@ check("retired: …a reason passed alone on a doing item is accepted, not stored
 o_ = upd(26, priority="p2")
 check("retired: …a call that passes neither carries no note", "no longer kept" not in o_ and mt(26)["priority"] == "p2", o_[-300:])
 check("retired: …the brief shows no expected_reason", "expected_reason" not in server.stackshot_brief(), None)
-upd(2, needs=["decision"], ask="Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date")
+upd(2, needs=["decision"], ask="Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date")
 check("retired: a later write that sets his decision keeps the item clean (nothing was stored, nothing to drop)", "expected_by" not in mt(2) and "expected_reason" not in mt(2), mt(2))
 
 # ================================================================ 3. an item's clock starts when its work does
@@ -134,7 +134,7 @@ check("past due: an item waiting on an outside party is past due as before, kind
 
 # ================================================================ 5. every other wait keeps its day-based default and cap
 for p in (T / "store/a").glob("*.json"): p.unlink()
-ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 item(40, needs=["decision", BACK], ask=ASK, state="your-call", su=now0 - DAY)
 item(41, needs=["external"], state="outside", party="a vendor", chase=time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + 2 * DAY)), su=now0 - DAY)
 item(42, needs=[BACK], state="doing", hold=True, wake=stamp_t(now0 + 2 * DAY), su=now0 - DAY)

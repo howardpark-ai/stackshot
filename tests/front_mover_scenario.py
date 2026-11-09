@@ -80,10 +80,10 @@ check("create: a background mover set by a front agent is accepted", r.startswit
 r = server.stackshot_create(subject="[home] reviewed by the reviewer", description=DESC, project="projects/delta", sender=BUILD, mover=REVIEW, next=f"{REVIEW}: review it")
 check("create: a background mover set by another background agent is accepted", r.startswith("created"), r)
 r = refusal(lambda: server.stackshot_create(subject="[home] the owner decides", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
-                                            ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", then=BUILD))
+                                            ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", then=BUILD))
 check("create: the owner as mover (with his decision) is accepted", r == "", r)
 r = server.stackshot_create(subject="[home] then the front", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
-                            ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", then=MAIN)
+                            ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", then=MAIN)
 check("create: then=<front agent> by another session becomes the builder, and the reply says so", r.startswith("created") and fixed(r, MAIN, "then") and rd(r.split()[1])["metadata"].get("then") == BUILD, r)
 
 # ---- update

@@ -1409,7 +1409,7 @@ wait_push(0)
 
 # ---- 17. the ask line, last confirmed and staleness
 CF = server._cfg.CFG; CF.setdefault("ask", {})["refuse_after"] = ""
-ASK = "Decide: whether to take vendor A · Recommend: A, it is cheaper · Stakes: B costs a month either way · By: Mon Mar 2nd"
+ASK = "Decide: whether to take vendor A · Recommend: yes, it is cheaper · Stakes: B costs a month either way · By: Mon Mar 2nd"
 SHAPE = 'Refused: ask must read "Decide: … · Recommend: … · Stakes: … · By: …" in one line of at most 240 characters'
 NEED = 'Refused: a needs=decision item needs an ask line: ask="Decide: … · Recommend: … · Stakes: … · By: …" (≤ 240 chars). A client whose tool has no ask parameter writes the line as the first line of next instead.'
 NAG = '[ask] a needs=decision item carries an ask line: ask="Decide: … · Recommend: … · Stakes: … · By: …" (≤ 240 chars)'
@@ -1420,7 +1420,7 @@ def setf(g, **kw):
     it = rd(g); it.update(kw); (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 res = mk(needs="decision", ask="  " + ASK + " "); g1 = gid_of(res); m1 = rd(g1)["metadata"]
 check("ask: a valid ask is accepted, stored trimmed and printed right after needs, with no nag", m1.get("ask") == ASK and f"\nneeds: decision\nask: {ASK}\n" in res and "[ask]" not in res, res)
-check("ask: the shape is the renderer's, importable", render.parse_ask(ASK) == {"decide": "whether to take vendor A", "recommend": "A, it is cheaper", "stakes": "B costs a month either way", "by": "Mon Mar 2nd"}
+check("ask: the shape is the renderer's, importable", render.parse_ask(ASK) == {"decide": "whether to take vendor A", "recommend": "yes, it is cheaper", "stakes": "B costs a month either way", "by": "Mon Mar 2nd"}
       and render.ASK_RE.fullmatch(ASK) is not None and render.parse_ask("Decide: x · Recommend: y · Stakes: z · By: no date")["by"] == "no date")
 bad = {"a part missing": "Decide: whether to take vendor A · Recommend: A · By: Mon Mar 2nd",
        "parts out of order": "Decide: whether to take vendor A · Stakes: a month · Recommend: A · By: Mon Mar 2nd",
@@ -1521,7 +1521,7 @@ for why, kw in {"`which of the two` in the ask": dict(ask=ASKO),
     e = refusal(lambda: server.stackshot_create(subject="[home] alt test", project="beta", owner="home-beta", needs="decision", **kw))
     check(f"options: {why}, no options → refused, nothing created, the refusal says what to add and the portal route",
           e.startswith(ALT) and "lists no options" in e and '"recommended": true' in e and "codemode.stackshot_update" in e and nfiles() == n_, e)
-for why, a_ in {"a yes/no ask": "Decide: whether to ship the release today · Recommend: ship it · Stakes: a day either way · By: no date",
+for why, a_ in {"a yes/no ask": "Decide: whether to ship the release today · Recommend: yes · Stakes: a day either way · By: no date",
                 "one vendor named, no pair (`whether to take vendor A`)": ASK, "the word `optional`": "Decide: make the field optional · Recommend: yes · Stakes: none · By: no date",
                 "`options` as a plain noun": "Decide: keep our options open on the lease · Recommend: yes · Stakes: rent · By: no date"}.items():
     res = mk(needs="decision", ask=a_); check(f"options: {why} passes without options", "created" in res, res)
@@ -1602,7 +1602,7 @@ ODRE = "Refused: this ask"
 mkd = lambda **kw: server.stackshot_create(**{"subject": "[home] od test", "project": "beta", "owner": "home-beta", "description": "- Goal: A decision\n- It lives here\n- Done when decided", "next": "home-beta: carry on", **kw})
 ODHINT = ("One decision per item", "split it into one item per decision", "write each option out in words")   # several decisions
 ODCODE = ("write each option out in words", "define each code in the ask or description", "A: ")   # a code the item does not define: no split advice
-mkask = lambda decide, rec="ship it", desc="- Goal: A decision\n- It lives here\n- Done when decided", **kw: dict(
+mkask = lambda decide, rec="yes", desc="- Goal: A decision\n- It lives here\n- Done when decided", **kw: dict(
     ask=f"Decide: {decide} · Recommend: {rec} · Stakes: a day either way · By: no date", description=desc, **kw)
 PACKED_ASK = "Decide: tool and choices 2-3 · Recommend: tool on plan A, 2b plugins on plan A, 3a runner off plan A · Stakes: three lanes change · By: Mon Mar 2nd"
 n_ = nfiles(); e = refusal(lambda: mk(needs="decision", ask=PACKED_ASK))
@@ -1610,8 +1610,8 @@ check("one decision: the three-decisions ask (choices 2-3, 2b, 3a) is refused on
       e.startswith(ODRE) and all(h in e for h in ODHINT) and nfiles() == n_, e)
 for why, (kw, frag) in {
         "several Decide: labels": (dict(ask="Decide: ship A · Decide: ship B · Recommend: both · Stakes: a day · By: no date"), "more than one Decide"),
-        "a Decide joined by ·": (dict(ask="Decide: ship the fix · rename the repo · Recommend: ship it · Stakes: a day · By: no date"), "split by"),
-        "a Decide joined by ;": (dict(ask="Decide: ship the fix; rename the repo · Recommend: ship it · Stakes: a day · By: no date"), "split by"),
+        "a Decide joined by ·": (dict(ask="Decide: ship the fix · rename the repo · Recommend: yes · Stakes: a day · By: no date"), "split by"),
+        "a Decide joined by ;": (dict(ask="Decide: ship the fix; rename the repo · Recommend: yes · Stakes: a day · By: no date"), "split by"),
         "`and choices 2-3`": (dict(ask="Decide: Widget and choices 2-3 · Recommend: Widget · Stakes: a day · By: no date"), "and choices 2"),
         "`and the options 1/2`": (dict(ask="Decide: Widget and the options 1/2 · Recommend: Widget · Stakes: a day · By: no date"), "and the options 1"),
         "a Recommend cut by ·": (dict(ask="Decide: what to ship · Recommend: Widget plan-A-only · plugins plan-A-only · Stakes: a day · By: no date"), "split by"),
@@ -1633,13 +1633,13 @@ for why, (decide, rec) in {
         "a worded single decision": ("whether the tool is plan-A-only or open to all lanes", "plan-A-only, since the cost is per seat")}.items():
     ask_ = mkask(decide, rec)["ask"]
     check(f"one decision: {why} is accepted (the matcher)", server._one_decision({"ask": ask_}, "") == "", server._one_decision({"ask": ask_}, ""))
-res = mkd(needs="decision", **mkask(f"ship the 2GB build, v3 and 1.2.3 on Fri Mar 13th at 10am with PR #53 and board#{BID_A}", "16px, 4K, 7B, 5m, 2d, 3d, $5b"))
+res = mkd(needs="decision", **mkask(f"ship the 2GB build, v3 and 1.2.3 on Fri Mar 13th at 10am with PR #53 and board#{BID_A}", "yes, 16px, 4K, 7B, 5m, 2d, 3d, $5b"))
 check("one decision: dates, versions, ids, sizes and times together pass on create", "created" in res, res)
-res = mkd(needs="decision", **mkask("A and B together, or C", "A and B together; C costs a day more"))
+res = mkd(needs="decision", **mkask("A and B together, or C", "yes, A and B together; C costs a day more"))
 check("one decision: a single decision with `and` in its options passes on create", "created" in res, res)
-res = mkd(needs="decision", **mkask("ship Widget plan-A-only or on every lane", "plan-A-only, since the cost is per seat"))
+res = mkd(needs="decision", **mkask("ship Widget plan-A-only or on every lane", "yes, plan-A-only, since the cost is per seat"))
 check("one decision: a split single ask with its options worded is accepted", "created" in res, res)
-for why, kw in {"2b = … in the description": mkask("ship 2b or 3a", "2b", desc="- Goal: 2b = plugins plan-A-only\n- 3a = the runner off plan A\n- Done when decided"),
+for why, kw in {"2b = … in the description": mkask("ship 2b or 3a", "yes, 2b", desc="- Goal: 2b = plugins plan-A-only\n- 3a = the runner off plan A\n- Done when decided"),
                 "codes defined by the options list": mkask("take option A or option B", "A", options=[dict(OA, label="A", line="plugins on plan A only", recommended=True), dict(OB, label="B", line="plugins on every lane")])}.items():
     res = mkd(needs="decision", **kw); check(f"one decision: codes defined in the item are accepted on create ({why})", "created" in res, res)
 for why, ask_, desc_ in (("A: … B: … in the description", mkask("take Option A or Option B", "Option A")["ask"], "A: plugins on plan A only. B: plugins on every lane. Done when decided."),
@@ -1694,7 +1694,7 @@ g9 = gid_of(mk(needs="decision", ask=ASK))
 e = refusal(lambda: server._update(g9, ask=PACKED_ASK, sender="home-beta")); check("one decision: an update whose ask packs three decisions is refused, the ask unchanged", e.startswith(ODRE) and rd(g9)["metadata"]["ask"] == ASK, e)
 e = refusal(lambda: server._update(g9, next="Decide: ship 2b · Recommend: 2b · Stakes: a day · By: no date", sender="home-beta"))
 check("one decision: …so is an ask lifted from the first line of next, and the refusal says it came from next", e.startswith(ODRE) and "(lifted from next's first line)" in e and rd(g9)["metadata"]["ask"] == ASK, e)
-res = server._update(g9, ask="Decide: Widget on plan A only or all lanes · Recommend: plan A only · Stakes: cost per seat · By: no date", sender="home-beta")
+res = server._update(g9, ask="Decide: Widget on plan A only or all lanes · Recommend: yes, plan A only · Stakes: cost per seat · By: no date", sender="home-beta")
 check("one decision: an update with one worded decision is accepted", "plan A only" in rd(g9)["metadata"]["ask"], res)
 setf(g9, metadata={**rd(g9)["metadata"], "ask": PACKED_ASK})     # an item written before this rule: the ask it carries stays
 res = server._update(g9, priority="p3", sender="home-beta"); check("one decision: an existing item's other-field update is not held", rd(g9)["metadata"]["priority"] == "p3", res)
@@ -1869,13 +1869,13 @@ for g in (gl, gd): (T / f"store/{g[0]}/{g[1:]}.json").unlink()
 
 # a command the owner runs lives on the item: a note, never a refusal
 CMDN = "this item waits on the owner running a command or a paste, but next carries neither the command"
-ASKC = "Decide: run the setup paste on the laptop · Recommend: run it · Stakes: the box stays offline · By: no date"
+ASKC = "Decide: run the setup paste on the laptop · Recommend: yes · Stakes: the box stays offline · By: no date"
 res = mk(needs="decision", ask=ASKC, next="home-beta: run the 20-line paste in PowerShell"); gc = gid_of(res)
 check("command: a decision item whose ask or next says run or paste, with no link or code span in next → the note, the item created", CMDN in res and server._path(gc).exists(), res)
 res = mk(needs="decision", ask=ASKC, next="home-beta: run the paste on [the project page](https://example.com/p#setup)"); check("command: …quiet with a link in next", CMDN not in res, res)
 res = mk(needs="decision", ask=ASKC, next="home-beta: run `sala provision home-z` in a shell"); check("command: …quiet with a code span in next", CMDN not in res, res)
 res = mk(needs="external", next="Kim: paste the command on their side"); check("command: …quiet on needs=external", CMDN not in res, res)
-res = mk(needs="decision", ask="Decide: ノートPCで設定コマンドを実行するか · Recommend: 実行 · Stakes: オフライン · By: no date", next="home-beta: スクリプト実行")
+res = mk(needs="decision", ask="Decide: ノートPCで設定コマンドを実行するか · Recommend: yes · Stakes: オフライン · By: no date", next="home-beta: スクリプト実行")
 check("command: …the Japanese words too", CMDN in res, res)
 res = server._update(gc, next="run the paste on [the project page](https://example.com/p#setup)", sender="home-beta"); check("command: an update that adds the link ends it", CMDN not in res, res)
 res = server._update(gc, priority="p3", sender="home-beta"); check("command: an update that writes none of ask, next or needs says nothing", CMDN not in res, res)
@@ -1920,18 +1920,18 @@ res = server.stackshot_create(subject="[home] ext anchor note", description="- G
 check("ext anchor: create with needs=external and no anchor → the note naming the item, the item created", EXTN in res and f"items=[{gx}]" in res and server._path(gx).exists(), res)
 res = server._update(gx, priority="p2", sender="home-beta"); check("ext anchor: an update that leaves external as it was → no note", EXTN not in res, res)
 res = server.stackshot_create(subject="[home] ext anchor note decision", description="- Goal: Waits on Oliver\n- Done when decided", project="beta", owner="home-beta", needs="decision",
-                              ask="Decide: whether to take A · Recommend: A · Stakes: none · By: no date", next="Oliver: pick one"); gdx = gid_of(res)
+                              ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver: pick one"); gdx = gid_of(res)
 check("ext anchor: create without external → no note", EXTN not in res, res)
 res = server._update(gdx, needs="external", next="wait on Kim", sender="home-beta"); check("ext anchor: an update that adds external with no anchor → the note", EXTN in res and f"items=[{gdx}]" in res, res)
 res = server._update(gdx, needs="external", next="still waiting on Kim", sender="home-beta"); check("ext anchor: an update when external was already in needs → no note", EXTN not in res, res)
-server._update(gdx, needs="decision", ask="Decide: whether to take A · Recommend: A · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
+server._update(gdx, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
 server._anchors("projects/beta", add=["https://github.com/example/repo/issues/91"], who="t")   # project-wide: no items
 res = server._update(gdx, needs="external", next="wait on Kim", sender="home-beta"); check("ext anchor: a project-wide anchor alone does not count → the note", EXTN in res, res)
-server._update(gdx, needs="decision", ask="Decide: whether to take A · Recommend: A · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
+server._update(gdx, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
 server._anchors("projects/beta", add=["https://github.com/example/repo/issues/92"], items=[gdx], who="t")
 res = server._update(gdx, needs="external", next="wait on Kim", sender="home-beta"); check("ext anchor: an anchor scoped to the item → no note", EXTN not in res, res)
 server._anchors("projects/beta", remove=["https://github.com/example/repo/issues/92"], who="t")
-server._update(gdx, clear_hold=True, needs="decision", ask="Decide: whether to take A · Recommend: A · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
+server._update(gdx, clear_hold=True, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
 res = server._update(gdx, needs="external", next="wait on Kim", hold=True, wake=wk, sender="home-beta")
 check("ext anchor: external added with a hold and no anchor → exactly one note, the hold's", "(note: on hold while it waits on someone outside" in res and EXTN not in res and res.count("(note:") == 1, res)
 server._anchors("projects/beta", remove=["https://github.com/example/repo/issues/91"], who="t")
@@ -2115,7 +2115,7 @@ check("session-start line: nothing about staleness when nothing is stale", ui_re
 # ---- 18. the ask line and staleness on the board (render.py over #9192's fields): the queue, the item page, the landing lines, board.md
 K = T / "store_k"; (K / "a").mkdir(parents=True); (K / "projects.json").write_text((T / "store/projects.json").read_text())
 know = datetime.datetime(2026, 2, 23, 18, 40, tzinfo=server.ZONE); kt = know.timestamp()
-KASK = "Decide: whether to take vendor A · Recommend: A, it is cheaper · Stakes: B costs a month either way · By: Mon Mar 2nd"
+KASK = "Decide: whether to take vendor A · Recommend: yes, it is cheaper · Stakes: B costs a month either way · By: Mon Mar 2nd"
 def kitem(i, owner, upd, conf, **md):
     (K / f"a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] k {i}", "description": "x", "status": "open",
         "metadata": {"owner": owner, "project": "projects/beta", **md}, "updated": kt - upd, "state_updated": kt - upd, "confirmed": kt - conf}))
@@ -3687,11 +3687,11 @@ item2(26, "projects/beta", "home-beta-main"); n1 = len(wait_push(0)); res = serv
 check("tell owner: a background agent's first write on a front agent owner's item (it names itself in needs) pushes nothing to a front agent, and the reply says once that the router has it",
       not to_front(n1) and not to_page(n1) and res.count("the notice went to projects/beta, where the router rules it") == 1 and "not told" not in res, (wait_push(0)[n1:], res[-400:]))
 item2(27, "projects/beta", "home-beta-main"); n1 = len(wait_push(0))
-res = server._update("a27", needs=["decision"], ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", sender="plain-y"); time.sleep(0.7); replies.append(res)
+res = server._update("a27", needs=["decision"], ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", sender="plain-y"); time.sleep(0.7); replies.append(res)
 check("tell owner: a move to needs=decision on a front agent owner's item outside the pilot is told to nobody, and the reply says so once",
       not to_front(n1) and not to_page(n1) and res.count("not told; the board shows it") == 1, (wait_push(0)[n1:], res[-300:]))
 item2(28, "projects/alpha", A); n1 = len(wait_push(0))
-res = server._update("a28", needs=["decision"], ask="Decide: a or b · Recommend: a · Stakes: none · By: no date", sender="plain-y"); time.sleep(0.7); replies.append(res)
+res = server._update("a28", needs=["decision"], ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", sender="plain-y"); time.sleep(0.7); replies.append(res)
 check("tell owner: …and in the pilot too (the older rule), with no 'may need to act' line", not to_page(n1) and not [m for m in wait_push(0)[n1:] if m[0] == A], (wait_push(0)[n1:], res[-300:]))
 # a reopen is told inside the window that a close opened
 item2(29, "projects/beta", P_); n1 = len(wait_push(0))

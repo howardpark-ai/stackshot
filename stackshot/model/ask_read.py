@@ -4,6 +4,7 @@ An item that needs a decision shows its options as cards; with none stored the i
 question, or its options are the answers. These functions read an item's metadata and write nothing:
 
   open_question(meta)        the Decide part when it opens with an interrogative word (what, which, how, who, whom, whose, when, where, why), else ""
+  recommend_not_stance(meta) the Recommend part of an item with no options when it is not a yes or a no (recommend_stance reads one: English words and [keywords.ask_options] yes_no_words), else ""
   alternatives(meta, text)   the words in the ask (or `text`, the description) that name alternatives, else ""
   yes_no_options(meta) / labels_in(meta, labels)   the stored options are a Yes/No pair (or the labels given)
   recommend_missing(meta)    the recommended option's label when the ask's Recommend part does not name it, else ""
@@ -76,6 +77,36 @@ def open_question(meta: dict[str, Any]) -> str:
     """The Decide part of an ask that opens with an interrogative word (what, which, how, who, whom, whose, when, where, why), "" when it does not."""
     decide = decide_of(meta)
     return decide if OPEN_Q_LEAD_RX.match(decide) else ""
+
+
+# A Recommend part that is a yes or a no (a stance), the only Recommend an item with no options may carry: the page draws Yes / No under such an item, and a Recommend that names a person, a topic,
+# a date or anything else is no answer to a Yes / No. The English words ship here; the instance's own language adds its words under [keywords.ask_options] `yes_no_words` (they may be followed by
+# a `particles` suffix, as a glued-on ending), so no other language's words live in this tree. A stance opens the Recommend part (after a quote, bracket or emphasis mark) and ends at a word
+# boundary: "Yes, ship it", "No: wait", "Approve", "Go ahead" count, "Yesterday", "Nothing", "Notion" do not. "go" and "hold" alone count only as the whole stance ("Go.", "Hold - wait a week"),
+# never as the first word of a phrase that names something ("Go with Alice", "Hold the 12th").
+_STANCE_LEAD = r"[\s\"'`“”‘’(\[{<«*_]*"
+_STANCE_EN = (r"(?:yes|no|yep|yeah|nope|ok|okay|agreed?|approved?|accept(?:ed)?|decline[ds]?|reject(?:ed)?|no[- ]go|go\s+ahead|go\s+for\s+it|go\s+with\s+it|hold\s+off|hold\s+on|"
+              r"(?:go|hold)(?=\s*(?:$|[.,;:!?—–]|\s-\s)))(?![^\W_])")
+
+
+def _stance_rx(yn: str, particles: str) -> str:
+    extra = rf"|(?:{yn})(?:{particles})?(?![^\W_])" if yn else ""
+    return rf"^{_STANCE_LEAD}(?:{_STANCE_EN}{extra})"
+
+
+def recommend_stance(recommend: str) -> bool:
+    """True when the Recommend text opens with a yes or a no: the English words above, or a word of [keywords.ask_options] `yes_no_words` (a `particles` suffix may follow it)."""
+    rx = _cfg.kw_rx("recommend_stance", _stance_rx, (("ask_options", "yes_no_words"), ("ask_options", "particles")), re.I)
+    return bool(rx.match(_norm(recommend)))
+
+
+def recommend_not_stance(meta: dict[str, Any]) -> str:
+    """The Recommend part of an ask that is not a yes or a no, "" when it is one. Only for an item with no options (with options, the Recommend names an option: recommend_mismatch's) and an ask in form
+    (an ask that does not split into Decide and Recommend is the shape gate's)."""
+    pa = render.parse_ask(str(meta.get("ask") or ""))
+    if meta.get("options") or not pa or recommend_stance(pa["recommend"]):
+        return ""
+    return pa["recommend"]
 
 
 YESNO_LABELS = frozenset({"yes", "no", "y", "n", "yep", "nope", "done", "not done", "not yet", "done it", "did it", "yes, done", "no, not yet"})

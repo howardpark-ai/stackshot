@@ -76,7 +76,7 @@ def upd(i, **kw):
     return server._update(f"a{i}", sender="home-front", **kw)
 
 TODAY = day(0)
-ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 mt = lambda i, letter="a": rd(i, letter)["metadata"]
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
 def refused_nw(name, i, f, *want, letter="a"):

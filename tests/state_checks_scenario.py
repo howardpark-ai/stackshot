@@ -83,8 +83,8 @@ def refused_nw(name, i, f, *want):
     refused(name, f, *want)
     check(name + " (nothing written)", raw(i) == was, None)
 get = lambda i: server.stackshot_get(f"a{i}")
-ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
-ASK2 = "Decide: ship the thing next week · Recommend: ship it next week · Stakes: two weeks of delay · By: no date"
+ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
+ASK2 = "Decide: ship the thing next week · Recommend: yes · Stakes: two weeks of delay · By: no date"
 TODAY_D = server._pages.zone_now().date()
 NOTE3 = "note: next names Oliver but the state is {s}: pass step=… (or needs=decision with an ask)"
 
