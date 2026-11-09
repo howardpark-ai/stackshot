@@ -130,6 +130,7 @@ from stackshot.model import owner_steps as _hs  # noqa: E402  — his steps on t
 from stackshot.model import next_backfill as _nbf  # noqa: E402  — the one-off fill-in of his past decisions as done steps, worked out from the item's own saved answers (next_backfill.py)
 from stackshot.model import step_proof as _sp  # noqa: E402  — a step that names the event which completes it: the patterns for its words and the explicit form (step_proof.py)
 from stackshot.waits import handover as _hv  # noqa: E402  — a finished step hands the item to the session the next step names (handover.py)
+from stackshot.waits import builderless as _bl  # noqa: E402  — a project with no builder: whom an answered step goes to, and a front agent handing an item to another front agent of its project (builderless.py)
 from stackshot.model import contact as _contact  # noqa: E402  — an item's contact: the front agent the person talks to about it (contact.py)
 from stackshot.model import next_rules as _nr  # noqa: E402  — the write checks of Next: a line names who takes it (N1), a reworded step is no rewrite (N3), an open item keeps an open step (N6) (next_rules.py)
 from stackshot.model import bullet_text as _bt  # noqa: E402  — how a line reads and how a text becomes `- ` bullets, for the gates, the cold call's close and the question route (bullet_text.py)
@@ -1823,6 +1824,42 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
     return key, proj, list(builder), hub
 
 
+def _project_builders(project: str) -> list[str]:
+    """The project's builder as the front-mover rule reads it: its hand-off builder, else its first background agent; [] when it has neither (a project with only front agents)."""
+    if not project:
+        return []
+    return _handoff_builder(project) or _hub_sessions(project)[2][:1]
+
+
+def _builderless_answer_to(meta: dict[str, Any], project: str) -> str:
+    """Who takes an item of a project with no builder when the owner's step is answered and the item stores no `then` (builderless.answer_target): the session its next open step names, else its
+    contact; "" when the project has a builder, neither names a session, or a read fails (the caller then keeps the project's keeper, as before)."""
+    try:
+        if not project or _project_builders(project):
+            return ""
+        nm = _anc.names()
+        def usable(who: str) -> bool:      # a front agent of this item's project, as mover= may name one (a step line does no more)
+            roles, key = _role_of(who, nm)
+            return bool(key) and _bl.front_of(roles[key], project)
+        return _bl.answer_target(meta, usable)
+    except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the old fallback
+        print(f"answer: next session of {project} not read ({e.__class__.__name__}: {e}); the keeper takes it", file=sys.stderr, flush=True)
+        return ""
+
+
+def _front_pair_ok(sender: str, key: str, project: str) -> bool:
+    """May `sender` hand an item of `project` to the front agent `key` (builderless.pair_allowed): both are live front agents of the project the item is filed under (one page), and the project has no builder. A project with no agents map has no front agent to name."""
+    try:
+        s = str(sender or "").strip()
+        if not s:
+            return False
+        nm = _anc.names()
+        roles, skey = _role_of(s, nm)
+        return _bl.pair_allowed(roles.get(skey) if skey else None, roles.get(key), _project_builders(project), project)
+    except Exception:  # noqa: BLE001  — the relaxation is an extra: a failed read keeps the refusal
+        return False
+
+
 def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]") -> ToolError:
     key, proj, builder, hub = case
     where = (f"Hand build work to the project's builder, {builder[0]} ({field}={builder[0]}); " if builder
@@ -1848,6 +1885,8 @@ def _fix_front_mover(field: str, value: str, sender: str, project: str, current:
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
+        if field == "mover" and _front_pair_ok(sender, key, project):      # a project with no builder: one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
+            return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is told it is handed the item)", []
         raise _front_mover_refusal(field, case)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
                         f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent; for a check or an answer only {key} can give, message it)"), \
@@ -9278,6 +9317,15 @@ def _handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool
             + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
 
 
+def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
+    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a project with no builder (the case _fix_front_mover lets through)?"""
+    try:
+        _roles, key = _role_of(to)
+        return bool(key) and _front_pair_ok(str(rec.get("from") or ""), key, project)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _handoff_notify(gid: str, item: dict[str, Any]) -> str:
     """At the tail of a create or update: the hand-off this write just recorded is told to its new mover when no notice of the write has told it already (a change of `mover` or
     `then` names no one in needs, so _tell_needed said nothing). Not the owner, not a front agent (an item notice wakes none of them). → the reply line, or ""."""
@@ -9290,7 +9338,8 @@ def _handoff_notify(gid: str, item: dict[str, Any]) -> str:
         tid = _session_id(to)
         if any(g == gid and (s == tid or _ho_same(s, to)) for g, s in told):
             return ""
-        if _front_keeper(to, str((item.get("metadata") or {}).get("project") or ""))[0]:
+        proj = str((item.get("metadata") or {}).get("project") or "")
+        if _front_keeper(to, proj)[0] and not _front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project that has no builder
             return ""
         _tell_woken(gid, tid or to, _handoff_text(gid, item, r), tag="handoff")
         return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)})"
@@ -11246,7 +11295,7 @@ _WAIT_BASIS_PARAM = Annotated[str, Field(description=f"The reason a time wait's 
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any new notice there that reaches the server and passes the project's keeper wakes the item; a wait_event naming a merge, close, landing or completion is not woken by a routine push or CI line on the fleet's own PR (only by one that says merged or closed). A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know; an item parked on a date check-back for an offline machine says wait_event=\"box_online <machine>\" with the check-back day as ask_by instead). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
-_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused); message the front agent for a check or an answer only it can give.")]
+_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give.")]
 _THEN_PARAM = Annotated[str, Field(description=f"Who takes the item after {OWNER}'s answer or step (it becomes the mover then): a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets then=<front agent> gets the project's builder instead, as for mover.")]
 _POST_WAKE_PARAM = Annotated[str, Field(description=f"Who moves the item when its wait ends (it becomes the mover then): {OWNER}, a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> gets the project's builder instead, as for mover.")]
 _CONTACT_PARAM = Annotated[str, Field(description=f"The item's contact: the front agent (a user-facing agent) that {OWNER} talks to about it, by its name. Leave it out and the contact is the creator when that is a front agent, else the project's -main agent. "
@@ -11266,7 +11315,7 @@ _CREATE_DESC = (
     f"subject: {_PFX}, then the outcome wanted as a task, never a topic or a symptom (a subject with no scope prefix is given the one its project's scope names, and the reply says so). "
     "project must exist (create the page first; a page in a second brain is looked up in that brain's own copy, and taken unchecked while that copy cannot be read); a sub-page counts and shows on its hub's row. "
     "sender: your own session (a cloud/Cowork session's cse_… id, or a pane's name or transcript UUID); the server records it as the item's creator (a background agent may create items too). "
-    "mover: who moves the item now (and then= after his answer or step); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused; message the front agent for a check or answer only it can give). "
+    "mover: who moves the item now (and then= after his answer or step); a front agent gets no hand-off notice, so a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front agents; message the front agent for a check or answer only it can give). "
     "With no mover= an alive item is moved by the project's builder (for a page the instance maps to a builder, that one when the project lists it), else its -main agent, never by its creator; "
     f"an item that waits on {OWNER}'s call (needs=decision with its ask) is taken after him by `then`, which defaults to the builder doing the work, not to the front agent that relayed it (a builder that files its own decision item is its own `then`). "
     f"An item created in his state (his step, or needs holding decision) has him as mover, and naming a session as mover beside that state is refused; mover={OWNER} on an item in none of his states is refused too (a create sets no state: he is the mover with needs=decision and its ask, else name a session as mover and put his part in a next line that starts `{OWNER}:`). "
@@ -11784,7 +11833,7 @@ _UPDATE_DESC = (
     "wake (at most [waiting] cap_days out unless his words are on the item), since the notice may never come; the server releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a "
     "notice from that anchor (never when it drops one; in a project nobody rules, when any notice from it arrives), and tells the sessions in its needs (else the project's builder, else its -main agent). "
     f"clear_hold=true releases it now (its wake goes with it); wake=\"none\" (or clear_wake=true) drops the wake: a reminder simply goes, and a hold stays only when an after, an anchor or a recycle still holds it. "
-    f"mover hands the item over: set mover=<session> (then=<who takes it after {OWNER}'s answer or step>) and the new mover is told; a front agent gets no hand-off notice, so an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused; message the front agent for a check or answer only it can give); take over another session's item only when asked; a session about to be retired first hands over or completes its open items. "
+    f"mover hands the item over: set mover=<session> (then=<who takes it after {OWNER}'s answer or step>) and the new mover is told; a front agent gets no hand-off notice, so an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front agents; message the front agent for a check or answer only it can give); take over another session's item only when asked; a session about to be retired first hands over or completes its open items. "
     f"mover={OWNER} alone is refused on an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). "
     f"An update that leaves an open item in a state that is {OWNER}'s (his step, or needs holding decision) and names no mover sets mover={OWNER} itself and moves the stored session mover into then "
     f"(set then=<you> to have the item come back to you), and the reply ends with a `(mover: <session> → …)` note; when a save ends his state the mover he held goes back to then; a write that names the mover or clears it (clear_mover), a rename, priority or project write, a re-bullet and a close are left alone. "
@@ -18028,8 +18077,8 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             rec["step"] = _states.clean(meta.get("step"))
             _pm = dict(meta); _watch.end_wait(_pm)      # who takes it is read with any leftover wait already ended (a stored wait would make the item read as waiting, with no then)
             then = _model.derive({**item, "metadata": _pm}).then
-            if not then or _model.is_owner(then):      # no default mover and no session in needs: the item goes to its project's keeper at once, as mover
-                then = _auto_mover(_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
+            if not then or _model.is_owner(then):      # no default mover and no session in needs: a project with no builder hands it to the session its next open step names, else its contact; else the item goes to its project's keeper at once, as mover
+                then = _builderless_answer_to(meta, str(meta.get("project") or "")) or _auto_mover(_keeper(str(meta.get("project") or ""), ""), str(meta.get("project") or ""))      # never a front agent when the project has a builder
             if not then or _model.is_owner(then):      # nobody to take it (no default mover, no session in needs, no keeper): not recorded, nothing written
                 return "nomover"
             if kind == "decision":          # his word that the step is done checks it on the item's checklist (a note leaves it open: the session that takes the item judges it)
