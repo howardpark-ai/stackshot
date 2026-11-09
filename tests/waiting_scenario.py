@@ -159,9 +159,10 @@ ja = [W.jitter(f"a{i}") for i in range(300)]
 check("the jitter is a fixed fraction in [0, 1) of the item id, spread over the range", all(0 <= j < 1 for j in ja) and max(ja) - min(ja) > 0.9 and W.jitter("a7") == W.jitter("a7") and W.jitter("a7") != W.jitter("a8"), (min(ja), max(ja)))
 check("the floor before the server's first pass: none for a call without a clock, now + default_days for a reader (nothing derived reads as late before the rule has started)",
       W.floor_of({"baseline": None}) == 0.0 and abs(W.floor_of({"baseline": None}, now0) - (now0 + 3 * DAY)) < 1 and abs(W.floor_of({"baseline": now0 - DAY}, now0) - (now0 + 2 * DAY)) < 1)
-check("words: who, when, past due by, why; the item page leaves the 'expected by' lead to its heading",
-      W.line(W_of(17), now0, str, str).startswith(f"{U['home-owner']} · expected by ") and "past due by" in W.line(W_of(17), now0, str, str) and W.line(W_of(2), now0, lead=False).startswith(f"{server.OWNER} · ") and "expected by" not in W.line(W_of(2), now0, lead=False),
-      (W.line(W_of(17), now0), W.line(W_of(2), now0, lead=False)))
+check("words: who, what the wait stands on, past due, why; no computed date and no 'expected by' or 'past due by' is printed",
+      W.line(W_of(17), now0, str, str).startswith(f"{U['home-owner']} · ") and "past due" in W.line(W_of(17), now0, str, str) and W.line(W_of(2), now0).startswith(f"{server.OWNER} · ")
+      and not any(x in W.line(W_of(g), now0) for g in (17, 2) for x in ("expected by", "past due by", W.when_words(W_of(g)["expected_by"]))),
+      (W.line(W_of(17), now0), W.line(W_of(2), now0)))
 
 # ---- 1b. an item that waits after agent work in progress (a doing item whose mover is a session): due AFTER_DOING_SECONDS (12 h) after that item's last write, not a cap from its own last move
 def doing_blocker(i, upd, state_upd=None, **meta):          # a doing item last written `upd` (and state-changed `state_upd`); the waiter below has a much older clock of its own
@@ -174,7 +175,7 @@ w = W_of(47)
 check("after a doing item last written 11 h ago: not past due, expected 12 h after that write (the waiter's own 5-day-old clock is not the anchor), the blocker's mover", w["wait"] == "after" and w["mover"] == {"kind": "session", "who": "team-back", "via": "a48"} and not w["overdue"] and abs(w["expected_by"] - (now0 - 11 * 3600 + H12)) < 1, w)
 doing_blocker(54, now0 - 13 * 3600); item(49, after=["a54"], su=now0 - 5 * DAY)
 w = W_of(49)
-check("…last written 13 h ago: past due, by about an hour", w["wait"] == "after" and w["overdue"] and abs(w["expected_by"] - (now0 - 13 * 3600 + H12)) < 1 and "past due by" in W.line(w, now0), w)
+check("…last written 13 h ago: past due, by about an hour", w["wait"] == "after" and w["overdue"] and abs(w["expected_by"] - (now0 - 13 * 3600 + H12)) < 1 and "past due" in W.line(w, now0) and "past due by" not in W.line(w, now0), w)
 doing_blocker(88, now0 - 5 * 3600, state_upd=now0 - 20 * 3600); item(87, after=["a88"], su=now0 - 5 * DAY)
 w = W_of(87)
 check("the anchor is the later of updated and state_updated: a write 5 h ago keeps it alive although the state changed 20 h ago", not w["overdue"] and abs(w["expected_by"] - (now0 - 5 * 3600 + H12)) < 1, w)
@@ -325,9 +326,9 @@ server._scoped_anchors = real_scoped
 item(75, su=now0 - DAY)
 r75 = server._update("a75", due=day(20), sender="home-owner")
 check("a due date is a deadline, not a wait: one three weeks out is accepted on update", rd(75)["metadata"].get("due") == day(20), rd(75)["metadata"])
-check("…and the reply says its expected-by is capped, at which date, and why", "expected-by capped at " in r75 and f"past 7 days needs {server.OWNER}'s words" in r75, r75)
+check("…and the reply says the wait is capped, at how many days, and why, with no date", "the wait is capped at 7 days" in r75 and f"needs {server.OWNER}'s words" in r75 and "expected-by" not in r75, r75)
 out = server._create(subject="[home] far due", description=DESC, project="projects/alpha", owner="home-owner", next="home-owner: x", due=day(30))
-check("…and on create, with the same line", out.startswith("created ") and "expected-by capped at " in out, out)
+check("…and on create, with the same line", out.startswith("created ") and "the wait is capped at 7 days" in out, out)
 w = W_of(75)
 check("…but its expected-by is never later than the item's last move + cap_days (setting the due was itself a move: the cap runs seven days from this write), whatever the due says",
       w["wait"] == "due" and abs(w["expected_by"] - (rd(75)["state_updated"] + 7 * DAY)) < 1 and "capped" in w["basis"] and not w["overdue"], w)
@@ -365,7 +366,7 @@ m_cap = rd(83)["metadata"]
 w = W_of(83)
 check("a far due date accepted on his words records them (cap_ok due) and stands at the due, not clamped, with no capped line in the reply",
       m_cap.get("cap_ok", {}).get("due") == day(20) and m_cap["cap_ok"]["due_by"] == "a checked said entry" and abs(w["expected_by"] - W.due_epoch(day(20))) < 1
-      and "capped" not in w["basis"] and "expected-by capped" not in r_cap, (m_cap, w, r_cap))
+      and "capped" not in w["basis"] and "the wait is capped" not in r_cap, (m_cap, w, r_cap))
 w = W_of(75)
 check("…the same due without words is clamped (item 75 above)", "capped" in w["basis"] and "cap_ok" not in rd(75)["metadata"], (w, rd(75)["metadata"]))
 server._update("a83", due=day(21), sender="home-owner")
@@ -411,11 +412,11 @@ async def create_desc():
 from fastmcp import Client
 cr = asyncio.run(create_desc())
 check("create's description carries the cap sentence", server._CAP_FORM.strip() in cr and "7 days" in cr and "capped" in cr, cr[-400:])
-check("the update description carries the rule, the cap and clear_after, and no ladder: the other texts keep their form", all(x in server._WAIT_FORM for x in ("expected-by", "7 days", "clear_after=true")) and not re.search(r"stuck list|ladder", server._WAIT_FORM), server._WAIT_FORM)
+check("the update description carries the rule, the cap and clear_after, and no ladder: the other texts keep their form", all(x in server._WAIT_FORM for x in ("timed in days", "7 days", "clear_after=true")) and not re.search(r"stuck list|ladder", server._WAIT_FORM), server._WAIT_FORM)
 _gd = asyncio.run(server.mcp.get_tool("get")).description if hasattr(server.mcp, "get_tool") else ""
 _bd = asyncio.run(server.mcp.get_tool("brief")).description if hasattr(server.mcp, "get_tool") else ""
 check("get and brief describe the `waiting:` line: mover, expected-by, past due, nothing sent, and teach no ladder, step or stuck list",
-      all("`waiting:`" in d and "past due by" in d and "nothing is sent" in d and not re.search(r"ladder|stuck list|step \d of|grace", d) for d in (_gd, _bd)), (_gd[:80], _bd[:80]))
+      all("`waiting:`" in d and "past due" in d and "past due by" not in d and "expected by" not in d and "nothing is sent" in d and not re.search(r"ladder|stuck list|step \d of|grace", d) for d in (_gd, _bd)), (_gd[:80], _bd[:80]))
 
 # ---- 6. after=[] clears; so do "none" and clear_after=true, through the MCP layer too
 item(80, after=["a81"], su=now0 - DAY); item(81, su=now0 - DAY)
@@ -435,7 +436,7 @@ async def via_mcp():
         await c.call_tool("update", {"item_id": "a80", "clear_after": True, "sender": "home-owner"})
         return props, tools["update"].description or ""
 props, desc = asyncio.run(via_mcp())
-check("through the MCP layer: update takes clear_after (a boolean) and clears the list, and its description names the rule", "clear_after" in props and props["clear_after"].get("type") == "boolean" and "after" not in rd(80)["metadata"] and "expected-by" in desc, (list(props), rd(80)["metadata"]))
+check("through the MCP layer: update takes clear_after (a boolean) and clears the list, and its description names the rule", "clear_after" in props and props["clear_after"].get("type") == "boolean" and "after" not in rd(80)["metadata"] and "timed in days" in desc, (list(props), rd(80)["metadata"]))
 
 # ---- 7. a failed delivery is recorded on the item and counted
 (T / "failpush.py").write_text("import sys\nmode = open(sys.argv[0] + '.mode').read().strip()\nprint('delivered → x' if mode == 'ok' else 'FAILED → ' + sys.argv[-2]); sys.exit(0 if mode == 'ok' else 1)\n")
@@ -553,8 +554,7 @@ check("board.md has no Stuck section; the undelivered notices and the undated wa
 br = bd.brief()
 check("the brief carries an undelivered count and no stuck count and no stuck line", "1 with an undelivered notice" in br and not re.search(r"\d+ stuck|^  stuck: |more stuck", br, re.M), br)
 ph = bd.item_html("a82")
-check("the item page has an Expected by row in its sidebar (the only markup the rule adds), past due drawn like the stale mark", "<dt>Expected by</dt><dd><span class=\"iwarn\">" in ph and "past due" in ph, re.findall(r"<dt>Expected by</dt>.{0,300}", ph))
-check("…and a parked item inside its date shows it plainly", "<dt>Expected by</dt><dd>" in bd.item_html("a26") and "past due" not in bd.item_html("a26").split("Expected by")[1][:300], bd.item_html("a26")[:0])
+check("the item page has no Expected by row in its sidebar and prints no computed date or 'past due by' (a past-due held item, and one inside its date)", "Expected by" not in ph and "past due by" not in ph and "Expected by" not in bd.item_html("a26"), re.findall(r"Expected by.{0,300}", ph))
 st_, ct_, body_ = server._client_get("items", {"key": U["home-owner"]})
 x = {i["gid"]: i for i in json.loads(body_)["items"]}
 check("the items API (the web board and sala read it) carries mover, expected_by, wait and overdue for a held item too, and no ladder step",
@@ -567,23 +567,23 @@ check("the audit status carries no waiting counts: GET /audit/status answers the
 # a session mover stored as a transcript id shows as its name wherever a wait is displayed (the Owner field's resolver); an id that does not resolve stays raw
 _own = U["home-owner"]
 check("the stored mover of a82 is the owner's transcript id (the premise of the next checks)", r_old["_wait"]["mover"]["who"] == _own and len(_own) >= 32, r_old["_wait"]["mover"])
-check("item page: the Expected by row is the day only (the mover is the header's) and the page never prints the mover's transcript id", "<dt>Expected by</dt><dd>" in ph and "home-owner · " not in ph.split("Expected by")[1].split("</dd>")[0] and _own not in ph, ph.split("Expected by")[1][:400])
+check("item page: the page never prints the mover's transcript id", _own not in ph, ph[:400])
 import copy
 def _expb(gid, **over):
-    """The Expected by cell of an item page, with the item's derived wait changed by `over` (a copy; the Board's row is put back)."""
+    """An item page, with the item's derived wait changed by `over` (a copy; the Board's row is put back): (the page, the page)."""
     r_ = bd.item(gid); keep = r_["_wait"]; r_["_wait"] = copy.deepcopy(keep)
     for k, v in over.items(): r_["_wait"][k] = v
     try: h_ = bd.item_html(gid)
     finally: r_["_wait"] = keep
-    return h_.split("<dt>Expected by</dt><dd>")[1].split("</dd>")[0], h_
+    return h_, h_
 _cell, _page = _expb("a82", mover={"kind": "outside", "who": "<b>evil</b> & co"}, why='<script>alert(1)</script> & "q" \'s\' home-owner stopped')
-check("item page: item text in a wait (its why, a mover name) never reaches the page unescaped", "<b>evil</b>" not in _page and "<script>alert(1)</script>" not in _page and "<b>" not in _cell, _cell)
+check("item page: item text in a wait (its why, a mover name) never reaches the page unescaped", "<b>evil</b>" not in _page and "<script>alert(1)</script>" not in _page, [x for x in ("<b>evil</b>", "<script>alert(1)</script>") if x in _page])
 _cell, _ = _expb("a26")
-check("item page: a parked item inside its date shows the day plainly, with no past-due mark", _cell and "iwarn" not in _cell and "past due" not in _cell and "<a " not in _cell, _cell)
+check("item page: a parked item inside its date shows no Expected by row and no past-due mark", "Expected by" not in _cell and "past due" not in _cell, "")
 check("board.md carries no row for the ladder's last step: the mover of a past-due hold is named on its own row, not its id",
       "## Stuck" not in md and "(the ladder's last step" not in md, md[:300])
 check("the brief has no stuck line for it either, and no id of the mover", "  stuck: a82" not in br and _own not in br, br)
-check("the stale tip of a parked item past its expected-by names the mover", "home-owner" in ui_render.stale_tip(r_old, bd.mover_name) and _own not in ui_render.stale_tip(r_old, bd.mover_name), ui_render.stale_tip(r_old, bd.mover_name))
+check("the stale tip of a parked item past due names the mover and prints no date", "past due" in ui_render.stale_tip(r_old, bd.mover_name) and "expected by" not in ui_render.stale_tip(r_old, bd.mover_name) and "home-owner" in ui_render.stale_tip(r_old, bd.mover_name) and _own not in ui_render.stale_tip(r_old, bd.mover_name), ui_render.stale_tip(r_old, bd.mover_name))
 check("the get tool's waiting: line already names it (the server's resolver)", server._waiting_of("a82", rd(82))["line"].startswith("home-owner · "), server._waiting_of("a82", rd(82))["line"])
 check("an id that resolves to no session stays the raw id; Oliver and an outside party stay as they are",
       bd.mover_name("deadbeef-0000-4000-8000-000000000000") == "deadbeef-0000-4000-8000-000000000000"

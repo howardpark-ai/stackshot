@@ -905,8 +905,8 @@ _istat = lambda h: h[h.find('<div class="istat">'):h.find("</div>", h.find('<div
 check("item page: the state line (item model) — the state tag and since; the mover and who takes it next are the sidebar's Mover and Then rows, due and priority are in the sidebar too, not here (the id in the title)",
       _istat(ip).startswith('<div class="istat"><p class="istate"><span class="tag t-you">Your move</span> · since ') and " · then " not in _istat(ip) and "mover" not in _istat(ip) and "your call" not in _istat(ip) and "Due " not in _istat(ip)
       and "prio-" not in _istat(ip) and 'class="iid"' not in _istat(ip), _istat(ip))
-check("item page: the sidebar opens with the mover, then holds project, then, priority, expected by, each a small heading over its value; due sits in the closed More details fold, the mover does not",
-      '<dl class="sgrp"><dt>Then</dt><dd>' in _side(ip) and '<dt>Expected by</dt><dd>' in _side(ip)
+check("item page: the sidebar opens with the mover, then holds project, then, priority, each a small heading over its value, and no Expected by; due sits in the closed More details fold, the mover does not",
+      '<dl class="sgrp"><dt>Then</dt><dd>' in _side(ip) and 'Expected by' not in _side(ip)
       and _side(ip).startswith('<aside class="iside" aria-label="Details"><dl class="sgrp"><dt>Mover</dt><dd><a href="https://sala.example.org/#s=home-beta"') and _side(ip).count("<dt>Mover</dt>") == 1
       and _side(ip).find("<h3>More details</h3>") > _side(ip).find("<dt>Mover</dt>") and "<dt>Mover</dt>" not in _side(ip).split("<h3>More details</h3>")[1] and '<dt>Project</dt><dd><a href="/projects/beta">home/Beta</a>' in _side(ip)
       and '<dt>Priority</dt><dd>P2</dd></dl>' in _side(ip) and _side(ip).find("<h3>More details</h3>") < _side(ip).find('<dt>Due</dt><dd><span class="badge due">Due in 5 d')
@@ -2133,7 +2133,7 @@ fm = lambda **kw: server._fmt({"id": "99", "gid": "a99", "status": "open", "subj
 c_ = time.time() - 2 * DAY - 100; out_ = fm(confirmed=c_)
 out_nw = "\n".join(ln for ln in out_.splitlines() if not ln.startswith("waiting: "))      # Oliver's one rule adds a waiting line after priority (its own scenario, waiting, covers it)
 check("_fmt: ask after needs, before priority; confirmed in words with its staleness", f"needs: decision\nask: {ASK}\npriority: p1\nconfirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, server.ZONE))} (stale 2 d)" in out_nw, out_)
-check("_fmt: the waiting line, after priority and before confirmed: whose move and the expected-by, with what gives the date", "\npriority: p1\nwaiting: the owner · expected by " in out_ and "(needs set + the default)\nconfirmed: " in out_, out_)
+check("_fmt: the waiting line, after priority and before confirmed: whose move and what gives its date, with no computed date", "\npriority: p1\nwaiting: the owner · needs set + the default\nconfirmed: " in out_ and "expected by" not in out_, out_)
 cline = lambda out: out.split("\nconfirmed: ", 1)[1].split("\n", 1)[0]
 check("_fmt: a fresh item says (fresh)", cline(fm(confirmed=time.time() - 600)).endswith(" (fresh)"), fm(confirmed=time.time() - 600))
 check("_fmt: a held item says (held)", server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"hold": True}, "confirmed": c_}).split("\nconfirmed: ", 1)[1].endswith(" (held)"))

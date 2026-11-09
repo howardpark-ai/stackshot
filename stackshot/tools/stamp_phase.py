@@ -169,7 +169,7 @@ def chunks(xs: list[Any], n: int = BATCH) -> list[list[Any]]:
 # ---------------------------------------------------------------------------------------------------------------- the dry run
 @contextlib.contextmanager
 def frozen(now: float) -> Any:
-    """Hold `time.time` at `now` inside the block. The board's text reads the clock itself (the wait's expected-by floor, `past due by N h`, `stale N d`), and the server functions `display_of` calls take no `now`: the
+    """Hold `time.time` at `now` inside the block. The board's text reads the clock itself (the wait's floor, the past-due mark, `stale N d`), and the server functions `display_of` calls take no `now`: the
     before and after passes of the proof run a few seconds apart, so a minute or an hour edge between them would show as a change the stamp never made. One frozen clock for both passes keeps the proof exact."""
     real = time.time
     time.time = lambda: now

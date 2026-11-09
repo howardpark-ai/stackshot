@@ -699,18 +699,17 @@ def when_words(ts: float) -> str:
     return f"{t:%a %b} {d}{'th' if 11 <= d % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')} {t:%H:%M}"
 
 
-def line(w: dict[str, Any], now: float, label: Callable[[str], str] = str, shown: Callable[[str], str] = str, lead: bool = True) -> str:
-    """One line for get, the md and the item page: "my-engineer · expected by Thu Mar 12th 18:30 (wake) · past due by 2 d". `lead` = False
-    leaves the words "expected by" out, for a place that already says them (the item page's "Expected by" heading)."""
+def line(w: dict[str, Any], now: float, label: Callable[[str], str] = str, shown: Callable[[str], str] = str) -> str:
+    """One line for get, the md and the stale tooltip: "my-engineer · wake · past due: why". It names the mover and what the wait stands on, and says
+    `past due` once the wait's date has passed; the computed date itself is never printed (an item shows only its real dates: wake, due, ask by)."""
     if w.get("wait") == "doing":
         return f"{who_words(w, label, shown)} · doing (work in hand; no expected time)"
     basis = f"after {shown(w['mover']['via'])}" if w.get("wait") == "after" and w["mover"].get("via") else str(w.get("basis") or "")
-    s = f"{who_words(w, label, shown)} · {'expected by ' if lead else ''}{when_words(w['expected_by'])} ({basis})"
+    s = f"{who_words(w, label, shown)} · {basis}"
     if w.get("nodate"):
-        s += " · no date of its own: given the cap"
+        s += " · no date of its own"
     if w.get("overdue"):
-        late = max(0.0, now - float(w["expected_by"]))
-        s += " · past due" + (f" by {age_words(late)}" if late >= 60 else "")
+        s += " · past due"
         if w.get("why"):
             s += f": {why_words(w, label)}"
     return s

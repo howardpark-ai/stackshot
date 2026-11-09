@@ -436,7 +436,7 @@ check("text: update's description says a doing item carries no expected time, th
 check("text: update's parameters still include expected_reason, a string (so an older call is not rejected)", tl["update"].parameters["properties"].get("expected_reason", {}).get("type") == "string", tl["update"].parameters["properties"].get("expected_reason"))
 check("text: create's description says agent work in progress has no expected time and a wait on an agent that is not doing is hours", "Agent work is timed in hours" not in cd and "Agent work carries no expected time" in cd and "not stored as doing" in cd and "A doing item is never past due" in cd, None)
 check("text: update's wait form excepts agent work in progress from the expected-by rule: it has no expected time and is never past due",
-      "Every open item but agent work in progress (state doing) also has an expected-by time" in ud and "Agent work in progress (state doing) has no expected time and is never past due" in ud
+      "Every open item but agent work in progress (state doing) also has a wait date the board reads" in ud and "Agent work in progress (state doing) has no expected time and is never past due" in ud
       and "(the one party whose move it is now: a session, " in ud and "and an expected-by time, which get shows" not in ud, None)
 check("text: waiting.py's rule says the same, and the audit rubric's why-not-now reads the wake only",
       "except agent work in progress (state doing)" in pathlib.Path(STACK, "stackshot/waits/waiting.py").read_text(encoding="utf-8")

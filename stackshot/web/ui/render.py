@@ -492,10 +492,10 @@ def mockup_link(r, shown=""):
     return f' <a class="mockup" href="{esc(u)}" target="_blank" rel="noopener" title="open the mockup this decision is about">Mockup ↗</a>' if u else ""
 def stale_tip(r, label=str):
     """The tooltip of a stale item's ⚠: a your-call item's ask may be out of date; any other lane has gone unconfirmed; a
-    parked item (on hold, or after an open item) is past its expected-by."""
+    parked item (on hold, or after an open item) is past due (its date is not printed: only real dates are)."""
     w = r.get("_wait") or {}
     if (is_parked(r) or w.get("wait") == "end") and w.get("overdue"):
-        return "past its expected-by: " + _wt.line(w, r.get("_now") or 0, label, shown_full)
+        return _wt.line(w, r.get("_now") or 0, label, shown_full)
     a = age_words(r.get("_age") or 0)
     return (f"ask last confirmed {a} ago — may be out of date" if needs_kind(r) == "call"
             else f"no confirmation for {a} — may be out of date")
@@ -2549,7 +2549,7 @@ class Board:
         words (alive · since; waiting on · watched by · until · then; done · date · outcome; the mover and the `then` are the sidebar's Mover and Then rows) on its own (the History keeps every change),
         the ask with its buttons and box (or the Your step block) while it is alive with the owner as mover, Next (every line, numbered, each
         `<mover>: <action>`), the wait and its chases while it waits, the Outcome of a closed item (the stored `outcome_text`, first among the sections, under the state line; none for an open item or a close with no outcome text), the Background (the stored `description`, which a close leaves as it was), and History and Comments, closed folds. The sidebar opens with Mover, Owner and Creator (one group, in that order) and holds
-        project, then, priority, expected by or wake, anchors, the GitHub issue and the For you control; today's other fields (agent at work, due, confirmed, work, after,
+        project, then, priority, wake, anchors, the GitHub issue and the For you control; today's other fields (agent at work, due, confirmed, work, after,
         observers) sit in a closed "More details" fold below them. The History is one line per revision with its author. Rendered on request; KeyError for an unknown id.
         answer: the server's {"action", "token", "sent"} for a signed-in viewer: the answer box under the Ask (an item the owner does not move has the comment box in the same place, open).
         watch (the For you list): the server's {"action", "token", "flag", "watched", "why"} for a signed-in viewer: the Watch / Mute control in the sidebar.
@@ -2658,7 +2658,7 @@ class Board:
         cform = "" if his else self.answer_html(r, answer, comment_only=True)     # an item he does not move: the comment box takes the answer box's slot, open
         # ---- the wait and its chases
         wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else ("End", "no end date set")), post, who_html) if waiting and w_ else ""
-        # ---- the sidebar: mover, owner and creator first, then project, then, priority, expected by or wake, anchors, the GitHub issue (and the For you control)
+        # ---- the sidebar: mover, owner and creator first, then project, then, priority, wake, anchors, the GitHub issue (and the For you control)
         tk = proj_top(r) or pk                        # the project it shows is the top-level one; the link stays the page the item is filed on (pk), as the gbrain page link below does
         if pk in self.proj: prj = f'<a href="{e(under("/" + pk))}">{e(self.proj_label(tk))}</a>'
         elif tk in self.proj: prj = f'<a href="{e(under("/" + tk))}">{e(self.proj_label(tk))}</a>'      # the filed page has no row of its own: the project's page stands in
@@ -2669,12 +2669,6 @@ class Board:
         pr = str(m.get("priority") or "p2")
         prio = '<span class="tag t-p1">P1</span>' if pr == "p1" else e(pr.upper())      # P1 red; P2 and P3 plain
         wk = wake_of(r)
-        w_line = r.get("_wait")                       # the one rule (waiting.py): the mover and the expected-by, one line; past due draws as the stale ⚠ does
-        # The line is escaped whole, then self.mentions links only what it knows: a session name with a live pane and an item id ("via board#N"). Nothing from item text reaches the page unescaped.
-        dated = bool(w_line) and not done and w_line.get("wait") != "doing"      # agent work in progress has no expected time: the status line's "since 2h ago" is its run time (waiting.py)
-        late = max(0.0, tnow - float(w_line["expected_by"])) if dated else 0.0      # the page's one age format (dur: 5m, 3h, 2d), as the rows say it; under a minute there is no duration to say
-        expl = e(_wt.when_words(w_line["expected_by"])) + (" · past due" + (f" by {e(dur(late))}" if late >= 60 else "") if w_line.get("overdue") else "") if dated else ""
-        expb = f'<span class="iwarn">{expl}</span>' if expl and w_line.get("overdue") else expl      # the day only: who moves it is the header's, the basis is the History's
         wlabel = {"relay": "Ask by", "anchor": "Backstop", "item": "Backstop"}.get(w_.kind if w_ else "", "Wake") if (w_ and (w_.until or w_.backstop)) else "Wake"
         wakev = e(self.when(wk)) if (wk and not done and not waiting) else (e(self.wait_day(wend)) if (waiting and wend) else "")
         gu = issue_url(r["gid"], self.data_dir)       # in the sidebar: the item's GitHub issue, when it has one and the mirror is on
@@ -2687,7 +2681,7 @@ class Board:
         ml, mv = self.mover_row(r)
         who_rows = f'<dt>{ml}</dt><dd>{mv}</dd>' + (f'<dt>{ol}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Mover first, then Owner, then Creator, in one group
         side = (f'<dl class="sgrp">{who_rows}</dl>' + grp(("Project", prj)) + grp(("Then", then_v)) + grp(("Priority", prio))
-                + grp(("Expected by", expb), (wlabel if waiting else "Wake", wakev))
+                + grp((wlabel if waiting else "Wake", wakev))
                 + (f'<dl class="sgrp"><dt>Anchors <span class="count">{alist.count("<li>")}</span></dt><dd><ul class="alist">{alist}</ul></dd></dl>' if alist else "")
                 + grp(("GitHub", ghl))
                 + self.watch_html(watch)
