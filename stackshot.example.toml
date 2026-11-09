@@ -552,7 +552,7 @@ enabled = false                                     # false (the default): the t
 look_minutes = 30                                   # how long after the ask the mover's pane is looked at (a value that is not a positive number is 30)
 silence = false                                     # false (the default): a pane with no turn running for [stall] minutes still starts a ladder, as with `enabled` alone. true (with `enabled = true`; alone it does nothing): the
                                                     # ten-minute silence pass and the dates pass bring the item instead, and a pane with no turn running starts none. The message the pass sends to the mover (an item on an agent with no
-                                                    # activity for 45 minutes, or past its own expected time with no write since) is the ask; the entry (`via` = "silence") then waits `look_minutes` for the look, then the cold call and the builder as
+                                                    # activity for 45 minutes, or past its own wake with no write since) is the ask; the entry (`via` = "silence") then waits `look_minutes` for the look, then the cold call and the builder as
                                                     # above, and ends when the item has activity, or its mover changes. A write or a confirm that is no activity (the mover's bare "still on it") does not restart it. An item the pass already
                                                     # asked before this is switched on is not entered (no flood); it climbs from its next silence. An untaken hand-off still starts its own ladder (the hand-off audit). Only a TOML true turns it on. Live
 

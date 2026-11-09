@@ -18047,7 +18047,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             _state_end(meta, "your-step")
             meta.pop("draft", None)         # the step is done: the text he was to post is posted
             meta.pop("mover", None); meta.pop("then", None)
-            _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; cap_ok keeps what lifts the cap on a due date)
+            _watch.end_wait(meta)           # a hold, its wake and any wait end with his step, as at the watcher's arrival (one list, watchers.LIVE_DROP; the owner's words for the wake go with it)
             _needs_store(meta, _canon_needs([x for x in _needs_of(meta) if x.lower() != "decision"]))      # a needs that named him would read the item as his call again
             if then and not _model.is_owner(then):
                 _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else _notice_to falls back to the page's keeper)
