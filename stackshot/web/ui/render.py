@@ -856,7 +856,7 @@ _APP_HEAD = ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use
 _APP_HEAD += _ct.HEAD   # the color tool's library (once per page) and the script that applies the stored look, in the head of every page after the theme script, before the page's own style
 _PANEL_BTN = ('<button type="button" class="b ico pbtn" id="panel-open" aria-label="Summary panel" aria-controls="panel" aria-expanded="true" title="Hide summary panel">'
               '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.8v12.4"/></svg></button>')
-_PANEL_BTN_CLOSED = _PANEL_BTN.replace('aria-expanded="true" title="Hide summary panel"', 'aria-expanded="false" title="Show summary panel"')   # the item page's, whose panel starts closed
+_PANEL_BTN_CLOSED = _PANEL_BTN.replace('aria-expanded="true" title="Hide summary panel"', 'aria-expanded="false" title="Show summary panel"')   # the button as drawn for a person whose panel is stored closed (apply_panel_open)
 _THEME_BTN = ('<button type="button" class="b ico theme" id="theme" aria-label="Theme: system" title="Theme: system">'
               '<svg class="i-system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>'
               '<svg class="i-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
@@ -1008,7 +1008,7 @@ _THEME_JS = ("<script>(function(){var b=document.getElementById('theme');if(!b)r
              "b.addEventListener('click',function(){var p=o[(o.indexOf(r.getAttribute('data-pref'))+1)%3];show(p);"
              "try{localStorage.setItem('" + _THEME_KEY + "',p)}catch(e){}});"
              "window.addEventListener('storage',function(e){if(e.key==='" + _THEME_KEY + "')show(e.newValue||'system')})})();</script>")
-# The summary panel (it defaults to open on load, ignoring the last state): a panel on the
+# The summary panel (open by default, and open or closed on a wide screen as the signed-in person last left it, on every page): a panel on the
 # right of the board, as sala's sidebar is on the left, holding what is not the day's work: the Tasks counts, Machines, Runners, Anchor hub, Audit and Projects.
 # On a wide screen (800 px and up) the pointer on the strip along the page's right edge (#panel-edge) or on the title bar's button
 # (#panel-open) PEEKS it: it slides in over the page, below the title bar, and leaving the three (strip, button, panel) takes it away
@@ -1020,20 +1020,22 @@ _THEME_JS = ("<script>(function(){var b=document.getElementById('theme');if(!b)r
 # pinned, #layout leaves _PANEL_RESERVE_PX of room on its right for it. Nothing moves when the panel opens or pins. Under 800 px the drawer and the buttons in
 # the page header are as they were. Below 800 px (a phone, a
 # narrow tablet in portrait) the button opens it as a drawer from the right, closed by its × button, a tap on the scrim, Escape or a tap on a
-# link to the main column. It is PINNED on a wide screen and a closed drawer on a narrow one, except on the item page, where it starts closed (no page remembers the last state). Nothing is stored: a click on a wide screen
-# pins or unpins it until the page reloads. Its sections (Machines,
+# link to the main column. It is PINNED on a wide screen and a closed drawer on a narrow one. What a click on a wide screen leaves, pinned or unpinned, is the person's own and is kept on the server with
+# their panel order (uiprefs.py `panel_open`; POST /prefs/panel-open, saved by _PANEL_JS), so it holds on every page, reload, browser and device; the default, nothing stored, is pinned. The drawer under 800 px is
+# never stored and starts closed whatever is stored. Its sections (Machines,
 # Runners, Anchor hub, Audit and Projects) are open on every load (_HOME_FOLD_JS). The default
-# is the page's own markup, so the first paint has it: the body is rendered with class panel-pin (the item page without it; the pin rules live inside the
-# min-width:800px media query, so on a narrow screen the class changes nothing the eye sees), and the button is rendered
-# aria-expanded="true" with the title "Hide summary panel" (the item page's, "false" and "Show summary panel"); the script reads the class (pinned only when wide) and corrects the
-# button on a narrow screen. Crossing 800 px sets the same default again (the page's: pinned, or closed on the item page). The state is the body's classes (panel-peek, panel-pin, panel-open);
+# is the page's own markup, so the first paint has it: every page is drawn with the body class panel-pin (the pin rules live inside the
+# min-width:800px media query, so on a narrow screen the class changes nothing the eye sees) and the button aria-expanded="true" with the title "Hide summary panel"; the server then
+# draws it closed for a person whose stored state is closed (apply_panel_open, on the way out like the section order: a bare <body> and the button "false" with "Show summary panel"), so the first paint is right on
+# every page and nothing flashes. The script reads the class (pinned only when wide) and corrects the button on a narrow screen. Crossing 800 px sets that state again (the one the page was drawn with, or the
+# one the person last chose here). The state is the body's classes (panel-peek, panel-pin, panel-open);
 # the panel and its frame are outside the blocks the in-place update (_LIVE_JS) swaps, so a swap leaves them as they are, and the
 # blocks swapped into it (overview, machines, anchorhub) take the folds' open state over as everywhere. A hash to something inside
 # it (#machines, #anchorhub) opens it: pinned on a wide screen (nothing holds a peek open without the pointer), the drawer on a phone.
 # The button's accessible name is fixed ("Summary panel"); aria-expanded alone carries the state (its title says what a click does).
 # Whatever closes the drawer returns focus to the button, the one control that opens it, also after a tap on the scrim blurred focus to the body.
 # The item, project, Landed and Search pages carry the same panel as home: the same body class, frame, button, script and blocks
-# (Board.panel_blocks, Board.panel_tail), pinned by default the same way (the item page starts closed), and no pin choice is kept across pages or reloads. Their folds in the
+# (Board.panel_blocks, Board.panel_tail), pinned by default the same way, the item page included, and kept the same way (one stored state for every page). Their folds in the
 # panel are not remembered either: _FOLD_JS and _FOLD_HEAD leave a fold inside #panel alone. The Audit script's addresses are absolute (/audit/status, /audit/now),
 # since those pages are not at the root.
 _PANEL_DOCK_PX = 800   # the one width at which the panel docks (was 960): the CSS media query below and _PANEL_JS's matchMedia both take it from here, so they cannot drift apart. A zoomed desktop window is narrower in CSS px, so 960 was too high; at 800 the pinned main column is 480 px (800 - 2*16 padding - 288 room for the panel), measured usable by tests/phone_width_check.py.
@@ -1050,15 +1052,26 @@ _ISTRIP_CSS = '.ilayout{grid-template-columns:minmax(0,1fr)}.imain,.iside{grid-c
 def _scoped(css: str, prefix: str) -> str:
     """css (plain rules, no at-rules) with `prefix` put before every selector."""
     return re.sub(r"([^{}]+)\{([^{}]*)\}", lambda m: ",".join(prefix + x.strip() for x in m.group(1).split(",")) + "{" + m.group(2) + "}", css)
-# The panel's pin state is the page's own markup and nothing is stored (open by default on every page except the item page, which defaults to closed; no page remembers the last state).
-# Every page but the item page renders pinned, <body class="panel-pin">; the item page
-# renders a bare <body>, so the panel starts closed there and a hover still peeks it open. A pin or unpin made with the button lasts until the page reloads.
+# The panel's pin state is the page's own markup, and the signed-in person's stored choice (uiprefs.panel_open) puts it in. Every page, the item page too, is DRAWN pinned, <body class="panel-pin"> (the
+# home is one kept draw for everyone, so the draw cannot differ per person); apply_panel_open turns it into the closed form, a bare <body>, for a person whose panel is stored closed, and a hover still peeks a
+# closed panel open. A pin or unpin made with the button on a wide screen is saved (POST /prefs/panel-open) and so holds on the next page, reload and device.
 _PANEL_BODY = '<body class="panel-pin">'
-_PANEL_BODY_CLOSED = '<body>'   # the item page's: the panel starts closed
+_PANEL_BODY_CLOSED = '<body>'   # the closed form of _PANEL_BODY
+def apply_panel_open(page: str, is_open: bool) -> str:
+    """The page (drawn with the panel open) with the panel closed when `is_open` is false: the body without panel-pin and the button offering to show the panel, so the first paint is closed on a wide
+    screen (a narrow one shows a closed drawer either way). A page with no side panel comes back as it was; only the first body tag and the first panel button are touched."""
+    if is_open or _PANEL_BODY not in page or _PANEL_BTN not in page:
+        return page
+    return page.replace(_PANEL_BODY, _PANEL_BODY_CLOSED, 1).replace(_PANEL_BTN, _PANEL_BTN_CLOSED, 1)
 _PANEL_JS = r"""(function(){var P=document.getElementById('panel'),B=document.getElementById('panel-open'),E=document.getElementById('panel-edge'),S=document.getElementById('panel-scrim'),X=document.getElementById('panel-close');
 if(!P||!B)return;
 var M=window.matchMedia('(max-width: __NARROW__px)'),b=document.body,D=b.classList.contains('panel-pin'),s={peek:false,pin:D&&!M.matches,open:false,t:0},LV=250;
 function narrow(){return M.matches}
+var KN=null,KB=false;
+function keep(v){KN=v;if(!KB)kflush()}
+function kflush(){var v=KN;KN=null;if(v===null||!window.fetch)return;KB=true;
+fetch('@ROOT@/prefs/panel-open',{method:'POST',keepalive:true,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({open:v})})
+.then(null,function(){}).then(function(){KB=false;kflush()})}
 function apply(){b.classList.toggle('panel-peek',s.peek);b.classList.toggle('panel-pin',s.pin);b.classList.toggle('panel-open',s.open);
 var held=s.pin||s.open,on=held||s.peek;
 B.setAttribute('aria-expanded',String(on));B.title=held?'Hide summary panel':s.peek?'Pin summary panel':'Show summary panel'}
@@ -1069,7 +1082,7 @@ function settle(){if([E,P,B].some(function(e){return e&&e.matches(':hover')})||d
 function shut(){var was=s.open;s.open=false;apply();if(was)B.focus({preventScroll:true})}
 B.addEventListener('click',function(){clearTimeout(s.t);
 if(narrow()){if(s.open)shut();else{s.open=true;apply();if(X)X.focus({preventScroll:true})}return}
-s.pin=!s.pin;s.peek=false;apply()});
+s.pin=!s.pin;s.peek=false;D=s.pin;apply();keep(s.pin)});
 if(X)X.addEventListener('click',shut);if(S)S.addEventListener('click',shut);
 document.addEventListener('keydown',function(e){if(e.key!=='Escape')return;if(s.open)shut();else if(s.peek){clearTimeout(s.t);s.peek=false;apply()}});
 function inside(h){var id;try{id=decodeURIComponent(String(h||'').replace(/^#/,''))}catch(e){return false}var el=id&&document.getElementById(id);return !!el&&P.contains(el)}
@@ -1077,7 +1090,7 @@ function reveal(){if(!inside(location.hash))return;if(narrow()){if(!s.open){s.op
 P.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href]');if(!a||!narrow()||!s.open||a.origin!==location.origin||a.target)return;var h=a.getAttribute('href');
 if(h.charAt(0)==='#'?!inside(h):(a.pathname===location.pathname&&a.hash&&!inside(a.hash)))shut()});
 M.addEventListener('change',function(){clearTimeout(s.t);s.peek=s.open=false;s.pin=!M.matches&&D;apply()});
-apply();reveal();window.addEventListener('hashchange',reveal)})();""".replace("__NARROW__", f"{_PANEL_DOCK_PX - 0.02:g}")   # max-width 799.98px: exactly the complement of min-width:800px, so a fractional width (zoom) is never in neither
+apply();reveal();window.addEventListener('hashchange',reveal)})();""".replace("__NARROW__", f"{_PANEL_DOCK_PX - 0.02:g}").replace("@ROOT@", PREFIX)   # max-width 799.98px: exactly the complement of min-width:800px, so a fractional width (zoom) is never in neither
 # The panel order's script (see the comment above _PANEL_LABELS). All its listeners sit on #panel, which the in-place update never swaps, so the grips of swapped
 # sections work without re-binding. A move is made in the page at once and saved with one POST (the next one waits for the one in flight, so the last move wins); a
 # refused or failed save leaves the move in the page and says so in the live region. The page's own order is read from the DOM, never from a copy.
@@ -2704,7 +2717,7 @@ class Board:
         outcome_html = fold("outcome", "Outcome", f'<div class="desc md">{self.md_html(outcome_text, r["gid"])}</div>', True, "ioutcome") if outcome_text else ""
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">'
                 f'<title>{e(rid(r))} · {e(title)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
-                + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY_CLOSED}<div id="layout"><main class="itempage" id="top">' + self.page_header(pinned=False) +
+                + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main class="itempage" id="top">' + self.page_header() +
                 f'<h1><span class="hid">{e(rid(r))}</span> {self.mentions(e(title), r["gid"])}</h1>{goal_html}{self.sent_html(answer, who_text(mod.mover) if alive else "")}'
                 # the sidebar comes first in the source; from 768px wide the grid puts it in the right-hand column. On a phone
                 # (one column) the CSS orders it after the state line, the Ask and the answer box and before Next (the Ask first, not a screen below the fields as on GitHub's mobile page)
@@ -3748,20 +3761,20 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<h2>Runs <small>{e(times)}, and Audit now</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
-    def page_header(self, pinned: bool = True, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None, search_page: bool = False) -> str:
+    def page_header(self, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None, search_page: bool = False) -> str:
         """The header every page of the board starts with, the home page's own: the theme and summary-panel buttons, the site title (a link to "/") with the rendered line beside it (_rendered_line), the five count cards (home_counts) and the search box.
         Home passes its parts in (`counts`: the live block it swaps in place; `h1`: the title is its h1; `conn`: the connection notice; `rstamp`: the rendered line's stamp, "" for the shell fingerprint); every
         other page calls it bare and gets the cards drawn by the same code from the same Board (home_counts with off_home: the four list cards link to home with that list open, Closed to /closed),
-        the title a <p> because those pages have their own h1. `pinned=False` (the item page) draws the panel button as for a closed panel; `q` is the search box's text (the Search page); `search_page=True` (the Search page) makes the box search in place, where every other page's box opens its results in a new tab (_search.box). Cost: one
+        the title a <p> because those pages have their own h1. The panel button is drawn for an open panel, as every page is (apply_panel_open changes it for a person whose panel is stored closed); `q` is the search box's text (the Search page); `search_page=True` (the Search page) makes the box search in place, where every other page's box opens its results in a new tab (_search.box). Cost: one
         classification of the open rows, which the Board holds (home_lists) and the page's own lists may share, and the Closed numbers the Board already computed; no store read, no GitHub call of its own."""
         counts = self.home_counts(off_home=True) if counts is None else counts
         rl = (_rendered_line(self.stamp(self.now), f"this page was drawn at {self.when(self.now)}; reload for the current board") if rstamp is None
               else _rendered_line(rstamp))         # a page drawn per request says when it was drawn; home's line is about the published board
-        return (f'<header class="top">\n{_THEME_BTN}{_PANEL_BTN if pinned else _PANEL_BTN_CLOSED}\n{conn}<div class="hbar">{_site_title(self.title, icon_href("favicon.svg"), h1=h1)}{rl}</div>\n{counts}\n{_search.box(q, in_place=search_page)}\n</header>')
+        return (f'<header class="top">\n{_THEME_BTN}{_PANEL_BTN}\n{conn}<div class="hbar">{_site_title(self.title, icon_href("favicon.svg"), h1=h1)}{rl}</div>\n{counts}\n{_search.box(q, in_place=search_page)}\n</header>')
 
     def panel_tail(self) -> str:
         """What follows a page's </main> on every page but home: the summary panel as the home page has it (the same frame, the same
-        five blocks from panel_blocks), the end of <div id="layout"> (opened before the <main>, with <body class="panel-pin">, the item page's <body> bare), the panel's scripts and the header's height script (_HDR_JS). The script of
+        five blocks from panel_blocks), the end of <div id="layout"> (opened before the <main>, with <body class="panel-pin">: every page is drawn with the panel open, and apply_panel_open closes it for a person who has), the panel's scripts and the header's height script (_HDR_JS). The script of
         the Audit card is the home page's; the card's refresh on the page's poll stays the home page's (these pages do not poll). GitHub calls: see panel_blocks (none of its own; at most one throttled background runners refresh per 120 s, shared by all pages)."""
         return _panel_frame(self.panel_blocks()) + f'</div><script>{_PANEL_JS}</script><script>{_PORDER_JS}</script><script>{_AUDIT_JS}</script><script>{_HDR_JS}</script>' + _STAMP_JS
 

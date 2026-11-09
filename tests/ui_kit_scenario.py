@@ -725,8 +725,8 @@ check("header: the stamp script finds the line wherever it is and does nothing o
 check("header: the line is muted, warn-coloured when old, and under 600 px loses the word 'rendered'", ".rline{margin:0;flex:none;white-space:nowrap;color:var(--mut)" in _sheet and "#rendered.old{color:var(--warn)" in _sheet and "@media(max-width:600px){header.top .rline .rw{display:none}" in _sheet)
 check("header: off home each card's target exists on home (a section of that id; the Closed page)", all(f'<section id="{x[0]}">' in ALLPG["home"] for x in LISTS))
 check("header: the Search page's box carries the typed words, and it is the header's one box", 'value="item"' in header_of(ALLPG["Search"]) and 'value=""' in header_of(ALLPG["Search (no query)"]), header_of(ALLPG["Search"])[-300:])
-check("header: the item page's panel button is the closed panel's (the panel starts closed there), every other page's the pinned one",
-      'aria-expanded="false"' in header_of(ALLPG["item"]) and all('aria-expanded="true"' in header_of(pg) for nm, pg in ALLPG.items() if nm != "item"))
+check("header: every page's panel button, the item page's too, is drawn for an open panel (the closed form is the server's, for a person who closed it)",
+      all('aria-expanded="true"' in header_of(pg) and 'aria-expanded="false"' not in header_of(pg) for pg in ALLPG.values()))
 # the counts are live: an item that arrives shows on every page's cards at the next draw, the same number as home's
 item(91, owner=A, subject="[work] a new item that waits on the owner", age=60, needs=["decision"], ask=ASK, options=OPTS)
 git("add", "-A"); git("commit", "-q", "-m", "a new item")

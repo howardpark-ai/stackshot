@@ -1072,9 +1072,9 @@ with sync_playwright() as p:
         m3 = pg.evaluate(RECT, "main#top")
         check(f"{tag}: the next click unpins it and the page is back", closed(pg) and (m3[0], m3[2]) == (m0[0], m0[2]), (m0, m3))
         pg.hover("#panel-open"); pg.click("#panel-open"); pg.wait_for_timeout(200)
-        pg.reload(); pg.wait_for_timeout(200); check(f"{tag}: pinned by hand, then a reload: it is pinned (the page's default; nothing is remembered)", pg.evaluate(CLS) == ["panel-pin"] and pg.evaluate(VIS, "#panel"), pg.evaluate(CLS))
+        pg.reload(); pg.wait_for_timeout(200); check(f"{tag}: pinned by hand, then a reload: it is pinned (the page's default; the file has no server to keep it)", pg.evaluate(CLS) == ["panel-pin"] and pg.evaluate(VIS, "#panel"), pg.evaluate(CLS))
         pg.click("#panel-open"); pg.mouse.move(600, 400); pg.wait_for_timeout(300); check(f"{tag}: unpinned by hand, then a reload", closed(pg))
-        pg.reload(); pg.wait_for_timeout(200); check(f"{tag}: ... it is pinned again (the page's default; nothing is remembered)", pg.evaluate(CLS) == ["panel-pin"] and pg.evaluate(VIS, "#panel") and pg.evaluate("localStorage.length") == 0, pg.evaluate(CLS))
+        pg.reload(); pg.wait_for_timeout(200); check(f"{tag}: ... it is pinned again (the page's default; the file has no server to keep it)", pg.evaluate(CLS) == ["panel-pin"] and pg.evaluate(VIS, "#panel") and pg.evaluate("localStorage.length") == 0, pg.evaluate(CLS))
         pg2 = ctx.new_page(); pg2.goto(BOARD + "#anchorhub"); pg2.wait_for_timeout(300)
         check(f"{tag}: a link to #anchorhub pins the panel and shows it", pg2.evaluate(CLS) == ["panel-pin"] and pg2.evaluate(VIS, "#anchorhub"), pg2.evaluate(CLS))
         ctx.close()
@@ -1394,10 +1394,7 @@ with sync_playwright() as p:
                       d["hrefs"] == ["/"] and d["size"] == "17px" and d["logo"] > 10 and d["deco"] == "none" and d["color"] == d["fg"], d)
                 check(f"{tag}: the panel button and the theme button are in the title bar, the panel, its edge and scrim and the layout wrapper on the page, and the one row of count cards", d["btn"] and d["theme"] and d["edge"] and d["scrim"] and d["layout"] and d["cards"] == 1 and d["panel"] is not None, d)
                 if w == 1300:
-                    if nm == "item page":      # the item page's panel starts closed; pin it by a click, the checks below are of the pinned panel
-                        check(f"{tag}: the panel starts closed: no panel-pin, hidden, the button offering to show it", not d["pin"] and d["vis"] == "hidden" and pg.get_attribute("#panel-open", "aria-expanded") == "false", d)
-                        pg.click("#panel-open"); pg.mouse.move(300, 400); pg.wait_for_timeout(400); d = pg.evaluate(TP)
-                    check(f"{tag}: the panel is pinned{' by a click' if nm == 'item page' else ' on load'}: body.panel-pin, visible, 280 px wide, beside the main column and inside the screen",
+                    check(f"{tag}: the panel is pinned on load (the item page too; a person's stored closed state is the server's, panel_open_scenario): body.panel-pin, visible, 280 px wide, beside the main column and inside the screen",
                           d["pin"] and d["vis"] == "visible" and abs(d["panel"][1] - 280) < 1 and d["panel"][0] >= d["mainRight"] - 0.5 and d["panel"][2] <= d["vw"] + 0.5, d)
                     check(f"{tag}: the panel button and the theme button are fixed at the window's top right (right edges 56 and 16 px in, top 12 px) and the panel starts 56 px from the top, right under them",
                           abs(d["tbtn"][2] - (w - 16)) < 1 and abs(d["pb"][2] - (w - 56)) < 1 and abs(d["pb"][1] - 12) < 1 and abs(d["tbtn"][1] - 12) < 1 and abs(d["panel"][3] - 56) < 1, d)
@@ -1414,46 +1411,46 @@ with sync_playwright() as p:
                 else:
                     check(f"{tag}: below 800 px the panel is a closed drawer (not pinned, hidden)", not d["pin"] and d["vis"] == "hidden", d)
                 ctx.close()
-    # the item page's Details column against the panel (the panel starts closed there): with it closed the two columns hold down to 768 px; pinned by a click, Details is above the main
-    # column (the one-column strip) while the page's room is under _ITEM_PIN_STRIP_PX, beside it at that width and wider
+    # the item page's Details column against the panel (drawn pinned on a wide screen, like every page): pinned, Details is above the main column (the one-column strip) while the page's
+    # room is under _ITEM_PIN_STRIP_PX, beside it at that width and wider; closed by a click, the two columns hold down to 768 px
     EDGE = render._ITEM_PIN_STRIP_PX
     for scheme in ("light", "dark"):
         for w, want in ((360, "strip"), (700, "strip"), (767, "strip"), (768, "cols"), (799, "cols"), (800, "strip"), (900, "strip"), (1000, "strip"), (EDGE - 1, "strip"), (EDGE, "cols"), (1200, "cols"), (1300, "cols"), (1920, "cols")):
             ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme); pg = ctx.new_page(); pg.goto(PAGES["item page"].as_uri()); pg.evaluate(OPEN); pg.wait_for_timeout(100)
-            for state in ("closed", "pinned"):
-                if state == "pinned":
+            for state in ("pinned", "closed"):
+                if state == "closed":
                     if w < 800: break           # narrow: the button opens a drawer, nothing is pinned
                     pg.click("#panel-open"); pg.mouse.move(300, 400); pg.wait_for_timeout(300)
-                    exp = want
-                else: exp = "strip" if w < 768 else "cols"
+                    exp = "strip" if w < 768 else "cols"
+                else: exp = want if w >= 800 else ("strip" if w < 768 else "cols")
                 tag = f"item page {w} {scheme}: panel {state if w >= 800 else 'a closed drawer'}"
                 d = pg.evaluate(DET)
                 if exp == "strip": ok = d["below"] > 0 and abs(d["sideLeft"] - d["mainLeft"]) < 1      # one column: Details over the item's body (the title and state line stay above it)
                 else: ok = d["sideLeft"] >= d["mainRight"] + 16 and d["sideTop"] < d["mainTop"] + 400
-                check(f"{tag}: Details is {'on top, in the one-column strip' if exp == 'strip' else 'in its own column beside the main column'}" + (" (the pinned panel leaves too little room)" if exp == "strip" and w >= 800 else ""), ok and d["sw"] == d["vw"] and d["pin"] == (state == "pinned"), d)
+                check(f"{tag}: Details is {'on top, in the one-column strip' if exp == 'strip' else 'in its own column beside the main column'}" + (" (the pinned panel leaves too little room)" if exp == "strip" and w >= 800 else ""), ok and d["sw"] == d["vw"] and d["pin"] == (state == "pinned" and w >= 800), d)
             ctx.close()
     ctx = br.new_context(viewport={"width": 900, "height": 900}); pg = ctx.new_page(); pg.goto(PAGES["item page"].as_uri()); pg.wait_for_timeout(100); d = pg.evaluate(DET)
-    check("item page 900: loaded with the panel closed, Details is beside the main column", not d["pin"] and d["sideLeft"] >= d["mainRight"] + 16, d)
-    pg.click("#panel-open"); pg.wait_for_timeout(100); d = pg.evaluate(DET)
-    check("item page 900: pinning the panel puts Details on top", d["pin"] and d["below"] > 0 and abs(d["sideLeft"] - d["mainLeft"]) < 1, d)
+    check("item page 900: loaded with the panel pinned (the default), Details is on top", d["pin"] and d["below"] > 0 and abs(d["sideLeft"] - d["mainLeft"]) < 1, d)
     pg.click("#panel-open"); pg.mouse.move(600, 400); pg.wait_for_timeout(100); d = pg.evaluate(DET)
     check("item page 900: unpinning it gives the room back: Details returns beside the main column", not d["pin"] and d["sideLeft"] >= d["mainRight"] + 16, d)
+    pg.click("#panel-open"); pg.wait_for_timeout(100); d = pg.evaluate(DET)
+    check("item page 900: pinning the panel again puts Details on top", d["pin"] and d["below"] > 0 and abs(d["sideLeft"] - d["mainLeft"]) < 1, d)
     ctx.close()
-    # ---- the panel's default: every page opens pinned but the item page, which opens closed; a pin or unpin by the button lasts until the reload; nothing is stored ----
+    # ---- the panel's default: every page opens pinned, the item page too; the pages here are files, so no server keeps a pin or unpin by the button (the server's per-person state is panel_open_scenario's), and nothing is stored in the browser; the width crossing 800 px keeps what was last chosen ----
     KEYS = "() => { try { return Object.keys(localStorage).filter(k => /panel/i.test(k)); } catch (e) { return ['throws']; } }"
     ISPIN = "() => document.body.classList.contains('panel-pin') && getComputedStyle(document.getElementById('panel')).visibility === 'visible'"
     ISOFF = "() => !document.body.classList.contains('panel-pin') && getComputedStyle(document.getElementById('panel')).visibility === 'hidden'"
-    DEFAULT = lambda nm: ISOFF if nm == "item page" else ISPIN
-    OTHER = lambda nm: ISPIN if nm == "item page" else ISOFF
+    DEFAULT = lambda nm: ISPIN
+    OTHER = lambda nm: ISOFF
     ALLPAGES = ("board", "results page", "runners page", "project page", "landed page", "item page")
     ctx = br.new_context(viewport={"width": 1300, "height": 900}); pg = ctx.new_page()
     for nm in ALLPAGES:
         pg.goto(PAGES[nm].as_uri()); pg.wait_for_timeout(100)
-        check(f"panel default: the {nm} opens {'closed' if nm == 'item page' else 'pinned'}, and loading it wrote nothing", pg.evaluate(DEFAULT(nm)) and pg.evaluate(KEYS) == [], (pg.evaluate(CLS), pg.evaluate(KEYS)))
+        check(f"panel default: the {nm} opens pinned, and loading it wrote nothing", pg.evaluate(DEFAULT(nm)) and pg.evaluate(KEYS) == [], (pg.evaluate(CLS), pg.evaluate(KEYS)))
         pg.click("#panel-open"); pg.mouse.move(600, 400); pg.wait_for_timeout(500)
         check(f"panel default: on the {nm} the button flips it, and writes nothing", pg.evaluate(OTHER(nm)) and pg.evaluate(KEYS) == [], (pg.evaluate(CLS), pg.evaluate(KEYS)))
         pg.reload(); pg.wait_for_timeout(100)
-        check(f"panel default: the {nm}, flipped by hand, then a reload: back to its default (nothing is remembered)", pg.evaluate(DEFAULT(nm)), pg.evaluate(CLS))
+        check(f"panel default: the {nm}, flipped by hand, then a reload of the file: back to its default (a file has no server to keep it)", pg.evaluate(DEFAULT(nm)), pg.evaluate(CLS))
     pg.goto(PAGES["board"].as_uri()); pg.wait_for_timeout(100); pg.click("#panel-open"); pg.mouse.move(600, 400); pg.wait_for_timeout(300)
     for nm in ALLPAGES:
         pg.goto(PAGES[nm].as_uri()); pg.wait_for_timeout(100)
@@ -1461,12 +1458,12 @@ with sync_playwright() as p:
     pg.goto(PAGES["item page"].as_uri()); pg.wait_for_timeout(100); pg.click("#panel-open"); pg.mouse.move(600, 400); pg.wait_for_timeout(300)
     pg.set_viewport_size({"width": 600, "height": 900}); pg.wait_for_timeout(100)
     pg.set_viewport_size({"width": 1300, "height": 900}); pg.wait_for_timeout(100)
-    check("panel default: the item page, pinned by hand, crossing 800 px down and back up: it is back at its default, closed", pg.evaluate(ISOFF), pg.evaluate(CLS))
+    check("panel default: the item page, unpinned by hand, crossing 800 px down and back up: it stays unpinned (the last choice is the default for the width crossing)", pg.evaluate(ISOFF), pg.evaluate(CLS))
     pg.goto(PAGES["board"].as_uri()); pg.set_viewport_size({"width": 1300, "height": 900}); pg.wait_for_timeout(100); pg.click("#panel-open"); pg.mouse.move(600, 400); pg.wait_for_timeout(500)
     a = pg.evaluate(ISOFF)
     pg.set_viewport_size({"width": 600, "height": 900}); pg.wait_for_timeout(100)
     pg.set_viewport_size({"width": 1300, "height": 900}); pg.wait_for_timeout(100)
-    check("panel default: the home page, unpinned by hand, crossing 800 px down and back up: it is back at its default, pinned", a and pg.evaluate(ISPIN), (a, pg.evaluate(CLS)))
+    check("panel default: the home page, unpinned by hand, crossing 800 px down and back up: it stays unpinned (the last choice is the default for the width crossing)", a and pg.evaluate(ISOFF), (a, pg.evaluate(CLS)))
     pg.set_viewport_size({"width": 360, "height": 900}); pg.wait_for_timeout(100)
     pg.click("#panel-open"); pg.wait_for_timeout(300)
     check("panel default: on a phone the button opens the drawer and writes nothing", pg.evaluate(CLS) == ["panel-open"] and pg.evaluate(KEYS) == [], (pg.evaluate(CLS), pg.evaluate(KEYS)))
@@ -1662,7 +1659,7 @@ with sync_playwright() as p:
     CT_FIXED = ["#reload", "#totop", "#theme", "#panel-open", "#panel-edge"]
     CT_SHOWN = "() => { const b = document.getElementById('ct-btn'); if (!b) return false; const r = b.getBoundingClientRect(), cs = getComputedStyle(b); return cs.display !== 'none' && r.width > 0 && r.right > 0 && r.left < innerWidth - 4 && r.top < innerHeight; }"
     def ct_show(pg):
-        """The button lives in the side panel: where the panel is shut (a phone, or the item page's wide default) open it with the title bar's button, as a person does."""
+        """The button lives in the side panel: where the panel is shut (a phone, or a wide screen with it closed) open it with the title bar's button, as a person does."""
         for _ in range(2):
             if pg.evaluate(CT_SHOWN): return True
             pg.click("#panel-open"); pg.wait_for_timeout(550)

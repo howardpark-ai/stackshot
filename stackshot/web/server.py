@@ -8319,19 +8319,20 @@ mcp.add_middleware(_RetiredInputs())
 # live instance runs the handler as it always did. FastMCP's own /mcp and OAuth routes are not custom routes: the tool middleware above refuses
 # the writes there.
 def _panel_ordered(request, resp):
-    """A page's HTML answer with the side panel's sections in the signed-in person's saved order (ui/render.py apply_panel_order); any other answer, a visitor not signed in
-    and a person who never moved a section get it as it is. The page is drawn in the default order (the home is one kept draw for everyone), so the order is put in on the
-    way out and is in the first paint. A page that cannot be read or reordered is served as it was, never refused for it."""
+    """A page's HTML answer with the side panel as the signed-in person left it: its sections in their saved order (ui/render.py apply_panel_order) and the panel closed when they closed
+    it (apply_panel_open); any other answer, a visitor not signed in and a person who never moved a section or closed the panel get it as it is. The page is drawn in the default
+    order with the panel open (the home is one kept draw for everyone), so both are put in on the way out and are in the first paint. A page that cannot be read or changed is
+    served as it was, never refused for it."""
     try:
         if (request.method != "GET" or not isinstance(resp, HTMLResponse)
                 or resp.status_code != 200 or not str(resp.media_type or "").startswith("text/html")):
             return resp
         email = _ui_email(request)
-        order = _uiprefs.panel_order(email) if email else []
-        if not email or _uiprefs.is_default(order):
+        order, is_open = _uiprefs.panel_prefs(email) if email else ([], True)
+        if not email or (_uiprefs.is_default(order) and is_open):
             return resp
         from stackshot.web.ui import render as r2
-        page = r2.apply_panel_order(bytes(resp.body).decode("utf-8"), order)
+        page = r2.apply_panel_open(r2.apply_panel_order(bytes(resp.body).decode("utf-8"), order), is_open)
         resp.body = page.encode("utf-8")
         resp.headers["content-length"] = str(len(resp.body))
     except Exception as e:  # noqa: BLE001
@@ -8340,6 +8341,7 @@ def _panel_ordered(request, resp):
 
 
 _UI_WRITES = ("/items/", "/for-you/", "/landed/", "/runners/", "/prefs/")      # the write routes of the root pages: a post to one drops the kept home
+_UI_WRITES_KEEP_HOME = ("/prefs/panel-open",)      # …except this one: the home's draw does not depend on whether the panel is open (apply_panel_open puts it in per person on the way out), so a toggle leaves the kept draw
 _RO_REFUSED_PATHS = ("/audit/now",)
 _RO_LIVE_ONLY = ("/runners", "/runners.json")       # these read GitHub and other machines over ssh on each request: the live board does that, a standby asks nobody
 
@@ -8374,7 +8376,7 @@ def _custom_route_ro(path, methods, **kw):
             path = request.url.path
             if not _ro.is_read_only():
                 resp = _ui_renewed(request, _panel_ordered(request, await fn(request)))
-                if request.method == "POST" and path.startswith(_UI_WRITES):      # a write from a page of the board: the home is drawn again on its next read
+                if request.method == "POST" and path.startswith(_UI_WRITES) and not path.startswith(_UI_WRITES_KEEP_HOME):      # a write from a page of the board: the home is drawn again on its next read
                     _board_home_drop()
                 return resp
             if request.method not in ("GET", "HEAD", "OPTIONS") or path in _RO_REFUSED_PATHS:
@@ -18534,6 +18536,55 @@ async def for_you_seen(request: Request):
 _PREFS_BODY_MAX = 4096
 
 
+async def _prefs_body(request: Request, what: str):
+    """The gates every save under /prefs/ shares, for a body of JSON: (the signed-in person's address, the decoded JSON, None), or (None, None, the refusal to answer with). Signed in to
+    the board (403 otherwise: with no address there is no person to keep it for, so a viewer let in without sign-in cannot save), from the board's own origin (403), a JSON content type
+    (415), a body of at most 4 KB (413, judged from Content-Length before the body is read, or as a body with none arrives), valid JSON (400). `what` names the setting in the refusals."""
+    email = _ui_email(request)
+    if not email:
+        return None, None, PlainTextResponse(f"sign in to the board to keep the panel {what}", status_code=403)
+    if not _answer_same_origin(request):
+        return None, None, PlainTextResponse("refused: this did not come from the board's own page", status_code=403)
+    if "json" not in str(request.headers.get("content-type") or "").lower():
+        return None, None, PlainTextResponse(f"send the {what} as JSON", status_code=415)
+    declared = request.headers.get("content-length")      # the size is judged before a byte is read; a body with none (chunked) is cut off as it arrives
+    if declared is not None:
+        if not declared.isdigit():
+            return None, None, PlainTextResponse("the request length is not a number", status_code=400)
+        if int(declared) > _PREFS_BODY_MAX:
+            return None, None, PlainTextResponse("refused: the request is too long", status_code=413)
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > _PREFS_BODY_MAX:
+            return None, None, PlainTextResponse("refused: the request is too long", status_code=413)
+    try:
+        d = json.loads(body.decode("utf-8"))
+    except ValueError:
+        return None, None, PlainTextResponse("the body is not JSON", status_code=400)
+    return email, d, None
+
+
+@mcp.custom_route("/prefs/panel-open", methods=["POST"])
+async def panel_open_save(request: Request):
+    """Save whether the signed-in person's side panel is open on a wide screen: the page's script sends it when they pin or unpin the panel with its button, never from the narrow drawer.
+    Body (JSON): {"open": true} or {"open": false}, a real boolean (anything else, a body that is not an object, or no `open` is 400). Kept per person on the server beside the panel order
+    (uiprefs.py), so every page, reload, browser and device draws the panel the same way; open is the default and is stored as no key. The gates are the order save's (_prefs_body):
+    signed in to the board (403 otherwise), from the board's own origin (403), a JSON body of at most 4 KB (413, 415, 400). A settings file that cannot be read or written is 503
+    ("could not be saved"), and nothing is changed. Answers {"open": bool}."""
+    email, d, refused = await _prefs_body(request, "state")
+    if refused is not None:
+        return refused
+    if not isinstance(d, dict) or not isinstance(d.get("open"), bool):
+        return PlainTextResponse('send {"open": true} or {"open": false}', status_code=400)
+    try:
+        is_open = _uiprefs.set_panel_open(email, d["open"])
+    except OSError as e:
+        print(f"panel state not saved: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return PlainTextResponse("the panel state could not be saved on the server; try again", status_code=503, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"open": is_open}, headers={"Cache-Control": "no-store"})
+
+
 @mcp.custom_route("/prefs/panel-order", methods=["POST"])
 async def panel_order_save(request: Request):
     """Save the signed-in person's order of the board's side panel's sections (Machines, Runners, Anchor hub, Audit, Projects), or put it back to the default. Body (JSON):
@@ -18543,28 +18594,9 @@ async def panel_order_save(request: Request):
     order they now have: names the page does not have are ignored, and the names sent take the places they hold in the person's stored order, so a section left out (one
     the page did not draw) keeps its place; a body that is not an object, an `order` that is not a list of short strings, or neither key, is 400. A settings file that
     cannot be read or written is 503 ("could not be saved"), and nothing is changed. Answers {"order": [...whole order...], "default": bool}."""
-    email = _ui_email(request)
-    if not email:
-        return PlainTextResponse("sign in to the board to keep the panel order", status_code=403)
-    if not _answer_same_origin(request):
-        return PlainTextResponse("refused: this did not come from the board's own page", status_code=403)
-    if "json" not in str(request.headers.get("content-type") or "").lower():
-        return PlainTextResponse("send the order as JSON", status_code=415)
-    declared = request.headers.get("content-length")      # the size is judged before a byte is read; a body with none (chunked) is cut off as it arrives
-    if declared is not None:
-        if not declared.isdigit():
-            return PlainTextResponse("the request length is not a number", status_code=400)
-        if int(declared) > _PREFS_BODY_MAX:
-            return PlainTextResponse("refused: the request is too long", status_code=413)
-    body = b""
-    async for chunk in request.stream():
-        body += chunk
-        if len(body) > _PREFS_BODY_MAX:
-            return PlainTextResponse("refused: the request is too long", status_code=413)
-    try:
-        d = json.loads(body.decode("utf-8"))
-    except ValueError:
-        return PlainTextResponse("the body is not JSON", status_code=400)
+    email, d, refused = await _prefs_body(request, "order")
+    if refused is not None:
+        return refused
     if not isinstance(d, dict):
         return PlainTextResponse('send {"order": [...]} or {"reset": true}', status_code=400)
     names = None

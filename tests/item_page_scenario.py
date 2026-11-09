@@ -518,16 +518,16 @@ check("inputs: the fill is lighter than the card in dark, and the answer, commen
       and ".sbox input::placeholder{color:var(--iph" in _c, None)
 
 
-# every page's title bar is the home h1 (logo and title) as a link to "/", and the side panel stands on it, pinned by default as on home
+# every page's title bar is the home h1 (logo and title) as a link to "/", and the side panel stands on it, pinned by default as on home (the stored closed state is panel_open_scenario's)
 def title_panel_problems(p):
     bad = []
     if re.findall(r'<(?:h1|p) class="site"><a href="([^"]*)"><img class="logo"', p) != ["/"]: bad.append("title link is not exactly one href=/")
     if "\u2190 " in p.split("</main>")[0][:3000] and 'class="topline"' in p: bad.append("the old back arrow is still there")
-    for need in (ui_render._PANEL_BODY_CLOSED + '<div id="layout">', '<aside id="panel"', 'id="panel-edge"', 'id="panel-scrim"', 'id="panel-open"', 'id="machines"', 'id="runners"', 'id="audit-panel"', ui_render._PANEL_JS[:60]):
+    for need in (ui_render._PANEL_BODY + '<div id="layout">', '<aside id="panel"', 'id="panel-edge"', 'id="panel-scrim"', 'id="panel-open"', 'id="machines"', 'id="runners"', 'id="audit-panel"', ui_render._PANEL_JS[:60]):
         if need not in p: bad.append("missing " + need)
-    # the board item (Oliver): the item page starts with the panel closed: a bare body, no panel-pin class anywhere in the markup, the button offering to show it; nothing remembered
-    if 'class="panel-pin"' in p or p.count("<body") != 1 or "<body>" not in p: bad.append("the item page's body is not bare (the panel would start pinned)")
-    if 'aria-expanded="false" title="Show summary panel"' not in p or 'aria-expanded="true"' in p[p.find('id="panel-open"'):p.find('id="panel-open"') + 250]: bad.append("the panel button is not rendered for a closed panel")
+    # the item page is drawn like every page: pinned, the button offering to hide it (it no longer starts closed on its own; a person's stored closed state is put in on the way out)
+    if p.count("<body") != 1 or ui_render._PANEL_BODY not in p: bad.append("the item page's body is not pinned (the panel would start closed)")
+    if 'aria-expanded="true" title="Hide summary panel"' not in p[p.find('id="panel-open"') - 120:p.find('id="panel-open"') + 250]: bad.append("the panel button is not rendered for an open panel")
     if "stackshot.panel" in p or "localStorage" in ui_render._PANEL_JS: bad.append("the panel state is stored in the browser")
     if p.count('<aside id="panel"') != 1 or p.count("</div><script>") < 1: bad.append("panel not once / no script")
     return bad
