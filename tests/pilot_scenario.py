@@ -412,6 +412,43 @@ for nm, pg in (("board", bd.html()), ("routing page", bd.routing_html("projects/
     check(f"{nm}: the standalone script in <head>: display-mode read at click time, same-origin _blank links only",
           hd.count("matchMedia('(display-mode: standalone)')") == 1 and "window.navigator.standalone===true" in hd and "document.addEventListener('click'" in hd
           and "u.origin!==location.origin)return" in hd and "location.assign(u.href)" in hd and hd.find("matchMedia('(display-mode") < hd.find("<style>"), nm)
+# the search box's form opens in a new tab; in an app window (no tabs) the same script sends a same-origin GET form with target=_blank to the window itself. The head script is run
+# in node against a stub document, window, location and FormData (no browser): a submit in an app window navigates and is cancelled, a submit in a tab, another origin, a form without
+# target=_blank, a POST form and a submit already cancelled are left alone.
+if shutil.which("node"):
+    _pg = bd.html()
+    _head_js = next(j for j in re.findall(r"<script>(.*?)</script>", _pg[:_pg.find("</head>")], re.S) if "display-mode: standalone" in j)
+    _harness = r"""
+const src = require('fs').readFileSync(0, 'utf8'); const out = [];
+function run(app, form, defaultPrevented) {
+  const subs = []; let moved = null, stopped = false;
+  const ctx = {URL, URLSearchParams, String, Symbol, Array,
+    FormData: class { constructor(f) { this.f = f } [Symbol.iterator]() { return this.f.fields[Symbol.iterator]() } },
+    window: {matchMedia: () => ({matches: app}), navigator: {standalone: false}},
+    location: {href: 'https://board.example.org/items/a1', origin: 'https://board.example.org', assign: u => { moved = u }},
+    document: {addEventListener: (t, fn) => { if (t === 'submit') subs.push(fn) }}};
+  ctx.matchMedia = ctx.window.matchMedia;
+  require('vm').runInNewContext(src, ctx);
+  const f = {getAttribute: k => form[k] ?? null, fields: form.fields || []};
+  subs.forEach(fn => fn({target: f, defaultPrevented: !!defaultPrevented, preventDefault: () => { stopped = true }}));
+  return {moved, stopped};
+}
+const box = {target: '_blank', method: 'get', action: '/search', fields: [['q', 'a b&c']]};
+out.push(run(true, box));
+out.push(run(false, box));
+out.push(run(true, {...box, target: null}));
+out.push(run(true, {...box, method: 'post'}));
+out.push(run(true, {...box, action: 'https://elsewhere.example.net/search'}));
+out.push(run(true, box, true));
+console.log(JSON.stringify(out));
+"""
+    import subprocess as _sp
+    _r = _sp.run(["node", "-e", _harness], input=_head_js, capture_output=True, text=True, timeout=30)
+    _o = json.loads(_r.stdout) if _r.returncode == 0 and _r.stdout.strip() else []
+    check("search box in an app window: a target=_blank GET form goes to the window itself with the typed query in the address, and the submit is cancelled",
+          len(_o) == 6 and _o[0] == {"moved": "https://board.example.org/search?q=a+b%26c", "stopped": True}, (_o, _r.stderr[:300]))
+    check("search box in a tab and the other cases: left to the browser (a tab, no target, a POST form, another origin, a submit already cancelled)",
+          len(_o) == 6 and all(x == {"moved": None, "stopped": False} for x in _o[1:5]) and _o[5] == {"moved": None, "stopped": False}, (_o, _r.stderr[:300]))
 # the code font: D2Coding, served by stackshot itself, ahead of the monospace stack on code (command blocks and inline code), the stack kept as the fallback
 _d2v = hashlib.sha256((pathlib.Path(STACK) / "fonts/D2Coding-Regular.woff2").read_bytes()).hexdigest()[:12]
 for nm, pg in (("board", bd.html()), ("routing page", bd.routing_html("projects/alpha")), ("item page", bd.item_html("a1"))):

@@ -13,7 +13,7 @@ Covers:
   * the filters and their counts: the Kind and State boxes cut the list, the number beside a box is what ticking it adds with the other filters as they stand, State leaves projects and sessions alone,
     a search that finds nothing says which window or box holds matches;
   * Show 25 more: 25 rows first, the link adds 25 and lands on the first new row, the last page has no link, the cap cuts the list and says so, a bad `n` is the first page;
-  * the form: a plain GET at the root whose Enter key searches with the filters as they are, the header's own box is there too, every text is escaped;
+  * the form: a plain GET at the root whose Enter key searches with the filters as they are, the header's own box is there too and searches in place (every other page's header box opens its results in a new tab), every text is escaped;
   * an index built without FTS5 finds the same.
 
     tests/run-suite ui_search       → exit 0 / 1"""
@@ -271,6 +271,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the form: a plain GET to /search at the root, the header's box is the other form",
           t.count('action="/search"') == 2 and 'method="get"' in t and 'id="se-form"' in t, re.findall(r'<form[^>]*>', t))
     form = re.search(r'<form class="se-controls".*?</form>', t, re.S).group(0)
+    hbox = re.search(r'<header class="top">.*?<form class="sbox"([^>]*)>', t, re.S).group(1)
+    check("new tab: the Search page's own header box and its filter form search in place (no target on either), so tabs do not pile up", "target=" not in hbox and "rel=" not in hbox and "target=" not in re.match(r"<form[^>]*>", form).group(0), (hbox, form[:120]))
+    check("new tab: the box another page's header draws opens its results in a new tab (target=_blank, rel=noopener), unless asked to search in place; the query is kept either way",
+          all(a in s2.box("x") for a in (' target="_blank" rel="noopener"', 'action="/search"', 'method="get"', 'value="x"')) and "target=" not in s2.box("x", in_place=True) and 'value="x"' in s2.box("x", in_place=True))
     check("the form: the first submit button is the invisible one with no name, so Enter in the box keeps the filters; every chip is a named submit button", re.search(r"<button", form).group(0) and form.index('class="sr"') < form.index('class="se-chip"')
           and re.search(r'<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Search</button>', form) and len(re.findall(r'class="se-chip" name="w"', form)) == 7 and '<input type="hidden" name="f" value="1">' in form, form[:400])
     check("the form: the box holds the query; a change to a box or date submits it (one script, none for the rows)", 'name="q" value="redesign"' in form and "requestSubmit" in t and "<noscript>" in form and t.count("se-form") >= 2)

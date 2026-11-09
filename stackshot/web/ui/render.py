@@ -827,7 +827,8 @@ _THEME_HEAD = ("<script>(function(){var p='system';try{p=localStorage.getItem('"
 # navigates the window itself; links to other origins keep opening outside the app, and an ordinary browser tab is
 # unchanged (items still open in a new tab). The listener is delegated on the document, so links the board's in-place
 # update swaps in (_LIVE_JS) are covered without a re-bind, and the display mode is read at click time, so a page that
-# moves between a tab and an app window follows the move. A click with a modifier or another button keeps its default.
+# moves between a tab and an app window follows the move. A click with a modifier or another button keeps its default. The same goes for a submit of the header's search box
+# (a GET form with target=_blank, whose results open in a new tab): in an app window the results load in the window itself.
 # The icons' URLs carry a version, ?v=<the first 12 hex digits of the SHA-256 of the file's bytes>, so a new icon is a new URL:
 # an installed app (Chrome, Android) takes its icons through the browser's HTTP cache and Cloudflare's edge, and an icon
 # under an unchanged URL never reached it (the maskable icon kept its old look). The
@@ -847,7 +848,11 @@ _APP_HEAD = ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use
              "document.addEventListener('click',function(ev){if(ev.defaultPrevented||ev.button!==0||ev.metaKey||ev.ctrlKey||ev.shiftKey||ev.altKey||!app())return;"
              "var a=ev.target&&ev.target.closest?ev.target.closest('a[href]'):null;if(!a||String(a.target).toLowerCase()!=='_blank'||a.hasAttribute('download'))return;"
              "var u;try{u=new URL(a.href,location.href)}catch(e){return}if(u.origin!==location.origin)return;"
-             "ev.preventDefault();location.assign(u.href)})})();</script>")
+             "ev.preventDefault();location.assign(u.href)});"
+             # the search box's form opens its results in a new tab; an app window has none, so a same-origin GET form with target=_blank goes to the window itself, as its link does
+             "document.addEventListener('submit',function(ev){var f=ev.target;if(ev.defaultPrevented||!app()||!f||!f.getAttribute||String(f.getAttribute('target')).toLowerCase()!=='_blank'||String(f.getAttribute('method')).toLowerCase()!=='get')return;"
+             "var u;try{u=new URL(f.getAttribute('action')||location.href,location.href)}catch(e){return}if(u.origin!==location.origin)return;"
+             "u.search=new URLSearchParams(new FormData(f)).toString();ev.preventDefault();location.assign(u.href)})})();</script>")
 _APP_HEAD += _ct.HEAD   # the color tool's library (once per page) and the script that applies the stored look, in the head of every page after the theme script, before the page's own style
 _PANEL_BTN = ('<button type="button" class="b ico pbtn" id="panel-open" aria-label="Summary panel" aria-controls="panel" aria-expanded="true" title="Hide summary panel">'
               '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.8v12.4"/></svg></button>')
@@ -3745,16 +3750,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 f'<h2>Runs <small>{e(times)}, and Audit now</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
-    def page_header(self, pinned: bool = True, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None) -> str:
+    def page_header(self, pinned: bool = True, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None, search_page: bool = False) -> str:
         """The header every page of the board starts with, the home page's own: the theme and summary-panel buttons, the site title (a link to "/") with the rendered line beside it (_rendered_line), the five count cards (home_counts) and the search box.
         Home passes its parts in (`counts`: the live block it swaps in place; `h1`: the title is its h1; `conn`: the connection notice; `rstamp`: the rendered line's stamp, "" for the shell fingerprint); every
         other page calls it bare and gets the cards drawn by the same code from the same Board (home_counts with off_home: the four list cards link to home with that list open, Closed to /closed),
-        the title a <p> because those pages have their own h1. `pinned=False` (the item page) draws the panel button as for a closed panel; `q` is the search box's text (the Search page). Cost: one
+        the title a <p> because those pages have their own h1. `pinned=False` (the item page) draws the panel button as for a closed panel; `q` is the search box's text (the Search page); `search_page=True` (the Search page) makes the box search in place, where every other page's box opens its results in a new tab (_search.box). Cost: one
         classification of the open rows, which the Board holds (home_lists) and the page's own lists may share, and the Closed numbers the Board already computed; no store read, no GitHub call of its own."""
         counts = self.home_counts(off_home=True) if counts is None else counts
         rl = (_rendered_line(self.stamp(self.now), f"this page was drawn at {self.when(self.now)}; reload for the current board") if rstamp is None
               else _rendered_line(rstamp))         # a page drawn per request says when it was drawn; home's line is about the published board
-        return (f'<header class="top">\n{_THEME_BTN}{_PANEL_BTN if pinned else _PANEL_BTN_CLOSED}\n{conn}<div class="hbar">{_site_title(self.title, icon_href("favicon.svg"), h1=h1)}{rl}</div>\n{counts}\n{_search.box(q)}\n</header>')
+        return (f'<header class="top">\n{_THEME_BTN}{_PANEL_BTN if pinned else _PANEL_BTN_CLOSED}\n{conn}<div class="hbar">{_site_title(self.title, icon_href("favicon.svg"), h1=h1)}{rl}</div>\n{counts}\n{_search.box(q, in_place=search_page)}\n</header>')
 
     def panel_tail(self) -> str:
         """What follows a page's </main> on every page but home: the summary panel as the home page has it (the same frame, the same
