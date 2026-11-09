@@ -23,7 +23,7 @@ pushes) enters it with `via` = "handoff", and the silence audit (a pane with no 
 alone: the silence audit does not start it, so one item never climbs two ladders at once; and the hand-off audit leaves an item already on the ladder. The sender rung is gone: an untaken hand-off no
 longer goes back to the session that handed it over.
 
-With `[ladder] silence = true` as well, there is a third way in and the pane stops being one: the silence pass (an item on an agent with no activity for 45 minutes) and the dates pass (an expected time passed with no write since) send their
+With `[ladder] silence = true` as well, there is a third way in and the pane stops being one: the silence pass (an item on an agent with no activity for 45 minutes) and the dates pass (a wake passed with no write since) send their
 message to the mover, and that message is the ask: `enter_quiet` writes the item's entry with `via` = "silence", on the look, its clock started when the message went. The entry is for that silence alone (`act`, the item's activity clock then):
 it ends with activity on the item or a new mover (`quiet_over`), and neither a write that is no activity nor the mover's bare confirm restarts it. The stall pass no longer starts a ladder from a pane with no turn running; it takes the rungs of
 the entries the two audits made.

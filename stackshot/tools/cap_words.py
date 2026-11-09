@@ -1,5 +1,5 @@
 """tools/cap_words.py — the one-time job after an earlier states audit: stop the
-parked items it is given from reading overdue once the 7-day cap runs out. Stdlib only, Python 3.11+.
+parked items it is given from being refused or re-asked once the 7-day cap runs out. Stdlib only, Python 3.11+.
 
   A. Items the owner parked himself ("snooze until the sprint ends", "postpone"), whose answer was never saved as his words (named with --a-item). The job finds, in each item's metadata.answers, the newest sentence of his that parks it (a board answer, or his own
      hand-written comment on the issue: the entries the store attributes to him), and records it as metadata.cap_ok for the item's wake

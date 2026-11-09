@@ -2479,7 +2479,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
 
 # The server's state checks. They note, and refuse only where the design says so:
 #   3  next opens with the owner while the state (stored or derived) is an agent's: a note in get and on the write's reply
-#   4  a third re-park in a row (a move of a parked or verifying item's wake or end with nothing else changed) is refused; a verifying item's end date is its wait (waiting.end_epoch)
+#   4  a third re-park in a row (a move of a parked or verifying item's wake or end with nothing else changed) is refused; a verifying item's end date is its wait (the watchers end the wait that day)
 #   5  next may be stale: another session changed needs, state, hold, wake or after and not next (metadata.next_stale), or next names a date that has passed
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
@@ -10487,7 +10487,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
                    else _stall.episode(old, who, _stall_ver(it), _ho_same, mine))
             keep[gid] = rec
             if silence_on and not quiet and _ladder.via_of(rec) != "handoff":
-                continue                 # a pane with no turn running starts no ladder here: the silence audit (an item with no activity) and the dates pass (an expected time passed) do, and the hand-off audit its own
+                continue                 # a pane with no turn running starts no ladder here: the silence audit (an item with no activity) and the dates pass (a wake passed) do, and the hand-off audit its own
             if _stall.spent(rec, now):
                 continue
             floor = max(float(it.get("state_updated") or it.get("updated") or 0), 0.0 if rec.get("capped") else float(rec.get("conf") or 0))      # the mover's own last confirm, kept in the entry (another session's later confirm does not erase it): the minutes count from it, up to stall.RESTARTS times
