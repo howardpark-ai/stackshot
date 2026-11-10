@@ -1,6 +1,6 @@
 """decision_gates.py: what the ask and the options of a needs=decision item may say. The write gates that refuse an ask naming alternatives while no options are listed, an open
 question with no options, a mockup linked outside the ask, several decisions in one ask, and the owner's own action put as a decision, and the two notes a write's reply may end with
-(the Recommend part that names no option, an option or ask that says "you" without naming who acts).
+(the Recommend part that names no option; an option label or line that says I, you, we, us or me, and an ask line that says I, you or me, without naming who acts).
 
 Each is a pure function of the item's metadata (and the description) that raises ToolError with the refusal, or returns the note; none reads the store or changes anything. server.py
 imports every name from here and keeps it on its own module as well, so the writes and the tests reach them as `server.<name>`. `_gate_options`, the shape of options=[...], stays in
@@ -359,11 +359,12 @@ def _bare_pronoun(text: str, rx: re.Pattern[str] = _BARE_PRONOUN_RX) -> str:
 
 def _actor_note(meta: dict[str, Any], options: bool = True, ask: bool = True) -> str:
     """Reply notes when an option's label or line, or the ask line, says you/I/me/my (an option also we/our/us) without naming who acts, else "";
-    one note per option (its label first, else its line), at most three lines."""
+    one note per option (its label first, else its line), at most three of them, and the ask line's note always besides."""
     out: list[str] = []
+    ask_out: list[str] = []
     eg = _ACTOR_EXAMPLE.format(who=OWNER)
     if options:
-        for o in meta.get("options") or []:
+        for n, o in enumerate(meta.get("options") or [], 1):
             if not isinstance(o, dict):
                 continue
             label, line = str(o.get("label") or ""), str(o.get("line") or "")
@@ -371,9 +372,10 @@ def _actor_note(meta: dict[str, Any], options: bool = True, ask: bool = True) ->
             if not w:
                 w, part = _bare_pronoun(line, _OPT_PRONOUN_RX), "the line of option"
             if w:
-                out.append(f'\n(note: {part} \u201c{label}\u201d says \u201c{w}\u201d: name who acts, e.g. {eg}.)')
+                name = f"\u201c{label}\u201d" if label else str(n)      # an empty label: the option's place
+                out.append(f'\n(note: {part} {name} says \u201c{w}\u201d: name who acts, e.g. {eg}.)')
     if ask:
         w = _bare_pronoun(str(meta.get("ask") or ""))
         if w:
-            out.append(f'\n(note: the ask line says \u201c{w}\u201d: name who acts, e.g. {eg}.)')
-    return "".join(out[:3])
+            ask_out.append(f'\n(note: the ask line says \u201c{w}\u201d: name who acts, e.g. {eg}.)')
+    return "".join(out[:3] + ask_out)

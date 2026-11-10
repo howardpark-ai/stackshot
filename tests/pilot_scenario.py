@@ -1636,8 +1636,13 @@ for line in ["The session redrafts it", "Pat usage report", "Run the mine-sweepe
 check("actor: a quote does not hide a bare word next to it", "says \u201cyou\u201d" in actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'), actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'))
 check("actor: we/our/us are noted in an option only; the ask line keeps its own word list",
       server._actor_note({"ask": "Decide: do we ship it · Recommend: yes", "options": []}) == "" and "says \u201cwe\u201d" in actor_hits("Pat ships", "we ship it"), "")
-res = server._actor_note({"options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}], "ask": "Decide: you pick"})
-check("actor: at most three notes, one per option", res.count("name who acts") == 3, res)
+res = server._actor_note({"options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
+check("actor: the module re-exports the word-list names", all(hasattr(server, n) for n in ("_OPT_PRONOUN_RX", "_ACTOR_EXAMPLE", "_PRONOUN_HEAD", "_PRONOUN_TAIL")), "")
+check("actor: at most three option notes, one per option", res.count("name who acts") == 3, res)
+res = server._actor_note({"ask": "Decide: do you ship it", "options": opt_pair("I a", "you b") + [{"label": "C: me", "line": "x"}, {"label": "D: my", "line": "y"}]})
+check("actor: three option notes fill the cap and the ask-line note still comes after them", res.count("name who acts") == 4 and res.rstrip().endswith("name who acts, e.g. " + f"\u201c{server.OWNER} unpublishes\u201d instead of \u201cI unpublish\u201d.)") and "the ask line says \u201cyou\u201d" in res.split("\n")[-1], res)
+res = actor_hits("", "you click Unpublish")
+check("actor: an option with an empty label is named by its place, not by empty quotes", "the line of option 1 says \u201cyou\u201d" in res and "\u201c\u201d" not in res, res)
 res = mk(needs="decision", ask=NAMED_ASK, options=opt_pair("A: flag", "you approve it, we wait")); gl = gid_of(res)
 check("actor: a create whose option line says \"you\" is created, with the note on that line and no refusal",
       "created" in res and "Refused" not in res and rd(gl)["metadata"]["options"][0]["line"] == "you approve it, we wait" and "(note: the line of option \u201cA: flag\u201d says \u201cyou\u201d: name who acts" in res, res)
@@ -1646,7 +1651,7 @@ check("actor: …and naming who acts in the line ends the note", "name who acts"
 res = server._update(gl, options=opt_pair("A: flag", "we approve it"), ask="Decide: flag or hold \u00b7 Recommend: the slim one \u00b7 Stakes: a day either way \u00b7 By: no date", sender="home-beta")
 check("actor: the Recommend-part note still works beside the actor note",
       "(note: the ask's Recommend part does not name the recommended option" in res and "(note: the line of option" in res and "Refused" not in res, res)
-check("actor: the shared item form (create and update descriptions) carries the sentence", "Name who acts in every option label and line, and in the ask line" in server._ITEM_FORM, "")
+check("actor: the shared item form (create and update descriptions) carries the sentence", "Name who acts in every option label and line" in server._ITEM_FORM and "the ask line likewise never says" in server._ITEM_FORM, "")
 bo = ui_render.Board(str(T / "store")); ip = bo.item_html(go)
 check("options: the item page lists them under the ask, the recommended one marked",
       '<b class="osub">Options</b><ol class="iopts"><li class=rec><b>Vendor A</b> <span class="badge rec">recommended</span><span class="oline">Cheaper, and ships next week.</span></li><li><b>Vendor B</b>' in ip, ip[ip.find('class="iask"'):ip.find('class="iask"') + 900])
