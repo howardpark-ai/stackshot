@@ -93,7 +93,8 @@ and that is narrow on purpose:
     a digit or an underscore is not plain (a commented-out sample such as `# live = true` or `# session_view = ""` is code to a suite that
     replaces text without anchoring it). → the direct readers
   * the lines from the header of a PINNED_TABLES table ([audit], [anchor_hub]) to its first code line are as they were (a suite's pattern
-    takes the header line and the one after it as one text); a comment or a blank line put there is a change.
+    takes the header line and the one after it as one text); a comment or a blank line put there is a change. So is anything at or above
+    the first line of the file (stackshot/cli.py anchors `\\A(# stackshot\\.example\\.toml)` on it for the configs it writes).
 Anything else selects the direct readers AND the fixture readers (the behaviour before this rule): any change to a code line, a trailing
 comment or the whitespace before it included; any key, table, inline table or array-of-tables row added, removed or moved; a value
 changed; an uncommented sample; a comment that is not plain. What a fixture suite breaks on depends on where a line lands and on text
@@ -1248,8 +1249,9 @@ def plain_comment(line, words):
 
 
 def layout_only(ot, nt, pinned, words):
-    """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string), and the lines from a
-    pinned table's header to its first code line are as they were. Every other line is equal and in order, so the code is untouched."""
+    """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string), the lines from a
+    pinned table's header to its first code line are as they were, and nothing at or above the first line changed (stackshot/cli.py anchors
+    `\\A(# stackshot\\.example\\.toml)` on it). Every other line is equal and in order, so the code is untouched."""
     oraw, oc = code_lines(ot)
     nraw, nc = code_lines(nt)
 
@@ -1261,13 +1263,15 @@ def layout_only(ot, nt, pinned, words):
                 end = cl[k + 1][0] if k + 1 < len(cl) else len(raw) - 1
                 found[m.group(1)] = tuple(raw[n:end + 1])
         return found
-    if anchors(oraw, oc) != anchors(nraw, nc):
+    if anchors(oraw, oc) != anchors(nraw, nc) or oraw[:1] != nraw[:1]:
         return False
     ofree = set(range(len(oraw))) - {n for n, _ in oc}
     nfree = set(range(len(nraw))) - {n for n, _ in nc}
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, oraw, nraw, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
+        if i1 <= 1:      # a hunk that starts at old line 0 or 1: above the first line, or the first line itself
+            return False
         for raw, free, lo, hi in ((oraw, ofree, i1, i2), (nraw, nfree, j1, j2)):
             if any(n not in free or not plain_comment(raw[n], words) for n in range(lo, hi)):
                 return False

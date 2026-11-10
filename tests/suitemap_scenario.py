@@ -304,6 +304,7 @@ EX = '''
     guards = true            # a comment
     digest = 5
 
+    # Nothing special here, just prose.
     [runners]
     boxes = ["box-a", "box-b"]
 
@@ -349,10 +350,18 @@ out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain
 check("example config: a whole plain-prose comment line added selects the direct readers only (the link readers stay out)", out.split() == ["direct"] and "plain comments" in err, (out, err))
 out, err = ex_sel(lambda: ex_sub("[runners]\n", "\n\n[runners]\n"), "blank lines")
 check("example config: blank lines only: the direct readers", out.split() == ["direct"], (out, err))
-out, err = ex_sel(lambda: ex_sub("# the example config\n", ""), "plain comment removed")
+out, err = ex_sel(lambda: ex_sub("# Nothing special here, just prose.\n", ""), "plain comment removed")
 check("example config: a plain whole-line comment removed: the direct readers", out.split() == ["direct"], (out, err))
-out, err = ex_sel(lambda: ex_sub("# the example config\n", PLAIN + " More of it.\n"), "plain comment replaced")
+out, err = ex_sel(lambda: ex_sub("# Nothing special here, just prose.\n", PLAIN + " More of it.\n"), "plain comment replaced")
 check("example config: a plain whole-line comment replaced by another: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: write("stackshot.example.toml", PLAIN + "\n" + textwrap.dedent(EX).lstrip("\n")), "comment above line 1")
+check("example config: a plain comment inserted above the first line is a change (cli.py anchors on that line)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", PLAIN + "\n"), "first line replaced")
+check("example config: a change to the first line is a change, even to plain prose", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", ""), "first line removed")
+check("example config: the first line removed is a change", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", "# the example config\n\n"), "blank line after the first line")
+check("example config: a blank line right after the first line is a change (the hunk starts at old line 1)", out.split() == FIX, (out, err))
 for what, line in (("a word of a key (digest)", "# the digest count"), ("a table name (runners)", "# about the runners"), ("a name inside a longer word (digests)", "# the digests count"),
                    ("a `=` (a commented-out sample)", "# digest = 7"), ("a quote", "# the \"digest\" count"), ("a digit", "# every 5 minutes"), ("an underscore", "# a plain_word"),
                    ("a bracket", "# see [model] above")):
@@ -482,6 +491,14 @@ def e8():
     ls[i:i + 3] = ["[registries]", "projects.key = " + ls[i + 1].split("=", 1)[1].split("#")[0].strip(), "projects.match = " + ls[i + 2].split("=", 1)[1].strip()]
     put("\n".join(ls))
 REAL_PLAIN = "# Some plain prose about nothing in particular."
+for word in ("git", "ssh", "cap"):
+    out, err = real_sel(lambda: swap("[router]  ", f"# the {word} thing\n[router]  "), f"real: comment with {word}")
+    check(f"real example: a plain comment holding the short key word {word!r} selects the fixture readers (whole-word test, not only the 4-letter substring)", out.split() == FIX, (out, err))
+out, err = real_sel(lambda: put(REAL_PLAIN + "\n" + cur()), "real: comment above line 1")
+check("real example: a plain comment inserted above the first line selects the fixture readers (cli.py anchors on it)", out.split() == FIX, (out, err))
+first = REAL_EX.split("\n", 1)[0]
+out, err = real_sel(lambda: put(REAL_EX.replace(first, REAL_PLAIN, 1)), "real: line 1 changed")
+check("real example: a change to the first line selects the fixture readers", out.split() == FIX, (out, err))
 out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "\n[router]  "), "real: comment")
 check("real example: a plain comment line away from a pinned header stays at the direct readers", out.split() == ["direct"], (out, err))
 out, err = real_sel(lambda: put(cur().rstrip("\n") + "\n\n" + REAL_PLAIN + "\n"), "real: comment and blank lines at the end")
