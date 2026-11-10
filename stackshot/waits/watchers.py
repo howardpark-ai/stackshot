@@ -235,14 +235,13 @@ def day_words(day: dt.date) -> str:
 
 def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list[dict[str, Any]]]:
     """The question the board puts back when a date button came with a note that holds no date it can read: (ask, options), still the shape of a watcher ask (is_watcher_ask), so the item stays
-    on his move and his next pick is read as before. Three dates counted from `today` (a week, two weeks, a month) as buttons, then the buttons of the first question that are not a date (arrived,
-    drop), so nothing he could do is taken away. The note is quoted short; it is already kept on the item as his comment."""
+    on his move and his next pick is read as before. Three dates counted from `today` (a week, two weeks, a month) as buttons, then the first question's own buttons (arrived, "not yet, ask again on <date>", drop),
+    so nothing he could do is taken away and a date typed in the box has its button. The note is quoted short; it is already kept on the item as his comment."""
     clip = " ".join(str(note or "").replace(" \u00b7 ", " - ").split())
     clip = clip if len(clip) <= 80 else clip[:79].rstrip() + "…"
     dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
     opts = [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": i == 0} for i, d in enumerate(dates)]
-    rest = [o for o in (relay_options() if asked_of(meta) == "relay" else drop_options()) if o["label"] not in (NOT_YET, KEEP)]
-    opts += [{**o, "recommended": False} for o in rest]
+    opts += [{**o, "recommended": False} for o in (relay_options() if asked_of(meta) == "relay" else drop_options())]      # the first question's own buttons stay: a date typed in the box still has its button
     kept = f"I kept your note (\u201c{clip}\u201d) but could not read a date from it." if clip else "I kept your answer but it holds no date."
     ask = (f"{_ASK_HEAD}when should {subject_of(meta)} come back? {kept} Pick a day, or write a date in the box{_OPT_MARK}" + " / ".join(o["label"] for o in opts))
     return ask, opts

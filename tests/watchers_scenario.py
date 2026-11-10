@@ -258,9 +258,36 @@ check("relay: the item that is not due is untouched", mt(51).get("wait_kind") ==
 br = server.stackshot_brief()
 check("relay: the brief lists the relay waits as waiting on the world: what, ask-by date", "Waiting on the world (1;" in br and f"the lease, ask by {day(4)}" in br, br[:1500])
 
-reset(); raw0 = raw(50)
-check("relay answer: not yet with no date writes nothing and says so", server._answer("a50", "not yet, ask again on <date>", "later please", "answer") == "needdate" and raw(50) == raw0, None)
-check("relay answer: the page has a line for it", '"needdate":' in open(os.path.join(STACK, "stackshot/web/render.py"), encoding="utf-8").read(), None)
+reset()
+TODAY = server._pages.zone_now().date()
+def ymd(n): return (TODAY + datetime.timedelta(days=n)).isoformat()
+out = server._answer("a50", "not yet, ask again on <date>", "later please", "answer")
+m = mt(50)
+check("relay answer: not yet with a note that holds no date keeps the note as his comment, sets no date and asks back",
+      out == "askedback" and [(a["kind"], a["text"]) for a in m["answers"]] == [("comment", "later please")] and "ask_by" not in m and "wait_kind" not in m and m.get("needs") == ["decision"], m)
+check("relay answer: …the ask-back quotes the note and offers three days counted from today (a week, two weeks, a month), then the first question's own buttons",
+      "later please" in m["ask"] and wk.is_watcher_ask(m["ask"]) and wk.asked_of(m) == "relay"
+      and [o["label"] for o in render.options_of(rd(50))][:3] == [wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=7)), wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), wk.ASK_AGAIN + wk.day_words(wk._add_months(TODAY, 1))]
+      and [o["label"] for o in render.options_of(rd(50))][3:] == ["arrived", "not yet, ask again on <date>", "drop"], (m["ask"], m.get("options")))
+check("relay answer: …it is his move still, and the page has lines for it",
+      server._model_of({**rd(50), "gid": "a50"}).owner_moves and '"askedback":' in open(os.path.join(STACK, "stackshot/web/render.py"), encoding="utf-8").read()
+      and "askedback" in render.Board._SENT and "stalenote" in render.Board._SENT and "closednote" in render.Board._SENT and "needdate" not in render.Board._SENT, (m, sent()))
+out = server._answer("a50", wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), "", "answer")
+m = mt(50)
+check("relay answer: a day picked from the ask-back puts the wait back on that day", out == "decision" and m.get("wait_kind") == "relay" and m.get("ask_by") == ymd(14) and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []), (out, m))
+# the same question again, and a date typed in the box over a pick
+it = rd(50); m = it["metadata"]
+m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "ask_by": ymd(20), "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options()
+(T / "store/a/50.json").write_text(json.dumps(it))
+out = server._answer("a50", "not yet, ask again on <date>", "one more week", "answer")
+check("relay answer: one more week counts from the date the wait already ended on", out == "decision" and mt(50).get("ask_by") == ymd(27), (out, mt(50)))
+it = rd(50); m = it["metadata"]
+m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options()
+(T / "store/a/50.json").write_text(json.dumps(it))
+check("relay answer: …and from today when the wait had no date", server._answer("a50", "not yet, ask again on <date>", "park it for a week", "answer") == "decision" and mt(50).get("ask_by") == ymd(7), mt(50))
+it = rd(50); m = it["metadata"]
+m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options()
+(T / "store/a/50.json").write_text(json.dumps(it))
 server._answer("a50", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer")
 m = mt(50)
 check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and m.get("ask_by") == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("post_wake_mover") == BACK
@@ -283,6 +310,20 @@ server._wake_pass()
 server._answer("a55", "arrived", "", "answer")
 check("relay answer: a post-wake mover that is the owner falls back to the project's default holder on 'arrived' (not the creator)", mt(55).get("mover") in (UF, "home-front") and "wait_kind" not in mt(55), mt(55))
 
+# ================================================================ the relative-date table (no model, a small table)
+D0 = datetime.date(2026, 11, 10)      # a Tuesday
+def pd(text, base=None): return wk.parse_date(text, D0, base)
+def ds(n): return (D0 + datetime.timedelta(days=n)).isoformat()
+check("dates: a week and its siblings", [pd(x) for x in ("a week", "in a week", "one week", "a week from now", "another week", "one more week", "park for 1 week")] == [ds(7)] * 7, [pd(x) for x in ("a week", "in a week", "one more week")])
+check("dates: two weeks, a fortnight, in N days, N weeks", [pd(x) for x in ("two weeks", "in 2 weeks", "a fortnight", "in 3 days", "3 days", "tomorrow", "the day after tomorrow", "next week")] == [ds(14), ds(14), ds(14), ds(3), ds(3), ds(1), ds(2), ds(7)], [pd(x) for x in ("two weeks", "a fortnight", "the day after tomorrow")])
+check("dates: a month, next month, in a month, N months (a month is calendar months, cut to a shorter month's last day)", [pd(x) for x in ("a month", "next month", "in a month", "a month from now", "3 months")] == ["2026-12-10"] * 4 + ["2027-02-10"]
+      and wk.parse_date("a month", datetime.date(2026, 1, 31)) == "2026-02-28", [pd(x) for x in ("a month", "next month", "3 months")])
+check("dates: end of the week is the Friday (the next Friday on a Friday), end of next week, end of the month, after the weekend", [pd(x) for x in ("end of the week", "end of next week", "end of the month", "after the weekend")] == [ds(3), ds(10), "2026-11-30", ds(6)]
+      and wk.parse_date("end of the week", datetime.date(2026, 11, 13)) == "2026-11-20" and wk.parse_date("end of the month", datetime.date(2026, 11, 30)) == "2026-12-31", None)
+check("dates: more and another count from the date the wait ended on when it is after today, a plain span from today", pd("one more week", datetime.date(2026, 11, 20)) == "2026-11-27" and pd("another month", datetime.date(2026, 11, 20)) == "2026-12-20"
+      and pd("a week", datetime.date(2026, 11, 20)) == ds(7) and pd("one more week", datetime.date(2026, 11, 1)) == ds(7), None)
+check("dates: a past phrase, a phrase with no number and an explicit date are not caught by the table", [pd(x) for x in ("a week ago", "two days ago", "later please", "soon", "")] == [""] * 5 and pd("a week, or Mar 9th") == "2027-03-09" and pd("2099-03-09 or a week") == "2099-03-09", [pd(x) for x in ("a week ago", "soon")])
+
 # ================================================================ chases
 item(60, wait_kind="relay", wait_event="the signed copy", ask_by=day(4), post_wake_mover=BACK, needs=[], subject="[home] chased relay", chases=[{"at": now0, "by": BACK, "note": "mailed Robin a reminder"}])      # a stored chase: fixture data (no tool logs one any more)
 reset()
@@ -297,7 +338,8 @@ check("chase: two chases and no arrival: at the wait's end the item comes to the
       and [o["label"] for o in render.options_of(rd(60))] == ["drop", "keep waiting until <date>"] and len(m.get("chases") or []) == 2 and m.get("then") == BACK, m)
 check("chase: …nobody is messaged", not sent("watch"), sent())
 server._answer("a60", "keep waiting until <date>", "", "answer")
-check("chase: keep waiting with no date writes nothing", mt(60).get("needs") == ["decision"], mt(60))
+check("chase: keep waiting with no date keeps the note and asks back, the wait is not put back", mt(60).get("needs") == ["decision"] and "wait_kind" not in mt(60) and mt(60)["ask"].startswith("Decide: when should") and wk.asked_of(mt(60)) == "dropit"
+      and [o["label"] for o in render.options_of(rd(60))][-2:] == ["drop", "keep waiting until <date>"], mt(60))
 server._answer("a60", "keep waiting until <date>", f"until {day(12)}", "answer")
 m = mt(60)
 check("chase: keep waiting until a date puts the wait back on it and starts the chases over", m.get("wait_kind") == "relay" and m["ask_by"] == day(12) and "chases" not in m and "ask" not in m, m)

@@ -397,11 +397,20 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     told.clear()
     r_e = post("/items/a5/answer", {"token": tok("a5"), "text": "   ", "act": "answer"})
     r_l = post("/items/a5/answer", {"token": tok("a5"), "text": "x" * 4001, "act": "comment"})
-    r_c = post("/items/a4/answer", {"token": tok("a4"), "text": "late", "act": "comment"})
-    check("nothing sent for an empty box, a text over 4000 characters, or a closed item: each says why, nothing written",
-          [x.headers.get("location") for x in (r_e, r_l, r_c)] == ["/items/a5?sent=empty", "/items/a5?sent=toolong", "/items/a4?sent=closed"]
+    r_c0 = post("/items/a4/answer", {"token": tok("a4"), "text": "  ", "act": "comment"})
+    check("nothing sent for an empty box, a text over 4000 characters, or a closed item with nothing written: each says why, nothing written",
+          [x.headers.get("location") for x in (r_e, r_l, r_c0)] == ["/items/a5?sent=empty", "/items/a5?sent=toolong", "/items/a4?sent=closed"]
           and len(rd("a", 5)["metadata"]["answers"]) == 1 and "answers" not in rd("a", 4)["metadata"] and not told and not jobs(),
-          [x.headers.get("location") for x in (r_e, r_l, r_c)])
+          [x.headers.get("location") for x in (r_e, r_l, r_c0)])
+    r_c = post("/items/a4/answer", {"token": tok("a4"), "text": "late", "act": "comment"})
+    a4 = rd("a", 4)
+    check("a note on a closed item is kept: it goes onto the item as his comment, the item stays closed, and the page says it was kept",
+          r_c.headers.get("location") == "/items/a4?sent=closednote" and a4["status"] == "completed"
+          and [(a["kind"], a["text"], a["via"]) for a in a4["metadata"]["answers"]] == [("comment", "late", "board")]
+          and "your note is on it" in ui_render.Board._SENT["closednote"][1], (r_c.headers.get("location"), a4["metadata"].get("answers")))
+    told.clear()
+    a4_again = rd("a", 4)
+    del a4_again["metadata"]["answers"]; (T / "store/a/4.json").write_text(json.dumps(a4_again))      # back to the fixture: later checks read item a4 as it was
 
     # ---- 5. Approve on a yes/no ask; "Send as my answer" with text; a front-agent owner
     r = post("/items/a2/answer", {"token": tok("a2"), "choice": "Approve", "text": "go, but tell Pat first"})
@@ -417,9 +426,13 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r_f2 = post("/items/a26/answer", {"token": tok("a26"), "choice": "Decline", "text": "no"})
     r_f3 = post("/items/a28/answer", {"token": tok("a28"), "choice": "Approve"})
     r_f4 = post("/items/a26/answer", {"token": tok("a26"), "choice": "Done"})
-    check("a forged choice=Approve / Decline on an ask with no stored options (or misshaped ones) is refused: sent=stale, nothing written, nobody told",
-          [x.headers.get("location") for x in (r_f1, r_f2, r_f3, r_f4)] == ["/items/a26?sent=stale", "/items/a26?sent=stale", "/items/a28?sent=stale", "/items/a26?sent=stale"]
-          and rd("a", 26) == b26 and rd("a", 28) == b28 and not told and len(jobs()) == njobs0, [x.headers.get("location") for x in (r_f1, r_f2, r_f3, r_f4)])
+    k26 = [(a["kind"], a["text"]) for a in rd("a", 26)["metadata"].get("answers", [])]; told_f = list(told); told.clear()
+    d26 = rd("a", 26); d26["metadata"].pop("answers"); d26["updated"] = b26["updated"]
+    check("a forged choice=Approve / Decline on an ask with no stored options (or misshaped ones) is refused: sent=stale, no decision written, nobody told; the one with a note keeps the note as his comment",
+          [x.headers.get("location") for x in (r_f1, r_f2, r_f3, r_f4)] == ["/items/a26?sent=stale", "/items/a26?sent=stalenote", "/items/a28?sent=stale", "/items/a26?sent=stale"]
+          and k26 == [("comment", "(late, the item no longer asks this: Decline) no")] and rd("a", 28) == b28 and len(told_f) == 1 and len(jobs()) == njobs0
+          and all(d26["metadata"].get(k) == b26["metadata"].get(k) for k in ("needs", "ask", "options")), (k26, told_f, rd("a", 28) == b28, len(jobs()), njobs0))
+    (T / "store/a/26.json").write_text(json.dumps(b26))      # back to the fixture
     check("…and the same through the server's own entry", server._answer("a26", "Approve", "", "") == "stale" and server._answer("a26", "Decline", "", "answer") == "stale" and rd("a", 26) == b26)
     r_q = post("/items/a27/answer", {"token": tok("a27"), "act": "answer", "text": "Go, with the smaller scope."})
     m27 = rd("a", 27)["metadata"]
@@ -724,6 +737,11 @@ check("…the cleared item draws no options, no ask and no option buttons, and H
 check("a choice that matches no option is stale: nothing written, options and ask stay",
       server._answer("a10", "Nope", "", "") == "stale" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
       and "answers" not in rd("a", 10)["metadata"], rd("a", 10)["metadata"])
+check("a choice that matches no option, sent with a note, keeps the note as his comment (the choice named in it); the options and the ask stay, and it is no decision",
+      server._answer("a10", "Nope", "wait, I meant the second one", "") == "stalenote" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
+      and "decision" in rd("a", 10)["metadata"]["needs"]
+      and [(a["kind"], a["text"]) for a in rd("a", 10)["metadata"]["answers"]] == [("comment", "(late, the item no longer asks this: Nope) wait, I meant the second one")], rd("a", 10)["metadata"])
+d10 = rd("a", 10); del d10["metadata"]["answers"]; (T / "store/a/10.json").write_text(json.dumps(d10))      # back to the fixture for the checks below
 check("a comment on an item with options changes neither the options nor the ask",
       server._answer("a10", "", "what does Drop mean?", "comment") == "comment" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
       and rd("a", 10)["metadata"]["needs"] == ["decision"], rd("a", 10)["metadata"])
