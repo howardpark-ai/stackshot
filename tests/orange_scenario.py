@@ -39,7 +39,7 @@ def in_band(hsl):
 
 # ---- the page fixture (the same shape as button_set_scenario's)
 tmp = _scratch.mkdtemp(prefix="orange-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):

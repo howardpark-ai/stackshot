@@ -27,7 +27,7 @@ import os, re, shutil, subprocess, sys, pathlib, tempfile
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="installtest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 # a sudo that records its call and fails: render must never reach it
 (T / "bin").mkdir(); (T / "bin/sudo").write_text(f'#!/bin/sh\ntouch {tmp}/sudo-called\necho "$*" >> {tmp}/sudo.log\nexit 1\n'); (T / "bin/sudo").chmod(0o755)

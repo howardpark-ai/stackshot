@@ -30,7 +30,7 @@ tmp = _scratch.mkdtemp(prefix="itemprj-"); T = pathlib.Path(tmp)
 
 def mk_toml(root):
     """A config whose every path is inside `root`, with no GitHub mirror and no commit."""
-    t = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), owner=True)
+    t = _instance.apply(_instance.base_toml(), owner=True)
     t = t.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in t
     for key, val in (("repo", root), ("store", f"{root}/store"), ("markdown", f"{root}/board.md"), ("brain", f"{root}/brain"),
                      ("state", f"{root}/state"), ("secrets", f"{root}/secrets"), ("project_touch", f"{root}/touch"), ("rules", f"{root}/RULES.md"), ("timezone", "Asia/Dubai")):

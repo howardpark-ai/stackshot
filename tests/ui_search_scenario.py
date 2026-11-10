@@ -28,7 +28,7 @@ BOARD = "https://board.example.org"
 EMAIL = "oliver@example.org"
 SALA = "https://sala.example.org/#s={name}"
 
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
 toml = toml.replace('session_view = ""', f'session_view = "{SALA}"', 1); assert "sala.example.org" in toml
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),

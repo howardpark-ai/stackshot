@@ -45,7 +45,7 @@ tmp = _scratch.mkdtemp(prefix="rotest-"); T = pathlib.Path(tmp)
 
 def write_toml(name, hook_port=None, root=None):
     root = root or tmp
-    toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+    toml = _instance.apply(_instance.base_toml())
     toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store
     for key, val in (("repo", f"{root}/inst"), ("store", f"{root}/inst/store"), ("markdown", f"{root}/inst/board.md"), ("brain", f"{root}/brain"),
                      ("state", f"{root}/state"), ("secrets", f"{root}/secrets"), ("project_touch", f"{root}/touch"), ("rules", f"{root}/RULES.md"), ("timezone", "Asia/Dubai")):

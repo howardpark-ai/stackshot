@@ -13,7 +13,7 @@ SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 HOOK = os.path.join(STACK, "reboot-hooks", "stackshot-hook")
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="hooktest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 home = T / "home"; home.mkdir(); (T / "bin").mkdir()
 # systemctl: logs every call (with XDG_RUNTIME_DIR), is-active from the state file, start/stop write it; show-environment
