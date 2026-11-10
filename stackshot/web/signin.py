@@ -3,7 +3,7 @@ who is signed in, the guard a page asks, the board's own OAuth client (its regis
 `_auth_mode`, which the guard and the server both read, is here too.
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). What stays in server.py is what needs its `mcp` object or its other functions, which a module under server.py cannot
-import: the three /ui/ routes (`ui_login`, `ui_callback`, `ui_logout`), `_ui_exchange` (it verifies the token with `mcp.auth`), `_ui_mods` and the provider `_auth` builds.
+import: the three /ui/ routes (`ui_login`, `ui_callback`, `ui_logout`), `_ui_exchange` (it verifies the token with `mcp.auth`) and `_ui_mods`; the provider `_auth` builds is in `server_auth.py` (stage 11).
 A suite that pins the sign-in's clock (`_ui_now`), replaces its call to the server's own OAuth endpoints (`_ui_http`, `_ui_client_id`) or sets the auth mode (`_auth_mode`) sets it on this module
 (`server._signin._ui_now = ...`), the one place the readers look it up: the server's own reads of those four go through `_signin.` as well, and are not imported back. The rest is imported back by
 server.py, so `server._ui_guard`, `server._ui_email`, `server._ui_sign` and the others stay the names the routes and the tests use."""

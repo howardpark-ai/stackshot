@@ -389,7 +389,7 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T3 | `setup` exits 2: "port 8020 is taken on this box by <user>" | Another account's server | stackshot | `--port <free port>` |
 | T4 | `setup` exits 2: "not a timezone this Python knows" | Bad `--tz` | stackshot | Use an IANA name |
 | T5 | Server will not start: `auth=google but STACKSHOT_GOOGLE_CLIENT_ID/SECRET not set (env file ...)` | `oauth.env` empty or wrong key names | stackshot/web/server.py | Step 5 checks; restart: `systemctl --user restart stackshot.service` |
-| T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | stackshot/web/server.py | Add an email; doctor refuses to start it in this case |
+| T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | stackshot/web/server_auth.py | Add an email; doctor refuses to start it in this case |
 | T7 | Server exits 1: "port 127.0.0.1:8020 is taken" | A second server or another program | stackshot/web/server.py | `ss -ltnp \| grep 8020`; change `[server] port`, then `./install.sh units --start` |
 | T8 | Server exits 2: "STACKSHOT_CONFIG is unset and ... is not the production checkout" | Started by hand from outside `~/stackshot` | stackshot/web/server.py | Use the unit, or export `STACKSHOT_CONFIG` |
 | T9 | Data repo never reaches the remote; no error | Empty remote has no `main`, so the publisher's fetch fails and it returns silently | stackshot/web/publish.py:62-70 | Step 4: `git push -u origin main` by hand |

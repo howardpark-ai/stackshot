@@ -2,8 +2,8 @@
 `_who` (the signed-in identity, allow-listed).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the auth mode
-(`signin.py`) and the board's own client check (`_ui_is_board_client`, signin.py's). server.py imports the three names back at the old position, before `mcp = FastMCP(..., auth=_auth())`, so `server._auth`, `server._who`
-and `server._env` stay the names the tools and the suites use: `_auth()` is called at that import, with the same config and environment as before, and `_who()` is looked up in `server`'s globals by every tool, so a suite that
+(`signin.py`) and the board's own client check (`_ui_is_board_client`, signin.py's). server.py imports `_auth` and `_who` back at the old position, before `mcp = FastMCP(..., auth=_auth())`, so `server._auth` and `server._who`
+stay the names the tools and the suites use (`_env` is read only here, and not imported back): `_auth()` is called at that import, with the same config and environment as before, and `_who()` is looked up in `server`'s globals by every tool, so a suite that
 replaces `server._who` reaches them all. Nothing in this module calls `_who` or `_env` through a name a suite replaces."""
 from __future__ import annotations
 
