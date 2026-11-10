@@ -85,14 +85,21 @@ the tracked link tests/example_base.toml (-> ../stackshot.example.toml; tests/_i
 opens as it was written, so the map tells two kinds of reader apart: a DIRECT reader opens the real path (it parses, greps, copies or patches
 the example config, or runs code that reads it: about 40 suites), a FIXTURE reader opens the link. The DATA table names the file and its link, and
 a change to the file is read by what it does to the parsed data (tomllib, old = the map's commit, new = the target):
-  * the same data (a comment, blank lines, the order of keys)          → the direct readers
-  * keys only ADDED (every old table and setting is still there, equal) → the direct readers (rule A2)
+  * the same data, types included (a comment, blank lines, the order of keys; 80 and 80.0 differ, so do true and 1) → the direct readers
+  * keys only ADDED (every old table and setting is still there, equal) → the direct readers (rule A2), unless an added name is one the
+    fixture suites meet (below)
   * a setting changed or removed, or a table removed                    → the direct readers and the fixture readers
   * a text that does not parse (old or new)                             → all
   * the link itself changes (tests/example_base.toml)                   → all (rule 2 above)
-SUITEMAP_EXAMPLE_RULE=A1 (default A2) also sends a key ADDED to the fixture readers, for the day an added key breaks a fixture suite
-(a suite that patches the base with a pattern that must match once, and a new key matches it twice): no code change, set it in tests.yml's
-selection step. Until main's next measured run records the link for the fixture suites, the map lists the real path for every suite that
+An ADDED table or key still selects the fixture readers when the fixture suites would meet it (they build their config with
+tests/_instance.py apply(), and patch the base with `re.subn(...); assert n == 1`): (a) it is a table apply() appends (a second declaration
+of [job_gap.repos], [[router.watch]] is a parse error), or a key apply() sets; (b) its name is one the example already holds elsewhere (a pattern
+that must match once would match twice); (c) it is a key directly under a table whose header line a suite's pattern anchors on. The names
+come from ONE place, the constants SETTINGS, KEYWORDS, FLAG_SETTINGS, TABLES and PINNED_TABLES of tests/_instance.py at the target commit, read
+by ast.literal_eval (no import of repo code); the scenario of this tool runs apply() and fails when it changes a name the selection does not
+know. A _instance.py that cannot be read this way makes every added table or key count as a change.
+SUITEMAP_EXAMPLE_RULE=A1 (A2 by default; any other value is an error) also sends every ADDED key to the fixture readers, for the day an
+added key breaks a fixture suite in a way the names above do not foresee: no code change, set it in tests.yml's selection step. Until main's next measured run records the link for the fixture suites, the map lists the real path for every suite that
 opened it, so the old behaviour (every suite that read the file) holds by itself. `audit` applies the same rule on both maps.
 
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
@@ -117,7 +124,15 @@ HARNESS = (".github/", "tests/run-suite", "pyproject.toml", "uv.lock", "tests/su
 # data files the selection reads by what they hold (see *The example config* above): file -> the tracked link the fixture suites read it through.
 # Another data file joins by a line here; a change to a link selects everything (the link is what the fixture readers' map entries name).
 DATA = {"stackshot.example.toml": "tests/example_base.toml"}
-EXAMPLE_RULE = os.environ.get("SUITEMAP_EXAMPLE_RULE", "A2").strip().upper()   # A2 (default): a key added selects the direct readers only; A1: the fixture readers too
+INSTANCE = "tests/_instance.py"   # where the names the fixture suites' config building touches are declared (see *The example config*)
+
+
+def example_rule():
+    """A2 (default): a key added selects the direct readers only, unless it is a name the fixture suites meet; A1: every added key selects the fixture readers too"""
+    v = os.environ.get("SUITEMAP_EXAMPLE_RULE", "A2").strip().upper()
+    if v not in ("A1", "A2"):
+        raise SystemExit(f"suitemap: SUITEMAP_EXAMPLE_RULE={os.environ.get('SUITEMAP_EXAMPLE_RULE')!r} is not a rule: the allowed values are A1 and A2")
+    return v
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
 TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"
@@ -1110,12 +1125,12 @@ def quiet_import(N, S, path, mod):
 
 
 def toml_items(text):
-    """(the parsed data, its settings as a set of (dotted path, value as JSON)): every table is (its path, "{}"), every other value its
-    JSON; (None, None) when the text does not parse"""
+    """a set of (dotted path, value as typed JSON) for a TOML text: every table is (its path, "{}"), every other value its JSON (80 and
+    80.0, true and 1 differ); None when the text does not parse"""
     try:
         data = tomllib.loads(text)
     except (tomllib.TOMLDecodeError, ValueError, TypeError):
-        return None, None
+        return None
     items = set()
 
     def walk(node, path):
@@ -1127,25 +1142,76 @@ def toml_items(text):
             else:
                 items.add((p, json.dumps(v, sort_keys=True, default=str)))
     walk(data, "")
-    return data, items
+    return items
+
+
+def instance_names(rev):
+    """(paths, pinned) from tests/_instance.py at rev, read as data: `paths` the dotted paths of the settings apply() sets (SETTINGS, KEYWORDS,
+    FLAG_SETTINGS) and of the tables it appends (TABLES: a table that holds a value of its own, an array of tables); `pinned` PINNED_TABLES.
+    None when the file or one of the constants cannot be read as a literal"""
+    return names_from_source(show(rev, INSTANCE))
+
+
+def names_from_source(src):
+    """instance_names() of the text of tests/_instance.py"""
+    want = ("SETTINGS", "KEYWORDS", "FLAG_SETTINGS", "TABLES", "PINNED_TABLES")
+    try:
+        c = {}
+        for node in ast.parse(src).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in want:
+                c[node.targets[0].id] = ast.literal_eval(node.value)
+        if set(c) != set(want):
+            return None
+        paths = {f"{s}.{k}" for d in (c["SETTINGS"], c["KEYWORDS"], *c["FLAG_SETTINGS"].values()) for s, keys in d.items() for k in keys}
+        tables = tomllib.loads(c["TABLES"])
+
+        def walk(node, path):
+            if any(not isinstance(v, dict) and not (isinstance(v, list) and v and all(isinstance(x, dict) for x in v)) for v in node.values()):
+                paths.add(path)
+            for k, v in node.items():
+                p = f"{path}.{k}" if path else k
+                if isinstance(v, dict):
+                    walk(v, p)
+                elif isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
+                    paths.add(p)
+        walk(tables, "")
+        return paths, set(c["PINNED_TABLES"])
+    except (TypeError, ValueError, SyntaxError, KeyError, AttributeError, tomllib.TOMLDecodeError):
+        return None
+
+
+def meets_fixtures(added, new_items, names):
+    """True when a key or table added to the example is one the fixture suites would meet: see *The example config* in the docstring"""
+    if names is None:
+        return bool(added)
+    paths, pinned = names
+    seen = collections.Counter(p.rsplit(".", 1)[-1] for p, v in new_items if v != "{}")
+    for p, v in added:
+        if any(p == t or p.startswith(t + ".") for t in paths if t):
+            return True
+        if v != "{}" and (seen[p.rsplit(".", 1)[-1]] > 1 or p.rsplit(".", 1)[0] in pinned):
+            return True
+    return False
 
 
 def data_change(a, b, old, new):
-    """how the data file changed between a and b: 'same' (the parsed data is equal: a comment, blank lines, key order), 'added'
-    (every table and setting of a is in b, equal, and b has more), 'changed' (a setting changed or removed, a table removed, the
-    file added, deleted or renamed), or None (a text that does not parse: the caller selects everything)"""
+    """how the data file changed between a and b: 'same' (the same typed data: a comment, blank lines, key order), 'added' (every table and
+    setting of a is in b, equal, and b has more, none of it a name the fixture suites meet), 'changed' (a setting changed or removed, a
+    table removed, an added name the fixture suites meet, the file added, deleted or renamed), or None (a text that does not parse: the
+    caller selects everything)"""
     if not (old and new):
         return "changed"
     ot, nt = show(a, old), show(b, new)
     if ot is None or nt is None:
         return None
-    od, oi = toml_items(ot)
-    nd, ni = toml_items(nt)
+    oi, ni = toml_items(ot), toml_items(nt)
     if oi is None or ni is None:
         return None
-    if od == nd:
+    if oi == ni:
         return "same"
-    return "added" if oi <= ni else "changed"
+    if not oi <= ni:
+        return "changed"
+    return "changed" if meets_fixtures(ni - oi, ni, instance_names(b)) else "added"
 
 
 def selection(m, a, b, pathspec=()):
@@ -1233,11 +1299,11 @@ def selection(m, a, b, pathspec=()):
                 kind = data_change(a, b, old, new)
                 if kind is None:
                     return "all", why + [(f, "does not parse, in the old text or the new: every suite")]
-                if kind == "changed" or (kind == "added" and EXAMPLE_RULE == "A1"):
+                if kind == "changed" or (kind == "added" and example_rule() == "A1"):
                     probe.append(DATA[dp])
                 note = {"same": "the same data (a comment or layout only): its direct readers",
-                        "added": "keys added only: its direct readers" + (" and the fixture readers (rule A1)" if EXAMPLE_RULE == "A1" else ""),
-                        "changed": "a setting changed or removed: its direct readers and the fixture readers"}[kind] + "; "
+                        "added": "keys added only: its direct readers" + (" and the fixture readers (rule A1)" if example_rule() == "A1" else ""),
+                        "changed": "a setting changed or removed, or a name the fixture suites meet added: its direct readers and the fixture readers"}[kind] + "; "
             for s, e in S.items():
                 if any(p in e.get("files", ()) for p in probe):
                     hit.add(s)
@@ -1344,6 +1410,7 @@ def main():
     p = sub.add_parser("select"); p.add_argument("--map", required=True); p.add_argument("--to", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
+    example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0

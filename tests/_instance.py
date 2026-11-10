@@ -82,6 +82,20 @@ KEYWORDS = {
     "keywords.waiting": {"park_words": '["保留", "延期", "後で", "来月"]'},
     "keywords.server": {"command_cues": '["実行", "貼り付け"]'},
 }
+# the settings a flag of apply() adds: section -> {key: toml value}
+FLAG_SETTINGS = {
+    "owner": {"instance": {"owner": '"Oliver"'}},
+    "login": {"github": {"owner_login": '"example-owner"'}},
+    "gbrain": {"pages": {"flavor": '"gbrain"'}},
+}
+# Tables whose header line a suite's pattern anchors on (`(?m)^(\[audit\][^\n]*\n)enabled = false`): a key added right under the header would break it.
+PINNED_TABLES = ("audit", "anchor_hub")
+# NAMES THE SELECTION READS (tests/suitemap.py, *The example config*): SETTINGS, KEYWORDS, FLAG_SETTINGS and TABLES above, and PINNED_TABLES, are read from this
+# file by `ast.literal_eval` at the target commit, so they stay plain literals. A key apply() sets or a table it appends, added to stackshot.example.toml, breaks the
+# suites (a table declared twice, or a key patched where apply() expects its own), so a change that adds one selects the suites that read the example through
+# tests/example_base.toml. Add what apply() touches to those constants and the selection follows; tests/suitemap_scenario.py runs apply() and fails when it
+# changes a name the selection does not know. A suite's own `re.subn(rf'(?m)^{key} = ...'); assert n == 1` is covered by name: a key added under a name
+# the example already has elsewhere selects them too.
 # tables the example config does not carry (commented there), appended at the end
 TABLES = '''
 [project_scopes.by_prefix]
@@ -129,10 +143,9 @@ def apply(toml: str, gbrain: bool = False, owner: bool = False, login: bool = Fa
         for section, keys in KEYWORDS.items():
             for key, value in keys.items():
                 toml = _set(toml, section, key, value)
-    if owner:
-        toml = _set(toml, "instance", "owner", '"Oliver"')
-    if login:
-        toml = _set(toml, "github", "owner_login", '"example-owner"')
-    if gbrain:
-        toml = _set(toml, "pages", "flavor", '"gbrain"')
+    for flag, on in (("owner", owner), ("login", login), ("gbrain", gbrain)):
+        if on:
+            for section, keys in FLAG_SETTINGS[flag].items():
+                for key, value in keys.items():
+                    toml = _set(toml, section, key, value)
     return toml.rstrip("\n") + "\n" + TABLES
