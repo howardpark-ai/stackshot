@@ -294,6 +294,91 @@ for rel, edit in (("pyproject.toml", lambda: write("pyproject.toml", "[project]\
     out, err, _ = sel_after(edit, rel)
     check(f"the harness's {rel} reaches all, even a comment", out == "all" and "the harness" in err, (out, err))
 
+# ---- the example config (Tue Nov 10th 2026): a synthetic map, nothing measured. direct opens stackshot.example.toml itself, fx1 and fx2 read
+# it through the link tests/example_base.toml (the fixture suites), other opens data.txt
+R_MAIN = R; R = T / "repo2"; R.mkdir()
+git("init", "-q", "-b", "main")
+EX = '''
+    # the example config
+    [model]
+    guards = true            # a comment
+    digest = 5
+
+    [runners]
+    boxes = ["box-a", "box-b"]
+
+    [runners.ids]
+
+    [router]
+    digest_hour = 6
+'''
+write("stackshot.example.toml", EX); write("data.txt", "one\n")
+for s in ("direct", "fx1", "fx2", "other"): write(f"tests/{s}_scenario.py", "print('x')\n")
+os.symlink("../stackshot.example.toml", R / "tests/example_base.toml"); shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+base2 = commit("base of the example config cases")
+def fmap(fixture_path):
+    ent = lambda files: {"ok": True, "failed": False, "files": files, "dirs": ["", "tests"], "whole": [], "py": {}, "seconds": 1}
+    return {"format": 1, "commit": base2, "strace": True, "suites": {
+        "direct": ent(["stackshot.example.toml"]), "fx1": ent([fixture_path]), "fx2": ent([fixture_path, "data.txt"]), "other": ent(["data.txt"])}}
+MAP2 = T / "map2.json"; MAP2.write_text(json.dumps(fmap("tests/example_base.toml")))
+OLDMAP = T / "oldmap.json"; OLDMAP.write_text(json.dumps(fmap("stackshot.example.toml")))
+def ex_sel(edit, msg, *, map_=MAP2, env=None):
+    git("checkout", "-q", "-B", f"x{len(ran)}", base2)
+    edit()
+    head = commit(msg)
+    r = tool("select", "--map", str(map_), "--to", head, env={"SUITEMAP_ROOT": str(R), **(env or {})})
+    return r.stdout.strip(), r.stderr
+def ex_sub(a, b): sub("stackshot.example.toml", a, b)
+FIX = ["direct", "fx1", "fx2"]
+out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment")
+check("example config: a comment-only change selects the direct readers (the link readers stay out)", out.split() == ["direct"] and "the same data" in err, (out, err))
+out, err = ex_sel(lambda: write("stackshot.example.toml", EX.replace("digest = 5", "digest = 5\n\n\n")), "blank lines")
+check("example config: blank lines only: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: write("stackshot.example.toml", EX.replace("digest = 5\n", "").replace("guards = true            # a comment", "digest = 5\n    guards = true")), "reordered")
+check("example config: the same keys in another order are the same data: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nnew_key = 1"), "key added")
+check("example config (A2): a key added under [model] selects the direct readers only", out.split() == ["direct"] and "keys added only" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners.ids]", "[runners.ids]\n# runners may be pinned to a session\nsession = \"s\"\n\n[runners.extra]\nx = 1"), "key and comment, new table")
+check("example config (A2): a key under a table that was empty, a comment and a new table: the direct readers only", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true", "guards = false"), "flipped")
+check("example config: an existing setting changed selects the direct readers and the fixture readers (fx1, fx2), not the others", out.split() == FIX and "changed or removed" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest_hour = 6", "digest_hour = 7"), "digest hour")
+check("example config: another existing setting changed: the same", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub('boxes = ["box-a", "box-b"]', 'boxes = ["box-a", "box-b", "box-c"]'), "list grown")
+check("example config: a list that grew is a changed setting, not an added key", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5\n", ""), "key removed")
+check("example config: a key removed selects the direct readers and the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners.ids]\n", ""), "empty table removed")
+check("example config: an empty table removed (a suite that sets a key in it would fail) selects the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest_hour = 6", "digest_hour = 6\ndigest = 9"), "key added in another table")
+check("example config (A2): the same key name added under another table is an added key", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nbroken = ["), "unparseable new")
+check("example config: a text that does not parse (new) selects every suite", out == "all" and "does not parse" in err, (out, err))
+git("checkout", "-q", "-B", "broken", base2); ex_sub("digest = 5", "digest = 5\nbroken = ["); broken = commit("broken base")
+MAP3 = T / "map3.json"; MAP3.write_text(json.dumps({**fmap("tests/example_base.toml"), "commit": broken}))
+git("checkout", "-q", "-B", "fixed", broken); ex_sub("broken = [\n", ""); fixed = commit("fixed")
+r = tool("select", "--map", str(MAP3), "--to", fixed, env={"SUITEMAP_ROOT": str(R)})
+check("example config: a text that does not parse (old) selects every suite", r.stdout.strip() == "all" and "does not parse" in r.stderr, (r.stdout, r.stderr))
+def link_edit():
+    os.remove(R / "tests/example_base.toml"); os.symlink("../data.txt", R / "tests/example_base.toml")
+out, err = ex_sel(link_edit, "link moved")
+check("example config: a change to the link tests/example_base.toml selects every suite", out == "all" and "link" in err, (out, err))
+out, err = ex_sel(lambda: (ex_sub("# the example config", "# the example config, again"), sub("data.txt", "one", "two")), "comment and data")
+check("example config: a comment beside another file's change selects the direct readers and the other file's (fx2, other open data.txt)",
+      out.split() == ["direct", "fx2", "other"], (out, err))
+A1 = {"SUITEMAP_EXAMPLE_RULE": "A1"}
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nnew_key = 1"), "key added, A1", env=A1)
+check("example config (switch A1): a key added selects the fixture readers too", out.split() == FIX and "rule A1" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment, A1", env=A1)
+check("example config (switch A1): a comment-only change still selects the direct readers only", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true", "guards = false"), "flipped, A1", env=A1)
+check("example config (switch A1): a changed setting selects the same as under A2", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment, old map", map_=OLDMAP)
+check("example config: on a map from before the link (every suite opens the real path) a comment still selects all of them, as before", out.split() == ["direct", "fx1", "fx2"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment, no strace", map_={**json.loads(MAP2.read_text()), "strace": False})
+check("example config: a map without the file measurement selects every suite, as for any data file", out == "all", (out, err))
+R = R_MAIN
+
 # no map, a broken map, an unknown commit: all
 _, _, head = sel_after(lambda: sub("data.txt", "one", "three"), "data again")
 r = tool("select", "--map", str(T / "none.json"), "--to", head)

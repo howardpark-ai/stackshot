@@ -52,7 +52,8 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
 
 The rules, per changed file F (git diff --name-status -M), the first that applies:
   1. no map, a map of another format, a commit that does not resolve           → all
-  2. F is the harness: .github/, tests/run-suite, pyproject.toml, uv.lock, tests/suitemap.py → all
+  2. F is the harness: .github/, tests/run-suite, pyproject.toml, uv.lock, tests/suitemap.py → all;
+     F is a link of the DATA table (tests/example_base.toml) → all
   3. F = tests/<suite>_scenario.py                                              → that suite
   4. F ends in .lock (a script's lock: the lock step checks every one)          → none;
      F is tests/*_check.py (a manual check, not in CI)                         → none
@@ -63,7 +64,8 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
   6. F is a .py file → the suites that read it whole, the suites that ran the functions its changed lines are in, and
      those that read the names its module-level changes bind (a new file: whoever imports it changed too; one named like a
      module the suites import, which it could shadow → all)
-  7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory
+  7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory;
+     a data file of the DATA table (stackshot.example.toml) is first read by what it holds, not by who touched it: see *The example config*
   A suite the map has no clean measurement for (new since, or `ok: false`) always runs. When the union is every suite: all.
   INNER names the suites that run other suites as their own checks (scratch runs rename, redact, lead and migration to see
   that they leave no folder behind): they pass or fail with them, but the code those inner runs ran is not in the outer
@@ -77,6 +79,22 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
   union of the two, takes the drift since `at` as main's news, and refuses a carry older than its own age limit. `ok` stays
   false, so the selection above still runs the suite on every PR.
 
+The example config (Tue Nov 10th 2026). About 150 of the suites read stackshot.example.toml, and only to make the base of their own temp
+config, so every change to it (11 of the last 30 PRs, a comment among them) ran about 188 of the 196 suites. Now those suites read it through
+the tracked link tests/example_base.toml (-> ../stackshot.example.toml; tests/_instance.py base_toml()), and strace records the path a process
+opens as it was written, so the map tells two kinds of reader apart: a DIRECT reader opens the real path (it parses, greps, copies or patches
+the example config, or runs code that reads it: about 40 suites), a FIXTURE reader opens the link. The DATA table names the file and its link, and
+a change to the file is read by what it does to the parsed data (tomllib, old = the map's commit, new = the target):
+  * the same data (a comment, blank lines, the order of keys)          → the direct readers
+  * keys only ADDED (every old table and setting is still there, equal) → the direct readers (rule A2)
+  * a setting changed or removed, or a table removed                    → the direct readers and the fixture readers
+  * a text that does not parse (old or new)                             → all
+  * the link itself changes (tests/example_base.toml)                   → all (rule 2 above)
+SUITEMAP_EXAMPLE_RULE=A1 (default A2) also sends a key ADDED to the fixture readers, for the day an added key breaks a fixture suite
+(a suite that patches the base with a pattern that must match once, and a new key matches it twice): no code change, set it in tests.yml's
+selection step. Until main's next measured run records the link for the fixture suites, the map lists the real path for every suite that
+opened it, so the old behaviour (every suite that read the file) holds by itself. `audit` applies the same rule on both maps.
+
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
 `shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
@@ -88,7 +106,7 @@ plan, for all six lists alike), and handed to the `measure` matrix as job output
 does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
 is in none or in two, and the run fails.
 """
-import argparse, ast, atexit, collections, datetime, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time
+import argparse, ast, atexit, collections, datetime, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time, tomllib
 
 FORMAT = 1
 TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
@@ -96,6 +114,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
 INNER = {"scratch": ("rename", "redact", "lead", "migration")}   # outer suite -> the suites it runs itself (rule above)
 HARNESS = (".github/", "tests/run-suite", "pyproject.toml", "uv.lock", "tests/suitemap.py")
+# data files the selection reads by what they hold (see *The example config* above): file -> the tracked link the fixture suites read it through.
+# Another data file joins by a line here; a change to a link selects everything (the link is what the fixture readers' map entries name).
+DATA = {"stackshot.example.toml": "tests/example_base.toml"}
+EXAMPLE_RULE = os.environ.get("SUITEMAP_EXAMPLE_RULE", "A2").strip().upper()   # A2 (default): a key added selects the direct readers only; A1: the fixture readers too
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
 TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"
@@ -1087,6 +1109,45 @@ def quiet_import(N, S, path, mod):
     return all(m.path in e.get("py", {}) for e in S.values() if path in e.get("py", {}))
 
 
+def toml_items(text):
+    """(the parsed data, its settings as a set of (dotted path, value as JSON)): every table is (its path, "{}"), every other value its
+    JSON; (None, None) when the text does not parse"""
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError, TypeError):
+        return None, None
+    items = set()
+
+    def walk(node, path):
+        for k, v in node.items():
+            p = f"{path}.{k}" if path else k
+            if isinstance(v, dict):
+                items.add((p, "{}"))
+                walk(v, p)
+            else:
+                items.add((p, json.dumps(v, sort_keys=True, default=str)))
+    walk(data, "")
+    return data, items
+
+
+def data_change(a, b, old, new):
+    """how the data file changed between a and b: 'same' (the parsed data is equal: a comment, blank lines, key order), 'added'
+    (every table and setting of a is in b, equal, and b has more), 'changed' (a setting changed or removed, a table removed, the
+    file added, deleted or renamed), or None (a text that does not parse: the caller selects everything)"""
+    if not (old and new):
+        return "changed"
+    ot, nt = show(a, old), show(b, new)
+    if ot is None or nt is None:
+        return None
+    od, oi = toml_items(ot)
+    nd, ni = toml_items(nt)
+    if oi is None or ni is None:
+        return None
+    if od == nd:
+        return "same"
+    return "added" if oi <= ni else "changed"
+
+
 def selection(m, a, b, pathspec=()):
     """(set of suites or 'all', [(file, reason)]) for the change a..b under map m"""
     if m is None:
@@ -1109,6 +1170,8 @@ def selection(m, a, b, pathspec=()):
         f = new or old
         if any(p.startswith(HARNESS[0]) or p in HARNESS[1:] for p in (old, new) if p):
             return "all", why + [(f, "the harness or the gate itself")]
+        if any(p in DATA.values() for p in (old, new)):
+            return "all", why + [(f, "the link the fixture suites read the example config through: every suite")]
         ms = SUITE_RE.match(f)
         if ms:
             if ms.group(1) in now:
@@ -1164,13 +1227,24 @@ def selection(m, a, b, pathspec=()):
         else:
             if not m.get("strace"):
                 return "all", why + [(f, "the map has no file measurement (no strace)")]
+            probe, note = [p for p in (old, new) if p], ""
+            dp = next((p for p in probe if p in DATA), None)
+            if dp:
+                kind = data_change(a, b, old, new)
+                if kind is None:
+                    return "all", why + [(f, "does not parse, in the old text or the new: every suite")]
+                if kind == "changed" or (kind == "added" and EXAMPLE_RULE == "A1"):
+                    probe.append(DATA[dp])
+                note = {"same": "the same data (a comment or layout only): its direct readers",
+                        "added": "keys added only: its direct readers" + (" and the fixture readers (rule A1)" if EXAMPLE_RULE == "A1" else ""),
+                        "changed": "a setting changed or removed: its direct readers and the fixture readers"}[kind] + "; "
             for s, e in S.items():
-                if any(p in e.get("files", ()) for p in (old, new) if p):
+                if any(p in e.get("files", ()) for p in probe):
                     hit.add(s)
                 if st[0] in "ADR":
                     if any(os.path.dirname(p) in e.get("dirs", ()) for p in (old, new) if p):
                         hit.add(s)
-            why.append((f, f"touched by {len(hit)} suite(s)" if hit else "no suite touches it"))
+            why.append((f, note + (f"touched by {len(hit)} suite(s)" if hit else "no suite touches it")))
         sel |= hit & now
     for outer, inner in INNER.items():
         if outer in now and outer not in sel and sel & set(inner):
