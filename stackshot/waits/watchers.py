@@ -37,7 +37,8 @@ CHASE_KINDS = ("relay", "anchor")          # the waits a chase goes with
 CHASES_MAX = 2                             # this many chases, no arrival: the next end of the wait asks the owner "drop it?"
 DROP_ON_CLOSE = ("chases", "woke", "watch")
 ARRIVED, NOT_YET, DROP, KEEP = "arrived", "not yet, ask again on <date>", "drop", "keep waiting until <date>"      # the buttons; the date is the one the owner gives in the box
-NEEDS_DATE = "needdate"                    # the answer code when "not yet" came with no readable date: nothing is written, the page says so
+NEEDS_DATE = "needdate"                    # what answer_effect says when "not yet" came with no readable date: the answer and the note are kept, the item asks him back with dates (ask_back)
+ASK_AGAIN = "Ask again on "                # the label of an ask-back button; the date follows ("Ask again on Tue Nov 17th")
 _ASK_HEAD = "Decide: "
 _OPT_MARK = " · Options: "
 
@@ -227,6 +228,26 @@ def drop_options() -> list[dict[str, Any]]:
             {"label": KEEP, "line": "Give the date in the box (Mar 9th, or 2099-03-09): the wait goes on and the chases start again.", "recommended": False}]
 
 
+def day_words(day: dt.date) -> str:
+    """A day as a person reads it: "Tue Nov 17th"."""
+    return f"{day:%a %b} {day.day}{'th' if 11 <= day.day % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(day.day % 10, 'th')}"
+
+
+def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list[dict[str, Any]]]:
+    """The question the board puts back when a date button came with a note that holds no date it can read: (ask, options), still the shape of a watcher ask (is_watcher_ask), so the item stays
+    on his move and his next pick is read as before. Three dates counted from `today` (a week, two weeks, a month) as buttons, then the buttons of the first question that are not a date (arrived,
+    drop), so nothing he could do is taken away. The note is quoted short; it is already kept on the item as his comment."""
+    clip = " ".join(str(note or "").replace(" \u00b7 ", " - ").split())
+    clip = clip if len(clip) <= 80 else clip[:79].rstrip() + "…"
+    dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
+    opts = [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": i == 0} for i, d in enumerate(dates)]
+    rest = [o for o in (relay_options() if asked_of(meta) == "relay" else drop_options()) if o["label"] not in (NOT_YET, KEEP)]
+    opts += [{**o, "recommended": False} for o in rest]
+    kept = f"I kept your note (\u201c{clip}\u201d) but could not read a date from it." if clip else "I kept your answer but it holds no date."
+    ask = (f"{_ASK_HEAD}when should {subject_of(meta)} come back? {kept} Pick a day, or write a date in the box{_OPT_MARK}" + " / ".join(o["label"] for o in opts))
+    return ask, opts
+
+
 # ---------------------------------------------------------------------------------------------------------------- the wait that turned (the record of what to put back)
 WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "post_wake_mover", "ask_by", "wake", "after", "party", "needs")
 
@@ -335,8 +356,47 @@ def world_line(gid_shown: str, subject: str, meta: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the owner's answer
-def parse_date(text: Any, today: dt.date | None = None) -> str:
-    """The date the owner gave, as YYYY-MM-DD ("" when none can be read, or it is not after today). Reads 2099-03-09, Mar 9th, Mon Mar 9th, 9 Mar, 9th March, tomorrow, next week, in 3 days, in 2 weeks, a weekday name (the next one, "next Monday" too); a month and day without a year is the next one to come. The instance's own words ([keywords.dates]: a month and a day number
+_NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+_REL_SPAN = re.compile(r"\b(?:in\s+)?(?:(?P<more>another)|(?P<n>\d{1,3}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(?P<mo>\s+more)?)\s+(?P<unit>day|week|fortnight|month)s?\b(?!\s+(?:ago|before|earlier))")
+
+
+def _add_months(day: dt.date, months: int) -> dt.date:
+    """`day` moved by whole months, the day of the month cut to the last day of a shorter month (Jan 31st + 1 month = Feb 28th)."""
+    y, m = divmod(day.year * 12 + day.month - 1 + months, 12)
+    first = dt.date(y, m + 1, 1)
+    nxt = dt.date(y + (m == 11), (m + 1) % 12 + 1, 1)
+    return first.replace(day=min(day.day, (nxt - first).days))
+
+
+def _relative_date(low: str, today: dt.date, base: dt.date | None) -> dt.date | None:
+    """The small table of relative phrases (no model): a span of days, weeks or months ("a week", "one more week", "another week", "two weeks", "in 3 days", "a fortnight", "next month",
+    "a month from now", "in a month"), "the day after tomorrow", "end of the week" (the Friday), "end of next week", "end of the month" (its last day), "after the weekend" (the Monday).
+    A span counts from today; "more" and "another" count from `base` (the date the wait already ends on) when it is after today, else from today. None when no phrase of the table is in the text."""
+    if re.search(r"\bday after tomorrow\b", low):
+        return today + dt.timedelta(days=2)
+    if re.search(r"\bend of next week\b", low):
+        return today + dt.timedelta(days=7 - today.weekday() + 4)
+    if re.search(r"\bend of (?:the |this )?week\b", low):
+        return today + dt.timedelta(days=(4 - today.weekday()) % 7 or 7)      # this week's Friday; on a Friday or after, the next one
+    if re.search(r"\bend of (?:the |this )?month\b", low):
+        last = _add_months(today.replace(day=1), 1) - dt.timedelta(days=1)
+        return last if last > today else _add_months(today.replace(day=1), 2) - dt.timedelta(days=1)
+    if re.search(r"\bafter the weekend\b", low):
+        return today + dt.timedelta(days=7 - today.weekday())
+    if re.search(r"\bnext month\b", low):
+        return _add_months(today, 1)
+    m = _REL_SPAN.search(low)
+    if not m:
+        return None
+    n = 1 if m["more"] else (int(m["n"]) if m["n"].isdigit() else _NUM_WORDS[m["n"]])
+    start = base if (m["more"] or m["mo"]) and base and base > today else today
+    if m["unit"] == "month":
+        return _add_months(start, n)
+    return start + dt.timedelta(days=n * {"day": 1, "week": 7, "fortnight": 14}[m["unit"]])
+
+
+def parse_date(text: Any, today: dt.date | None = None, base: dt.date | None = None) -> str:
+    """The date the owner gave, as YYYY-MM-DD ("" when none can be read, or it is not after today). Reads 2099-03-09, Mar 9th, Mon Mar 9th, 9 Mar, 9th March, tomorrow, next week, in 3 days, in 2 weeks, a weekday name (the next one, "next Monday" too); a month and day without a year is the next one to come. The small table of relative phrases (_relative_date: one more week, a week, two weeks, next month, a month, end of the week or month, after the weekend, the day after tomorrow) reads too; `base` is the date a wait already ends on, which "one more week" counts from. The instance's own words ([keywords.dates]: a month and a day number
     followed by month_suffix and day_suffix, a day number alone, N days or weeks later, tomorrow, the day after tomorrow, next week) read the same."""
     today = today or dt.date.today()
     t = str(text or "")
@@ -390,6 +450,8 @@ def parse_date(text: Any, today: dt.date | None = None) -> str:
                     break
                 y, mo = (y + 1, 1) if mo == 12 else (y, mo + 1)
     if best is None:
+        best = _relative_date(low, today, base)
+    if best is None:
         units = "|".join(x for x in (dy_s, wk_s) if x)
         m = re.search(r"\bin\s+(\d{1,3})\s+(day|week)s?\b", low) or (re.search(rf"(\d{{1,3}})\s*({units})\s*(?:{lat_s})", t, re.I) if units and lat_s else None)
         if m:
@@ -409,9 +471,21 @@ def parse_date(text: Any, today: dt.date | None = None) -> str:
     return best.isoformat() if best is not None and best > today else ""
 
 
+def _wait_end(meta: dict[str, Any]) -> dt.date | None:
+    """The date the wait ended on before it turned to him (its ask-by, else its wake), the date "one more week" counts from. None when it had none or it cannot be read."""
+    w = meta.get("watch")
+    was = w.get("was") if isinstance(w, dict) and isinstance(w.get("was"), dict) else {}
+    for k in ("ask_by", "wake"):
+        try:
+            return dt.date.fromisoformat(str(was.get(k) or "")[:10])
+        except ValueError:
+            continue
+    return None
+
+
 def answer_effect(meta: dict[str, Any], choice: str, text: str, today: dt.date | None = None) -> dict[str, str]:
     """What the owner's pick on a watcher ask does: {"do": arrived | wait | drop | words | needdate | "", "date": the new end date for a wait}. "" = the pick is not one of this ask's buttons.
-    arrived (relay ask's button) → the item goes to its post-wake mover; wait (not yet, or keep waiting) with the date he gave; drop → close as not planned; needdate = a wait button with no date;
+    arrived (relay ask's button) → the item goes to its post-wake mover; wait (not yet, or keep waiting) with the date he gave; drop → close as not planned; needdate = a date button with no date it can read (the answer and the note are kept, the item asks him back: ask_back);
     words = an answer in the box with no button: it is never read as arrived or as drop, the item goes to its post-wake mover with his words and the record of the wait, and the mover judges."""
     asked = asked_of(meta)
     if not asked:
@@ -424,7 +498,10 @@ def answer_effect(meta: dict[str, Any], choice: str, text: str, today: dt.date |
     if c == DROP:
         return {"do": "drop"}
     if (asked == "relay" and c == NOT_YET) or (asked == "dropit" and c == KEEP):
-        date = parse_date(text, today)
+        date = parse_date(text, today, _wait_end(meta))
+        return {"do": "wait", "date": date} if date else {"do": NEEDS_DATE}
+    if c.startswith(ASK_AGAIN):      # a button of the question put back (ask_back): the day on the button, unless he wrote a date in the box
+        date = parse_date(text, today, _wait_end(meta)) or parse_date(c[len(ASK_AGAIN):], today)
         return {"do": "wait", "date": date} if date else {"do": NEEDS_DATE}
     return {"do": ""}
 
