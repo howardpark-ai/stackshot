@@ -1137,8 +1137,9 @@ def _held_by(item: dict[str, Any], was: dict[str, Any] | None = None) -> tuple[s
             mod = _model_of({**src, "gid": src.get("gid") or src.get("id") or ""})
             if mod.state == _model.ALIVE:
                 cands = [(mod.mover, "mover"), (mod.then, "then")]
-            elif mod.wait:      # a waiting item: the post-wake mover when the writer named one, else the stored mover / `then` (it relays), else the model's default for who takes it after the wait
-                cands = [(_model.norm_who(meta.get("post_wake_mover")), "then"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.post_wake_mover, "then")]
+            elif mod.wait:      # a waiting item: the post-wake mover when the writer named one, else the stored mover / `then` (it relays), else the model's default for who takes it after the wait.
+                # The order is the one the hand-over writers (_hand_stored_then, _decision_hand_over, _release_after) still use: they hand to the stored `then`, so the reader must find the same session.
+                cands = [(_model.norm_who(meta.get("post_wake_mover")), "then"), (_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then"), (mod.wait.mover, "then")]
     except Exception:  # noqa: BLE001  — a notice's addressee is never worth failing a write over
         cands = []
     cands += [(_model.norm_who(meta.get("mover")), "mover"), (_model.norm_who(meta.get("then")), "then")]      # a stored mover or `then` still holds an item that waits on someone outside (it relays; it is told when the wait ends)
@@ -1166,7 +1167,7 @@ def _then_label(item: dict[str, Any]) -> str:
     """The item's `then` (stored, else the model's) as a session label; "" when it has none or it is the owner."""
     try:
         mod = _model_of({**item, "gid": item.get("gid") or item.get("id") or ""})
-        who = mod.then if mod.state == _model.ALIVE else (mod.wait.post_wake_mover if mod.wait else "")
+        who = mod.then if mod.state == _model.ALIVE else ((mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else "")
     except Exception:  # noqa: BLE001
         who = _model.norm_who((item.get("metadata") or {}).get("then"))
     return "" if (not who or _model.is_owner(who)) else (_session_label(who) or who)
@@ -5167,7 +5168,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
         mod = _model_of({**it, "gid": gid})
         if mod.state != _model.WAITING or mod.wait is None:
             raise _WatchStuck(f"{gid} reads as {mod.state}, not as a wait")
-        post = mod.wait.post_wake_mover or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or ""))      # a fallback is never a front agent when the project has a builder
+        post = mod.wait.mover or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or ""))      # a fallback is never a front agent when the project has a builder
         until = _watch.backstop_epoch(meta)
         date = (dt.datetime.fromtimestamp(until, ZONE).strftime("%Y-%m-%d") if until else "")
         url = str(meta.get("wait_anchor") or "")
@@ -5194,11 +5195,11 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
             ask = _watch.drop_ask(meta) if chased else _watch.relay_ask(meta)
             opts = _watch.drop_options() if chased else _watch.relay_options()
             _watch.remember(meta, asked, now)
-            _watch.turn_to_owner(meta, "" if _model.is_owner(post) else post, ask, opts, what if chased else f"{_watch.subject_of(meta)} is due: its ask-by day {meta.get('ask_by')} came", now)
+            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if chased else f"{_watch.subject_of(meta)} is due: its ask-by day {meta.get('ask_by')} came", now)
             mover = OWNER
         elif _model.is_owner(post):
             ask, opts = _watch_ask(gid, meta, what)
-            _watch.turn_to_owner(meta, "", ask, opts, what, now)
+            _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
         else:
             _watch.turn_alive(meta, post, what, now)
@@ -5737,7 +5738,7 @@ def _machine_anchor_poll(now: float, skip: set[tuple[str, str]]) -> list[str]:
                     continue
                 who, _alive = _item_mover_model(it)
                 sid = _session_id(_holder(it))
-                if _model.is_owner(who) or _model.is_owner(_model.norm_who(meta.get("post_wake_mover"))) or not sid:
+                if _model.is_owner(who) or not sid:
                     continue                  # the owner moves it now (alive) or takes it when its wait ends (waiting): an agent-facing notice never stands in for his queue
                 own = _evw_spec(meta.get("wait_event")) if _watch.stored_kind(meta) == "event" else None
                 steps = [_steps.first_line(s["text"])[:140] for s in _steps.view(meta, keeper=str(meta.get("owner") or "")) if s["status"] == _steps.OPEN]
@@ -5895,13 +5896,13 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     what = _watch.subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})
     do = eff["do"]
     if do == "arrived":
-        was_post = str((w.get("was") or {}).get("post_wake_mover") or "")
+        was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))      # a fallback is never a front agent when the project has a builder; he is the one answering: a post-wake mover that is he falls back to the project's builder, else its -main agent
         _watch.turn_alive(meta, post, f"{OWNER} says {what} arrived", now)
         meta.pop("chases", None)
         return f"arrived → {_watch_label(post)}"
     if do == "words":     # his words with no button: never an arrival or a drop; the post-wake mover has the item, the wait's record (watch.was) and his words, and judges
-        was_post = str((w.get("was") or {}).get("post_wake_mover") or "")
+        was_post = str((w.get("was") or {}).get("post_wake_mover") or (w.get("was") or {}).get("mover") or "")
         post = str(meta.get("then") or ("" if _model.is_owner(was_post) else was_post) or _auto_mover(_fallback_mover(str(meta.get("project") or "")), str(meta.get("project") or "")))
         keep = w.get("was")
         _watch.turn_alive(meta, post, f'{OWNER} answered in words: "{_clip_line(eff.get("text") or "", 300)}"', now)
@@ -5910,8 +5911,8 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
             meta["watch"] = {**(meta.get("watch") if isinstance(meta.get("watch"), dict) else {}), "was": keep}
         return f"answered in words → {_watch_label(post)}"
     if do == "wait":
+        meta.pop("then", None); meta.pop("woke", None); meta.pop("mover", None)      # before the restore: the wait's own mover (who picks it up) comes back with it and stays
         _watch.restore_wait(meta, eff["date"], reset_chases=True, now=now)      # a moved date is a new round: the backstop and the chases start over
-        meta.pop("then", None); meta.pop("woke", None); meta.pop("mover", None)
         return f"waits again until {eff['date']}"
     if do == "drop":
         item["metadata"] = meta
@@ -7873,7 +7874,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             return no("not an open item the mover moves")
         mod = _model_of(item)
         alive = mod.state == _model.ALIVE
-        mover = mod.mover if alive else (mod.wait.post_wake_mover if mod.wait else "")
+        mover = mod.mover if alive else (mod.wait.mover if mod.wait else "")
         if not mover or _model.is_owner(mover):
             return no(f"{OWNER} moves it")
         if _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok):
@@ -8150,14 +8151,14 @@ def _model_report_line() -> str:
 
 def _mover_lines(item: dict[str, Any]) -> list[str]:
     """What get and a write's reply lead with: `mover:` (who moves an alive item now, as the model reads it: the stored mover, else the default) and `then:` (who takes it after
-    the answer or step; for a waiting item, who takes it when the wait ends). A waiting item has no mover until it ends; a closed one none at all. [] when the reading fails: a get never fails over it."""
+    the answer or step; it stands only beside the owner). A waiting item shows who picks it up when the wait ends as its mover, and `then:` only when he is that one; a closed one has none at all. [] when the reading fails: a get never fails over it."""
     try:
         mod = _model_of(item)
         who = lambda w: _session_label(w) if w and not _model.is_owner(w) else (w or "no one")
         if mod.state == _model.ALIVE:
             return [f"mover: {who(mod.mover)}" + ("" if mod.mover_explicit else " (derived)")] + ([f"then: {who(mod.then)}" + ("" if mod.then_explicit else " (derived)")] if mod.then else [])
         if mod.state == _model.WAITING and mod.wait:
-            return ["mover: no one while it waits", f"then: {who(mod.wait.post_wake_mover)} (when the wait ends)"]
+            return [f"mover: {who(mod.wait.mover)} (picks it up when the wait ends)"] + ([f"then: {who(mod.then)}"] if mod.then else [])
     except Exception as e:  # noqa: BLE001
         print(f"model: {item.get('gid') or item.get('id')} mover not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return []
@@ -14307,7 +14308,7 @@ def _then_label_raw(item: dict[str, Any]) -> str:
     """The session id or name an alive item's `then` (stored, else the model's) or a waiting item's post-wake mover names; "" for none or the owner."""
     try:
         mod = _model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
-        who = mod.then if mod.state == _model.ALIVE else (mod.wait.post_wake_mover if mod.wait else "")
+        who = mod.then if mod.state == _model.ALIVE else ((mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else "")      # a waiting item's picker takes the role `then` (or, when he picks it up, the `then` beside him)
     except Exception:  # noqa: BLE001
         who = ""
     return "" if (not who or _model.is_owner(who)) else who
@@ -14318,7 +14319,7 @@ def _item_mover_model(item: dict[str, Any]) -> tuple[str, bool]:
     try:
         mod = _model_of(dict(item, gid=str(item.get("gid") or item.get("id") or "")))
         alive = mod.state == _model.ALIVE
-        return (mod.mover if alive else (mod.wait.post_wake_mover if mod.wait else "")), alive
+        return (mod.mover if alive else (mod.wait.mover if mod.wait else "")), alive
     except Exception:  # noqa: BLE001
         return "", False
 
@@ -16563,8 +16564,8 @@ def _hand_stored_then(gid: str, item: dict[str, Any], meta: dict[str, Any]) -> b
     """A wait just ended on `meta` (the old wake pass, the release of an `after` link). A `then` stored on the item was waiting for the owner's move, so it takes the item only when that is what
     the item was: the stored mover is he or absent, no session is named in needs, and with a stored mover he dropped the item reads alive and not his (no decision in needs, no your-call or
     your-step, no other wait). An item whose stored mover or needs already name an agent is left alone (an agent-set `then` must not take an item from the agent working it), and so is a `then`
-    that is not a live session (_then_live: free text, a retired or unknown name). A `then` left over when this declines is dropped where it reads as a conflict ("then=X while X, not the owner,
-    is the mover"): when it already is the stored mover or is named in needs, or is not a live session; in any other case (the item still reads as waiting or his) it stays.
+    that is not a live session (_then_live: free text, a retired or unknown name). A `then` left over when this declines is dropped where it follows nobody (the model reads a `then` only while the owner is the mover, so it
+    would only sit unread): when it already is the stored mover or is named in needs, or is not a live session; in any other case (the item still reads as waiting or his) it stays.
     Then: the stored mover he goes, mover = `then` named first in needs (_hand_to_mover), and the notice the release sends (_notice_to reads needs) reaches it. → True when handed."""
     then = _model.norm_who(meta.get("then"))
     if not then or _model.is_owner(then):
@@ -16598,7 +16599,7 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
       a hold with a wake (and no `external`, no open `after`, no wait already stored): a time wait, wait_kind=time and post_wake_mover=`then` (watch.set_at stamped, as an update does), `then` cleared,
         so the watcher's wake hands the item to it; `update clear_hold=true` drops that wait with the hold. With `[model] watchers = false` no time wait is stored: the park stays as it was, `then`
         with it, and the old wake pass hands the item to it when the hold ends (_hand_stored_then);
-      `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would read as a conflict); the wait's own
+      `external` in needs, a hold with no wake, any other shape: `then` is dropped (nothing reads it when such a wait ends, and a stale one would sit on the item unread); the wait's own
         mover (the first session in needs, else the project's builder or -main agent) takes it when it ends. A wait already stored as a watcher's keeps its own post-wake mover.
     Without this a stored mover=the owner stayed on an item whose state had become doing: "model conflict: mover=the owner on an item whose state is doing", and needs read as the keeper. → who the item was handed to now ("" when to nobody): it is told it is the mover."""
     then = "" if _model.is_owner(then_in) else then_in

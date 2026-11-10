@@ -120,7 +120,7 @@ def mover_of(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any] |
     """Who moves the item now, as a name: the model's mover while it is alive, the post-wake mover while it waits (a held item's session), the stored mover or the project's fallback otherwise."""
     try:
         mod = _model.derive(item, None, after_open)
-        who = mod.mover if mod.state == _model.ALIVE else (mod.wait.post_wake_mover if mod.wait else "")
+        who = mod.mover if mod.state == _model.ALIVE else (mod.wait.mover if mod.wait else "")
     except Exception:  # noqa: BLE001
         who = ""
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}

@@ -11,13 +11,13 @@ This module is the data layer of that model, additive to today's fields: it read
 optional and all in the item's metadata:
 
   goal              the end-state in one sentence (shown by get and the brief; not used to derive anything)
-  mover             who moves an alive item now: the owner, a session name, or the project's background agent
-  then              who takes an alive item after the owner's answer or step (only meaningful while the owner is the mover)
+  mover             who moves an alive item now: the owner, a session name, or the project's background agent; on a waiting item, who picks it up when the wait ends
+  then              who takes an item after the owner's answer or step: it stands only while the owner is the mover (an alive item he moves, or a waiting one he picks up), whatever is stored
   wait_kind         time | anchor | item | relay | event, what an item waits on
   wait_anchor       the anchor (URL) an anchor wait watches
   wait_event        the event expected: of the anchor (anchor wait), the party or event the owner relays (relay wait), or the fleet event an event wait watches for (event_waits.py)
   ask_by            YYYY-MM-DD, the day a relay wait turns into a question to the owner
-  post_wake_mover   who moves the item when the wait ends
+  post_wake_mover   the old name of a waiting item's `mover`; while it is stored (not yet moved into `mover`) it wins over a stored `mover`
   (the wait's other inputs are fields an item already had: wake for a time, after for an item; for an anchor or an item wait a wake is its backstop)
   phase             alive | waiting, what the board SHOWS the open item as, written by every save of an open item (server._phase_stamp, the one place) and kept true as the clock moves by the
                     minute set's phase sweep (server._phase_sweep: a dated wait's wake coming within the hour, local midnight (instance timezone), an `after` item closing). The readers (view) take the alive-or-waiting
@@ -76,6 +76,12 @@ def norm_who(who: Any) -> str:
     return owner_display() if is_owner(w) else w
 
 
+def pick_who(who: Any) -> str:
+    """A stored mover read as the one who picks a waiting item up: like norm_who, but the literal word none (an old way of writing "no one") names nobody."""
+    w = norm_who(who)
+    return "" if w.lower() == "none" else w
+
+
 @dataclass(frozen=True)
 class Wait:
     """What a waiting item waits on. `kind` is the stored wait_kind or the one the item's fields read as; `until` is the date the wait is read to end (a wake, a verifying
@@ -88,20 +94,29 @@ class Wait:
     anchor: str = ""
     event: str = ""
     after: tuple[str, ...] = ()
-    post_wake_mover: str = ""
-    post_explicit: bool = False
+    mover: str = ""            # who picks the item up when the wait ends (Model.picker): the stored post_wake_mover (the old name) if any, else the stored mover, else the default
+    mover_explicit: bool = False
     due: bool = False
     basis: str = ""            # a time wait's reason: a real outside date (wait_basis text) …
     owner_words: bool = False  # … or the owner's recorded words (cap_ok)
+
+    @property
+    def post_wake_mover(self) -> str:
+        """The old name of `mover` (who picks the item up when the wait ends); readers move to `mover`."""
+        return self.mover
+
+    @property
+    def post_explicit(self) -> bool:
+        return self.mover_explicit
 
 
 @dataclass(frozen=True)
 class Model:
     """The item as the model reads it. `state` is dead | alive | waiting; `today` is today's state word it came from ("" for a closed item), `today_derived` whether
     that word was derived (no stored state). For an alive item `mover` is who moves it (`mover_explicit`: stored, False = defaulted), `then` who takes it after the
-    owner's answer or step (only while the owner is the mover; `then_explicit` likewise) and `checkback` the wake that stands on it (the mover's own check-back: the item
-    stays alive). For a waiting item `wait` says what it waits on and who moves it then. `conflicts` lists what the fields say that cannot both stand (a mover on a waiting
-    item, wait fields on an alive one); the model still answers, the guards of the write path refuse them later."""
+    owner's answer or step (only while the owner is the mover, or picks the waiting item up; `then_explicit` likewise) and `checkback` the wake that stands on it (the mover's own check-back: the item
+    stays alive). For a waiting item `wait` says what it waits on and who picks it up when it ends (`wait.mover`, also `Model.picker`; `mover` itself stays empty while it waits). `conflicts` lists what the fields say that cannot both stand (two different
+    pickers stored on a waiting item, wait fields on an alive one); the model still answers, the guards of the write path refuse them later."""
     state: str
     today: str = ""
     today_derived: bool = False
@@ -118,11 +133,16 @@ class Model:
         return self.state == ALIVE and is_owner(self.mover)
 
     @property
-    def next_mover(self) -> str:
-        """Who takes the item after this step: the post-wake mover of a wait, `then` while the owner moves it, else the mover itself."""
+    def picker(self) -> str:
+        """Who takes the item after this step: on a waiting item the one who picks it up when the wait ends (the stored post_wake_mover, else the stored mover, else the default),
+        `then` while the owner moves an alive one, else the mover itself. `mover` stays empty while an item waits: it is who moves it NOW."""
         if self.state == WAITING and self.wait:
-            return self.wait.post_wake_mover
+            return self.wait.mover
         return self.then if self.owner_moves and self.then else self.mover
+
+    @property
+    def next_mover(self) -> str:
+        return self.picker
 
 
 def _first(m: dict[str, Any], key: str) -> str:
@@ -154,7 +174,8 @@ def owner_state(m: dict[str, Any], today: str) -> bool:
 def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[dict[str, Any]], Any] | None = None) -> dict[str, str] | None:
     """Does a STORED mover disagree with the state the item stands in on the owner's side? → None when nothing is to change, else {"mover", "then"}: the values to store ("" drops the field).
       in his state (your-call, your-step, needs decision), an agent stored as mover  → he is the mover; `then` stays if stored (an agent), else the agent that was mover
-      the wait on him is over (alive in an agent's state, or waiting), he stored as mover → an agent in `then` is the mover again and `then` goes, as _answer's Done does it (alive); else only the mover goes. A waiting item loses only its mover: its `then` (the post-wake mover) is never touched
+      the wait on him is over (alive in an agent's state), he stored as mover → an agent in `then` is the mover again and `then` goes, as _answer's Done does it; else only the mover goes
+      a wait replaces his state (waiting), he stored as mover → the agent in `then` is the one who picks it up (mover := then, `then` goes) when no post_wake_mover is stored; with one stored, or no agent in `then`, only the mover goes
     The way back only happens for an item that stood in his state (`was_his`: the caller knows it from the version before the write, or, for the migration, from his hand-off record or
     an answer of his on the item): a mover=the owner that a writer stored on an agent's state with no such history is a conflict the model flags, not a hand-back.
     A closed item and an item with no stored mover settle nothing; an unnamed mover is the model's own default and needs no storing."""
@@ -175,7 +196,9 @@ def settle(item: dict[str, Any], was_his: bool = False, after_open: Callable[[di
         if then_s and not is_owner(then_s):
             return {"mover": then_s, "then": ""}       # the hand-back, as _answer's Done does it: the agent becomes the mover and `then` goes (it would read as a conflict beside an agent mover)
         return {"mover": ""}                           # no agent in then: only the mover goes, a stored then is left as it is
-    return {"mover": ""}                               # a wait replaces his state: only the live mover goes; `then` (a waiting item's post-wake mover, maybe he) stays exactly as stored
+    if then_s and not is_owner(then_s) and not norm_who(m.get("post_wake_mover")):
+        return {"mover": then_s, "then": ""}           # a wait replaces his state: the agent he named to take it picks it up when the wait ends (when no post_wake_mover is stored to say otherwise)
+    return {"mover": ""}                               # only the stale live mover goes; a stored post_wake_mover or then stays exactly as stored
 
 
 def stood_his(item: dict[str, Any] | None, after_open: Callable[[dict[str, Any]], Any] | None = None) -> bool:
@@ -222,16 +245,11 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
         if mover_s and (h_state or today == "doing") and is_owner(mover_s) != h_state:      # a stored mover against the state it stands in
             whose = f"{owner_display()}'s" if h_state else "an agent's"
             conflicts.append(f"mover={mover_s} on an item whose state is {today}, which is {whose} move")
-        then = ""
-        if is_owner(mover):
-            then = then_s or then_d
-        elif then_s:
-            then = then_s
-            conflicts.append(f"then={then_s} while {mover or 'no one'}, not {owner_display()}, is the mover: then follows {owner_display()}'s answer")
+        then = (then_s or then_d) if is_owner(mover) else ""         # `then` stands only while the owner is the mover; beside an agent mover a stored one is not read
         stray = [k for k in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover") if _first(m, k)]
         if stray:
             conflicts.append(f"{', '.join(stray)} stored on an alive item, which waits on nothing")
-        return Model(ALIVE, today, derived, mover, bool(mover_s), then, bool(then_s), clean(m.get("wake")), None, tuple(conflicts))
+        return Model(ALIVE, today, derived, mover, bool(mover_s), then, bool(then_s) and bool(then), clean(m.get("wake")), None, tuple(conflicts))
     # waiting
     if kind_set:
         kind, explicit = kind_set, True
@@ -258,18 +276,20 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
         backstop = wake
         if kind == "item":
             due = not (after_open(item) if after_open else _wt.after_of(m)) and bool(_wt.after_of(m))
-    mover_s = norm_who(m.get("mover"))
-    if mover_s:
-        conflicts.append(f"mover={mover_s} stored on a waiting item: the wait's post_wake_mover moves it, not a mover")
     mv_d, _ = _defaults(m, today)
-    post_s = norm_who(m.get("post_wake_mover"))
+    mover_s, post_s = pick_who(m.get("mover")), norm_who(m.get("post_wake_mover"))
+    if mover_s and post_s and mover_s != post_s:
+        conflicts.append(f"mover={mover_s} and post_wake_mover={post_s} are both stored on a waiting item and differ: post_wake_mover picks it up when the wait ends, until it is moved into mover")
+    picker_s = post_s or mover_s        # a stored post_wake_mover (the old name, not yet moved) wins; a mover alone is the picker
     post_d = owner_display() if kind == "relay" else mv_d       # a relay's ask-by day turns the item to him (section 4); the rest the section 3 chain
+    picker = picker_s or post_d
+    then_s = norm_who(m.get("then")) if is_owner(picker) else ""         # `then` stands only while he is the one who picks the item up
     wait = Wait(kind=kind, kind_explicit=explicit, until=until, backstop=backstop,
                 anchor=_first(m, "wait_anchor") if kind == "anchor" else "",
                 event=(_first(m, "wait_event") or (clean(m.get("party")) if today == "outside" else "")) if kind in ("anchor", "relay") else (_first(m, "wait_event") if kind == "event" else ""),
-                after=tuple(_wt.after_of(m)) if kind == "item" else (), post_wake_mover=post_s or post_d, post_explicit=bool(post_s), due=due,
+                after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), due=due,
                 basis=_wt.basis_of(m) if kind == "time" else "", owner_words=bool(kind == "time" and wake and isinstance(m.get("cap_ok"), dict) and m["cap_ok"].get("wake") == wake))
-    return Model(WAITING, today, derived, "", False, "", False, "", wait, tuple(conflicts))
+    return Model(WAITING, today, derived, "", False, then_s, bool(then_s), "", wait, tuple(conflicts))
 
 
 def view(item: dict[str, Any], mod: Model, now: float | None = None, after_open: Callable[[dict[str, Any]], Any] | None = None, check: bool = True) -> Model:
@@ -311,20 +331,22 @@ def _alive_of(item: dict[str, Any], mod: Model) -> Model:
     mv_d, then_d = _defaults(m, mod.today)
     mover_s, then_s = norm_who(m.get("mover")), norm_who(m.get("then"))
     mover = mover_s or mv_d
-    then = (then_s or then_d) if is_owner(mover) else then_s
-    return Model(ALIVE, mod.today, mod.today_derived, mover, bool(mover_s), then, bool(then_s), clean(m.get("wake")), None, mod.conflicts)
+    then = (then_s or then_d) if is_owner(mover) else ""
+    return Model(ALIVE, mod.today, mod.today_derived, mover, bool(mover_s), then, bool(then_s) and bool(then), clean(m.get("wake")), None, mod.conflicts)
 
 
 def _wait_of(item: dict[str, Any], mod: Model, kind: str) -> Model:
     """A waiting reading of the stored kind for an item the fields read as alive and not as a view-only wait (a stored wait the clock has outdated since the last restamp): the wake it stands on, and the mover as the post-wake mover."""
     m = item.get("metadata") or {}
     wake = clean(m.get("wake"))
-    post_s = norm_who(m.get("post_wake_mover"))
+    picker_s = norm_who(m.get("post_wake_mover")) or pick_who(m.get("mover"))
+    picker = picker_s or mod.mover
     wait = Wait(kind=kind, kind_explicit=False, until=wake if kind == "time" else "", backstop=wake if kind != "time" else "",
                 anchor=_first(m, "wait_anchor") if kind == "anchor" else "", event=_first(m, "wait_event") if kind in ("anchor", "relay", "event") else "",
-                after=tuple(_wt.after_of(m)) if kind == "item" else (), post_wake_mover=post_s or mod.mover, post_explicit=bool(post_s), due=False,
+                after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), due=False,
                 basis=_wt.basis_of(m) if kind == "time" else "")
-    return Model(WAITING, mod.today, mod.today_derived, "", False, "", False, "", wait, mod.conflicts)
+    then = mod.then if is_owner(picker) else ""
+    return Model(WAITING, mod.today, mod.today_derived, "", False, then, mod.then_explicit and bool(then), "", wait, mod.conflicts)
 
 
 def _shown(item: dict[str, Any], mod: Model, now: float | None, after_open: Callable[[dict[str, Any]], Any] | None) -> Model:
@@ -337,8 +359,8 @@ def _shown(item: dict[str, Any], mod: Model, now: float | None, after_open: Call
         return mod
     ep, basis = dw.until, _dw.basis(dw)
     until = dt.datetime.fromtimestamp(ep, _wt._cfg.tz()).strftime("%Y-%m-%dT%H:%M")
-    wait = Wait(kind="time", kind_explicit=False, until=until, post_wake_mover=mod.mover, post_explicit=mod.mover_explicit, due=False, basis=basis)
-    return Model(WAITING, "doing", mod.today_derived, "", False, "", False, "", wait, mod.conflicts)
+    wait = Wait(kind="time", kind_explicit=False, until=until, mover=mod.mover, mover_explicit=mod.mover_explicit, due=False, basis=basis)
+    return Model(WAITING, "doing", mod.today_derived, "", False, mod.then, mod.then_explicit, "", wait, mod.conflicts)
 
 
 # ---------------------------------------------------------------------------------------------------------------- the stored pair
@@ -375,18 +397,19 @@ def stamp_values(item: dict[str, Any], shown: Model) -> tuple[str, str]:
 
 
 def derived_fields(mod: Model) -> list[str]:
-    """The model fields the item does not store and the model filled in: what a session sets to say it itself (mover, then, wait_kind, post_wake_mover)."""
+    """The model fields the item does not store and the model filled in: what a session sets to say it itself (mover, then, wait_kind)."""
     if mod.state == ALIVE:
         return [k for k, v, e in (("mover", mod.mover, mod.mover_explicit), ("then", mod.then, mod.then_explicit)) if v and not e]
     if mod.state == WAITING and mod.wait:
-        return [k for k, e in (("wait_kind", mod.wait.kind_explicit), ("post_wake_mover", mod.wait.post_explicit)) if not e]
+        return [k for k, e in (("wait_kind", mod.wait.kind_explicit), ("post_wake_mover", mod.wait.mover_explicit)) if not e]
     return []
 
 
 def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], str] = str, derived: bool = True) -> str:
     """The model as one plain line for get and the brief:
       model: alive · mover the owner (then my-x)
-      model: waiting on a time (wake 2099-03-02) · then my-x
+      model: waiting on a time (wake 2099-03-02) · mover my-x
+      model: waiting on a time (wake 2099-03-02) · mover the owner (then my-x)
     `label` shows a session reference as people read it, `shown` an item id. A trailing `derived: mover, then` names what the item does not store (derived=False leaves it off: the brief)."""
     who = lambda w: label(w) if w and not is_owner(w) else (w or "no one")
     d = derived_fields(mod) if derived else []
@@ -413,7 +436,7 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     else:
         bits = [x for x in (w.event, f"ask by {w.until}" if w.until else "no ask-by date") if x]
         what = f"news only {owner_display()} relays ({'; '.join(bits)})"
-    return f"model: waiting on {what} · then {who(w.post_wake_mover)}" + tail
+    return f"model: waiting on {what} · mover {who(w.mover)}" + (f" (then {who(mod.then)})" if mod.then else "") + tail
 
 
 def check_fields(values: dict[str, Any]) -> list[str]:

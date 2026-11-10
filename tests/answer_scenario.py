@@ -836,8 +836,8 @@ check("the wake pass hands a stored then (an old hold whose wake has come): home
 check("the board item's shape (hold due, mover Oliver, then home-agent, no needs): the wake pass hands it to home-agent: the Oliver mover goes, mover and needs home-agent, then cleared, no conflict, home-agent told",
       b(68).state == "alive" and b(68).mover == "home-agent" and not b(68).conflicts and rd("a", 68)["metadata"].get("mover") == "home-agent" and rd("a", 68)["metadata"].get("needs") == [AGENT]
       and "then" not in rd("a", 68)["metadata"] and any("a68" in t[0] and t[1] == AGENT for t in told), (rd("a", 68)["metadata"], b(68), told))
-check("an agent mover with an agent then (hold due): left alone, mover and then stay, today's conflict note stands",
-      rd("a", 71)["metadata"].get("mover") == "home-keeper" and rd("a", 71)["metadata"].get("then") == "home-agent" and "needs" not in rd("a", 71)["metadata"] and b(71).conflicts, (rd("a", 71)["metadata"], b(71)))
+check("an agent mover with an agent then (hold due): left alone, mover and then stay stored; the model reads no then beside an agent mover and notes no conflict",
+      rd("a", 71)["metadata"].get("mover") == "home-keeper" and rd("a", 71)["metadata"].get("then") == "home-agent" and "needs" not in rd("a", 71)["metadata"] and not b(71).conflicts and b(71).then == "", (rd("a", 71)["metadata"], b(71)))
 check("a then that is no session (free text), hold due: not handed, mover Oliver unchanged, the stale then is dropped (D2)",
       rd("a", 72)["metadata"].get("mover") == "Oliver" and "needs" not in rd("a", 72)["metadata"] and "then" not in rd("a", 72)["metadata"], rd("a", 72)["metadata"])
 check("a session already in needs (hold due, then home-agent): left alone, needs unchanged, then stays",

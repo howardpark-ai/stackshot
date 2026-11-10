@@ -228,7 +228,7 @@ def drop_options() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the wait that turned (the record of what to put back)
-WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "post_wake_mover", "ask_by", "wake", "after", "party", "needs")
+WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "after", "party", "needs")
 
 
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:

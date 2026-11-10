@@ -93,16 +93,16 @@ item(18, "[home] just confirmed, in its state three days", age=3 * D, needs=["ho
 # ---- Waiting ----
 item(20, "[home] parked on his words", age=1 * D, hold=True, wake=day(3), cap_ok={"wake": day(3), "quote": "park it until Friday", "source": "board", "by": "Oliver"}, next="team-back: pick it up after")
 item(21, "[home] blocked on another", age=1 * D, after=["a10"], next="team-back: continue once a10 is done")
-item(22, "[home] anchor wait", age=1 * D, needs=["external"], wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the PR merges", post_wake_mover="team-back", wake=day(9), next="team-back: deploy it")
-item(23, "[home] party relay", age=2 * D, needs=["external"], wait_kind="relay", wait_event="Acme's reply", ask_by=day(5), post_wake_mover="team-back",
+item(22, "[home] anchor wait", age=1 * D, needs=["external"], wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the PR merges", mover="team-back", wake=day(9), next="team-back: deploy it")
+item(23, "[home] party relay", age=2 * D, needs=["external"], wait_kind="relay", wait_event="Acme's reply", ask_by=day(5), mover="team-back",
      chases=[{"at": now - D, "by": "team-back", "note": "mailed"}, {"at": now - 12 * H, "by": "team-back", "note": "mailed again"}], next="Oliver: nothing yet")
 item(24, "[home] basis wait", age=2 * D, hold=True, wake=day(1), wait_basis={"text": "the vendor ships on " + day(2), "wake": day(1), "by": "team-back", "at": now - D}, next="team-back: review the release")
 item(25, "[home] verifying", age=2 * D, state="verifying", proof="the dashboard shows green", end=day(2), needs=["team-back"], next="team-back: check the dashboard")
 item(26, "[home] a wait with no date", age=4 * D, hold=True, next="team-back: someone must look")
 # a Waiting row of each wait kind, with and without a watcher and a then-mover; an anchor wait whose anchor is only scoped to the item (anchors.json, no wait_anchor), and one with none at all
-item(28, "[home] anchor wait, no anchor recorded", age=1 * D, needs=["external"], wait_kind="anchor", wait_event="the vendor answers", post_wake_mover="team-back", wake=day(6), next="team-back: look again")
+item(28, "[home] anchor wait, no anchor recorded", age=1 * D, needs=["external"], wait_kind="anchor", wait_event="the vendor answers", mover="team-back", wake=day(6), next="team-back: look again")
 item(29, "[home] anchor wait, anchor scoped to the item", age=1 * D, needs=["external"], state="outside", party="Acme", wake=day(7), next="team-back: read the thread when it moves")
-item(44, "[home] item wait with only its backstop date", age=1 * D, wait_kind="item", wake=day(5), post_wake_mover="team-back", next="team-back: look at it then")
+item(44, "[home] item wait with only its backstop date", age=1 * D, wait_kind="item", wake=day(5), mover="team-back", next="team-back: look at it then")
 item(43, "[home] time wait, a long then-mover", age=1 * D, hold=True, wake=day(4), post_wake_mover="falcon-engineer-with-a-very-long-name", next="falcon-engineer-with-a-very-long-name: take it")
 item(27, "[home] no project item", age=1 * D, project="", needs=["team-back"], owner="back", next="team-back: no project here")
 # ---- items that store the model's own fields ----
@@ -241,7 +241,7 @@ check("folds: once a hash has opened its section (on load, on hashchange, on a c
       "history.replaceState(null,'',location.pathname+location.search)" in _hj and "var go0=go;go=function(h,scroll){go0(h,scroll);if(scroll&&location.hash)" in _hj
       and _hj.find("history.replaceState") > _hj.find("function go(h,scroll)") and _hj.find("history.replaceState") < _hj.find("go(location.hash,false)")
       and "replaceState" not in render._FOLD_JS and "replaceState" not in render._FOLD_HASH and "replaceState" not in render._FOLD_GO, _hj[:700])
-check("lists: items that store the model's fields (a mover, a time wait with its post-wake mover) land by them", "task-a-40" in YM and f"then home-other" in re.sub(r"<[^>]+>", "", row_of(WL, 41)), row_of(WL, 41))
+check("lists: items that store the model's fields (a mover, a time wait with its mover, who picks it up) land by them", "task-a-40" in YM and f"home-other picks it up" in re.sub(r"<[^>]+>", "", row_of(WL, 41)), row_of(WL, 41))
 check("lists: a model-less item (needs a session, no stored mover) is Agents at work with its needs session as the mover, by model.derive", "task-a-10" in AW and "team-back" in row_of(AW, 10))
 
 # ---- every row ----
@@ -379,25 +379,25 @@ txt = lambda n: plain(parts(n)["wait"]) if parts(n)["ok"] else "NO ROW %s: %s" %
 rt = lambda n: plain(parts(n)["who"]) if parts(n)["ok"] else "NO ROW %s" % n
 check("Waiting rows: every row is the top line (number, title, end date), the who line, the wait (what it waits on), the next step after the wait",
       all(parts(int(i))["ok"] for i in ids(WL)) and all(w(int(i)).count('class="ir-top"') == 1 and w(int(i)).count('class="ir-who"') == 1 and w(int(i)).count('class="hwait"') == 1 and w(int(i)).count('class="hnext hafter"') == 1 for i in ids(WL)), [i for i in ids(WL) if not parts(int(i))["ok"]])
-check("Waiting rows: 'then' and 'watched by' are on the who line, not in the wait; the wait text itself says what it waits on (and the backstop), not who",
-      all(rt(int(i)).startswith("then ") for i in ids(WL)) and all("watched by" not in txt(int(i)) and "then " not in txt(int(i)) and "hwho" not in parts(int(i))["wait"] for i in ids(WL))
+check("Waiting rows: 'picks it up' and 'watched by' are on the who line, not in the wait; the wait text itself says what it waits on (and the backstop), not who",
+      all(re.search(r" (picks|to pick) it up", rt(int(i))) for i in ids(WL)) and all("watched by" not in txt(int(i)) and "picks it up" not in txt(int(i)) and "hwho" not in parts(int(i))["wait"] for i in ids(WL))
       and all(re.match(r"(Until |On |After |With no date)", txt(int(i))) for i in ids(WL)), [(i, rt(int(i)), txt(int(i))) for i in ids(WL)][:3])
-check("Waiting rows: the who line is in the order then, watched by, set by; the top line carries the end date and no mover of its own",
-      all(re.fullmatch(r'then .*?( · watched by [^·]*)?( · set by [^·]*)?', rt(int(i))) for i in ids(WL))
+check("Waiting rows: the who line is in the order picks it up, watched by, set by; the top line carries the end date and no mover of its own",
+      all(re.fullmatch(r'.*? (picks|to pick) it up( · watched by [^·]*)?( · set by [^·]*)?', rt(int(i))) for i in ids(WL))
       and all(re.fullmatch(r'(until .*|no end date)', parts(int(i))["age"]) and "hwho" not in w(int(i)).split('class="ir-who"')[0] for i in ids(WL)), [(parts(int(i))["age"], rt(int(i))) for i in ids(WL)][:2])
 check("Waiting rows: the lines come in order in the markup, the top line, the who line, the wait, the step last", all(w(int(i)).find('class="ir-top"') < w(int(i)).find('class="ir-who"') < w(int(i)).find('class="hwait"') < w(int(i)).find('class="hnext hafter"') for i in ids(WL)))
-check("Waiting: a time wait names the date and his words; then the post-wake mover and the scheduler watching follow it",
-      txt(20) == f"Until {b.day_words(day(3))}: “park it until Friday”" and re.sub(r"\s+", " ", rt(20)).startswith("then team-back · watched by the scheduler"), (txt(20), rt(20)))
+check("Waiting: a time wait names the date and his words; then who picks it up and the scheduler watching follow it",
+      txt(20) == f"Until {b.day_words(day(3))}: “park it until Friday”" and re.sub(r"\s+", " ", rt(20)).startswith("team-back picks it up · watched by the scheduler"), (txt(20), rt(20)))
 check("Waiting: a wait on a real-world date names its basis (the facts of the old 'Parked on an outside event' block)", f"Until {b.day_words(day(1))}: the vendor ships on {day(2)}" in txt(24), txt(24))
 check("Waiting: a verifying item waits on its end date with the proof named", f"Until {b.day_words(day(2))}: proof: the dashboard shows green" in txt(25), txt(25))
 check("Waiting: another item's close names it, the server watches", 'After <a href="/items/a10"' in w(21) and "watched by the server" in rt(21), (w(21), rt(21)))
 check("Waiting: an anchor wait names the anchor and the event and the backstop, the anchor module watches, the step after the wait on its own span", 'On <a href="https://github.com/o/r/pull/9"' in w(22) and ": the PR merges" in txt(22) and f"· backstop {b.day_words(day(9))}" in txt(22)
       and "watched by the anchor module" in rt(22) and parts(22)["step"].startswith('<span class="hnext hafter"><span class="dim">after the wait:</span> deploy it'), (w(22), rt(22)))
 check("Waiting: a relay names the party's news and the ask-by day, the scheduler watches", f"On Acme's reply, ask by {b.day_words(day(5))}" in txt(23) and "watched by the scheduler" in rt(23), (txt(23), rt(23)))
-check("Waiting: 'then' is the post-wake mover, linked while its pane lives, before the watcher", parts(22)["who"].startswith('then <a class="hwho" href="https://sala.example.org/#s=team-back"'), parts(22)["who"])
-check("Waiting: a long then-mover is whole (it wraps on its line, never cut off)", "then falcon-engineer-with-a-very-long-name" in re.sub(r"\s+", " ", rt(43)), rt(43))
+check("Waiting: the one who picks it up is linked while its pane lives, before the watcher", parts(22)["who"].startswith('<a class="hwho" href="https://sala.example.org/#s=team-back"') and " picks it up" in parts(22)["who"], parts(22)["who"])
+check("Waiting: a long then-mover is whole (it wraps on its line, never cut off)", "falcon-engineer-with-a-very-long-name picks it up" in re.sub(r"\s+", " ", rt(43)), rt(43))
 check("Waiting: the chases count shows when there are any, and only then, at the end of the wait", txt(23).endswith("chased 2×") and "chased" not in txt(22) and "chased" not in rt(23), (txt(23), rt(23)))
-check("Waiting: a wait with no date says so and nothing watches it, so the who line has no 'watched by'", "With no date set" in txt(26) and "watched by" not in rt(26) and "then " in rt(26), (txt(26), rt(26)))
+check("Waiting: a wait with no date says so and nothing watches it, so the who line has no 'watched by'", "With no date set" in txt(26) and "watched by" not in rt(26) and " picks it up" in rt(26), (txt(26), rt(26)))
 check("Waiting: sorted by end date, the soonest first (a time, a relay's ask-by day, a backstop, then the dateless)", ids(WL) == ["24", "25", "41", "20", "43", "23", "44", "28", "29", "22", "21", "26"], ids(WL))
 check("Waiting: the next step is the last span of the detail, after the wait", '<span class="hnext hafter"><span class="dim">after the wait:</span> pick it up after</span>' in w(20), w(20))
 check("Waiting: the end date shows in the age's place (no colour), the age since the wait began is its hover, and no ask form", 'data-tip="waiting since' in w(20) and "ir-age amber" not in WL and "ir-age red" not in WL and "hanswer" not in WL)
@@ -407,7 +407,7 @@ check("Waiting: the wait carries the post-wake mover on the who line only: no ot
 check("Waiting: an anchor wait whose anchor is scoped to the item (no wait_anchor stored) names that anchor, as many as are scoped, with its event", '<a href="https://github.com/o/r/pull/12"' in w(29) and '<a href="https://example.invalid/thread/2"' in w(29)
       and "none recorded" not in w(29) and "no anchor stored" not in w(29) and txt(29).startswith("On ") and "watched by the anchor module" in rt(29), (w(29), rt(29)))
 check("Waiting: an anchor wait with no anchor anywhere says so truthfully, keeps the event and the backstop, and has no watcher", txt(28) == f"On an anchor (none recorded): the vendor answers · backstop {b.day_words(day(6))}" and "no anchor stored" not in WL
-      and "watched by" not in rt(28) and "then team-back" in rt(28), (txt(28), rt(28)))
+      and "watched by" not in rt(28) and "team-back picks it up" in rt(28), (txt(28), rt(28)))
 check("Waiting: the page steps over a hand-edited anchors file: an entry whose url is no string or whose items is no list names nothing; the Waiting row still draws, with the real anchors", "123" not in w(29).replace("123456789", "") and "junk" not in w(29)
       and b.scoped_urls("a29") == ["https://github.com/o/r/pull/12", "https://example.invalid/thread/2", "https://example.invalid/thread/3", "https://example.invalid/thread/4"], b.scoped_urls("a29"))
 _b2 = render.Board(str(T / "store"), now=NOW); _b2.anchors = {**_b2.anchors, "projects/alpha": _b2.anchors["projects/alpha"] + [{"url": "https://example.invalid/odd-added", "items": ["a44"], "added": "yesterday"}, {"url": "https://example.invalid/first", "items": ["a44"], "added": 1}]}
@@ -422,7 +422,7 @@ check("Waiting: the item page names all four scoped anchors, in full", all(f'hre
 check("Waiting: an item wait with no item but a backstop date is watched by the scheduler; the wait says so in the anchor wording and keeps the date", txt(44) == f"On an item (none recorded) · back anyway {b.day_words(day(5))}"
       and "watched by the scheduler" in rt(44) and "no item stored" not in WL, (txt(44), rt(44)))
 _r44 = next(r for r in b.rows if r["gid"] == "a44")
-_nb = model.Model(model.WAITING, wait=model.Wait(kind="item", kind_explicit=True, post_wake_mover="team-back"))
+_nb = model.Model(model.WAITING, wait=model.Wait(kind="item", kind_explicit=True, mover="team-back"))
 check("Waiting: an item wait with neither an item nor a backstop date has no watcher and says no item is recorded", "watched by" not in plain(b.wait_who(_r44, _nb)) and "On an item (none recorded)" in plain(b.home_wait(_r44, _nb)), plain(b.home_wait(_r44, _nb)))
 # a hand-edited anchors file (the board item review): a page's value that is no list, an entry that is no dict, an items that is a number, an `added` that is no time, a url that is no string: the home page,
 # the project page and the item pages all render, with the real anchors still named and the junk named nowhere
@@ -542,8 +542,8 @@ check("row: a next line opening with the mover's display name is stripped when t
       "write the code" in _rt and "team-back: write" not in _rt and "follow-up: write the code" in _rt2, (_rt, _rt2))
 _wl_all = " | ".join(rt(int(i)) for i in ids(WL))
 _r41 = next(r for r in b.rows if r["gid"] == "a41")
-_nw = re.sub(r"<[^>]+>", "", b.wait_who(_r41, model.Model(model.WAITING, wait=model.Wait(kind="time", kind_explicit=True, until=day(2), post_wake_mover=""))))
-check("Waiting: a wait with no post-wake mover reads 'then nobody set', never 'then no mover'; the rows of the fixture, which all have one, say neither", "then nobody set" in _nw and "no mover" not in _nw + _wl_all, (_nw, _wl_all[:300]))
+_nw = re.sub(r"<[^>]+>", "", b.wait_who(_r41, model.Model(model.WAITING, wait=model.Wait(kind="time", kind_explicit=True, until=day(2), mover=""))))
+check("Waiting: a wait with nobody to pick it up reads 'nobody set to pick it up', never 'no mover'; the rows of the fixture, which all have one, say neither", "nobody set to pick it up" in _nw and "no mover" not in _nw + _wl_all, (_nw, _wl_all[:300]))
 # the board item: the row's form says which page it is on and the page shows the answer's notice when the server brings it back
 # ---- the step rows: the step itself in place of the first next line, a note box with ONE Send (no Done button), only on a your-step item
 S = {n: row_of(YM, n) for n in (50, 51, 52, 53, 55, 56, 57)}

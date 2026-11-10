@@ -62,7 +62,7 @@ REG = {"projects/par": page(["par-main"]),
        "projects/gen": page(["gen-main"])}
 GEN = lambda project, reg: ("gen-main", "projects/gen")
 alive = lambda mover, **m: {"status": "open", "_m": M.Model(M.ALIVE, mover=mover), "metadata": {"project": m.pop("project", "projects/par/kid"), **m}}
-waiting = lambda post, **m: {"status": "open", "_m": M.Model(M.WAITING, wait=M.Wait(kind="time", kind_explicit=True, post_wake_mover=post)), "metadata": {"project": m.pop("project", "projects/par/kid"), **m}}
+waiting = lambda post, **m: {"status": "open", "_m": M.Model(M.WAITING, wait=M.Wait(kind="time", kind_explicit=True, mover=post)), "metadata": {"project": m.pop("project", "projects/par/kid"), **m}}
 derive = lambda it: it["_m"]
 LIVE = {"par-main", "live-main", "bgp-build", "bgp-docs", "hubpage-main", "gen-main", "live-front", "both-main", "both-build"}           # the sessions with a pane
 gone = lambda who: "" if who in LIVE else f"{who} has no pane"

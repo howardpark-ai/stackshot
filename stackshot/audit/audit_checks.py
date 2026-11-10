@@ -211,11 +211,11 @@ def check_stuck_elsewhere(item: dict[str, Any], meta: dict[str, Any], mover: str
     if w is not None and not w.due:
         return None                             # a wait that has not ended: nothing is stuck yet
     if _model.is_owner(nm):
-        if _model.is_owner(mover) or (w is not None and (w.kind == "relay" or _model.is_owner(w.post_wake_mover))):
+        if _model.is_owner(mover) or (w is not None and (w.kind == "relay" or _model.is_owner(w.mover))):
             return None
     elif _norm(nm) not in known or _norm(nm) == _norm(mover):
         return None
-    elif w is not None and (_norm(nm) == _norm(w.post_wake_mover) or not w.post_explicit or _model.is_owner(w.post_wake_mover)):
+    elif w is not None and (_norm(nm) == _norm(w.mover) or not w.mover_explicit or _model.is_owner(w.mover)):
         return None
     elif w is None and mod is not None and mod.owner_moves and (_norm(nm) == _norm(mod.then) or not mod.then_explicit):
         return None                             # the owner moves an alive item: a session's step is the one for after his answer, which `then` names

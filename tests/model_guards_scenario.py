@@ -458,11 +458,11 @@ check("6c mover: …and leaves the agent as the mover again, no stored then, no 
 out_c2 = server._create(subject="[home] his call, no mover named", description=DESC, project="projects/alpha", owner="home-front", next="Oliver: decide", needs=["decision"], ask=ASK)
 gc2 = out_c2
 check("6c mover: a create that leaves an item waiting on him and names no mover has him as mover", "created" in out_c2 and f"mover: {OWN}" in gc2 and "model conflict" not in gc2, (out_c2, gc2))
-# a wait that replaces his state drops the mover he held
+# a wait that replaces his state: the agent he named in then picks it up
 item(31, needs=[BACK], mover=BACK)
 upd(31, needs=["decision"], ask=ASK)
 upd(31, needs=[BACK], hold=True, wake=day(3), wait_basis="the vendor ships on " + day(3), next=f"{BACK}: waiting")
-check("6c mover: a wait that replaces his state drops the mover he held (a waiting item has none stored)", mt(31).get("mover") in (None, "") and mt(31).get("then") == BACK and "model conflict: mover" not in server.stackshot_get("a31"), (mt(31), server.stackshot_get("a31")))
+check("6c mover: a wait that replaces his state hands the agent in then the pick-up: mover := then, then gone, no model conflict", mt(31).get("mover") == BACK and "then" not in mt(31) and "model conflict" not in server.stackshot_get("a31"), (mt(31), server.stackshot_get("a31")))
 # the guards off: nothing is flipped by the backstop
 set_cfg(guards=False)
 item(32, needs=[BACK], mover=BACK)
@@ -534,7 +534,7 @@ it_d = server._load("a40"); it_d["metadata"]["needs"] = ["decision", BACK]; it_d
 server._save("a40", it_d)
 it_d = server._load("a40"); it_d["metadata"].update(needs=[BACK], wait_kind="relay", wait_event="Robin relays the quote", ask_by=day(5)); it_d["metadata"].pop("ask")
 server._save("a40", it_d)
-check("6c mover: a save where a wait replaces his state drops the mover and keeps then (the post-wake mover) as stored", "mover" not in mt(40) and mt(40)["then"] == BACK, mt(40))
+check("6c mover: a save where a wait replaces his state makes the agent in then the mover who picks it up, and then goes", mt(40).get("mover") == BACK and "then" not in mt(40), mt(40))
 set_cfg(guards=False, handoff=False)
 item(157, needs=["decision", BACK], mover=BACK, ask=ASK)
 check("6c migration: [model] guards = false and handoff = false: nothing to do", server._migrate_owner_mover() == [], None)
