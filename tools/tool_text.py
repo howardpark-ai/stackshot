@@ -83,7 +83,7 @@ def show_at(root: Path, rev: str, rel: str) -> str | None:
 # goes in here, in the same PR: this is the one list.
 _ITEM_LINES = [   # the item as get shows it, which create, update and complete return after their own first line, and the brief returns one per open item
     ("stackshot/web/server.py", "_fmt"), ("stackshot/web/server.py", "_mover_lines"), ("stackshot/web/server.py", "_model_lines"), ("stackshot/web/server.py", "_handoff_lines"),
-    ("stackshot/web/server.py", "_state_check_notes"), ("stackshot/web/server.py", "_next_names_lines"), ("stackshot/web/server.py", "_check_words"), ("stackshot/web/server.py", "_answer_words"), ("stackshot/web/page_debts.py", "_nag"),
+    ("stackshot/web/server.py", "_state_check_notes"), ("stackshot/web/server.py", "_next_names_lines"), ("stackshot/web/server.py", "_check_words"), ("stackshot/web/answers.py", "_answer_words"), ("stackshot/web/page_debts.py", "_nag"),
     ("stackshot/model/states.py", "words"), ("stackshot/model/states.py", "carry_of"), ("stackshot/model/model.py", "words"), ("stackshot/waits/handoff.py", "words"), ("stackshot/waits/watchers.py", "woke_line"),
     ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"),
 ]
