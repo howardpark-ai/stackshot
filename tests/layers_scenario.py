@@ -12,12 +12,15 @@ audit/, tools/ and the command line (cli.py, __main__.py) sit outside the layers
 
 This suite starts with what already holds: it measures the package's imports with the AST (every `import` and `from ... import`, relative ones resolved,
 those inside a function body too, and `__import__("stackshot....")` or `importlib.import_module("stackshot....")` with a literal argument) and fails
-  * on an import from a lower layer to a higher one that ALLOWED_TODAY does not list, and on a listed file that imports one more time than its entry says;
-  * on an import of audit/, tools/, the command line or a root module from core/, the domain packages or service/ (beyond paths.py).
-ALLOWED_TODAY is the measured list of what points the wrong way today, keyed by the importing file and the module it imports, each with its count and the
+  * on an import from a lower layer to a higher one that ALLOWED_TODAY does not list, and on a listed file that imports more names of a module than its entry says;
+  * on an import of audit/, tools/, the command line or a root module from core/, the domain packages or service/ (beyond paths.py);
+  * on an import of anything but the bare package in paths.py itself, which every layer may import.
+ALLOWED_TODAY is the measured list of what points the wrong way today, keyed by the importing file and the module it imports, each with its count of imported names (`from a import b, c` counts two) and the
 work of the plan that removes it; an entry whose import is gone must be deleted (or its count lowered), so the list only shrinks. The packages named in
 CONTRIBUTING.md's first principle must be exactly the ones in LAYERS and UNLAYERED below.
-Not seen: an import whose argument is not a literal string (a name, a format), and a name reached by attribute from a module that imported it.
+A literal relative `import_module(".render", "stackshot.web")` is resolved against its literal package argument.
+Not seen: an import whose argument is not a literal string (a name, a format), a relative import_module whose package is not a literal, and a name reached by
+attribute from a module that imported it.
 
     tests/run-suite layers        → exit 0 / 1"""
 import ast, os, pathlib, re, sys
@@ -38,8 +41,8 @@ LAYER = {area: name for name, areas in LAYERS for area in areas}
 UNLAYERED = ("audit", "tools")          # reports and tools that read the package; with the command line they sit outside the layers
 ROOT_OK = ("stackshot", "stackshot.paths")      # the root modules a layer below the surface may import: the package itself and paths.py
 
-# What points the wrong way today (measured Tue Nov 10th 2026): (importing file, module it imports) → (how many import statements, the work of the server
-# structure plan that removes it). The first three are lazy imports inside a function; model/ask_read's is at module level, project_restore's is lazy.
+# What points the wrong way today (measured Tue Nov 10th 2026): (importing file, module it imports) → (how many imported names, the work of the server
+# structure plan that removes it). The two in core/config.py and the one in projects/project_restore.py are lazy imports inside a function; model/ask_read's is at module level.
 ALLOWED_TODAY = {
     ("stackshot/core/config.py", "stackshot.github.ghsync"): (1, "work 5 (passes): stall_item_answers, which reads an item through github/ghsync, leaves core/ with the stall pass for service/stall.py"),
     ("stackshot/core/config.py", "stackshot.waits.stall"): (2, "work 5 (passes): stall_auth and stall_notes, which call waits/stall, leave core/ with the stall pass for service/stall.py"),
@@ -81,7 +84,14 @@ def imports_of(mod, init, src, mods):
             cands = [[f"{b}.{a.name}", b] for a in n.names]      # a name that is a module of the package, else the module it comes from
         elif isinstance(n, ast.Call) and n.args and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str) \
                 and (getattr(n.func, "id", None) in ("__import__", "import_module") or getattr(n.func, "attr", None) == "import_module"):
-            cands = [[n.args[0].value]]
+            v = n.args[0].value
+            if v.startswith("."):      # import_module(".render", "stackshot.web"): resolved against the literal package, as a relative import is
+                pk = n.args[1].value if len(n.args) > 1 and isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str) \
+                    else next((k.value.value for k in n.keywords if k.arg == "package" and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str)), None)
+                if pk is None: continue
+                lv = len(v) - len(v.lstrip(".")); base = pk.split(".")
+                v = ".".join(base[:len(base) - (lv - 1)] + ([v[lv:]] if v[lv:] else []))
+            cands = [[v]]
         else:
             continue
         for c in cands:
@@ -113,14 +123,18 @@ def outward(g):
         if a in RANK and a != "web" and (b is None or b in UNLAYERED) and t not in ROOT_OK: out.setdefault((path, t), []).append(line)
     return out
 
+def paths_imports(g):
+    """the modules of the package that paths.py imports, the bare package aside"""
+    return {t for path, _, _, t, _ in g if path == "stackshot/paths.py"} - {"stackshot"}
+
 # ---- the checker itself, on a small package of its own: an upward import is found whatever its form
 fake = {"stackshot": ("stackshot/__init__.py", True, ""),
-        "stackshot.paths": ("stackshot/paths.py", False, ""),
+        "stackshot.paths": ("stackshot/paths.py", False, "import stackshot\nfrom stackshot.web import page\n"),
         "stackshot.cli": ("stackshot/cli.py", False, "from stackshot.web import page\n"),
         "stackshot.core": ("stackshot/core/__init__.py", True, ""),
         "stackshot.core.low": ("stackshot/core/low.py", False, "import json\nfrom stackshot import paths\nfrom . import peer\n\ndef f():\n    from stackshot.web import page\n"),
         "stackshot.core.peer": ("stackshot/core/peer.py", False, "import stackshot.model.rules\n"),
-        "stackshot.core.dyn": ("stackshot/core/dyn.py", False, "import importlib\nx = __import__('stackshot.web.page')\ny = importlib.import_module('stackshot.model.rules')\nz = __import__('json')\nw = importlib.import_module(name)\n"),
+        "stackshot.core.dyn": ("stackshot/core/dyn.py", False, "import importlib\nx = __import__('stackshot.web.page')\ny = importlib.import_module('stackshot.model.rules')\nz = __import__('json')\nw = importlib.import_module(name)\nv = importlib.import_module('.page', 'stackshot.web')\nu = importlib.import_module('.page', name)\n"),
         "stackshot.core.out": ("stackshot/core/out.py", False, "from stackshot.tools import cap\nfrom stackshot import cli\nimport stackshot.audit.report\nfrom stackshot import paths\n"),
         "stackshot.model": ("stackshot/model/__init__.py", True, ""),
         "stackshot.model.rules": ("stackshot/model/rules.py", False, "from stackshot.core import low\nfrom ..web import page as p\n"),
@@ -132,15 +146,17 @@ fake = {"stackshot": ("stackshot/__init__.py", True, ""),
         "stackshot.audit.report": ("stackshot/audit/report.py", False, "from stackshot.web import page\n")}
 fg = graph(fake)
 got = upward(fg)
-check("the checker finds an upward import in a function body, a relative one, a plain `import a.b`, a from-import of a module and a literal __import__ or import_module",
+check("the checker finds an upward import in a function body, a relative one, a plain `import a.b`, a from-import of a module, and a literal __import__ or import_module (a relative one too)",
       set(got) == {("stackshot/core/low.py", "stackshot.web.page"), ("stackshot/core/peer.py", "stackshot.model.rules"), ("stackshot/core/dyn.py", "stackshot.web.page"),
                    ("stackshot/core/dyn.py", "stackshot.model.rules"), ("stackshot/model/rules.py", "stackshot.web.page")}, got)
 check("... and not a downward one, one inside a layer, one from or to a package outside the layers, a non-package __import__ or a non-literal import_module",
       ("stackshot/web/page.py", "stackshot.model.rules") not in got and ("stackshot/audit/report.py", "stackshot.web.page") not in got and ("stackshot/cli.py", "stackshot.web.page") not in got
-      and len([k for k in got if k[0] == "stackshot/core/dyn.py"]) == 2, got)
+      and len([k for k in got if k[0] == "stackshot/core/dyn.py"]) == 2 and got[("stackshot/core/dyn.py", "stackshot.web.page")] == [2, 6], got)
 out = outward(fg)
 check("the checker finds an import of tools/, the command line or audit/ from a layer below the surface, and lets paths.py and web/'s own use of audit/ be",
       set(out) == {("stackshot/core/out.py", "stackshot.tools.cap"), ("stackshot/core/out.py", "stackshot.cli"), ("stackshot/core/out.py", "stackshot.audit.report")}, out)
+
+check("the checker finds what paths.py imports of the package, the bare package aside", paths_imports(fg) == {"stackshot.web.page"}, paths_imports(fg))
 
 # ---- the package
 sources = {}
@@ -164,7 +180,7 @@ check("service/ imports nothing from web/", not new_between("service", ("surface
 unlisted = {k: v for k, v in found.items() if k not in ALLOWED_TODAY}
 check("no import points up from a lower layer to a higher one that ALLOWED_TODAY does not list", not unlisted, unlisted)
 more = {k: (len(found[k]), ALLOWED_TODAY[k][0], found[k]) for k in ALLOWED_TODAY if k in found and len(found[k]) > ALLOWED_TODAY[k][0]}
-check("... and a listed file does not import the same module one more time than its entry says", not more, more)
+check("... and a listed file does not import more names of the same module than its entry says", not more, more)
 stale = {k: (len(found.get(k, ())), ALLOWED_TODAY[k][0]) for k in ALLOWED_TODAY if len(found.get(k, ())) < ALLOWED_TODAY[k][0]}
 check("ALLOWED_TODAY lists only imports that still exist: an entry whose import is gone is deleted, or its count lowered (the list only shrinks)", not stale, stale)
 check("ALLOWED_TODAY is exactly what the scan finds today (every entry names the work that removes it)",
@@ -172,11 +188,18 @@ check("ALLOWED_TODAY is exactly what the scan finds today (every entry names the
 o = outward(g)
 check("core/, the domain packages and service/ import nothing of audit/, tools/, the command line or a root module (paths.py aside)", not o, o)
 
+pi = paths_imports(g)
+check("paths.py, the one root module every layer may import, imports nothing of the package but the bare package", not pi, sorted(pi))
+
 # ---- the rulebook and the suite name the same packages: the first principle of CONTRIBUTING.md
 contrib = pathlib.Path(STACK, "CONTRIBUTING.md").read_text(encoding="utf-8")
-first = next((l for l in contrib.split("\n") if l.startswith("1. **Four layers")), "")
-named = set(re.findall(r"`(\w+)/`", first))
-check("the packages CONTRIBUTING.md's first principle names are exactly the suite's layers and the packages outside them", named == set(RANK) | set(UNLAYERED), sorted(named ^ (set(RANK) | set(UNLAYERED))))
+lines = contrib.split("\n")
+start = next((i for i, l in enumerate(lines) if l.startswith("1. **Four layers")), None)
+end = next((i for i in range(start + 1, len(lines)) if re.match(r"\d+\. \*\*", lines[i])), len(lines)) if start is not None else 0
+named = set(re.findall(r"`(\w+)/`", "\n".join(lines[start:end]))) if start is not None else set()
+want = set(RANK) | set(UNLAYERED)
+check("the packages CONTRIBUTING.md's first principle (its whole paragraph) names are exactly the suite's layers and the packages outside them", start is not None and named == want,
+      f"principle 1 found: {start is not None}; names in CONTRIBUTING but not in the suite: {sorted(named - want)}; in the suite but not named in CONTRIBUTING: {sorted(want - named)}")
 
 print(("ok" if not fails else "FAILED") + f": layers scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush()
 sys.exit(1 if fails else 0)
