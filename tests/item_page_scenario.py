@@ -87,6 +87,9 @@ STEPCMD = "run the one line `sala op reauth box-a --from me --words \"go\"` and 
 item(30, "[home] step with a command", state="your-step", step=STEPCMD, mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
 item(31, "[home] step with a pane line", state="your-step", step="! sala reauth box-a", mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
 item(32, "[home] step with a link", state="your-step", step="Sign in at https://example.com/login/now and say done", mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
+item(44, "[home] step with two links", state="your-step", step="Compare https://example.com/p/aaa with https://example.com/p/bbb and say done", mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
+item(45, "[home] step with a command and a link", state="your-step", step="Open https://example.com/p/aaa then run `sala op reauth box-a` and say done", mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
+item(46, "[home] step with a lone-word backtick", state="your-step", step="Set the mode to `default` and say done", mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
 item(33, "[home] step with plain words", state="your-step", step="Call the office and say done", mover="Oliver", then="home-other", needs=["home-other"], next="home-other: check it")
 item(34, "[home] step item, closed", status="completed", su=now - 2 * DAY, state="your-step", step=STEPCMD, outcome="done", reason="done", mover=None)
 item(35, "[home] open question", needs=["decision"], ask=ASK, mover="Oliver", then="home-other", next="home-other: wait")                                       # an ask with no options
@@ -420,7 +423,14 @@ check("a command in the step is a copyable code block, the line says 'the comman
 b21 = blk(S21)
 check("a `! ...` pane line stays verbatim in one code block, with no text line around it", '<pre><code>! sala reauth box-a</code></pre>' in b21 and b21.count('<div class="cmd">') == 1 and 'istepbody"><div class="cmd">' in b21, b21)
 b22 = blk(S22)
-check("a step with only a link has the link as its copyable block", '<pre><code>https://example.com/login/now</code></pre>' in b22 and "Sign in at" in b22, b22)
+check("a step with only a link keeps it inline as a link that opens in a new tab, in no code block", 'href="https://example.com/login/now" target="_blank" rel="noopener"' in b22 and "Sign in at" in b22 and "<pre>" not in b22 and 'class="cmd"' not in b22, b22)
+S44, S45, S46 = (page(f"a{i}", answer=BOX) for i in (44, 45, 46))
+b44, b45, b46 = blk(S44), blk(S45), blk(S46)
+_alinks = lambda h: re.findall(r'<a href="(https://example\.com/p/[a-z]+)" target="_blank" rel="noopener">', h)
+check("a step with two links and no command draws both as links and no Copy box", _alinks(b44) == ["https://example.com/p/aaa", "https://example.com/p/bbb"] and "<pre>" not in b44 and 'class="b copy"' not in b44 and "and say done" in b44, b44)
+check("a step with a command and a link boxes the command only; the link stays inline", b45.count('<div class="cmd">') == 1 and '<pre><code>sala op reauth box-a</code></pre>' in b45 and _alinks(b45) == ["https://example.com/p/aaa"]
+      and "https://example.com/p/aaa</code>" not in b45 and "the command below" in b45, b45)
+check("a step with a lone-word backtick keeps it inline, no Copy box", "<code>default</code>" in b46 and "<pre>" not in b46 and 'class="b copy"' not in b46, b46)
 b23 = blk(S23)
 check("a step of plain words is shown as it reads, with no code block", "Call the office and say done" in b23 and "<pre>" not in b23, b23)
 check("the block and the form are only for an item with a step: a decision item, an agent item, a plain Oliver-moves item and a closed step item have none",
@@ -452,10 +462,10 @@ check("ctrl+enter: the item page carries the key script exactly when it carries 
 check("a disabled button takes no hover accent", ".b:hover:not(:disabled)" in S20 and ".b.std" not in S20 and ".b.pri" not in S20 and ".abtn" not in S20.replace(".abtns", ""))
 sb = itempage.step_block; ld = lambda i: json.loads((T / f"store/a/{i}.json").read_text())
 s20, s21, s22, s23 = sb(ld(30)), sb(ld(31)), sb(ld(32)), sb(ld(33))
-check("itempage.step_block: a command leaves the text for a block; a `!` line is the one verbatim block; a link is the block; plain words have no block",
+check("itempage.step_block: a command leaves the text for a block; a `!` line is the one verbatim block; a link stays in the text and is no block; plain words have no block",
       s20 and s20.blocks == ['sala op reauth box-a --from me --words "go"'] and "the command below" in s20.text and not s20.verbatim
       and s21 and s21.verbatim and s21.blocks == ["! sala reauth box-a"] and s21.text == ""
-      and s22 and s22.blocks == ["https://example.com/login/now"] and s23 and s23.blocks == [] and s23.text.startswith("Call the office"), (s20, s21, s22, s23))
+      and s22 and s22.blocks == [] and "https://example.com/login/now" in s22.text and s23 and s23.blocks == [] and s23.text.startswith("Call the office"), (s20, s21, s22, s23))
 check("itempage.step_block: None for a closed item, an item with no state, and a your-step item with no step line",
       sb(ld(34)) is None and sb(ld(10)) is None and sb({"status": "open", "metadata": {"state": "your-step"}}) is None and sb({"status": "open", "metadata": {"state": "your-step", "step": "  "}}) is None)
 

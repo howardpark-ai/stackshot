@@ -185,7 +185,7 @@ def next_lines(text: Any, mover: str) -> list[NextLine]:
 @dataclass
 class StepBlock:
     """The step of a your-step item as both the home row and the item page draw it: `text` is the step as written with each command taken out of it ("the command below"), `blocks`
-    the commands (or the one link) to copy, `verbatim` a `! ...` line he types in a pane: the whole step, as written, is the one block and there is no text."""
+    the commands to copy (a link stays in `text`), `verbatim` a `! ...` line he types in a pane: the whole step, as written, is the one block and there is no text."""
     text: str
     blocks: list[str]
     verbatim: bool = False
@@ -195,7 +195,7 @@ class StepBlock:
 def step_block(item: dict[str, Any]) -> "StepBlock | None":
     """The step of an open item whose stored state is your-step (the single thing only the owner does: states.py), None for any other item or one with no step line. The one reading
     the home row (render.Board.home_row) and the item page (Board.item_html) share, so they cannot drift: a numbered list or a fenced block is drawn part by part (step_commands.parse); a `! ...` line stays verbatim in one block; a backticked command (a span with
-    a space in it) leaves the line for a block of its own; with no command a link is the block; else the step is plain text."""
+    a space in it) leaves the line for a block of its own; else the step is text, a link in it staying inline."""
     if item.get("status") == "completed" or _states.stored(item) != "your-step":
         return None
     raw = str((item.get("metadata") or {}).get("step") or "").strip()
