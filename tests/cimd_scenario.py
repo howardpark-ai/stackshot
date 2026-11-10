@@ -1,4 +1,4 @@
-"""Scenario test for the CIMD fallback (cimd.py, wired in server.py `_auth()`; a failed fetch of
+"""Scenario test for the CIMD fallback (cimd.py, wired in stackshot/web/server_auth.py `_auth()`; a failed fetch of
 the client's metadata document was refused and the client dropped the connector grant for every pane)
 — fake fetchers and a patched transport, no network, no Google credentials.
 
