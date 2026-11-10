@@ -540,6 +540,22 @@ def main_of(e: dict[str, Any]) -> str:
     return next((n for n in front if n.endswith("-main")), front[0] if front else "")
 
 
+def front_only(project: str, reg: dict[str, dict[str, Any]] | None = None) -> bool:
+    """Is the project front-only: its `agents:` map lists no `background:` agent? The one test of "has this project a builder" that new rules use.
+    The map read is the page's own; a page with no map of its own (a sub-page) reads its hub's (hub_of: the nearest `hub:` line, else the top-level page). A page whose own map exists
+    decides alone, so a sub-page with a map of front agents is front-only although its hub has a background agent. No map on the page or its hub, an unknown key and an empty
+    key are front-only too: nothing there could build. Any `background:` entry, whatever its mandate says, makes the project not front-only, so adding a builder to the map is all
+    that switches it over, with no field of its own. `reg` = the page registry (default: the registry plus the agents only the project record holds, as session_roles reads it)."""
+    from stackshot.projects import projects as _prj
+    reg = _prj.with_pending(registry(), made=True) if reg is None else reg
+    key = str(project or "").strip().strip("/")
+    for k in dict.fromkeys([key, hub_of(key, reg) if key else ""]):
+        entry = reg.get(k) if k else None
+        if isinstance(entry, dict) and entry.get("agents"):
+            return not entry.get("back_agents")
+    return True
+
+
 def _general_value(scope: str) -> str:
     v = str(_cfg.get("router", f"general_{scope}") or "").strip()
     return v or GENERAL_DEFAULTS.get(scope, "")
