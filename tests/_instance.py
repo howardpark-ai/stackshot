@@ -10,8 +10,22 @@ it checks a text that names the owner). tests/neutral_install_scenario.py checks
     toml = _instance.apply(toml, login=True)  # a suite that checks the owner's GitHub login ([github] owner_login)
     toml = _instance.apply(toml, gbrain=True) # a suite that runs the gbrain-only tools with a fake `gb` (rename_page, page_keeper, page_debt)
     toml = _instance.apply(toml, keywords=True)  # a suite that checks the words of another language ([keywords.<feature>], Japanese here)
+
+The text a suite starts from is base_toml(): the example config, read through the tracked link tests/example_base.toml (-> ../stackshot.example.toml)
+and not by its own path. The selection of CI (tests/suitemap.py, *The example config* in its docstring) tells the two apart: a suite that reads the real
+path is a direct reader of the example config and runs on every change to it; a suite that reads it through the link only uses its text as the base of
+its own temp config, and runs on a change that alters an existing setting (not on a comment, nor on a key added). A suite that checks the example config
+itself, or patches a setting of it the suite then asserts on, reads the real path (pathlib.Path(STACK, "stackshot.example.toml")).
 """
-import re
+import os, pathlib, re
+
+# the link, not the file it points to: the strace of the measured run records the path a process opens as it was written
+EXAMPLE_BASE = pathlib.Path(os.path.abspath(__file__)).with_name("example_base.toml")
+
+
+def base_toml() -> str:
+    """The example config's text, read through tests/example_base.toml (see the docstring of this file)."""
+    return EXAMPLE_BASE.read_text(encoding="utf-8")
 
 # section -> {key: toml value}; a key that is not in its section yet is added right after the header
 SETTINGS = {
