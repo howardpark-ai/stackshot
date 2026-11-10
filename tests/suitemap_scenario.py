@@ -343,68 +343,91 @@ FIX = ["direct", "fx1", "fx2"]
 # The comment, blank-line and reorder cases below pin that a change to the file's text but not to its data is NOT over-selected: they pass with DATA
 # emptied (a plain file rule picks only the real-path readers here, the same as the "same data" answer) and fail when a textual change is read as a change.
 # The old-map and no-strace cases pin behaviour the rule must leave alone (a map from before the link; a map with no file measurement).
-out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment")
-check("example config: a comment-only change selects the direct readers (the link readers stay out)", out.split() == ["direct"] and "the same data" in err, (out, err))
-out, err = ex_sel(lambda: write("stackshot.example.toml", EX.replace("digest = 5", "digest = 5\n\n\n")), "blank lines")
+PLAIN = "# Some plain prose about nothing in particular."
+def ex_end(extra): write("stackshot.example.toml", textwrap.dedent(EX).lstrip("\n") + extra)
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment line")
+check("example config: a whole plain-prose comment line added selects the direct readers only (the link readers stay out)", out.split() == ["direct"] and "plain comments" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", "\n\n[runners]\n"), "blank lines")
 check("example config: blank lines only: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", ""), "plain comment removed")
+check("example config: a plain whole-line comment removed: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", PLAIN + " More of it.\n"), "plain comment replaced")
+check("example config: a plain whole-line comment replaced by another: the direct readers", out.split() == ["direct"], (out, err))
+for what, line in (("a word of a key (digest)", "# the digest count"), ("a table name (runners)", "# about the runners"), ("a name inside a longer word (digests)", "# the digests count"),
+                   ("a `=` (a commented-out sample)", "# digest = 7"), ("a quote", "# the \"digest\" count"), ("a digit", "# every 5 minutes"), ("an underscore", "# a plain_word"),
+                   ("a bracket", "# see [model] above")):
+    out, err = ex_sel(lambda: ex_sub("[runners]\n", line + "\n[runners]\n"), f"comment: {what}")
+    check(f"example config: a comment with {what} is not plain: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true            # a comment", "guards = true            # another comment"), "trailing comment edited")
+check("example config: a trailing comment edited on a code line selects the fixture readers (a suite's regex takes the whole line)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5  # x"), "trailing comment added")
+check("example config: a trailing comment added to a code line selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true            # a comment", "guards = true\t# a comment"), "tab before comment")
+check("example config: spaces turned into a tab before a trailing comment select the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: write("stackshot.example.toml", EX.replace("guards = true            # a comment\n    digest = 5\n", "digest = 5\n    guards = true            # a comment\n")), "reordered")
-check("example config: the same data with two lines of a table in another order is a change of the text (a pattern that anchors on a line's place breaks): fixture readers too", out.split() == FIX, (out, err))
+check("example config: two lines of a table in another order select the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nnew_key = 1"), "key added")
-check("example config (A2): a key added under [model] selects the direct readers only", out.split() == ["direct"] and "keys added only" in err, (out, err))
-out, err = ex_sel(lambda: ex_sub("[runners.ids]", "[runners.ids]\n# runners may be pinned to a session\nsession = \"s\"\n\n[runners.extra]\nx = 1"), "key and comment, new table")
-check("example config (A2): a key under a table that was empty, a comment and a new table: the direct readers only", out.split() == ["direct"], (out, err))
+check("example config: a key added, whatever its name, selects the fixture readers (where it lands and what a suite patches are not predictable)", out.split() == FIX and "changed" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nbrand_new_key = 1"), "unrelated key")
+check("example config: an unrelated key with a name of its own: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[a_new_feature]\nswitch = 1\n'), "unrelated table")
+check("example config: an unrelated table added: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end("\nzz_end = 1\n"), "key at the end")
+check("example config: a key at the end of the file (it lands in the last table) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\ndirect = {}"), "inline table")
+check("example config: an inline table added (a name a suite patches, and a value the old name check skipped) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[units]\nscope = "user"\n'), "units table")
+check("example config: a [units] table added (set by hand in suites, in no constant) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end("\n[units]\n"), "empty units table")
+check("example config: an empty [units] table selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", "# the example config\nlive = true\n"), "uncommented sample")
+check("example config: an uncommented sample line (a key added) selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("guards = true", "guards = false"), "flipped")
-check("example config: an existing setting changed selects the direct readers and the fixture readers (fx1, fx2), not the others", out.split() == FIX and "changed or removed" in err, (out, err))
+check("example config: an existing setting changed selects the direct readers and the fixture readers (fx1, fx2), not the others", out.split() == FIX and "changed" in err, (out, err))
 out, err = ex_sel(lambda: ex_sub("digest_hour = 6", "digest_hour = 7"), "digest hour")
 check("example config: another existing setting changed: the same", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub('boxes = ["box-a", "box-b"]', 'boxes = ["box-a", "box-b", "box-c"]'), "list grown")
-check("example config: a list that grew is a changed setting, not an added key", out.split() == FIX, (out, err))
+check("example config: a list that grew selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("digest = 5\n", ""), "key removed")
-check("example config: a key removed selects the direct readers and the fixture readers", out.split() == FIX, (out, err))
+check("example config: a key removed selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("[runners.ids]\n", ""), "empty table removed")
-check("example config: an empty table removed (a suite that sets a key in it would fail) selects the fixture readers too", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: ex_sub("digest_hour = 6", "digest_hour = 6\ndigest = 9"), "key added in another table")
-check("example config (A2): the same key name added under another table selects the fixture readers (a suite's pattern that must match once would match twice)", out.split() == FIX, (out, err))
+check("example config: an empty table removed selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nrules = \"~/x/RULES.md\""), "rules added under [model]")
-check("example config (A2, failing input B): a key named like one the example holds elsewhere (rules, under [pages]) selects the fixture readers", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nbrand_new_key = 1"), "unrelated key")
-check("example config (A2): an unrelated key with a name of its own stays at the direct readers", out.split() == ["direct"], (out, err))
-out, err = ex_sel(lambda: write("stackshot.example.toml", textwrap.dedent(EX).lstrip("\n") + '\n[job_gap.repos]\n"example-owner/ops-hub" = "ops/general"\n'), "job_gap.repos added")
-check("example config (A2, failing input A): a table apply() appends ([job_gap.repos]; declared twice it is a parse error) selects the fixture readers", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: write("stackshot.example.toml", textwrap.dedent(EX).lstrip("\n") + '\n[[router.watch]]\npage = "p"\n'), "router.watch added")
-check("example config (A2): an array of tables apply() appends ([[router.watch]]) selects the fixture readers", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: write("stackshot.example.toml", textwrap.dedent(EX).lstrip("\n") + '\n[project_scopes.by_tag]\nops = "ops"\n'), "by_tag added")
-check("example config (A2): a table apply() appends, under a parent the example does not hold, selects the fixture readers", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: write("stackshot.example.toml", textwrap.dedent(EX).lstrip("\n") + '\n[a_new_feature]\nswitch = 1\n'), "unrelated table")
-check("example config (A2): an added table with unrelated names stays at the direct readers", out.split() == ["direct"], (out, err))
+check("example config: a key named like one the example holds elsewhere selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[job_gap.repos]\n"example-owner/ops-hub" = "ops/general"\n'), "job_gap.repos added")
+check("example config: a table apply() appends ([job_gap.repos]; declared twice it is a parse error) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[[router.watch]]\npage = "p"\n'), "router.watch added")
+check("example config: an array of tables apply() appends ([[router.watch]]) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[project_scopes.by_tag]\nops = "ops"\n'), "by_tag added")
+check("example config: a table apply() appends, under a parent the example does not hold, selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("[pages]\n", "[pages]\ndirs = [\"x\"]\n"), "pages.dirs added")
-check("example config (A2): a key apply() sets (pages.dirs) selects the fixture readers", out.split() == FIX, (out, err))
+check("example config: a key apply() sets (pages.dirs) selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\nretries = 3\n"), "key under a pinned table")
-check("example config (A2): a key right under a table a suite's pattern anchors on ([audit]) selects the fixture readers", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\n# a comment right under the header\n"), "comment under a pinned header")
-check("example config: a comment right under a pinned header ([audit]) is a change (a pattern takes the header line and the next as one text)", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: ex_sub("[audit]\nenabled = false", "[audit]\nenabled = false\n# a comment after the first key\nother = 1"), "comment and key after the first key of a pinned table")
-check("example config (A2): a comment and a key after the first key of a pinned table stay at the direct readers", out.split() == ["direct"], (out, err))
+check("example config: a key right under a table a suite's pattern anchors on ([audit]) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\n" + PLAIN + "\n"), "plain comment under a pinned header")
+check("example config: a plain comment right under a pinned header ([audit]) is a change (a pattern takes the header line and the next as one text)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\n\n"), "blank line under a pinned header")
+check("example config: a blank line right under a pinned header is a change", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\nenabled = false", "[audit]\nenabled = false\n" + PLAIN), "plain comment after the first key of a pinned table")
+check("example config: a plain comment after the first key of a pinned table stays at the direct readers", out.split() == ["direct"], (out, err))
 out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nbroken = ["), "unparseable new")
 check("example config: a text that does not parse (new) selects every suite", out == "all" and "does not parse" in err, (out, err))
 git("checkout", "-q", "-B", "broken", base2); ex_sub("digest = 5", "digest = 5\nbroken = ["); broken = commit("broken base")
-MAP3 = T / "map3.json"; MAP3.write_text(json.dumps({**fmap("tests/example_base.toml"), "commit": broken}))
+fixed_map = T / "broken.json"; fixed_map.write_text(json.dumps({**json.loads(MAP2.read_text()), "commit": broken}))
 git("checkout", "-q", "-B", "fixed", broken); ex_sub("broken = [\n", ""); fixed = commit("fixed")
-r = tool("select", "--map", str(MAP3), "--to", fixed, env={"SUITEMAP_ROOT": str(R)})
+r = tool("select", "--map", str(fixed_map), "--to", fixed, env={"SUITEMAP_ROOT": str(R)})
 check("example config: a text that does not parse (old) selects every suite", r.stdout.strip() == "all" and "does not parse" in r.stderr, (r.stdout, r.stderr))
 def link_edit():
     os.remove(R / "tests/example_base.toml"); os.symlink("../data.txt", R / "tests/example_base.toml")
 out, err = ex_sel(link_edit, "link moved")
 check("example config: a change to the link tests/example_base.toml selects every suite", out == "all" and "link" in err, (out, err))
-out, err = ex_sel(lambda: (ex_sub("# the example config", "# the example config, again"), sub("data.txt", "one", "two")), "comment and data")
-check("example config: a comment beside another file's change selects the direct readers and the other file's (fx2, other open data.txt)",
+out, err = ex_sel(lambda: (ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), sub("data.txt", "one", "two")), "comment and data")
+check("example config: a plain comment beside another file's change selects the direct readers and the other file's (fx2, other open data.txt)",
       out.split() == ["direct", "fx2", "other"], (out, err))
 out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5.0"), "int to float")
-check("example config: 5 to 5.0 is a changed setting (typed compare), not the same data", out.split() == FIX, (out, err))
+check("example config: 5 to 5.0 selects the fixture readers", out.split() == FIX, (out, err))
 out, err = ex_sel(lambda: ex_sub("guards = true", "guards = 1"), "bool to int")
-check("example config: true to 1 is a changed setting", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: ex_sub("flags = [1]", "flags = [true]"), "list element type")
-check("example config: [1] to [true] is a changed setting", out.split() == FIX, (out, err))
+check("example config: true to 1 selects the fixture readers", out.split() == FIX, (out, err))
 A1 = {"SUITEMAP_EXAMPLE_RULE": "A1"}
 r = tool("list", env={"SUITEMAP_EXAMPLE_RULE": "A-1"})
 check("example config: a bad SUITEMAP_EXAMPLE_RULE is refused at the start of any command, `list` included (the check in main(), not only where a rule reads it)",
@@ -414,16 +437,14 @@ for bad in ("A-1", "a3", "off"):
     check(f"example config: SUITEMAP_EXAMPLE_RULE={bad} is an error that names A1 and A2, not a silent A2", r.returncode != 0 and "A1" in r.stderr and "A2" in r.stderr and r.stdout.strip() == "", (r.returncode, r.stdout, r.stderr[-300:]))
 r = tool("select", "--map", str(MAP2), "--to", "HEAD", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_EXAMPLE_RULE": " a1 "})
 check("example config: the switch is read without case or spaces (a1)", r.returncode == 0, (r.returncode, r.stderr[-300:]))
-out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nnew_key = 1"), "key added, A1", env=A1)
-check("example config (switch A1): a key added selects the fixture readers too", out.split() == FIX and "rule A1" in err, (out, err))
-out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment, A1", env=A1)
-check("example config (switch A1): a comment-only change still selects the direct readers only", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment, A1", env=A1)
+check("example config (switch A1): even a plain comment selects the fixture readers (no cheap case)", out.split() == FIX and "rule A1" in err, (out, err))
 out, err = ex_sel(lambda: ex_sub("guards = true", "guards = false"), "flipped, A1", env=A1)
 check("example config (switch A1): a changed setting selects the same as under A2", out.split() == FIX, (out, err))
-out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment, old map", map_=OLDMAP)
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment, old map", map_=OLDMAP)
 # pins the change-over: on a map made before the link (every suite opens the real path) nothing is lost while the rule waits for main's next measurement
 check("example config: on a map from before the link (every suite opens the real path) a comment still selects all of them, as before", out.split() == ["direct", "fx1", "fx2"], (out, err))
-out, err = ex_sel(lambda: ex_sub("# the example config", "# the example config, with more words"), "comment, no strace", map_={**json.loads(MAP2.read_text()), "strace": False})
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment, no strace", map_={**json.loads(MAP2.read_text()), "strace": False})
 check("example config: a map without the file measurement selects every suite, as for any data file", out == "all", (out, err))
 
 # ---- the edits of the delta review, on the real example config and the real tests/_instance.py: each of E1-E4 and E6-E9 breaks the fixture suites
@@ -460,36 +481,56 @@ def e8():
     ls = cur().split("\n"); i = ls.index("[registries.projects]")
     ls[i:i + 3] = ["[registries]", "projects.key = " + ls[i + 1].split("=", 1)[1].split("#")[0].strip(), "projects.match = " + ls[i + 2].split("=", 1)[1].strip()]
     put("\n".join(ls))
-out, err = real_sel(lambda: swap("[router]  ", "# a new comment line\n[router]  "), "real: comment")
-check("real example: a comment line away from a pinned header stays at the direct readers", out.split() == ["direct"], (out, err))
-out, err = real_sel(lambda: swap("max_pause_hours = 4  ", "max_pause_hours = 4  # and a trailing comment  "), "real: trailing comment")
-check("real example: a trailing comment on a line stays at the direct readers", out.split() == ["direct"], (out, err))
-out, err = real_sel(lambda: after_line("[model] ", ["# a comment under a header that is not pinned"]), "real: comment under [model]")
-check("real example: a comment right under a header that no suite anchors on stays at the direct readers", out.split() == ["direct"], (out, err))
-for name, edit in (("E1 a comment line right under [audit]", lambda: after_line("[audit]", ["# a comment right under the header"])),
+REAL_PLAIN = "# Some plain prose about nothing in particular."
+out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "\n[router]  "), "real: comment")
+check("real example: a plain comment line away from a pinned header stays at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: put(cur().rstrip("\n") + "\n\n" + REAL_PLAIN + "\n"), "real: comment and blank lines at the end")
+check("real example: a plain comment and blank lines at the end of the file stay at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: after_line("[model] ", [REAL_PLAIN]), "real: comment under [model]")
+check("real example: a plain comment right under a header that no suite anchors on stays at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "\n[router]  "), "real: comment, A1", env={"SUITEMAP_EXAMPLE_RULE": "A1"})
+check("real example (switch A1): the same plain comment selects the fixture readers", out.split() == FIX, (out, err))
+def trailing_tab(prefix):
+    ls = cur().split("\n"); i = next(k for k, l in enumerate(ls) if l.startswith(prefix)); code, _, cm = ls[i].partition("#")
+    ls[i] = code.rstrip() + "\t#" + cm; put("\n".join(ls))
+def uncomment(sample):
+    swap("# " + sample, sample)
+for name, edit in (("E1 a plain comment line right under [audit]", lambda: after_line("[audit]", [REAL_PLAIN])),
                    ("E1 a blank line right under [audit]", lambda: after_line("[audit]", [""])),
+                   ("E1 a plain comment line right under [anchor_hub]", lambda: after_line("[anchor_hub]", [REAL_PLAIN])),
                    ("E2 an extra space before = in [stall]", lambda: swap("max_pause_hours = 4", "max_pause_hours  = 4")),
                    ("E3 an extra space before = in [paths] repo", lambda: swap('repo = "~/stackshot-data"', 'repo  = "~/stackshot-data"')),
                    ("E4 a new [[foo.bar]] row with a repo key", lambda: put(cur().rstrip("\n") + '\n\n[[foo.bar]]\nrepo = "x"\n')),
+                   ("E5 an unrelated key in an unrelated table", lambda: put(cur().rstrip("\n") + "\n\n[a_new_feature]\nswitch = 1\n")),
                    ("E6 a new multi-line value in [instance]", lambda: after_line("[instance]", ["zzz = [", "[1],", "]"])),
                    ("E7 enabled moved below mode in [audit]", e7),
                    ("E8 [registries.projects] rewritten as dotted keys", e8),
-                   ("E9 [ runners.ssh_hosts ] with spaces in the brackets", lambda: swap("[runners.ssh_hosts] ", "[ runners.ssh_hosts ] "))):
+                   ("E9 [ runners.ssh_hosts ] with spaces in the brackets", lambda: swap("[runners.ssh_hosts] ", "[ runners.ssh_hosts ] ")),
+                   ("E10 a key added after owner_aliases", lambda: after_line("owner_aliases = []", ["unrelated_after_aliases = 1"])),
+                   ("E10 a key added after rules", lambda: after_line("rules = ", ["unrelated_after_rules = 1"])),
+                   ("F1 a trailing comment on port = 8020", lambda: swap("\nport = 8020\n", "\nport = 8020  # x\n")),
+                   ("F1 a trailing comment on hook_port = 8010", lambda: swap("\nhook_port = 8010\n", "\nhook_port = 8010 # x\n")),
+                   ("F1 a tab before the comment on cap_needs_owner", lambda: trailing_tab("cap_needs_owner = true")),
+                   ("F2 a first line # session_view = \"\"", lambda: put('# session_view = ""\n' + cur())),
+                   ("F3 direct = {} added in [model]", lambda: after_line("[model] ", ["direct = {}"])),
+                   ("F3 a [units] table added", lambda: put(cur().rstrip("\n") + "\n\n[units]\n")),
+                   ("F3 a [units] table with scope = user added", lambda: put(cur().rstrip("\n") + '\n\n[units]\nscope = "user"\n')),
+                   ("F4 zz_end = 1 at the end of the file", lambda: put(cur().rstrip("\n") + "\nzz_end = 1\n")),
+                   ("F4 zz_gate = 1 under [page_gate]", lambda: after_line("[page_gate]", ["zz_gate = 1"])),
+                   ("F4 the sample # paused_until uncommented", lambda: uncomment("paused_until = ")),
+                   ("F4 the sample # pause_item uncommented", lambda: uncomment("pause_item = ")),
+                   ("F4 the sample # live = true uncommented", lambda: uncomment("live = true"))):
     out, err = real_sel(edit, name)
     check(f"real example: {name} selects the fixture readers", out.split() == FIX, (out, err))
-out, err = real_sel(lambda: put(cur().rstrip("\n") + "\n\n[a_new_feature]\nswitch = 1\n"), "E5")
-check("real example: E5 an unrelated key in an unrelated table stays at the direct readers", out.split() == ["direct"], (out, err))
-out, err = real_sel(lambda: after_line("owner_aliases = []", ["unrelated_after_aliases = 1"]), "E10 aliases")
-check("real example: E10 a key added after owner_aliases stays at the direct readers", out.split() == ["direct"], (out, err))
-out, err = real_sel(lambda: after_line("rules = ", ["unrelated_after_rules = 1"]), "E10 rules")
-check("real example: E10 a key added after rules stays at the direct readers", out.split() == ["direct"], (out, err))
-out, err = real_sel(lambda: after_line("owner_aliases = []", ["unrelated_after_aliases = 1"]), "E10 aliases A1", env={"SUITEMAP_EXAMPLE_RULE": "A1"})
-check("real example (switch A1): the same key selects the fixture readers", out.split() == FIX, (out, err))
 R = R_MAIN
 # what apply() touches, run for real: every setting it sets and every table it appends is a name the selection knows (the names come from the constants
 # of tests/_instance.py, so a new line in apply() that changes something the constants do not list fails here)
 sys.path.insert(0, SCR)
 import _instance
+MLS = 'a = """\nx\n\ny\n"""\nb = 1\n'
+check("layout_only: a blank line inside a multi-line string is content, not layout", not smod.layout_only(MLS, MLS.replace("x\n\ny", "x\n\n\ny"), set(), set()))
+check("layout_only: a '#' line inside a multi-line string is content, not a comment", not smod.layout_only(MLS, MLS.replace("x\n", "x\n# plain\n"), set(), set()))
+check("layout_only: a blank line outside the string is layout", smod.layout_only(MLS, MLS + "\n\n", set(), set()))
 names = smod.names_from_source((pathlib.Path(SCR) / "_instance.py").read_text(encoding="utf-8"))
 check("apply(): the selection reads the names from tests/_instance.py", names is not None and len(names[0]) > 20 and names[1] == set(_instance.PINNED_TABLES), names and len(names[0]))
 if names:
@@ -501,6 +542,10 @@ if names:
     check("apply(): every setting it changes and every table it appends is covered by a name the selection knows", touched and not uncovered, uncovered)
     check("apply(): the tables it appends are all in the names (job_gap.repos, router.watch, project_scopes.by_prefix)",
           {"job_gap.repos", "router.watch", "router.quiet", "project_scopes.by_prefix", "project_scopes.by_tag"} <= names[0], names[0])
+src = (pathlib.Path(SCR) / "_instance.py").read_text(encoding="utf-8")
+bad_pinned = re.sub(r"(?m)^PINNED_TABLES = .*$", 'PINNED_TABLES = "audit"', src)
+check("apply(): PINNED_TABLES as a bare string is refused, not read as a set of letters", bad_pinned != src and smod.names_from_source(bad_pinned) is None, bad_pinned != src)
+check("apply(): PINNED_TABLES as a list of strings is read", smod.names_from_source(re.sub(r"(?m)^PINNED_TABLES = .*$", 'PINNED_TABLES = ["audit"]', src)) is not None)
 # a suite's pattern that anchors on a table's header line names that table in PINNED_TABLES
 anchored = set()
 for f in sorted(pathlib.Path(SCR).glob("*_scenario.py")):

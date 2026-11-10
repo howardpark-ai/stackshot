@@ -83,30 +83,31 @@ The example config (Tue Nov 10th 2026). About 150 of the suites read stackshot.e
 config, so every change to it (11 of the last 30 PRs, a comment among them) ran about 188 of the 196 suites. Now those suites read it through
 the tracked link tests/example_base.toml (-> ../stackshot.example.toml; tests/_instance.py base_toml()), and strace records the path a process
 opens as it was written, so the map tells two kinds of reader apart: a DIRECT reader opens the real path (it parses, greps, copies or patches
-the example config, or runs code that reads it: about 40 suites), a FIXTURE reader opens the link. The DATA table names the file and its link, and
-a change to the file is read by what it does to the parsed data (tomllib, old = the map's commit, new = the target):
-  * the same data, types included (80 and 80.0 differ, so do true and 1), and the same code lines: only whole-line comments, trailing
-    comments and blank lines differ → the direct readers
-  * keys only ADDED, each a complete one-line `key = value` or `[table]` line (every old table, setting and code line is still there,
-    equal and in its place) → the direct readers (rule A2), unless an added name is one the fixture suites meet (below)
-  * a setting changed or removed, or a table removed, or a code line of the file modified, removed or moved even when the data is the
-    same (an extra space, a reorder inside a table, a header respelled, a dotted-key rewrite, `[ a.b ]`), or an added line that is not a
-    complete line of its own (a multi-line value, an array-of-tables row)  → the direct readers and the fixture readers
-  * a text that does not parse (old or new)                             → all
-  * the link itself changes (tests/example_base.toml)                   → all (rule 2 above)
-An ADDED table or key still selects the fixture readers when the fixture suites would meet it (they build their config with
-tests/_instance.py apply(), and patch the base with `re.subn(...); assert n == 1`): (a) it is a table apply() appends (a second declaration
-of [job_gap.repos], [[router.watch]] is a parse error), or a key apply() sets; (b) its name is one the example already holds elsewhere (a pattern
-that must match once would match twice). A table in PINNED_TABLES ([audit], [anchor_hub]: a suite's pattern takes the header line and the line after it as one text, then `enabled = false`)
-keeps the lines from its header to its first code line as they were: a comment, a blank line or a key put there is a change. The cheap answers
-are given only when the old text is provably untouched from the point of view of such a regex; what does not classify is a change. The names
-come from ONE place, the constants SETTINGS, KEYWORDS, FLAG_SETTINGS, TABLES and PINNED_TABLES of tests/_instance.py at the target commit, read
-by ast.literal_eval (no import of repo code); the scenario of this tool runs apply() and fails when it changes a name the selection does not
-know a name in a hardcoded `_set` or append of apply() (a name dropped from a constant and from apply() together is not caught). A _instance.py that cannot
-be read this way makes every change to the example count as a change of data.
-SUITEMAP_EXAMPLE_RULE=A1 (A2 by default; any other value is an error) also sends every ADDED key to the fixture readers, for the day an
-added key breaks a fixture suite in a way the names above do not foresee: no code change, set it in tests.yml's selection step. Until main's next measured run records the link for the fixture suites, the map lists the real path for every suite that
-opened it, so the old behaviour (every suite that read the file) holds by itself. `audit` applies the same rule on both maps.
+the example config, or runs code that reads it: about 40 suites, the suitemap scenario among them), a FIXTURE reader opens the link. The DATA
+table names the file and its link. A change to the file selects the direct readers ALONE only when it is provably harmless to a fixture suite,
+and that is narrow on purpose:
+  * every changed line of the file, on the old side and the new, is a whole blank line or a whole comment-only line (outside a multi-line
+    string), and a comment line is plain prose: letters, spaces and . , ; : ! ? ( ) ' - only, with no word of it (and no 4-letter-or-longer
+    name inside a longer word) that is a name the fixtures patch, read or grep: the table and key names of the file itself (old and new)
+    and the constants SETTINGS, KEYWORDS, FLAG_SETTINGS, TABLES and PINNED_TABLES of tests/_instance.py. A comment with `=`, `[`, a quote,
+    a digit or an underscore is not plain (a commented-out sample such as `# live = true` or `# session_view = ""` is code to a suite that
+    replaces text without anchoring it). → the direct readers
+  * the lines from the header of a PINNED_TABLES table ([audit], [anchor_hub]) to its first code line are as they were (a suite's pattern
+    takes the header line and the one after it as one text); a comment or a blank line put there is a change.
+Anything else selects the direct readers AND the fixture readers (the behaviour before this rule): any change to a code line, a trailing
+comment or the whitespace before it included; any key, table, inline table or array-of-tables row added, removed or moved; a value
+changed; an uncommented sample; a comment that is not plain. What a fixture suite breaks on depends on where a line lands and on text
+a suite patches (`re.subn(...); assert n == 1`, a bare str.replace, a regex anchored on a header), and no rule short of "the code is
+untouched" has held up against the edits reviewers tried, so none is attempted. A text that does not parse (old or new) → all; the link
+itself changes → all (rule 2 above). The names come from ONE place, the constants of tests/_instance.py at the target commit, read by
+ast.literal_eval (no import of repo code); the scenario of this tool runs apply() and fails when it changes a name the constants do not
+list, which holds for a name in a hardcoded `_set` or append of apply() (a name dropped from a constant and from apply() together is not
+caught). A _instance.py that cannot be read this way makes every change to the example count as a change of code.
+SUITEMAP_EXAMPLE_RULE=A1 (A2 by default; any other value is an error, checked when a command starts) leaves no cheap case: every change
+to the example, a comment included, selects the fixture readers too (the old behaviour of the file), for the day a comment edit is found
+to break a fixture suite: no code change, set it in tests.yml's selection step. Until main's next measured run records the link for the
+fixture suites, the map lists the real path for every suite that opened it, so the old behaviour (every suite that read the file) holds by
+itself. `audit` applies the same rule on both maps.
 
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
@@ -134,7 +135,7 @@ INSTANCE = "tests/_instance.py"   # where the names the fixture suites' config b
 
 
 def example_rule():
-    """A2 (default): a key added selects the direct readers only, unless it is a name the fixture suites meet; A1: every added key selects the fixture readers too"""
+    """A2 (default): a change of blank lines and plain comments only selects the direct readers; A1: every change to the example selects the fixture readers too"""
     v = os.environ.get("SUITEMAP_EXAMPLE_RULE", "A2").strip().upper()
     if v not in ("A1", "A2"):
         raise SystemExit(f"suitemap: SUITEMAP_EXAMPLE_RULE={os.environ.get('SUITEMAP_EXAMPLE_RULE')!r} is not a rule: the allowed values are A1 and A2")
@@ -1181,23 +1182,12 @@ def names_from_source(src):
                 elif isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
                     paths.add(p)
         walk(tables, "")
-        return paths, set(c["PINNED_TABLES"])
+        pinned = c["PINNED_TABLES"]
+        if not isinstance(pinned, (tuple, list, set, frozenset)) or not all(isinstance(x, str) for x in pinned):
+            return None
+        return paths, set(pinned)
     except (TypeError, ValueError, SyntaxError, KeyError, AttributeError, tomllib.TOMLDecodeError):
         return None
-
-
-def meets_fixtures(added, new_items, paths):
-    """True when a key or table added to the example is one the fixture suites would meet (a name apply() sets or appends, or one the
-    example holds elsewhere): see *The example config* in the docstring"""
-    if paths is None:
-        return bool(added)
-    seen = collections.Counter(p.rsplit(".", 1)[-1] for p, v in new_items if v != "{}")
-    for p, v in added:
-        if any(p == t or p.startswith(t + ".") for t in paths if t):
-            return True
-        if v != "{}" and seen[p.rsplit(".", 1)[-1]] > 1:
-            return True
-    return False
 
 
 def code_lines(text):
@@ -1231,23 +1221,35 @@ def code_lines(text):
     return raw, out
 
 
-def simple_line(code):
-    """True for a complete one-line `key = value` or a one-line `[table]` header (not an array of tables): a line that parses alone"""
-    s = code.strip()
-    if s.startswith("[["):
-        return False
-    try:
-        return bool(tomllib.loads(s)) or s.startswith("[")
-    except (tomllib.TOMLDecodeError, ValueError):
-        return False
+PLAIN_COMMENT = re.compile(r"[A-Za-z .,;:!?()'-]*")
 
 
-def text_change(ot, nt, pinned):
-    """how the text of the example changed, apart from its data: 'none' (the code lines are the same: only whole-line comments, trailing
-    comments and blank lines differ), 'added' (the old code lines are all there in order, untouched, and the new ones are one-line
-    `key = value` or `[table]` lines), or 'changed' (a code line modified, removed or moved: a spacing change, a reorder, a header
-    respelled; an added line that is not a complete line of its own; an array-of-tables row added). In every case the lines from a pinned
-    table's header to its first code line (comments, blanks and that line) must be as they were: a suite's pattern anchors on them."""
+def name_words(paths, items):
+    """the lowercase words of every name a fixture suite may patch, read or grep: the dotted paths of the constants of tests/_instance.py and
+    of every table and key of the example (old and new)"""
+    words = set()
+    for p in list(paths) + [p for p, _ in items]:
+        words |= set(re.findall(r"[a-z]+", p.lower()))
+    return words
+
+
+def plain_comment(line, words):
+    """True for a blank line, or a whole-line comment of plain prose that names no setting (see *The example config*)"""
+    s = line.strip()
+    if not s:
+        return True
+    if not s.startswith("#"):
+        return False
+    text = s.lstrip("#").strip()
+    if not PLAIN_COMMENT.fullmatch(text):
+        return False
+    low = text.lower()
+    return not (set(re.findall(r"[a-z]+", low)) & words) and not any(w in low for w in words if len(w) >= 4)
+
+
+def layout_only(ot, nt, pinned, words):
+    """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string), and the lines from a
+    pinned table's header to its first code line are as they were. Every other line is equal and in order, so the code is untouched."""
     oraw, oc = code_lines(ot)
     nraw, nc = code_lines(nt)
 
@@ -1260,24 +1262,22 @@ def text_change(ot, nt, pinned):
                 found[m.group(1)] = tuple(raw[n:end + 1])
         return found
     if anchors(oraw, oc) != anchors(nraw, nc):
-        return "changed"
-    ocode, ncode = [c for _, c in oc], [c for _, c in nc]
-    if ocode == ncode:
-        return "none"
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, ocode, ncode, autojunk=False).get_opcodes():
+        return False
+    ofree = set(range(len(oraw))) - {n for n, _ in oc}
+    nfree = set(range(len(nraw))) - {n for n, _ in nc}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, oraw, nraw, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
-        if tag != "insert" or not all(simple_line(c) for c in ncode[j1:j2]):
-            return "changed"
-    return "added"
+        for raw, free, lo, hi in ((oraw, ofree, i1, i2), (nraw, nfree, j1, j2)):
+            if any(n not in free or not plain_comment(raw[n], words) for n in range(lo, hi)):
+                return False
+    return True
 
 
 def data_change(a, b, old, new):
-    """how the data file changed between a and b: 'same' (the same typed data and the code lines as they were: a comment, a blank line),
-    'added' (the data and the text keep everything of a, with one-line additions the fixture suites would not meet), 'changed' (a
-    setting changed or removed, a table removed, a line of the text touched, an added name the fixture suites meet, the file added,
-    deleted or renamed), or None (a text that does not parse: the caller selects everything). The cheap answers ('same', 'added') are
-    given only when the old text is untouched from the point of view of a suite's regex; anything that does not classify is 'changed'."""
+    """how the data file changed between a and b: 'same' (blank lines and plain comments only: see layout_only), 'changed' (anything else,
+    the file added, deleted or renamed included), or None (a text that does not parse: the caller selects everything). Only 'same' is
+    cheap; anything that does not classify is 'changed'."""
     if not (old and new):
         return "changed"
     ot, nt = show(a, old), show(b, new)
@@ -1287,16 +1287,9 @@ def data_change(a, b, old, new):
     if oi is None or ni is None:
         return None
     names = instance_names(b)
-    if names is None or not oi <= ni:
+    if names is None:
         return "changed"
-    how = text_change(ot, nt, names[1])
-    if how == "changed":
-        return "changed"
-    if oi == ni:
-        return "same" if how == "none" else "changed"
-    if how != "added" or meets_fixtures(ni - oi, ni, names[0]):
-        return "changed"
-    return "added"
+    return "same" if layout_only(ot, nt, names[1], name_words(names[0], oi | ni)) else "changed"
 
 
 def selection(m, a, b, pathspec=()):
@@ -1384,11 +1377,10 @@ def selection(m, a, b, pathspec=()):
                 kind = data_change(a, b, old, new)
                 if kind is None:
                     return "all", why + [(f, "does not parse, in the old text or the new: every suite")]
-                if kind == "changed" or (kind == "added" and example_rule() == "A1"):
+                if kind == "changed" or example_rule() == "A1":
                     probe.append(DATA[dp])
-                note = {"same": "the same data (a comment or layout only): its direct readers",
-                        "added": "keys added only: its direct readers" + (" and the fixture readers (rule A1)" if example_rule() == "A1" else ""),
-                        "changed": "a setting changed or removed, or a name the fixture suites meet added: its direct readers and the fixture readers"}[kind] + "; "
+                note = ("blank lines and plain comments only: its direct readers" + (" and the fixture readers (rule A1)" if example_rule() == "A1" else "") if kind == "same" else
+                        "a code line, a setting, a name or a comment that names one changed: its direct readers and the fixture readers") + "; "
             for s, e in S.items():
                 if any(p in e.get("files", ()) for p in probe):
                     hit.add(s)
