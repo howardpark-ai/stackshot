@@ -115,10 +115,10 @@ def of(item: dict[str, Any], now: float) -> DatedWait | None:
     if _wt.mover_of(m)["kind"] != "session":
         return None
     soon = now + _wt.dated_wait_min_hours() * 3600.0
-    wake = _wt.wake_epoch(m.get("wake")) if m.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None
     if wake is None:
         return None
-    until, source, at = wake, "wake", str(m.get("wake")).strip()
+    until, source, at = wake, "wake", str(_wt.wake_value(m)).strip()
     if until <= soon:
         return None
     zone = _wt._cfg.tz()
@@ -142,11 +142,11 @@ def held_wait(item: dict[str, Any], now: float) -> DatedWait | None:
     m = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     if item.get("status") != "open" or _states.stored(item) != "doing" or not _wt.is_held(item) or _wt.mover_of(m)["kind"] != "session":
         return None
-    wake = _wt.wake_epoch(m.get("wake")) if m.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None
     soon = now + _wt.dated_wait_min_hours() * 3600.0
     if wake is None or wake <= soon:
         return None
-    return DatedWait(wake, "wake", str(m.get("wake")).strip(), ())
+    return DatedWait(wake, "wake", str(_wt.wake_value(m)).strip(), ())
 
 
 def basis_wait(item: dict[str, Any], now: float, after_open: Any = None) -> DatedWait | None:
@@ -161,10 +161,10 @@ def basis_wait(item: dict[str, Any], now: float, after_open: Any = None) -> Date
     if _wt.after_of(m) and (after_open(item) if after_open else True):
         return None
     reason = _wt.basis_of(m)
-    wake = _wt.wake_epoch(m.get("wake")) if reason and m.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(m)) if reason and _wt.wake_value(m) else None
     if wake is None or wake <= now:
         return None
-    return DatedWait(wake, "wake", str(m.get("wake")).strip(), (), reason)
+    return DatedWait(wake, "wake", str(_wt.wake_value(m)).strip(), (), reason)
 
 
 def timed_wait_lines(next_text: Any, wake: Any, today: dt.date, mover_is: Callable[[str], bool], dated_only: bool = False) -> list[str]:

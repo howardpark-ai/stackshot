@@ -83,15 +83,18 @@ def paused() -> bool:
 
 
 def stored_kind(meta: dict[str, Any]) -> str:
-    """The wait_kind an item stores ("" when none or not one of the four)."""
+    """The wait_kind an item stores ("" when none or not one of the five); an item that stores an `until` and no kind waits on the date alone, so it reads "time"."""
     k = _model.clean((meta or {}).get("wait_kind")).lower()
-    return k if k in _model.WAIT_KINDS else ""
+    if k in _model.WAIT_KINDS:
+        return k
+    return "time" if _wt.stored_until(meta or {}) else ""
 
 
 def time_epoch(meta: dict[str, Any]) -> float | None:
-    """When a time wait ends: its wake, else (a verifying item) its end date, the end of that day."""
-    ep = day_epoch(meta.get("wake"))
-    if ep is None and meta.get("state") == "verifying" and meta.get("end"):
+    """When a time wait ends: its `until`, else its wake, else (a verifying item) its end date, the end of that day."""
+    su = _wt.stored_until(meta)
+    ep = day_epoch(su) if su else day_epoch(meta.get("wake"))
+    if ep is None and not su and meta.get("state") == "verifying" and meta.get("end"):
         ep = _wt.due_epoch(meta.get("end"))
     return ep
 
@@ -103,7 +106,7 @@ def can_end(meta: dict[str, Any]) -> bool:
     if k == "time":
         return time_epoch(meta) is not None
     if k == "relay":
-        return day_epoch(meta.get("ask_by")) is not None
+        return day_epoch(relay_day(meta)) is not None
     if k == "item":
         return bool(_wt.after_of(meta)) or backstop_epoch(meta) is not None
     if k == "anchor":
@@ -136,8 +139,16 @@ def day_epoch(value: Any) -> float | None:
     return _wt.wake_epoch(value)
 
 
+def relay_day(meta: dict[str, Any]) -> Any:
+    """The day a relay wait turns into a question: its `until`, else its ask_by (as stored)."""
+    return _wt.stored_until(meta) or meta.get("ask_by")
+
+
 def backstop_epoch(meta: dict[str, Any]) -> float | None:
-    """The date an item or anchor wait comes back anyway: the earlier of its ask_by and its wake, None when it has neither."""
+    """The date an item, anchor or event wait comes back anyway: its `until`, else the earlier of its ask_by and its wake, None when it has none."""
+    su = _wt.stored_until(meta)
+    if su:
+        return day_epoch(su)
     eps = [e for e in (day_epoch(meta.get("ask_by")), day_epoch(meta.get("wake"))) if e is not None]
     return min(eps) if eps else None
 
@@ -146,7 +157,7 @@ def next_moment(meta: dict[str, Any]) -> float | None:
     """The moment the scheduler next has to look at this wait (a wake, a relay's ask-by, a backstop), None for none: the runner sleeps until the earliest. An item whose last turn failed
     is looked at again BACKOFF after the failure, not at once."""
     k = stored_kind(meta)
-    ep = time_epoch(meta) if k == "time" else day_epoch(meta.get("ask_by")) if k == "relay" else backstop_epoch(meta) if k in ("item", "anchor", "event") else None
+    ep = time_epoch(meta) if k == "time" else day_epoch(relay_day(meta)) if k == "relay" else backstop_epoch(meta) if k in ("item", "anchor", "event") else None
     fa = failed_at(meta)
     if ep is not None and fa and ep <= fa + BACKOFF:
         ep = fa + BACKOFF
@@ -166,7 +177,7 @@ def due(item: dict[str, Any], now: float, after_open: list[str] | None = None) -
         ep = time_epoch(meta)
         return "time" if ep is not None and ep <= now else ""
     if k == "relay":
-        ep = day_epoch(meta.get("ask_by"))
+        ep = day_epoch(relay_day(meta))
         return "relay" if ep is not None and ep <= now else ""
     if k == "item":
         if _wt.after_of(meta) and not (after_open or []):
@@ -228,7 +239,7 @@ def drop_options() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the wait that turned (the record of what to put back)
-WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "after", "party", "needs")
+WAS_FIELDS = ("wait_kind", "wait_anchor", "wait_event", "mover", "then", "post_wake_mover", "ask_by", "wake", "until", "after", "party", "needs")
 
 
 def remember(meta: dict[str, Any], asked: str, now: float) -> None:
@@ -251,12 +262,13 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
     anchor wait: its ask_by, the old wake dropped). A moved date resets the backstop and (reset_chases) the chases, a new round; a notice older than `now` is not the wait's arrival."""
     w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
     was = dict(w.get("was") or {})
-    for k in ("wake", "ask_by"):
+    by_until = "until" in was                      # a wait that stood on a stored `until` gets its new end there; one on ask_by gets it there, as it always did
+    for k in ("wake", "ask_by", "until"):
         meta.pop(k, None)
     for k, v in was.items():
-        if k not in ("wake", "ask_by"):
+        if k not in ("wake", "ask_by", "until"):
             meta[k] = v
-    meta["ask_by"] = date
+    meta["until" if by_until else "ask_by"] = date
     if reset_chases:
         meta.pop("chases", None)
     meta["watch"] = {k: v for k, v in w.items() if k not in ("asked", "was", "failed_at")}
@@ -265,7 +277,7 @@ def restore_wait(meta: dict[str, Any], date: str, reset_chases: bool, now: float
 
 
 # ---------------------------------------------------------------------------------------------------------------- the arrival
-LIVE_DROP = ("hold", "hold_set", "wake", "wait_basis", "waiting", "wait_failed", "idle", "after", "recycle", "recycle_at", *_model.WAIT_GROUP)      # what the end of a wait clears
+LIVE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "waiting", "wait_failed", "idle", "after", "recycle", "recycle_at", *_model.WAIT_GROUP)      # what the end of a wait clears
 
 
 def end_wait(meta: dict[str, Any]) -> None:
@@ -331,7 +343,7 @@ def chases_line(meta: dict[str, Any], label=str) -> str:
 def world_line(gid_shown: str, subject: str, meta: dict[str, Any]) -> str:
     """One line of the brief's "waiting on the world": the item, what it waits on, its ask-by date, its chases."""
     n = len(chases_of(meta))
-    return f"- {gid_shown} {subject}: {subject_of(meta)}, ask by {_model.clean(meta.get('ask_by')) or 'no date'}" + (f", chased {n}x" if n else "")
+    return f"- {gid_shown} {subject}: {subject_of(meta)}, ask by {_model.clean(relay_day(meta)) or 'no date'}" + (f", chased {n}x" if n else "")
 
 
 # ---------------------------------------------------------------------------------------------------------------- the owner's answer
@@ -432,6 +444,10 @@ def answer_effect(meta: dict[str, Any], choice: str, text: str, today: dt.date |
 # ---------------------------------------------------------------------------------------------------------------- the words of an arrival
 def what_time(wake: str) -> str:
     return f"its wake {wake} came"
+
+
+def what_until(date: str) -> str:
+    return f"its until {date} came"
 
 
 def what_item(closed: str, how: str) -> str:

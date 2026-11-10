@@ -108,6 +108,45 @@ def wake_epoch(value: Any) -> float | None:
     return ts if 0 < ts < MAX_EPOCH else None
 
 
+_WAIT_KINDS = ("time", "anchor", "item", "relay", "event")      # the stored wait kinds (the same five as model.WAIT_KINDS; this module is read by model.py, so it cannot import them)
+
+
+def stored_until(m: dict[str, Any]) -> str:
+    """The `until` an item stores (the one date its wait ends on: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, read as a wake is), on one line; "" when it stores none. An open item with one is waiting."""
+    return " ".join(str(m.get("until") or "").split())
+
+
+def wake_value(m: dict[str, Any]) -> Any:
+    """The date a wake-side record (wait_basis, cap_ok) stands for: the stored `until`, else the stored `wake` as it is. The records are read only for the very date they were given for."""
+    return stored_until(m) or m.get("wake")
+
+
+def kind_of(m: dict[str, Any]) -> str:
+    """The kind of wait an item stores: its wait_kind when it is one of the five; with none, "time" when it stores an `until` (a wait on the date alone); else ""."""
+    k = " ".join(str(m.get("wait_kind") or "").split()).lower()
+    if k in _WAIT_KINDS:
+        return k
+    return "time" if stored_until(m) else ""
+
+
+def until_of(m: dict[str, Any]) -> str:
+    """The date an item's wait ends on, as stored text: its `until`; with none, what the legacy fields give for its kind (a time wait's wake; a relay's ask_by; the earlier of ask_by and
+    wake for an anchor, item or event wait, whose date is the backstop; a wake, else an ask_by, when the item stores no kind); "" when it has no date."""
+    su = stored_until(m)
+    if su:
+        return su
+    k = " ".join(str(m.get("wait_kind") or "").split()).lower()
+    wake, ask = " ".join(str(m.get("wake") or "").split()), " ".join(str(m.get("ask_by") or "").split())
+    if k == "time":
+        return wake
+    if k == "relay":
+        return ask
+    if k in _WAIT_KINDS:
+        dated = [(ep, v) for v in (ask, wake) if (ep := wake_epoch(v)) is not None]
+        return min(dated)[1] if dated else ""
+    return wake or ask
+
+
 def due_epoch(value: Any) -> float | None:
     """A due date (YYYY-MM-DD) as the end of that day in the instance zone, None when it is not one."""
     try:
@@ -178,7 +217,8 @@ def basis_of(m: dict[str, Any]) -> str:
     to a vendor reply, a release date, a trial end) → its text, "" when there is none or it was written for another wake: like cap_ok, it is
     read only for the very wake it was recorded for, so a wake moved to another date reads without it."""
     v = m.get("wait_basis")
-    if not isinstance(v, dict) or not m.get("wake") or v.get("wake") != m.get("wake"):
+    wv = wake_value(m)
+    if not isinstance(v, dict) or not wv or v.get("wake") != wv:
         return ""
     return " ".join(str(v.get("text") or "").split())
 
@@ -189,7 +229,8 @@ def cap_words(m: dict[str, Any], wait: str = "wake") -> bool:
     for a wake only, a real-world date the session gave as its basis (metadata.wait_basis, basis_of). A changed date reads without either."""
     v = m.get("cap_ok")
     key = "due" if wait == "due" else "wake"
-    if isinstance(v, dict) and bool(m.get(key)) and v.get(key) == m.get(key):
+    cur = wake_value(m) if key == "wake" else m.get(key)
+    if isinstance(v, dict) and bool(cur) and v.get(key) == cur:
         return True
     return key == "wake" and bool(basis_of(m))
 
@@ -197,7 +238,8 @@ def cap_words(m: dict[str, Any], wait: str = "wake") -> bool:
 def words_of(m: dict[str, Any]) -> dict[str, str]:
     """The owner's recorded words behind this item's wake, {"quote", "source", "by"}, when cap_ok holds a quote for the very wake; else {}."""
     v = m.get("cap_ok")
-    if isinstance(v, dict) and m.get("wake") and v.get("wake") == m.get("wake") and str(v.get("quote") or "").strip():
+    wv = wake_value(m)
+    if isinstance(v, dict) and wv and v.get("wake") == wv and str(v.get("quote") or "").strip():
         return {"quote": str(v["quote"]), "source": str(v.get("source") or ""), "by": str(v.get("by") or "")}
     return {}
 

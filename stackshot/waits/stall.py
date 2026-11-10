@@ -86,7 +86,7 @@ def not_due(item: dict[str, Any], now: float, after_open: Callable[[dict[str, An
         return "on hold"
     if _wt.after_of(m) and (after_open(item) if after_open else True):
         return "ordered after an open item"
-    wake = _wt.wake_epoch(m.get("wake")) if m.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None
     if wake is not None and wake > now:
         return "wake still ahead"
     return ""
@@ -96,7 +96,7 @@ def due_at(item: dict[str, Any]) -> float:
     """When the item's work fell due: its wake (0.0 when it has none). The pass counts a mover's idle time from then, as it counts from the item's arrival, so
     an item whose wake has just passed gets the minutes before its first step, not an instant one on the pane's age alone."""
     m = item.get("metadata") or {}
-    wake = _wt.wake_epoch(m.get("wake")) if m.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None
     return wake or 0.0
 
 

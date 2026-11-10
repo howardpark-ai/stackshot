@@ -128,7 +128,7 @@ def stored(item: dict[str, Any]) -> str:
 
 
 def _wake_with_words(m: dict[str, Any]) -> bool:
-    return bool(m.get("wake")) and _wt.cap_words(m, "wake")
+    return bool(_wt.wake_value(m)) and _wt.cap_words(m, "wake")
 
 
 def derive(item: dict[str, Any], after_open: Callable[[dict[str, Any]], Any] | None = None) -> str:
@@ -247,11 +247,11 @@ def problems(meta: dict[str, Any], state: str, today: dt.date, *, check_dates: b
             out.append("after=[\"board#N\"] (the item it waits on)")
         text("supplies", "one line: what that item's output gives this one")
     elif state == "parked":
-        if not meta.get("wake"):
+        if not _wt.wake_value(meta):
             out.append("wake=YYYY-MM-DD")
         if not _wt.is_held({"status": "open", "metadata": meta}):
             out.append("hold=true (a wake alone is a reminder, never a park)")
-        if not (meta.get("wake") and _wt.cap_words(meta, "wake")):
+        if not (_wt.wake_value(meta) and _wt.cap_words(meta, "wake")):
             out.append("the owner's words for the wake (said=[...], which records cap_ok) or wait_basis=\"<what happens> YYYY-MM-DD\"")
     elif state == "verifying":
         need_agent("verifying is a session checking its work")

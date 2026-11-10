@@ -233,7 +233,7 @@ def n_apart(rs):
 def waits_on_end(r):
     """A verifying item whose wait is its end date (no wake of its own): held until then, like a parked item."""
     m = r.get("metadata") or {}
-    return is_verifying(r) and not m.get("wake") and bool(m.get("end"))
+    return is_verifying(r) and not _wt.wake_value(m) and bool(m.get("end"))
 def anchor(r): return f"task-{r['L']}-{r['id']}"
 def is_held(r):
     """On hold: parked, out of the queue; drawn as a kind of on agent, never your call or on others. A
@@ -250,7 +250,8 @@ def is_held(r):
 def wake_of(r):
     """An item's wake (on hold: when it is released; not on hold: a reminder): a date ("YYYY-MM-DD", start of that day), a datetime in the instance timezone ("YYYY-MM-DDTHH:MM", the owner
     "until friday evening"), or None. Board.when() draws either: "Fri Mar 6th" or "Fri Mar 6th 12:00"."""
-    v = str((r.get("metadata") or {}).get("wake", "")).strip().replace(" ", "T")
+    md = r.get("metadata") or {}
+    v = (str(md.get("until") or "").strip() or str(md.get("wake", "")).strip()).replace(" ", "T")      # a stored `until` first, else the wake
     try:
         if "T" in v: return datetime.datetime.fromisoformat(v[:16]).replace(tzinfo=_cfg.tz())
         return datetime.date.fromisoformat(v[:10])
@@ -360,7 +361,7 @@ def held_only_for_recycle(r, open_after):
     rows). An anchor-scoped hold always carries a backstop wake (the rule in the server's update), so the wake test covers
     it. The one definition: the server's _recycled releases such a hold with the recycle, and recycle_due() counts the item."""
     m = r.get("metadata") or {}
-    return r.get("status") == "open" and bool(m.get("hold")) and not m.get("wake") and not open_after
+    return r.get("status") == "open" and bool(m.get("hold")) and not _wt.wake_value(m) and not open_after
 def recycle_due(r, open_after):
     """The item is one a pane recycle would serve now, as far as the item itself says: open, flagged
     (waits_recycle), and either not on hold or on hold for the recycle alone (held_only_for_recycle). Both the server's
