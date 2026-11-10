@@ -16650,11 +16650,17 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
     return _steps.first_line(cl[mine[0]]["text"])
 
 
-def _keep_note(gid: str, item: dict[str, Any], text: str, code: str) -> str:
+def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "") -> str:
     """An answer note that has no decision to go with it (the item is closed, or the question it answered has changed) is kept as his comment on the item and told to the mover, as any comment of his
-    is: the board never drops what he wrote. → `code`, the notice the page shows (it says the note was kept). The caller holds the item and answer locks."""
+    is: the board never drops what he wrote. `pick` is the option he sent with it and `why` the words that name it in front of the note ("the item is closed", "the item no longer asks this"). A second
+    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click).
+    → `code`, the notice the page shows (it says the note was kept). The caller holds the item and answer locks."""
     now = time.time()
     meta = dict(item.get("metadata") or {})
+    text = f"({why}: {pick}) {note}" if why and pick else note
+    for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
+        if isinstance(a, dict) and now - float(a.get("ts") or 0) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
+            return code
     rec: dict[str, Any] = {"ts": now, "kind": "comment", "text": text, "via": "board"}
     prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
     meta["answers"] = [*prior, rec]
@@ -16678,7 +16684,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
     with _ITEM_LOCK, _ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
         item = _load(gid)
         if item.get("status") != "open":
-            return _keep_note(gid, item, text, "closednote") if text else "closed"      # a note on a closed item is kept as his comment
+            return _keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
         meta = dict(item.get("metadata") or {})
         stepped, then, handed, letter, until = False, "", "", "", ""
         if choice:
@@ -16687,7 +16693,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             valid = [f[0] for f in _option_forms(item)] or [o["label"] for o in _rmod.yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
                 if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
-                    return _keep_note(gid, item, f"(late, the item no longer asks this: {choice}) {text}", "stalenote") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
+                    return _keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
                 text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
             else:
                 kind = "decision"

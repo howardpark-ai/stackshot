@@ -409,6 +409,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and [(a["kind"], a["text"], a["via"]) for a in a4["metadata"]["answers"]] == [("comment", "late", "board")]
           and "your note is on it" in ui_render.Board._SENT["closednote"][1], (r_c.headers.get("location"), a4["metadata"].get("answers")))
     told.clear()
+    r_c2 = post("/items/a4/answer", {"token": tok("a4"), "text": "late", "act": "comment"})
+    check("a second send of the same note on the closed item is a no-op: one comment, nobody told again", r_c2.headers.get("location") == "/items/a4?sent=closednote" and len(rd("a", 4)["metadata"]["answers"]) == 1 and not told, rd("a", 4)["metadata"]["answers"])
+    server._answer("a4", "Yes", "a pick on it", "")
+    check("a pick sent with a note on a closed item is kept with the pick named in front",
+          [a["text"] for a in rd("a", 4)["metadata"]["answers"]][-1] == "(the item is closed: Yes) a pick on it" and len(rd("a", 4)["metadata"]["answers"]) == 2, rd("a", 4)["metadata"]["answers"])
+    told.clear()
     a4_again = rd("a", 4)
     del a4_again["metadata"]["answers"]; (T / "store/a/4.json").write_text(json.dumps(a4_again))      # back to the fixture: later checks read item a4 as it was
 
@@ -742,6 +748,12 @@ check("a choice that matches no option, sent with a note, keeps the note as his 
       and "decision" in rd("a", 10)["metadata"]["needs"]
       and [(a["kind"], a["text"]) for a in rd("a", 10)["metadata"]["answers"]] == [("comment", "(late, the item no longer asks this: Nope) wait, I meant the second one")], rd("a", 10)["metadata"])
 d10 = rd("a", 10); del d10["metadata"]["answers"]; (T / "store/a/10.json").write_text(json.dumps(d10))      # back to the fixture for the checks below
+item("a", 120, needs=["decision"], ask=ASK, options=OPTS)
+told.clear()
+check("a pick with a note is a decision; the same send again (a double click) is stale and adds no comment and tells nobody more",
+      server._answer("a120", "Wait", "after the holiday", "") == "decision" and (n_told := len(told)) >= 1
+      and server._answer("a120", "Wait", "after the holiday", "") == "stalenote" and len(told) == n_told and [(a["kind"], a["text"]) for a in rd("a", 120)["metadata"]["answers"]] == [("decision", "after the holiday")], (told, rd("a", 120)["metadata"].get("answers")))
+check("…but the same note sent again after another pick or other text is kept", server._answer("a120", "Ship", "after the holiday", "") == "stalenote" and len(rd("a", 120)["metadata"]["answers"]) == 2, rd("a", 120)["metadata"]["answers"])
 check("a comment on an item with options changes neither the options nor the ask",
       server._answer("a10", "", "what does Drop mean?", "comment") == "comment" and rd("a", 10)["metadata"].get("options") == OPTS and rd("a", 10)["metadata"].get("ask") == ASK
       and rd("a", 10)["metadata"]["needs"] == ["decision"], rd("a", 10)["metadata"])

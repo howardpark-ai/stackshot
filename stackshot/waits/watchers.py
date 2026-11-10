@@ -240,10 +240,12 @@ def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list
     clip = " ".join(str(note or "").replace(" \u00b7 ", " - ").split())
     clip = clip if len(clip) <= 80 else clip[:79].rstrip() + "…"
     dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
-    opts = [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": i == 0} for i, d in enumerate(dates)]
+    opts = [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": i == 0, "date": d.isoformat()} for i, d in enumerate(dates)]      # the day is stored on the button: a pick is read from it, never from the label
     opts += [{**o, "recommended": False} for o in (relay_options() if asked_of(meta) == "relay" else drop_options())]      # the first question's own buttons stay: a date typed in the box still has its button
-    kept = f"I kept your note (\u201c{clip}\u201d) but could not read a date from it." if clip else "I kept your answer but it holds no date."
-    ask = (f"{_ASK_HEAD}when should {subject_of(meta)} come back? {kept} Pick a day, or write a date in the box{_OPT_MARK}" + " / ".join(o["label"] for o in opts))
+    kept = f"I kept your note (\u201c{clip}\u201d) but could not read a date from it." if clip else "I kept your answer but it holds no date I can use."
+    w = meta.get("watch") if isinstance(meta.get("watch"), dict) else {}
+    what = subject_of({**(w.get("was") or {}), **{k: v for k, v in meta.items() if k in ("party", "wait_event")}})      # the wait's fields moved to watch.was when the item turned to him
+    ask = (f"{_ASK_HEAD}when should {what} come back? {kept} Pick a day, or write a date in the box{_OPT_MARK}" + " / ".join(o["label"] for o in opts))
     return ask, opts
 
 
@@ -367,31 +369,53 @@ def _add_months(day: dt.date, months: int) -> dt.date:
     return first.replace(day=min(day.day, (nxt - first).days))
 
 
-def _relative_date(low: str, today: dt.date, base: dt.date | None) -> dt.date | None:
-    """The small table of relative phrases (no model): a span of days, weeks or months ("a week", "one more week", "another week", "two weeks", "in 3 days", "a fortnight", "next month",
-    "a month from now", "in a month"), "the day after tomorrow", "end of the week" (the Friday), "end of next week", "end of the month" (its last day), "after the weekend" (the Monday).
-    A span counts from today; "more" and "another" count from `base` (the date the wait already ends on) when it is after today, else from today. None when no phrase of the table is in the text."""
-    if re.search(r"\bday after tomorrow\b", low):
-        return today + dt.timedelta(days=2)
-    if re.search(r"\bend of next week\b", low):
-        return today + dt.timedelta(days=7 - today.weekday() + 4)
-    if re.search(r"\bend of (?:the |this )?week\b", low):
-        return today + dt.timedelta(days=(4 - today.weekday()) % 7 or 7)      # this week's Friday; on a Friday or after, the next one
-    if re.search(r"\bend of (?:the |this )?month\b", low):
-        last = _add_months(today.replace(day=1), 1) - dt.timedelta(days=1)
-        return last if last > today else _add_months(today.replace(day=1), 2) - dt.timedelta(days=1)
-    if re.search(r"\bafter the weekend\b", low):
-        return today + dt.timedelta(days=7 - today.weekday())
-    if re.search(r"\bnext month\b", low):
-        return _add_months(today, 1)
-    m = _REL_SPAN.search(low)
-    if not m:
-        return None
+_REL_CUES = r"(?:in|for|after|wait|give it|ask again|check back|park(?: it)?|again|snooze(?: it)?|until)"
+_REL_FILLER = r"(?:ok|okay|yes|sure|please|just|maybe|then|hmm|well|so|and|let'?s)"
+_REL_TAIL = re.compile(r"\s*(?:ago|already|report|before|earlier)\b")
+
+
+def _rel_span(m, today: dt.date, base: dt.date | None) -> dt.date | None:
     n = 1 if m["more"] else (int(m["n"]) if m["n"].isdigit() else _NUM_WORDS[m["n"]])
     start = base if (m["more"] or m["mo"]) and base and base > today else today
     if m["unit"] == "month":
         return _add_months(start, n)
     return start + dt.timedelta(days=n * {"day": 1, "week": 7, "fortnight": 14}[m["unit"]])
+
+
+def _end_of_month(today: dt.date) -> dt.date:
+    last = _add_months(today.replace(day=1), 1) - dt.timedelta(days=1)
+    return last if last > today else _add_months(today.replace(day=1), 2) - dt.timedelta(days=1)
+
+
+_REL_TABLE = (
+    (_REL_SPAN, _rel_span),
+    (re.compile(r"\bend of (?:the |this )?week\b"), lambda m, t, b: t + dt.timedelta(days=(4 - t.weekday()) % 7 or 7)),      # this week's Friday; on a Friday or after, the next one
+    (re.compile(r"\bend of (?:the |this )?month\b"), lambda m, t, b: _end_of_month(t)),
+    (re.compile(r"\bafter the weekend\b"), lambda m, t, b: t + dt.timedelta(days=7 - t.weekday())),
+    (re.compile(r"\bnext month\b"), lambda m, t, b: _add_months(t, 1)),
+)
+
+
+def _relative_date(low: str, today: dt.date, base: dt.date | None) -> dt.date | None:
+    """The small table of relative phrases (no model), read only when no older reader found a date: a span of days, weeks or months ("a week", "one more week", "another week", "two weeks", "in 3 days",
+    "a fortnight", "a month from now", "in a month"), "next month", "end of the week" (the Friday), "end of the month" (its last day), "after the weekend" (the Monday).
+    A span counts from today; "more" and "another" count from `base` (the date the wait already ends on) when it is after today, else from today.
+    Only a note that is mostly a date phrase reads: the phrase is the whole note, or at its start (after a word like please or ok), or comes right after a cue word (in, for, after, wait, give it, ask again,
+    check back, park it, again, until), is not part of a hyphenated word, and is not followed by ago, already, report, before or earlier; a bare "a day" or "one day" is the idiom, not a span. Of
+    several phrases the first in the text counts. None when no phrase passes."""
+    found = [(m.start(), m.end(), d) for rx, fn in _REL_TABLE for m in rx.finditer(low) if (d := fn(m, today, base))]
+    for start, end, d in sorted(found):
+        lead = " ".join(re.sub(r"[^\w\s']", " ", low[:start]).split())
+        filler = re.fullmatch(r"(?:" + _REL_FILLER + r"\s*)*", lead) is not None
+        cued = re.search(r"(?:^|\s)" + _REL_CUES + r"$", lead) is not None or low[start:].startswith("in ")      # a cue word right before the phrase, whatever came before it
+        if not (filler or cued):
+            continue
+        if low[start - 1:start] == "-" or low[end:end + 1] == "-" or _REL_TAIL.match(low[end:]):
+            continue
+        if re.fullmatch(r"(?:a|an|one) day", low[start:end]) and not cued:
+            continue
+        return d
+    return None
 
 
 def parse_date(text: Any, today: dt.date | None = None, base: dt.date | None = None) -> str:
@@ -449,13 +473,13 @@ def parse_date(text: Any, today: dt.date | None = None, base: dt.date | None = N
                     break
                 y, mo = (y + 1, 1) if mo == 12 else (y, mo + 1)
     if best is None:
-        best = _relative_date(low, today, base)
-    if best is None:
         units = "|".join(x for x in (dy_s, wk_s) if x)
         m = re.search(r"\bin\s+(\d{1,3})\s+(day|week)s?\b", low) or (re.search(rf"(\d{{1,3}})\s*({units})\s*(?:{lat_s})", t, re.I) if units and lat_s else None)
         if m:
             best = today + dt.timedelta(days=int(m[1]) * (7 if (m[2].lower() == "week" or (wk_s and re.fullmatch(wk_s, m[2], re.I))) else 1))
         elif (a_ := _cfg.kw_alt("dates", "day_after_tomorrow")) and re.search(a_, t, re.I):
+            best = today + dt.timedelta(days=2)
+        elif re.search(r"\bday after tomorrow\b", low):
             best = today + dt.timedelta(days=2)
         elif re.search(r"\btomorrow\b" + _cfg.kw_pipe(_cfg.kw_alt("dates", "tomorrow")), low):
             best = today + dt.timedelta(days=1)
@@ -467,6 +491,8 @@ def parse_date(text: Any, today: dt.date | None = None, base: dt.date | None = N
         if m:
             ahead = (days.index(m[1]) - today.weekday()) % 7 or 7
             best = today + dt.timedelta(days=ahead)
+    if best is None:      # no older reader found a date: the table of relative phrases (only a note that is mostly a date phrase)
+        best = _relative_date(low, today, base)
     return best.isoformat() if best is not None and best > today else ""
 
 
@@ -500,7 +526,8 @@ def answer_effect(meta: dict[str, Any], choice: str, text: str, today: dt.date |
         date = parse_date(text, today, _wait_end(meta))
         return {"do": "wait", "date": date} if date else {"do": NEEDS_DATE}
     if c.startswith(ASK_AGAIN):      # a button of the question put back (ask_back): the day on the button, unless he wrote a date in the box
-        date = parse_date(text, today, _wait_end(meta)) or parse_date(c[len(ASK_AGAIN):], today)
+        stored = next((str(o.get("date") or "") for o in meta.get("options") or [] if isinstance(o, dict) and o.get("label") == c), "")      # the day stored on the button
+        date = parse_date(text, today, _wait_end(meta)) or (stored if stored > (today or dt.date.today()).isoformat() else "")      # a day that has passed since the question was put is asked again with new days
         return {"do": "wait", "date": date} if date else {"do": NEEDS_DATE}
     return {"do": ""}
 

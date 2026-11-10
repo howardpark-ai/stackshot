@@ -218,6 +218,9 @@ nz = dt.datetime(2026, 11, 7, 15, 0, tzinfo=dt.timezone.utc)
 pd = lambda t, today: watchers.parse_date(t, today)
 check("note_read: done phrases", all(NR.read(t, nz, pd) == {"done": True, "until": ""} for t in ("ran it", "Done", "I did it already", "ok, I've run it", "it's done", "I have run it")),
       [NR.read(t, nz, pd) for t in ("ran it", "Done", "I did it already", "I have run it")])
+check("note_read: a stray span in a note keeps the older readers' day (tomorrow, next week, a weekday), the table of relative phrases is not consulted",
+      [NR.read(t, nz, pd)["until"] for t in ("I'll look at it next week, it is a month-end task", "I'll do it on Friday, it takes a day", "I will do it tomorrow, took two weeks to get here")]
+      == ["2026-11-14T09:00", "2026-11-13T09:00", "2026-11-08T09:00"], [NR.read(t, nz, pd) for t in ("I'll look at it next week, it is a month-end task", "I'll do it on Friday, it takes a day")])
 check("note_read: 'run it' is a request, not a tick",
       not any(NR.read(t, nz, pd)["done"] for t in ("run it", "Run it now", "run them", "run")), [NR.read(t, nz, pd) for t in ("run it", "Run it now")])
 check("note_read: not done when it asks, negates or says more",
