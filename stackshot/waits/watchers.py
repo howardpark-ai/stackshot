@@ -218,14 +218,14 @@ def is_watcher_ask(ask: Any) -> bool:
 def relay_options() -> list[dict[str, Any]]:
     """The relay question's buttons, in the shape of an option the owner's page offers (label, line, recommended)."""
     return [{"label": ARRIVED, "line": "It came: the item goes on to the session that takes it after the wait.", "recommended": False},
-            {"label": NOT_YET, "line": "Give the date in the box (Mar 9th, or 2099-03-09): the item waits again and the question comes back then.", "recommended": True},
+            {"label": NOT_YET, "line": "Give the date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the item waits again and the question comes back then.", "recommended": True},
             {"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": False}]
 
 
 def drop_options() -> list[dict[str, Any]]:
     """The "drop it?" question's buttons."""
     return [{"label": DROP, "line": "It is no longer wanted: the item closes as not planned.", "recommended": True},
-            {"label": KEEP, "line": "Give the date in the box (Mar 9th, or 2099-03-09): the wait goes on and the chases start again.", "recommended": False}]
+            {"label": KEEP, "line": "Give the date in the box (Mar 9th, 2099-03-09, or a phrase like one more week): the wait goes on and the chases start again.", "recommended": False}]
 
 
 def day_words(day: dt.date) -> str:
