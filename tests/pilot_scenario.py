@@ -2814,75 +2814,89 @@ check("migration: get shows the migrated item's needs; the hub's name line not, 
 for i in (90, 91): (T / f"store/a/{i}.json").unlink()
 (T / "store/projects.json").write_text(_reg_b)
 
-# ---- the board item: work lines, what is in motion on an item and what waits
-from stackshot.model import work as W; from stackshot.github import ghsync as _ghs
+# ---- the board item: step statuses, what is in motion on an item and what waits
+from stackshot.model import work as W; from stackshot.model import steps as _stp; from stackshot.github import ghsync as _ghs
 _regw = (T / "store/projects.json").read_text(); _rgw = json.loads(_regw)
 _rgw["pages"]["projects/alpha"].update(agents={"work-osprey-main": "front", "work-osprey-x": "back"}, back_agents={"work-osprey-x": "back"})
 (T / "store/projects.json").write_text(json.dumps(_rgw))
-w1 = mk2(); st0, cf0 = rd(w1)["state_updated"], rd(w1)["confirmed"]
+tags_of = lambda g: [(_stp.opener(x["text"]), x["status"], (x.get("tag") or {}).get("text"), (x.get("tag") or {}).get("state")) for x in rd(g)["metadata"].get("steps") or []]
+w1 = mk2(); st0, cf0 = rd(w1)["state_updated"], rd(w1)["confirmed"]; next0 = rd(w1)["metadata"]["next"]
 n0 = len(wait_push(0)); owed0 = server._owed_load().get("projects/beta", {}).get(B); time.sleep(0.02)   # the create's own debt, as it stands
 res = server._update(w1, work={"text": "migrating the ids"}, sender="home-beta")
-wl = rd(w1)["metadata"].get("work")
-check("work: the owner adds a line: stored defined, keyed by its words, stamped, no agent; the reply shows the list and the change",
-      wl == [{"id": "migrating-the-ids", "text": "migrating the ids", "agent": "", "state": "defined", "ts": wl[0]["ts"]}] and wl[0]["ts"] > 0
-      and "\nwork: migrating the ids — defined\n" in res and "\nwork: migrating the ids · defined" in res, (wl, res))
+check("work: the owner sets the status of its open step: stored on the step (in progress), the step's words and the list unchanged; the reply shows the change",
+      tags_of(w1) == [("home-beta", "open", "migrating the ids", "in progress")] and rd(w1)["metadata"]["next"] == next0 and "work" not in rd(w1)["metadata"]
+      and "\nstep status: migrating the ids — in progress (home-beta)\n" in res and "\nstatus: migrating the ids \u00b7 in progress (home-beta)" in res, (tags_of(w1), res))
 owed1 = server._owed_load().get("projects/beta", {}).get(B)
 check("work: a filing edit: no page owed (the ledger's beta entry is the create's or gone), nobody told, the state clock and the confirm untouched, the item's own clock moved",
       (owed1 is None or owed1 == owed0) and "charged" not in res and len(wait_push(0)) == n0
       and rd(w1)["state_updated"] == st0 and rd(w1)["confirmed"] == cf0 and rd(w1)["updated"] > st0, (owed0, owed1, rd(w1)))
 check("work: the pane hook counts it as filing only (no touch)", pages.touch_mcp({"tool_name": "mcp__Stackshot__update", "tool_input": {"item_id": w1, "work": {"text": "x"}}, "tool_response": "updated"}) == 0)
 e = refusal(lambda: server._update(w1, work={"text": "migrating the ids", "state": "in progress"}, sender="work-osprey-main"))   # a front agent: a background agent's first write names it and passes (auto-name, below)
-check("work: a session neither owner nor named in needs is refused, with the way in", e.startswith(f"Refused: work lines on {w1} are written by its mover (home-beta) or a session named in its needs (none named); work-osprey-main is neither.")
-      and "name you in needs" in e and rd(w1)["metadata"]["work"][0]["state"] == "defined", e)
+check("work: a session neither owner nor named in needs is refused, with the way in", e.startswith(f"Refused: the status of a step on {w1} is written by its mover (home-beta) or a session named in its needs (none named); work-osprey-main is neither.")
+      and "name you in needs" in e and tags_of(w1)[0][3] == "in progress", e)
 server._update(w1, needs=["work-osprey-x"], sender="home-beta"); time.sleep(0.3)
-res = server._update(w1, work={"text": "Migrating the IDs", "state": "in progress"}, sender="work-osprey-x")
-wl = rd(w1)["metadata"]["work"]
-check("work: a session named in needs moves the line (found by its text, case apart) to in progress; the agent defaults to the writer; needs unchanged",
-      len(wl) == 1 and wl[0]["state"] == "in progress" and wl[0]["agent"] == "work-osprey-x" and wl[0]["id"] == "migrating-the-ids" and rd(w1)["metadata"]["needs"] == ["work-osprey-x"]
-      and "\nwork: migrating the ids → in progress (work-osprey-x)" in res, (wl, res))
-e = refusal(lambda: server._update(w1, work={"text": "migrating the ids", "state": "done"}, sender="work-osprey-main"))
-check("work: a stranger is still refused once a session is named", "work-osprey-main is neither" in e and "(work-osprey-x)" in e and rd(w1)["metadata"]["work"][0]["state"] == "in progress", e)
-res = server._update(w1, work={"text": "migrating the ids", "state": "in progress"}, sender="work-osprey-x")
-check("work: a no-op says so, writes no change", "(work: \"migrating the ids\" unchanged, already so)" in res and rd(w1)["metadata"]["work"] == wl, res)
-before_w = {**rd(w1), "metadata": {**rd(w1)["metadata"], "work": [{**wl[0], "state": "defined", "agent": ""}]}}
-check("work: the change reads as one line, in History, never a JSON dump",
-      W.changes(before_w["metadata"], rd(w1)["metadata"]) == ["work: migrating the ids → in progress (work-osprey-x)"], W.changes(before_w["metadata"], rd(w1)["metadata"]))
-check("work: get and the brief carry the one line", "\nwork: migrating the ids — in progress (work-osprey-x)\n" in server.stackshot_get(w1) and "work: migrating the ids — in progress (work-osprey-x)" in server.stackshot_brief())
-# the forms: a plain string adds a line, a JSON string too (a client whose cached schema sends text); an agent by its id is stored by name, and makes a defined line assigned
-server._update(w1, work="tests", sender="work-osprey-x"); server._update(w1, work='{"text": "docs", "agent": "' + X + '"}', sender="work-osprey-x")
-wl = rd(w1)["metadata"]["work"]
-check("work: a plain string adds a defined line; a JSON string with an agent (by id) adds an assigned line with the agent's name",
-      [(l["text"], l["state"], l["agent"]) for l in wl] == [("migrating the ids", "in progress", "work-osprey-x"), ("tests", "defined", ""), ("docs", "assigned", "work-osprey-x")], wl)
-check("work: get lists in progress first, then assigned, then defined", "\nwork: migrating the ids — in progress (work-osprey-x) · docs — assigned (work-osprey-x) · tests — defined\n" in server.stackshot_get(w1), server.stackshot_get(w1))
-server._update(w1, work={"id": "tests", "state": "done"}, sender="work-osprey-x"); server._update(w1, work={"text": "docs", "remove": True}, sender="work-osprey-x")
-wl = rd(w1)["metadata"]["work"]
-check("work: done by id stays on the list as done; remove drops a line; the words say it", [(l["text"], l["state"]) for l in wl] == [("migrating the ids", "in progress"), ("tests", "done")]
-      and "work: tests — " not in server.stackshot_get(w1) and "· done: tests" in server.stackshot_get(w1)
-      and W.changes({"work": [*wl, {"id": "docs", "text": "docs", "state": "assigned", "agent": "x", "ts": 1}]}, {"work": wl}) == ["work: docs removed"], (wl, server.stackshot_get(w1)))
-for bad, want in (({"text": "x" * 41}, "at most 40 characters"), ({"foo": "bar"}, "unknown key foo"), ([{"text": "a"}], "one line per call"), ({"id": "nope"}, "no line 'nope'"),
-                  ({"text": "a", "state": "soon"}, "is not one of defined, assigned, in progress, done"), ({"text": "nothing here", "remove": True}, "nothing to remove")):
+res = server._update(w1, work={"text": "PR 83 up", "state": "in progress"}, sender="work-osprey-x")
+check("work: a session named in needs with no open step of its own gets one made from the text, with that status; needs unchanged; the owner's step keeps its status",
+      tags_of(w1) == [("home-beta", "open", "migrating the ids", "in progress"), ("work-osprey-x", "open", "PR 83 up", "in progress")] and rd(w1)["metadata"]["needs"] == ["work-osprey-x"]
+      and "(step added for work-osprey-x: work-osprey-x: PR 83 up)" in res, (tags_of(w1), res))
+res = server._update(w1, work={"text": "review running", "state": "in progress"}, sender="work-osprey-x")
+check("work: the next status of that session replaces the one on its step in place: still one step, one status",
+      tags_of(w1)[1:] == [("work-osprey-x", "open", "review running", "in progress")] and len(tags_of(w1)) == 2 and "step added" not in res, (tags_of(w1), res))
+e = refusal(lambda: server._update(w1, work={"text": "review running", "state": "done"}, sender="work-osprey-main"))
+check("work: a stranger is still refused once a session is named", "work-osprey-main is neither" in e and "(work-osprey-x)" in e and tags_of(w1)[1][3] == "in progress", e)
+res = server._update(w1, work={"text": "review running", "state": "in progress"}, sender="work-osprey-x")
+check("work: a no-op says so, writes no change", "(work: \"review running\" unchanged, already so)" in res, res)
+t_before = (rd(w1)["metadata"]["steps"][1].get("tag") or {}).get("ts")
+time.sleep(0.05); server._update(w1, work={"text": "review running", "state": "in progress"}, sender="work-osprey-x")
+check("work: a status sent again unchanged keeps its old time", (rd(w1)["metadata"]["steps"][1].get("tag") or {}).get("ts") == t_before, t_before)
+_m1 = rd(w1)["metadata"]
+check("work: the change reads as one line, in History, never a JSON dump", W.changes({**_m1, "steps": [{**x, "tag": None} if i == 1 else x for i, x in enumerate(_m1["steps"])]}, _m1) == ["status: review running \u00b7 in progress (work-osprey-x)"],
+      W.changes({**_m1, "steps": [{**x, "tag": None} if i == 1 else x for i, x in enumerate(_m1["steps"])]}, _m1))
+check("work: get and the brief carry the one line", "\nstep status: migrating the ids — in progress (home-beta) · review running — in progress (work-osprey-x)\n" in server.stackshot_get(w1)
+      and "step status: migrating the ids — in progress (home-beta) · review running — in progress (work-osprey-x)" in server.stackshot_brief(), server.stackshot_get(w1))
+# the forms: a plain string is the text, a JSON string too (a client whose cached schema sends text)
+server._update(w1, work="tests running", sender="work-osprey-x"); server._update(w1, work='{"text": "docs", "state": "in progress"}', sender="work-osprey-x")
+check("work: a plain string and a JSON string are the status text; each replaces the status in place", tags_of(w1)[1:] == [("work-osprey-x", "open", "docs", "in progress")], tags_of(w1))
+res = server._update(w1, work={"remove": True}, sender="work-osprey-x")
+check("work: remove clears the status of the sender's open step; the step stays", tags_of(w1)[1] == ("work-osprey-x", "open", None, None) and "status: docs cleared" in res, (tags_of(w1), res))
+res = server._update(w1, work={"state": "done"}, sender="work-osprey-x")
+check("work: state done ticks the sender's step as done=[n] does: the step is done, its status done, the owner's step stays open",
+      [(a_, b_, d_) for a_, b_, c_, d_ in tags_of(w1)] == [("home-beta", "open", "in progress"), ("work-osprey-x", "done", "done")] and "(step 2 done: work-osprey-x: PR 83 up)" in res, (tags_of(w1), res))
+for bad, want in (({"text": "x" * 41}, "at most 40 characters"), ({"foo": "bar"}, "unknown key foo"), ([{"text": "a"}], "one status line per call"),
+                  ({"text": "a", "state": "soon"}, "is not one of defined, assigned, in progress, done")):
     e = refusal(lambda: server._update(w1, work=bad, sender="work-osprey-x")); check(f"work: refused: {want}", e.startswith("Refused: work: ") and want in e, e)
-for i in range(7): server._update(w1, work=f"line {i}", sender="work-osprey-x")
-e = refusal(lambda: server._update(w1, work="one too many", sender="work-osprey-x"))
-check("work: at most 8 open lines", "8 open lines already" in e and len([l for l in rd(w1)["metadata"]["work"] if l["state"] != "done"]) == 8, e)
-old = rd(w1); old["metadata"]["work"][1]["ts"] = time.time() - 2 * 86400; (T / f"store/{w1[0]}/{w1[1:]}.json").write_text(json.dumps(old))
-server._update(w1, work={"text": "line 0", "remove": True}, sender="work-osprey-x")
-check("work: a done line a day old drops off the list at the next work write, and says nothing", "tests" not in [l["text"] for l in rd(w1)["metadata"]["work"]]
-      and W.changes(old["metadata"], rd(w1)["metadata"]) == ["work: line 0 removed"], (rd(w1)["metadata"]["work"], W.changes(old["metadata"], rd(w1)["metadata"])))
-# the board: the row shows the lines in progress with the agent's short name (the project keeper's prefix dropped), "+N" for the rest; the item page the full list
+# no open step: a status done is recorded nowhere and says so; a clear says so; a status with text makes the step
+w1b = mk2(next="work-osprey-main: someone else's step"); res = server._update(w1b, work={"state": "done"}, sender="home-beta")
+check("work: state done with no open step of the sender's: nothing ticked, the reply says so", "(work: not recorded, home-beta has no open step on the item to finish" in res and all(x[1] == "open" for x in tags_of(w1b)), (tags_of(w1b), res))
+res = server._update(w1b, work={"remove": True}, sender="home-beta")
+check("work: remove with no open step of the sender's: the reply says so", "(work: not recorded, home-beta has no open step on the item, so there is no status to clear)" in res, res)
+res = server._update(w1b, work={"text": "starting up"}, sender="home-beta")
+check("work: a status with no open step of the sender's makes one open step from the text (smallest choice, not a refusal)",
+      tags_of(w1b)[-1] == ("home-beta", "open", "starting up", "in progress") and rd(w1b)["metadata"]["next"].endswith("\nhome-beta: starting up"), (tags_of(w1b), rd(w1b)["metadata"]["next"]))
+# a night of writes is one line on the step: 41 statuses in, 1 stored
+w1c = mk2()
+for i in range(41): server._update(w1c, work={"text": f"stage 11: round {i}"}, sender="home-beta")
+check("work: 41 writes on one step leave one step with the last status (the list does not grow)", tags_of(w1c) == [("home-beta", "open", "stage 11: round 40", "in progress")] and rd(w1c)["metadata"]["next"] == "home-beta: carry on", (tags_of(w1c), rd(w1c)["metadata"]["next"]))
+# the board: the row shows the statuses in progress with the agent's short name (the project keeper's prefix dropped), "+N" for the rest; the item page shows each on its step
 wa = mk2(project="alpha", owner="work-osprey-main"); server._update(wa, needs=["work-osprey-x"], sender="work-osprey-main"); time.sleep(0.3)
 server._update(wa, work={"text": "migrating the ids", "state": "in progress"}, sender="work-osprey-x")
 bW = ui_render.Board(str(T / "store")); hW = "".join(bW.routing_html(k) for k in bW.proj)      # the item lines live on the project pages
 check("work: the words of work in progress are no part of the home page's row, which the project page's lists share: the item has its row, without them",
       f'<li class="irow hrow" id="task-{wa[0]}-{wa[1:]}" data-st="agent">' in hW and '<span class="iwork"' not in hW, re.findall(r'<span class="iwork".*?</span>', hW))
 check("work: short names", W.short_agent("ops-falcon-engineer", "ops-falcon") == "engineer" and W.short_agent("ops-plover-master", "ops-falcon") == "ops-plover-master" and W.short_agent("ops-falcon", "ops-falcon") == "ops-falcon")
-server._update(wa, work={"text": "answer box", "state": "in progress"}, sender="work-osprey-x"); server._update(wa, work="tests", sender="work-osprey-x"); server._update(wa, work={"text": "docs", "agent": "work-osprey-x"}, sender="work-osprey-x")
+server._update(wa, work={"text": "answer box", "state": "in progress"}, sender="work-osprey-x")
 bW = ui_render.Board(str(T / "store")); hW, mdW, pW = "".join(bW.routing_html(k) for k in bW.proj), bW.markdown(), bW.item_html(wa)
-check("work: board.md carries the one line", f"- work: migrating the ids — in progress (work-osprey-x) · answer box — in progress (work-osprey-x) · docs — assigned (work-osprey-x) · tests — defined\n" in mdW, re.findall(r"- work: .*", mdW))
-check("work: the item page's sidebar lists every line with its state, agent and time, in progress first", '<dl class="sgrp"><dt>Work <span class="count">4</span></dt><dd><ul class="iwork"><li class="w-in-progress"><span class="wtext">migrating the ids</span><span class="badge w-in-progress">in progress</span><span class="wagent">work-osprey-x</span><span class="dim">· ' in _side(pW)
-      and pW.count('<li class="w-') == 4 and pW.index('class="w-in-progress"') < pW.index('class="w-assigned"') < pW.index('class="w-defined"'), re.findall(r'<ul class="iwork">.*?</ul>', pW))
-check("work: an item with no lines shows no Work section and no row words", "<dt>Work" not in bW.item_html("a1") and 'class="iwork"' not in bW.item_html("a1") and "Agent at work" not in bW.item_html("a1"))
-check("work: the update tool's description says it", "work: one status line of the item's subtasks per call" in server._UPDATE_DESC and "Written by the mover or a session named in needs" in server._UPDATE_DESC)
+check("work: board.md carries the one line", "- step status: answer box — in progress (work-osprey-x)\n" in mdW and "- step status: migrating the ids — in progress (work-osprey-x)" not in mdW, re.findall(r"- step status: .*", mdW))
+check("work: the item page has no Work field in the sidebar; the status is on its step in Next", "<dt>Work" not in pW and '<span class="cl-tag">answer box' in pW, re.findall(r'<span class="cl-tag">.*?</span>', pW))
+check("work: an item with no statuses shows no Work section and no row words", "<dt>Work" not in bW.item_html("a1") and 'class="iwork"' not in bW.item_html("a1") and "Agent at work" not in bW.item_html("a1") and 'class="cl-tag"' not in bW.item_html("a1"))
+# read-compat: an item that still carries the old `work` list (before the migration) is read as it always was
+wl_old = mk2(project="alpha", owner="work-osprey-main", next="work-osprey-main: carry on"); _it_old = rd(wl_old)
+_it_old["metadata"]["work"] = [{"id": "migrating", "text": "migrating", "agent": "work-osprey-x", "state": "in progress", "ts": time.time() - 60}, {"id": "docs", "text": "docs", "agent": "", "state": "defined", "ts": time.time() - 30}]
+(T / f"store/{wl_old[0]}/{wl_old[1:]}.json").write_text(json.dumps(_it_old))
+bO = ui_render.Board(str(T / "store")); pO, mdO = bO.item_html(wl_old), bO.markdown()
+check("work: an item that still carries the old list (until the migration has run) shows it in the sidebar and in get, and counts it in progress for the checks",
+      '<dt>Work <span class="count">2</span></dt>' in _side(pO) and "\nstep status: migrating — in progress (work-osprey-x) · docs — defined\n" in server.stackshot_get(wl_old) and W.in_progress(rd(wl_old)["metadata"])[0]["agent"] == "work-osprey-x", _side(pO)[:300])
+check("work: the update tool's description says it", "work: the status of your open step, one line per call" in server._UPDATE_DESC and "Written by the mover or a session named in needs" in server._UPDATE_DESC)
 (T / "store/projects.json").write_text(_regw)
 # ---- the board item: the server names the working background agent in needs, at the
 # moments it sees: a handover by message, and a write on the item. Only a background agent; never twice; never on a closed item;
@@ -2957,12 +2971,12 @@ check("auto-name: …and the owner is told through the owner path", any(m[0] == 
 res = server._update(w1, next="still building", sender="work-osprey-x"); check("auto-name: a second write names nothing again", needs46(w1) == ["work-osprey-x"] and "(named" not in res, res)
 w3 = mk46(owner="home-beta"); n0 = len(wait_push(0))
 res = server._update(w3, work={"text": "migrating the ids"}, sender="work-osprey-x"); time.sleep(0.3)
-check("auto-name: an unnamed background agent's first work line passes the work-writer gate, since the naming runs before it, and leaves it named",
-      needs46(w3) == ["work-osprey-x"] and [l["text"] for l in rd(w3)["metadata"].get("work") or []] == ["migrating the ids"]
-      and f"(named work-osprey-x in {w3}'s needs: update by work-osprey-x)" in res, (needs46(w3), rd(w3)["metadata"].get("work"), res))
+check("auto-name: an unnamed background agent's first status passes the status-writer gate, since the naming runs before it, and leaves it named; the step is made from the text",
+      needs46(w3) == ["work-osprey-x"] and [(_stp.opener(x["text"]), (x.get("tag") or {}).get("text")) for x in rd(w3)["metadata"].get("steps") or []][-1] == ("work-osprey-x", "migrating the ids")
+      and f"(named work-osprey-x in {w3}'s needs: update by work-osprey-x)" in res, (needs46(w3), rd(w3)["metadata"].get("steps"), res))
 e = refusal(lambda: server._update(w3, work={"text": "docs"}, sender="work-osprey-main"))
-check("auto-name: …while a front agent's work line is still refused by that gate (a front agent is never auto-named)", e.startswith(f"Refused: work lines on {w3} are written by")
-      and "work-osprey-main is neither" in e and needs46(w3) == ["work-osprey-x"] and len(rd(w3)["metadata"]["work"]) == 1, e)
+check("auto-name: …while a front agent's status is still refused by that gate (a front agent is never auto-named)", e.startswith(f"Refused: the status of a step on {w3} is written by")
+      and "work-osprey-main is neither" in e and needs46(w3) == ["work-osprey-x"] and len(rd(w3)["metadata"]["steps"]) == 2, e)
 w2 = mk46(); server._update(w2, next="x", sender="work-osprey"); server._update(w2, next="y", sender="work-osprey-main")
 check("auto-name: a write by the keeper or a front agent names nobody", "needs" not in rd(w2)["metadata"], rd(w2)["metadata"])
 c1 = mk46(needs=["work-osprey-ops"]); wait_push(len(wait_push(0))); n0 = len(wait_push(0))
@@ -3008,56 +3022,48 @@ check("auto-name: …and a subject or priority edit alone", "needs" not in rd(f4
 f5 = mk46(); res = server._update(f5, project="projects/alpha", next="building it", sender="work-osprey-x")
 check("auto-name: the project key together with real work (next) still names the agent, as before", needs46(f5) == ["work-osprey-x"] and f"(named work-osprey-x in {f5}'s needs: update by work-osprey-x)" in res, (needs46(f5), res))
 f6 = mk46(); res = server._update(f6, project="projects/alpha", work={"text": "moving it"}, sender="work-osprey-x")
-check("auto-name: …and with a work line", needs46(f6) == ["work-osprey-x"] and "(named" in res, (needs46(f6), res))
+check("auto-name: …and with a step status", needs46(f6) == ["work-osprey-x"] and "(named" in res, (needs46(f6), res))
 f7 = mk46(needs=["work-osprey-x"]); res = server._update(f7, project="projects/beta", sender="work-osprey-x")
 check("auto-name: a background agent already named stays named by a project-only update (nothing removed)", needs46(f7) == ["work-osprey-x"] and "(named" not in res, (needs46(f7), res))
-# …and finishing its own work line: a background agent that is not the owner marks a line assigned to it done, and that is the last of its part, not new work: it is not
-# named in needs, also when the line was already done ("unchanged, already so"); a new line, or a line that is not its own, still names it as before
+# …and finishing its own step by a status done: a background agent that is not the owner marks its own step done by a status done, and that is the last of its part, not new work: it is not
+# named in needs; a status done with no step of its own to finish, or together with other work, still names it as before
+st46 = lambda g: [(_stp.opener(x["text"]), x["status"], (x.get("tag") or {}).get("text")) for x in rd(g)["metadata"].get("steps") or []]
 d1 = mk46(); server._update(d1, work={"text": "moving the docs", "agent": "work-osprey-x"}, sender="work-osprey-main")
-check("auto-name: the owner assigns a line to the agent without naming it", needs46(d1) is None and rd(d1)["metadata"]["work"][0]["agent"] == "work-osprey-x", (needs46(d1), rd(d1)["metadata"].get("work")))
-res = server._update(d1, work={"text": "moving the docs", "state": "done"}, sender="work-osprey-x")
-check("auto-name: a non-owner marking its own work line done is not named in needs; the line is done", needs46(d1) is None and "(named" not in res and rd(d1)["metadata"]["work"][0]["state"] == "done", (needs46(d1), rd(d1)["metadata"].get("work"), res))
-res = server._update(d1, work={"text": "moving the docs", "state": "done"}, sender="work-osprey-x")
-check("auto-name: …again, the line already done: unchanged, already so, and needs unchanged", needs46(d1) is None and "(named" not in res and "unchanged, already so" in res, (needs46(d1), res))
+check("auto-name: the owner makes a step for the agent with a status without naming it", needs46(d1) is None and ("work-osprey-x", "open", "moving the docs") in st46(d1), (needs46(d1), st46(d1)))
+res = server._update(d1, work={"state": "done"}, sender="work-osprey-x")
+check("auto-name: a non-owner marking its own step done by a status done is not named in needs; the step is done", needs46(d1) is None and "(named" not in res and ("work-osprey-x", "done", "moving the docs") in st46(d1), (needs46(d1), st46(d1), res))
+res = server._update(d1, work={"state": "done"}, sender="work-osprey-x")
+check("auto-name: …again, with no open step left to finish: nothing recorded, the reply says so", "(work: not recorded, work-osprey-x has no open step" in res, (needs46(d1), res))
 d2 = mk46(); server._update(d2, work={"text": "moving the docs"}, sender="work-osprey-main")
-res = server._update(d2, work={"text": "moving the docs", "state": "done"}, sender="work-osprey-x")
-check("auto-name: a done on a line that is not assigned to the writer still names it, as today", needs46(d2) == ["work-osprey-x"] and "(named" in res, (needs46(d2), res))
-d3 = mk46(); res = server._update(d3, work={"text": "a new line", "state": "done"}, sender="work-osprey-x")
-check("auto-name: a new work line (even created done) still names the writer", needs46(d3) == ["work-osprey-x"] and "(named" in res, (needs46(d3), res))
+res = server._update(d2, work={"state": "done"}, sender="work-osprey-x")
+check("auto-name: a done when the writer has no step of its own (the open step is the owner's) still names it, as today, and ticks nothing", needs46(d2) == ["work-osprey-x"] and "(named" in res and all(x[1] == "open" for x in st46(d2)), (needs46(d2), st46(d2), res))
 d4 = mk46(); server._update(d4, work={"text": "moving the docs", "agent": "work-osprey-x"}, sender="work-osprey-main")
-res = server._update(d4, work={"text": "moving the docs", "state": "done"}, next="and the next thing", sender="work-osprey-x")
+res = server._update(d4, work={"state": "done"}, next="and the next thing", sender="work-osprey-x")
 check("auto-name: …and a done together with other work (next) names the writer", needs46(d4) == ["work-osprey-x"] and "(named" in res, (needs46(d4), res))
-# …what counts as finishing is exact: the spec changes nothing else (no other agent, no new text on a line found by id), the line is on the live list, the item is open
+# …what counts as finishing is exact: the spec changes nothing else (no other session's step), the writer has an open step, the item is open
 def own46():
     g = mk46(); server._update(g, work={"text": "moving the docs", "agent": "work-osprey-x"}, sender="work-osprey-main"); return g
-e1 = own46(); res = server._update(e1, work={"text": "moving the docs", "state": "done", "agent": "work-osprey-main"}, sender="work-osprey-x")
-check("auto-name: a done that hands the line to another session is not a finish: the writer is named, as before", needs46(e1) == ["work-osprey-x"] and "(named" in res and rd(e1)["metadata"]["work"][0]["agent"] == "work-osprey-main", (needs46(e1), rd(e1)["metadata"].get("work"), res))
-e2 = own46(); res = server._update(e2, work={"id": "moving-the-docs", "text": "moving other docs", "state": "done"}, sender="work-osprey-x")
-check("auto-name: a done by id with a changed text renames the line: not a finish, the writer is named, as before", needs46(e2) == ["work-osprey-x"] and "(named" in res and rd(e2)["metadata"]["work"][0]["text"] == "moving other docs", (needs46(e2), rd(e2)["metadata"].get("work"), res))
-e3 = own46(); res = server._update(e3, work={"id": "moving-the-docs", "state": "done"}, sender="work-osprey-x")
-check("auto-name: a done by id alone is a finish: not named", needs46(e3) is None and "(named" not in res and rd(e3)["metadata"]["work"][0]["state"] == "done", (needs46(e3), rd(e3)["metadata"].get("work"), res))
-e3b = own46(); res = server._update(e3b, work={"id": "moving-the-docs", "text": "moving the docs", "state": "done", "agent": "work-osprey-x"}, sender="work-osprey-x")
-check("auto-name: …also with the same text and its own agent repeated", needs46(e3b) is None and "(named" not in res, (needs46(e3b), res))
+e1 = own46(); res = server._update(e1, work={"state": "done", "agent": "work-osprey-main"}, sender="work-osprey-x")
+check("auto-name: a done that is for another session's step is not a finish: the writer is named, as before, and that step is the one ticked", needs46(e1) == ["work-osprey-x"] and "(named" in res
+      and ("work-osprey-main", "done", "carry on") in st46(e1), (needs46(e1), st46(e1), res))
+e3 = own46(); res = server._update(e3, work={"text": "moving other docs", "state": "done"}, sender="work-osprey-x")
+check("auto-name: a done with a final status text is a finish: not named; the step is done with that text", needs46(e3) is None and "(named" not in res and ("work-osprey-x", "done", "moving other docs") in st46(e3), (needs46(e3), st46(e3), res))
+e3b = own46(); res = server._update(e3b, work={"text": "moving the docs", "state": "done", "agent": "work-osprey-x"}, sender="work-osprey-x")
+check("auto-name: …also with its own name repeated", needs46(e3b) is None and "(named" not in res, (needs46(e3b), res))
 e4 = own46(); res = server._update(e4, work={"text": "moving the docs", "state": "done"}, said=[{"tag": "Suggested-by", "quote": "finish it", "msg": "11111111-1111-4111-8111-0000000000e4", "session": "cse_e4unreadable"}], sender="work-osprey-x")
-check("auto-name: a finish together with said is still a finish: not named", needs46(e4) is None and "(named" not in res and rd(e4)["metadata"]["work"][0]["state"] == "done", (needs46(e4), rd(e4)["metadata"].get("work"), res))
-e5 = own46(); server._update(e5, work={"text": "moving the docs", "state": "done"}, sender="work-osprey-x")
-_it5 = rd(e5); _it5["metadata"]["work"][0]["ts"] -= 2 * 86400; (T / f"store/{e5[0]}/{e5[1:]}.json").write_text(json.dumps(_it5))
-res = server._update(e5, work={"text": "moving the docs", "state": "done"}, sender="work-osprey-x")
-check("auto-name: a repeat done on a done line older than 24 h (off the list) creates a new line: not a finish, the writer is named, as before",
-      needs46(e5) == ["work-osprey-x"] and "(named" in res and [l["agent"] for l in rd(e5)["metadata"]["work"]] == [""], (needs46(e5), rd(e5)["metadata"].get("work"), res))
+check("auto-name: a finish together with said is still a finish: not named", needs46(e4) is None and "(named" not in res and ("work-osprey-x", "done", "moving the docs") in st46(e4), (needs46(e4), st46(e4), res))
 e6 = own46(); server.stackshot_complete(e6, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
-e = refusal(lambda: server._update(e6, work={"text": "moving the docs", "state": "done"}, sender="work-osprey-x"))
-check("auto-name: a finish on a completed item is refused as before, the writer not named", "work-osprey-x is neither" in e and "needs" not in rd(e6)["metadata"] and rd(e6)["metadata"]["work"][0]["state"] == "assigned", (e, rd(e6)["metadata"]))
-# …and it is judged on the text work.apply gets: the update path rewrites a bare store id (g9999) to first (patched here so that g9999 maps)
-e7 = mk46(); server._update(e7, work={"text": "wait for g9999 now", "agent": "work-osprey-x"}, sender="work-osprey-main")
+e = refusal(lambda: server._update(e6, work={"state": "done"}, sender="work-osprey-x"))
+check("auto-name: a finish on a completed item is refused as before, the writer not named", "work-osprey-x is neither" in e and "needs" not in rd(e6)["metadata"], (e, rd(e6)["metadata"]))
+# …and the status text is the one the update path gets: it rewrites a bare store id (g9999) to first (patched here so that g9999 maps)
+e7 = mk46()
 _shown_was = server._shown_ids; server._shown_ids = lambda t: str(t or "").replace("g9999", f"board#{BID_B}")
 try:
-    res = server._update(e7, work={"text": "wait for g9999 now", "state": "done"}, sender="work-osprey-x")
+    res = server._update(e7, work={"text": "wait for g9999 now"}, sender="work-osprey-x")
 finally:
     server._shown_ids = _shown_was
-check(f"auto-name: a done whose text the update path rewrites (g9999 → board#{BID_B}) no longer matches the stored line: a new line, so not a finish, the writer is named, as before",
-      needs46(e7) == ["work-osprey-x"] and "(named" in res and [(l["text"], l["state"]) for l in rd(e7)["metadata"]["work"]] == [("wait for g9999 now", "assigned"), (f"wait for board#{BID_B} now", "done")],
-      (needs46(e7), rd(e7)["metadata"].get("work"), res))
+check(f"auto-name: a status whose text the update path rewrites (g9999 → board#{BID_B}) is stored as rewritten, and the writer is named",
+      needs46(e7) == ["work-osprey-x"] and "(named" in res and ("work-osprey-x", "open", f"wait for board#{BID_B} now") in st46(e7), (needs46(e7), st46(e7), res))
 wait_push(0)
 z1 = mk46(); server.stackshot_complete(z1, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
 res = server._update(z1, priority="p1", sender="work-osprey-x"); res2 = server._message("work-osprey-x", f"look at {z1}", "home-beta"); time.sleep(0.3)
@@ -3692,9 +3698,9 @@ check("tell owner: a close of a front agent owner's item no relay carried is tol
       not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[for the owner] [stackshot] a19 [home] item 19: closed by plain-y: done (front owner's item closed) \u2192 https://stackshot.example.com/items/a19"]
       and "not told; the board shows it" not in res and "told at once that it was closed" in res, (wait_push(0)[n1:], res[-300:]))
 # a builder's step on a front agent owner's item is never pushed to the owner
-item2(129, "projects/alpha", A, needs=[Xn], work=[{"id": "w", "text": "w", "agent": Xn, "state": "in progress", "ts": 1}]); item2(142, "projects/alpha", A, needs=["external", Xn])
-n1 = len(wait_push(0)); res1 = server._update("a129", work={"id": "w", "state": "done"}, sender=Xn); time.sleep(0.7); res2 = server._update("a142", needs=["external"], next="builder done", sender=Xn); time.sleep(0.7)
-check("tell owner: a builder marking its last work line done, or taking itself out of needs, sends the front agent owner nothing and the reply promises nothing (no step line)",
+item2(129, "projects/alpha", A, needs=[Xn], next=f"{Xn}: w"); item2(142, "projects/alpha", A, needs=["external", Xn])
+n1 = len(wait_push(0)); res1 = server._update("a129", work={"state": "done"}, sender=Xn); time.sleep(0.7); res2 = server._update("a142", needs=["external"], next="builder done", sender=Xn); time.sleep(0.7)
+check("tell owner: a builder marking its last step done by a status done, or taking itself out of needs, sends the front agent owner nothing and the reply promises nothing (no step line)",
       not [m for m in wait_push(0)[n1:] if m[0] in (A, "work-osprey-main") and re.search(r"a987[01]\b", m[1])] and "told at once" not in res1 + res2 and "step came back" not in res1 + res2, (wait_push(0)[n1:], res1[-200:], res2[-200:]))
 general(False)      # a page with no agent of its own and no scope general behind it
 item2(20, "projects/epsilon", A); n1 = len(wait_push(0)); res = server._update("a20", next="no page behind it", sender=Xn); time.sleep(0.5)

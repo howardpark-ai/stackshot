@@ -242,7 +242,8 @@ p1 = bd.item_html("a1")
 nx = lambda h: h[h.find("<h2>Next</h2></summary>"):h.find('<details class="fold" data-fold="item.description"')]
 n1 = nx(p1)
 lis = re.findall(r'<li class="cl-(open|done|dropped)">', n1)
-check("the page's Next lists the open steps in the order written, then the finished ones in the earlier-steps fold: two open, two done", lis == ["open", "open", "done", "done"] and '<ul class="inext" aria-label="Next steps">' in n1 and '<summary>2 earlier steps: 2 done</summary>' in n1, lis)
+check("the page's Next folds the older done steps behind one line, then shows the newest done step and the open steps in the order written: two open, two done",
+      lis == ["done", "done", "open", "open"] and '<ul class="inext" aria-label="Next steps">' in n1 and '<summary>1 step done · <span class="sh-show">show</span>' in n1, lis)
 check("a done step: a checked box (CSS, aria-hidden), a hidden 'Done' for a screen reader, the text, who · when under it",
       re.search(r'<li class="cl-done"><span class="cb" aria-hidden="true">✓</span><div class="cl-b"><span class="sr">Done: </span><span class="cl-t">home-agent: build the thing</span><span class="cl-by"><b>done</b> by home-here · [^<]+</span></div></li>', n1) is not None, n1[:900])
 check("an open step: an empty box and a hidden 'To do'", '<li class="cl-open"><span class="cb" aria-hidden="true"></span><div class="cl-b"><span class="sr">To do: </span>' in n1)
@@ -265,7 +266,7 @@ check("a legacy item (all open) is a checklist too", re.findall(r'<li class="cl-
 p14 = bd.item_html("a14")
 n14 = nx(p14)
 check("hostile text in a step and in who marked it is escaped", "<script>alert(1)" not in p14 and "&lt;script&gt;alert(1)&lt;/script&gt;" in n14 and "<img src=x" not in p14 and "&lt;img src=x onerror=alert(2)&gt;" in n14
-      and "<b>bold</b>" not in n14 and re.findall(r'<li class="cl-(\w+)">', n14) == ["open", "open", "done"], n14[:1200])
+      and "<b>bold</b>" not in n14 and re.findall(r'<li class="cl-(\w+)">', n14) == ["done", "open", "open"], n14[:1200])
 
 # ---- 12. the Your step block shows his own open Next lines in full, with copy boxes; Next stays whole
 from stackshot.model import step_commands as SC
@@ -299,7 +300,7 @@ check("his Send with an empty box checks his three open steps: checked, by Olive
       r == "done" and [x["status"] for x in m21["steps"]] == ["open", "done", "done", "done", "open"] and m21["steps"][1]["by"] == "Oliver" and "state" not in m21 and 'class="istepnext"' not in p21b,
       (r, [x["status"] for x in m21.get("steps", [])]))
 nx21b = nx(ui_render.Board(str(STORE)).item_html("a21"))
-check("…and Next shows the agent's steps still open first, and his three checked, by Oliver, in the earlier-steps fold", re.findall(r'<li class="cl-(\w+)">', nx21b) == ["open", "open", "done", "done", "done"] and "Oliver · " in nx21b, nx21b[:700])
+check("…and Next folds two of his three checked steps (by Oliver), shows the newest of them, then the agent's steps still open", re.findall(r'<li class="cl-(\w+)">', nx21b) == ["done", "done", "done", "open", "open"] and "Oliver · " in nx21b and "<summary>2 steps done · " in nx21b, nx21b[:700])
 back = rd(21); back["metadata"].update(state="your-step", step=STEPY, next=mt(21)["next"] + "\nOliver: and then read it back"); [back["metadata"].pop(k, None) for k in ("answers", "mover", "next_by")]; (T / "store/a/21.json").write_text(json.dumps(back)); snap()
 p21c = ui_render.Board(str(STORE)).item_html("a21", answer=BOX)
 sn2 = re.search(r'<div class="istepnext">(.*?)</div></div></div><form', p21c, re.S)
@@ -399,8 +400,8 @@ item(41, next="home-agent: step A\nhome-agent: step C", steps=[
     {"text": "home-agent: step E", "status": "done", "by": "home-here", "at": now - 100}])
 snap()
 n41 = nx(ui_render.Board(str(STORE)).item_html("a41"))
-check("the page's Next lists the open steps first in their planned order, then the finished ones in the earlier-steps fold by the time they were marked (dropped and done together)",
-      re.findall(r'<span class="cl-t">home-agent: step (.)</span>', n41) == ["A", "C", "D", "B", "E"] and re.findall(r'<li class="cl-(open|done|dropped)">', n41) == ["open", "open", "dropped", "done", "done"], n41[:900])
+check("the page's Next folds the earlier steps by the time they were marked (dropped and done together), then shows the newest done step and the open steps in their planned order",
+      re.findall(r'<span class="cl-t">home-agent: step (.)</span>', n41) == ["D", "B", "E", "A", "C"] and re.findall(r'<li class="cl-(open|done|dropped)">', n41) == ["dropped", "done", "done", "open", "open"], n41[:900])
 check("…while the stored steps, next and the checklist the tools list stay in the stored order",
       [x["text"][-1] for x in mt(41)["steps"]] == list("ABCDE") and mt(41)["next"] == "home-agent: step A\nhome-agent: step C" and [x["text"][-1] for x in S.view(mt(41))] == list("ABCDE"), mt(41))
 g41 = server._fmt({**rd(41), "gid": "a41"})
@@ -414,9 +415,9 @@ item(42, next="home-agent: build option A", steps=[
              {"ts": now - 200, "kind": "decision", "choice": "Approve", "via": "board"}, {"ts": now - 150, "kind": "decision", "text": "go ahead,\nplease", "via": "board"}])
 snap()
 n42 = nx(ui_render.Board(str(STORE)).item_html("a42"))
-check("his decision answers are drawn among the finished rows by time (a pick with its option line, a pick without one, his words); comments and notes on his step are not drawn; the open step is listed first, ahead of the earlier-steps fold",
-      re.findall(r'<li class="cl-(\w+)">', n42) == ["open", "done", "decided", "decided", "decided", "dropped"]
-      and re.findall(r'<span class="cl-t">(.*?)</span>', n42) == ["home-agent: build option A", "home-agent: first look", "Oliver: picked A (do it the &lt;b&gt;short&lt;/b&gt; way)", "Oliver: picked Approve", "Oliver: go ahead, please", "home-agent: second look"]
+check("his decision answers are drawn among the finished rows by time (a pick with its option line, a pick without one, his words); comments and notes on his step are not drawn; the fold holds the older rows, the newest finished row and the open step follow it",
+      re.findall(r'<li class="cl-(\w+)">', n42) == ["done", "decided", "decided", "dropped", "decided", "open"]
+      and re.findall(r'<span class="cl-t">(.*?)</span>', n42) == ["home-agent: first look", "Oliver: picked A (do it the &lt;b&gt;short&lt;/b&gt; way)", "Oliver: picked Approve", "home-agent: second look", "Oliver: go ahead, please", "home-agent: build option A"]
       and "just a comment" not in n42 and "a note on his step" not in n42, n42[:1400])
 check("…a decided row: a checked box, a hidden 'Decided', 'decided on the board · when' under the text",
       re.search(r'<li class="cl-decided"><span class="cb" aria-hidden="true">✓</span><div class="cl-b"><span class="sr">Decided: </span><span class="cl-t">Oliver: picked Approve</span><span class="cl-by"><b>decided on the board</b> · [^<]+</span></div></li>', n42) is not None, n42[:1400])

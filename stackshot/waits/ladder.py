@@ -9,7 +9,7 @@ Two orders, two records (`metadata.handoff` and the stall pass's entry), and an 
 
     rung 0  ask      the mover is sent the notice again (a hand-off's own notice for an untaken hand-off, the stall notice for a silent pane; a front agent only gets the History line)
     rung 1  look     `LOOK` (30) minutes after the ask, and only then, the pane is looked at: a pane with no turn running is sent the notice again; a pane with a turn running is left alone. A background
-                     agent's pane is never looked at (it is nearly always busy or showing a background shell): it is sent the notice again, unless a work line of the item in progress, changed within 90
+                     agent's pane is never looked at (it is nearly always busy or showing a background shell): it is sent the notice again, unless a step status of the item in progress, changed within 90
                      minutes, shows it at work on it, and a live one is asked and then handed up, not replaced (the cold call and the builder are for a mover whose pane is not live)
     main     `minutes` after the look, for a live background mover that is still silent: a notice to the project's -main agent (one per -main agent per pass, listing every item due for it), which decides whether the item needs a nudge or a different mover; the
              same notice again every `MAIN_EVERY` (4 hours) while the silence lasts. It is no step of its own (the entry stays on its rung, so the cold call and the builder stay reachable if the pane stops
@@ -131,7 +131,7 @@ def action(rec: dict[str, Any], status: str, at: float, floor: float, now: float
     previous rung: `look` (30 minutes) after the ask (the pane only has to be idle then), the others `minutes`.
 
     `background`: the mover is a background agent. The rungs after the ask (the look, the cold call, the builder) then wait on the clock alone, never on its pane: a background agent's pane is nearly always
-    busy or showing a background shell, and that says nothing about this item (the server holds the ladder for an item whose own work line shows work in progress, `silence.subagent_running`). `live`: its pane
+    busy or showing a background shell, and that says nothing about this item (the server holds the ladder for an item whose own step status shows work in progress, `silence.subagent_running`). `live`: its pane
     is live (running now): the ladder then goes no further than the look on the mover, since the cold call and the builder replace a mover that cannot answer, and one that is live can; a live mover
     that stays silent after the look is handed up instead (`main`, see `_main_due`). A pane that is not live goes on to both, and so does an entry marked `gone` whatever the heartbeat shows. The ask
     of a ladder a pane with no turn running brought still waits for that pane (`background` changes nothing at step 0)."""

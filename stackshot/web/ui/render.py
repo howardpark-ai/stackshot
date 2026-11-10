@@ -17,7 +17,7 @@ from stackshot.core import legacy_owner as _lo   # an old version of an item (fr
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
 from stackshot.router import routing as _routing   # the routing log: what came in per project and how it was ruled (the pilot)
 from stackshot.github import ghsync as _gh   # how an id is written for a person (board-tmp-<machine>#3) and its page address (/items/<n>)
-from stackshot.model import work as _work   # an item's work lines, what is in motion on it (a row's "engineer: migrating", the item page's list, the History)
+from stackshot.model import work as _work   # a step's status line, what is in motion on an item (a row's "engineer: migrating", the item page's Next and History)
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
@@ -2141,6 +2141,10 @@ class Board:
         elif isinstance(ts, datetime.date): t, clock = ts, False
         else: t = datetime.datetime.fromtimestamp(float(ts), self.now.tzinfo)
         return when_words(t, clock)
+    def span_words(self, a, b):
+        """A span of time for a History line that folds several writes: "Tue Nov 10th 08:31 – 09:39" (the second time alone when it is the same day), the board's zone."""
+        ta, tb = (datetime.datetime.fromtimestamp(float(x), self.now.tzinfo) for x in (a, b))
+        return self.when(a) if (ta.hour, ta.minute, ta.date()) == (tb.hour, tb.minute, tb.date()) else f"{self.when(a)} – {tb:%H:%M}" if ta.date() == tb.date() else f"{self.when(a)} – {self.when(b)}"
     def new_hold_words(self, r):
         """A new hold's words for the briefings: "set by my-x Sat Mar 21st 09:00 · wake Mon Mar 23rd · held by after board#N",
         or "… · nothing holds it now" when no open after, recycle, needs external or item-scoped anchor holds it."""
@@ -2164,7 +2168,7 @@ class Board:
         if is_held(r): parts.append("on hold, " + (f"wake {self.when(w)}" if w else "no wake date"))
         if after_open(r): parts.append(self.after_words(r))
         return "; ".join(parts)
-    # ---------------- work lines: what is in motion on an item ----------------
+    # ---------------- step statuses: what is in motion on an item ----------------
     def work_prefix(self, r):
         """The keeper whose prefix an agent's name drops on a row (work.short_agent: my-engineer → engineer): the
         `session:` of the item's board row page, else of its own page."""
@@ -2172,15 +2176,16 @@ class Board:
         return str((self.proj.get(row) or self.proj.get(k) or {}).get("session") or "")
     def work_row(self, r):
         """A row's words for the work in progress on an item, as HTML: "engineer: migrating · board: answer box +1" (at most two
-        lines, the agent's short name in bold, the other open lines counted); "" with nothing in progress. The title lists every open line."""
+        step statuses, the agent's short name in bold, the other open ones counted); "" with nothing in progress. The title lists every open status."""
         shown, more = _work.row_parts(r["metadata"], self.work_prefix(r))
         if not shown: return ""
         tip = " · ".join(f"{l['text']} — {l['state']}" + (f" ({l['agent']})" if l["agent"] else "") for l in _work.open_lines(r["metadata"]))
         body = " · ".join((f"<b>{esc(a)}</b>: " if a else "") + esc(t) for a, t in shown) + (f' <span class="dim">+{more}</span>' if more > 0 else "")
         return f' <span class="iwork" title="{esc(tip)}">{body}</span>'
     def work_html(self, r):
-        """The item page's Work field in the sidebar: every line with its state, its agent and when it last changed; "" with none."""
-        ls = _work.lines_of(r["metadata"])
+        """The old Work field of the sidebar, for an item that still carries the old `work` list (read-compat until tools/migrate_work_to_steps.py has run; the lines live on the steps
+        otherwise and the field is not drawn): every line with its state, its agent and when it last changed; "" with none."""
+        ls = _work.legacy_lines(r["metadata"])
         if not ls: return ""
         rank = {"in progress": 0, "assigned": 1, "defined": 2, "done": 3}
         e = esc; L = lambda x: self.mentions(e(x), r["gid"])
@@ -2319,6 +2324,7 @@ class Board:
             k = proj_key({"metadata": v.get("metadata") or {}})
             return self.proj_label(k) if k in self.proj else (k or "no project")
         out = []
+        groups = {}          # a step's key -> the status updates written on it while it was open (folded under its one line); a closed group stays here only for the line it made
         vs = self.item_versions(r); prev = None
         for vi, (ts, v) in enumerate(vs):
             m = v.get("metadata") or {}; ev = []
@@ -2395,7 +2401,20 @@ class Board:
                     rl = _gh.refile_line(pm, m)        # "Refile itself": the server moved it to its owner's project
                     ev.append(("project", e(rl) if rl else f"project: {e(proj(prev))} → <b>{e(proj(v))}</b>"))
                 if prev.get("subject") != v.get("subject"): ev.append(("edit", f"subject edited (was “{e(prev.get('subject') or '')}”)"))
-                for word, line in _steps.changes(pm, m, s_ == "completed"):     # a step checked or dropped, one line each
+                who_ = " ".join(str(v.get("written_by") or "").split())
+                for te in _work.tag_events(pm, m):          # a step's status line set, moved or cleared: folded under the step's one line (below), not a line of its own
+                    g = groups.get(te["key"])
+                    if g is None or g["closed"]:
+                        g = groups[te["key"]] = {"step": te["step"], "ups": [], "first": ts, "closed": False, "vi": vi}
+                    g["ups"].append((ts, te)); g["last"] = ts; g["vi"] = vi; g["who"] = who_
+                just_closed = set()
+                for k_, mark_ in _work.closed_steps(pm, m):         # a step marked done or dropped closes its group
+                    g = groups.get(k_)
+                    if g is not None and not g["closed"]:
+                        g["closed"] = True; g["vi"] = vi; g["last"] = ts; g["who"] = who_; g["mark"] = mark_
+                        just_closed.add(g["step"])
+                for word, line in _steps.changes(pm, m, s_ == "completed"):     # a step checked or dropped, one line each (a step with status updates has the folded line instead)
+                    if line in just_closed: continue
                     ev.append(("step", f"step {word}: " + self.md_line(_ip.clip_md(line, self.HIST_NEXT_CLIP), r["gid"])))
                 if (pm.get("next") or "") != (m.get("next") or ""): ev.append(fev("next", m.get("next")))
                 pa, a_ = str(pm.get("ask") or "").strip(), str(m.get("ask") or "").strip()
@@ -2409,7 +2428,7 @@ class Board:
                         if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
                         ev.append(("answer", f"{e(_OWNER)} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
-                for w in _work.changes(pm, m): ev.append(("work", e(w)))   # a work line added, moved, reassigned or removed, one line each
+                for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved, reassigned or removed, one line each (an item the migration has not reached)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
                 if new_said: ev.append(("said", e(_said.recorded_words([x for _n, x in new_said])) + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in new_said)))
                 if (prev.get("confirmed") != v.get("confirmed") and v.get("confirmed")
@@ -2435,6 +2454,19 @@ class Board:
                 for j, x in enumerate(c for c in ev if c[0] == "comment"):   # his comment written on GitHub: its own line, at the comment's own time
                     out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "comment": True}))
             prev = v
+        for g in groups.values():          # one line per step: a closed step says it was closed, the status updates written on it folded under; an open step's updates are one line too, at its newest update
+            n = len(g["ups"])
+            fold = ("".join(f'<li><span class="dim">{e(self.when(t_))}</span> {e(te["text"]) if not te["removed"] else "status cleared: " + e(te["text"])}'
+                            + (f' <span class="dim">· {e(te["state"])}</span>' if te["state"] else "") + '</li>' for t_, te in g["ups"]))
+            body = [(("step " + g["mark"] + ": " if g["closed"] else "step: ") + self.md_line(_ip.clip_md(g["step"], self.HIST_NEXT_CLIP), r["gid"]),
+                     f'<details class="ehold"><summary class="more">{n} status update{"" if n == 1 else "s"}</summary><div class="body"><ul class="estat">{fold}</ul></div></details>')]
+            ent = {"ts": g["last"], "ts_from": g["first"], "kind": "work", "html": self.hist_bullets(body), "who": g.get("who", ""),
+                   "what": f'{"step " + g["mark"] if g["closed"] else "step"}: {g["step"]}; {n} status update{"" if n == 1 else "s"}: ' + "; ".join(te["text"] for _t, te in g["ups"]), "comment": False}
+            host = next((x[2] for x in out if merge and g["closed"] and x[0] == g["vi"] and x[1] == 0), None)      # the write that closed the step is one entry: its step line first, its other changes (a new next) after it
+            if host is not None:
+                host["html"], host["ts_from"], host["what"] = ent["html"] + host["html"], g["first"], ent["what"] + "; " + host["what"]
+            else:
+                out.append((g["vi"], 0.5, ent))
         out.sort(key=lambda x: (-x[0], x[1]))
         return [x for _vi, _j, x in out[:self.HISTORY_CAP]], max(len(out) - self.HISTORY_CAP, 0)
     _SENT = {"decision": ("ok", "Sent: your answer is on the item, it has left your queue, and the agent on it has been told."),
@@ -2610,7 +2642,7 @@ class Board:
         # ---- the History, split: what changed, and what people said
         evs, more = self.item_log(r)
         changes, said_ = [x for x in evs if not x["comment"]], [x for x in evs if x["comment"]]
-        li = lambda x: f'<li class="ev ev-{x["kind"]}"><div class="eh">{"<b>" + e(x["who"]) + "</b> · " if x["who"] else ""}<span class="t">{e(self.when(x["ts"]))}</span>{" " + x["mark"] if x.get("mark") else ""}</div><div class="w">{self.mentions(x["html"], r["gid"])}</div></li>'
+        li = lambda x: f'<li class="ev ev-{x["kind"]}"><div class="eh">{"<b>" + e(x["who"]) + "</b> · " if x["who"] else ""}<span class="t">{e(self.span_words(x["ts_from"], x["ts"]) if x.get("ts_from") else self.when(x["ts"]))}</span>{" " + x["mark"] if x.get("mark") else ""}</div><div class="w">{self.mentions(x["html"], r["gid"])}</div></li>'
         extra = []
         if not done and waits_recycle(r): extra.append(badge("waits for recycle", "recycle"))   # held ones too (they keep the field)
         # ---- Next: every line, numbered, each `<mover>: <action>` (no "+N more" fold)
@@ -2633,16 +2665,26 @@ class Board:
             stamp = " · ".join(b_ for b_ in ((f"<b>{'done' if st == _steps.DONE else 'dropped'}</b>" + (f" by {who}" if who else "")), when_) if b_)      # the verb opens the byline, done and dropped alike
             word = {_steps.OPEN: "To do", _steps.DONE: "Done", _steps.DROPPED: "Dropped"}[st]
             glyph = {_steps.OPEN: "", _steps.DONE: "✓", _steps.DROPPED: "×"}[st]
-            return (f'<li class="cl-{st}"><span class="cb" aria-hidden="true">{glyph}</span><div class="cl-b"><span class="sr">{word}: </span><span class="cl-t">{body}</span>'
+            tg = _steps.tag_of(x) if st == _steps.OPEN else None      # an open step's status line, under its words: where its session is with it, and since when
+            tag = (f'<span class="cl-tag">{self.md_line(tg["text"], r["gid"])}' + (f' <span class="dim">· {e(tg["state"])}</span>' if tg["state"] != "in progress" else "")
+                   + (f' <span class="dim">· {e(self.when(tg["ts"]))}</span>' if tg["ts"] else "") + '</span>') if tg else ""
+            return (f'<li class="cl-{st}"><span class="cb" aria-hidden="true">{glyph}</span><div class="cl-b"><span class="sr">{word}: </span><span class="cl-t">{body}</span>' + tag
                     + (f"<ul>{subs}</ul>" if subs else "") + (f'<span class="cl-by">{stamp}</span>' if st != _steps.OPEN and stamp else "") + "</div></li>")
         opens = [x for x in checklist if x["status"] == _steps.OPEN]; earlier = [x for x in checklist if x["status"] != _steps.OPEN]
         if checklist:
-            nxt = f'<ul class="inext" aria-label="Next steps">{"".join(cli(x) for x in opens)}</ul>' if opens else ('<p class="empty">no open steps</p>' if not done else "")
-            if earlier:       # every earlier line kept as it was drawn (the board's record, struck-through drops); only the order changes
-                tally = ", ".join(f"{n} {w}" for n, w in ((sum(1 for x in earlier if x["status"] == _steps.DONE), "done"), (sum(1 for x in earlier if x["status"] == _steps.DROPPED), "dropped"),
-                                                          (sum(1 for x in earlier if x["status"] == "decided"), "decided on the board")) if n)
-                nxt += (f'<details class="iearlier"><summary>{len(earlier)} earlier step{"" if len(earlier) == 1 else "s"}: {tally}</summary>'
-                        f'<ul class="inext" aria-label="Earlier steps">{"".join(cli(x) for x in earlier)}</ul></details>')
+            # one list: the open steps always show; of the finished ones only the newest done (or decided) step shows above them, and the rest fold behind one line that opens to one line per step
+            newest = next((x for x in reversed(earlier) if x["status"] in (_steps.DONE, "decided")), None)
+            folded = [x for x in earlier if x is not newest]
+            nxt = ""
+            if folded:        # every earlier line kept as it was drawn (the board's record, struck-through drops); only the order changes
+                nd, ndr, ndec = (sum(1 for x in folded if x["status"] == k) for k in (_steps.DONE, _steps.DROPPED, "decided"))
+                tally = f' ({", ".join(f"{n} {w}" for n, w in ((nd, "done"), (ndr, "dropped"), (ndec, "decided on the board")) if n)})' if (ndr or ndec) else ""
+                head = f'{len(folded)} {"step" if len(folded) == 1 else "steps"} done' if nd == len(folded) else f'{len(folded)} earlier step{"" if len(folded) == 1 else "s"}{tally}'
+                nxt += (f'<details class="iearlier"><summary>{head} · <span class="sh-show">show</span><span class="sh-hide">hide</span></summary>'
+                        f'<ul class="inext" aria-label="Earlier steps">{"".join(cli(x) for x in folded)}</ul></details>')
+            shown_ = ([newest] if newest is not None else []) + opens
+            nxt += f'<ul class="inext" aria-label="Next steps">{"".join(cli(x) for x in shown_)}</ul>' if shown_ else ""
+            if not opens and not done: nxt += '<p class="empty">no open steps</p>'
         else: nxt = '<p class="empty">none</p>'
         def fold(sid, h2, body, open_=False, cls=""):      # every section of the page is a fold with the same heading and indent; the key is remembered per browser
             return f'<details class="fold{" " + cls if cls else ""}" data-fold="item.{sid}"{" open" if open_ else ""} id="{sid}"><summary><h2>{h2}</h2></summary>{body}</details>'
@@ -2773,7 +2815,7 @@ class Board:
         return '<section class="iwait"><h2>Waiting</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
     def more_html(self, r, done) -> str:
         """The sidebar's closed "More details" fold: the fields the page showed before the item model and the sidebar's rows do not cover (agent at work on the item, due, confirmed and
-        stale, work lines, after and observers, a wait's basis and his words). Nothing is dropped, and it is one fold to delete once the owner has seen the page."""
+        stale, a leftover old work list, after and observers, a wait's basis and his words). Nothing is dropped, and it is one fold to delete once the owner has seen the page."""
         e = esc; m = r["metadata"]; L = lambda x: self.mentions(e(x), r["gid"])
         def grp(*fields):
             body = "".join(f'<dt>{h}</dt><dd>{v}</dd>' for h, v in fields if v)
@@ -2940,7 +2982,7 @@ class Board:
             if needs_sessions(r): out.append("- needs: " + ", ".join(f"`{shown_ref(s)}`" for s in needs_sessions(r)))   # the sessions whose move it is
             if after_of(r): out.append("- after: " + ", ".join(f"[{shown_full(g)}](#task-{g[0]}-{g[1:]})" + ("" if g in after_open(r) else " (closed)") for g in after_of(r)))
             if observers_of(r): out.append("- observers: " + ", ".join(f"`{shown_ref(s)}`" for s in observers_of(r)))
-            if r.get("status") != "completed" and _work.lines_of(m): out.append("- work: " + _work.words(m))   # what is in motion on it
+            if r.get("status") != "completed" and _work.lines_of(m): out.append("- step status: " + _work.words(m))   # what is in motion on it
             pk, pinfo = proj_state(r)
             tk = proj_top(r) or pk                         # the project it shows is the top-level one; the link stays the page the item is filed on (its own page's mirror, else the project's)
             pinfo = pinfo or (self.proj.get(tk) if tk else None)
@@ -3119,7 +3161,7 @@ main.itempage .istate{margin:0;font-size:15px;line-height:1.5;min-width:0}.istat
 main.itempage details.fold[id]>summary~*{margin-left:18px}main.itempage details.fold[id]>summary h2{margin-bottom:6px}
 .iwait{margin:0 0 14px}.iwait h2{margin:0 0 6px}dl.iwl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0;font-size:14px;line-height:1.45}dl.iwl dt{color:var(--mut)}dl.iwl dd{margin:0;min-width:0}ul.ichases{list-style:none;margin:4px 0 0;padding:0;font-size:13px}ul.ichases li{margin:0 0 3px}
 main.itempage details.fold>summary h2{margin-top:18px}.imore{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}.imore>summary h3{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:6px 0}.imore dl.sgrp:first-of-type{border-top:0}
-ul.inext{list-style:none;margin:0 0 4px;padding:0;font-size:14px;line-height:1.5}ul.inext>li{display:flex;align-items:flex-start;gap:9px;margin:0 0 7px;min-width:0}ul.inext .cb{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:17px;height:17px;margin-top:3px;border:1.5px solid var(--fg);border-radius:4px;font-size:13px;font-weight:700;line-height:1;color:var(--mut)}ul.inext .cl-b{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}ul.inext .cl-b ul{list-style:disc;margin:2px 0 0;padding-left:18px}ul.inext .cl-by{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext li.cl-done .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-done .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-decided .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-decided .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-dropped{color:var(--mut);opacity:.75}ul.inext li.cl-dropped a{color:inherit;text-decoration:underline}ul.inext li.cl-dropped code{color:inherit}ul.inext li.cl-dropped .cb{border-color:var(--mut);color:var(--mut)}ul.inext li.cl-dropped .cl-t{text-decoration:line-through}ul.inext li.cl-dropped .cl-by b{font-weight:600}ul.inext li.icode{list-style:none;margin:4px 0 4px -14px}ul.inext li.icode .md pre{margin:0}.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}ul.hist li.ev-step::before{border-color:var(--ok)}.istep .istepnext{margin:8px 0 0}.istep .istepnext ol.stepol{margin-top:0}li.hrow .istepnext{margin:6px 0 0}li.hrow .istepnext ol.stepol{margin-top:0}
+ul.inext{list-style:none;margin:0 0 4px;padding:0;font-size:14px;line-height:1.5}ul.inext>li{display:flex;align-items:flex-start;gap:9px;margin:0 0 7px;min-width:0}ul.inext .cb{flex:none;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:17px;height:17px;margin-top:3px;border:1.5px solid var(--fg);border-radius:4px;font-size:13px;font-weight:700;line-height:1;color:var(--mut)}ul.inext .cl-b{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}ul.inext .cl-b ul{list-style:disc;margin:2px 0 0;padding-left:18px}ul.inext .cl-by{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext li.cl-done .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-done .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-decided .cb{border-color:var(--ok);background:var(--ok);color:var(--bg)}ul.inext li.cl-decided .cl-by b{color:var(--ok);font-weight:600}ul.inext li.cl-dropped{color:var(--mut);opacity:.75}ul.inext li.cl-dropped a{color:inherit;text-decoration:underline}ul.inext li.cl-dropped code{color:inherit}ul.inext li.cl-dropped .cb{border-color:var(--mut);color:var(--mut)}ul.inext li.cl-dropped .cl-t{text-decoration:line-through}ul.inext li.cl-dropped .cl-by b{font-weight:600}ul.inext li.icode{list-style:none;margin:4px 0 4px -14px}ul.inext li.icode .md pre{margin:0}.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}ul.hist li.ev-step::before{border-color:var(--ok)}.istep .istepnext{margin:8px 0 0}.istep .istepnext ol.stepol{margin-top:0}li.hrow .istepnext{margin:6px 0 0}li.hrow .istepnext ol.stepol{margin-top:0}ul.inext .cl-tag{display:block;font-size:12px;line-height:1.4;color:var(--mut)}ul.inext .cl-tag::before{content:"status: "}details.iearlier .sh-hide{display:none}details.iearlier[open] .sh-show{display:none}details.iearlier[open] .sh-hide{display:inline}ul.hist ul.estat{list-style:none;margin:2px 0 0;padding:0}ul.hist ul.estat li{margin:0 0 2px;line-height:1.4}ul.hist li.ev-work::before{border-color:var(--run)}
 .md{min-width:0;overflow-wrap:anywhere}.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}.md p{margin:0 0 8px;line-height:1.5}.md ul,.md ol{margin:0 0 8px;padding-left:22px}.md ul ul,.md ul ol,.md ol ul,.md ol ol{margin:2px 0}.md ul{list-style:disc}.md ul ul{list-style:circle}.md li{margin:0 0 3px;line-height:1.5}.md li>p{margin:0 0 4px}.md li>:last-child{margin-bottom:0}.md blockquote{margin:0 0 8px;padding:2px 12px;border-left:3px solid var(--line);color:var(--mut)}.md blockquote>:last-child{margin-bottom:0}.md pre{margin:0 0 8px;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:auto;max-width:100%;line-height:1.45}.md pre code{border:0;padding:0;background:none;color:var(--fg)}main.itempage .desc.md{padding-left:0;margin:0;font-size:14px}ul.hist .w{min-width:0;max-width:100%}ul.hist .body.md{display:block;white-space:normal;margin:2px 0 0;font-size:13px;line-height:1.45;opacity:.92}ul.hist .body.md p{line-height:1.45}
 #for-you h2{margin-top:20px}ul.fy-list{list-style:none;margin:0;padding:0;border:1px solid var(--ibd);border-radius:10px;background:var(--bg)}
 li.fy-row{display:flex;align-items:center;gap:10px;padding:6px 12px;border-top:1px solid var(--ibd);font-size:14px;line-height:1.35;min-width:0}li.fy-row:first-child{border-top:0}li.fy-row.urgent{border-left:3px solid var(--call)}

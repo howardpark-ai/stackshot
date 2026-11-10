@@ -417,8 +417,8 @@ server.stackshot_confirm("s22", sender="home-here")
 server._update("s22", needs="decision", ask=ASK, options=OPTS, due="2026-12-24", sender="home-here")
 server._update("s22", work={"text": "migrating the ids"}, sender="home-here")
 m22 = rd("s", 22)["metadata"]
-check("a change of next, needs, a hold and a wake, the ask and options, the due date, a work line or a confirm is stored and queues no job; GitHub is not called at all",
-      m22["next"] == "second step\nthird step" and "decision" in m22["needs"] and m22["due"] == "2026-12-24" and m22["ask"] == ASK and not m22.get("hold") and qlen() == 0 and len(F.log) == log0, (m22, qlen(), F.log[log0:]))
+check("a change of next, needs, a hold and a wake, the ask and options, the due date, a step status or a confirm is stored and queues no job; GitHub is not called at all",
+      m22["next"] == "second step\nthird step\nhome-here: migrating the ids" and "decision" in m22["needs"] and m22["due"] == "2026-12-24" and m22["ask"] == ASK and not m22.get("hold") and qlen() == 0 and len(F.log) == log0, (m22, qlen(), F.log[log0:]))
 r = G.drain(GH, STORE, say=lambda s: None)
 check("…and a drain with nothing queued sends nothing", r == {"done": 0, "left": 0, "down": ""} and len(F.log) == log0 and issue(6)["labels"] == [] and not comments(6), (r, F.log[log0:]))
 server._update("s22", description=D("changed text"), sender="home-here")
@@ -512,18 +512,21 @@ server.stackshot_complete(g_ns, outcome="done", reason="it is in", description="
 check("with a sender the complete goes through: the issue is closed, still no comment", issue(n_ns)["state"] == "closed" and not comments(n_ns), (issue(n_ns)["state"], comments(n_ns)))
 check("the mirror has posted no comment on any issue so far", all(not i["_comments"] for i in F.issues.values()), [(n_, len(i["_comments"])) for n_, i in F.issues.items() if i["_comments"]])
 
-# ---- 3d. work lines: a change to an item's work list is not on the issue (no comment, no call); History reads it from the store's git
-g_w, n_w = made("[home] with work lines"); snap("work item"); owed_w = server._owed_load(); log_w = len(F.log)
+# ---- 3d. step statuses: a change to a step's status is not on the issue (no comment, no call); History reads it from the store's git
+g_w, n_w = made("[home] with step statuses"); snap("work item"); owed_w = server._owed_load(); log_w = len(F.log)
 server._update(g_w, work={"text": "migrating the ids"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work defined")
-server._update(g_w, work={"text": "migrating the ids", "state": "in progress"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work in progress")
-server._update(g_w, work={"text": "migrating the ids", "state": "done"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work done")
-check("a work line added, moved to in progress and done: stored, no job, no call, no comment (the issue's body and labels as they were)",
-      rd(g_w[0], int(g_w[1:]))["metadata"]["work"][0]["state"] == "done" and qlen() == 0 and len(F.log) == log_w and not comments(n_w) and issue(n_w)["labels"] == [] and "### Work" not in issue(n_w)["body"], (qlen(), F.log[log_w:]))
+server._update(g_w, work={"text": "PR 83 up", "state": "in progress"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work in progress")
+server._update(g_w, work={"state": "done"}, sender="home-here"); G.drain(GH, STORE, say=lambda s: None); snap("work done")
+stw = [x for x in rd(g_w[0], int(g_w[1:]))["metadata"]["steps"] if x["text"].endswith("migrating the ids")]
+check("a step status set, changed and marked done: one step, stored with its status, no job, no call, no comment (the issue's body and labels as they were)",
+      len(stw) == 1 and stw[0]["status"] == "done" and stw[0]["tag"]["text"] == "PR 83 up" and stw[0]["tag"]["state"] == "done" and "work" not in rd(g_w[0], int(g_w[1:]))["metadata"]
+      and qlen() == 0 and len(F.log) == log_w and not comments(n_w) and issue(n_w)["labels"] == [] and "### Work" not in issue(n_w)["body"], (qlen(), F.log[log_w:], stw))
 bw = ui_render.Board(str(STORE)); evs, _more = bw.item_events(bw.item(g_w))
-check("the item page's History has the three work lines, newest first, from the store's git",
-      [h for _t, k, h in evs if k == "work"] == ["work: migrating the ids → done (home-here)", "work: migrating the ids → in progress (home-here)", "work: migrating the ids · defined"], evs)
-check("a work change owes no page", server._owed_load() == owed_w, server._owed_load())
-refused("mirror on: a work write without a sender is refused like any other", lambda: server.stackshot_update(g_w, work="another line"), *HINT)
+wev = [h for _t, k, h in evs if k == "work"]
+check("the item page's History has one line for the step with its three status updates folded under it, from the store's git",
+      len(wev) == 1 and "step done: " in wev[0] and "3 status updates" in wev[0] and "migrating the ids" in wev[0] and "PR 83 up" in wev[0], evs)
+check("a step status owes no page", server._owed_load() == owed_w, server._owed_load())
+refused("mirror on: a status write without a sender is refused like any other", lambda: server.stackshot_update(g_w, work="another line"), *HINT)
 check("the queue is empty after the work writes, and no label, field, blocked-by or comment call has reached GitHub so far", qlen() == 0 and F.forbidden == [], (G.pending(), F.forbidden))
 
 # ---- 4. an outage, a rate limit, a refusal, the marker guard, the pace
@@ -1367,9 +1370,9 @@ check("create: the reply echoes the shown form, never the store id", nk in out a
 out = server._update(gw, next=f"after {gk} closes", description=f"- Now waits on {gk}\n- It lives here\n- Done when it works", subject=f"[home] after {gk}",
                      ask=f"Decide: whether to wait on {gk} · Recommend: yes · Stakes: none either way · By: no date", work={"text": f"watch {gk}", "state": "in progress"}, sender="home-here")
 dw = rd(gw[0], gw[1:])
-check("update: g<n> in subject, description, next, ask and a work line is stored as board#<n>",
-      dw["subject"] == f"[home] after {nk}" and dw["description"].startswith(f"- Now waits on {nk}") and dw["metadata"]["next"] == f"after {nk} closes"
-      and f"wait on {nk}" in dw["metadata"]["ask"] and dw["metadata"]["work"][0]["text"] == f"watch {nk}", dw)
+check("update: g<n> in subject, description, next, ask and a step status is stored as board#<n>",
+      dw["subject"] == f"[home] after {nk}" and dw["description"].startswith(f"- Now waits on {nk}") and dw["metadata"]["next"].startswith(f"after {nk} closes")
+      and f"wait on {nk}" in dw["metadata"]["ask"] and any(x.get("tag", {}).get("text") == f"watch {nk}" for x in dw["metadata"]["steps"]), dw)
 check("update: the reply shows the rewritten form", f"after {nk} closes" in out and f"after {gk}" not in out, out[:600])
 out = server._update(gw, status="completed", outcome="done", reason=f"closed with {gk}", outcome_text=f"- Ended with {gk}\n- It lived here\n- It worked", sender="home-here")
 dw = rd(gw[0], gw[1:])

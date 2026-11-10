@@ -4,7 +4,11 @@ open items start the list now; a dropped step stays, struck through).
 THE STORAGE (the one decision of this module). `metadata.next` stays what it always was: the text of the OPEN lines, one step per top-level line. Every reader of next (the brief, the notices, the home
 rows, the GitHub mirror, `get`, the write guards, the router, search) reads that text and is untouched. Beside it `metadata.steps` is the checklist: a list, in the order the steps were written, of
 
-    {"text": <the step as written, its sub-lines included>, "status": "open" | "done" | "dropped", "by": <who marked it>, "at": <epoch seconds it was marked>}
+    {"text": <the step as written, its sub-lines included>, "status": "open" | "done" | "dropped", "by": <who marked it>, "at": <epoch seconds it was marked>,
+     "tag": {"text": <a few words>, "state": <in progress | done | …>, "ts": <epoch seconds>}}
+
+`tag` is the step's status line (optional): where the step's session is with it ("PR 83 up", "review, scan running"). A `work` write of the update tool changes the tag of the sender's first open step in
+place, so a step that takes a night keeps one line, not one line per status; it follows the step's text (the key) through a reorder and stays on the step when it is marked.
 
 (The item page draws the finished steps first, then the open ones: `drawn_order`; the stored order is unchanged.) `next` is derived from it: the open steps' text joined by newlines (an update that writes `next` keeps the text exactly as written, and the steps follow it). A step is a line of next as
 nextlines.split groups it (the one rule for what a line is), and the writer of each open line is the one nextlines keeps in `metadata.next_by`, so a step is the sender's own or another
@@ -54,11 +58,37 @@ def join(texts: list[str]) -> str:
     return "\n".join(texts)
 
 
+TAG = "tag"
+TAG_STATES = ("defined", "assigned", "in progress", "done")
+
+
+def tag_of(step: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The step's status tag as {text, state, ts}, None when it has none or a misshaped one."""
+    t = (step or {}).get(TAG)
+    if not isinstance(t, dict):
+        return None
+    text = clean(t.get("text"))
+    if not text:
+        return None
+    st = clean(t.get("state")).lower()
+    try:
+        ts = float(t.get("ts") or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    return {"text": text, "state": st if st in TAG_STATES else "in progress", "ts": ts}
+
+
+def _with_tag(step: dict[str, Any], tag: dict[str, Any] | None) -> dict[str, Any]:
+    if tag:
+        step[TAG] = dict(tag)
+    return step
+
+
 def _valid(v: Any) -> list[dict[str, Any]]:
     out = []
     for s in v if isinstance(v, list) else []:
         if isinstance(s, dict) and str(s.get("text") or "").strip() and s.get("status") in STATUSES:
-            out.append({"text": str(s["text"]), "status": s["status"], "by": clean(s.get("by")), "at": s.get("at") or 0})
+            out.append(_with_tag({"text": str(s["text"]), "status": s["status"], "by": clean(s.get("by")), "at": s.get("at") or 0}, tag_of(s)))
     return out
 
 
@@ -89,9 +119,9 @@ def view(meta: dict[str, Any] | None, closed: bool = False, keeper: str = "") ->
         j = next((j for j, kk in enumerate(keys) if j not in used and kk == k), -1)
         if j >= 0:
             used.add(j)
-            out.append({**_step(chunks[j]), "writer": writers[j]})
+            out.append(_with_tag({**_step(chunks[j]), "writer": writers[j]}, tag_of(s)))
         else:
-            out.append(_step(s["text"], DROPPED))
+            out.append(_with_tag(_step(s["text"], DROPPED), tag_of(s)))
     out += [{**_step(c), "writer": writers[j]} for j, c in enumerate(chunks) if j not in used]
     return out
 
@@ -118,7 +148,12 @@ def close_status(outcome: Any) -> str:
 def mark_open(steps: list[dict[str, Any]], outcome: Any, by: str, at: float) -> list[dict[str, Any]]:
     """The checklist with every step still open marked by the closer: done when the outcome is done, dropped otherwise, `by` and `at` like any other mark. Marked steps stay as they are."""
     st = close_status(outcome)
-    return [_step(s["text"], st, by, at) if s["status"] == OPEN else dict(s) for s in steps]
+    return [_with_tag(_step(s["text"], st, by, at), _done_tag(tag_of(s), st)) if s["status"] == OPEN else dict(s) for s in steps]
+
+
+def _done_tag(tag: dict[str, Any] | None, status: str) -> dict[str, Any] | None:
+    """The tag of a step as it is marked: a step marked done reads done on its status line too (the text stays); a dropped step keeps its tag as it was."""
+    return {**tag, "state": "done"} if tag and status == DONE else tag
 
 
 def close_meta(meta: dict[str, Any], outcome: Any, by: str, at: float, keeper: str = "") -> None:
@@ -141,7 +176,7 @@ def stored(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if s["status"] != OPEN:
             e["by"] = s.get("by") or ""
             e["at"] = s.get("at") or 0
-        out.append(e)
+        out.append(_with_tag(e, tag_of(s)))
     return out
 
 
@@ -276,7 +311,7 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
     steps = [dict(s) for s in old]
     for idx, st in ((done, DONE), (dropped, DROPPED)):
         for i in idx:
-            steps[i] = _step(steps[i]["text"], st, by, at)
+            steps[i] = _with_tag(_step(steps[i]["text"], st, by, at), _done_tag(tag_of(steps[i]), st))
     marked = {key(old[i]["text"]) for i in (*done, *dropped)}
     left = {k: sum(1 for s in steps if s["status"] == OPEN and key(s["text"]) == k) for k in marked}      # the open steps still reading k once this call's marks are in
     listed: dict[str, int] = {}
@@ -303,7 +338,7 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
     gone = [i for i in open_idx if i not in used]
     if gone and wipe:
         for i in gone:
-            steps[i] = _step(steps[i]["text"], DROPPED, by, at)
+            steps[i] = _with_tag(_step(steps[i]["text"], DROPPED, by, at), tag_of(steps[i]))
     else:
         said_rw = [i for i in gone if reworded and i in reworded]
         if said_rw:
@@ -320,11 +355,12 @@ def apply(old: list[dict[str, Any]], new_next: str | None, done: list[int], drop
                             "a reworded line counts as a new step, so reword the step itself (reword), or mark the old one (dropped=[n]) and write the new text; clear_next=true wipes every line and marks them dropped. "
                             "If this tool shows no done/dropped/reword parameter, call stackshot_update through the MCP Portal's Code Mode (portal_codemode_execute with codemode.stackshot_update({…, done:[…]})), or use clear_next=true")
         for i in gone:
-            steps[i] = _step(steps[i]["text"], DROPPED)
+            steps[i] = _with_tag(_step(steps[i]["text"], DROPPED), tag_of(steps[i]))
     open_idx = [i for i in open_idx if i in used]
     order = sorted(used.values())
+    tags = {key(s["text"]): tag_of(s) for s in old if s["status"] == OPEN and tag_of(s)}      # a status line follows its step's words through a reorder
     for slot, j in zip(open_idx, order):
-        steps[slot] = _step(chunks[j])
+        steps[slot] = _with_tag(_step(chunks[j]), tags.get(keys[j]))
     taken = set(used.values())
     steps += [_step(c) for j, c in enumerate(chunks) if j not in taken]
     return steps

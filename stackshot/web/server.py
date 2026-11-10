@@ -102,7 +102,7 @@ if __name__ == "__main__":
 from stackshot.github import ghsync as _gh  # noqa: E402  — the GitHub mirror and the id switch, both off unless [github] says so
 from stackshot.core import ghbudget as _gb  # noqa: E402  — the hourly ledger of GitHub calls: the PR-state readers tag theirs (a done check, a step proof, an event wait)
 from stackshot.github import pr_state as _prs  # noqa: E402  — the one reader of a pull request's merged state behind _pr_merged: one shared record, one GitHub read for the done check, the step proof and the event wait (pr_state.py)
-from stackshot.model import work as _work  # noqa: E402  — an item's work lines: what is in motion on it
+from stackshot.model import work as _work  # noqa: E402  — a step's status: what is in motion on an item
 from stackshot.web import whatschanged as _wc  # noqa: E402  — the brief's what-changed lines for 7 days after a release that changes a tool
 from stackshot.model import said as _said  # noqa: E402  — the owner's words on an item, checked against his message's transcript (the trailers)
 from stackshot.model import states as _states  # noqa: E402  — an open item's stored state, what each state carries, and the derived one (states.py)
@@ -1441,10 +1441,9 @@ def _gate_observers(observers: Any) -> list[str]:
 
 
 def _finishes_own_line(work: Any, meta: dict[str, Any], writer: str, open_item: bool = True) -> bool:
-    """Does this `work` argument only mark a line done, one whose agent is the writer ("done", also when it already is)? Such a write
-    is the writer closing out its own part: it is no new work on the item, so it names the writer in no needs (_update_unlocked).
-    Only on an open item; the spec carries no other change (no other agent, no new text on a line found by id); the line is found among
-    the lines work.apply works on (a done line aged off the list is not there, and the write would create a new one)."""
+    """Does this `work` argument only finish the writer's own step (state done, no other change)? Such a write is the writer closing out its own part: it is no new work on the item, so it
+    names the writer in no needs (_update_unlocked). Only on an open item; the spec carries no other session (`agent` is the writer or absent) and no remove; the writer has an open step
+    (the first open step that opens with its name is the one the write ticks)."""
     if not open_item or not writer or work is None or (isinstance(work, str) and not work.strip()):
         return False
     try:
@@ -1453,21 +1452,16 @@ def _finishes_own_line(work: Any, meta: dict[str, Any], writer: str, open_item: 
         return False
     if spec["state"] != "done" or spec["remove"]:
         return False
-    spec["text"] = _shown_ids(spec["text"])      # the text work.apply gets: the update path rewrites g7 → board#N before it
-    lines = _work.live_lines(meta)
-    hit = next((l for l in lines if l["id"] == spec["id"]), None) if spec["id"] else next((l for l in lines if l["text"].casefold() == spec["text"].casefold()), None)
-    if hit is None or not hit["agent"]:
-        return False
-    if spec["id"] and spec["text"] and spec["text"] != hit["text"]:     # a rename, not a finish
-        return False
     nm = _anc.names()
-    same = lambda x: x == writer or _anc.canonical(x, nm) == _anc.canonical(writer, nm)
-    return same(hit["agent"]) and (not spec["agent"] or same(spec["agent"]))      # another agent in the spec reassigns the line
+    same = lambda x, y: bool(x) and bool(y) and (x == y or _anc.canonical(x, nm) == _anc.canonical(y, nm))
+    if spec["agent"] and not same(spec["agent"], writer):      # another session's step is not the writer's own part
+        return False
+    return _work.step_of(_steps.view(meta, keeper=str(meta.get("owner") or "")), writer, same) >= 0
 
 
 def _gate_work_writer(gid: str, writer: str, owner: str, meta: dict[str, Any], finishing: bool = False) -> None:
-    """a work line is written by the item's mover (`owner` here) or a session named in its needs; anyone else is refused with the way in.
-    A name or an id on either side; the needs list is read as the call leaves it. `finishing`: the writer marks its own line done
+    """a step's status (work) is written by the item's mover (`owner` here) or a session named in its needs; anyone else is refused with the way in.
+    A name or an id on either side; the needs list is read as the call leaves it. `finishing`: the writer finishes its own step
     (_finishes_own_line), which needs no naming in needs, so it passes without it."""
     nm = _anc.names()
     me = _anc.canonical(writer, nm)
@@ -1475,8 +1469,8 @@ def _gate_work_writer(gid: str, writer: str, owner: str, meta: dict[str, Any], f
     if finishing or same(owner) or any(same(s) for s in _needs_sessions(meta)):
         return
     named = ", ".join(_shown_ref(x) for x in _needs_sessions(meta)) or "none named"
-    raise ToolError(f"Refused: work lines on {_gh.shown(gid)} are written by its mover ({_session_label(owner) or 'none'}) or a session named in its needs ({named}); "
-                    f"{writer} is neither. Have its mover name you in needs (needs=[…, {writer!r}]), or pass the line to it.")
+    raise ToolError(f"Refused: the status of a step on {_gh.shown(gid)} is written by its mover ({_session_label(owner) or 'none'}) or a session named in its needs ({named}); "
+                    f"{writer} is neither. Have its mover name you in needs (needs=[…, {writer!r}]), or pass the step to it.")
 
 
 def _follow_superseded(gid: str, seen: set[str] | None = None) -> str:
@@ -3308,7 +3302,7 @@ def _tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool
     mover wrote it or is the owner or not a session, not when [board] tell_owner is off, not when the item is muted on his For you list, not
     when the mover is not a front agent (it already hears a close through _tell_owner), not when this write already told the mover
     (`heard`), not when the close's For you row failed and was told the old way (_FORYOU_FELL). This function once also told the mover of a builder's step, when a session the
-    item's needs named took itself out of needs or marked its last work line done. That line is gone: a front agent mover hears of an
+    item's needs named took itself out of needs or finished its last step by a status done. That line is gone: a front agent mover hears of an
     item only when it is closed (here) or back with it alone (_tell_handback); a builder's step stays on the item's History (one line a change)
     and, for a state-changing write, the page debt it leaves (_owed_mark). The mover is added to `heard` and to _OWNER_HEARD so the write's other notices leave it out.
     → the writer's reply line, or "" (nobody told)."""
@@ -3468,7 +3462,7 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
     """Moment 2: a write on an open item by a background agent not named in its needs names it first, as its own save, so the record
     shows the agent named, then its change (on a close: named, then closed; the close's own notice names the closer, so the mover
     hears nothing extra). `item` is the write in flight, `meta` its metadata: the naming is carried into `meta` at once, so the gates on who may
-    write (a work line's) read the agent as a named session. Nothing is stored here: the returned function stores the naming (the server's own
+    write (a step status) read the agent as a named session. Nothing is stored here: the returned function stores the naming (the server's own
     save, and the mover's notice) and the caller runs it just before the write's own save, so a write a later gate refuses leaves the item exactly
     as it was, the needs list included. Nothing on a closed item (`was`), on a write that names the agent itself, or without a sender; nothing on a write
     that is not plain work (`plain` false: it sets needs itself, `none` included, parks the item with hold or wake, sets or
@@ -6138,10 +6132,10 @@ def _archive_tick() -> "list[tuple[str, str]]":
 
 def _silence_skip() -> "Callable[[str, dict[str, Any], str], bool]":
     """The silence pass's view of what is already on an item (`silence.findings(skip=)`): True leaves a silent item alone when the stall ladder is already on it (`_stall_active`: that ladder is
-    chasing the mover), or when its mover is its project's builder (`_handoff_builder`) and a build subagent is running on it by the item's own `work` line (`silence.subagent_running`: a line in
+    chasing the mover), or when its mover is its project's builder (`_handoff_builder`) and a build subagent is running on it by the item's own step status (`silence.subagent_running`: a line in
     progress, changed within 90 minutes). The mover's pane is NOT read: silence is judged per item (the item's own activity clock, an event on its anchored pull request included), so a busy pane, a
     background agent's `shell` pane or a pane this box does not show says nothing about one item, and a builder directing subagents (a pane that is nearly always busy) no longer hides its silent
-    items; only a subagent the item itself shows counts as taken. The rungs that need a pane with no turn running (the ladder's look, cold call and builder steps of a front agent or a session no page lists as a background agent) stay in the stall pass and ladder.py; a background agent's rungs go by the work line alone.
+    items; only a subagent the item itself shows counts as taken. The rungs that need a pane with no turn running (the ladder's look, cold call and builder steps of a front agent or a session no page lists as a background agent) stay in the stall pass and ladder.py; a background agent's rungs go by the step status alone.
     The ladder's items are read once per pass, and so is each project's builder."""
     from stackshot.audit import silence as _silence
     active = _stall_active()
@@ -8594,10 +8588,10 @@ def _handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool
     if float(r.get("reminded_at") or 0) > float(r.get("resent_at") or 0):      # the later of the two is what this notice is (a reminder's retry stays a reminder; a resend after it is a resend)
         return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {_handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
                 + (f"; next: {nxt}" if nxt else "")
-                + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
+                + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
     return (f"[stackshot] {_gh.shown(gid)} is handed to you by {by}" + (" (sent again: your pane restarted before the item was written to)" if again else "")
             + f": {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")
-            + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
+            + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
 
 
 def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
@@ -8954,7 +8948,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         gs = [g for g, w, _l, _t in to_remind if w == sid]
         text = next(t for g, w, _l, t in to_remind if g == gs[0]) if len(gs) == 1 else _ho.message(
             lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {_handoff_minutes():g} min:",
-            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a work line in progress) counts as taking it; a note does not. → {_shared.BOARD_URL}")
+            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → {_shared.BOARD_URL}")
         try:
             _tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
         except Exception as e:  # noqa: BLE001
@@ -8963,7 +8957,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         gids = ",".join(g for w, g, _l in to_new if w == who)
         if _front_keeper(who, "")[0]:
             continue                                 # a front agent is never pushed to unmarked: the board shows it
-        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{_shared.BOARD_URL}")
+        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{_shared.BOARD_URL}")
         _tell_woken(gids, _session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
                     tag="handoff")
     for who, lines in _ho.batch(to_sender).items():
@@ -9764,7 +9758,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
     minutes = _stall_minutes()
     ladder_on, look = _ladder_on(), _ladder_look()
     silence_on = ladder_on and _ladder_silence_on()      # the silence audit brings the items: a pane with no turn running starts nothing
-    from stackshot.audit import silence as _silence      # the clocks of the silence audit, and `subagent_running`, the work line a background mover's ladder is held by
+    from stackshot.audit import silence as _silence      # the clocks of the silence audit, and `subagent_running`, the step status a background mover's ladder is held by
     since = _stall_since(now)          # no clock starts before the pass first ran (a deploy must not step every long-idle pane at once)
     cap = max(1, int(_stall_num("max_per_tick", _stall.MAX_PER_TICK)))
     old_st = _stall_load()
@@ -9802,13 +9796,13 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 continue                 # an untaken hand-off is the hand-off audit's alone (silence does not start it); once that audit has brought it to the one ladder, the ladder takes its rungs here
             # review: the registry row shows background work in its status. A pane whose turn is over but which has a run_in_background Bash task running (a CI watch, a release) shows
             # `shell`, not `idle`, and stall.action counts `shell` as idle; a pane with a background subagent running shows `busy` and is left alone. A background agent's `shell` pane is
-            # working on that job, so it is not quiet (with `[ladder] enabled` the pane is not read for a background agent at all: its item's own work line decides, below). A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
+            # working on that job, so it is not quiet (with `[ladder] enabled` the pane is not read for a background agent at all: its item's own step status decides, below). A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
             # carries no expected time: a mover with no background work running is chased by the minutes of its pane alone.
             status, at = _handoff_status(who, idx)
             back = bool(ladder_on and not front and _stall_background(who))
             if back:
                 # the one ladder: a background agent's pane says nothing about this item (it is nearly always busy, or shows a background shell for a CI watch or a release), so the pane no longer holds
-                # the rungs after the ask; the item's own work line does: a line in progress, changed within 90 minutes, is a subagent at work on it. A live pane gets no cold call or builder: its silence goes to the project's -main agent (ladder.action, `_ladder_main`).
+                # the rungs after the ask; the item's own step status does: a line in progress, changed within 90 minutes, is a subagent at work on it. A live pane gets no cold call or builder: its silence goes to the project's -main agent (ladder.action, `_ladder_main`).
                 if _silence.subagent_running(it, now, who, _ho_same):      # only the mover's own line: another agent's stale one holds nothing
                     continue
             elif not front and status == "shell" and _stall_background(who):
@@ -10012,8 +10006,8 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         out.append("after: " + ", ".join(states) + ("" if _after_open(m) else " — all closed" if item.get("status") == "open" else ""))
     if _observers_of(m):
         out.append("observers: " + ", ".join(_shown_ref(x) for x in _observers_of(m)))
-    if item.get("status") != "completed" and _work.lines_of(m):   # what is in motion on it, one line (the item page has the full list)
-        out.append("work: " + _work.words(m))
+    if item.get("status") != "completed" and _work.lines_of(m):   # what is in motion on it, one line (the item page shows each on its step)
+        out.append("step status: " + _work.words(m))
     for e in _said.entries_of(m):            # the trailers: his words on the item, each with where it was checked; an acted entry is a pasted result that proves a step, not his words
         sess_ = _session_label(e["session"]) or "unknown session"
         when_ = f" · {_rmod.when_words(dt.datetime.fromtimestamp(e['ts'], ZONE))}" if e["ts"] else ""
@@ -10239,7 +10233,7 @@ def _notice_report(nid: str) -> str:
 
 # What an agent does when the stall pass takes a wrong step; the same path is in stall.py's docstring and docs/stall-and-ladder.md.
 _STALL_FORM = (
-    f" A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as mover, follow-ups after the first notice go by the item's work line, not its pane): resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
+    f" A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as mover, follow-ups after the first notice go by the item's step status, not its pane): resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
     f"recovery (nobody could take it: the fleet's builder is sent one message, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
@@ -10494,12 +10488,12 @@ _REWORD_PARAM = Annotated[dict[Any, str] | str | None, Field(description=(
     "the step keeps its number and stays open, and the new text is one step that opens with who takes it (the rules are under Parameter reword in the description)."))]
 
 _WORK_PARAM = Annotated[dict[str, Any] | str | None, Field(description=(
-    "One status line of the item's work, one per call: {\"text\": \"migrating ids\", \"state\": \"in progress\", \"agent\": \"my-x\"}. "
-    f"text is at most {_work.TEXT_MAX} characters (details go on the project page). state: defined | assigned | in progress | done. "
-    "To change a line send the same text (or its \"id\") with the new state; to reword it send {\"id\": \"<line id>\", \"text\": \"new words\"}, since changed text without the id adds a new line. "
-    "{\"text\": \"migrating ids\", \"remove\": true} drops a line. " + f"At most {_work.OPEN_MAX} lines are open: mark one done or remove one first. " +
-    "A project builder's line in progress (changed within 90 minutes) tells the silence check a build subagent is running on the item; a line left in progress stops hiding the item after that, "
-    "and a line sent again unchanged keeps its old time, so a long job changes the line's words or state; mark it done or remove it when the subagent ends. Keys: id, text, state, agent, remove."))]
+    "The status of your open step, one line per call: {\"text\": \"PR 83 up\", \"state\": \"in progress\"}. It replaces the status of your first open step in place (the step is the stage, "
+    "the status says where you are in it; the page keeps one line per step, not one per write). "
+    f"text is at most {_work.TEXT_MAX} characters (details go on the project page). state: in progress (the default) | done. state done also ticks the step, as done=[n] does. "
+    "With no open step of yours, one is made from the text. {\"remove\": true} clears the status. Keys: text, state, remove. "
+    "A project builder's step with a status in progress (changed within 90 minutes) tells the silence check a build subagent is running on the item; a status left in progress stops hiding the item after that, "
+    "and a status sent again unchanged keeps its old time, so a long job changes the words or marks the step done."))]
 
 _DONE_PARAM = Annotated[list[int | str] | int | str | None, Field(description="Open steps of the checklist you finished: positions (1-based, marked steps count) or the exact first line, e.g. done=[1] or done=[1, \"my-x: open the PR\"]. A step of yours that next leaves out must be in done or dropped.")]
 
@@ -11080,8 +11074,8 @@ _UPDATE_DESC = (
     "Update an item; only the fields you pass change." + _OFF_MAP + " Right calls (sender = you): "
     "step done, next added: update(item_id=\"board#N\", sender=\"my-x\", done=[1], next=\"my-x: open the PR\") (next keeps your open steps; one you leave out must be in done or dropped); "
     "reword an open step: reword={\"2\": \"my-x: ship the export\"}; drop a step: dropped=[2]; "
-    "status line: work={\"text\": \"migrating ids\", \"state\": \"in progress\", \"agent\": \"my-x\"} "
-    f"(text at most {_work.TEXT_MAX} characters, at most {_work.OPEN_MAX} open lines); "
+    "status of your open step: work={\"text\": \"PR 83 up\", \"state\": \"in progress\"} "
+    f"(at most {_work.TEXT_MAX} characters; state done ticks the step); "
     "park for a work window: hold=true, wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\"; "
      "a reminder wake on your own item: wake=\"<tomorrow or later, within " + f"{_wt.cap_days():g}" + " days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"; "
     "wait on another item: after=[\"board#N\"], ask_by=\"2099-03-02\"; "
@@ -11135,12 +11129,13 @@ _UPDATE_DESC = (
     "an item of its own (create refuses one), and for a change no item covers, "
     f"{_when_idle()}; {_fleet_tool()} runs a flagged recycle itself, the board shows one \"Pane recycle pending for … ({_fleet_tool()} runs it)\" status line while an open item not on hold carries it, and when {_fleet_tool()} reports the recycle done the server "
     "clears it and tells you to re-read the item and resume. clear_recycle=true takes it off by hand. "
-    "work: one status line of the item's subtasks per call, what is in motion and what waits: work={\"text\": \"migrating the ids\", \"state\": \"in progress\", "
-    "\"agent\": \"my-engineer\"}, a few words (at most " + str(_work.TEXT_MAX) + " characters; the details stay on the project page), a state (defined | assigned | in progress | done) "
-    "and the session doing it; a line is found again by its text (or id), remove=true drops it, at most " + str(_work.OPEN_MAX) + " open lines. Written by the mover or a "
-    "session named in needs; it changes no needs, owes no page and leaves the state clock and the confirm alone. A project builder's line in progress (changed within 90 minutes) "
-    "tells the silence check a build subagent is running on the item, so the item is not found silent meanwhile; a line left in progress stops hiding the item after that, "
-    "and a line sent again unchanged keeps its old time, so a long job changes the line's words or writes to the item; mark it done or remove it when the subagent ends. "
+    "work: the status of your open step, one line per call: work={\"text\": \"PR 83 up\", \"state\": \"in progress\"}, a few words (at most " + str(_work.TEXT_MAX) + " characters; "
+    "the details stay on the project page). A step is a stage of the work (\"stage 11: auth and who\"), not a status: what changes while it is under way goes in this status, which replaces the "
+    "status of your first open step in place, so a night of updates is one line on the step, not one line each. state is in progress (the default) or done; done also ticks the step, as done=[n] does. "
+    "With no open step of yours the call makes one from the text; {\"remove\": true} clears the status. Written by the mover or a session named in needs; it changes no needs, owes no page and, "
+    "unless it ticks or makes a step, leaves the state clock and the confirm alone. A project builder's step with a status in progress (changed within 90 minutes) "
+    "tells the silence check a build subagent is running on the item, so the item is not found silent meanwhile; a status left in progress stops hiding the item after that, "
+    "and a status sent again unchanged keeps its old time, so a long job changes the words or writes to the item; mark the step done when the subagent ends. "
     + f"A question {OWNER} asks on an item (in his answer or a comment on it) is answered by the mover on the item itself: rewrite the "
     "description, and the options where it is a pick, the description saying it answers his question. His question is never posted with "
     "said and never taken as his call; only his conclusions are. "
@@ -12438,7 +12433,7 @@ def _update_unlocked(
     meta.pop("refiled", None)                          # the last refile's record is its History line; only a write that refiles carries it
     was_needs = _needs_of(meta)
     proj_for = project or str(meta.get("project") or "")
-    own_for = owner or _holder(item)       # the session the item is held by (its mover), which needs may name and which writes work lines; the creator holds no part
+    own_for = owner or _holder(item)       # the session the item is held by (its mover), which needs may name and which writes step statuses; the creator holds no part
     contact_new = ""
     if contact.strip():                    # the contact: a front agent of the project the item will be filed under; refused before anything is written
         if (status or item.get("status")) == "completed":
@@ -12486,9 +12481,9 @@ def _update_unlocked(
     debtor = _session_id(sender or owner or _holder(item))     # the writer owes the page; without a sender, the item's mover is the writer by rule
     keeper_was = str((item_was.get("metadata") or {}).get("owner") or "")      # the creator as it stood: the writer of the legacy lines
     next_writer = keeper_was if keeper_was and (sender.strip() == _ho.COLD or sender.strip().startswith("a script on ")) else debtor      # a line the server writes (the cold call's, a script's) is the keeper's, which a session can replace; a sender label is no session
-    # a background agent's first write names it, before any gate on who may write (a work line's) reads the needs list
+    # a background agent's first write names it, before any gate on who may write (a step status) reads the needs list
     # only plain work names it: a write that sets needs (none included, or agent=), a hold or wake, or a recycle leaves needs as it says
-    # finishing your own work line (work with state done, nothing else that does work) is no new work either, also when the
+    # finishing your own step (work with state done, nothing else that does work) is no new work either, also when the
     # line was already done: it named the finisher in needs each time
     finishing = bool(sender.strip()) and set(given) <= {"work", "said"} and _finishes_own_line(work, meta, _session_label(_session_id(sender.strip())), str(item.get("status") or "") == "open")
     plain = not (needs_set or clear_needs or agent.strip() or hold or clear_hold or wake or clear_wake or recycle or clear_recycle or filing_only or finishing)
@@ -12496,21 +12491,45 @@ def _update_unlocked(
     name_commit = _name_on_write(gid, item, meta, sender, str(item.get("status") or ""), was_needs, status == "completed", plain)      # carried into meta now, stored just before the write's own save
     naming_added = [s for s in _needs_of(meta) if s not in pre_named]       # the sessions the server itself named (the writer, a background agent): not a change the writer made
     before["needs"] = _needs_list(before.get("needs")) + naming_added   # the server's own naming of the writer is no change of the writer's to tell the mover of
-    work_spec = None            # one work line added, moved or removed; a filing edit (no page owed, the state clock and the confirm stay)
+    work_spec = None            # the status of the sender's open step set or cleared; a filing edit (no page owed, the state clock and the confirm stay) unless it ticks or makes a step
+    work_tick, work_who, work_made, work_skip = -1, "", "", ""
     if work is not None and (work if isinstance(work, (dict, list)) else str(work).strip()):
         try:
             work_spec = _work.parse(work)
         except ValueError as e:
             raise ToolError(f"Refused: {e}")
-        work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check (a line found by its text)
-        work_writer = _session_label(_session_id(sender.strip() or own_for))   # the writer by name; the agent a line defaults to
+        work_spec["text"] = _shown_ids(work_spec.get("text") or "")   # g7 → board#N, after the length check
+        work_writer = _session_label(_session_id(sender.strip() or own_for))   # the writer by name; the session whose step it is, unless the spec names another
         _gate_work_writer(gid, work_writer, _holder({"status": "open", "metadata": meta}), meta, finishing)                      # the needs list as this call leaves it
         if work_spec.get("agent"):
             work_spec["agent"] = _session_label(_session_id(work_spec["agent"]))
+        work_who = work_spec.get("agent") or work_writer
+        if str(item.get("status") or "") != "open":
+            work_skip = "the item is closed: its checklist is the record, and a status is written on an open step"
+        else:
+            nm_w = _anc.names()
+            same_w = lambda x, y: bool(x) and bool(y) and (x == y or _anc.canonical(x, nm_w) == _anc.canonical(y, nm_w))
+            ti_w = _work.step_of(_steps.view(item_was.get("metadata"), keeper=keeper_was), work_who, same_w)       # the sender's first open step, as the item stood
+            in_next_w = any(same_w(_steps.opener(c), work_who) for c in _steps.split(next))                       # …or a step of the sender's this call writes
+            if work_spec["remove"]:
+                if ti_w < 0 and not in_next_w:
+                    work_skip = f"{work_who} has no open step on the item, so there is no status to clear"
+            elif work_spec["state"] == "done":
+                if ti_w >= 0:
+                    work_tick = ti_w                                   # the status done ticks the step, as done=[n] does
+                elif not in_next_w:
+                    work_skip = f"{work_who} has no open step on the item to finish; the stage you finished is marked with done=[n] on the step, or not a step of the item"
+            elif ti_w < 0 and not in_next_w:                           # no open step: one is made from the text, for the sender, at the end of its lines
+                if not work_spec["text"]:
+                    raise ToolError(f"Refused: work: {work_who} has no open step on {_gh.shown(gid)}, so the status needs its text: it makes the step. {_work.FORM}")
+                work_made = f"{work_who}: {work_spec['text']}"
+                kept_own = _nl.text_of(meta, next_writer, keeper_was, _ho_same)                     # the sender's lines stay: next replaces them as a whole
+                next = (next.rstrip() + "\n" if next.strip() else (kept_own.rstrip() + "\n" if kept_own.strip() else "")) + work_made
+                next_touch = True
     said_l = _gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
     reformat = bool(description) and bool(getattr(_REFORMAT, "on", False))   # a re-bullet changes the form of the description, never what it says: the state clock and the confirm stay, no page is owed
     rewording = _steps.reword_given(reword)      # reword={position: new text}: an open step's words change; an empty mapping ({} or "{}") is not given
-    marks = _marks_given(done) or _marks_given(dropped) or rewording      # a step checked, dropped or reworded is a change of next
+    marks = _marks_given(done) or _marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks
     state_change = bool((description and not reformat) or next_touch or marks or needs_set or clear_needs or status or due or clear_due or wake or clear_wake or hold or clear_hold or after_set or clear_after)   # _STATE_FIELDS (+ the hold and its wake, and after); the rest is filing
     was, was_held = item.get("status"), _is_held(item)
     outcome, reason, superseded_by = outcome.strip().lower(), reason.strip(), superseded_by.strip()
@@ -12559,6 +12578,8 @@ def _update_unlocked(
     try:
         done_ix, drop_ix = _steps.resolve(steps_old, done, "done"), _steps.resolve(steps_old, dropped, "dropped")
         reword_ix = _steps.resolve_reword(steps_old, reword) if rewording else {}
+        if work_tick >= 0 and work_tick not in done_ix and work_tick not in drop_ix:
+            done_ix.append(work_tick)
         if both := sorted(set(reword_ix) & {*done_ix, *drop_ix}):
             raise _steps.StepError(f"step {both[0] + 1} is in reword and in done or dropped ({_steps.first_line(steps_old[both[0]]['text'])[:90]}); pick one")
     except _steps.StepError as e:
@@ -12769,17 +12790,6 @@ def _update_unlocked(
     if anchors is not None:
         raise ToolError("Refused: anchors belong to the project, not the item — use anchors(project=<its project>, add=[url…], items=[<this id>]) or remove=[url…]")
     work_note = ""
-    if work_spec is not None:     # the change, one line in the reply as History says it
-        work_was = {"work": meta.get("work")}
-        try:
-            lines = _work.apply(meta, work_spec, work_writer)
-        except ValueError as e:
-            raise ToolError(f"Refused: {e}")
-        if lines:
-            meta["work"] = lines
-        else:
-            meta.pop("work", None)
-        work_note = "".join("\n" + w for w in _work.changes(work_was, meta)) or f"\n(work: \"{work_spec.get('text') or work_spec.get('id')}\" unchanged, already so)"
     if said_l:                    # appended, never replaced: every entry keeps its position (the anchor the issue's trailer links)
         meta["said"] = [*(meta.get("said") if isinstance(meta.get("said"), list) else []), *said_l]
         work_note += _said_note(said_l)
@@ -12821,6 +12831,23 @@ def _update_unlocked(
         _nl.prune(meta, marked_text, keeper_was)
         meta["steps"] = _steps.stored(steps_new)
         steps_note += "".join(f"\n(step {i + 1} done: {_steps.first_line(steps_new[i]['text'])[:120]})" for i in done_ix) + "".join(f"\n(step {i + 1} dropped: {_steps.first_line(steps_new[i]['text'])[:120]})" for i in drop_ix)
+    if work_spec is not None:      # the status of the sender's open step, one line in the reply as History says it
+        if work_skip or closing or not steps_on:
+            work_note += f"\n(work: not recorded, {work_skip or 'the item is closed with this call'})"
+        else:
+            cl_w = steps_new if steps_new is not None else steps_old
+            nm_w = _anc.names()
+            ti_w = work_tick if work_tick >= 0 else _work.step_of(cl_w, work_who, lambda x, y: bool(x) and bool(y) and (x == y or _anc.canonical(x, nm_w) == _anc.canonical(y, nm_w)))
+            if ti_w < 0:
+                work_note += f"\n(work: not recorded, {work_who} has no open step on the item after this write)"
+            else:
+                cl_w = list(cl_w)
+                spec_w = {**work_spec, "state": "done"} if work_tick >= 0 else work_spec
+                cl_w[ti_w] = _work.apply(cl_w[ti_w], spec_w, time.time())
+                meta["steps"] = _steps.stored(cl_w)
+                work_note += "".join("\n" + w for w in _work.changes({"steps": (item_was.get("metadata") or {}).get("steps")}, meta)) or f"\n(work: \"{work_spec.get('text') or 'the status'}\" unchanged, already so)"
+                if work_made:
+                    work_note += f"\n(step added for {work_who}: {work_made})"
     if closing and step_proof is not None:
         raise ToolError(f"Refused: {_gh.shown(gid)} is being closed, and a close leaves no open step to give a proof: send step_proof on a call that keeps the item open")
     if closing:                                                 # a close leaves no open step, so no proof
@@ -15017,7 +15044,7 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
         it["metadata"] = meta
         _save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, so the item moved from {_session_label(frm) or 'its mover'} to {_session_label(to)}: {step}")
         text = (f"[stackshot] {_gh.shown(gid)} is yours: {did} is done, and the next step is yours: {step}. {subject} ({project}). Do your part and close it or hand it back"
-                + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a work line in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
+                + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
         _tell_woken(gid, _session_id(to) or to, text, tag="handoff")
         _PROOF_TOLD_SID[gid] = (_session_id(to), now)
         row.update(action="moved", told=_session_label(to))

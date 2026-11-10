@@ -378,8 +378,11 @@ check("item page: no 'Last change' line under the title (the state line stands a
 check("item page: the old state words are gone (Alive, Mover and then, whose move)", not re.search(r"\bAlive\b|Mover and then|whose move", p14 + p1 + p6))
 check("item page: Details say Then, and no Expected by, without the owner's name or the basis", ">Then</dt>" in p6 and "Expected by" not in p6 and "needs set" not in p6 + p1 + p14 and "no date of its own" not in p6 + p1 + p14)
 check("item page: priority P1 is a red tag, P2 is plain text", 'class="tag t-p1">P1</span>' in p14 and "<dd>P2</dd>" in p1 and "badge prio" not in p14 + p1)
-check("item page: Next shows the open step, then one fold of the earlier ones with their count", re.search(r'<ul class="inext" aria-label="Next steps">(?:(?!<details).)*review the PR.*?</ul><details class="iearlier"><summary>2 earlier steps: 1 done, 1 dropped</summary>.*?write the code.*?try the old way', p14, flags=re.S) is not None, re.findall(r'<details class="iearlier">.*?</summary>', p14))
-check("item page: the open step is not inside the fold, the earlier ones are", "review the PR" not in p14.split('<details class="iearlier">')[1])
+nx14 = p14[p14.find("<h2>Next</h2>"):p14.find('<details class="fold" data-fold="item.description"')]
+check("item page: Next shows the newest finished step and the open step, and one fold of the other earlier ones with their count (a dropped step is not a done one)",
+      re.search(r'<details class="iearlier"><summary>1 earlier step \(1 dropped\) · .*?try the old way.*?</details><ul class="inext" aria-label="Next steps">.*?write the code.*?review the PR', nx14, flags=re.S) is not None, nx14[:900])
+check("item page: the open step and the newest done step are not inside the fold, the dropped one is", "review the PR" not in p14.split('<details class="iearlier">')[1].split("</details>")[0]
+      and "write the code" not in p14.split('<details class="iearlier">')[1].split("</details>")[0] and "try the old way" in p14.split('<details class="iearlier">')[1].split("</details>")[0])
 check("item page: a waiting item's next section is 'After the wait'", re.search(r"<h2>After the wait</h2>", p6) is not None and "<h2>Next</h2>" in p1 and "<h2>Next</h2>" not in p6)
 check("item page: the project link in the Details has no arrow, only outside links do", "Project details ↗" not in home)
 

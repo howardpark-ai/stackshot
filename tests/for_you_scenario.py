@@ -168,9 +168,9 @@ def to_owner(owner, gid, since): return [x[1] for x in pushes()[since:] if x[0] 
 for live in (True,):      # the router rules every project since the "router off" pass is gone
     cfg(live=live); mode = "router live" if live else "router off"; b = 70 if live else 80      # items 70-79 router live, 80-89 off
     item(b, needs=["osprey-x"]); item(b + 1); item(b + 2, needs=["external", "osprey-x"])
-    item(b + 3, needs=["osprey-x"], work=[{"id": "migrating", "text": "migrating", "agent": "osprey-x", "state": "in progress", "ts": now0 - 60}])
+    item(b + 3, needs=["osprey-x"], next="osprey-x: migrating")
     item(b + 4, needs=["osprey-x"]); item(b + 5, needs=["external", "osprey-x"]); item(b + 6, needs=["osprey-x"])
-    item(b + 7, owner=B); item(b + 8, owner=B, needs=["osprey-x"], work=[{"id": "migrating", "text": "migrating", "agent": "osprey-x", "state": "in progress", "ts": now0 - 60}])
+    item(b + 7, owner=B); item(b + 8, owner=B, needs=["osprey-x"], next="osprey-x: migrating")
     g = lambda k: f"a{b + k}"
     p0 = len(pushes()); out = cl(b); settle()
     check(f"owner told, {mode}: a close by the builder (no words on the item, so no row): one marked line to the front agent owner, with the outcome, the subject and the item link",
@@ -181,10 +181,10 @@ for live in (True,):      # the router rules every project since the "router off
     p0 = len(pushes()); out = server._update(g(2), needs=["external"], next="Oliver: builder done; review it", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
     check(f"no step line, {mode}: the builder takes itself off needs (`external` stays in it; the owner is not named): nothing is pushed to the front agent owner, and the reply promises nothing",
           not to_front_of(g(2), p0) and "told at once" not in out and "step came back" not in out and "not told" not in out, (pushes()[p0:], out))
-    p0 = len(pushes()); out = server._update(g(3), work={"id": "migrating", "state": "done"}, sender="osprey-x"); settle()
-    check(f"no step line, {mode}: the builder marks its last work line done (needs unchanged, X still named): nothing is pushed to the front agent owner, and the write is on the item",
+    p0 = len(pushes()); out = server._update(g(3), work={"state": "done"}, sender="osprey-x"); settle()
+    check(f"no step line, {mode}: the builder marks its last step done by a status done (needs unchanged, X still named): nothing is pushed to the front agent owner, and the write is on the item",
           not to_front_of(g(3), p0) and "told at once" not in out and rd(b + 3)["metadata"]["needs"] == ["osprey-x"]
-          and [l["state"] for l in rd(b + 3)["metadata"]["work"]] == ["done"], (pushes()[p0:], out, rd(b + 3)["metadata"]))
+          and [l["status"] for l in rd(b + 3)["metadata"]["steps"]] == ["done"], (pushes()[p0:], out, rd(b + 3)["metadata"]))
     p0 = len(pushes()); out = server._update(g(4), next="osprey-x: halfway there", sender="osprey-x"); settle()
     check(f"{mode}: an update by the builder that only sets next (still named, no work done) tells the owner nothing", not to_front_of(g(4), p0) and "told at once" not in out, (pushes()[p0:], out))
     p0 = len(pushes()); out = server._update(g(5), subject="[home] item %d renamed" % (b + 5), sender="osprey-x"); settle()
@@ -201,20 +201,20 @@ for live in (True,):      # the router rules every project since the "router off
     p0 = len(pushes()); out = cl(b + 7); settle()
     check(f"owner that is not a front agent, {mode}: a close by the builder is told as before, once, unmarked (the older notice; this change adds no second line)",
           len(to_owner(B, g(7), p0)) == 1 and "[for Oliver]" not in to_owner(B, g(7), p0)[0], (pushes()[p0:], out))
-    p0 = len(pushes()); out = server._update(g(8), work={"id": "migrating", "state": "done"}, sender="osprey-x"); settle()
-    check(f"no step line, {mode}: a work line marked done on an item a background owner owns is told to nobody either (it was the one step line it used to get)",
-          not [x for x in pushes()[p0:] if re.search(rf"\b{g(8)}\b", x[1]) and "handed back" in x[1]] and not to_owner(B, g(8), p0) and "has been told" not in out and "told at once" not in out, (pushes()[p0:], out))
+    p0 = len(pushes()); out = server._update(g(8), work={"state": "done"}, sender="osprey-x"); settle()
+    check(f"no step line, {mode}: a step marked done by a status done on an item a background owner owns hands nothing back and tells the owner nothing (its mover gets the same board notice as for done=[n] on its last step, which it always got)",
+          not [x for x in pushes()[p0:] if re.search(rf"\b{g(8)}\b", x[1]) and "handed back" in x[1]] and not to_owner(B, g(8), p0) and "told at once" not in out
+          and all(x[1].startswith("[board]") and "removed their next lines" in x[1] for x in pushes()[p0:]), (pushes()[p0:], out))
 cfg(live=True)
 # marking work lines done, one by one or the last one, pushes nothing to the owner: the record is the item's History
-WL = lambda k, agent="osprey-x": {"id": k, "text": k, "agent": agent, "state": "in progress", "ts": now0 - 60}
-item(90, needs=["osprey-x"], work=[WL("one"), WL("two"), WL("three")]); item(91, needs=["osprey-x"], work=[WL("mine"), WL("theirs", "osprey-docs")])
+item(90, needs=["osprey-x"], next="osprey-x: one\nosprey-x: two\nosprey-x: three"); item(91, needs=["osprey-x"], next="osprey-x: mine\nosprey-docs: theirs")
 p0 = len(pushes()); outs = []
 for k in ("one", "two", "three"):
-    outs.append(server._update("a90", work={"id": k, "state": "done"}, sender="osprey-x")); settle()
+    outs.append(server._update("a90", work={"state": "done"}, sender="osprey-x")); settle()
     check(f"work lines, {k} of three marked done: nothing is pushed to the owner", not to_front_of("a90", p0) and "told at once" not in outs[-1], (pushes()[p0:], outs[-1]))
 check("...the third (the builder's whole step is done): still nothing pushed to the front agent owner, and every line is done on the item", not to_front_of("a90", p0)
-      and [l["state"] for l in rd(90)["metadata"]["work"]] == ["done"] * 3 and "step came back" not in outs[-1], (pushes()[p0:], outs[-1]))
-p0 = len(pushes()); out = server._update("a91", work={"id": "mine", "state": "done"}, sender="osprey-x"); settle()
+      and [l["status"] for l in rd(90)["metadata"]["steps"]] == ["done"] * 3 and "step came back" not in outs[-1], (pushes()[p0:], outs[-1]))
+p0 = len(pushes()); out = server._update("a91", work={"state": "done"}, sender="osprey-x"); settle()
 check("...a line of another agent still open: the builder's own last line done pushes nothing either", not to_front_of("a91", p0), (pushes()[p0:], out))
 # (a) to (c): a builder leaving needs while another session stays, its last work line, and the hand-back's one line, are in router_live_scenario (it has a second background agent)
 # (d) another session closes the item while a second session is still named in its needs: the owner still gets the close line
@@ -240,13 +240,13 @@ p0 = len(pushes()); server._check_close("a94", server._load("a94"), CHK, time.ti
 check("…the owner Oliver, or a name that is no session: nobody is marked for it", not [x for x in pushes()[p0:] if ("a94" in x[1] or "a95" in x[1]) and "[for Oliver]" in x[1]], pushes()[p0:])
 # the other small gaps: [board] tell_owner off, and an owner that is Oliver or no session, on a close and on a handed-back step
 _cfg.CFG.setdefault("board", {})["tell_owner"] = False
-item(97, needs=["osprey-x"], work=[WL("only")]); item(98, needs=["external", "osprey-x"])
+item(97, needs=["osprey-x"], next="osprey-x: only"); item(98, needs=["external", "osprey-x"])
 p0 = len(pushes()); server._check_close("a96", server._load("a96"), CHK, time.time()); out = cl(97); outh = server._update("a98", needs=["external"], next="Oliver: handed back", wait_event="the review", ask_by=ABY, sender="osprey-x"); settle()
 check("tell_owner off: a done check's close, a session's close and an item back with the owner alone tell the front agent owner nothing", not [x for x in pushes()[p0:] if x[0] == A and re.search(r"a9[678]\b", x[1]) and x[1].startswith("[for Oliver]")]
       and "told at once" not in out + outh, (pushes()[p0:], out, outh))
 _cfg.CFG["board"]["tell_owner"] = True
-item(99, owner="Oliver", needs=["osprey-x"], work=[WL("only")]); item(64, owner="an-outside-party", needs=["osprey-x"], work=[WL("only")])
-p0 = len(pushes()); outs = [server._update("a99", work={"id": "only", "state": "done"}, sender="osprey-x"), server._update("a64", work={"id": "only", "state": "done"}, sender="osprey-x"), cl(99), cl(64)]; settle()
+item(99, owner="Oliver", needs=["osprey-x"], next="osprey-x: only"); item(64, owner="an-outside-party", needs=["osprey-x"], next="osprey-x: only")
+p0 = len(pushes()); outs = [server._update("a99", work={"state": "done"}, sender="osprey-x"), server._update("a64", work={"state": "done"}, sender="osprey-x"), cl(99), cl(64)]; settle()
 check("an owner that is Oliver or no session (an outside party's name): a close tells nobody marked, and the reply does not say it told one", not [x for x in pushes()[p0:] if re.search(r"a(99|64)\b", x[1]) and x[1].startswith("[for Oliver]")]
       and not any("told at once" in o for o in outs), (pushes()[p0:], outs))
 cfg(live=True)
