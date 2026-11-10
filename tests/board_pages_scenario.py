@@ -234,6 +234,15 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     # the small routes at the root
     r = get("/render-stamp"); check("/render-stamp: the render time of the home", r.status_code == 200 and isinstance(r.json().get("ts"), int) and r.json()["ts"] > 1.7e9, r.text)
     r = get("/receivers.json"); check("/receivers.json answers (503 unavailable without a status file, else the receivers)", r.status_code in (200, 503), r.status_code)
+    import datetime as _dt, zoneinfo as _zi
+    _zn = _dt.datetime.now(_zi.ZoneInfo("Asia/Dubai")); _fmt = lambda secs: (_zn - _dt.timedelta(seconds=secs)).strftime("%Y-%m-%d %H:%M:%S")
+    (T / "state/anchor-hub/status.json").write_text(json.dumps({"started": "x", "anchors": {}, "receivers": {
+        "github": {"ok": True, "checked": _fmt(300)}, "slack": {"ok": True, "checked": _fmt(30)}, "google": {"ok": False, "error": "gmail: Broken pipe", "checked": _fmt(9000)}}}))
+    r = get("/receivers.json"); rj = r.json() if r.status_code == 200 else {}
+    check("/receivers.json: `stale` is the seconds since a healthy receiver's last check when that is over twice its beat (GitHub, 5 min old), else 0 (Slack fresh; Google is down, not stale)",
+          r.status_code == 200 and 295 <= rj["github"]["stale"] <= 330 and rj["slack"]["stale"] == 0 and rj["google"]["stale"] == 0 and rj["github"]["ok"] is True
+          and rj["github"]["stale_note"].startswith("no check for 5m (it reports every 1m)") and rj["slack"]["stale_note"] == "", r.text[:300])
+    (T / "state/anchor-hub/status.json").unlink()
     r = get("/answer-tokens?ids=a1"); check("/answer-tokens answers", r.status_code == 200 and r.json().get("a1") == tok("a1"), r.text[:120])
     r = get("/no-such-page"); check("/<unknown>: 404, not the static site (a path never serves a file of the root)", r.status_code == 404, (r.status_code, r.text[:80]))
     r = get("/items/a1.html"); check("/items/<id>.html redirects 301 to /items/<id>", r.status_code == 301 and r.headers["location"] == "/items/a1", (r.status_code, r.headers.get("location")))

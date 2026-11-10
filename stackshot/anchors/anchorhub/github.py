@@ -1,9 +1,11 @@
 """anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications."""
 import json, os, re, subprocess, threading, time, zlib
-from .core import Hub, Transient, _anc, _cfg, _ts, log, now_iso, now_iso_at
+from .core import Hub, Transient, _anc, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at
 from stackshot.core import ghbudget as _gb   # the host's one hourly ledger of GitHub calls, shared with the stackshot server (a locked file under <state>/github)
 
 GHPOLL = 60   # s; conditional GETs — a 304 does not count against the API budget
+FIRST_PASS = 600   # s; how long the first pass after a start may take before the board counts the silence (announced with hub.hold, cleared by the pass's own check)
+BACKOFF = 600   # s; the wait after GitHub refuses a read for its rate limit (announced to the board with hub.hold, so it is not shown stale)
 FINISHED_EVERY = 10   # a closed or merged anchor is looked at once in this many passes (staggered by anchor), not every pass
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
 def run(hub: Hub):
@@ -165,7 +167,7 @@ def run(hub: Hub):
         except Exception as e:
             if "404" in str(e) or "Not Found" in str(e): state.setdefault(a_id, {"tag": None}); return
             log.warning("github %s: %s", a_id, str(e)[:120])
-            if "rate limit" in str(e).lower() or "403" in str(e): time.sleep(600)
+            if "rate limit" in str(e).lower() or "403" in str(e): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
             return
         if r is None: return                                  # 304: unchanged
         st = state.get(a_id)
@@ -336,32 +338,35 @@ def run(hub: Hub):
         except Exception as e:
             log.warning("github %s: %s", a_id, str(e)[:120])
             etags.pop(f"/repos/{repo}/issues/{n}", None)         # a read that failed after the issue's 200 (the comments, refused by the cap or GitHub) is made again next pass, not answered 304
-            if "rate limit" in str(e).lower() or "403" in str(e): time.sleep(600)
+            if "rate limit" in str(e).lower() or "403" in str(e): hub.hold("github", BACKOFF); time.sleep(BACKOFF)
+    hub.hold("github", FIRST_PASS)                         # the first pass after a start reads every anchor: the board counts no age until it ends or this time is up
     hub.gh_state = {"ci": ci_st, "state": state, "etags": etags, "news": thread_news, "committed": committed, "resolved": resolved}      # for inspection and tests
     capped_now = [False]                                                # the cap warning is logged when the state changes, not every pass
     passes = [0]                                                        # polls made since the receiver started (the finished anchors' turn is counted by it)
+    def one_pass():
+        with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:")]
+        skipped = False
+        for a_id in ids:
+            if held() > 0:                                          # the hourly read cap is spent: the rest of this pass reads nothing; the next pass looks again
+                skipped = True; break
+            adopt(state, a_id); adopt(ci_st, a_id)           # before release, notifications, ci and the issue read look at either
+            touched.clear()
+            if a_id.endswith("@releases"): release(a_id)
+            elif a_id.endswith("@notifications"): notifications(a_id)   # CI: GitHub's own ci_activity
+            elif (mode := how(a_id, passes[0])) != "skip": watch(a_id, with_ci=mode == "full")
+            settle(a_id)
+        passes[0] += 1
+        if skipped:                                                 # a pass the cap cut short is not a finished check
+            msg = f"reads held by the hourly cap, resume in {_gb.held_words(held())}"
+            if not capped_now[0]: log.warning("github: %s; this pass is cut short", msg)
+            capped_now[0] = True; hub.health("github", False, msg)
+        else:
+            if capped_now[0]: log.info("github: the hourly cap on reads has room again; polling resumes")
+            capped_now[0] = False
+            with hub.lock: hub.status.setdefault("github", {})["last_pass"] = time.time()
+            hub.health("github", True)                              # a finished poll pass is GitHub's real check
     def loop():
-        while True:
-            with hub.lock: ids = [k for k in hub.bindings if k.startswith("github:")]
-            skipped = False
-            for a_id in ids:
-                if (w := held()) > 0:                                   # the hourly read cap is spent: the rest of this pass reads nothing; the next pass looks again
-                    skipped = True; break
-                adopt(state, a_id); adopt(ci_st, a_id)           # before release, notifications, ci and the issue read look at either
-                touched.clear()
-                if a_id.endswith("@releases"): release(a_id)
-                elif a_id.endswith("@notifications"): notifications(a_id)   # CI: GitHub's own ci_activity
-                elif (mode := how(a_id, passes[0])) != "skip": watch(a_id, with_ci=mode == "full")
-                settle(a_id)
-            passes[0] += 1
-            if skipped:                                                 # a pass the cap cut short is not a finished check
-                msg = f"reads held by the hourly cap, resume in {_gb.held_words(held())}"
-                if not capped_now[0]: log.warning("github: %s; this pass is cut short", msg)
-                capped_now[0] = True; hub.health("github", False, msg)
-            else:
-                if capped_now[0]: log.info("github: the hourly cap on reads has room again; polling resumes")
-                capped_now[0] = False
-                with hub.lock: hub.status.setdefault("github", {})["last_pass"] = time.time()
-                hub.health("github", True)                              # a finished poll pass is GitHub's real check
-            time.sleep(GHPOLL - time.time() % GHPOLL)   # on the dot: every poll fires at :00 s (conditional GETs: unchanged issues cost nothing)
+        # A pass that raises (a status file that could not be written, a bug) is logged and the next pass runs: the poll thread never ends on one.
+        # The pause is on the dot: every poll fires at :00 s (conditional GETs: unchanged issues cost nothing); time.sleep is looked up at each call.
+        guarded_loop(hub, "github", one_pass, every=lambda: GHPOLL - time.time() % GHPOLL, retry=GHPOLL, sleep=lambda s: time.sleep(s))
     threading.Thread(target=loop, daemon=True).start()

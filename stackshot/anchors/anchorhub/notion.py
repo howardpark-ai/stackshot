@@ -1,7 +1,7 @@
 """anchorhub.notion — Notion pages and databases: webhook push where the connection can see the page, polling where it cannot."""
 import json, os, hmac, hashlib, queue, threading, time
 from datetime import datetime, timezone
-from .core import Hub, ENVF, HEALTH, _cfg, _ts, log, now_iso, now_iso_at, read_env, watches_load, watches_save
+from .core import Hub, ENVF, HEALTH, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at, read_env, watches_load, watches_save
 
 NPOLL = 5
 ROUTES = ("/hook/notion",)   # the webhook run() registers; answered 503, not 404, while the start is being retried
@@ -244,35 +244,38 @@ def run(hub: Hub):
         return 200, "ok"
     hub.hooks["/hook/notion"] = hook_notion
     hub.push.setdefault("notion", {})["mode"] = "push" if hook_tok else "poll (no NOTION_HOOK_TOKEN)"
-    def loop():
-        last_health = 0.0; last_fallback = 0.0
-        while True:
-            with hub.lock: ids = [k[7:] for k in hub.bindings if k.startswith("notion:")]
-            db_ids = [i for i in ids if is_db(i)]; pages = [i for i in ids if i not in db_ids]
-            due: dict[str, str] = {}
+    timers = {"health": 0.0, "fallback": 0.0}
+    def one_pass():
+        last_health = timers["health"]; last_fallback = timers["fallback"]
+        with hub.lock: ids = [k[7:] for k in hub.bindings if k.startswith("notion:")]
+        db_ids = [i for i in ids if is_db(i)]; pages = [i for i in ids if i not in db_ids]
+        due: dict[str, str] = {}
+        try:
+            while True:
+                k, pid = hub.triggers.get(timeout=1)
+                if k == "notion": due[pid] = "push"
+                else: hub.triggers.put((k, pid)); break
+        except queue.Empty: pass
+        now = time.time()
+        health_due = now - last_health >= HEALTH
+        if health_due: last_health = timers["health"] = now; due.update({p: "health" for p in ids})
+        health_ids = set(ids) if health_due else set()           # the pages the health re-read covers, whatever the poll below calls them
+        if int(now // NPOLL) != int(last_fallback // NPOLL):   # once per wall-clock NPOLL slot
+            last_fallback = timers["fallback"] = now; due.update({p: "poll" for p in ids if not reachable(p)})
+        nerr, nchecked = None, health_due     # a re-read with nothing bound has no call to make, but the beat is stamped (an idle receiver does not age on the board)
+        for pid, src in due.items():
             try:
-                while True:
-                    k, pid = hub.triggers.get(timeout=1)
-                    if k == "notion": due[pid] = "push"
-                    else: hub.triggers.put((k, pid)); break
-            except queue.Empty: pass
-            now = time.time()
-            if now - last_health >= HEALTH: last_health = now; due.update({p: "health" for p in ids})
-            if int(now // NPOLL) != int(last_fallback // NPOLL):   # once per wall-clock NPOLL slot
-                last_fallback = now; due.update({p: "poll" for p in ids if not reachable(p)})
-            nerr, nchecked = None, any(v == "health" for v in due.values())
-            for pid, src in due.items():
-                try:
-                    if pid in pages: check_page(pid, src)
-                    if pid in db_ids: check_db(pid, src)
-                    elif src == "push":                      # an event on some page: a row, or a page below a watched one?
-                        for kind, anc, row in climb(pid, pages, db_ids):
-                            if kind == "db" and row == pid: check_row(anc, pid, src)
-                            elif kind == "db": check_child(anc, pid, dbstate(anc)["base"], row=row)
-                            else: check_child(anc, pid, t0)
-                except Exception as e:
-                    log.warning("notion %s: %s", pid[:8], str(e)[:160])
-                    if src == "health": nerr = nerr or f"{pid[:8]}: {str(e)[:60]}"
-            if nchecked: hub.health("notion", nerr is None, nerr)       # the 30-min re-read is Notion's real check
-            elif due: hub.write_status()
+                if pid in pages: check_page(pid, src)
+                if pid in db_ids: check_db(pid, src)
+                elif src == "push":                      # an event on some page: a row, or a page below a watched one?
+                    for kind, anc, row in climb(pid, pages, db_ids):
+                        if kind == "db" and row == pid: check_row(anc, pid, src)
+                        elif kind == "db": check_child(anc, pid, dbstate(anc)["base"], row=row)
+                        else: check_child(anc, pid, t0)
+            except Exception as e:
+                log.warning("notion %s: %s", pid[:8], str(e)[:160])
+                if src == "health" or pid in health_ids: nerr = nerr or f"{pid[:8]}: {str(e)[:60]}"
+        if nchecked: hub.health("notion", nerr is None, nerr)       # the 30-min re-read is Notion's real check
+        elif due: hub.write_status()
+    def loop(): guarded_loop(hub, "notion", one_pass, retry=1.0)    # each pass waits on the trigger queue (a second at most); a pass that raises is logged and the next one runs
     threading.Thread(target=loop, daemon=True).start()

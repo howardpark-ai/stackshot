@@ -2438,6 +2438,37 @@ check("errors: rcv() uses the render's pattern and never writes the raw error as
       f"var NET=new RegExp({json.dumps(ui_render._NET_ERR)},'i');" in hr and "h.title=raw;h.textContent=k==='ok'?'healthy ✓':k==='warn'?'unreachable ✗':'error ✗'" in hr
       and "(v.error||'down')+' ✗'" not in hr and "['ok','warn','bad'].forEach(function(x){c.classList.toggle(x,x===k)})" in hr and "c.querySelector('.st')" in hr)
 check("errors: the board.md receiver table is untouched by the card change", "| google | DOWN: " + LONG + " |" in ui_render.Board(f"{tmp}/store", now=_now).markdown())
+# a healthy receiver whose last check is more than twice its beat old is stale, with the age (beats: GitHub and Slack 1 min, Google and Notion 30 min); exactly twice is still healthy
+_status_before = (T / "state/anchor-hub/status.json").read_text()
+(T / "state/anchor-hub/status.json").write_text(json.dumps({"started": "x", "anchors": {}, "receivers": {
+    "github": {"ok": True, "checked": "2026-02-23 12:53:00"}, "slack": {"ok": True, "checked": "2026-02-23 12:52:59"},
+    "google": {"ok": True, "checked": "2026-02-23 11:55:00"}, "notion": {"ok": True, "checked": "2026-02-23 11:54:59"},
+    "hook-x": {"ok": True, "checked": "2026-02-22 12:55:00"}}}))
+hs_ = ui_render.Board(f"{tmp}/store", now=_now).html()
+def rcard_(k):
+    i = hs_.find(f'data-rcv="{k}"'); return hs_[hs_.rfind("<div", 0, i):hs_.find("</div>", i)]
+check("stale: exactly twice the beat old (GitHub 2 min, Google 60 min) is still healthy, drawn as before",
+      all('class="pc rcv ok"' in rcard_(k) and '<span class="lbl st ok" title="healthy">healthy ✓</span>' in rcard_(k) for k in ("github", "google")), (rcard_("github"), rcard_("google")))
+check("stale: one second past twice the beat (Slack 121 s, Notion 3601 s) is stale, in warn, with the age",
+      'class="pc rcv warn"' in rcard_("slack") and ">stale 2m ✗</span>" in rcard_("slack") and 'class="pc rcv warn"' in rcard_("notion") and ">stale 1h ✗</span>" in rcard_("notion"), (rcard_("slack"), rcard_("notion")))
+check("stale: the tooltip says how long and that the last check said healthy", "no check for 2m" in rcard_("slack") and "the last one said healthy" in rcard_("slack"), rcard_("slack"))
+from stackshot.anchors import receiver_health as _rh_
+check("stale: the card's tooltip is the one text (receiver_health.stale_note) the live update takes from the endpoint",
+      f'title="{render.esc(_rh_.stale_note("slack", 121))} · checked 2026-02-23 12:52:59' in rcard_("slack")
+      and "sn=String(v.stale_note||sw)" in hs_ and "c.title=sn+' · checked '+v.checked" in hs_ and "h.title=sn;h.textContent=sw" in hs_, rcard_("slack"))
+check("stale: a receiver with no known beat is never stale", 'class="pc rcv ok"' in rcard_("hook-x"), rcard_("hook-x"))
+check("stale: the live update (rcv()) draws the stale word from the endpoint's `stale` seconds and leaves the healthy lines as they were",
+      "if(v.ok&&+v.stale>0){var sw='stale '+dur(+v.stale)+' ✗',sn=" in hs_ and "h.textContent=k==='ok'?'healthy ✓':k==='warn'?'unreachable ✗':'error ✗'" in hs_, "")
+# a receiver that announced a wait (status.json hold: the first pass after a start, a wait after GitHub refuses calls) is not stale during it, and counts its age from the end of it
+_t0_ = _now.timestamp()
+(T / "state/anchor-hub/status.json").write_text(json.dumps({"started": "x", "anchors": {}, "hold": {"github": _t0_ + 300, "slack": _t0_ - 121},
+    "receivers": {"github": {"ok": True, "checked": "2026-02-23 12:00:00"}, "slack": {"ok": True, "checked": "2026-02-23 12:00:00"}}}))
+hh_ = ui_render.Board(f"{tmp}/store", now=_now).html()
+def rcard2_(k):
+    i = hh_.find(f'data-rcv="{k}"'); return hh_[hh_.rfind("<div", 0, i):hh_.find("</div>", i)]
+check("stale: a hold that has not run out keeps a receiver healthy however old its check; one that ran out 121 s ago is stale, 2m old",
+      'class="pc rcv ok"' in rcard2_("github") and 'class="pc rcv warn"' in rcard2_("slack") and ">stale 2m ✗</span>" in rcard2_("slack"), (rcard2_("github"), rcard2_("slack")))
+(T / "state/anchor-hub/status.json").write_text(_status_before)
 
 # ---- items that wait for a pane recycle (metadata.recycle): one plain status line under the Machines
 # heading listing the open ones not on hold or held for the recycle alone (render.recycle_due, the test the server's recycle-wanted

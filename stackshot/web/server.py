@@ -3872,6 +3872,7 @@ def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None
 
 
 from stackshot.anchors import anchors as _anc  # noqa: E402
+from stackshot.anchors import receiver_health as _rh  # noqa: E402  — when a receiver's last check is too old to call it healthy (receiver_health.py)
 from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
 from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
 from stackshot.fleet import fleet as _fleet  # noqa: E402
@@ -17509,7 +17510,9 @@ def _receivers_response():
         for k, v in (ast.get("receivers") or {}).items():
             try: ts = int(dt.datetime.strptime(str(v.get("checked", "")), "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZONE).timestamp())
             except Exception: ts = 0
-            out[k] = {"ok": bool(v.get("ok")), "error": v.get("error"), "checked": v.get("checked", ""), "ts": ts, "type": _rmod.receiver_type(ast, k)}
+            late = _rh.stale_age(k, bool(v.get("ok")), ts, time.time(), (ast.get("hold") or {}).get(k, 0))      # seconds since a healthy receiver's last check when that is over twice its beat (an announced wait counted out), else 0
+            out[k] = {"ok": bool(v.get("ok")), "error": v.get("error"), "checked": v.get("checked", ""), "ts": ts, "type": _rmod.receiver_type(ast, k),
+                      "stale": late, "stale_note": _rh.stale_note(k, late) if late else ""}
         return JSONResponse(out, headers={"Cache-Control": "no-store"})
     except Exception:
         return PlainTextResponse("unavailable", status_code=503)
