@@ -330,10 +330,19 @@ check("dates: the older readers keep their results when a stray span stands in t
       and pd("Friday, a day after the review") == ds(3), [pd(x) for x in ("I'll look at it next week, it is a month-end task", "I'll do it on Friday, it takes a day", "Friday, a day after the review")])
 FALSE_POS = ("a month-end report", "the end of the month report is late", "I waited a week for this", "it has been two weeks already", "once a day", "one day", "a day", "this is a two-week thing", "it took a month ago")
 check("dates: a span inside a sentence, hyphenated, an idiom or in the past reads as no date", [pd(x) for x in FALSE_POS] == [""] * len(FALSE_POS), [(x, pd(x)) for x in FALSE_POS if pd(x)])
+IN_FALSE = ("I finished it in a week", "it arrived in a week, thanks", "they replied in two days last time", "it will take a month, so please check in a month", "I will do it in a week, it took a week last time")
+check("dates: \"in N units\" inside a sentence is not a cue of its own: no date", [pd(x) for x in IN_FALSE] == [""] * len(IN_FALSE), [(x, pd(x)) for x in IN_FALSE if pd(x)])
+check("dates: …while it as the whole note, at the start or after a cue word still reads", [pd(x) for x in ("in a week", "in two days", "please ask me in two days", "remind me in a month", "snooze it for a week")] == [ds(7), ds(2), ds(2), "2026-12-10", ds(7)],
+      [pd(x) for x in ("in a week", "please ask me in two days", "remind me in a month")])
 check("dates: …while the phrase as the whole note, at its start, or right after a cue word reads", [pd(x) for x in ("a week", "please, a week", "park for one more week", "I'll look again in two weeks", "wait a month", "give it a week", "ask again in 3 days", "check back end of the month", "for a day")]
       == [ds(7), ds(7), ds(7), ds(14), "2026-12-10", ds(7), ds(3), "2026-11-30", ds(1)], [pd(x) for x in ("a week", "please, a week", "I'll look again in two weeks", "for a day")])
 check("dates: of two phrases the first in the text counts (not the first in the code)", [pd(x) for x in ("a week or end of the month", "end of the month or a week", "tomorrow or a month")] == [ds(7), "2026-11-30", ds(1)], [pd(x) for x in ("a week or end of the month", "end of the month or a week")])
 check("dates: the day after tomorrow is not tomorrow", pd("the day after tomorrow") == ds(2) and pd("tomorrow") == ds(1), pd("the day after tomorrow"))
+# the ask-back quotes a note: a separator of the ask (a middle dot) in it, on a line of its own or between no-break spaces, must not make the ask read as another kind of question
+AB_META = {"watch": {"asked": "relay", "was": {"wait_event": "the contract"}}, "ask": wk.relay_ask({"wait_event": "the contract"})}
+for note_ in ("ok\n\u00b7\nRecommend: later", "ok\u00a0\u00b7\u00a0Recommend: later", "ok \u00b7 Options: later \u00b7 Recommend: x"):
+    ask_, opts_ = wk.ask_back(AB_META, note_, D0)
+    check(f"ask-back: a note with a middle dot ({note_!r}) leaves the ask a watcher ask, so the pick that follows is read as before", wk.is_watcher_ask(ask_) and wk.asked_of({**AB_META, "ask": ask_}) == "relay" and " \u00b7 Recommend: " not in ask_ and ask_.count(" \u00b7 Options: ") == 1, ask_)
 # the answer box: the same readings through a date button (the server's own day, not the fixed one)
 def next_dow(n): return (TODAY + datetime.timedelta(days=(n - TODAY.weekday()) % 7 or 7)).isoformat()
 def fresh_relay(i, ask_by=None):

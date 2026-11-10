@@ -16658,8 +16658,13 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
     now = time.time()
     meta = dict(item.get("metadata") or {})
     text = f"({why}: {pick}) {note}" if why and pick else note
+    def _ts(a: dict[str, Any]) -> float:
+        try:
+            return float(a.get("ts") or 0)
+        except (TypeError, ValueError):      # a hand-edited record
+            return 0.0
     for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
-        if isinstance(a, dict) and now - float(a.get("ts") or 0) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
+        if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
             return code
     rec: dict[str, Any] = {"ts": now, "kind": "comment", "text": text, "via": "board"}
     prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []

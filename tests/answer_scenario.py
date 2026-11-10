@@ -415,6 +415,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("a pick sent with a note on a closed item is kept with the pick named in front",
           [a["text"] for a in rd("a", 4)["metadata"]["answers"]][-1] == "(the item is closed: Yes) a pick on it" and len(rd("a", 4)["metadata"]["answers"]) == 2, rd("a", 4)["metadata"]["answers"])
     told.clear()
+    d4 = rd("a", 4); d4["metadata"]["answers"] = [{"ts": "not a number", "kind": "comment", "text": "hand-edited"}, {"ts": None, "kind": "comment", "text": "no stamp"}]; (T / "store/a/4.json").write_text(json.dumps(d4))
+    check("a record with a ts that is not a number is read as old: the note is kept, not an error", server._answer("a4", "", "after the hand edit", "comment") == "closednote" and [a["text"] for a in rd("a", 4)["metadata"]["answers"]][-1] == "after the hand edit"
+          and len(rd("a", 4)["metadata"]["answers"]) == 3, rd("a", 4)["metadata"]["answers"])
+    told.clear()
     a4_again = rd("a", 4)
     del a4_again["metadata"]["answers"]; (T / "store/a/4.json").write_text(json.dumps(a4_again))      # back to the fixture: later checks read item a4 as it was
 

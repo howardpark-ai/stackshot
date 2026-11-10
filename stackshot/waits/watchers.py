@@ -237,7 +237,7 @@ def ask_back(meta: dict[str, Any], note: str, today: dt.date) -> tuple[str, list
     """The question the board puts back when a date button came with a note that holds no date it can read: (ask, options), still the shape of a watcher ask (is_watcher_ask), so the item stays
     on his move and his next pick is read as before. Three dates counted from `today` (a week, two weeks, a month) as buttons, then the first question's own buttons (arrived, "not yet, ask again on <date>", drop),
     so nothing he could do is taken away and a date typed in the box has its button. The note is quoted short; it is already kept on the item as his comment."""
-    clip = " ".join(str(note or "").replace(" \u00b7 ", " - ").split())
+    clip = " ".join(str(note or "").split()).replace("\u00b7", "-")      # whitespace first (a line break or a no-break space too), then every middle dot: the ask's own separators must stay the only ones
     clip = clip if len(clip) <= 80 else clip[:79].rstrip() + "…"
     dates = [today + dt.timedelta(days=7), today + dt.timedelta(days=14), _add_months(today, 1)]
     opts = [{"label": ASK_AGAIN + day_words(d), "line": "The item waits again until then and the question comes back that day.", "recommended": i == 0, "date": d.isoformat()} for i, d in enumerate(dates)]      # the day is stored on the button: a pick is read from it, never from the label
@@ -369,7 +369,7 @@ def _add_months(day: dt.date, months: int) -> dt.date:
     return first.replace(day=min(day.day, (nxt - first).days))
 
 
-_REL_CUES = r"(?:in|for|after|wait|give it|ask again|check back|park(?: it)?|again|snooze(?: it)?|until)"
+_REL_CUES = r"(?:for|after|wait|give it|ask again|ask me|remind me|check back|park(?: it)?|again|snooze(?: it)?|until)"
 _REL_FILLER = r"(?:ok|okay|yes|sure|please|just|maybe|then|hmm|well|so|and|let'?s)"
 _REL_TAIL = re.compile(r"\s*(?:ago|already|report|before|earlier)\b")
 
@@ -398,16 +398,16 @@ _REL_TABLE = (
 
 def _relative_date(low: str, today: dt.date, base: dt.date | None) -> dt.date | None:
     """The small table of relative phrases (no model), read only when no older reader found a date: a span of days, weeks or months ("a week", "one more week", "another week", "two weeks", "in 3 days",
-    "a fortnight", "a month from now", "in a month"), "next month", "end of the week" (the Friday), "end of the month" (its last day), "after the weekend" (the Monday).
+    "a fortnight", "a month from now", "in a month"), "next month", "end of the week" (the Friday), "end of the month" (its last day), "after the weekend" (the Monday). The older readers read "the day after tomorrow" (two days).
     A span counts from today; "more" and "another" count from `base` (the date the wait already ends on) when it is after today, else from today.
-    Only a note that is mostly a date phrase reads: the phrase is the whole note, or at its start (after a word like please or ok), or comes right after a cue word (in, for, after, wait, give it, ask again,
-    check back, park it, again, until), is not part of a hyphenated word, and is not followed by ago, already, report, before or earlier; a bare "a day" or "one day" is the idiom, not a span. Of
+    Only a note that is mostly a date phrase reads: the phrase is the whole note, or at its start (after a word like please or ok), or comes right after a cue word (for, after, wait, give it, ask again, ask me, remind me,
+    check back, park it, snooze it, again, until; "in a week" is a phrase like any other, not a cue), is not part of a hyphenated word, and is not followed by ago, already, report, before or earlier; a bare "a day" or "one day" is the idiom, not a span. Of
     several phrases the first in the text counts. None when no phrase passes."""
     found = [(m.start(), m.end(), d) for rx, fn in _REL_TABLE for m in rx.finditer(low) if (d := fn(m, today, base))]
     for start, end, d in sorted(found):
         lead = " ".join(re.sub(r"[^\w\s']", " ", low[:start]).split())
         filler = re.fullmatch(r"(?:" + _REL_FILLER + r"\s*)*", lead) is not None
-        cued = re.search(r"(?:^|\s)" + _REL_CUES + r"$", lead) is not None or low[start:].startswith("in ")      # a cue word right before the phrase, whatever came before it
+        cued = re.search(r"(?:^|\s)" + _REL_CUES + r"$", lead) is not None      # a cue word right before the phrase, whatever came before it ("in N units" has no cue of its own: it stands where any phrase may)
         if not (filler or cued):
             continue
         if low[start - 1:start] == "-" or low[end:end + 1] == "-" or _REL_TAIL.match(low[end:]):
@@ -419,7 +419,7 @@ def _relative_date(low: str, today: dt.date, base: dt.date | None) -> dt.date | 
 
 
 def parse_date(text: Any, today: dt.date | None = None, base: dt.date | None = None) -> str:
-    """The date the owner gave, as YYYY-MM-DD ("" when none can be read, or it is not after today). Reads 2099-03-09, Mar 9th, Mon Mar 9th, 9 Mar, 9th March, tomorrow, next week, in 3 days, in 2 weeks, a weekday name (the next one, "next Monday" too); a month and day without a year is the next one to come. The small table of relative phrases (_relative_date: one more week, a week, two weeks, next month, a month, end of the week or month, after the weekend, the day after tomorrow) reads too; `base` is the date a wait already ends on, which "one more week" counts from. The instance's own words ([keywords.dates]: a month and a day number
+    """The date the owner gave, as YYYY-MM-DD ("" when none can be read, or it is not after today). Reads 2099-03-09, Mar 9th, Mon Mar 9th, 9 Mar, 9th March, tomorrow, next week, in 3 days, in 2 weeks, a weekday name (the next one, "next Monday" too); a month and day without a year is the next one to come. The small table of relative phrases (_relative_date: one more week, a week, two weeks, next month, a month, end of the week or month, after the weekend), read last, reads too; `base` is the date a wait already ends on, which "one more week" counts from. The instance's own words ([keywords.dates]: a month and a day number
     followed by month_suffix and day_suffix, a day number alone, N days or weeks later, tomorrow, the day after tomorrow, next week) read the same."""
     today = today or dt.date.today()
     t = str(text or "")
