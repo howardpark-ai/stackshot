@@ -9,7 +9,7 @@ An alive item has one mover. When a write changes the effective mover (model.der
   from           the writer (name), or the server's own label when the server moved it
   at             when the write happened (epoch seconds)
   delivered_at   when the new mover's session was actually told (a push that came back "delivered"); None until known
-  taken_at       when the new mover first started work on the item (`started`: a step marked done, a work line in progress or done, the item closed; an anchor scoped to it counts through `plan`); None until then. A note, a confirm, a queue or wait line leaves it None
+  taken_at       when the new mover first started work on the item (`started`: a step marked done, a step status in progress or done, the item closed; an anchor scoped to it counts through `plan`); None until then. A note, a confirm, a queue or wait line leaves it None
   resent_at      when the notice was sent a second time because the mover's pane was relaunched after the first one; the clock restarts from the re-send, and it happens once
   no_clock       true when the new mover is the owner (he never times out; his list shows the age) and on every record the server made itself (a wake, an event wake, a release of `after`, the stall pass): the
                  10-minute take clock runs only on a session's hand-off, and the timing of a woken mover stays with the stall pass, which leaves a busy pane alone
@@ -44,6 +44,7 @@ from typing import Any, Callable
 
 from stackshot.model import model as _model
 from stackshot.model import steps as _steps
+from stackshot.model import work as _work
 
 KEY = "handoff"
 HISTORY = "handoff_history"
@@ -131,7 +132,7 @@ def detect(before: dict[str, Any] | None, after: dict[str, Any], writer: str, wr
 
 def started(before: dict[str, Any] | None, item: dict[str, Any]) -> str:
     """Why the write that produced `item` out of `before` shows the work started, "" when it shows none. Only what no wording can fake counts: the item closed (open before, not after), a step
-    marked done (the checklist's own mark, steps.changes), or a work line (metadata.work) new or moved to `in progress` or `done`. A note, a confirm, a reword of next or description, a hold or a wake,
+    marked done (the checklist's own mark, steps.changes), or a step status (a step's status line, work.lines_of) new or moved to `in progress` or `done`. A note, a confirm, a reword of next or description, a hold or a wake,
     a step dropped or a new step, a wait, a timeline line: none of them says work began, so none counts. (An anchor scoped to the item counts through `plan`'s `Env.anchored`, not here.)"""
     if not isinstance(before, dict) or not isinstance(item, dict):
         return ""
@@ -140,10 +141,10 @@ def started(before: dict[str, Any] | None, item: dict[str, Any]) -> str:
     bm, am = before.get("metadata") or {}, item.get("metadata") or {}
     if any(kind == _steps.DONE for kind, _ in _steps.changes(bm, am)):
         return "marked a step done"
-    def lines(m: dict[str, Any]) -> set[tuple[str, str, str]]:
-        return {(str(w.get("id") or ""), clean(w.get("text")), str(w.get("state") or "")) for w in (m.get("work") or []) if isinstance(w, dict) and w.get("state") in ("in progress", "done")}
+    def lines(m: dict[str, Any]) -> set[tuple[str, str, float]]:      # the status itself (words, state, and the time it was set, which an unchanged status keeps), not the step it sits on: a reword of the step is no work
+        return {(clean(w.get("text")), str(w.get("state") or ""), _work._ts(w.get("ts"))) for w in _work.lines_of(m) if w.get("state") in ("in progress", "done")}
     if lines(am) - lines(bm):
-        return "set a work line in progress or done"
+        return "set a step status in progress or done"
     return ""
 
 

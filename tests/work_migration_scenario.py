@@ -1,0 +1,114 @@
+"""Scenario test for the one-off move of the old `work` lines onto the steps (stackshot/tools/migrate_work_to_steps.py) — a synthetic store in a scratch folder, no server, no network.
+
+Items as they were stored before the one list: an open item whose builder had a line in progress and three done lines beside its step, one whose line names an agent with no step, one whose
+line names no agent, one with an empty `work`, a closed item that still carries `work`, and one with no `work` at all. What the tool must do:
+
+  1  the dry run (the default) reports each open item with what its lines become and writes nothing (a hash of the whole store before and after), and `--dry-run` says the same
+  2  --apply writes the undo file first (the previous text of every item it will touch, fsynced) and then the items; each moved item has no `work` field, its in-progress line is the status of the
+     agent's step, its done lines are done steps (the fold), a line with no step of its agent makes a new open step, and nothing else on the item changed (`updated`, `state_updated`, `confirmed`,
+     the description and the activity clock stay); a closed item and one without `work` are not touched
+  3  the readers see the same work before and after: the status lines in progress read the same (text, agent, state) through work.lines_of
+  4  running it twice writes nothing the second time; the fold itself is idempotent
+  5  --undo puts back every item byte for byte; an item a session saved after the pass is kept as it is and named; undoing twice is a no-op
+  6  the command line: no flag is a dry run; --apply with --dry-run, and --undo with --apply, are refused (exit 2)
+
+    tests/run-suite work_migration        → exit 0 / 1"""
+import hashlib, json, os, pathlib, subprocess, sys, time
+
+SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
+import _scratch
+tmp = _scratch.mkdtemp(prefix="workmigtest-"); T = pathlib.Path(tmp)
+sys.path.insert(0, STACK)
+fails = []; ran = []
+def check(name, cond, got=None):
+    ran.append(name)
+    if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
+
+from stackshot.model import work as W; from stackshot.model import steps as S
+
+STORE = T / "store"; (STORE / "a").mkdir(parents=True); RUN = T / "run"
+now = time.time(); OWNER = "00000000-0000-4000-8000-000000000001"
+def L(text, state="in progress", agent="quill-engineer", ago=600): return {"id": text.replace(" ", "-")[:24], "text": text, "agent": agent, "state": state, "ts": now - ago}
+def put(i, status="open", **meta):
+    base = {"owner": OWNER, "project": "projects/alpha", "mover": "quill-engineer", "needs": ["quill-engineer"]}
+    (STORE / "a" / f"{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item a{i}", "description": "- A thing\n- It lives here\n- Finished when it works", "status": status,
+                                                       "updated": now - 3000, "state_updated": now - 4000, "confirmed": now - 4000, "activity": now - 3000, "metadata": {**base, **meta}}, indent=1, ensure_ascii=False))
+put(1, next="quill-engineer: stage 11, auth and who", work=[L("stage 10: PR 82 up", "done", ago=7200), L("stage 9: PR 81 up", "done", ago=9000), L("stage 8: PR 80 up", "done", ago=11000),
+                                                              L("PR 83 up; review, scan 99", "in progress", ago=300)])      # the long-running item's shape
+put(2, next="quill-main: look at it", work=[L("migrating the ids", "in progress", agent="quill-docs")])                     # an agent with no step of its own
+put(3, next="quill-engineer: build it", work=[L("tests", "defined", agent="")])                                             # no agent: the mover's step
+put(4, next="quill-engineer: build it", work=[])                                                                            # an empty list
+put(5, status="completed", next="", work=[L("old", "done", ago=99999)], outcome="done", reason="landed")                      # a closed item with the field still on it
+put(6, next="quill-engineer: build it")                                                                                     # no work field at all
+
+def tree():
+    return {str(p.relative_to(STORE)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(STORE.rglob("*")) if p.is_file()}
+def rd(i): return json.loads((STORE / "a" / f"{i}.json").read_text())
+def run(*args):
+    return subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/migrate_work_to_steps.py"), "--store", str(STORE), *args], capture_output=True, text=True, timeout=120)
+
+before = tree(); old = {i: rd(i) for i in range(1, 7)}
+lines_before = {i: [(l["text"], l["agent"], l["state"]) for l in W.lines_of(old[i]["metadata"]) if l["state"] == "in progress"] for i in range(1, 7)}
+
+# ---- 1 the dry run
+r = run()
+check("the dry run (no flag) exits 0, names the four open items with work and the closed one left alone, and says nothing is written", r.returncode == 0 and "dry run: 4 open items would be moved, 1 closed one left as they are; nothing written" in r.stdout
+      and all(f"a{i}  " in r.stdout for i in (1, 2, 3, 4)) and "a5" in r.stdout, (r.returncode, r.stdout[-700:], r.stderr[-300:]))
+check("…and it wrote nothing: the store is byte for byte as it was", tree() == before and not RUN.exists())
+r2 = run("--dry-run")
+check("--dry-run says the same", r2.stdout == r.stdout and tree() == before, r2.stdout[-200:])
+rj = run("--json"); js = json.loads(rj.stdout)
+check("--json lists the same items", [x["gid"] for x in js["open_items_to_move"]] == ["a1", "a2", "a3", "a4"] and js["closed_left_alone"] == ["a5"], rj.stdout[:300])
+check("a line shown in the report reads in plain words: the one in progress becomes the status of the step, a done one a done step", "-> the status of step" in r.stdout and "-> a done step" in r.stdout and "-> a new open step" in r.stdout, r.stdout)
+
+# ---- 2 apply
+ra = run("--apply", "--run-dir", str(RUN))
+undo_files = sorted(RUN.glob("*/undo.json"))
+check("--apply exits 0, reports 4 items moved and where the undo file is", ra.returncode == 0 and "wrote 4 of 4 items" in ra.stdout and len(undo_files) == 1 and str(undo_files[0]) in ra.stdout, (ra.returncode, ra.stdout[-500:], ra.stderr[-300:]))
+ud = json.loads(undo_files[0].read_text())
+check("the undo file holds the previous text of exactly the four items, with the hash of what the pass wrote", sorted(ud["items"]) == ["a1", "a2", "a3", "a4"]
+      and all(e["before_sha"] and e["after_sha"] and e["before_sha"] != e["after_sha"] for e in ud["items"].values())
+      and all(hashlib.sha256(e["before"].encode()).hexdigest() == e["before_sha"] for e in ud["items"].values()), list(ud["items"]))
+after = {i: rd(i) for i in range(1, 7)}
+check("no moved item has a `work` field; the closed one keeps it; the one with none is untouched", all("work" not in after[i]["metadata"] for i in (1, 2, 3, 4)) and "work" in after[5]["metadata"] and after[6] == old[6] and after[5] == old[5])
+m1 = after[1]["metadata"]; st1 = S.view(m1)
+check("item 1: three done lines became three done steps (the fold), the line in progress is the status of the open step, in place", [x["status"] for x in st1] == ["done", "done", "done", "open"]
+      and (S.tag_of(st1[3]) or {}).get("text") == "PR 83 up; review, scan 99" and (S.tag_of(st1[3]) or {}).get("state") == "in progress" and m1["next"] == old[1]["metadata"]["next"], (st1, m1["next"]))
+check("…the done steps read oldest first, each by its agent and at its time, with its status done", [x["text"] for x in st1[:3]] == ["quill-engineer: stage 8: PR 80 up", "quill-engineer: stage 9: PR 81 up", "quill-engineer: stage 10: PR 82 up"]
+      and all((S.tag_of(x) or {}).get("state") == "done" and x.get("by") == "quill-engineer" and x.get("at") for x in st1[:3]), st1[:3])
+st2 = S.view(after[2]["metadata"])
+check("item 2: a line whose agent has no step makes a new open step for it, carrying the status", [(S.opener(x["text"]), x["status"], (S.tag_of(x) or {}).get("text")) for x in st2] == [("quill-main", "open", None), ("quill-docs", "open", "migrating the ids")]
+      and after[2]["metadata"]["next"].endswith("\nquill-docs: migrating the ids"), (st2, after[2]["metadata"]["next"]))
+st3 = S.view(after[3]["metadata"])
+check("item 3: a line with no agent is the mover's: the status of the mover's step", [(S.opener(x["text"]), (S.tag_of(x) or {}).get("text"), (S.tag_of(x) or {}).get("state")) for x in st3] == [("quill-engineer", "tests", "defined")], st3)
+check("item 4: an empty list is just removed", "work" not in after[4]["metadata"] and after[4]["metadata"]["next"] == old[4]["metadata"]["next"])
+check("nothing else on a moved item changed: the clocks, the description, the owner, the needs", all({k: v for k, v in after[i].items() if k != "metadata"} == {k: v for k, v in old[i].items() if k != "metadata"}
+      and all(after[i]["metadata"][k] == old[i]["metadata"][k] for k in ("owner", "project", "mover", "needs")) for i in (1, 2, 3, 4)))
+
+# ---- 3 the readers
+lines_after = {i: [(l["text"], l["agent"], l["state"]) for l in W.lines_of(after[i]["metadata"]) if l["state"] == "in progress"] for i in range(1, 7)}
+check("the readers see the same work in progress before and after (text, agent, state) for every moved item", lines_after[1] == lines_before[1] == [("PR 83 up; review, scan 99", "quill-engineer", "in progress")]
+      and lines_after[2] == lines_before[2] and lines_after[6] == lines_before[6] == [], (lines_before, lines_after))
+check("a defined line stays defined (it is not in progress) and is still read", [(l["text"], l["state"]) for l in W.lines_of(after[3]["metadata"])] == [("tests", "defined")])
+
+# ---- 4 idempotent
+tr = tree(); rb = run("--apply", "--run-dir", str(RUN))
+check("a second --apply finds nothing to move, writes nothing and keeps no second undo file", rb.returncode == 0 and "nothing to move" in rb.stdout and tree() == tr and len(list(RUN.glob("*/undo.json"))) == 1, (rb.stdout[-300:], tree() == tr))
+f1, _n = W.fold_legacy(old[1]["metadata"]); f2, n2 = W.fold_legacy(f1)
+check("the fold is idempotent: folding the result changes nothing and notes nothing", f1 == f2 and n2 == [] and "work" not in f1)
+check("the dry run after the pass has nothing to move (the closed item is still counted as left alone)", "dry run: 0 open items would be moved, 1 closed one left as they are" in run().stdout)
+
+# ---- 5 undo
+(STORE / "a" / "2.json").write_text(json.dumps({**rd(2), "subject": "[home] a session saved this after the pass"}, indent=1, ensure_ascii=False))      # a later save
+ru = run("--undo", str(undo_files[0]))
+check("--undo puts back items 1, 3 and 4 byte for byte, and keeps item 2, saved since the pass, as it is, naming it", ru.returncode == 0 and "a1: put back" in ru.stdout and "a3: put back" in ru.stdout and "a4: put back" in ru.stdout and "a2: kept" in ru.stdout
+      and all((STORE / "a" / f"{i}.json").read_text() == ud["items"][f"a{i}"]["before"] for i in (1, 3, 4)) and rd(2)["subject"].endswith("after the pass"), (ru.returncode, ru.stdout))
+tr = tree(); ru2 = run("--undo", str(undo_files[0]))
+check("undoing twice changes nothing more (the restored items say `same`)", ru2.returncode == 0 and "a1: same" in ru2.stdout and tree() == tr, ru2.stdout)
+
+# ---- 6 arguments
+check("--apply with --dry-run is refused (exit 2)", run("--apply", "--dry-run").returncode == 2)
+check("--undo with --apply is refused (exit 2)", run("--undo", str(undo_files[0]), "--apply").returncode == 2)
+
+print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + (f"; FAILED: {len(fails)}" if fails else ""))
+sys.exit(1 if fails else 0)

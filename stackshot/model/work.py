@@ -1,22 +1,30 @@
-"""work.py — an item's work lines (the item page shows what is in motion and what is waiting, and for what):
-metadata.work, a short list of subtask status lines, each
-{id, text, agent, state, ts}. A line is a few words; the details of a subtask stay on the project page. Pure helpers with
-no config and no store, shared by the server (the update tool's `work` parameter, the get and brief replies), the renderer
-(a row's "engineer: migrating", the item page's list, the History) and the GitHub mirror (the comment of a change)."""
+"""work.py — a step's status line: where the session that holds a step of an item is with it.
+
+An item has one list, its checklist (`next`, steps.py). A step is a stage of the work ("stage 11: PR 83 up"), not a status. What changes while the stage
+is under way (a pull request is up, a review is running, a release is going out) is the step's status line, `tag` on the step: {text, state, ts}, a few
+words and a state. The update tool's `work` parameter writes it: it changes the status line of the sender's first open step in place, so a long job keeps one
+line on the page, and marking the step done (done=[n], or work with state done) ticks the step. The sender with no open step gets one made from the text.
+
+Pure helpers with no config and no store, shared by the server (the update tool, the get and brief replies), the renderer (a row's "engineer: migrating", the
+item page's Next and History) and the audits (a status line in progress is a build subagent at work on the item).
+
+READ-COMPAT. Before the migration (tools/migrate_work_to_steps.py) an item may still carry the old `metadata.work` list, {id, text, agent, state, ts} lines. Every reader goes
+through `lines_of`, which gives those lines as they are beside the status lines of the open steps, so a release is safe in either order; the writer never adds to the old list."""
 from __future__ import annotations
 
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Callable
+
+from stackshot.model import nextlines as _nl
+from stackshot.model import steps as _steps
 
 STATES = ("defined", "assigned", "in progress", "done")
-TEXT_MAX = 40            # a line is a few words
-OPEN_MAX = 8             # open (not done) lines per item
-DONE_KEEP_S = 24 * 3600  # a done line stays on the list this long; the History keeps it after that
-KEYS = ("id", "text", "state", "agent", "remove")
+TEXT_MAX = 40            # a status line is a few words
+KEYS = ("text", "state", "agent", "remove")      # `id` named a line of the old list: a non-empty one is refused with the way in (a client with a cached schema must not tick a whole step by it); an empty one is ignored
 _STATE_ALIAS = {"wip": "in progress", "doing": "in progress", "started": "in progress", "completed": "done", "finished": "done", "todo": "defined", "open": "defined"}
-FORM = "{text: a few words, state: defined | assigned | in progress | done, agent: the session doing it}"
+FORM = "{text: a few words (at most 40 characters), state: in progress | done}"
 
 
 def _ts(v: Any) -> float:
@@ -35,8 +43,9 @@ def key_of(text: str, taken: list[str] | tuple[str, ...] | set[str] = ()) -> str
     return key
 
 
-def lines_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """metadata.work as a clean list of {id, text, agent, state, ts}; a misshaped entry is skipped, a missing key or state filled."""
+# ---------------------------------------------------------------------------------------------------------------- reading
+def legacy_lines(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """metadata.work, the old list, as a clean list of {id, text, agent, state, ts}; a misshaped entry is skipped, a missing key or state filled."""
     v = (meta or {}).get("work")
     out: list[dict[str, Any]] = []
     if not isinstance(v, list):
@@ -53,6 +62,23 @@ def lines_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
     return out
 
 
+def step_lines(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The status lines of an item's open steps, as {id, text, agent, state, ts, step}: the step's status line, the session the step names as `agent`, `step` the step's first line.
+    Read through steps.view (the creator as keeper), so a step whose line left next without a mark reads as dropped there and shows on no row and holds no running-subagent check: a status line is of a step to do."""
+    out: list[dict[str, Any]] = []
+    for s in _steps.view(meta):
+        t = _steps.tag_of(s)
+        if s["status"] != _steps.OPEN or t is None:
+            continue
+        out.append({"id": _steps.key(s["text"]), "text": t["text"], "agent": _steps.opener(s["text"]), "state": t["state"], "ts": t["ts"], "step": _steps.first_line(s["text"])})
+    return out
+
+
+def lines_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """What is in motion on an item: the status lines of its open steps, and any line of the old `work` list the migration has not moved yet."""
+    return [*step_lines(meta), *legacy_lines(meta)]
+
+
 def open_lines(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
     """The lines not done, in progress first, then assigned, then defined (each group in its stored order)."""
     rank = {"in progress": 0, "assigned": 1, "defined": 2}
@@ -63,6 +89,39 @@ def in_progress(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [l for l in lines_of(meta) if l["state"] == "in progress"]
 
 
+def short_agent(name: str, prefix: str = "") -> str:
+    """An agent's short name on a row: the project name's prefix dropped (my-engineer → engineer); any other name as it is."""
+    name, prefix = str(name or ""), str(prefix or "")
+    return name[len(prefix) + 1:] if prefix and name.startswith(prefix + "-") and len(name) > len(prefix) + 1 else name
+
+
+def row_parts(meta: dict[str, Any] | None, prefix: str = "", limit: int = 2) -> tuple[list[tuple[str, str]], int]:
+    """What a board row shows of an item's work: the status lines in progress, at most `limit`, each (the agent's short name, the
+    text), and how many open lines are not shown ("+N")."""
+    ip = in_progress(meta)
+    shown = [(short_agent(l["agent"], prefix), l["text"]) for l in ip[:limit]]
+    return shown, len(open_lines(meta)) - len(shown)
+
+
+def row_words(meta: dict[str, Any] | None, prefix: str = "", limit: int = 2) -> str:
+    """The row's words: "engineer: migrating · board: answer box +1"; "" with nothing in progress."""
+    shown, more = row_parts(meta, prefix, limit)
+    if not shown:
+        return ""
+    return " · ".join(f"{a}: {t}" if a else t for a, t in shown) + (f" +{more}" if more > 0 else "")
+
+
+def words(meta: dict[str, Any] | None) -> str:
+    """One line for a tool reply or board.md: the open status lines, in progress first, each with its state and the session it belongs to: "PR 83 up — in progress (my-engineer) · tests — defined"."""
+    ls = open_lines(meta)
+    done = [l["text"] for l in legacy_lines(meta) if l["state"] == "done"]
+    out = " · ".join(f"{l['text']} — {l['state']}" + (f" ({l['agent']})" if l["agent"] else "") for l in ls)
+    if done:
+        out += (" · " if out else "") + "done: " + ", ".join(done)
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------------- writing
 def norm_state(s: Any) -> str:
     """A state as given → one of STATES; ValueError for anything else."""
     t = re.sub(r"[\s_-]+", " ", str(s or "").strip().lower())
@@ -73,83 +132,98 @@ def norm_state(s: Any) -> str:
 
 
 def parse(spec: Any) -> dict[str, Any]:
-    """The update tool's `work` argument as given → {id, text, state, agent, remove}, each normalized ("" / False when not
-    given). Accepts an object, a JSON string of one (a client whose cached schema sends the parameter as text), or a plain
-    string, which is the text of a line to add. ValueError with the hint on anything else."""
+    """The update tool's `work` argument as given → {text, state, agent, remove}, each normalized ("" / False when not given). Accepts an object, a JSON string of one (a client whose
+    cached schema sends the parameter as text), or a plain string, which is the text of the status line. ValueError with the hint on anything else."""
     if isinstance(spec, str):
         s = spec.strip()
         if s[:1] == "{":
             try:
                 spec = json.loads(s)
             except ValueError:
-                raise ValueError(f"work: not valid JSON; pass an object {FORM}, or the text of a new line alone")
+                raise ValueError(f"work: not valid JSON; pass an object {FORM}, or the text of the status line alone")
         else:
             spec = {"text": s}
     if isinstance(spec, list):
-        raise ValueError("work: one line per call, since each change is one line in the item's History; call update once per line")
+        raise ValueError("work: one status line per call, since each change is one line in the item's History; call update once per line")
     if not isinstance(spec, dict):
-        raise ValueError(f"work: an object {FORM}; id names a line already there (or give its text again); remove: true drops a line")
-    bad = [str(k) for k in spec if k not in KEYS]
+        raise ValueError(f"work: an object {FORM}; it sets the status line of your open step; remove: true clears it")
+    if str(spec.get("id") or "").strip():
+        raise ValueError(f"work: `id` named a line of the old Work list, which is gone; a status belongs to your open step. Use done=[n] to tick a step, or send a status on your step: {FORM}")
+    bad = [str(k) for k in spec if k not in KEYS and k != "id"]      # an empty `id` (checked above) is let through and ignored
     if bad:
         raise ValueError(f"work: unknown key{'s' if len(bad) > 1 else ''} {', '.join(bad)}; the keys are {', '.join(KEYS)}")
     text = re.sub(r"\s+", " ", str(spec.get("text") or "")).strip()
     if len(text) > TEXT_MAX:
-        raise ValueError(f"work: a line is a few words, at most {TEXT_MAX} characters ({len(text)} given: \"{text[:TEXT_MAX]}…\"); the details of a subtask stay on the project page")
-    out = {"id": str(spec.get("id") or "").strip(), "text": text, "state": norm_state(spec["state"]) if spec.get("state") not in (None, "") else "",
+        raise ValueError(f"work: a status line is a few words, at most {TEXT_MAX} characters ({len(text)} given: \"{text[:TEXT_MAX]}…\"); the details of a stage stay on the project page")
+    out = {"text": text, "state": norm_state(spec["state"]) if spec.get("state") not in (None, "") else "",
            "agent": str(spec.get("agent") or "").strip(), "remove": bool(spec.get("remove"))}
-    if not out["id"] and not out["text"]:
-        raise ValueError(f"work: text is the line's few words, nothing to add or find without it (or id names a line already there); {FORM}")
+    if not out["text"] and not out["state"] and not out["remove"]:
+        raise ValueError(f"work: text is the status line's few words (or state alone, to move the line you have); {FORM}")
     return out
 
 
-def live_lines(meta: dict[str, Any] | None, now: float | None = None) -> list[dict[str, Any]]:
-    """The lines apply() works on: lines_of without the done lines older than DONE_KEEP_S (they dropped off the list)."""
-    now = time.time() if now is None else now
-    return [l for l in lines_of(meta) if l["state"] != "done" or now - l["ts"] < DONE_KEEP_S]
+def _same(a: Any, b: Any) -> bool:
+    return bool(a) and str(a).casefold() == str(b).casefold()
 
 
-def apply(meta: dict[str, Any], spec: dict[str, Any], writer: str = "", now: float | None = None) -> list[dict[str, Any]]:
-    """Add, change or remove one line (`spec` from parse()) → the new list for metadata.work. A line is found by its id, else
-    by its text (case apart); a new one takes the text. A new line is defined, assigned when it comes with an agent; a line
-    moved to in progress without an agent takes the writer; an agent set on a defined line makes it assigned. Done lines
-    older than DONE_KEEP_S drop off the list (the History keeps them). ValueError on a refusal, with the hint."""
+def step_of(steps: list[dict[str, Any]], agent: str, same: Callable[[Any, Any], bool] | None = None) -> int:
+    """The position (0-based, in the checklist) of the first open step that opens with `agent`'s name, -1 when it has none. `same(a, b)` says whether two names are one session."""
+    same = same or _same
+    for i, s in enumerate(steps):
+        if s["status"] == _steps.OPEN:
+            nm = _steps.opener(s["text"])
+            if nm and same(nm, agent):
+                return i
+    return -1
+
+
+def apply(step: dict[str, Any], spec: dict[str, Any], now: float | None = None) -> dict[str, Any]:
+    """The step with its status line set from `spec` (from parse()): text and state given replace the line; a state alone moves the line it has (a step with none takes the step's own
+    first words); remove drops it. A new line is in progress unless the spec says otherwise. The line's time moves when its text or state changes. Returns a new dict."""
     now = time.time() if now is None else now
-    lines = live_lines(meta, now)
-    key, text = spec.get("id") or "", spec.get("text") or ""
-    hit = next((l for l in lines if l["id"] == key), None) if key else next((l for l in lines if l["text"].casefold() == text.casefold()), None)
-    listed = ", ".join(f"{l['id']} ({l['text']}, {l['state']})" for l in lines) or "none"
-    if key and hit is None:
-        raise ValueError(f"work: no line {key!r} on this item (its lines: {listed}); give the text of a new line instead")
+    out = dict(step)
     if spec.get("remove"):
-        if hit is None:
-            raise ValueError(f"work: nothing to remove, no line reads \"{text}\" (its lines: {listed})")
-        return [l for l in lines if l is not hit]
-    if hit is None:
-        if len([l for l in lines if l["state"] != "done"]) >= OPEN_MAX:
-            raise ValueError(f"work: {OPEN_MAX} open lines already (its lines: {listed}); mark one done or remove one first: a line is a subtask's status, its details stay on the project page")
-        state = spec.get("state") or ("assigned" if spec.get("agent") else "defined")
-        agent = spec.get("agent") or (writer if state == "in progress" else "")
-        return [*lines, {"id": key_of(text, [l["id"] for l in lines]), "text": text, "agent": agent, "state": state, "ts": now}]
-    was = dict(hit)
-    if key and text and text != hit["text"]:
-        hit["text"] = text
-    if spec.get("agent") and spec["agent"] != hit["agent"]:
-        hit["agent"] = spec["agent"]
-        if not spec.get("state") and hit["state"] == "defined":
-            hit["state"] = "assigned"
-    if spec.get("state"):
-        hit["state"] = spec["state"]
-        if hit["state"] == "in progress" and not hit["agent"]:
-            hit["agent"] = writer
-    if {k: v for k, v in hit.items() if k != "ts"} != {k: v for k, v in was.items() if k != "ts"}:
-        hit["ts"] = now
-    return lines
+        out.pop(_steps.TAG, None)
+        return out
+    cur = _steps.tag_of(step)
+    text = spec.get("text") or (cur["text"] if cur else _steps.strip_opener(_steps.first_line(step["text"]))[:TEXT_MAX])
+    state = spec.get("state") or (cur["state"] if cur else "in progress")
+    if cur and cur["text"] == text and cur["state"] == state:
+        return out
+    out[_steps.TAG] = {"text": text, "state": state, "ts": now}
+    return out
 
 
-def changes(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list[str]:
-    """What changed between two versions of an item's work list, one readable line each, as the History
-    shows it: "work: migrating → in progress (my-engineer)". A done line that aged off the list says nothing."""
-    a, b = {l["id"]: l for l in lines_of(before)}, {l["id"]: l for l in lines_of(after)}
+# ---------------------------------------------------------------------------------------------------------------- History
+def tag_events(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The status-line changes between two versions of an item's metadata, one per step whose line changed: {key, step (its first line), agent, text, state, ts, removed}. Steps are matched by
+    their words (steps.key); a step that left next unmarked has no event."""
+    pv = {_steps.key(s["text"]): _steps.tag_of(s) for s in _steps._valid((before or {}).get("steps"))}
+    out = []
+    for s in _steps._valid((after or {}).get("steps")):
+        k, t = _steps.key(s["text"]), _steps.tag_of(s)
+        old = pv.get(k)
+        if t is None and old is None:
+            continue
+        if t is not None and old is not None and (t["text"], t["state"]) == (old["text"], old["state"]):
+            continue
+        out.append({"key": k, "step": _steps.first_line(s["text"]), "agent": _steps.opener(s["text"]), "text": (t or old)["text"], "state": (t or {}).get("state", ""),
+                    "ts": (t or {}).get("ts", 0.0), "removed": t is None})
+    return out
+
+
+def say(ev: dict[str, Any], agent: str = "") -> str:
+    """One status-line change as a line of text: "status: PR 83 up · in progress (my-engineer)"."""
+    ag = f" ({agent})" if agent else ""
+    return f"status: {ev['text']} cleared" if ev.get("removed") else f"status: {ev['text']} · {ev['state']}{ag}"
+
+
+def legacy_changes(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list[str]:
+    """What changed between two versions of an item's old `work` list, one readable line each, as the History shows it: "work: migrating → in progress (my-engineer)". The list leaving whole
+    (the migration moved it onto the steps) says nothing, and a done line that aged off says nothing."""
+    if (after or {}).get("work") is None and (before or {}).get("work") is not None:
+        return []
+    a, b = {l["id"]: l for l in legacy_lines(before)}, {l["id"]: l for l in legacy_lines(after)}
     out = []
     for k, l in b.items():
         p = a.get(k)
@@ -167,34 +241,55 @@ def changes(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list
     return out
 
 
-def short_agent(name: str, prefix: str = "") -> str:
-    """An agent's short name on a row: the project name's prefix dropped (my-engineer → engineer); any other name as it is."""
-    name, prefix = str(name or ""), str(prefix or "")
-    return name[len(prefix) + 1:] if prefix and name.startswith(prefix + "-") and len(name) > len(prefix) + 1 else name
+def changes(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list[str]:
+    """What changed between two versions of an item's status lines, one readable line each, as a reply and the text History say it: the steps' status lines
+    ("status: PR 83 up · in progress (my-engineer)") and, for an item that still carries the old list, its lines (legacy_changes)."""
+    return [say(e, e["agent"]) for e in tag_events(before, after)] + legacy_changes(before, after)
 
 
-def row_parts(meta: dict[str, Any] | None, prefix: str = "", limit: int = 2) -> tuple[list[tuple[str, str]], int]:
-    """What a board row shows of an item's work: the lines in progress, at most `limit`, each (the agent's short name, the
-    text), and how many open lines are not shown ("+N")."""
-    ip = in_progress(meta)
-    shown = [(short_agent(l["agent"], prefix), l["text"]) for l in ip[:limit]]
-    return shown, len(open_lines(meta)) - len(shown)
+def closed_steps(before: dict[str, Any] | None, after: dict[str, Any] | None) -> list[tuple[str, str]]:
+    """The steps a write marked done or dropped, between two versions of an item's metadata: open in `before`, marked in `after` → (steps.key, the stored status, "done" or "dropped").
+    The mark is read from the stored step, so a close that marks the open steps itself (dropped, superseded) says dropped."""
+    pv = {_steps.key(s["text"]): s["status"] for s in _steps._valid((before or {}).get("steps"))}
+    return [(_steps.key(s["text"]), s["status"]) for s in _steps._valid((after or {}).get("steps")) if s["status"] != _steps.OPEN and pv.get(_steps.key(s["text"])) == _steps.OPEN]
 
 
-def row_words(meta: dict[str, Any] | None, prefix: str = "", limit: int = 2) -> str:
-    """The row's words: "engineer: migrating · board: answer box +1"; "" with nothing in progress."""
-    shown, more = row_parts(meta, prefix, limit)
-    if not shown:
-        return ""
-    return " · ".join(f"{a}: {t}" if a else t for a, t in shown) + (f" +{more}" if more > 0 else "")
-
-
-def words(meta: dict[str, Any] | None) -> str:
-    """One line for a tool reply or board.md: the open lines in progress first, each with its state and agent, then the done
-    ones still on the list: "migrating the ids — in progress (my-engineer) · tests — defined · done: answer box"."""
-    ls = open_lines(meta)
-    done = [l["text"] for l in lines_of(meta) if l["state"] == "done"]
-    out = " · ".join(f"{l['text']} — {l['state']}" + (f" ({l['agent']})" if l["agent"] else "") for l in ls)
-    if done:
-        out += (" · " if out else "") + "done: " + ", ".join(done)
-    return out
+# ---------------------------------------------------------------------------------------------------------------- migration
+def fold_legacy(meta: dict[str, Any], now: float | None = None, same: Callable[[Any, Any], bool] | None = None, keeper: str = "") -> tuple[dict[str, Any], list[str]]:
+    """The old `work` list moved onto the checklist → (the new metadata, notes on what was made); `meta` is not changed. The lines go oldest first. A done line becomes a done step of its
+    own (`<agent>: <text>`, by its agent, at its time, its status line done): the fold of finished steps. Any other line becomes the status line of its agent's first open step that has none yet;
+    when the agent has no such step, a new open step is added to next for it (`<agent>: <text>`). A line with no agent belongs to the item's mover, else the first session its needs name, else
+    the creator. The `work` field is dropped. Pure and idempotent: with no `work` field the metadata comes back as it was."""
+    m = json.loads(json.dumps(meta))
+    notes: list[str] = []
+    if "work" not in m:
+        return m, notes
+    lines = sorted(legacy_lines(m), key=lambda l: l["ts"])
+    keeper = keeper or str(m.get("owner") or "")
+    fallback = str(m.get("mover") or "") or next((str(x) for x in (m.get("needs") or []) if isinstance(x, str) and x.lower() not in ("decision", "external")), "") or keeper
+    eq = same or _same
+    steps = _steps.view(m, keeper=keeper)
+    pos = next((j for j, s in enumerate(steps) if s["status"] == _steps.OPEN), len(steps))      # finished steps go before the open ones, oldest first: the checklist reads in the order things happened
+    for l in lines:
+        agent = l["agent"] or fallback
+        text = l["text"][:TEXT_MAX]
+        label = f"{agent}: " if agent else ""
+        if l["state"] == "done":
+            steps.insert(pos, {**_steps._step(f"{label}{l['text']}", _steps.DONE, agent, l["ts"]), _steps.TAG: {"text": text, "state": "done", "ts": l["ts"]}})
+            pos += 1
+            notes.append(f"done line \"{text}\" -> a done step")
+            continue
+        i = next((j for j, s in enumerate(steps) if s["status"] == _steps.OPEN and _steps.tag_of(s) is None and _steps.opener(s["text"]) and eq(_steps.opener(s["text"]), agent)), -1)
+        if i >= 0:
+            steps[i] = {**steps[i], _steps.TAG: {"text": text, "state": l["state"], "ts": l["ts"]}}
+            notes.append(f"line \"{text}\" -> the status of step {i + 1}")
+            continue
+        m["steps"] = _steps.stored(steps)
+        _nl.append(m, f"{label}{l['text']}", agent or keeper, keeper)
+        steps = _steps.view(m, keeper=keeper)
+        j = next(j for j in range(len(steps) - 1, -1, -1) if steps[j]["status"] == _steps.OPEN)
+        steps[j] = {**steps[j], _steps.TAG: {"text": text, "state": l["state"], "ts": l["ts"]}}
+        notes.append(f"line \"{text}\" -> a new open step (no open step of {agent or 'its agent'} without a status)")
+    m["steps"] = _steps.stored(steps)
+    m.pop("work", None)
+    return m, notes

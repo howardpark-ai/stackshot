@@ -282,6 +282,12 @@ check("3 taken: pure: a close is a start; a note, a dropped step, a new step and
       and H.started(bef, {**bef, "metadata": {"owner": "o", "steps": [{"text": "x: a", "status": "done", "by": "x", "at": 5.0}]}})
       and H.started(bef, {**bef, "metadata": {**bef["metadata"], "work": [{"id": "1", "text": "t", "state": "in progress"}]}})
       and H.started(bef, {**bef, "metadata": {**bef["metadata"], "work": [{"id": "1", "text": "t", "state": "done"}]}}), None)
+tg = {"text": "PR up", "state": "in progress", "ts": 1000.0}
+bs = {"status": "open", "metadata": {"owner": "o", "next": "x: a", "steps": [{"text": "x: a", "status": "open", "tag": tg}]}}
+check("3 taken: pure: a reword of a step that carries a status is no start (the status is unchanged: same words, state and time); a new or changed status is",
+      not H.started(bs, {**bs, "metadata": {"owner": "o", "next": "x: a, reworded", "steps": [{"text": "x: a, reworded", "status": "open", "tag": dict(tg)}]}})
+      and H.started(bs, {**bs, "metadata": {**bs["metadata"], "steps": [{"text": "x: a", "status": "open", "tag": {**tg, "text": "review", "ts": 2000.0}}]}})
+      and H.started(bef, {**bef, "metadata": bs["metadata"]}), None)
 t0 = ho(20)["taken_at"]; upd(20, "home-peer", next="home-peer: a second write")
 check("3 taken: the first start stays the time it was taken", ho(20)["taken_at"] == t0, ho(20))
 

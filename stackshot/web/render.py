@@ -1393,7 +1393,7 @@ class Board:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or "")
                         ev.append(("answer", f"{e(_OWNER)} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
                                    + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
-                for w in _work.changes(pm, m): ev.append(("work", e(w)))   # a work line added, moved, reassigned or removed, one line each
+                for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved or removed (a step status is folded under its step in the page, not a line each here)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
                 if new_said: ev.append(("said", e(_said.recorded_words([x for _n, x in new_said])) + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in new_said)))
                 if (prev.get("confirmed") != v.get("confirmed") and v.get("confirmed")
@@ -1528,7 +1528,7 @@ class Board:
             if needs_sessions(r): out.append("- needs: " + ", ".join(f"`{shown_ref(s)}`" for s in needs_sessions(r)))   # the sessions whose move it is
             if after_of(r): out.append("- after: " + ", ".join(f"[{shown_full(g)}](#task-{g[0]}-{g[1:]})" + ("" if g in after_open(r) else " (closed)") for g in after_of(r)))
             if observers_of(r): out.append("- observers: " + ", ".join(f"`{shown_ref(s)}`" for s in observers_of(r)))
-            if r.get("status") != "completed" and _work.lines_of(m): out.append("- work: " + _work.words(m))   # what is in motion on it
+            if r.get("status") != "completed" and _work.lines_of(m): out.append("- step status: " + _work.words(m))   # what is in motion on it
             pk, pinfo = proj_state(r)
             tk = proj_top(r) or pk                         # the project it shows is the top-level one; the link stays the page the item is filed on (its own page's mirror, else the project's)
             pinfo = pinfo or (self.proj.get(tk) if tk else None)

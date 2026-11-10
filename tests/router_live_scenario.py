@@ -828,13 +828,13 @@ item(52, "projects/alpha", A, then=A, needs=[X, B]); p52 = len(pushes()); n52 = 
 out52 = hb(52, [A, "work-osprey-docs"]); settle()
 check("needs narrowing to the owner and another session: no hand-back line (the owner is not alone) and no step line either (a builder's step is never pushed to a front agent owner); the other session is told it is named",
       not hb_pushes(52, p52) and not hb_notes(52, n52) and "back with them alone" not in out52 and "told at once" not in out52 and "step came back" not in out52 and "is a front agent: not told; the board shows it" in out52 and hb_pushes(52, p52, DOC, "work-osprey-docs"), (pushes()[p52:], out52[-300:]))
-# the board item (a) to (d), in sequence on one item: a builder leaves needs while another session stays, marks its last work line done, then the other session hands the item back
-item(67, "projects/alpha", A, then=A, needs=[X, "work-osprey-docs"], work=[{"id": "build", "text": "build", "agent": BK, "state": "in progress", "ts": 1.0}]); p67 = len(pushes()); n67 = len(routing.read("projects/alpha"))
+# the board item (a) to (d), in sequence on one item: a builder leaves needs while another session stays, marks its own step status done (its last step), then the other session hands the item back
+item(67, "projects/alpha", A, then=A, needs=[X, "work-osprey-docs"], next=f"{BK}: build", steps=[{"text": f"{BK}: build", "status": "open", "by": BK, "at": 1.0, "tag": {"text": "build", "state": "in progress", "ts": 1.0}}]); p67 = len(pushes()); n67 = len(routing.read("projects/alpha"))
 out67a = hb(67, ["work-osprey-docs"]); settle()
 check("(a) a builder takes itself out of needs while another session stays: nothing is pushed to the front agent owner and no hand-back is recorded",
       not hb_pushes(67, p67) and not hb_notes(67, n67) and "told at once" not in out67a and "back with them alone" not in out67a, (pushes()[p67:], out67a[-300:]))
-out67b = server._update("a67", work={"id": "build", "state": "done"}, sender=BK); settle()
-check("(b) the builder marks its last own work line done: nothing is pushed to the front agent owner, a background owner's item alike (for_you_scenario)",
+out67b = server._update("a67", work={"state": "done"}, sender=BK); settle()
+check("(b) the builder marks the status of its own last step done: nothing is pushed to the front agent owner, a background owner's item alike (for_you_scenario)",
       not hb_pushes(67, p67) and not hb_notes(67, n67) and "told at once" not in out67b, (pushes()[p67:], out67b[-300:]))
 held.take(BK)
 out67c = hb(67, [A], sender="work-osprey-docs"); settle(); d67 = hb_pushes(67, p67, X, BK); t67 = held.take(BK)
