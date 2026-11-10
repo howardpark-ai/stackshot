@@ -4,8 +4,11 @@ An item used to carry two lists: its `next` checklist and a separate `work` list
 `work` write is the status line of the writer's open step (model/work.py), and a step marked done folds away with the others. The readers tolerate a leftover `work` field, so a release
 is safe before this runs; this moves the lines that are still stored:
 
-  * a line in progress / assigned / defined becomes the status line of its agent's first open step that has none (the agent is the line's `agent`, else the item's mover, else the first
-    session its needs name, else its owner); with no such step a new open step `<agent>: <text>` is added to `next` for that agent, carrying the status;
+  * of the lines in progress / assigned / defined, only the newest of each agent stays live (the agent is the line's `agent`, else the item's mover, else the first session its needs name,
+    else its owner; the newest is by the line's time, the last in the list when the times tie). It becomes the status line of that agent's first open step that has none; with no such step
+    a new open step `<agent>: <text>` is added to `next` for that agent, carrying the status;
+  * every older line of that kind of the same agent is an earlier status of one job, superseded by the newest: it becomes a done step of its own, like a done line (below), so the history
+    fold keeps it and the checklist does not show it as open work;
   * a done line becomes a done step of its own (`<agent>: <text>`, by its agent, at its time, its status done), so the fold of finished steps holds what the Work list held;
   * the `work` field is removed. Nothing else on the item changes: not `updated`, `state_updated`, `confirmed`, nor the activity clock (the lines were a filing edit, and so is this).
 
@@ -66,7 +69,7 @@ def _read(p: Path) -> tuple[dict[str, Any] | None, str]:
 
 def plan(store: Path, now: float | None = None) -> dict[str, Any]:
     """Read the store and say what the pass would write: {"rows": [...open items to move...], "closed": [gids left alone], "unread": [paths]}. Writes nothing.
-    A row: {gid, path, subject, notes, before (text), after (text), lines (count of work lines)}."""
+    A row: {gid, path, subject, notes, before (text), after (text), lines (count of work lines), live / superseded / done (how the lines were told apart)}."""
     from stackshot.model import work as _work
     now = time.time() if now is None else now
     rows: list[dict[str, Any]] = []; closed: list[str] = []; unread: list[str] = []
@@ -90,15 +93,21 @@ def plan(store: Path, now: float | None = None) -> dict[str, Any]:
         if again != new_meta:
             raise AssertionError(f"{gid}: the fold is not idempotent")
         after = _dump({**item, "metadata": new_meta})
+        sup = sum(n.startswith("superseded line") for n in notes); dn = sum(n.startswith("done line") for n in notes)
         rows.append({"gid": gid, "path": str(p), "subject": str(item.get("subject") or ""), "notes": notes, "lines": len(_work.legacy_lines(meta)),
-                     "before": text, "after": after})
+                     "live": len(notes) - sup - dn, "superseded": sup, "done": dn, "before": text, "after": after})
     return {"rows": rows, "closed": closed, "unread": unread}
+
+
+def totals(pl: dict[str, Any]) -> dict[str, int]:
+    """The counts of a plan: lines in all, and how many stay live, are superseded (a done step each) or were done already."""
+    return {k: sum(r[k] for r in pl["rows"]) for k in ("lines", "live", "superseded", "done")}
 
 
 def report(pl: dict[str, Any]) -> list[str]:
     out = []
     for r in pl["rows"]:
-        out.append(f"{r['gid']}  {r['subject'][:70]}  ({r['lines']} line{'' if r['lines'] == 1 else 's'})")
+        out.append(f"{r['gid']}  {r['subject'][:70]}  ({r['lines']} line{'' if r['lines'] == 1 else 's'}: {r['live']} live, {r['superseded']} superseded, {r['done']} done)")
         out += [f"    {n}" for n in r["notes"]] or ["    (the work field is empty: it is removed)"]
     if pl["closed"]:
         out.append(f"left as they are (closed, a record): {len(pl['closed'])}: {', '.join(pl['closed'][:20])}{' …' if len(pl['closed']) > 20 else ''}")
@@ -218,10 +227,13 @@ def main(argv: list[str]) -> int:
         return code
     pl = plan(store, a.now)
     if a.json:
-        print(json.dumps({"open_items_to_move": [{k: v for k, v in r.items() if k not in ("before", "after")} for r in pl["rows"]], "closed_left_alone": pl["closed"], "unread": pl["unread"]}, indent=1, ensure_ascii=False))
+        print(json.dumps({"open_items_to_move": [{k: v for k, v in r.items() if k not in ("before", "after")} for r in pl["rows"]], "closed_left_alone": pl["closed"], "unread": pl["unread"],
+                          "lines": totals(pl)}, indent=1, ensure_ascii=False))
     else:
         print("\n".join(report(pl)))
-        print(f"dry run: {len(pl['rows'])} open item{'' if len(pl['rows']) == 1 else 's'} would be moved, {len(pl['closed'])} closed one{'' if len(pl['closed']) == 1 else 's'} left as they are; nothing written (add --apply)")
+        t = totals(pl)
+        print(f"dry run: {len(pl['rows'])} open item{'' if len(pl['rows']) == 1 else 's'} would be moved, {len(pl['closed'])} closed one{'' if len(pl['closed']) == 1 else 's'} left as they are; "
+              f"{t['lines']} line{'' if t['lines'] == 1 else 's'}: {t['live']} live, {t['superseded']} superseded (a done step each), {t['done']} done; nothing written (add --apply)")
     return 1 if pl["unread"] else 0
 
 

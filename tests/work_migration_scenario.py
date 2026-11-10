@@ -11,6 +11,8 @@ line names no agent, one with an empty `work`, a closed item that still carries 
   4  running it twice writes nothing the second time; the fold itself is idempotent
   5  --undo puts back every item byte for byte; an item a session saved after the pass is kept as it is and named; undoing twice is a no-op
   6  the command line: no flag is a dry run; --apply with --dry-run, and --undo with --apply, are refused (exit 2)
+  7  superseded lines (a second store): of one agent's lines not done only the newest stays live (the status of the agent's open step, else one new open step) and every older one becomes a done
+     step; two agents are told apart; a done line mixed in is a done step; equal times: the last in the list is the newest; the report and --json count them; a second run writes nothing; undo restores
 
     tests/run-suite work_migration        → exit 0 / 1"""
 import hashlib, json, os, pathlib, subprocess, sys, time
@@ -52,7 +54,7 @@ lines_before = {i: [(l["text"], l["agent"], l["state"]) for l in W.lines_of(old[
 
 # ---- 1 the dry run
 r = run()
-check("the dry run (no flag) exits 0, names the four open items with work and the closed one left alone, and says nothing is written", r.returncode == 0 and "dry run: 4 open items would be moved, 1 closed one left as they are; nothing written" in r.stdout
+check("the dry run (no flag) exits 0, names the four open items with work and the closed one left alone, and says nothing is written", r.returncode == 0 and "dry run: 4 open items would be moved, 1 closed one left as they are; 6 lines: 3 live, 0 superseded (a done step each), 3 done; nothing written" in r.stdout
       and all(f"a{i}  " in r.stdout for i in (1, 2, 3, 4)) and "a5" in r.stdout, (r.returncode, r.stdout[-700:], r.stderr[-300:]))
 check("…and it wrote nothing: the store is byte for byte as it was", tree() == before and not RUN.exists())
 r2 = run("--dry-run")
@@ -109,6 +111,60 @@ check("undoing twice changes nothing more (the restored items say `same`)", ru2.
 # ---- 6 arguments
 check("--apply with --dry-run is refused (exit 2)", run("--apply", "--dry-run").returncode == 2)
 check("--undo with --apply is refused (exit 2)", run("--undo", str(undo_files[0]), "--apply").returncode == 2)
+
+# ---- 7 superseded lines
+STORE2 = T / "store2"; (STORE2 / "b").mkdir(parents=True); RUN2 = T / "run2"
+def put2(i, **meta):
+    base = {"owner": OWNER, "project": "projects/alpha", "mover": "quill-engineer", "needs": ["quill-engineer"]}
+    (STORE2 / "b" / f"{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item b{i}", "description": "- A thing\n- It lives here\n- Finished when it works", "status": "open",
+                                                        "updated": now - 3000, "state_updated": now - 4000, "confirmed": now - 4000, "activity": now - 3000, "metadata": {**base, **meta}}, indent=1, ensure_ascii=False))
+def run2(*args):
+    return subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/migrate_work_to_steps.py"), "--store", str(STORE2), *args], capture_output=True, text=True, timeout=120)
+def rd2(i): return json.loads((STORE2 / "b" / f"{i}.json").read_text())
+def tree2(): return {str(p.relative_to(STORE2)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(STORE2.rglob("*")) if p.is_file()}
+put2(1, next="quill-engineer: build it", work=[L("third try", ago=300), L("first try", "defined", ago=900), L("second try", "assigned", ago=600)])      # stored out of order: the newest is by time
+put2(2, next="quill-main: look at it", work=[L("one", ago=900), L("two", ago=600), L("three", ago=300)])                                              # no open step of the agent
+put2(3, next="quill-engineer: build it\nquill-docs: write it", work=[L("e1", ago=900), L("d1", agent="quill-docs", ago=800), L("e2", ago=700), L("d2", agent="quill-docs", ago=100)])
+put2(4, next="quill-engineer: build it", work=[L("shipped", "done", ago=5000), L("early", ago=900), L("late", ago=300), L("also shipped", "done", ago=100)])          # a done line mixed in, one newer than the live line
+put2(5, next="quill-engineer: build it", work=[L("alpha", ago=500), L("omega", ago=500)])                                                            # equal times: the last in the list
+put2(6, next="quill-engineer: build it", work=[L("lone", ago=500)])                                                                                  # nothing to supersede
+before2 = tree2(); old2 = {i: rd2(i) for i in range(1, 7)}
+r = run2()
+check("the dry run counts the lines: 17 in all, 7 live, 8 superseded (a done step each), 2 done; each item says its own", r.returncode == 0
+      and "17 lines: 7 live, 8 superseded (a done step each), 2 done; nothing written" in r.stdout and "b1  [home] item b1  (3 lines: 1 live, 2 superseded, 0 done)" in r.stdout
+      and "b4  [home] item b4  (4 lines: 1 live, 1 superseded, 2 done)" in r.stdout and "b6  [home] item b6  (1 line: 1 live, 0 superseded, 0 done)" in r.stdout, (r.returncode, r.stdout[-1500:], r.stderr[-300:]))
+check("…a superseded line reads `superseded line \"<text>\" -> a done step`, and the dry run wrote nothing", 'superseded line "first try" -> a done step' in r.stdout and 'superseded line "second try" -> a done step' in r.stdout
+      and 'line "third try" -> the status of step 3' in r.stdout and tree2() == before2 and not RUN2.exists(), r.stdout[:800])
+js = json.loads(run2("--json").stdout)
+check("--json carries the same counts, per item and in all", js["lines"] == {"lines": 17, "live": 7, "superseded": 8, "done": 2}
+      and {x["gid"]: (x["live"], x["superseded"], x["done"]) for x in js["open_items_to_move"]} == {"b1": (1, 2, 0), "b2": (1, 2, 0), "b3": (2, 2, 0), "b4": (1, 1, 2), "b5": (1, 1, 0), "b6": (1, 0, 0)}, js)
+ra = run2("--apply", "--run-dir", str(RUN2)); ud2 = sorted(RUN2.glob("*/undo.json"))
+check("--apply moves the six items and writes one undo file", ra.returncode == 0 and "wrote 6 of 6 items" in ra.stdout and len(ud2) == 1, (ra.returncode, ra.stdout[-400:], ra.stderr[-300:]))
+af2 = {i: rd2(i) for i in range(1, 7)}
+def shape(i): return [(S.opener(x["text"]), x["text"].split(": ", 1)[-1], x["status"], (S.tag_of(x) or {}).get("text"), (S.tag_of(x) or {}).get("state")) for x in S.view(af2[i]["metadata"])]
+check("b1: the newest line (by time, not by place in the list) is the status of the open step; the two older are done steps, oldest first",
+      shape(1) == [("quill-engineer", "first try", "done", "first try", "done"), ("quill-engineer", "second try", "done", "second try", "done"), ("quill-engineer", "build it", "open", "third try", "in progress")]
+      and af2[1]["metadata"]["next"] == old2[1]["metadata"]["next"], shape(1))
+check("b1: each done step is by its agent and at its line's time", [(x.get("by"), x.get("at")) for x in S.view(af2[1]["metadata"])[:2]] == [("quill-engineer", now - 900), ("quill-engineer", now - 600)], S.view(af2[1]["metadata"])[:2])
+check("b2: with no open step of the agent the newest becomes one new open step carrying the status; the older two are done steps",
+      shape(2) == [("quill-engineer", "one", "done", "one", "done"), ("quill-engineer", "two", "done", "two", "done"), ("quill-main", "look at it", "open", None, None), ("quill-engineer", "three", "open", "three", "in progress")]
+      and af2[2]["metadata"]["next"].endswith("\nquill-engineer: three"), shape(2))
+check("b3: two agents are told apart: each keeps its own newest line on its own step and has its older line done",
+      shape(3) == [("quill-engineer", "e1", "done", "e1", "done"), ("quill-docs", "d1", "done", "d1", "done"), ("quill-engineer", "build it", "open", "e2", "in progress"), ("quill-docs", "write it", "open", "d2", "in progress")], shape(3))
+check("b4: done lines stay done steps; the older line in progress is superseded; the newest in progress is live (a done line newer than it changes nothing)",
+      shape(4) == [("quill-engineer", "shipped", "done", "shipped", "done"), ("quill-engineer", "early", "done", "early", "done"), ("quill-engineer", "also shipped", "done", "also shipped", "done"), ("quill-engineer", "build it", "open", "late", "in progress")], shape(4))
+check("b5: equal times: the last line in the list is the newest", shape(5) == [("quill-engineer", "alpha", "done", "alpha", "done"), ("quill-engineer", "build it", "open", "omega", "in progress")], shape(5))
+check("b6: a lone line is just the status of the step, as before", shape(6) == [("quill-engineer", "build it", "open", "lone", "in progress")], shape(6))
+check("no moved item has a `work` field, and the readers see one live line per agent (never a superseded one)", all("work" not in af2[i]["metadata"] for i in range(1, 7))
+      and sorted((l["agent"], l["text"]) for l in W.lines_of(af2[3]["metadata"]) if l["state"] != "done") == [("quill-docs", "d2"), ("quill-engineer", "e2")]
+      and all(len([l for l in W.open_lines(af2[i]["metadata"])]) == (2 if i == 3 else 1) for i in range(1, 7)), [W.open_lines(af2[i]["metadata"]) for i in range(1, 7)])
+check("only the checklist's open steps stay open: the superseded lines add no open step", [sum(x["status"] == "open" for x in S.view(af2[i]["metadata"])) for i in range(1, 7)] == [1, 2, 2, 1, 1, 1], [S.view(af2[i]["metadata"]) for i in range(1, 7)])
+tr = tree2(); rb = run2("--apply", "--run-dir", str(RUN2))
+check("a second --apply writes nothing and keeps no second undo file", rb.returncode == 0 and "nothing to move" in rb.stdout and tree2() == tr and len(list(RUN2.glob("*/undo.json"))) == 1, rb.stdout[-300:])
+f1, _n = W.fold_legacy(old2[3]["metadata"]); f2, n2 = W.fold_legacy(f1)
+check("the fold is idempotent with superseded lines too", f1 == f2 and n2 == [] and "work" not in f1)
+ru = run2("--undo", str(ud2[0]))
+check("--undo puts back all six items byte for byte; again says `same`", ru.returncode == 0 and ru.stdout.count("put back") == 6 and tree2() == before2 and run2("--undo", str(ud2[0])).stdout.count("same") == 6, (ru.stdout, ))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + (f"; FAILED: {len(fails)}" if fails else ""))
 sys.exit(1 if fails else 0)

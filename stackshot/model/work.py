@@ -257,8 +257,10 @@ def closed_steps(before: dict[str, Any] | None, after: dict[str, Any] | None) ->
 # ---------------------------------------------------------------------------------------------------------------- migration
 def fold_legacy(meta: dict[str, Any], now: float | None = None, same: Callable[[Any, Any], bool] | None = None, keeper: str = "") -> tuple[dict[str, Any], list[str]]:
     """The old `work` list moved onto the checklist → (the new metadata, notes on what was made); `meta` is not changed. The lines go oldest first. A done line becomes a done step of its
-    own (`<agent>: <text>`, by its agent, at its time, its status line done): the fold of finished steps. Any other line becomes the status line of its agent's first open step that has none yet;
-    when the agent has no such step, a new open step is added to next for it (`<agent>: <text>`). A line with no agent belongs to the item's mover, else the first session its needs name, else
+    own (`<agent>: <text>`, by its agent, at its time, its status line done): the fold of finished steps. Of the other lines (defined / assigned / in progress) only the newest of each agent
+    stays live (the newest by its time, the last in the list when the times tie): it becomes the status line of its agent's first open step that has none yet, or, when the agent has no such
+    step, a new open step added to next for it (`<agent>: <text>`). Every older such line of the agent is an earlier status of the same job, superseded by the newest, and becomes a done step
+    of its own like a done line (note `superseded line ... -> a done step`). A line with no agent belongs to the item's mover, else the first session its needs name, else
     the creator. The `work` field is dropped. Pure and idempotent: with no `work` field the metadata comes back as it was."""
     m = json.loads(json.dumps(meta))
     notes: list[str] = []
@@ -270,14 +272,18 @@ def fold_legacy(meta: dict[str, Any], now: float | None = None, same: Callable[[
     eq = same or _same
     steps = _steps.view(m, keeper=keeper)
     pos = next((j for j, s in enumerate(steps) if s["status"] == _steps.OPEN), len(steps))      # finished steps go before the open ones, oldest first: the checklist reads in the order things happened
-    for l in lines:
+    live: dict[str, int] = {}      # per agent, the index (in `lines`) of its newest line that is not done: the only one that stays live
+    for n, l in enumerate(lines):      # `lines` is sorted by time (stable), so the last of an agent is the newest, and the last in the list when the times tie
+        if l["state"] != "done":
+            live[(l["agent"] or fallback).casefold()] = n
+    for n, l in enumerate(lines):
         agent = l["agent"] or fallback
         text = l["text"][:TEXT_MAX]
         label = f"{agent}: " if agent else ""
-        if l["state"] == "done":
+        if l["state"] == "done" or live.get(agent.casefold()) != n:
             steps.insert(pos, {**_steps._step(f"{label}{l['text']}", _steps.DONE, agent, l["ts"]), _steps.TAG: {"text": text, "state": "done", "ts": l["ts"]}})
             pos += 1
-            notes.append(f"done line \"{text}\" -> a done step")
+            notes.append(f"{'done' if l['state'] == 'done' else 'superseded'} line \"{text}\" -> a done step")
             continue
         i = next((j for j, s in enumerate(steps) if s["status"] == _steps.OPEN and _steps.tag_of(s) is None and _steps.opener(s["text"]) and eq(_steps.opener(s["text"]), agent)), -1)
         if i >= 0:
