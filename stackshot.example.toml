@@ -508,6 +508,11 @@ tell_owner = true                                   # another session's close of
 handback_hold_seconds = 180                          # the one line a front agent keeper hears when a builder hands an item back to it alone is held this long; a close of the item
                                                     # inside the window drops it, so the keeper hears only the close. 0 = sent at once. A held line survives a restart (<state>/handback-held.json). Live
 
+[ui]                                                # the board's pages (stackshot/web/i18n.py; docs/board-ui.md)
+# locale_dir = "~/.config/stackshot/locales"        # a folder that holds a second language for the pages: `<code>.json` (e.g. ko.json), an object of string table key -> text, the keys of
+                                                    # stackshot/web/i18n_catalog.py. Off by default: with no folder, or no file that loads, the pages are English and the side panel draws no language switch.
+                                                    # The folder is outside this repository (it holds no text in another language). A missing folder, file or key is English for what is missing, with one warning in the log. Live (a changed file is read again)
+
 [for_you]                                           # the owner's For you list: rows on the board for what he should see; see docs/for-you-and-closed.md
 slack_command = ""                                  # an urgent row (a due date within 24 h) is also posted once to Slack by this command: an argv
                                                     # (e.g. "/path/to/post-to-slack.sh"), the text on its standard input, exit 0 = posted. "" (the default) = no Slack

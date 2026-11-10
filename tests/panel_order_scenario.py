@@ -360,7 +360,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     GONE = r"panel-reset|showReset|reset:true|Order reset|Reset order"
     check("the order script has no reset: no button looked up, no show / hide, no {reset:true} sent, no announcement", not re.search(GONE, js), re.findall(GONE, js))
     check("…and it still has what moves a section: the drag, the menu's four moves, the live announcement and the save",
-          all(t in js for t in ("function place(", "function act(", "function openMenu(", "function moved(", "say(label(id)+' moved to position '", "save({order:o})", "/prefs/panel-order")), js[:80])
+          all(t in js for t in ("function place(", "function act(", "function openMenu(", "function moved(", "say(SST('panel.moved',{label:label(id)", "save({order:o})", "/prefs/panel-order")), js[:80])
     check("the style has no rule for the removed row or button", not re.search(r"\.prow\b|panel-reset", css) and not re.search(GONE, r2._PORDER_CSS))
     check("the default order is drawn with every grip and no control to get back to it", sections(get("/").text)[0] == DEFAULT and get("/").text.count('class="pgrip"') == 5)
     post({"order": ["audit-panel", "runners"]})

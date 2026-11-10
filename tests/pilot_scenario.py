@@ -2316,17 +2316,17 @@ check("audit: the button POSTs /audit/now once, same-origin, no retry, and fetch
       and "setInterval" not in AJ and AJ.count("setTimeout(") == 1 and ".then(function(){inflight=false;btn();refresh()})" in AJ)
 check("audit: the button is disabled while a run is in progress, while the POST is in flight and while 'cued' shows",
       "function btn(){B.forEach(function(b){b.disabled=run||inflight||Date.now()<hold;if(inflight)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy')})}" in AJ and "run=!!d.running" in AJ and "inflight=true;btn();" in AJ
-      and "if(s===202){hold=Date.now()+10000;say(t||'audit cued',false)}" in AJ)
+      and "if(s===202){hold=Date.now()+10000;say(t||SST('panel.audit.cued'),false)}" in AJ)
 check("audit: the server's answer shows 10 s — 409 / 503 warn, 404 hides the line",
-      "else if(s===409||s===503)say(t||'HTTP '+s,true)" in AJ and "if(s===404){E.hidden=true;if(P)P.hidden=true;return}" in AJ and "},10000)" in AJ and ".audit .a-bad,.audit .a-msg.warn{color:var(--warn)" in he)
+      "else if(s===409||s===503)say(t||SST('panel.audit.http',{n:s}),true)" in AJ and "if(s===404){E.hidden=true;if(P)P.hidden=true;return}" in AJ and "},10000)" in AJ and ".audit .a-bad,.audit .a-msg.warn{color:var(--warn)" in he)
 check("audit: the variants — running since, did not finish (warn), the shortlist (a group's name, its audits, its findings in 24 h, a dash where no log is kept) and the note under it",
-      "'Audit running'+(num(d.running_since)?' since '+clock(d.running_since):'')+'…'" in AJ and "sp('a-run a-bad','Last audit did not finish')" in AJ
-      and "sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found))" in AJ and "sp('a-h','found, 24 h')" in AJ and "if(C.note)f.appendChild(sp('a-cn',C.note))" in AJ
+      "num(d.running_since)?SST('panel.audit.running_since',{at:clock(d.running_since)}):SST('panel.audit.running')" in AJ and "sp('a-run a-bad',SST('panel.audit.unfinished'))" in AJ
+      and "sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found))" in AJ and "sp('a-h',SST('panel.audit.h_found'))" in AJ and "if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))" in AJ
       and "row('findings'" not in AJ and "row('last audit'" not in AJ)
 check("audit: the Audits page's button shares the script: it finds #audit-now-page and the message line #audit-page-msg, and both buttons cue through the one cue()",
       "document.getElementById('audit-page-msg')" in AJ and "B=[N,P].filter(Boolean)" in AJ and "B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})})" in AJ and AJ.count("function cue()") == 1)
 check("audit: times in the rulebook's form, in the board's zone", "Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))" in AJ
-      and "return p.weekday+' '+p.month+' '+ord(+p.day)+' '+p.hour+':'+p.minute" in AJ and "hourCycle:'h23'" in AJ)
+      and "function when(ts){var p=pt(ts);return SST('date.full',{wd:SST('date.wd.'+WD.indexOf(p.weekday))" in AJ and "hourCycle:'h23'" in AJ)
 check("audit: the server's text is drawn as text, never as markup", "innerHTML" not in AJ and "g.textContent=t" in AJ)
 check("audit: a redraw builds the new text first and swaps it in, and leaves an unchanged line alone",
       "f=document.createDocumentFragment()" in AJ and "if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}" in AJ
@@ -2435,7 +2435,7 @@ check("errors: receiver_state agrees with the cards", ui_render.receiver_state({
       and ui_render.receiver_state({"ok": True, "error": "x"}) == ("healthy ✓", "ok"))
 # the live update path (rcv()) draws the same: the same pattern, a short word, the raw text as a title, never as text
 check("errors: rcv() uses the render's pattern and never writes the raw error as text",
-      f"var NET=new RegExp({json.dumps(ui_render._NET_ERR)},'i');" in hr and "h.title=raw;h.textContent=k==='ok'?'healthy ✓':k==='warn'?'unreachable ✗':'error ✗'" in hr
+      f"var NET=new RegExp({json.dumps(ui_render._NET_ERR)},'i');" in hr and "h.title=raw;h.textContent=SST(k==='ok'?'js.rcv.ok':k==='warn'?'js.rcv.warn':'js.rcv.bad')" in hr
       and "(v.error||'down')+' ✗'" not in hr and "['ok','warn','bad'].forEach(function(x){c.classList.toggle(x,x===k)})" in hr and "c.querySelector('.st')" in hr)
 check("errors: the board.md receiver table is untouched by the card change", "| google | DOWN: " + LONG + " |" in ui_render.Board(f"{tmp}/store", now=_now).markdown())
 # a healthy receiver whose last check is more than twice its beat old is stale, with the age (beats: GitHub and Slack 1 min, Google and Notion 30 min); exactly twice is still healthy
@@ -2455,11 +2455,40 @@ check("stale: the tooltip says how long and that the last check said healthy", "
 from stackshot.anchors import receiver_health as _rh_
 check("stale: the card's tooltip is the one text (receiver_health.stale_note) the live update takes from the endpoint",
       f'title="{render.esc(_rh_.stale_note("slack", 121))} · checked 2026-02-23 12:52:59' in rcard_("slack")
-      and "sn=String(v.stale_note||sw)" in hs_ and "c.title=sn+' · checked '+v.checked" in hs_ and "h.title=sn;h.textContent=sw" in hs_, rcard_("slack"))
+      and "sn=String(v.stale_note||sw)" in hs_ and "c.title=SST('js.rcv.title',{raw:sn,checked:v.checked,tz:" in hs_ and "h.title=sn;h.textContent=sw" in hs_, rcard_("slack"))
 check("stale: a receiver with no known beat is never stale", 'class="pc rcv ok"' in rcard_("hook-x"), rcard_("hook-x"))
 check("stale: the live update (rcv()) draws the stale word from the endpoint's `stale` seconds and leaves the healthy lines as they were",
-      "if(v.ok&&+v.stale>0){var sw='stale '+dur(+v.stale)+' ✗',sn=" in hs_ and "h.textContent=k==='ok'?'healthy ✓':k==='warn'?'unreachable ✗':'error ✗'" in hs_, "")
-# a receiver that announced a wait (status.json hold: the first pass after a start, a wait after GitHub refuses calls) is not stale during it, and counts its age from the end of it
+      "if(v.ok&&+v.stale>0){var sw=SST('js.rcv.stale',{age:dur(+v.stale)}),sn=" in hs_ and "h.textContent=SST(k==='ok'?'js.rcv.ok':k==='warn'?'js.rcv.warn':'js.rcv.bad')" in hs_, "")
+# the receivers' live update is run, not only read: every function it calls is defined in the page, and (with node) rcv() draws a stale and an errored receiver as the render does
+_scripts_ = re.findall(r"<script>(.*?)</script>", hs_, re.S)
+_rcv_js_ = next((x for x in _scripts_ if "receivers.json" in x), "")
+_i0_ = _rcv_js_.find("(function(){function dur(")
+_blk_ = _rcv_js_[_i0_:_rcv_js_.find("tick();rcv()});})();", _i0_) + len("tick();rcv()});})();")] if _i0_ >= 0 else ""      # the receivers' IIFE alone
+check("live update: the receivers script defines dur() and fa() before it calls them", "function dur(" in _blk_ and "function fa(" in _blk_ and _blk_.find("function dur(") < _blk_.find("dur(+v.stale)"), _rcv_js_[:200])
+import shutil as _shutil_, subprocess as _sp_
+if _shutil_.which("node"):
+    _head_ = next((x for x in _scripts_ if x.startswith("window.SSD=")), "")
+    _sim_ = r"""
+const vm=require('vm'),fs=require('fs');const inp=JSON.parse(fs.readFileSync(0,'utf8'));
+function mkCard(name){const cls=new Set(['pc','rcv','ok']);const st={className:'lbl st ok',title:'',textContent:''};
+ return{name,title:'',classList:{add:c=>cls.add(c),remove:c=>cls.delete(c),toggle:(c,on)=>{on?cls.add(c):cls.delete(c)},has:c=>cls.has(c)},
+  getAttribute:a=>a==='data-rcv'?name:null,querySelector:q=>q==='.st'?st:null,st,cls}}
+const cards={slack:mkCard('slack'),github:mkCard('github')};let ticks=0;
+const ctx={window:{},document:{getElementById:()=>null,addEventListener(){},querySelectorAll:q=>{if(q==='[data-rcv]')return Object.values(cards);if(q==='[data-ts]')ticks++;return[]}},
+ fetch:()=>Promise.resolve({status:200,ok:true,json:()=>Promise.resolve(inp.data)}),setInterval(){},setTimeout,Promise,RegExp,Math,Date,String,JSON,console};
+vm.createContext(ctx);vm.runInContext(inp.head,ctx);ctx.SST=ctx.window.SST;
+vm.runInContext(inp.block,ctx);
+setTimeout(()=>{const o={ticks};for(const k in cards){const c=cards[k];o[k]={cls:[...c.cls].filter(x=>['ok','warn','bad'].includes(x)),word:c.st.textContent,stcls:c.st.className,title:c.title}}
+ process.stdout.write(JSON.stringify(o))},50);"""
+    _data_ = {"slack": {"ok": True, "checked": "2026-02-23 11:00:00", "stale": 7200, "stale_note": "no check for 2h; the last one said healthy", "ts": 1}, "github": {"ok": False, "error": "HTTP 401 unauthorized", "checked": "2026-02-23 12:53:00", "ts": 1}}
+    _r_ = _sp_.run(["node", "-e", _sim_], input=json.dumps({"head": _head_, "block": _blk_, "data": _data_}), capture_output=True, text=True, timeout=30)
+    if _r_.returncode != 0 or not _r_.stdout: check("live update: rcv() runs in a simulated page (node)", False, _r_.stderr[-500:])
+    else:
+        _o_ = json.loads(_r_.stdout)
+        check("live update: a stale receiver is drawn warn, 'stale 2h ✗', with the endpoint's note as its tooltip (the healthy line is not left standing)",
+              _o_["slack"]["cls"] == ["warn"] and _o_["slack"]["word"] == "stale 2h ✗" and _o_["slack"]["stcls"] == "lbl st warn" and _o_["slack"]["title"].startswith("no check for 2h; the last one said healthy"), _o_)
+        check("live update: an errored receiver is drawn bad, 'error ✗', and tick() runs (the later cards are still updated)", _o_["github"]["cls"] == ["bad"] and _o_["github"]["word"] == "error ✗" and _o_["ticks"] >= 2, _o_)
+# a receiver that announced a wait (status.json hold:the first pass after a start, a wait after GitHub refuses calls) is not stale during it, and counts its age from the end of it
 _t0_ = _now.timestamp()
 (T / "state/anchor-hub/status.json").write_text(json.dumps({"started": "x", "anchors": {}, "hold": {"github": _t0_ + 300, "slack": _t0_ - 121},
     "receivers": {"github": {"ok": True, "checked": "2026-02-23 12:00:00"}, "slack": {"ok": True, "checked": "2026-02-23 12:00:00"}}}))

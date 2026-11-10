@@ -985,7 +985,7 @@ check("the home row says 'handed to <session>, not yet taken' for a session, in 
 # the Done button and the notice after Done
 HJ = r2._HOME_JS
 check("home script: a button marked spent stays disabled when the page re-enables the forms, and Done names who takes it from here",
-      "button[disabled]:not([data-spent])" in HJ and "b.setAttribute('data-spent','1')" in HJ and "'Done: '+th+' takes it from here.'" in HJ and "form.hstep button[value=send]" in HJ and HJ in Bd().html())
+      "button[disabled]:not([data-spent])" in HJ and "b.setAttribute('data-spent','1')" in HJ and "'js.sent_done'" in HJ and "form.hstep button[value=send]" in HJ and HJ in Bd().html())
 check("the item page's notice after Done names who takes the item on, and without a name says it goes on to its next mover", "Done: alpha-main takes it from here." in Bd().sent_html({"sent": "done"}, "alpha-main")
       and "goes on to its next mover" in Bd().sent_html({"sent": "done"}), Bd().sent_html({"sent": "done"}))
 

@@ -26,6 +26,7 @@ from urllib.parse import urlencode
 
 from stackshot.core import config as _cfg
 from stackshot.core import readonly as _ro
+from stackshot.web import i18n as _i18n
 from stackshot.web import search as _s
 from stackshot.web.search import (KINDS, LIMIT, MAX_Q, MIN_CHARS, REQUEST_ITEMS, TITLES, _corrupt, building, query, rebuild, standby_index, sync, terms)   # noqa: F401  — query and terms stay importable from here
 from stackshot.web.ui import under
@@ -98,9 +99,10 @@ def box(q: str = "", in_place: bool = False) -> str:
     `in_place=True` is the Search page's own header box: there the results replace the page, so tabs do not pile up (the filters under it are a plain in-place form too).
     An installed app window has no tabs: head's script (render.py _APP_HEAD) sends a same-origin target="_blank" form's results to the window itself, as it does a link's."""
     tab = "" if in_place else ' target="_blank" rel="noopener"'
+    hint, short = esc(_i18n.t("home.search.hint")), esc(_i18n.t("home.search.hint_short"))      # the words are the string table's (English: HINT, HINT_SHORT)
     return (f'<form class="sbox" action="{under("/search")}" method="get" role="search"{tab}><input type="search" name="q" value="{esc(str(q or "")[:MAX_Q])}" '
-            f'placeholder="{HINT}" data-hint="{HINT}" data-hint-short="{HINT_SHORT}" aria-label="Search the board" maxlength="{MAX_Q}" autocomplete="off" enterkeyhint="search">'
-            f'<button type="submit" class="b ico" aria-label="Search" title="Search">{_ICON}</button></form>{_HINT_JS}')
+            f'placeholder="{hint}" data-hint="{hint}" data-hint-short="{short}" aria-label="{esc(_i18n.t("home.search.aria"))}" maxlength="{MAX_Q}" autocomplete="off" enterkeyhint="search">'
+            f'<button type="submit" class="b ico" aria-label="{esc(_i18n.t("home.search.button"))}" title="{esc(_i18n.t("home.search.button"))}">{_ICON}</button></form>{_HINT_JS}')
 
 
 def _hl(text: str, ws: list[str]) -> str:
