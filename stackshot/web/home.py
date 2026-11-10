@@ -158,18 +158,12 @@ def sort_waiting(pairs: list[tuple[dict[str, Any], "_model.Model"]], tie: Callab
     return sorted(pairs, key=lambda p: (end_epoch(p[1]), tie(p[0])))
 
 
-_URL = re.compile(r"https?://[^\s<>\"\)\]`]+")
-
-
 def copyables(step: str) -> tuple[str, list[str]]:
     """(the step's text, the blocks to copy) for a step only the owner takes: each backticked command (a span with a space in it; a lone word stays inline) leaves the line for a block
-    of its own, the text saying "the command below"; with no command, a link in the line is the one block. The text is returned with its markdown as written."""
+    of its own, the text saying "the command below". With no command the text comes back whole and no block: a link stays in the line, drawn as a link like any other. The text is returned with its markdown as written."""
     cmds = [m.group(1) for m in re.finditer(r"`([^`\n]+)`", step) if " " in m.group(1).strip()]
     if cmds:
         n = iter(range(1, len(cmds) + 1))
         text = re.sub(r"`([^`\n]+)`", lambda m: ("the command below" if len(cmds) == 1 else f"command {next(n)} below") if " " in m.group(1).strip() else m.group(0), step)
         return text, [c.strip() for c in cmds]
-    m = _URL.search(step)
-    if m:
-        return step, [m.group(0).rstrip(".,;:")]
     return step, []

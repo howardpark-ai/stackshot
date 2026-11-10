@@ -3313,7 +3313,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return self.when(t) if t else str(s)
     def step_html(self, step, gid):
         """The immediate next step as the row shows it, inline markdown with its mentions linked; for a step only the owner takes, its command in a block of its own with a copy
-        button (or, with no command, the link in one), as the item page's Next draws it."""
+        button (a link in it stays in the line), as the item page's Next draws it."""
         text, blocks = _home.copyables(step)
         return self.md_line(text, gid) + _cmd_blocks(blocks)
     def decision_rows(self, r, steps):
@@ -3428,7 +3428,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return self.step_nexts_html(r, draft) or self.step_block_html(r, sb=sb, home=home)
     def step_block_html(self, r, sb=None, home=False):
         """The step field of a your-step item as HTML (itempage.step_block is the one reading), for an item whose checklist holds no step of his: its text as markdown with each command taken out of it
-        into a copyable block of its own (a link, with no command, in one); a `! ...` line he types in a pane stays whole and verbatim in one block. The item's draft goes right under the step's text,
+        into a copyable block of its own (a link stays in the text); a `! ...` line he types in a pane stays whole and verbatim in one block. The item's draft goes right under the step's text,
         before those blocks: the draft is part of the step, and is left out when it is one of those commands. "" for any other item."""
         sb = sb or _ip.step_block(r)
         if not sb: return ""

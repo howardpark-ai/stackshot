@@ -7,7 +7,7 @@ Every open item is in exactly one of the home page's lists, from model.derive (t
   * every row, in every list: the title linking the item page with its number, the immediate next step (the first `next` line, its `<mover>: ` prefix stripped), the mover (a session linked to the
     fleet tool while its pane lives, the post-wake mover on Waiting), the age since the state began; an item with no stored model field lands in exactly one list by today's fields;
   * Your move: the age amber past two days and red past five, nothing before; a decision's question with one card per option (none stored: Yes and No; Approve and Decline only as stored options), the
-    note box and one Send, drawn disabled for the page script to enable once it has a token; a step's command in a block to copy, a link in one when it has no command; a relay come due with its three cards;
+    note box and one Send, drawn disabled for the page script to enable once it has a token; a step's command in a block to copy, a link in it staying inline; a relay come due with its three cards;
   * On agent: "handed to X, not yet taken" on the who line, `woke: <what> → <mover>`, the sort;
   * Waiting: what it waits on (a time with his words or the basis; another item's close; an anchor and its event, or "an anchor (none recorded)"; a party's news with its ask-by day) and the chases, "then" and
     "watched by" (when something watches) on the who line; the next step after the wait; sorted by end date;
@@ -109,6 +109,9 @@ item(27, "[home] no project item", age=1 * D, project="", needs=["team-back"], o
 item(50, "[home] a step with a command", age=1 * D, state="your-step", step="run the one line `sala op reauth box-a --from me --words \"go\"` and say done", needs=["team-back"], owner="front", next="team-back: check it")
 item(51, "[home] a step typed in a pane", age=1 * D, state="your-step", step="! sala reauth box-a", needs=["team-back"], owner="front", next="team-back: check it")
 item(52, "[home] a step with a link", age=1 * D, state="your-step", step="Sign in at https://example.invalid/login/now and say done", needs=["team-back"], owner="front", next="team-back: check it")
+item(55, "[home] a step with two links", age=1 * D, state="your-step", step="Compare https://example.com/p/aaa with https://example.com/p/bbb and say done", needs=["team-back"], owner="front", next="team-back: check it")
+item(56, "[home] a step with a command and a link", age=1 * D, state="your-step", step="Open https://example.com/p/aaa then run `sala op reauth box-a` and say done", needs=["team-back"], owner="front", next="team-back: check it")
+item(57, "[home] a step with a lone-word backtick", age=1 * D, state="your-step", step="Set the mode to `default` and say done", needs=["team-back"], owner="front", next="team-back: check it")
 item(53, "[home] a step of plain words", age=1 * D, state="your-step", step="Call the office and say done", owner="front", next="team-back: check it")
 item(54, "[home] a yes or no with its options", age=45 * 60, needs=["decision"], ask="Decide: use the cheaper plan? · Recommend: yes · Stakes: low · By: Mon", next="Oliver: decide", owner="front",
      options=[{"label": "Approve", "line": "Take the cheaper plan.", "recommended": True}, {"label": "Decline", "line": "Keep the current plan.", "recommended": False}])   # Approve and Decline stored by its owner
@@ -144,7 +147,7 @@ def row_of(sec, n):
 def ids(sec):
     return [i for i, _ in rows(sec)]
 YM, AW, WL = section("your-move"), section("agents-at-work"), section("waiting-list")
-OPEN = {1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 43, 44, 50, 51, 52, 53, 54}
+OPEN = {1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 43, 44, 50, 51, 52, 53, 54, 55, 56, 57}
 
 # ---- the five counts and the lists ----
 import html as _html
@@ -211,7 +214,7 @@ check("cards: the header runs title, the rendered line, the cards, the search ba
       h.find("<header") < h.find('<h1 class="site">') < h.find('<p class="rline">') < h.find('<nav class="hcards"') < h.find("</nav>") < h.find('class="sbox"') < h.find("</header>") < h.find('<section id="your-move">') < h.find('<section id="agents-at-work">') < h.find('<section id="queued-release">') < h.find('<section id="waiting-list">'), cn)
 check("cards: the old plain count links are gone (nav.hcounts, a.hcount)", 'class="hcounts"' not in h and "a.hcount" not in h and "nav.hcounts" not in h)
 check("lists: every open item is in exactly one list", sorted(map(int, ids(YM) + ids(AW) + ids(WL))) == sorted(OPEN) and len(set(ids(YM) + ids(AW) + ids(WL))) == len(OPEN), (ids(YM), ids(AW), ids(WL)))
-check("lists: Your move holds the eleven items the owner moves, Waiting the twelve waits, Agents at work the rest", set(map(int, ids(YM))) == {1, 2, 3, 4, 5, 40, 50, 51, 52, 53, 54} and set(map(int, ids(WL))) == {20, 21, 22, 23, 24, 25, 26, 28, 29, 41, 43, 44}
+check("lists: Your move holds the fourteen items the owner moves, Waiting the twelve waits, Agents at work the rest", set(map(int, ids(YM))) == {1, 2, 3, 4, 5, 40, 50, 51, 52, 53, 54, 55, 56, 57} and set(map(int, ids(WL))) == {20, 21, 22, 23, 24, 25, 26, 28, 29, 41, 43, 44}
       and set(map(int, ids(AW))) == {10, 11, 12, 13, 14, 15, 16, 17, 18, 27}, (ids(YM), ids(AW), ids(WL)))
 check("lists: a closed item is in none of them", all(f"task-a-{n}" not in YM + AW + WL for n in (30, 31, 32)))
 check("lists: the three are folds under their own keys; only Your move is open, Agents at work and Waiting closed", '<section id="your-move"><details class="fold" data-fold="your-move" open><summary><h2>' in h
@@ -299,7 +302,7 @@ _css0 = h[h.find("<style"):h.find("</style>")]
 # ---- Your move: ages ----
 cls = lambda n: re.search(r'<span class="tip ir-age( amber| red)?"', row_of(YM, n)).group(1)
 check("Your move: red past five days, amber past two, nothing before", (cls(1), cls(2), cls(4), cls(3)) == (" red", " amber", " amber", None), (cls(1), cls(2), cls(4), cls(3)))
-check("Your move: oldest first", ids(YM) == ["1", "40", "2", "4", "50", "51", "52", "53", "3", "54", "5"], ids(YM))
+check("Your move: oldest first", ids(YM) == ["1", "40", "2", "4", "50", "51", "52", "53", "55", "56", "57", "3", "54", "5"], ids(YM))
 check("Your move: no colour on Agents at work or Waiting rows, whatever the age", "ir-age amber" not in AW + WL and "ir-age red" not in AW + WL and re.search(r'class="tip ir-age"', row_of(AW, 12)))
 check("home.age_class: the edges (exactly two and five days are not past them)", (home.age_class(2 * D), home.age_class(2 * D + 1), home.age_class(5 * D), home.age_class(5 * D + 1)) == ("", "amber", "amber", "red"))
 
@@ -344,7 +347,7 @@ check("ask: a relay come due shows its three cards in the stored order, lettered
 r2 = row_of(YM, 2)
 check("ask: a step shows its command in one block with a copy button, and the line says so", '<div class="cmd"><pre><code>ssh box sala status</code></pre><button type="button" class="b copy"' in r2 and "the command below" in r2 and "hanswer" not in r2, r2)
 r4 = row_of(YM, 4)
-check("ask: a step with a link and no command shows the link in one block", '<div class="cmd"><pre><code>https://example.invalid/portal/setup</code></pre>' in r4, r4)
+check("ask: a step with a link and no command shows the link inline, in no code block", 'href="https://example.invalid/portal/setup"' in r4 and '<div class="cmd">' not in r4 and "<pre>" not in r4, r4)
 check("ask: Agents at work and Waiting rows carry no form", "hanswer" not in AW + WL and "<textarea" not in AW + WL)
 check("ask: nothing on the lists pushes or sends: the only forms are the Your move answer forms (the owner submits them), no script sits in a row", all(f.startswith('<form class="hanswer') for f in re.findall(r"<form[^>]*>", YM + AW + WL)) and "<script" not in YM + AW + WL)
 check("ask: the page script asks for tokens by GET and shows only the forms it gets one for", "fetch('/answer-tokens?ids='" in h and "f.hidden=false" in h and "stackshot:swapped" in h and "button.copy" in h)
@@ -543,14 +546,19 @@ _nw = re.sub(r"<[^>]+>", "", b.wait_who(_r41, model.Model(model.WAITING, wait=mo
 check("Waiting: a wait with no post-wake mover reads 'then nobody set', never 'then no mover'; the rows of the fixture, which all have one, say neither", "then nobody set" in _nw and "no mover" not in _nw + _wl_all, (_nw, _wl_all[:300]))
 # the board item: the row's form says which page it is on and the page shows the answer's notice when the server brings it back
 # ---- the step rows: the step itself in place of the first next line, a note box with ONE Send (no Done button), only on a your-step item
-S = {n: row_of(YM, n) for n in (50, 51, 52, 53)}
+S = {n: row_of(YM, n) for n in (50, 51, 52, 53, 55, 56, 57)}
 sform = lambda r: (re.search(r'<form class="hanswer hstep".*?</form>', r, re.S) or [""])[0]
 check("step rows: a your-step item with no ask is on Your move, and its row shows the step on line two, never the first next line ('check it' is the agent's)",
       all(f"task-a-{n}" in YM for n in S) and all("team-back: check it" not in S[n] and "check it" not in S[n].split('class="hask"')[0] for n in S), S[50][:500])
 check("step rows: a command in the step is one code block with a copy button and the line says 'the command below', the command as the item wrote it",
       '<div class="cmd"><pre><code>sala op reauth box-a --from me --words &quot;go&quot;</code></pre><button type="button" class="b copy"' in S[50] and "the command below" in S[50].split('class="hask"')[0], S[50])
 check("step rows: a `! ...` line stays verbatim whole in one code block, with no text line around it", '<pre><code>! sala reauth box-a</code></pre>' in S[51] and S[51].count('<div class="cmd">') == 1 and '<span class="hnext"><div class="cmd">' in S[51], S[51])
-check("step rows: with no command a link is the one block, the sentence kept", '<pre><code>https://example.invalid/login/now</code></pre>' in S[52] and "Sign in at" in S[52], S[52])
+_links = lambda h: re.findall(r'<a href="(https://example\.com/p/[a-z]+)" target="_blank" rel="noopener">', h)
+check("step rows: with no command a link stays in the sentence as a link that opens in a new tab, in no code block", 'href="https://example.invalid/login/now" target="_blank" rel="noopener"' in S[52] and "Sign in at" in S[52] and "<pre>" not in S[52] and 'class="cmd"' not in S[52], S[52])
+check("step rows: a step with two links and no command draws both as links and no Copy box", _links(S[55]) == ["https://example.com/p/aaa", "https://example.com/p/bbb"] and "<pre>" not in S[55] and 'class="b copy"' not in S[55] and "and say done" in S[55], S[55])
+check("step rows: a step with a command and a link boxes the command only, the link stays inline", S[56].count('<div class="cmd">') == 1 and '<pre><code>sala op reauth box-a</code></pre>' in S[56] and "aaa</code>" not in S[56]
+      and _links(S[56].split('<div class="cmd">')[0]) == ["https://example.com/p/aaa"] and "the command below" in S[56], S[56])
+check("step rows: a lone-word backtick stays inline, no Copy box", "<code>default</code>" in S[57] and "<pre>" not in S[57] and 'class="b copy"' not in S[57], S[57])
 check("step rows: plain words show as they read with no block", "Call the office and say done" in S[53] and "<pre>" not in S[53], S[53])
 check("step rows: the form has a note box and ONE button, Send (disabled until the token), no Done, the label says an empty Send finishes the step, the token empty and `back` empty, nothing hidden",
       all(sform(S[n]).count("<button") == 1 and sform(S[n]).count('name="act" value="send" disabled>Send</button>') == 1 and 'value="done"' not in sform(S[n]) and "Done" not in sform(S[n]) and 'value="comment"' not in sform(S[n])
@@ -591,9 +599,10 @@ check("the home page carries the notice of a note sent on a step (stepreply), an
 _lj = render._LIVE_JS
 check("in place: a decision box with text in it holds the swap — busy() also tests every form.hanswer textarea and text input for a typed value, not only the focused element",
       "form.hanswer textarea" in _lj and "form.hanswer input[type=text]" in _lj and "if(l[i].value)return true" in _lj and "||s||typed())" in _lj, _lj[_lj.find("function typed"):][:400])
-check("home.copyables: a command leaves the line (several are numbered), a link is the block when there is no command, a plain step has none",
-      home.copyables("run `a b` then `c d`") == ("run command 1 below then command 2 below", ["a b", "c d"]) and home.copyables("open https://x.example/a?b=1.") == ("open https://x.example/a?b=1.", ["https://x.example/a?b=1"])
-      and home.copyables("do `one` thing") == ("do `one` thing", []) and home.copyables("[the page](https://x.example/p) now")[1] == ["https://x.example/p"])
+check("home.copyables: a command leaves the line (several are numbered), a link stays in the text and is no block, a plain step has none",
+      home.copyables("run `a b` then `c d`") == ("run command 1 below then command 2 below", ["a b", "c d"]) and home.copyables("open https://x.example/a?b=1.") == ("open https://x.example/a?b=1.", [])
+      and home.copyables("do `one` thing") == ("do `one` thing", []) and home.copyables("[the page](https://x.example/p) now") == ("[the page](https://x.example/p) now", [])
+      and home.copyables("see https://x.example/a then run `a b`") == ("see https://x.example/a then run the command below", ["a b"]))
 check("home.list_of: waiting, the owner's alive, an agent's alive, dead", (home.list_of(model.Model(model.WAITING)), home.list_of(model.Model(model.ALIVE, mover=model.owner_display())), home.list_of(model.Model(model.ALIVE, mover="x")), home.list_of(model.Model(model.DEAD)))
       == ("waiting", "your-move", "agents", ""))
 check("home.watched_by: the scheduler, the anchor module, the server", [home.watched_by(k) for k in ("time", "relay", "anchor", "item")] == ["the scheduler", "the scheduler", "the anchor module", "the server"])
