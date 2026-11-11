@@ -210,7 +210,9 @@ def is_held(r):
     its stored flag says; it is in the owner's queue (the server's _is_held, the same rule; its update drops such a flag). A
     wake on an item not on hold is a reminder and leaves it in its lane."""
     st = str(r.get("status") or "")
-    return (st == "on_hold" or (st == "open" and bool((r.get("metadata") or {}).get("hold")))) and needs_kind(r) != "call"
+    m = r.get("metadata") or {}
+    date_wait = bool(_wt.stored_until(m)) and _wt.kind_of(m) == "time"        # a wait on a date alone (an until with no kind, or the kind time): parked like the hold with a wake it replaces
+    return (st == "on_hold" or (st == "open" and (bool(m.get("hold")) or date_wait))) and needs_kind(r) != "call"
 def wake_of(r):
     """An item's wake (on hold: when it is released; not on hold: a reminder): a date ("YYYY-MM-DD", start of that day), a datetime in the instance timezone ("YYYY-MM-DDTHH:MM", the owner
     "until friday evening"), or None. Board.when() draws either: "Fri Mar 6th" or "Fri Mar 6th 12:00"."""

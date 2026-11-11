@@ -63,6 +63,13 @@ def unfold(meta: dict[str, Any]) -> bool:
     return True
 
 
+def unfolded(meta: dict[str, Any]) -> dict[str, Any]:
+    """A copy of `meta` with a stored until standing as the old working fields (for a note that reads the wake as the mover wrote it)."""
+    m = dict(meta)
+    unfold(m)
+    return m
+
+
 def unfold_item(item: dict[str, Any]) -> bool:
     """unfold on an item's metadata (an item that has none is left alone)."""
     m = item.get("metadata")

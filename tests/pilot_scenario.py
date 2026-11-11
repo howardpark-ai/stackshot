@@ -1189,8 +1189,8 @@ check("hold: a wake set on an item already waiting on a date, shown as the until
 res = server._update("a5", hold=True, wake=D(2), due=D(9), needs="external", sender="home-beta"); m5 = rd("a5")["metadata"]
 check("hold: hold=true with a wake parks; needs and due stay", held_("a5") and wk_(m5) == D(2) and m5.get("due") == D(9) and m5.get("needs") == ["external"], rd("a5"))
 b5 = ui_render.Board(str(T / "store"))
-check("hold: an item with needs external waiting on a date is drawn once, as waiting",
-      "a5" in {r["gid"] for rs in b5.by_proj.values() for r in rs} and [r["gid"] for r in b5.agent + b5.n_call + b5.n_relay + b5.held].count("a5") <= 1, [r["gid"] for r in b5.n_relay])
+check("hold: a held item with needs external is drawn held, counted on agent, never on others",
+      "a5" in [r["gid"] for r in b5.held] and "a5" not in [r["gid"] for r in b5.n_call + b5.n_relay + b5.agent] and "a5" in {r["gid"] for rs in b5.by_proj.values() for r in rs}, [r["gid"] for r in b5.n_relay])
 e = refusal(lambda: server._update("a2", hold=True, sender="home-beta"))
 check("hold: hold=true on a completed item refused", e == "Refused: a completed item does not go on hold; set it open first" and rd("a2")["status"] == "completed" and "hold" not in rd("a2")["metadata"], e)
 e = refusal(lambda: server._update("a2", wake=D(3), sender="home-beta"))
@@ -1242,10 +1242,10 @@ a3, a5, a7, a8 = rd("a3"), rd("a5"), rd("a7"), rd("a8")
 check("wake pass: the items due (yesterday's and today's wake) are released, the one not due stays on hold", sorted(woke) == ["a3", "a5", "a8"]
       and all(x["status"] == "open" and "hold" not in x["metadata"] for x in (a3, a5, a8)) and held_("a7") and wk_(a7["metadata"]) == D(5), (woke, a3, a7, a8))
 check("wake pass: the wake goes and both clocks move to now, together", all("wake" not in x["metadata"] and x["updated"] == x["state_updated"] and t0 - 1 <= x["updated"] <= time.time() + 1 for x in (a3, a5, a8)), (a3, a8))
-check("wake pass: due and next untouched (the ended wait names the mover in needs)", a5["metadata"].get("due") == D(9) and a5["metadata"].get("next") == "ask Kim for A or B", a5)
+check("wake pass: needs, due and next untouched", a5["metadata"].get("needs") == ["external"] and a5["metadata"].get("due") == D(9) and a5["metadata"].get("next") == "ask Kim for A or B", a5)
 bw = ui_render.Board(str(T / "store"))
-check("wake pass: back in its lane, none still held or waiting",
-      {"a3", "a5", "a8"} <= {r["gid"] for r in bw.agent + bw.n_call + bw.n_relay} and not {"a3", "a5", "a8"} & {r["gid"] for r in bw.held}, ([r["gid"] for r in bw.n_call], [r["gid"] for r in bw.held]))
+check("wake pass: back in its lane: needs external → on others, no needs → on agent; none still held", "a5" in [r["gid"] for r in bw.n_relay]
+      and {"a3", "a8"} <= {r["gid"] for r in bw.agent} and not {"a3", "a5", "a8"} & {r["gid"] for r in bw.held}, ([r["gid"] for r in bw.n_call], [r["gid"] for r in bw.held]))
 p = wait_push(n0 + 1)
 _w3 = sorted(p[n0][1].splitlines()[1:]) if len(p) == n0 + 1 else []
 check("wake pass (the turn rule's fourth build): the owner is told once for the three, one line each, naming the wake as stored and the lane",
@@ -1386,9 +1386,11 @@ check("reminder: a wake alone is stored and is no hold; the hand-off it carries 
       wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "work-osprey: review the draft" and res.startswith("updated a30.\na30 [open] ") and f"until: {D(2)}" in res, res)
 check("reminder: it wakes the minute loop and is on its list", server._WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
-check("reminder: the item stays in its active lane (on agent), never among the parked", "a30" in [r["gid"] for r in b_.agent] and "a30" not in [r["gid"] for r in b_.held], [r["gid"] for r in b_.held])
-check("reminder: the item page shows the date a wait on a time ends on", f"<dt>Wake</dt><dd>{b_.when(render.wake_of(rd('a30')))}</dd>" in ip_ or b_.when(render.wake_of(rd("a30"))) in ip_, ip_[ip_.find("istat"):][:600])
-check("reminder: the brief lists it among the active items", "a30 [open]" in server.stackshot_brief().partition("\n\nOn hold (")[0])
+check("reminder: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
+_wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)
+check("reminder: the item page shows the date in the sidebar's Wake row, and says waiting", bool(_wk30) and _wk30.group(1) == b_.when(render.wake_of(rd("a30"))) and "tag t-wait" in ip_, (_wk30.group(1) if _wk30 else None, ip_[ip_.find("istat"):][:300]))
+_b30 = server.stackshot_brief().partition("\n\nOn hold (")
+check("reminder: the brief lists it among the parked, not the active items", "a30 [open" in _b30[2] and "a30 [open" not in _b30[0], _b30[0][-300:])
 check("reminder: the update description says a wake alone is a reminder, never that it implies a hold",
       "alone is a reminder, never a hold" in server._UPDATE_DESC and "a wake implies" not in server._UPDATE_DESC and "implies hold" not in server._UPDATE_DESC)
 pj = json.load(open(T / "store/projects.json")); pj["pages"]["projects/zz"] = {**page("Zz", "work-zz"), "agents": {"work-zz-bg": "builds"}, "back_agents": {"work-zz-bg": "builds"}}; (T / "store/projects.json").write_text(json.dumps(pj))
@@ -1417,7 +1419,9 @@ b_ = ui_render.Board(str(T / "store"))
 check("reminder pass: the items stay in their lane, still active", {"a30", "a25"} <= {r["gid"] for r in b_.agent} and not {"a30", "a25"} & {r["gid"] for r in b_.held})
 # hold=true with a wake parks and releases as before; an item stored held with a wake before the change still releases at its wake
 server._update("a34", hold=True, wake=D(2), sender="home-beta")
-check("park: hold=true with a wake is on hold, out of the active lane", held_("a34") and "hold" not in rd("a34")["metadata"])
+_b34 = ui_render.Board(str(T / "store"))
+check("park: hold=true with a wake is waiting on its date, parked out of the active lane", held_("a34") and "hold" not in rd("a34")["metadata"]
+      and "a34" in [r["gid"] for r in _b34.held] and "a34" not in [r["gid"] for r in _b34.agent + _b34.n_call + _b34.n_relay], ([r["gid"] for r in _b34.held], [r["gid"] for r in _b34.agent]))
 it = rd("a34"); setwk_(it["metadata"], D(-1)); (T / "store/a/34.json").write_text(json.dumps(it))
 it = rd("a31"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/31.json").write_text(json.dumps(it))   # as a file written before the change holds it
 n0 = len(wait_push(0)); woke = server._wake_pass(); p = wait_push(n0 + 1)

@@ -5216,6 +5216,9 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
             ask, opts = _watch_ask(gid, meta, what)
             _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
+        elif cause == "time" and not str(meta.get("wait_kind") or "").strip() and not str(meta.get("post_wake_mover") or "").strip():
+            _watch.end_date(meta, what, post, now)       # a wait on the date alone ends with the date: needs, the open after link and the mover stay as stored
+            mover = post
         else:
             _watch.turn_alive(meta, post, what, now)
             mover = post
@@ -7765,7 +7768,7 @@ def _wake_alone_on_agent(meta: dict[str, Any]) -> bool:
     """A wake with no hold on an item that is on agent: what the two wake notes (_wake_window_note, _wake_step_note) share. False for an item on hold or with no wake, one waiting on his decision
     or on an open `after`, one with needs=external, one whose wake carries a wait_basis and is still ahead (the board lists it as waiting until the wake: model.view), and one stored as outside, verifying or blocked
     (none of those is on agent)."""
-    if meta.get("hold") or (_wt.stored_until(meta) and str(meta.get("wait_kind") or "").strip()) or not _wt.wake_value(meta) or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
+    if meta.get("hold") or _wt.stored_until(meta) or not _wt.wake_value(meta) or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
         return False
     return not ("external" in [str(x).lower() for x in _wt.needs_of(meta)] or str(meta.get("state") or "").lower() in ("outside", "verifying", "blocked"))
 
@@ -10245,7 +10248,8 @@ def stackshot_brief() -> str:
             it = json.load(f)
         _legacy_hold(it); _ip.read_through(it)
         if it.get("status") == "open":
-            it["gid"] = gid; (held if _is_held(it) else mine).append(_fmt(it, brief=True))
+            parked = _is_held(it) or (_date_parked(it) and not _waits_decision(it.get("metadata") or {}))      # a wait on a date alone is parked, as the board draws it
+            it["gid"] = gid; (held if parked else mine).append(_fmt(it, brief=True))
     hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
     return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
             + "\n\nFull board: " + _shared.BOARD_URL + " · any item by id: the get tool") + _nag()
@@ -12634,8 +12638,9 @@ def _update_unlocked(
         opts = []
     gid = _norm_id(item_id, bare=_bare_id_ok(status))
     item = _load(gid)
+    had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
     was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
-    if was_until and clear_wake and _uw.kind_of(item["metadata"]) in ("", "time") and not item["metadata"].get("hold"):
+    if was_until and clear_wake and _uw.kind_of(item["metadata"]) in ("", "time") and not had_hold:
         clear_hold = True                                # the date of a wait on the date alone is the whole wait: dropping it ends the wait, the hold it stands as goes with it
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
     meta = dict(item.get("metadata") or {})
@@ -12676,6 +12681,8 @@ def _update_unlocked(
         raise ToolError("Refused: clear_after drops the after list; it does not go with a new one")
     if clear_after:
         meta.pop("after", None)
+        if _uw.kind_of(meta) == "item" and not wait_kind.strip() and not clear_wait and was_until and _uw.date_of(meta):
+            meta.pop("wait_kind", None)                  # the wait on the item ended with its link; the date it carried stays as a wait on the date alone
         _wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
         meta["after"] = _gate_after(after, gid)
@@ -13025,6 +13032,9 @@ def _update_unlocked(
             for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
                 meta.pop(k_, None)
     wait_note = ""
+    gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in _ASK_NONE
+    if was_until and bool(wake) != gave_ask and item.get("status") == "open":      # one date given: the date the item held before (unfolded into the other working field) does not outlive it
+        meta.pop("ask_by" if wake else "wake", None)
     if item.get("status") == "open" and "wait_kind" in model_set:
         _uw.to_slot(meta)                                       # a date held for another kind moves to the field the new kind reads
     if item.get("status") == "open" and "wait_kind" in model_set and _uw.needs_date(meta) and not meta.get("recycle") and not (meta.get("state") == "verifying" and meta.get("end")):
@@ -13160,6 +13170,8 @@ def _update_unlocked(
             _gate_front_step(gid, item_now, steps_before, steps_new, sender.strip() or debtor)     # a new or reworded step that opens with a front agent on an item another session moves: nothing could wake it for the step
     kept_legacy_wake = False
     if item.get("status") == "open" and (was_until or wake or hold or ask_by.strip() or until_wait):
+        if _wt.after_of(meta) and not _uw.kind_of(meta) and not clear_after and (after_set or had_hold) and _uw.date_of(meta):
+            meta["wait_kind"] = "item"                   # a date beside an after link with no kind is that wait's backstop (as ask_by was); create does the same
         kept_legacy_wake = bool(meta.get("wake")) and not until_wait and (bool(wake) or not was_until)      # the wake as the old parameter (or an older write) gave it keeps the reminder note; a date passed as until never does
         keep_hold = bool(meta.get("hold")) and bool(_wt.wake_value(meta)) and bool({"anchor", "recycle"} & set(_hold_held_by(gid, meta)))      # a hold that waits on an anchor scoped to the item or on a pane recycle keeps its flag and record (the anchor release, the backstop gate and the recycle read them); the date is its backstop
         kept_hold_set = meta.get("hold_set")
@@ -13274,7 +13286,7 @@ def _update_unlocked(
                  + (f"; its wake {_wt.wake_value(meta)} stays as a reminder" if _wt.wake_value(meta) else "") + ")")
     return (f"updated {_gh.shown(gid)}.\n" + _fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + _form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(meta) if wake else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + _nag(debtor))
 
 

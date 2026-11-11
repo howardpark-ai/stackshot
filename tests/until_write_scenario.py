@@ -188,7 +188,8 @@ timed_next = f"{BACK}: collect the logs until {w(2)}, then review them"
 note = server._wake_window_note({"wake": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"})
 check("4 the window note prints the date the wait stands for (the legacy wake)", w(2) in note and "alone is a reminder" in note, note)
 check("4 …and the same date stored as until with a kind is the wait, not a reminder: no note", server._wake_window_note({"until": w(2), "wait_kind": "time", "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == "", None)
-check("4 …a kind-less until reads as the reminder the wake alias wrote, with the date printed", w(2) in server._wake_window_note({"until": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"}), None)
+check("4 …and a kind-less until is a wait too: no reminder note for any stored until", server._wake_window_note({"until": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == ""
+      and not server._wake_alone_on_agent({"until": w(2), "needs": [BACK]}), None)
 item(40, needs=[BACK], until=w(5), post_wake_mover=BACK, watch={"set_at": now0}, wait_basis={"text": f"the vendor ships {w(5)}", "wake": w(5), "by": BACK, "at": now0})
 bupd(40, clear_hold=True)
 check("4 clear_hold on an item that stores only until releases it: until, the post-wake mover, the watcher stamps and the basis go", not W.stored_until(mt(40)) and not any(k in mt(40) for k in ("post_wake_mover", "watch", "wait_basis", "wait_kind", "ask_by")), mt(40))
@@ -202,6 +203,53 @@ bupd(42, priority="p2")
 check("4 the basis is read against the until it was given for: an unrelated write keeps it", W.basis_of(mt(42)) == f"the license expires {w(31)}" and W.stored_until(mt(42)) == w(30), mt(42))
 bupd(42, until=w(3))
 check("4 …and a write that moves the date to another day drops the record bound to the old one", not W.basis_of(mt(42)) and W.stored_until(mt(42)) == w(3), mt(42))
+
+# ================================================================ 5. defects a review found: each one failed before its fix
+# 5.1 clearing the date of a wait that unfolds as a hold (a basis, or the kind time) is not refused as an indefinite park
+item(50, needs=[BACK], until=w(5), wait_basis={"text": f"the vendor ships {w(5)}", "wake": w(5), "by": BACK, "at": now0})
+try:
+    bupd(50, until="none"); e50 = ""
+except Exception as e:
+    e50 = str(e)
+check("5.1 until=none on a wait that carries a basis ends it, no refusal", not e50 and not W.stored_until(mt(50)), (e50, mt(50)))
+item(51, needs=[BACK], until=w(5), wait_kind="time")
+try:
+    bupd(51, clear_wake=True); e51 = ""
+except Exception as e:
+    e51 = str(e)
+check("5.1 clear_wake on a stored time wait ends it, no refusal", not e51 and not W.stored_until(mt(51)), (e51, mt(51)))
+
+# 5.2 a date given in the write that changes the kind of the wait is the date that stands
+item(52, needs=[BACK], until=w(3), wait_kind="relay", wait_event="the vendor's reply", post_wake_mover=BACK)
+item(53, needs=[BACK])
+bupd(52, wait_kind="item", after=["a53"], until=w(6))
+check("5.2 relay → item with a new until: the new date stands, not the earlier one", W.stored_until(mt(52)) == w(6) and mt(52).get("wait_kind") == "item", mt(52))
+item(54, needs=[BACK], until=w(6), wait_kind="item", after=["a53"])
+bupd(54, wait_kind="relay", wait_event="the vendor's reply", ask_by=w(3), post_wake_mover=BACK)
+check("5.2 item → relay with a new ask_by: the new date stands", W.stored_until(mt(54)) == w(3) and mt(54).get("wait_kind") == "relay", mt(54))
+
+# 5.3 a date written as until is a wait, never a reminder: the reply carries no reminder note
+item(55, needs=[BACK], next=timed_next)
+out55 = bupd(55, until=w(2))
+check("5.3 update(until=D) with a timed next line: no reminder note, and the item reads waiting", "alone is a reminder" not in out55 and W.stored_until(mt(55)) == w(2) and mt(55).get("phase") == "waiting", (out55[-500:], mt(55)))
+
+# 5.4 a wait on a date alone ends by dropping the date: needs, after and the mover stay as stored
+item(56, needs=["external"], until=w(1))
+item(57, needs=[BACK], until=w(1), after=["a53"], wait_kind="item")
+for g in (56,):
+    d = rd(g); d["metadata"]["until"] = w(-1); (T / f"store/a/{g}.json").write_text(json.dumps(d))
+server._watch_pass()
+check("5.4 a date-only wait that ends keeps needs=external (the item goes back to others, not to a session)", W.stored_until(mt(56)) is None or not W.stored_until(mt(56)), mt(56))
+check("5.4 …and needs stays external, with the arrival recorded", mt(56).get("needs") == ["external"] and mt(56).get("woke"), mt(56))
+item(58, needs=[BACK], until=w(1), after=["a53"])
+d = rd(58); d["metadata"]["until"] = w(-1); (T / "store/a/58.json").write_text(json.dumps(d))
+server._watch_pass()
+check("5.4 a date that passes never drops an open after link", mt(58).get("after") == ["a53"], mt(58))
+
+# 5.5 update matches create: a date beside an after link with no kind is the item wait's backstop
+item(59, needs=[BACK], hold=True, after=["a53"], wake=w(5), wait_basis={"text": f"the vendor ships {w(5)}", "wake": w(5), "by": BACK, "at": now0})
+bupd(59, wake=w(4))
+check("5.5 a legacy hold + after given wake= stores the item wait with the date as its backstop", mt(59).get("wait_kind") == "item" and W.stored_until(mt(59)) == w(4) and mt(59).get("after") == ["a53"], mt(59))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": until write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
