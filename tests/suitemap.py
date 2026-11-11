@@ -93,8 +93,9 @@ and that is narrow on purpose:
     a digit or an underscore is not plain (a commented-out sample such as `# live = true` or `# session_view = ""` is code to a suite that
     replaces text without anchoring it). → the direct readers
   * the lines from the header of a PINNED_TABLES table ([audit], [anchor_hub]) to its first code line are as they were (a suite's pattern
-    takes the header line and the one after it as one text); a comment or a blank line put there is a change. So is anything at or above
-    the first line of the file (stackshot/cli.py anchors `\\A(# stackshot\\.example\\.toml)` on it for the configs it writes).
+    takes the header line and the one after it as one text); a comment or a blank line put there is a change. So is a change at, or directly
+    after, the first line of the file (stackshot/cli.py anchors `\\A(# stackshot\\.example\\.toml)` on it for the configs it writes; the
+    test is wider than that line on purpose, the safe side).
 Anything else selects the direct readers AND the fixture readers (the behaviour before this rule): any change to a code line, a trailing
 comment or the whitespace before it included; any key, table, inline table or array-of-tables row added, removed or moved; a value
 changed; an uncommented sample; a comment that is not plain. What a fixture suite breaks on depends on where a line lands and on text
@@ -1250,8 +1251,8 @@ def plain_comment(line, words):
 
 def layout_only(ot, nt, pinned, words):
     """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string), the lines from a
-    pinned table's header to its first code line are as they were, and nothing at or above the first line changed (stackshot/cli.py anchors
-    `\\A(# stackshot\\.example\\.toml)` on it). Every other line is equal and in order, so the code is untouched."""
+    pinned table's header to its first code line are as they were, and no change starts at, or directly after, the first line (stackshot/cli.py anchors
+    `\\A(# stackshot\\.example\\.toml)` on it; the test is wider than that line on purpose). Every other line is equal and in order, so the code is untouched."""
     oraw, oc = code_lines(ot)
     nraw, nc = code_lines(nt)
 
