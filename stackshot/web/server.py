@@ -3808,6 +3808,8 @@ def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None
 from stackshot.anchors import anchors as _anc  # noqa: E402
 from stackshot.anchors import receiver_health as _rh  # noqa: E402  — when a receiver's last check is too old to call it healthy (receiver_health.py)
 from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
+from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the progress clock's merge pass
+from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open items a merged pull request is tied to (merge_tie.py)
 from stackshot.anchors import anchor_scope as _ascope  # noqa: E402  — which anchors count for an item: the one reader, from every project's page (anchor_scope.py)
 from stackshot.fleet import fleet as _fleet  # noqa: E402
 from stackshot.core import cloud as _cloud  # noqa: E402
@@ -5885,8 +5887,19 @@ def _minute_wake_catchup() -> None:
 
 
 def _minute_anchor_pass() -> None:
-    """The anchor pass, in a tick of its own so that a failure in it does not stop the next one; published when it released something."""
-    if _anchor_pass():
+    """The anchor pass, in a tick of its own so that a failure in it does not stop the next one; published when it released something. The progress clock's merge pass (`_merge_progress_tick`) rides
+    on it: it reads what the hub saw, as the anchor pass does, and a failure in either does not stop the other."""
+    try:
+        released = _anchor_pass()
+    except Exception as e:  # noqa: BLE001  — the merge pass below is not stopped for it
+        released = []
+        print(f"anchor pass: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        moved = _merge_progress_tick()
+    except Exception as e:  # noqa: BLE001  — the clock is groundwork for the hand-up of a stuck item; the anchor pass is not stopped for it
+        moved = []
+        print(f"merge progress: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if released or moved:
         _publish()
 
 
@@ -15713,6 +15726,145 @@ def _proof_tick(now: float | None = None) -> list[str]:
     if not (isinstance(sec, dict) and "live" in sec):
         _proof_state_save(dry_logged=now)      # no switch set: this was the first dry pass, the next one acts
     return []
+
+
+# ----------------------------------------------------------------------------- a merged pull request is progress for the item it is tied to
+# An item whose pull request merged has moved, whether or not the merge settles a step: a pull request that is one of several steps never wrote the "merged <ref>" entry of `released_told`
+# (that is the settle path's, `_proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
+# reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
+# body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
+# naming the pull request. The pass stores the key in `metadata.merged_seen` through `_save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
+_MERGE_PROG_KEEP = 20       # keys kept in an item's merged_seen (as released_told keeps its last 20)
+
+
+def _merge_progress_state_path() -> Path:
+    return _cfg.state("merge-progress.json")
+
+
+def _merge_progress_offset() -> int | None:
+    """Where in the hub's merge log the pass stopped (a byte offset), None for a pass that has never run on this state directory."""
+    try:
+        v = json.load(open(_merge_progress_state_path(), encoding="utf-8")).get("offset")
+        return int(v) if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _merge_progress_save(offset: int) -> None:
+    try:
+        p = _merge_progress_state_path(); p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps({"offset": int(offset)}) + "\n", encoding="utf-8"); os.replace(tmp, p)
+    except Exception as e:  # noqa: BLE001
+        print(f"merge progress: offset not saved: {e}", file=sys.stderr, flush=True)
+
+
+def _anchor_repo(url: str) -> str:
+    """The GitHub repository ("owner/repo", through [github.moved]) an anchor URL is in (a pull request, a repository's releases or notifications), "" for any other anchor."""
+    a = str(_anc.anchor_id(url) or "")
+    return _cfg.canon_repo(a[7:].split("#", 1)[0].split("@", 1)[0]) if a.startswith("github:") else ""
+
+
+def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
+    """The lines worth acting on: each parsed on its own (merge_log.normal), so a line of the wrong shape (a hand edit, a torn write that still parsed) is logged and skipped and the offset moves on
+    past it; and only those younger than `main_hours` plus two hours, on every pass. A merge from the backlog of a day of downtime stamps the item's progress at the time of the save, which would be a
+    clock reset for work that happened long ago: it is no progress now, so it is not stamped."""
+    out: list[dict[str, Any]] = []
+    floor = now - (_ladder_main_hours() + 2.0) * 3600.0
+    for row in rows:
+        try:
+            r = _mlog.normal(row)
+        except Exception as e:  # noqa: BLE001
+            print(f"merge progress: line skipped ({e.__class__.__name__}: {e}): {str(row)[:120]}", file=sys.stderr, flush=True)
+            continue
+        if r["ts"] >= floor:
+            out.append(r)
+    return out
+
+
+def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, Any], str, dict[str, str]]]:
+    """For each merge line the open items on the stall ladder it is tied to: [(line, "owner/repo#n", {item id: why})]. The items are read once for all lines; one that cannot be read is logged and left out."""
+    scoped = _released_anchors()
+    texts: dict[str, str] = {}
+    projects: dict[str, str] = {}
+    for gid, _p in _item_files():
+        try:
+            it = _load(gid)
+            if it.get("status") != "open":
+                continue
+            meta = it.get("metadata") or {}
+            cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))
+            if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or _is_held(it):
+                continue      # the board shows it waiting, held or in the owner's lane: not on the stall ladder, and a stray mention must not reset its silence clock
+            texts[gid] = "\n".join([str(it.get("description") or ""), *(c["text"] for c in cl)])
+            projects[gid] = str(meta.get("project") or "")
+        except Exception as e:  # noqa: BLE001
+            print(f"merge progress: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        pages = _mtie.repo_pages(_anc.load(), _anchor_repo)
+    except Exception as e:  # noqa: BLE001
+        pages = {}
+        print(f"merge progress: anchors not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    out = []
+    for row in rows:
+        key = f"{_cfg.canon_repo(str(row['repo']))}#{int(row['n'])}"
+        body: list[str] = []
+        for ref in row.get("refs") or []:
+            try:
+                g = _norm_id(str(ref))
+            except Exception:      # an id that names no item (another machine's temporary id, a word that only looks like an id)
+                continue
+            if g in texts and g not in body:
+                body.append(g)
+        tied = _mtie.tied(key, body, {g: ks for g, ks in scoped.items() if g in texts}, texts, projects, pages, _cfg.canon_repo)
+        out.append((row, key, tied))
+    return out
+
+
+def _merge_progress_tick(now: float | None = None) -> list[str]:
+    """The pass: read the hub's merge log from where it stopped, and for each open item a merged pull request is tied to (merge_tie.tied) add the pull request to the item's `merged_seen` and save it,
+    which moves the item's progress clock (progress.moved). On every pass a line that is malformed is logged and skipped, and one older than the hand-up interval plus two hours is skipped (`_merge_rows`: the
+    backlog of a day of downtime, or a shorter file read again from its start, would stamp items for merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
+    or held is left alone. An item that cannot be read or saved is logged and skipped: the others are saved and the offset is stored, so one bad item does not abort the pass every minute. → the ids saved."""
+    if _watch.holding():
+        return []
+    now = time.time() if now is None else now
+    off = _merge_progress_offset()
+    rows, new = _mlog.read(off or 0)      # an offset past the end of the file (replaced or shrunk) reads from its start
+    rows = _merge_rows(rows, now)
+    if not rows:
+        if new != off:
+            _merge_progress_save(new)
+        return []
+    saved: list[str] = []
+    try:
+        ties = _merge_tied(rows, now)
+    except Exception as e:  # noqa: BLE001  — a read that failed as a whole: the offset stays where it was, and the next pass reads the lines again
+        print(f"merge progress: items not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+    for row, key, tied in ties:
+        for gid, how in tied.items():
+            try:
+                with _ITEM_LOCK:
+                    it = _load(gid)
+                    meta = it.get("metadata")
+                    if it.get("status") != "open" or not isinstance(meta, dict):
+                        continue
+                    seen = [str(x) for x in (meta.get(_progress.SEEN) or []) if str(x)]
+                    if key in seen:
+                        continue
+                    meta[_progress.SEEN] = [*seen, key][-_MERGE_PROG_KEEP:]
+                    what = f"{_pr_shown(key)} merged, and {_mtie.HOW[how]}: that is progress on the item"
+                    _stall.note(meta, now, what)      # the History line
+                    it["metadata"] = meta
+                    it["updated"] = now      # as the event save of the settle path does (_proof_item)
+                    _save(gid, it, note=f"{NAME}: {what}", activity=_activity.EVENT)
+                    if gid not in saved:
+                        saved.append(gid)
+                    print(f"merge progress: {gid} moved by {key} ({how})", file=sys.stderr, flush=True)
+            except Exception as e:  # noqa: BLE001  — one item that cannot be read or saved never stops the others
+                print(f"merge progress: {gid} not saved for {key}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    _merge_progress_save(new)
+    return saved
 
 
 def _project_agent_rename(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:

@@ -3441,6 +3441,7 @@ def _gh48(args, capture_output=True, text=True, timeout=30):
     if path not in G48: return _types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
     body = json.dumps(G48[path])
     return _types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
+bref = lambda n: f"board#{n}"      # a board id as a body writes it, built here so a fixture number is never a literal board id
 class _Stop48(Exception): pass
 def _no_sleep(s): raise _Stop48()
 _gsub, _gthr, _gtime = ghr.subprocess, ghr.threading, ghr.time
@@ -3467,7 +3468,7 @@ try:
     G48[f"{R}/issues/116"] = {**G48[f"{R}/issues/116"], "comments": 1, "updated_at": "2026-03-05T01:00:00Z"}
     G48[f"{R}/issues/116/comments?since=2026-03-05T00:00:00Z&per_page=20"] = [{"user": {"login": "kim"}, "body": "why this?", "html_url": PR48 + "#c1", "created_at": "2026-03-05T01:00:00Z"}]
     G48[f"{N}/notifications?all=true&per_page=50"] = [{**x, "updated_at": "2026-03-05T02:00:00Z"} for x in G48[f"{N}/notifications?all=true&per_page=50"]]
-    G48[f"{N}/issues/12"] = {"html_url": "https://github.com/example-org/board-repo/pull/12", "pull_request": {"merged_at": "2026-03-05T02:00:00Z"}, "closed_by": {"login": "example-owner"}, "closed_at": "2026-03-05T02:00:00Z", "state": "closed"}
+    G48[f"{N}/issues/12"] = {"html_url": "https://github.com/example-org/board-repo/pull/12", "pull_request": {"merged_at": "2026-03-05T02:00:00Z"}, "closed_by": {"login": "example-owner"}, "closed_at": "2026-03-05T02:00:00Z", "state": "closed", "body": "Part of " + bref(9233) + ", not #34"}
     G48[f"{N}/issues/12/comments?since=2026-03-05T00:00:00Z&per_page=50"] = []; G48[f"{N}/pulls/12/reviews?per_page=100"] = []; G48[f"{N}/pulls/12/comments?since=2026-03-05T00:00:00Z&per_page=50"] = []
     G48[f"{N}/issues/13"] = {"html_url": "https://github.com/example-org/board-repo/pull/13", "pull_request": {"merged_at": None}, "state": "open"}
     G48[f"{N}/issues/13/comments?since=2026-03-05T00:00:00Z&per_page=50"] = []; G48[f"{N}/pulls/13/comments?since=2026-03-05T00:00:00Z&per_page=50"] = []
@@ -3479,9 +3480,11 @@ try:
           {(e.anchor, e.repo_id) for e in evs1} == {(A48, ID_A48), (AH48, ID_B48)} and all(isinstance(e.repo_id, int) for e in evs1), [(e.anchor, e.repo_id) for e in evs1])
     G48[f"{R}/pulls/116"] = {"head": {"sha": "c" * 40}}
     G48[f"{R}/commits/{'c' * 40}/check-runs?per_page=100"] = {"check_runs": [{"name": "tests", "status": "completed", "conclusion": "success"}]}
-    G48[f"{R}/issues/116"] = {**G48[f"{R}/issues/116"], "state": "closed", "updated_at": "2026-03-05T03:00:00Z", "closed_by": {"login": "example-owner"}, "pull_request": {"merged_at": "2026-03-05T03:00:00Z"}}
+    G48[f"{R}/issues/116"] = {**G48[f"{R}/issues/116"], "state": "closed", "updated_at": "2026-03-05T03:00:00Z", "closed_by": {"login": "example-owner"}, "pull_request": {"merged_at": "2026-03-05T03:00:00Z"}, "body": "Closes " + bref(9235) + ""}
     pass48(); got2 = sorted((e.anchor, e.etype) for e in evs48); evs2 = list(evs48); evs48.clear()
     check("receiver: CI passing again and the PR's merge, tagged ci_passed and pr_merged", got2 == sorted([(A48, "ci_passed"), (A48, "pr_merged")]), got2)
+    check("receiver: a merge carries the board ids the pull request's body names (a repository's notifications thread, and the pull request's own anchor); an event that is no merge carries none",
+          {(e.anchor, e.etype): (e.meta or {}).get("refs") for e in evs1 + evs2 if e.etype in ("pr_merged", "comment", "review")} == {(AH48, "pr_merged"): [bref(9233)], (A48, "pr_merged"): [bref(9235)], (A48, "comment"): None, (AH48, "review"): None}, [(e.anchor, e.etype, e.meta) for e in evs1 + evs2])
     check("receiver: a later event on the same repo keeps the ID it learnt", {e.repo_id for e in evs2} == {ID_A48}, [e.repo_id for e in evs2])
     G48[f"{R}/issues/116"] = {**G48[f"{R}/issues/116"], "state": "open", "updated_at": "2026-03-05T04:00:00Z", "pull_request": {"merged_at": None}}
     for _k in range(10):                                           # a merged PR is looked at once in 10 passes, so a reopen is seen within 10
