@@ -201,7 +201,10 @@ does both (its docstring has the rules in full):
   that reads the name, followed across imports and through the bindings that use it, and the suites whose own file names it;
   a module-level statement with effects at import (an unknown decorator, a call) every suite that ran the file; a
   registered tool's header or description (`@mcp.tool`) its callers and whatever lists the tools. A comment or a file no suite
-  touches reaches none. A new file (added, or a rename's new path) reaches the suites that listed its directory; in a
+  touches reaches none. A change to the docstring alone of a module-level function with no decorator (or only a wrapping one, such as
+  `functools.wraps`) is not a change of its body: it reaches the file's text readers, the suites whose own file names the function and the
+  suites that ran code reading a docstring (`__doc__`, `getdoc`), not every suite that ran the function; a decorated function's docstring (an
+  `@mcp.tool`'s is the description a session reads), a method's, a class's and a docstring changed together with its function's code are selected as before. A new file (added, or a rename's new path) reaches the suites that listed its directory; in a
   directory no measured suite lists, every suite, since code may look it up by a name nobody tried before (the checkout and
   `tests/` are listed by every suite: the import machinery lists the directories on `sys.path`). No map, a change to the harness (`.github/`, `tests/run-suite`, `pyproject.toml`, `uv.lock`,
   `tests/suitemap.py`) or a suite with no clean measurement: those run (all, for the first three).
