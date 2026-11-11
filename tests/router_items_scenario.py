@@ -43,7 +43,7 @@ def item(proj, subject, mover=None, needs=None, party=None, status="open", updat
     md = {"owner": mover or "docs-main", "project": proj, **({"mover": mover} if mover and not needs else {}), **({"needs": needs} if needs else {}), **({"party": party} if party else {}), **({"next": nxt} if nxt else {})}
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": subject, "description": "A thing. It lives here. Done when done.", "status": status, "metadata": md, "updated": updated}))
     return i
-# projects/docs: two open items moved by docs-main (the blog draft's), one closed, one of another project
+# projects/docs: two open items moved by docs-main, one closed, one of another project
 i_style = item("projects/docs", "Style pass on the blog draft about the weekly digest", "docs-main", party="Sam", updated=300.0)
 i_post = item("projects/docs", "Write the post from the deck", "docs-main", party="Sam", updated=200.0)
 item("projects/docs", "Old newsroom post", "docs-main", status="completed", updated=400.0)
