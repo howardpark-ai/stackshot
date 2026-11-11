@@ -12,7 +12,8 @@ import urllib.parse
 from typing import Any
 
 from stackshot.core import config as _cfg
-from stackshot.web.runners import ORG_MARK, SWITCH_ACTIONS, _columns, _machines, _now, asof_html, conf, enabled, pending_html, switch_boxes, switch_enabled, unused
+from stackshot.web import i18n as _i18n
+from stackshot.web.runners import ORG_MARK, SWITCH_ACTIONS, _columns, _machines, dur as _dur, _now, asof_html, conf, enabled, pending_html, switch_boxes, switch_enabled, unused
 from stackshot.web.ui import under
 
 # ----------------------------------------------------------------------------- the page
@@ -22,14 +23,6 @@ def _e(s: Any) -> str:
 
 def _natural(name: str) -> list[Any]:
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
-
-
-def _dur(s: float) -> str:
-    s = max(0, int(s))
-    if s < 60:
-        return f"{s}s"
-    m = s // 60
-    return f"{m}m" if m < 60 else f"{m // 60}h {m % 60:02d}m"
 
 
 def _running(x: dict[str, Any], now: float) -> str:
@@ -45,15 +38,16 @@ def _running(x: dict[str, Any], now: float) -> str:
     elif ph:                                                  # no PR or branch to link: the repo and the run's name
         what = " · ".join(p for p in (_e(repo), _e(j.get("run") or "")) if p)
     else:
-        what = f"{_e(repo)}, job not found" if repo else "job not found"
+        what = _i18n.t("runners.repo_job_not_found", repo=_e(repo)) if repo else _i18n.t("runners.job_not_found")
     if ph:                                                    # the job's start or end gap, told as such: GitHub's lists are seconds behind the runner
-        what = f"{what} · {ph} job…" if what else f"{ph} job…"
+        gap = _i18n.t("runners.phase." + ph)
+        what = f"{what} · {gap}" if what else gap
     since = f" · {_dur(now - j['started'])}" if j.get("started") else ""
     return f'<span class="rjob">{what}{since}</span>'
 
 
 def _tag(col: str) -> str:
-    return col[:-len(ORG_MARK)] + " (shared)" if col.endswith(ORG_MARK) else col
+    return _i18n.t("runners.shared", name=col[:-len(ORG_MARK)]) if col.endswith(ORG_MARK) else col
 
 
 def _li(x: dict[str, Any], now: float, tag: str = "") -> str:
@@ -61,7 +55,7 @@ def _li(x: dict[str, Any], now: float, tag: str = "") -> str:
     st = x["state"]
     if st == "running":
         cls, word = "running", "running"
-        tail = _running(x, now) + (' <span class="rwhy">· finishes, then stops</span>' if x.get("stopping") else "")
+        tail = _running(x, now) + (f' <span class="rwhy">{_e(_i18n.t("runners.finishes_stops"))}</span>' if x.get("stopping") else "")
     elif x.get("disabled"):
         cls, word = "off", "disabled"
         tail = "" if x["reason"].startswith("disabled on ") or not x["reason"] else f'<span class="rwhy switch">{_e(x["reason"])}</span>'      # "disabled on <box>" says what the machine's row says already
@@ -72,7 +66,7 @@ def _li(x: dict[str, Any], now: float, tag: str = "") -> str:
         cls, word, tail = "idle", "idle", ""
     tg = f' <span class="rtag">{_e(tag)}</span>' if tag else ""
     return (f'<li class="rn {cls}"><span class="rdot" aria-hidden="true"></span><b class="rname">{_e(x["name"])}</b> '
-            f'<span class="rst">{word}</span>{tg}{" " + tail if tail else ""}</li>')
+            f'<span class="rst">{_e(_i18n.t("runners.st." + word))}</span>{tg}{" " + tail if tail else ""}</li>')
 
 
 def tally(snap: dict[str, Any]) -> dict[str, int]:
@@ -90,8 +84,9 @@ def _cards(t: dict[str, int]) -> str:
     def card(cls: str, n: int, label: str) -> str:
         z = "" if n else " zero"
         return f'<div class="rcard {cls}{z}"><b>{n}</b><span>{label}</span></div>'
-    return ('<div class="rcards">' + card("", t["runners"], "Runners") + card("run", t["running"], "Running") + card("idle", t["idle"], "Idle")
-            + card("off", t["disabled"], "Disabled") + card("bad" if t["offline"] else "", t["offline"], "Offline") + "</div>")
+    L = lambda k: _e(_i18n.t("runners.card." + k))
+    return ('<div class="rcards">' + card("", t["runners"], L("runners")) + card("run", t["running"], L("running")) + card("idle", t["idle"], L("idle"))
+            + card("off", t["disabled"], L("disabled")) + card("bad" if t["offline"] else "", t["offline"], L("offline")) + "</div>")
 
 
 def _machine_state(mine: list[dict[str, Any]], sw: dict[str, Any]) -> tuple[str, str, bool]:
@@ -100,15 +95,16 @@ def _machine_state(mine: list[dict[str, Any]], sw: dict[str, Any]) -> tuple[str,
     busy = sum(1 for x in online if x["state"] == "running")
     if not sw.get("ok"):
         if sw.get("why") == "unreachable":
-            return '<span class="offw">not reachable</span>', "unreachable", False
-        return "switch not read", "unread", False
+            return f'<span class="offw">{_e(_i18n.t("runners.m.unreachable"))}</span>', "unreachable", False
+        return _e(_i18n.t("runners.m.unread")), "unread", False
     if sw["mode"] == "off":
         if busy:
-            return f'<span class="offw">disabling</span> · {busy} job{"s" if busy != 1 else ""} finishing', "disabling", False
+            return f'<span class="offw">{_e(_i18n.t("runners.m.disabling"))}</span> · {_e(_i18n.t("runners.m.finishing_one" if busy == 1 else "runners.m.finishing_many", n=busy))}', "disabling", False
         import datetime as dt
-        since = f" since {dt.datetime.fromtimestamp(sw['since'], _cfg.tz()).strftime('%H:%M')}" if sw.get("since") else ""
-        return f'<span class="offw">disabled</span>{since}', "disabled", True
-    return (f'<span class="on">on</span> · {busy} of {len(online)} busy' if online else '<span class="on">on</span> · no runner online'), "on", False
+        since = " " + _e(_i18n.t("runners.m.since", at=dt.datetime.fromtimestamp(sw['since'], _cfg.tz()).strftime('%H:%M'))) if sw.get("since") else ""
+        return f'<span class="offw">{_e(_i18n.t("runners.st.disabled"))}</span>{since}', "disabled", True
+    on = f'<span class="on">{_e(_i18n.t("runners.m.on"))}</span>'
+    return (f'{on} · {_e(_i18n.t("runners.m.busy", busy=busy, total=len(online)))}' if online else f'{on} · {_e(_i18n.t("runners.m.no_online"))}'), "on", False
 
 
 def _buttons(b: str, sw: dict[str, Any], token: Any) -> str:
@@ -122,16 +118,16 @@ def _buttons(b: str, sw: dict[str, Any], token: Any) -> str:
         acts = ["off", "on"]
     tk = _e(token(b))
     return "".join(f'<form class="mact" method="post" action="{under("/runners/switch")}"><input type="hidden" name="box" value="{_e(b)}"><input type="hidden" name="act" value="{a}">'
-                   f'<input type="hidden" name="token" value="{tk}"><button type="submit" class="b">{SWITCH_ACTIONS[a]}</button></form>' for a in acts)
+                   f'<input type="hidden" name="token" value="{tk}"><button type="submit" class="b">{_e(_i18n.t("runners.act." + a))}</button></form>' for a in acts)      # SWITCH_ACTIONS has the English words (and the server's failure line); the button says them in the request's language
 
 
 def not_used_html(snap: dict[str, Any]) -> str:
     """The one plain line the page shows instead of cards and a table when the board uses no CI runners: none listed in [runners] repos (or no [runners] table), or a clean read that
     found none. "" when there is something to draw."""
     if not enabled():
-        return '<p class="sub rnotused" role="status">This board does not use self-hosted CI runners.</p>'
+        return f'<p class="sub rnotused" role="status">{_e(_i18n.t("runners.not_used"))}</p>'
     if unused(snap):
-        return '<p class="sub rnotused" role="status">GitHub lists no self-hosted CI runners for the repositories this board follows.</p>'
+        return f'<p class="sub rnotused" role="status">{_e(_i18n.t("runners.none_listed"))}</p>'
     return ""
 
 
@@ -149,7 +145,7 @@ def table_html(snap: dict[str, Any], now: float | None = None, token: Any = None
     swm = snap.get("switch") or {}
     out = [asof_html(snap, now)]
     for key, msg in snap["errors"].items():
-        out.append(f'<p class="rerr" role="alert">{"" if key.startswith("org:") else "GitHub error: "}{_e(msg)}</p>')
+        out.append(f'<p class="rerr" role="alert">{_e(msg) if key.startswith("org:") else _i18n.t("runners.gh_error", msg=_e(msg))}</p>')
     out.append(_cards(tally(snap)))
     failed = snap.get("failed") or []
     body = []
@@ -160,10 +156,10 @@ def table_html(snap: dict[str, Any], now: float | None = None, token: Any = None
         lis = [_li(x, now, _tag(x["repo"]) if len(cols) > 1 else "") for x in mine]
         for r in cols:                                   # a list GitHub could not give: its runners on this machine are unknown, said once on the row
             if (r in failed or (r.endswith(ORG_MARK) and "org:" + r[:-len(ORG_MARK)] in failed)) and not any(x["repo"] == r for x in mine):
-                lis.append(f'<li class="rnone">{_e(_tag(r))}: unknown (GitHub error)</li>')
-        cell = '<ul class="rl">' + "".join(lis) + "</ul>" if lis else '<span class="rnone">no runners</span>'
+                lis.append(f'<li class="rnone">{_i18n.t("runners.unknown_gh", repo=_e(_tag(r)))}</li>')
+        cell = '<ul class="rl">' + "".join(lis) + "</ul>" if lis else f'<span class="rnone">{_e(_i18n.t("runners.no_runners"))}</span>'
         body.append(f'<tr class="{"isoff" if dim else ""}"><th scope="row"><div class="mname">{_e(b)}</div><div class="mstate {scls}">{state}</div>{_buttons(b, sw, token)}</th><td>{cell}</td></tr>')
-    out.append(f'<table class="rtab"><colgroup><col class="m"><col></colgroup><thead><tr><th scope="col">Machine</th><th scope="col">Runners</th></tr></thead><tbody>{"".join(body)}</tbody></table>')
+    out.append(f'<table class="rtab"><colgroup><col class="m"><col></colgroup><thead><tr><th scope="col">{_e(_i18n.t("runners.col.machine"))}</th><th scope="col">{_e(_i18n.t("runners.col.runners"))}</th></tr></thead><tbody>{"".join(body)}</tbody></table>')
     return "".join(out)
 
 
@@ -200,7 +196,7 @@ tr.isoff td{opacity:.6}[data-stale]{opacity:.55}.rstale,.rstale-js{color:var(--w
 """
 _JS = """<script>(function(){var box=document.getElementById('rn-body'),note=document.getElementById('rn-note'),res=document.getElementById('rn-result'),TZ=%s,last=+box.getAttribute('data-ts')||0,busy=false,quick=0,gone=false;
 function hm(t){try{return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:TZ}).format(new Date(t*1000))}catch(e){return new Date(t*1000).toTimeString().slice(0,5)}}
-function bad(why){box.setAttribute('data-stale','1');note.textContent=why==='login'?'Not refreshed: sign in again.':'Not refreshed since '+hm(last)+' '+%s+'.';note.className='rstale-js on'}
+function bad(why){box.setAttribute('data-stale','1');note.textContent=why==='login'?SST('js.runners.stale_login'):SST('js.runners.stale_since',{time:hm(last),tz:%s});note.className='rstale-js on'}
 function load(){if(busy||gone)return;busy=true;var ac=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ac)ac.abort();busy=false},15000);
 fetch('@RUNNERS_JSON@',{cache:'no-store',credentials:'same-origin',headers:{'Accept':'application/json'},signal:ac?ac.signal:undefined})
 .then(function(r){if(r.status===401)throw 'login';if(!r.ok)throw 'http';if((r.headers.get('content-type')||'').indexOf('json')<0)throw 'login';return r.json()})
@@ -209,10 +205,10 @@ fetch('@RUNNERS_JSON@',{cache:'no-store',credentials:'same-origin',headers:{'Acc
 function show(t,ok){res.textContent=t;res.className=t?(ok?'ok':'err'):''}
 document.addEventListener('submit',function(e){var f=e.target;if(!f.classList||!f.classList.contains('mact'))return;e.preventDefault();
 var b=f.querySelector('button'),was=b.textContent,off=f.elements['act'].value==='off',ac=window.AbortController?new AbortController():null,tm=setTimeout(function(){if(ac)ac.abort()},150000);
-b.disabled=true;b.textContent=off?'Disabling\\u2026':'Enabling\\u2026';show('',true);
+b.disabled=true;b.textContent=SST(off?'js.runners.disabling':'js.runners.enabling');show('',true);
 fetch(f.getAttribute('action'),{method:'POST',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(f)).toString(),signal:ac?ac.signal:undefined})
-.then(function(r){return r.text().then(function(t){var d=null;try{d=JSON.parse(t)}catch(x){}return {ok:!!(r.ok&&d&&d.ok),text:d&&d.text?d.text:(t||'It did not work ('+r.status+').')}})})
-.catch(function(){return {ok:false,text:'No answer from the board. Check the table and try again.'}})
+.then(function(r){return r.text().then(function(t){var d=null;try{d=JSON.parse(t)}catch(x){}return {ok:!!(r.ok&&d&&d.ok),text:d&&d.text?d.text:(t||SST('js.runners.failed',{status:r.status}))}})})
+.catch(function(){return {ok:false,text:SST('js.runners.no_answer')}})
 .then(function(o){clearTimeout(tm);show(o.text,o.ok);b.disabled=false;b.textContent=was;busy=false;load();setTimeout(load,10000)})});
 if(box.hasAttribute('data-refreshing'))setTimeout(load,2000);
 setInterval(function(){if(!document.hidden)load()},30000);document.addEventListener('visibilitychange',function(){if(!document.hidden)load()})})();</script>""".replace("@RUNNERS_JSON@", under("/runners.json"))
@@ -222,13 +218,13 @@ def page_html(board: Any, snap: dict[str, Any], token: Any = None) -> str:
     """The CI runners page in the board's chrome (as the search page draws it): the home title bar and side panel, the count cards and table, the refresh script."""
     from stackshot.web.ui import render as R
     font_css = str(_cfg.get("instance", "font_css") or "")
-    title = f"CI runners · {board.title}"
-    sub = "" if not_used_html(snap) else f'<p class="sub">GitHub Actions runners on each machine. They belong to the {_e(_org_phrase(snap))} and take jobs from every repo.</p>'      # the not-used line is the body's
+    title = _i18n.t("runners.title", site=board.title)
+    sub = "" if not_used_html(snap) else f'<p class="sub">{_i18n.t("runners.sub", org=_e(_org_phrase(snap)))}</p>'      # the not-used line is the body's
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_e(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{_e(font_css)}">' if font_css else "")
             + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}{_CSS}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header()}'
-            f'<h1>CI runners</h1>{sub}'
+            f'<h1>{_e(_i18n.t("runners.heading"))}</h1>{sub}'
             f'<p id="rn-note" class="rstale-js" role="status"></p><p id="rn-result" role="status" aria-live="polite"></p>'
             f'<div id="rn-body" data-ts="{int(snap["ts"])}"{" data-stale=\"1\"" if snap.get("stale") else ""}{" data-refreshing=\"1\"" if snap.get("refreshing") or snap.get("pending") else ""}>{table_html(snap, token=token)}</div></main>' + board.panel_tail()
             + _JS % (json.dumps(str(_cfg.get("instance", "timezone") or "UTC")), json.dumps(_cfg.tz_abbr())) + R._FAB_PAIR + R._THEME_JS + R._RELOAD_JS + R._TOTOP_JS + R._BFCACHE_JS + '</body></html>')
@@ -237,4 +233,4 @@ def page_html(board: Any, snap: dict[str, Any], token: Any = None) -> str:
 def _org_phrase(snap: dict[str, Any]) -> str:
     """"<login> org" when the runners are an organization's shared ones, else "repos' own list": the subtitle names whose runners these are."""
     orgs = sorted({x["repo"][:-len(ORG_MARK)] for x in snap.get("runners") or [] if x["repo"].endswith(ORG_MARK)})
-    return f"{orgs[0]} org" if len(orgs) == 1 else "repos you list"
+    return _i18n.t("runners.org_one", login=orgs[0]) if len(orgs) == 1 else _i18n.t("runners.org_own")

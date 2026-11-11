@@ -34,6 +34,7 @@ from stackshot.web.ui import kit as _ui
 
 PAGE = 25                  # rows shown first, and added by each "Show more"
 CAP = 200                  # rows a search shows at most (the rest is said, not drawn)
+# The English words of the filters below are the string table's too (search.when.<key>, search.state.<key>, search.row.<kind>, search.kind.<kind>): these constants stay English (ids and the English forms), the page says each in the request's language.
 WHEN = (("1h", "1 h", 3600), ("6h", "6 h", 6 * 3600), ("24h", "24 h", 24 * 3600), ("3d", "3 days", 3 * 86400), ("7d", "7 days", 7 * 86400))
 DEFAULT_WHEN = "7d"        # a search started from the box
 STATES = (("open", "Open"), ("closed", "Closed"))
@@ -182,18 +183,18 @@ def _pick(v: str, tz: datetime.tzinfo) -> float | None:
 def _window(f: Filters, now: datetime.datetime) -> tuple[float | None, float | None, str, str]:
     """(since, until, the window in words, a problem in words) of a search: None is no bound."""
     if f.when == "all":
-        return None, None, "all time", ""
+        return None, None, _i18n.t("search.all_time"), ""
     if f.when == "dates":
         if not f.frm:
-            return None, None, "", "Pick a From date and time (the To is optional)."
+            return None, None, "", _i18n.t("search.need_from")
         since, until = _pick(f.frm, now.tzinfo), _pick(f.to, now.tzinfo) if f.to else None
         if since is None or (f.to and until is None):
-            return None, None, "", "That date is not one a search can use."
-        d = lambda t: datetime.datetime.fromtimestamp(t, now.tzinfo).strftime("%Y-%m-%d %H:%M")
-        return since, until, f"from {d(since)}" + (f" to {d(until)}" if until else ""), ""
+            return None, None, "", _i18n.t("search.bad_date")
+        d = lambda t: datetime.datetime.fromtimestamp(t, now.tzinfo).strftime("%Y-%m-%d %H:%M")      # i18n: skip  (the date forms of the window are the machine form, as the pickers write them)
+        return since, until, (_i18n.t("search.from_to", since=d(since), until=d(until)) if until else _i18n.t("search.from", since=d(since))), ""
     for k, label, secs in WHEN:
         if k == f.when:
-            return now.timestamp() - secs, None, "last " + label, ""
+            return now.timestamp() - secs, None, _i18n.t("search.last", when=_i18n.t("search.when." + k)), ""
     return None, None, "", ""
 
 
@@ -284,32 +285,32 @@ def results_html(board: Any, q: str, opts: Any = None) -> str:
     left = len(pool) - len(page_rows)
 
     if rebuilding:
-        note = "The search index is being rebuilt. Try again in a minute."
+        note = esc(_i18n.t("search.rebuilding"))
     elif wide:
-        note = f"A search is at most {_s.MAX_TERMS} words; put a phrase in quotes to keep it as one."
+        note = esc(_i18n.t("search.too_wide", n=_s.MAX_TERMS))
     elif short:
-        note = f'Type at least {MIN_CHARS} characters.' if not q else f'Type at least {MIN_CHARS} characters (letters or digits).'
+        note = esc(_i18n.t("search.short", n=MIN_CHARS) if not q else _i18n.t("search.short_letters", n=MIN_CHARS))
     elif problem:
         note = problem
     else:
-        n_s = "match" if total == 1 else "matches"
-        note = (f'<b>{total} {n_s}</b> for “{esc(q)}” · newest first · {esc(window_words)} · times in {esc(_cfg.tz_abbr(board.now))}'
-                + (f' · <b>cut at {CAP}</b>' if total > CAP else ""))
+        count = _i18n.t("search.match_one" if total == 1 else "search.match_many", n=total)
+        note = (_i18n.t("search.summary", count=f"<b>{esc(count)}</b>", q=esc(q), window=esc(window_words), tz=esc(_cfg.tz_abbr(board.now)))
+                + (_i18n.t("search.cut", cut=f"<b>{esc(_i18n.t('search.cut_at', cap=CAP))}</b>") if total > CAP else ""))
         if not total:
-            note += " · No matches." + _empty_hint(hits, in_window, f, since is not None or until is not None, n_kind, n_state)
+            note += esc(_i18n.t("search.none")) + _empty_hint(hits, in_window, f, since is not None or until is not None, n_kind, n_state)
         if not _ro.is_read_only() and building():                   # a standby never reads History: "still being built" would never end
-            note += " The index is still being built: older history may be missing for a few minutes."
+            note += esc(_i18n.t("search.building"))
         elif _ro.is_read_only():
-            note += " This is a read-only standby copy: items, projects and sessions are searched, not item History."
-    more = (f'<a class="se-more" id="se-more" href="{esc(_href(q, f, n=f.n + PAGE) + "#se-new")}">Show {min(PAGE, left)} more</a>' if left > 0 else "")
+            note += esc(_i18n.t("search.standby"))
+    more = (f'<a class="se-more" id="se-more" href="{esc(_href(q, f, n=f.n + PAGE) + "#se-new")}">{esc(_i18n.t("search.more", n=min(PAGE, left)))}</a>' if left > 0 else "")
     results = f'<ul class="ir-rows se-hits">{"".join(lis)}</ul>' if lis else ""
     font_css = str(_cfg.get("instance", "font_css") or "")
-    title = f"Search · {board.title}" if short else f"{q} · Search · {board.title}"
+    title = _i18n.t("search.title", site=board.title) if short else _i18n.t("search.title_q", q=q, site=board.title)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
             f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{esc(title)}</title>'
             f'<link rel="icon" href="{R.icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
             + R._THEME_HEAD + R._APP_HEAD + f'<style>{board._css()}</style></head>{R._PANEL_BODY}<div id="layout"><main id="top">{board.page_header(q=q, search_page=True)}'
-            f'<h1>Search</h1>{_controls(q, f, board.now, n_kind, n_state)}<div class="se-summary" role="status">{note}</div>{results}{more}</main>'
+            f'<h1>{esc(_i18n.t("search.heading"))}</h1>{_controls(q, f, board.now, n_kind, n_state)}<div class="se-summary" role="status">{note}</div>{results}{more}</main>'
             + board.panel_tail() + R._FAB_PAIR + R._THEME_JS + R._RELOAD_JS + R._TOTOP_JS + R._BFCACHE_JS + '</body></html>')
 
 
@@ -318,45 +319,47 @@ def _empty_hint(hits: list[dict[str, Any]], in_window: list[dict[str, Any]], f: 
     out = ""
     older = len(hits) - len(in_window)
     if bounded and older:
-        out += f" {older} {'match is' if older == 1 else 'matches are'} outside this window: choose All."
-    off = [f"{TITLES[k]} ({n_kind[k]})" for k in KINDS if k not in f.kinds and n_kind[k]] + [f"{lab} ({n_state[k]})" for k, lab in STATES if k not in f.states and n_state[k]]
+        out += esc(_i18n.t("search.outside_one" if older == 1 else "search.outside_many", n=older))
+    off = ([_i18n.t("search.label_count", label=_i18n.t("search.kind." + k), n=n_kind[k]) for k in KINDS if k not in f.kinds and n_kind[k]]
+           + [_i18n.t("search.label_count", label=_i18n.t("search.state." + k), n=n_state[k]) for k, _lab in STATES if k not in f.states and n_state[k]])
     if off:
-        out += " Unticked boxes hold more: " + ", ".join(off) + "."
+        out += esc(_i18n.t("search.unticked", list=", ".join(off)))
     return out
 
 
 def _controls(q: str, f: Filters, now: datetime.datetime, n_kind: dict[str, int], n_state: dict[str, int]) -> str:
     """The query box and the filters: one GET form. The first submit button is invisible so that Enter in the box searches again with the filters as they are; a chip is a submit button named `w`."""
-    chips = "".join(f'<button type="submit" class="se-chip" name="w" value="{k}" aria-pressed="{"true" if f.when == k else "false"}">{lab}</button>' for k, lab, _ in WHEN)
-    chips += "".join(f'<button type="submit" class="se-chip" name="w" value="{k}" aria-pressed="{"true" if f.when == k else "false"}">{lab}</button>' for k, lab in (("all", "All"), ("dates", "Dates")))
-    dates = (f'<div class="se-row" role="group" aria-label="Dates"><b>Dates</b><label>From <input type="datetime-local" name="from" value="{esc(f.frm)}"></label>'
-             f'<label>To <input type="datetime-local" name="to" value="{esc(f.to)}"></label><span class="se-zone">in {esc(_cfg.tz_abbr(now))}</span></div>') if f.when == "dates" else ""
-    kinds = "".join(f'<label><input type="checkbox" name="kind" value="{k}"{" checked" if k in f.kinds else ""}> {TITLES[k]} <small>({n_kind[k]})</small></label>' for k in KINDS)
-    states = "".join(f'<label><input type="checkbox" name="state" value="{k}"{" checked" if k in f.states else ""}> {lab} <small>({n_state[k]})</small></label>' for k, lab in STATES)
-    return (f'<form class="se-controls" id="se-form" action="{under("/search")}" method="get" role="search" aria-label="Search filters">'
-            f'<button type="submit" class="sr" tabindex="-1" aria-hidden="true">Search</button><input type="hidden" name="f" value="1"><input type="hidden" name="when" value="{esc(f.when)}">'
-            f'<div class="se-q">{_ICON}<input id="se-query" type="search" name="q" value="{esc(q)}" maxlength="{MAX_Q}" placeholder="{HINT}" data-hint="{HINT}" data-hint-short="{HINT_SHORT}" aria-label="Search the board" '
+    chips = "".join(f'<button type="submit" class="se-chip" name="w" value="{k}" aria-pressed="{"true" if f.when == k else "false"}">{esc(_i18n.t("search.when." + k))}</button>' for k, _lab, _ in WHEN)
+    chips += "".join(f'<button type="submit" class="se-chip" name="w" value="{k}" aria-pressed="{"true" if f.when == k else "false"}">{esc(_i18n.t("search.when." + k))}</button>' for k in ("all", "dates"))
+    dates = (f'<div class="se-row" role="group" aria-label="{esc(_i18n.t("search.when.dates"))}"><b>{esc(_i18n.t("search.when.dates"))}</b><label>{esc(_i18n.t("search.from_label"))} <input type="datetime-local" name="from" value="{esc(f.frm)}"></label>'
+             f'<label>{esc(_i18n.t("search.to_label"))} <input type="datetime-local" name="to" value="{esc(f.to)}"></label><span class="se-zone">{esc(_i18n.t("search.in_zone", tz=_cfg.tz_abbr(now)))}</span></div>') if f.when == "dates" else ""
+    kinds = "".join(f'<label><input type="checkbox" name="kind" value="{k}"{" checked" if k in f.kinds else ""}> {esc(_i18n.t("search.kind." + k))} <small>({n_kind[k]})</small></label>' for k in KINDS)
+    states = "".join(f'<label><input type="checkbox" name="state" value="{k}"{" checked" if k in f.states else ""}> {esc(_i18n.t("search.state." + k))} <small>({n_state[k]})</small></label>' for k, _lab in STATES)
+    hint, short, aria = esc(_i18n.t("home.search.hint")), esc(_i18n.t("home.search.hint_short")), esc(_i18n.t("home.search.aria"))      # the words are the string table's (English: HINT, HINT_SHORT)
+    return (f'<form class="se-controls" id="se-form" action="{under("/search")}" method="get" role="search" aria-label="{esc(_i18n.t("search.filters"))}">'
+            f'<button type="submit" class="sr" tabindex="-1" aria-hidden="true">{esc(_i18n.t("search.heading"))}</button><input type="hidden" name="f" value="1"><input type="hidden" name="when" value="{esc(f.when)}">'
+            f'<div class="se-q">{_ICON}<input id="se-query" type="search" name="q" value="{esc(q)}" maxlength="{MAX_Q}" placeholder="{hint}" data-hint="{hint}" data-hint-short="{short}" aria-label="{aria}" '
             f'autocomplete="off" enterkeyhint="search" spellcheck="false"></div>'
-            f'<div class="se-row" role="group" aria-label="When"><b>When</b>{chips}</div>{dates}'
-            f'<div class="se-row" role="group" aria-label="Kind"><b>Kind</b>{kinds}</div>'
-            f'<div class="se-row" role="group" aria-label="State"><b>State</b>{states}</div>'
-            f'<noscript><button type="submit" class="b">Apply</button></noscript></form>{_JS}{_HINT_JS}')
+            f'<div class="se-row" role="group" aria-label="{esc(_i18n.t("search.group.when"))}"><b>{esc(_i18n.t("search.group.when"))}</b>{chips}</div>{dates}'
+            f'<div class="se-row" role="group" aria-label="{esc(_i18n.t("search.group.kind"))}"><b>{esc(_i18n.t("search.group.kind"))}</b>{kinds}</div>'
+            f'<div class="se-row" role="group" aria-label="{esc(_i18n.t("search.group.state"))}"><b>{esc(_i18n.t("search.group.state"))}</b>{states}</div>'
+            f'<noscript><button type="submit" class="b">{esc(_i18n.t("search.apply"))}</button></noscript></form>{_JS}{_HINT_JS}')
 
 
 def _row(board: Any, R: Any, h: dict[str, Any], snip: str, ws: list[str], state_of: dict[str, str], li_id: str) -> str:
     """One hit as a row: its kind label, the item's state tag where it has one, `#id title` (the typed words marked), how long ago it changed at the right, a who line, and the excerpt behind the guide line."""
     kind, r, x = h["kind"], h["r"], h
-    kt = f'<span class="ktag">{ROW_KIND[kind]}</span>'
+    kt = f'<span class="ktag">{esc(_i18n.t("search.row." + kind))}</span>'
     age = board.stamp(datetime.datetime.fromtimestamp(h["t"], board.now.tzinfo), "ir-age") if h["t"] else ""
     detail = _mark(snip) if "\x02" in snip else ""                  # a match in the title is marked in the title; the excerpt only when it holds one
     if kind in ("item", "history"):
         pk = R.proj_top(r)       # the project it shows is the top-level one (an item on a sub-page reads as its project)
         proj = esc(board.proj_label(pk)) if pk else ""
         if kind == "history":
-            bits = [f'History · {esc(h["sub"] or "change")}', esc(board.when(h["t"])) if h["t"] else "", proj]
+            bits = [esc(_i18n.t("search.hist", what=h["sub"] or _i18n.t("search.change"))), esc(board.when(h["t"])) if h["t"] else "", proj]
         else:
             by = r.get("written_by")
-            bits = [f'updated by {esc(by)}' if by else "", esc(board.when(h["t"])) if h["t"] else "", proj]
+            bits = [esc(_i18n.t("search.updated_by", who=by)) if by else "", esc(board.when(h["t"])) if h["t"] else "", proj]
         subj = board.bare(r.get("subject") or "")
         return _ui.row(tag_html=kt + " " + _ui.tag(state_of[r["gid"]]), href=R.item_href(r), rid=R.rid(r), title=subj, title_html=_hl(subj, ws), age_html=age,
                        who_html=" · ".join(b for b in bits if b), detail_html=detail, li_class="srow", li_id=li_id, new_tab=False)
@@ -365,12 +368,12 @@ def _row(board: Any, R: Any, h: dict[str, Any], snip: str, ws: list[str], state_
         k = h["key"]
         link = f'<a class="ir-link" href="{esc(under("/" + k))}"><span class="hgoal">{_hl(board.proj_title(k), ws)}</span> <span class="ir-id dim">{esc(k)}</span></a>'
         mirror = board.proj_mirror(k)
-        bits = [f'page changed {esc(board.when(h["t"]))}' if h["t"] else "", f'<a href="{esc(mirror)}" target="_blank" rel="noopener">gbrain page ↗</a>' if mirror else ""]
+        bits = [esc(_i18n.t("search.page_changed", when=board.when(h["t"]))) if h["t"] else "", f'<a href="{esc(mirror)}" target="_blank" rel="noopener">{esc(_i18n.t("search.gbrain_page"))}</a>' if mirror else ""]
         who = f'<div class="ir-who">{" · ".join(b for b in bits if b)}</div>' if any(bits) else ""
         return f'<li class="irow srow"{idat}><div class="ir-top"><span class="ir-title">{kt} {link}</span>{age}</div>{who}' + (f'<div class="ir-det">{detail}</div>' if detail else "") + '</li>'
     name = h["key"]                                                 # a session: the fleet tool's view while it has a live pane (the way the board links it), else the name as text
     href = board.sess_href(name)
     title = f'<a class="ir-link" href="{esc(href)}" target="_blank" rel="noopener"><span class="hgoal">{_hl(name, ws)}</span></a>' if href else f'<span class="hgoal">{_hl(name, ws)}</span>'
     s = board.sess.get("name:" + name) or {}
-    bits = [esc(h["sub"]) if h["sub"] else "", esc(str(s.get("status") or "")), "opens in sala" if href else "no live pane"]
+    bits = [esc(h["sub"]) if h["sub"] else "", esc(str(s.get("status") or "")), _i18n.t("search.opens_sala") if href else _i18n.t("search.no_pane")]
     return f'<li class="irow srow"{idat}><div class="ir-top"><span class="ir-title">{kt} {title}</span>{age}</div><div class="ir-who">{" · ".join(b for b in bits if b)}</div></li>'
