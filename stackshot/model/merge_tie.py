@@ -4,8 +4,9 @@ The pure half: no server import, no file, no clock. A pull request is tied to an
 
   anchored   an anchor scoped to the item names the pull request (a project-wide anchor names no item: every item of a project would be tied to every merge, and no clock would run)
   body       the pull request's body names the item (`board#N`; the hub reads it with the event, merge_log.refs)
-  words      the item's own words (its description and its steps) name the pull request: its URL in any repository, or its number written `#n`, `PR n` or `PR #n` for a repository the item
-             speaks of without a URL (this repository, or one the item has a pull request anchored in; a bare number in any other repository's item may be another repository's)
+  words      the item's own words (its description and its steps) name the pull request: its URL in any repository, or its number written `#n`, `PR n` or `PR #n` only for an item that speaks of
+             that repository without a URL: one whose project page holds an anchor in the repository (its project is the repository's), or one that already has a pull request of the repository
+             anchored to it. A bare number in any other item may be another repository's ("see #116" in an item of another project), so it ties nothing.
 
 The first reason found is the one a History line gives (anchored, then body, then words)."""
 from __future__ import annotations
@@ -36,9 +37,25 @@ def repo_of(key: str) -> str:
     return str(key).rpartition("#")[0]
 
 
-def tied(key: str, body_items: Iterable[str], scoped: dict[str, set[str]], texts: dict[str, str], own: str = "", canon: Callable[[str], str] = str.lower) -> dict[str, str]:
+def repo_pages(store: Any, repo_of_url: Callable[[str], str]) -> dict[str, set[str]]:
+    """{repository ("owner/repo", lower-case): the project pages that hold an anchor in it} from the anchors store ({page: [entry, ...]}, an entry a dict with a `url`, in any scope).
+    `repo_of_url` gives the repository an anchor URL is in, "" for an anchor that is in none (Slack, Drive...)."""
+    out: dict[str, set[str]] = {}
+    for page, entries in (store.items() if isinstance(store, dict) else []):
+        for e in (entries if isinstance(entries, list) else []):
+            repo = repo_of_url(str(e.get("url") or "")) if isinstance(e, dict) else ""
+            if repo:
+                out.setdefault(repo.lower(), set()).add(str(page))
+    return out
+
+
+def tied(key: str, body_items: Iterable[str], scoped: dict[str, set[str]], texts: dict[str, str], projects: dict[str, str] | None = None, pages: dict[str, set[str]] | None = None,
+         canon: Callable[[str], str] = str.lower) -> dict[str, str]:
     """→ {item id: why} for the pull request `key`: `body_items` the ids its body names (already resolved to the store's), `scoped` {item id: the pull requests anchored to it}, `texts` {item id: its
-    description and steps, one string} of the items to search, `own` this repository ("owner/repo") for the numbers written without a URL. The caller passes open items only."""
+    description and steps, one string} of the items to search, `projects` {item id: its project page}, `pages` (repo_pages) {repository: the project pages that hold an anchor in it}: a number written
+    without a URL ties only an item of one of those pages or one with a pull request of the repository anchored to it. The caller passes open items only."""
+    projects, pages = projects or {}, pages or {}
+    repo = repo_of(key)
     out: dict[str, str] = {}
     for gid, keys in scoped.items():
         if key in keys:
@@ -48,7 +65,7 @@ def tied(key: str, body_items: Iterable[str], scoped: dict[str, set[str]], texts
     for gid, text in texts.items():
         if gid in out:
             continue
-        bare = {own, *(repo_of(k) for k in scoped.get(gid, ()))}
-        if names(text, key, bare, canon):
+        speaks = repo in {repo_of(k) for k in scoped.get(gid, ())} or projects.get(gid, "") in pages.get(repo, ())      # a project's own repository, or one the item has a pull request in
+        if names(text, key, [repo] if speaks else (), canon):
             out[gid] = WORDS
     return out

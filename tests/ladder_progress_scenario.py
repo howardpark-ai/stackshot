@@ -398,33 +398,37 @@ check("14 progress.merges: a key of merged_seen counts as a merge recorded (one 
 
 # the log, the anchors and the items. The items would all go up at +30 minutes; a merge tied to one at +20 minutes moves its clock to then.
 def line(n, refs=(), at=20 * MIN): return {"ts": now0 + at, "repo": "acme/widgets", "n": n, "refs": list(refs)}
-anchors_ = {"projects/alpha": [{"url": f"{W_}/pull/21", "items": ["a200"]}, {"url": f"{W_}/pull/22"}, {"url": f"{W_}/pull/30", "items": ["a205"]}, {"url": f"{W_}/pull/32", "items": ["a207"]}]}
+anchors_ = {"projects/alpha": [{"url": f"{W_}/pull/21", "items": ["a200"]}, {"url": f"{W_}/pull/22"}, {"url": f"{W_}/pull/30", "items": ["a205"]}, {"url": f"{W_}/pull/32", "items": ["a207"]}, {"url": f"{W_}/pull/28", "items": ["a212", "a213"]}]}
 (T / "store/anchors.json").write_text(json.dumps(anchors_))
 def fixture(i, **meta): put(i, act=30, mover="home-peer", **meta); prog(i, now0 - 3 * H - 30 * MIN)
-for i in (200, 201, 202, 203, 204, 205, 206, 207): fixture(i)
+for i in (200, 201, 202, 203, 204, 205, 207, 211): fixture(i)
+fixture(206, project="projects/beta")      # an item of another project: its bare "#25" may be another repository's
 d_ = rd(204); d_["description"] = f"- Waits on {W_}/pull/23\n- Done when it lands"; (T / "store/a/204.json").write_text(json.dumps(d_))
 d_ = rd(205); d_["metadata"]["steps"] = [step("home-peer: land PR #24 and check it", "open")]; (T / "store/a/205.json").write_text(json.dumps(d_))
-d_ = rd(206); d_["metadata"]["steps"] = [step("home-peer: land PR #25 and check it", "open")]; (T / "store/a/206.json").write_text(json.dumps(d_))      # the number alone, and no anchor of the item in that repository: not tied
+d_ = rd(206); d_["metadata"]["steps"] = [step("home-peer: land PR #25 and check it", "open")]; (T / "store/a/206.json").write_text(json.dumps(d_))      # the number alone, in a project that holds no anchor in that repository and with none of its own: not tied
+d_ = rd(211); d_["metadata"]["steps"] = [step("home-peer: land PR #26 and check it", "open")]; (T / "store/a/211.json").write_text(json.dumps(d_))      # the number alone, in the project that holds anchors in that repository: tied
+fixture(212, hold=True, wake=iso(now0 + 5 * H), phase="waiting", waits_on="time")      # held and waiting for a dated wake, with an anchor on the merged pull request: not on the stall ladder
+fixture(213); waits_after(213, "a203"); prog(213, now0 - 3 * H - 30 * MIN)             # ordered after an open item, the same anchor: not on the stall ladder
 fixture(208, project="projects/alpha"); close(208)                                   # a closed item named by the body: left alone
-for ln in (line(21), line(22), line(23), line(24), line(25), line(99), line(31, [shown(201), shown(208), shown(9299)]), line(40, [shown(201)])):
+for ln in (line(21), line(22), line(23), line(24), line(25), line(26), line(28), line(99), line(31, [shown(201), shown(208), shown(9299)]), line(40, [shown(201)])):
     ML.append(ln)
 saved = merge_pass(now0 + 21 * MIN)
-check("14 the pass saves exactly the items a merge is tied to: anchored (a200), the body naming it (a201, also by a merge no anchor holds), its own words (a204 by URL, a205 by number with a pull request of its repository anchored)",
-      sorted(saved) == ["a200", "a201", "a204", "a205"], saved)
-check("14 …each moved its clock to the save (progress = the pass's time), recorded the key in merged_seen, and said why in the History", all(rd(i)["progress"] == now0 + 21 * MIN for i in (200, 201, 204, 205))
+check("14 the pass saves exactly the items a merge is tied to: anchored (a200), the body naming it (a201, also by a merge no anchor holds), its own words (a204 by URL, a205 by number with a pull request of its repository anchored, a211 by number in the project that holds the repository's anchors)",
+      sorted(saved) == ["a200", "a201", "a204", "a205", "a211"], saved)
+check("14 …each moved its clock to the save (progress = the pass's time), recorded the key in merged_seen, and said why in the History", all(rd(i)["progress"] == now0 + 21 * MIN and rd(i)["updated"] == now0 + 21 * MIN for i in (200, 201, 204, 205, 211))
       and mt(200).get("merged_seen") == ["acme/widgets#21"] and sorted(mt(201).get("merged_seen")) == ["acme/widgets#31", "acme/widgets#40"] and mt(204).get("merged_seen") == ["acme/widgets#23"] and mt(205).get("merged_seen") == ["acme/widgets#24"]
       and any("an anchor of the item names it" in x["text"] for x in log_of(200)) and any("description names the item" in x["text"] for x in log_of(201)) and any("own words name it" in x["text"] for x in log_of(204)),
       ([rd(i).get("progress") for i in (200, 201, 204, 205)], [mt(i).get("merged_seen") for i in (200, 201, 204, 205)], log_of(201)))
-check("14 a project-wide anchor's merge (a202's project holds #22 for nobody), an unrelated merge (#99), a bare number in an item with no anchor in that repository (a206) and a closed item named by the body (a208) move nothing: the clock stays and nothing is written",
-      all(rd(i)["progress"] == now0 - 3 * H - 30 * MIN and "merged_seen" not in mt(i) for i in (202, 203, 206, 207, 208)) and rd(208).get("status") == "completed" and rd(202)["updated"] == now0 - 30 * MIN, [rd(i).get("progress") for i in (202, 203, 206, 207, 208)])
+check("14 a project-wide anchor's merge (a202's project holds #22 for nobody), an unrelated merge (#99), a bare number in an item of another project (a206: its PR number may be another repository's), a closed item named by the body (a208) and an anchored item the board shows held (a212) or ordered after an open item (a213) move nothing: the clock stays and nothing is written",
+      all(rd(i)["progress"] == now0 - 3 * H - 30 * MIN and "merged_seen" not in mt(i) for i in (202, 203, 206, 207, 208, 212, 213)) and rd(208).get("status") == "completed" and rd(202)["updated"] == now0 - 30 * MIN, [rd(i).get("progress") for i in (202, 203, 206, 207, 208)])
 check("14 the pass keeps where it stopped: a second pass reads no line again and saves nothing", merge_pass(now0 + 22 * MIN) == [] and ML.read(server._merge_progress_offset())[0] == [], server._merge_progress_offset())
 check("14 …and a line a pass sees again (the offset lost) is not saved twice: the item holds the key already", (server._merge_progress_save(0), merge_pass(now0 + 23 * MIN))[1] == [] and mt(200).get("merged_seen") == ["acme/widgets#21"] and rd(200)["progress"] == now0 + 21 * MIN, mt(200))
 done = stk(now0 + 31 * MIN); stk(now0 + 2 * H); stk(now0 + 21 * MIN + 4 * H - 60)
 check("14 the hand-up: the items the merge tied are not handed up at +30 minutes, 2 hours or 4 hours less a minute after it; the items it did not tie (a207: anchored to another pull request) went up at +30 minutes, once",
-      not any(handed(i) for i in (200, 201, 204, 205)) and all(len(handed(i)) == 1 for i in (202, 203, 206, 207)) and sorted(done) == ["a202", "a203", "a206", "a207"], (done, [len(handed(i)) for i in (200, 201, 202, 203, 204, 205, 206, 207)]))
+      not any(handed(i) for i in (200, 201, 204, 205, 211)) and all(len(handed(i)) == 1 for i in (202, 203, 207)) and sorted(done) == ["a202", "a203", "a206", "a207"], (done, [len(handed(i)) for i in (200, 201, 202, 203, 204, 205, 206, 207)]))
 done = stk(now0 + 21 * MIN + 4 * H)
-check("14 …and 4 hours after the merge they are, once each, with no merge in between", sorted(done) == ["a200", "a201", "a204", "a205"] and all(len(handed(i)) == 1 for i in (200, 201, 204, 205)), (done, pushes_to("home-front", "a200")))
-close(200, 201, 202, 203, 204, 205, 206, 207)
+check("14 …and 4 hours after the merge they are, once each, with no merge in between", sorted(done) == ["a200", "a201", "a204", "a205", "a211"] and all(len(handed(i)) == 1 for i in (200, 201, 204, 205, 211)), (done, pushes_to("home-front", "a200")))
+close(200, 201, 202, 203, 204, 205, 206, 207, 211, 212, 213)
 
 # the first pass on a state directory with no offset reads only lines the clock could use (main_hours and 2 hours back); the offset file is then written
 (T / "state/merge-progress.json").unlink(missing_ok=True)
@@ -434,6 +438,49 @@ ML.append({"ts": now0 - 7 * H, "repo": "acme/widgets", "n": 50, "refs": []}); ML
 saved = merge_pass(now0)
 check("14 the first pass: a merge older than main_hours + 2 hours is skipped (a209), a recent one counts (a210); the offset is kept", saved == ["a210"] and "merged_seen" not in mt(209) and server._merge_progress_offset() == ML.read(0)[1], (saved, server._merge_progress_offset()))
 close(209, 210)
+
+# a shorter or replaced merges.jsonl (the offset is past its end): read from the start with the first run's time filter, never a full replay
+fixture(214, project="projects/alpha"); fixture(215, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/52", "items": ["a214"]}, {"url": f"{W_}/pull/53", "items": ["a215"]}]}))
+off_before = server._merge_progress_offset()
+ML.path().write_text(json.dumps({"ts": now0 - 7 * H, "repo": "acme/widgets", "n": 52, "refs": []}) + "\n" + json.dumps({"ts": now0 - 1 * H, "repo": "acme/widgets", "n": 53, "refs": []}) + "\n", encoding="utf-8")
+saved = merge_pass(now0)
+check("14 the file replaced by a shorter one (offset past its end): read from the start, only the lines the clock could use (a merge 7 hours old is skipped, one an hour old counts), the offset is the new end",
+      off_before > ML.size() and saved == ["a215"] and "merged_seen" not in mt(214) and server._merge_progress_offset() == ML.size(), (off_before, ML.size(), saved, server._merge_progress_offset()))
+close(214, 215)
+
+# one item that cannot be read or saved does not abort the pass: the others are saved, the failure is logged, the offset is stored
+for i in (216, 217, 218): fixture(i, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/54", "items": ["a216", "a217", "a218"]}]}))
+ML.append(line(54, at=-60))
+_real_save, _real_load = server._save, server._load
+def _bad_save(gid, *a, **kw):
+    if gid == "a216": raise OSError("disk full")
+    return _real_save(gid, *a, **kw)
+def _bad_load(gid, *a, **kw):
+    if gid == "a218" and _bad_load.on: raise OSError("unreadable")
+    return _real_load(gid, *a, **kw)
+_bad_load.on = False
+server._save, server._load = _bad_save, _bad_load
+import io as _io, contextlib as _cl
+errs = _io.StringIO()
+try:
+    _bad_load.on = True
+    with _cl.redirect_stderr(errs): saved = merge_pass(now0)
+finally:
+    server._save, server._load = _real_save, _real_load
+check("14 an item whose save fails (a216) or whose read fails (a218) is logged and skipped; the other (a217) is saved, and the offset is stored so the pass does not repeat",
+      saved == ["a217"] and "merged_seen" not in mt(216) and "merged_seen" not in mt(218) and mt(217).get("merged_seen") == ["acme/widgets#54"] and "a216 not saved" in errs.getvalue() and server._merge_progress_offset() == ML.size(),
+      (saved, errs.getvalue()[-300:], server._merge_progress_offset(), ML.size()))
+close(216, 217, 218)
+
+# merge_tie: a bare number ties only an item of a project that holds an anchor in the repository, or with a pull request of it anchored; a URL ties anywhere
+pg_ = MT.repo_pages({"projects/alpha": [{"url": f"{W_}/pull/1"}, {"url": "https://example.org/x"}], "projects/beta": [{"url": "https://github.com/other/repo/pull/2"}, "junk"]}, lambda u: "acme/widgets" if "acme/widgets" in u else "other/repo" if "other/repo" in u else "")
+check("14 merge_tie.repo_pages: the pages that hold an anchor in each repository (any scope), others and malformed entries left out", pg_ == {"acme/widgets": {"projects/alpha"}, "other/repo": {"projects/beta"}}, pg_)
+tx_ = {"i1": "see #7", "i2": "see #7", "i3": "see #7", "i4": f"see {W_}/pull/7"}
+tied_ = MT.tied("acme/widgets#7", [], {"i3": {"acme/widgets#99"}}, tx_, {"i1": "projects/alpha", "i2": "projects/beta", "i3": "projects/beta", "i4": "projects/beta"}, pg_)
+check("14 merge_tie.tied: the item of the repository's project (i1) and the one with a pull request of it anchored (i3) tie by a bare number, the item of another project (i2) does not, a URL ties it anywhere (i4)",
+      tied_ == {"i1": "words", "i3": "words", "i4": "words"}, tied_)
 
 # the hub: Hub.emit writes the line for a merge, before any lane, and for nothing else
 hub_ = HUB.Hub(); hub_.deliver = lambda anchor, session, text: None; hub_.write_status = lambda: None; hub_.persist = lambda: "saved"
@@ -457,7 +504,7 @@ with open(ML.path(), "ab") as f_: f_.write(b"\n")
 whole_rows, whole_off = ML.read(_o)
 check("14 merge_log.read: a line the hub is still writing (no newline yet) is not read, and is read whole next time; the offset moves past whole lines only",
       part_rows == [] and part_off == _o and [r["n"] for r in whole_rows] == [62] and whole_off == ML.path().stat().st_size, (part_rows, part_off, whole_rows, whole_off))
-check("14 merge_log.read: an offset past the end (a replaced, shorter file) reads from the start; no file reads as nothing", ML.read(10 ** 9)[0][0]["n"] == 21 and (ML.path().rename(ML.path().with_suffix(".gone")), ML.read(5))[1] == ([], 5), None)
+check("14 merge_log.read: an offset past the end (a replaced, shorter file) reads from the start; no file reads as nothing", ML.read(10 ** 9)[0][0]["n"] == 52 and (ML.path().rename(ML.path().with_suffix(".gone")), ML.read(5))[1] == ([], 5), None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

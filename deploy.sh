@@ -108,6 +108,7 @@ while IFS= read -r f; do
         units/anchor-hub.service.in) hub=1 ;;
         units/stackshot-puller.service.in) puller=1 ;;
         anchor-hub.py|anchorhub/*|push.py|stackshot/anchors/anchor_hub.py|stackshot/anchors/anchorhub/*|stackshot/fleet/push.py) hub=1 ;;
+        stackshot/anchors/merge_log.py) server=1; hub=1 ;;      # the hub writes the merge log and the server reads it: both read the file at their start
         pyproject.toml|uv.lock) server=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
         stackshot/cli.py) server=1; hub=1 ;;      # the units start the server and the hub through it (the audit's oneshot reads it fresh)
         icons/*) server=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start

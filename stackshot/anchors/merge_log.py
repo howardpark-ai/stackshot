@@ -81,6 +81,14 @@ def note(anchor: str, url: str, etype: Any, body_refs: Any, now: float) -> bool:
     return True
 
 
+def size() -> int:
+    """The file's size in bytes, 0 when there is none."""
+    try:
+        return path().stat().st_size
+    except OSError:
+        return 0
+
+
 def read(offset: int = 0) -> tuple[list[dict[str, Any]], int]:
     """The lines from byte `offset` on, and the offset after the last whole line read. A file that is shorter than `offset` (replaced) is read from its start; a missing one reads as nothing.
     A line that is not a JSON object is skipped."""
