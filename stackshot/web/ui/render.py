@@ -834,10 +834,10 @@ def outcome_of(r):
 from stackshot.anchors.anchors import KINDS as _KIND     # an anchor id's prefix → its type; the one table, shared with anchor-hub
 from stackshot.anchors import anchors as _anc   # roles.json's live flag per session (roles_live)
 from stackshot.anchors.anchors import hub_of as _hub_of   # the page a key belongs to on the board (a `hub:` line, else its top-level page)
-_AFLAG = {"unlisted": "owns an open item in this project, but the project page's agents: line does not list it",
-          "no session": "listed in the project page's agents: line, but no session of that name is running (none known, or gone past the grace)"}
+_AFLAG = {"unlisted": ("sessions.flag_unlisted", "sessions.flag_unlisted_tip"),      # the flag the index computes → (its label's key, its tooltip's key)
+          "no session": ("sessions.flag_nosession", "sessions.flag_nosession_tip")}
 _KIND_ORDER = ["Slack", "Notion", "Gmail", "Drive", "GitHub", "Link"]
-_ROLE_TIP = {"background": "a background agent: it works out of sight and is listed while it is running"}
+_ROLE_TIP = {"background": _i18n.EN["projects.role_background"]}      # the English view; projects_table draws it through projects.role_background
 # The theme switch: system → light → dark, one icon button, remembered per browser in
 # localStorage; the board and the routing pages share the origin, so one choice covers both. _THEME_HEAD runs before the
 # first paint so a re-rendered page never flashes the wrong theme; storage that throws (a private window) means "system".
@@ -1017,6 +1017,8 @@ def _audit_word(table: dict, english: str, prefix: str) -> str:
     """An audit group's name or the card's note in the request's language: by the English text the audit module gives; one the table does not know stays as it is."""
     k = table.get(english)
     return _t(prefix + k) if k else english
+_AUDIT_PACES = {v: k[len("audit.pace."):] for k, v in _i18n.EN.items() if k.startswith("audit.pace.")}      # an audit's pace and mode words, English -> key (audit_overview.GROUPS, _mode); the Audits page draws them through the table
+_AUDIT_MODES = {v: k[len("audit.mode."):] for k, v in _i18n.EN.items() if k.startswith("audit.mode.")}
 _PANEL_LABELS = {"machines": "Machines", "runners": "Runners", "anchorhub": "Anchor hub", "audit-panel": "Audit", "projects-panel": "Projects"}      # English; the section's name in the person's language is panel.sec.<id> (panel_label)
 assert tuple(_PANEL_LABELS) == _up.PANEL_SECTIONS
 _PANEL_MOVES = ("up", "down", "top", "bottom")      # the move menu's items; their words are panel.move.<name>
@@ -1478,28 +1480,29 @@ if(!n){var u=S.querySelector('ul.fy-list');if(u){var p=document.createElement('p
 # the server's (it republishes after each change, and an open home page picks that up). Without JavaScript, or when the request fails, the forms post as they always did (303 back to the page). Nothing here inserts HTML: text goes in with
 # textContent, and the only nodes made are a form, an input and a button. The relative times redraw every 30 s (ago() says what render.landed_ago says; keep them in step).
 _LANDED_JS = r"""(function(){var M=document.querySelector('main#top');if(!M||!window.fetch||!window.URLSearchParams)return;
-function ago(s){s=Math.max(s,0);var m=Math.floor(s/60);return s<60?'just now':m<60?m+'m ago':m<2880?Math.floor(m/60)+'h ago':Math.floor(m/1440)+'d ago'}
+""" + _AGE_FN + r"""
+function ago(s){return fa(s)}
 function tick(){var n=Date.now()/1000;M.querySelectorAll('.lago[data-ts]').forEach(function(e){e.textContent=ago(n-(+e.getAttribute('data-ts')))})}
 tick();setInterval(tick,30000);
 function live(sec){return [].filter.call(sec.querySelectorAll('li.lrow'),function(x){return!x.classList.contains('lcleared')})}
 function counts(){var n=live(M).length,p=M.querySelector('p.lnote');
-if(p&&p.firstChild&&p.firstChild.nodeType===3)p.firstChild.nodeValue=p.firstChild.nodeValue.replace(/^\d+ closes?/,n+' close'+(n===1?'':'s'));
+if(p&&p.hasAttribute('data-n')&&p.firstChild&&p.firstChild.nodeType===3)p.firstChild.nodeValue=SST(n===1?'js.closed.note_one':'js.closed.note_many',{n:n});
 [].forEach.call(M.querySelectorAll('#new details.hscope'),function(g){var c=g.querySelector('summary h3 .count');if(c)c.textContent=String(live(g).length)});
 var h=M.querySelector('#new>h2 .count');if(h)h.textContent=String(n);var a=M.querySelector('form.lmark');if(a)a.hidden=!n}
 function mk(cls,look,action,key,label,aria){var f=document.createElement('form');f.className=cls;f.method='post';f.action=action;
-var i=document.createElement('input');i.type='hidden';i.name='keys';i.value=key;var b=document.createElement('button');b.type='submit';b.className=look;b.textContent=label;b.setAttribute('aria-label',label+' '+aria);
+var i=document.createElement('input');i.type='hidden';i.name='keys';i.value=key;var b=document.createElement('button');b.type='submit';b.className=look;b.textContent=label;b.setAttribute('aria-label',SST('js.closed.aria',{label:label,id:aria}));
 f.appendChild(i);f.appendChild(b);return f}
 function setState(li,cleared,ok){var act=li.querySelector('.ir-act');if(!act){act=document.createElement('div');act.className='ir-act';li.appendChild(act)}var old=act.querySelector('form, span.lgone'),k=li.getAttribute('data-key'),id=(li.querySelector('.ir-id')||{}).textContent||'';
 li.classList.toggle('lcleared',cleared||ok===false);var nf;
-if(ok===false){nf=document.createElement('span');nf.className='lgone';nf.textContent='Not restored'}
-else if(cleared)nf=mk('lundo','b','@ROOT@/landed/unclear',k,'Undo',id);
-else nf=mk('lclear','b','@ROOT@/landed/clear',k,'Clear',id);
+if(ok===false){nf=document.createElement('span');nf.className='lgone';nf.textContent=SST('js.closed.not_restored')}
+else if(cleared)nf=mk('lundo','b','@ROOT@/landed/unclear',k,SST('js.closed.undo'),id);
+else nf=mk('lclear','b','@ROOT@/landed/clear',k,SST('js.closed.clear'),id);
 if(old)old.replaceWith(nf);else act.insertBefore(nf,act.firstChild)}
 document.addEventListener('submit',function(ev){var f=ev.target;if(!f||!f.matches||!f.matches('form.lclear,form.lundo,form.lmark'))return;
 ev.preventDefault();var all=f.classList.contains('lmark'),undo=f.classList.contains('lundo'),li=f.closest('li.lrow'),inp=f.querySelector('input[name=keys]'),b=f.querySelector('button');
 var lis=all?live(M):li?[li]:[];if(all)inp.value=lis.map(function(x){return x.getAttribute('data-key')}).join(',');
 if(!inp.value)return;var lab=b&&b.textContent;function rest(){if(b){b.disabled=false;b.removeAttribute('aria-busy');b.textContent=lab}}
-if(b){b.disabled=true;b.setAttribute('aria-busy','true');if(all)b.textContent='Clearing\u2026'}
+if(b){b.disabled=true;b.setAttribute('aria-busy','true');if(all)b.textContent=SST('js.closed.clearing')}
 fetch(f.action,{method:'POST',body:new URLSearchParams({keys:inp.value}),credentials:'same-origin',headers:{'Accept':'application/json'},redirect:'manual'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){
 if(!d||!d.ok)throw 0;rest();lis.forEach(function(x){setState(x,!undo,undo&&!d.changed?false:true)});counts()
 }).catch(function(){rest();f.submit()})},true)})();"""
@@ -2209,22 +2212,22 @@ class Board:
         e = lambda x: H.escape(str(x), quote=True)
         def li(l, _u, g, flag, tip):   # _u: the store's link (board.md's); the name links to its view
             mach, nm = l.split("/", 1) if "/" in l else ("", l)
-            where = "" if mach in ("", "?") else ("cloud" if mach == "c" else self.fleet.get(mach) or mach)
+            where = "" if mach in ("", "?") else (_t("sessions.cloud") if mach == "c" else self.fleet.get(mach) or mach)
             name = self.sess_html(nm)
             ids = ", ".join(f'<a href="{item_href(r)}">{e(rid(r))}</a>' for r in sorted(g, key=lambda r: (r["L"], num(r))))
             return (f'<li><span class="sn">{name}</span>' + (f' <span class="dim">· {e(where)}</span>' if where else "")
-                    + (f' <span class="aflag" title="{e(_AFLAG[flag])}">{e(flag)}</span>' if flag else "")
-                    + (f' <span class="own">· owns {ids}</span>' if ids else "")
+                    + (f' <span class="aflag" title="{e(_t(_AFLAG[flag][1]))}">{e(_t(_AFLAG[flag][0]))}</span>' if flag else "")
+                    + (f' <span class="own">{_t("sessions.owns", ids=ids)}</span>' if ids else "")
                     + (f'<span class="mand">{self.mentions(e(tip))}</span>' if tip else "") + '</li>')   # the page's mandate words: mentions linked
         if self.is_hub(k):
             _front, back = self.agent_roles(k)
-            groups = [("Agents", sorted([x for x in ls if x[0].split("/", 1)[-1] not in back], key=lambda x: not x[0].endswith("-main"))),
-                      ("Background agents", [x for x in ls if x[0].split("/", 1)[-1] in back])]
+            groups = [(_t("sessions.agents"), sorted([x for x in ls if x[0].split("/", 1)[-1] not in back], key=lambda x: not x[0].endswith("-main"))),
+                      (_t("sessions.background"), [x for x in ls if x[0].split("/", 1)[-1] in back])]
         else:
-            groups = [("Session", ls)]
+            groups = [(_t("sessions.session"), ls)]
         body = "".join(f'<h3 class="sgrp">{e(t)}</h3><ul class="alist slist">' + "".join(li(x[0], x[1], x[4], x[5], x[6]) for x in xs) + '</ul>'
                        for t, xs in groups if xs)
-        if body and self.finished(k): body = f'<details class="archived"><summary>Archived</summary>{body}</details>'       # an archived project's agents sit in a group that starts closed
+        if body and self.finished(k): body = f'<details class="archived"><summary>{_t("page.archived")}</summary>{body}</details>'       # an archived project's agents sit in a group that starts closed
         return len(ls), body
     def when(self, ts, clock=True):
         """"Mon Mar 2nd 20:00" (clock=False: "Mon Mar 2nd"): the rulebook's form for a date a person reads, in the board's zone.
@@ -2294,17 +2297,18 @@ class Board:
         e = esc
         ents = _said.entries_of(r["metadata"]); ent = ents[n - 1] if 0 < n <= len(ents) else None
         if ent is not None: checked = ent["checked"]
-        label = f"{tag} {who or _OWNER}" + ("" if checked else " · unchecked")
+        base = f"{tag} {who or _OWNER}"
+        label = base if checked else _t("said.label_unchecked", label=base)
         summary = f'<summary>{badge(label, "said" + ("" if checked else " unchecked"))}</summary>'
         if ent is None:
-            return f'<details class="said" id="{e(_said.anchor(n))}">{summary}<div class="sbody"><span class="dim">the item holds no record of this entry</span></div></details>'
+            return f'<details class="said" id="{e(_said.anchor(n))}">{summary}<div class="sbody"><span class="dim">{_t("said.no_record")}</span></div></details>'
         x = self.sess_of(ent["session"]) or {}
-        nm = x.get("name") or ent["session"] or "an unknown session"
+        nm = x.get("name") or ent["session"] or _t("said.unknown_session")
         sess = self.sess_html(nm)
         when = f' · {e(self.when(ent["ts"]))}' if ent["ts"] else ""
-        chk = "checked against the transcript" if checked else "unchecked" + (f": {e(ent['why'])}" if ent.get("why") else "")
+        chk = _t("said.checked") if checked else (_t("said.unchecked_why", why=e(ent["why"])) if ent.get("why") else _t("said.unchecked"))
         return (f'<details class="said" id="{e(_said.anchor(n))}">{summary}<div class="sbody"><blockquote>{e(ent["quote"])}</blockquote>'
-                f'<span class="smeta">{e(_OWNER)} in {sess}{when} · {chk}</span></div></details>')
+                f'<span class="smeta">{_t("said.meta", owner=e(_OWNER), sess=sess, when=when, chk=chk)}</span></div></details>')
     def item(self, gid):
         """The item with board id `gid`, open, on hold or completed; KeyError when the store has none."""
         r = next((r for r in self.rows if r["gid"] == str(gid)), None)
@@ -2564,23 +2568,20 @@ class Board:
                 out.append((g["vi"], 0.5, ent))
         out.sort(key=lambda x: (-x[0], x[1]))
         return [x for _vi, _j, x in out[:self.HISTORY_CAP]], max(len(out) - self.HISTORY_CAP, 0)
-    _SENT = {"decision": ("ok", "Sent: your answer is on the item, it has left your queue, and the agent on it has been told."),
-             "comment": ("ok", "Sent: your comment is on the item and the agent on it has been told."),
-             "empty": ("warn", "Nothing sent: write something in the box, or pick an option."),
-             "toolong": ("warn", "Nothing sent: the text is too long."),
-             "stale": ("warn", "Nothing sent: the item no longer asks this (its options or its needs changed). Read it again below.",
-                       "Nothing sent: the ask changed before your answer arrived; open the item to read it again."),
-             "askedback": ("warn", "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
-                           "Sent: your note is on the item. I could not read a date from it; open the item to pick a day."),
-             "stalenote": ("ok", "Sent as a comment: the item no longer asks this, so your note is on it as a comment and the agent on it has been told. Read the item again below.",
-                           "Sent as a comment: the ask changed before your answer arrived, so your note is on the item as a comment; open the item to read it again."),
-             "closednote": ("ok", "Sent as a comment: the item is closed, and your note is on it."),
-             "closed": ("warn", "Nothing sent: the item is closed."),
-             "done": ("ok", "Done: the item goes on to its next mover."),
-             "stepreply": ("ok", "Sent: your note is on the item and its next mover has it. It decides whether the step is done, and hands the item back to you if it was a question."),      # the item page names who: sent_html(taken_by=)
-             "nomover": ("warn", "Nobody is set to take this item next, so nothing was recorded. Write a comment instead."),
-             "nostep": ("warn", "Nothing sent: the item has no step for you any more. Read it again below.",
-                        "Nothing sent: the item has no step for you any more; open the item to read it again.")}
+    _SENT_KEYS = {"decision": ("ok", "sent.decision"),      # ?sent=<code> → (the notice's class, its key on the item page, its key on the home page when that differs: it has no "below" and no box to press again in)
+                  "comment": ("ok", "sent.comment"),
+                  "empty": ("warn", "sent.empty"),
+                  "toolong": ("warn", "sent.toolong"),
+                  "stale": ("warn", "sent.stale", "sent.stale_home"),
+                  "askedback": ("warn", "sent.askedback", "sent.askedback_home"),
+                  "stalenote": ("ok", "sent.stalenote", "sent.stalenote_home"),
+                  "closednote": ("ok", "sent.closednote"),
+                  "closed": ("warn", "sent.closed"),
+                  "done": ("ok", "sent.done"),
+                  "stepreply": ("ok", "sent.stepreply"),      # the item page names who: sent_html(taken_by=)
+                  "nomover": ("warn", "sent.nomover"),
+                  "nostep": ("warn", "sent.nostep", "sent.nostep_home")}
+    _SENT = {k: (v[0], *[_i18n.EN[x] for x in v[1:]]) for k, v in _SENT_KEYS.items()}      # the English view of the table above (what the tests read)
     def answer_html(self, r, answer, comment_only=False) -> str:
         """the answer box under the Ask of an open item, for a signed-in viewer (`answer` = {"action", "token"} from
         the server; None draws nothing). While it needs his decision: one card per stored option (_cards_html: the label and the whole text of the option, the recommended one marked by its badge;
@@ -2637,23 +2638,23 @@ class Board:
         def row(r):
             gid = str(r.get("gid") or "")
             who = (f'<a class="fy-id" href="{e(id_href(gid))}" target="_blank" rel="noopener">{e(shown(gid))}</a>' if gid else f'<span class="fy-id dim">{e(str(r.get("kind") or "").replace("_", " "))}</span>')
-            urgent = ' <span class="badge due">urgent</span>' if r.get("urgent") else ""
+            urgent = f' <span class="badge due">{_t("foryou.urgent")}</span>' if r.get("urgent") else ""
             return (f'<li class="fy-row{" urgent" if r.get("urgent") else ""}" id="fy-{int(r["id"])}"><span class="fy-main">{who}'
                     f'<span class="fy-what">{e(str(r.get("what") or ""))}{urgent}</span></span>'
                     f'<span class="fy-when" title="{e(str(r.get("kind") or ""))}">{e(self.when(float(r.get("ts") or 0)))}</span>'
                     f'<form class="fy-seen" method="post" action="{under("/for-you/seen")}"><input type="hidden" name="id" value="{int(r["id"])}">'
-                    '<button type="submit" class="b" title="clears this row">seen</button></form></li>')
+                    f'<button type="submit" class="b" title="{esc(_t("foryou.seen_tip"))}">{_t("foryou.seen_btn")}</button></form></li>')
         allb = (f'<form class="fy-seen fy-all" method="post" action="{under("/for-you/seen")}"><input type="hidden" name="id" value="all">'
-                '<button type="submit" class="b">mark all seen</button></form>') if len(rows) > 1 else ""
-        body = (f'<ul class="fy-list">{"".join(row(r) for r in rows)}</ul>{allb}' if rows else '<p class="empty fy-empty">nothing new for you</p>')
-        return _top_fold("for-you", f'<h2>For you <span class="count">{len(rows)}</span></h2>', body)
+                f'<button type="submit" class="b">{_t("foryou.all_seen")}</button></form>') if len(rows) > 1 else ""
+        body = (f'<ul class="fy-list">{"".join(row(r) for r in rows)}</ul>{allb}' if rows else f'<p class="empty fy-empty">{_t("foryou.empty")}</p>')
+        return _top_fold("for-you", f'<h2>{_t("watch.for_you")} <span class="count">{len(rows)}</span></h2>', body)
     def sent_html(self, answer, taken_by="") -> str:
         """The short notice after a POST (?sent=<code>): sent, or why nothing was. After Done or a note on the step `taken_by` is who moves the item now."""
         k = str((answer or {}).get("sent") or "")
         if k not in self._SENT: return ""
-        cls, msg = self._SENT[k][:2]      # the item page's wording; a third entry is the home page's own (it has no "below" and no box to press again in)
-        if k == "done" and taken_by: msg = f"Done: {taken_by} takes it from here."
-        if k == "stepreply" and taken_by: msg = f"Sent: {taken_by} has your note and decides whether the step is done."
+        cls, msg = self._SENT_KEYS[k][0], _t(self._SENT_KEYS[k][1])      # the item page's wording; a third entry is the home page's own (it has no "below" and no box to press again in)
+        if k == "done" and taken_by: msg = _t("js.sent_done", who=taken_by)
+        if k == "stepreply" and taken_by: msg = _t("sent.stepreply_by", who=taken_by)
         return f'<p class="isent {cls}" role="status">{esc(msg)}</p>'
     def contact_name(self, r, contact=None) -> str:
         """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, server._contact_label), else the stored metadata.contact as the session's name now; "" when none."""
@@ -2955,10 +2956,10 @@ class Board:
                        + _ui.rows([self.home_row(r, mod, which, flags=True) for r, mod in lists[which]]) + '</details>'
                        for which, t in ((w, self.list_title(w)) for w in LIST_ORDER) if lists[which])
         if done:
-            body += (f'<details class="fold sfold" data-fold="project.items.completed"><summary><h3 class="iscope">Completed <span class="count">{len(done)}</span></h3></summary>'
+            body += (f'<details class="fold sfold" data-fold="project.items.completed"><summary><h3 class="iscope">{_t("routing.completed_title")} <span class="count">{len(done)}</span></h3></summary>'
                      + _ui.rows([self.done_row(r, sub(r)) for r in done]) + '</details>')
         n_ver = n_apart(rows)[1]     # the verifying items count apart from open
-        return len(rows) - n_ver, len(done), ("" if rows else '<p class="empty">no open items</p>') + body, n_ver
+        return len(rows) - n_ver, len(done), ("" if rows else f'<p class="empty">{_t("routing.no_open")}</p>') + body, n_ver
 
     def routing_html(self, k) -> str:
         """The project's details page behind a row's watch light: its items, its sessions, its anchors, then every notice
@@ -2976,7 +2977,7 @@ class Board:
         def ruling(n):
             r = n.get("ruling")
             if r: return f'<span class="r-{esc(r)}">{esc(r)}</span>' + (f' → {esc(n["ruled_to"])}' if n.get("ruled_to") else "")
-            return '<span class="r-pending">pending</span>' if n.get("pilot") else '<span class="dim">—</span>'
+            return f'<span class="r-pending">{_t("routing.pending_ruling")}</span>' if n.get("pilot") else '<span class="dim">—</span>'
         rows = self.mentions("".join(     # who, gist, for, ruling and reason are free text: mentions linked
             f'<tr><td class="t">{when(n["ts"])}</td><td>' + (f'<a href="{esc(n["url"])}" target="_blank" rel="noopener">{esc(n.get("label") or n.get("kind"))}</a>' if n.get("url") else esc(n.get("label") or n.get("kind")))
             + f'</td><td>{esc(n.get("who", ""))}{": " if n.get("who") and n.get("text") else ""}{esc(n.get("text", ""))}</td><td class="f">{esc(n.get("target") or "")}</td><td class="r">{ruling(n)}</td><td class="why">{esc(n.get("reason", ""))}</td></tr>'
@@ -2997,17 +2998,16 @@ class Board:
             return (f'<section id="{sid}"><details class="fold" data-fold="project.{sid}"{" open" if open_ else ""}><summary><h2>{esc(title)} <span class="count">{n}</span>{more}</h2></summary>'
                     f'{body}</details></section>')
         mirror = self.proj_mirror(k)       # the project's gbrain page on its GitHub mirror
-        summary =" · ".join([f"{c['in']} in"] + ([f"{c[r]} {r}" for r in _routing.RULINGS if c[r]] if pilot else [])) + (f" · {c['pending']} pending" if c["pending"] else "")
+        summary = " · ".join([_t("routing.in", n=c["in"])] + ([f"{c[r]} {r}" for r in _routing.RULINGS if c[r]] if pilot else [])) + (" · " + _t("routing.pending", n=c["pending"]) if c["pending"] else "")      # the ruling words are the router's own vocabulary
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">'
                 f'<title>{esc(name)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{esc(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">' + self.page_header() +
-                f'<p class="pjback"><a href="{under("/projects")}">← Projects</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">gbrain page ↗</a></p>' if mirror else "")
-                + f'<p class="sub">last 24 hours: {esc(summary)}'
-                + (" · the router rules every notice" if pilot else " · not a project page: notices go straight to the sessions, no rulings") + '</p>'
-                + self.sent_notes_html() + fold("items", "Items", n_items, items_body, more=(f' <span class="count dim">· {n_ver} verifying</span>' if n_ver else "") + (f' <span class="count dim">· {n_done} completed</span>' if n_done else ""))
-                + fold("sessions", "Sessions", n_sess, sess_body or '<p class="empty">none</p>')
-                + fold("anchors", "Anchors", len(seen), f'<ul class="alist">{alist}</ul>' if alist else '<p class="empty">none</p>')
-                + fold("notices", "Notices", len(notes), f'<div class="rwrap"><table class="rlog"><thead><tr><th>when ({_cfg.tz_abbr()})</th><th>source</th><th>what</th><th>for</th><th>ruling</th><th>reason</th></tr></thead><tbody>{rows}</tbody></table></div>' if rows else '<p class="empty">nothing delivered yet</p>', open_=False)
+                f'<p class="pjback"><a href="{under("/projects")}">{_t("routing.back")}</a></p><h1>{esc(name)}</h1>' + (f'<p class="sub"><a href="{esc(mirror)}" target="_blank" rel="noopener">{_t("routing.gbrain_page")}</a></p>' if mirror else "")
+                + f'<p class="sub">{_t("routing.sub_pilot" if pilot else "routing.sub_plain", summary=esc(summary))}</p>'
+                + self.sent_notes_html() + fold("items", _t("routing.sec_items"), n_items, items_body, more=(f' <span class="count dim">{_t("routing.verifying", n=n_ver)}</span>' if n_ver else "") + (f' <span class="count dim">{_t("routing.completed", n=n_done)}</span>' if n_done else ""))
+                + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
+                + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
+                + fold("notices", _t("routing.sec_notices"), len(notes), f'<div class="rwrap"><table class="rlog"><thead><tr><th>{_t("routing.th_when", tz=_cfg.tz_abbr())}</th><th>{_t("routing.th_source")}</th><th>{_t("routing.th_what")}</th><th>{_t("routing.th_for")}</th><th>{_t("routing.th_ruling")}</th><th>{_t("routing.th_reason")}</th></tr></thead><tbody>{rows}</tbody></table></div>' if rows else f'<p class="empty">{_t("routing.nothing")}</p>', open_=False)
                 + f'<script>{_FOLD_JS}</script></main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
 
     # ---------------- the emitters ----------------
@@ -3770,7 +3770,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The hidden element the home page's script (_HOME_JS) reads to show the notice of an answer sent from a row: the item page's own notices (one text per ?sent= code, the home wording where it has
         one) and the prefix an issue-numbered id is written with. The home page and the project page carry it, both draw answer forms in their rows; the notice shows after #counts, else after this element."""
         return (f'<div id="sent-notes" hidden data-hash="{esc(shown("g1")[:-1])}" data-notes="'
-                + esc(json.dumps({k: [v[0], v[2] if len(v) > 2 else v[1]] for k, v in self._SENT.items()})) + '"></div>')
+                + esc(json.dumps({k: [v[0], _t(v[-1])] for k, v in self._SENT_KEYS.items()})) + '"></div>')
     def scope_groups(self, items, row=lambda x: x):
         """Items grouped by scope: [(scope, [item])]. The one grouping home's four lists and the Closed page's New and Last 14 days sections draw (ui/groups.py): an item's scope is the Closed page's (landed_scope: the scope of the project
         its board row rolls up to, no project the default scope), the groups in [project_scopes] order (team, lab, infra, say), the items of a group in the order given (each list keeps its own sort). A scope with no items has no group. An item
@@ -3842,12 +3842,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def at(p): return under("/closed") + (f"?page={p}" if p > 1 else "") + "#completed"
         def side(word, p, rel):
             return f'<a class="pg" rel="{rel}" href="{esc(at(p))}">{word}</a>' if p else f'<span class="pg off" aria-disabled="true">{word}</span>'
-        pager = (f'<nav class="lpager" aria-label="Last 14 days pages">{side("Newer", page - 1 if page > 1 else 0, "prev")}<span class="lpos">Page {page} of {pages}</span>'
-                 f'{side("Older", page + 1 if page < pages else 0, "next")}</nav>') if pages > 1 else ""
-        body = self.scope_sections("closed.completed", rows, lambda r: self.done_row(r, named=True)) if rows else '<p class="empty">none</p>'
-        span = f" Showing {first + 1} to {first + len(rows)} of {n}." if rows and pages > 1 else ""
-        return (f'<section id="completed" class="lcompleted"><h2 class="lsec" title="Items closed in the last 14 days">Last 14 days <span class="count">{n}</span></h2>'
-                f'<p class="lpgnote">Items closed in the last 14 days, newest first.{span}</p>{body}{pager}</section>')
+        pager = (f'<nav class="lpager" aria-label="{esc(_t("closed.pager"))}">{side(_t("closed.newer"), page - 1 if page > 1 else 0, "prev")}<span class="lpos">{_t("closed.page_of", page=page, pages=pages)}</span>'
+                 f'{side(_t("closed.older"), page + 1 if page < pages else 0, "next")}</nav>') if pages > 1 else ""
+        body = self.scope_sections("closed.completed", rows, lambda r: self.done_row(r, named=True)) if rows else f'<p class="empty">{_t("page.none")}</p>'
+        note = _t("closed.last14_showing", first=first + 1, last=first + len(rows), n=n) if rows and pages > 1 else _t("closed.last14_note")
+        return (f'<section id="completed" class="lcompleted"><h2 class="lsec" title="{esc(_t("closed.last14_tip"))}">{_t("closed.last14")} <span class="count">{n}</span></h2>'
+                f'<p class="lpgnote">{esc(note)}</p>{body}{pager}</section>')
 
     # ---------------- Landed ----------------
     def landed_rows(self):
@@ -3885,7 +3885,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             oc, why, _sup = outcome_of(r)
             key = _ld.key(rec["gid"], rec["ts"])
             clear = (f'<form class="lclear" method="post" action="{under("/landed/clear")}"><input type="hidden" name="keys" value="{e(key)}">'
-                     f'<button type="submit" class="b" aria-label="Clear {e(rid(r))}">Clear</button></form>') if mark else ""
+                     f'<button type="submit" class="b" aria-label="{e(_t("js.closed.aria", label=_t("js.closed.clear"), id=rid(r)))}">{_t("js.closed.clear")}</button></form>') if mark else ""
             when = (f'<span class="tip ir-age lago" data-ts="{int(rec["ts"])}" data-tip="{e(self.when(rec["ts"]))} {e(_cfg.tz_abbr(datetime.datetime.fromtimestamp(rec["ts"], self.now.tzinfo)))}" title="">'
                     f'{e(landed_ago(now_ts - rec["ts"]))}</span>')
             # the one row: the outcome as its tag, `#id title` with the close's age at the right, the close reason behind the guide line, Clear under the reason (where Your move has its Send)
@@ -3893,16 +3893,15 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                            actions_html=clear, li_class="lrow", data=f'data-key="{e(key)}"', project_html=self.row_line(r), edge=_ui.NEW)
         # the same subsections as home's lists (scope_sections): one foldable subsection per scope in [project_scopes] order, the entries of a scope newest first (landed_rows is), each a row with no who line
         secs = self.scope_sections("closed.new", rows, lambda pr: line(*pr), row=lambda pr: pr[1])
-        note = (f'{len(rows)} close{"s" if len(rows) != 1 else ""} by agents, newest first. An entry stays here until you clear it.') if rows \
-            else 'Nothing an agent closed is waiting here: an entry stays on this page until you clear it.'
+        note = _t("js.closed.note_one" if len(rows) == 1 else "js.closed.note_many", n=len(rows)) if rows else _t("closed.note_none")
         btn = ('<form class="lmark" method="post" action="' + under("/landed/clear") + '"><input type="hidden" name="keys" value="' + e(",".join(self.landed_keys())) + '">'
-               '<button type="submit" class="b">Clear all</button></form>') if rows and mark else ""
+               '<button type="submit" class="b">' + _t("closed.clear_all") + '</button></form>') if rows and mark else ""
         font_css = str(_cfg.get("instance", "font_css") or "")
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
-                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>Closed · {e(self.title)}</title>'
+                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("state.closed")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
-                f'<h1>Closed</h1><section id="new" class="lnew"><h2 class="lsec">New <span class="count">{len(rows)}</span></h2><p class="lnote">{note}</p>{btn}{secs}</section>{self.completed_html(page)}</main>'
+                f'<h1>{_t("state.closed")}</h1><section id="new" class="lnew"><h2 class="lsec">{_t("closed.new")} <span class="count">{len(rows)}</span></h2><p class="lnote"{" data-n" if rows else ""}>{note}</p>{btn}{secs}</section>{self.completed_html(page)}</main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_HOME_FOLD_JS}</script><script>{_LANDED_JS}</script></body></html>')
 
     def projects_html(self) -> str:
@@ -3910,10 +3909,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         e = esc
         font_css = str(_cfg.get("instance", "font_css") or "")
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
-                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>Projects · {e(self.title)}</title>'
+                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("projects.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
-                f'<h1>Projects</h1><p class="pjnote">Each project and the agents that are running. Its items are on its own page.</p><section id="by-project">{self.projects_table()}</section></main>'
+                f'<h1>{_t("projects.title")}</h1><p class="pjnote">{_t("projects.note")}</p><section id="by-project">{self.projects_table()}</section></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_HOME_FOLD_JS}</script></body></html>')
 
     def audits_html(self, runner=None) -> str:
@@ -3941,62 +3940,64 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             return "–" if d is None else (f"{d:%H:%M}" if d.date() == self.now.astimezone(z).date() else when_words(d))
         running = ov["running_since"] is not None
         if ov["enabled"]:
-            sub = f"{ov['total']} audits in {len(ov['groups'])} groups." + (f" Next run {words(ov['next'])}." if _num_ok(ov["next"]) else "")
-            btn = (f'<div class="atbtn"><button type="button" class="b" id="audit-now-page"{" disabled" if running else ""}>Audit now</button>'
+            sub = _t("audit.sub_next", n=ov["total"], groups=len(ov["groups"]), at=words(ov["next"])) if _num_ok(ov["next"]) else _t("audit.sub", n=ov["total"], groups=len(ov["groups"]))
+            btn = (f'<div class="atbtn"><button type="button" class="b" id="audit-now-page"{" disabled" if running else ""}>{_t("panel.audit.now")}</button>'
                    '<span class="apmsg" id="audit-page-msg" role="status" aria-live="polite"></span></div>')
         else:
-            sub, btn = "The audit is off ([audit] enabled), so nothing runs and no run is listed.", ""
+            sub, btn = _t("audit.off"), ""
         done = [r for r in ov["runs"] if r["finished"] is not None and not r["error"]]
         last = done[0] if done else None
-        times = " and ".join(ov["times"]) or "Scheduled runs"
-        paces = [("Every minute", "events, hand-offs, answers, fleet"),
-                 ("Every 10 minutes", (f"last {stamp(ov['ten_last'])}: " if ov["ten_last"] else "") + "filing, dates, silence"),
-                 (times, (f"last {stamp(last['finished'])}: {last['items'] if last['items'] is not None else 0} items, {last['found']} findings") if last else "no run yet")]
+        times = _t("audit.times_join").join(ov["times"]) or _t("audit.scheduled")
+        paces = [(_t("audit.pace_min"), _t("audit.pace_min_what")),
+                 (_t("audit.pace_ten"), _t("audit.pace_ten_what_last", at=stamp(ov["ten_last"])) if ov["ten_last"] else _t("audit.pace_ten_what")),
+                 (times, _t("audit.pace_runs_last", at=stamp(last["finished"]), items=last["items"] if last["items"] is not None else 0, found=last["found"]) if last else _t("audit.no_run_yet"))]
         paces_html = "".join(f'<div class="apace"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in paces)
         def group(g):
             if g["found"] is None:
-                num = f'<span class="anum">{"not logged" if not g["log"] else "log off"}</span>'
+                num = f'<span class="anum">{_t("audit.not_logged" if not g["log"] else "audit.log_off")}</span>'
             else:
-                num = f'<span class="anum{" hit" if g["found"] else ""}">{g["found"]} found</span>'
-            items = "".join(f'<li>{e(a["name"])}<span{"" if a["mode"] == "on" else " class=" + chr(34) + "shadow" + chr(34)}>{e(a["pace"])}{"" if a["mode"] == "on" else " · " + e(a["mode"])}</span></li>' for a in g["audits"])
-            return (f'<details class="audg"><summary><span class="agn"><b>{e(g["name"])}</b><span>{e(g["desc"])}</span></span><span class="anum">{len(g["audits"])} audits</span>{num}</summary>'
+                num = f'<span class="anum{" hit" if g["found"] else ""}">{_t("audit.found", n=g["found"])}</span>'
+            word = lambda table, prefix, english: _audit_word(table, english, prefix)      # a pace or a mode in the request's language; an audit's own name stays as the module gives it
+            items = "".join(f'<li>{e(a["name"])}<span{"" if a["mode"] == "on" else " class=" + chr(34) + "shadow" + chr(34)}>{e(word(_AUDIT_PACES, "audit.pace.", a["pace"]))}{"" if a["mode"] == "on" else " · " + e(word(_AUDIT_MODES, "audit.mode.", a["mode"]))}</span></li>' for a in g["audits"])
+            desc = _t("audit.desc." + g["key"]) if "audit.desc." + g.get("key", "") in _i18n.EN else g["desc"]
+            return (f'<details class="audg"><summary><span class="agn"><b>{e(_audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group."))}</b><span>{e(desc)}</span></span><span class="anum">{_t("audit.n_audits", n=len(g["audits"]))}</span>{num}</summary>'
                     f'<ul class="aaud">{items}</ul></details>')
         groups_html = "".join(group(g) for g in ov["groups"])
         def finding(r):
             n = _ov.item_path(r["id"])
             ref = f'<a href="{under("/items/" + n)}">{e(r["id"])}</a>' if n else e(r["id"])
-            return (f'<div class="af">{ref} {e(r["detail"])}<div class="am">{e(stamp(r["at"]))} · {e(_ov.SOURCES.get(r["source"], r["source"] or "audit"))} · {e(r["agent"])}</div></div>')
+            return (f'<div class="af">{ref} {e(r["detail"])}<div class="am">{e(stamp(r["at"]))} · {e(_t("audit.source." + r["source"]) if r["source"] in _ov.SOURCES else (r["source"] or _t("audit.source_default")))} · {e(r["agent"])}</div></div>')
         if not ov["log"]:
-            feed, fsub = '<p class="aempty">The findings log is off, so findings are not listed here.</p>', "log off"
+            feed, fsub = f'<p class="aempty">{_t("audit.feed_log_off")}</p>', _t("audit.log_off")
         elif ov["recent"]:
-            feed, fsub = '<div class="afeed">' + "".join(finding(r) for r in ov["recent"]) + "</div>", f"{ov['found']} in the last 24 hours"
+            feed, fsub = '<div class="afeed">' + "".join(finding(r) for r in ov["recent"]) + "</div>", _t("audit.found_24h", n=ov["found"])
         else:
-            feed, fsub = '<p class="aempty">No findings in the last 24 hours.</p>', "none in the last 24 hours"
+            feed, fsub = f'<p class="aempty">{_t("audit.feed_none")}</p>', _t("audit.none_24h")
         def run_row(r):
+            unfinished = False
             if r["finished"] is None:
-                took = "running" if running and r["started"] == ov["running_since"] else "did not finish"
+                unfinished = not (running and r["started"] == ov["running_since"])
+                took = _t("audit.run_unfinished" if unfinished else "audit.run_running")
             else:
-                took = f"{max(0, round(r['finished'] - (r['started'] or r['finished'])))} s"
-            warn = ' class="warn"' if took == "did not finish" or r["error"] else ""
+                took = _t("audit.run_secs", n=max(0, round(r["finished"] - (r["started"] or r["finished"]))))
+            warn = ' class="warn"' if unfinished or r["error"] else ""
             start = words(r["started"]) if r["started"] is not None else "–"
             dash = lambda v: "–" if v is None else str(v)
             return f'<tr><td>{e(start)}</td><td{warn}>{e(took)}</td><td>{e(dash(r["items"]))}</td><td>{r["found"]}</td><td>{e(dash(r["calls"]))}</td></tr>'
         if ov["runs"]:
-            runs = ('<div class="atw"><table><tr><th>Started</th><th>Took</th><th>Items</th><th>Findings</th><th>Calls</th></tr>' + "".join(run_row(r) for r in ov["runs"]) + "</table></div>")
+            runs = (f'<div class="atw"><table><tr><th>{_t("audit.th_started")}</th><th>{_t("audit.th_took")}</th><th>{_t("audit.th_items")}</th><th>{_t("audit.th_findings")}</th><th>{_t("audit.th_calls")}</th></tr>' + "".join(run_row(r) for r in ov["runs"]) + "</table></div>")
         else:
-            runs = '<p class="aempty">No audit has run yet.</p>'
-        note = ('Counts are findings in the last 24 hours, counted the first time each appears, from the findings log. A group whose audits report to a machine or to CI keeps no findings log, so it shows a dash on the card and "not logged" here, not a zero.'
-                if ov["log"] else
-                "The findings log is off ([audit] pattern_review), so no group has a count and no finding is listed.")
+            runs = f'<p class="aempty">{_t("audit.no_runs")}</p>'
+        note = _t("audit.note_logged" if ov["log"] else "audit.note_log_off")
         font_css = str(_cfg.get("instance", "font_css") or "")
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
-                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>Audits · {e(self.title)}</title>'
+                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("audit.title")} · {e(self.title)}</title>'
                 f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top" class="audits-page">{self.page_header()}'
-                f'<div class="atop"><h1>Audits</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
-                f'<h2>Groups <small>open one to see its audits</small></h2><div class="agroups">{groups_html}</div>'
-                f'<h2>Latest findings <small>{e(fsub)}</small></h2>{feed}'
-                f'<h2>Runs <small>{e(times)}, and Audit now</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
+                f'<div class="atop"><h1>{_t("audit.title")}</h1>{btn}</div><p class="asub">{e(sub)}</p><div class="apaces">{paces_html}</div>'
+                f'<h2>{_t("audit.groups")} <small>{_t("audit.groups_hint")}</small></h2><div class="agroups">{groups_html}</div>'
+                f'<h2>{_t("audit.findings")} <small>{e(fsub)}</small></h2>{feed}'
+                f'<h2>{_t("audit.runs")} <small>{e(_t("audit.runs_hint", times=times, button=_t("panel.audit.now")))}</small></h2>{runs}<p class="anote">{e(note)}</p></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     def page_header(self, q: str = "", counts: str | None = None, h1: bool = False, conn: str = "", rstamp: str | None = None, search_page: bool = False) -> str:
@@ -4190,8 +4191,6 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 "audit-panel": _top_fold("audit-panel", f'<h2 class="hdr">{esc(panel_label("audit-panel"))}</h2>', self.audit_line() + self.gh_calls_card(), is_open=True),
                 "projects-panel": projects_panel_html()}
 
-    NO_OWN_AGENT = "no agent of its own"        # the Agents cell of a project whose page lists no agent and has no keeper session
-    NONE_RUNNING = "no agent running"           # the project has agents, but sala lists no running session of any
     def project_agents(self, k):
         """The agents the Projects page lists for project `k` -> (declared, [(name, what it is for, is_background)]).
         Order: the -main agent, the other front agents (the page's order), then the running background agents. Only agents sala
@@ -4237,12 +4236,12 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         Archived group after the active ones, drawn as home's subsections are (groups.fold_block: the heading, its count of projects, a native fold) and
         closed on load; inside it they are listed by scope as above. The table fits its box at every width (fixed layout, names wrap on a phone)."""
         SCOPES = self.scopes
-        _cols = ('<colgroup><col class="c-proj"><col class="c-sess"></colgroup><thead><tr><th>Project</th><th>Agents</th></tr></thead><tbody>')   # the head the active table and the Archived group both draw
+        _cols = ('<colgroup><col class="c-proj"><col class="c-sess"></colgroup><thead><tr><th>' + _t("projects.th_project") + '</th><th>' + _t("projects.th_agents") + '</th></tr></thead><tbody>')   # the head the active table and the Archived group both draw
         def ref(nm):   # a session's name, linked to its view while it has one
             code = esc(nm)
             return self.sess_html(nm, cls="sref", inner=code) if self.sess_href(nm) else code
         def agent_li(nm, what, back):
-            body = ref(nm) + (f' <span class="rtag" title="{esc(_ROLE_TIP["background"])}">background</span>' if back else "")
+            body = ref(nm) + (f' <span class="rtag" title="{esc(_t("projects.role_background"))}">{_t("projects.background")}</span>' if back else "")
             return f'<li{" class=dimline" if back else ""}{f' title="{esc(what)}"' if what else ""}>{body}</li>'
         rows = self.project_keys()      # a registered project is a top-level page of type project, with or without open items; notes and sub-pages roll up
         out = {False: [], True: []}     # the table rows of the active projects and of the archived ones
@@ -4260,10 +4259,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 pl = f'<a href="{esc(under("/" + k))}" target="_blank" rel="noopener" title="{esc(t)}">{esc(t)}</a>'
                 declared, ags = self.project_agents(k)
                 cell = (f'<ul class="pagents">{"".join(agent_li(*x) for x in ags)}</ul>' if ags
-                        else f'<span class="dim">{self.NONE_RUNNING if declared else self.NO_OWN_AGENT}</span>')
+                        else f'<span class="dim">{_t("projects.none_running" if declared else "projects.no_agent")}</span>')
                 out[fin_pass].append(f'<tr><td class="proj">{pl}</td><td class="sess">{cell}</td></tr>')
         table = lambda trs: '<div class="pwrap"><table class="pidx">' + _cols + "".join(trs) + '</tbody></table></div>'      # .pwrap: the table's box; the table fits it at every width (fixed layout, the agents column takes the rest), no sideways scroll
-        return table(out[False]) + (_grp.fold_block("projects.archived", "Archived", n_arch, table(out[True]), opened=False, cls="fold sfold") if n_arch else "")
+        return table(out[False]) + (_grp.fold_block("projects.archived", _t("page.archived"), n_arch, table(out[True]), opened=False, cls="fold sfold") if n_arch else "")
 
     def html(self) -> str:
         """The board's home as one HTML page."""

@@ -169,7 +169,7 @@ AJ = render._ANSWER_JS; LJ = render._LANDED_JS
 check("the answer form: the pressed Send reads Sending… and is aria-busy, the form is busy, and a failure puts the label and the state back",
       "s.textContent='Sending\\u2026'" in AJ and "s.name==='act'" in AJ and "s.setAttribute('aria-busy','true')" in AJ and "F.setAttribute('aria-busy','true')" in AJ and "S.innerHTML=L" in AJ and "S.removeAttribute('aria-busy')" in AJ, None)
 check("Landed: only Clear all reads Clearing… (a row's Clear and Undo keep their label); all are aria-busy while the request runs; the label comes back when it ends",
-      "if(all)b.textContent='Clearing\\u2026'" in LJ and LJ.count("Clearing") == 1 and "if(!undo)b.textContent" not in LJ and "b.setAttribute('aria-busy','true')" in LJ and "b.removeAttribute('aria-busy');b.textContent=lab" in LJ and LJ.count("rest()") >= 2, None)
+      "if(all)b.textContent=SST('js.closed.clearing')" in LJ and LJ.count("js.closed.clearing") == 1 and "if(!undo)b.textContent" not in LJ and "b.setAttribute('aria-busy','true')" in LJ and "b.removeAttribute('aria-busy');b.textContent=lab" in LJ and LJ.count("rest()") >= 2, None)
 check("Landed rows: Clear and Undo share one fixed width so the swap never moves the text, and the swapped-in button has no colour fade",
       "li.lrow form.lclear .b,li.lrow form.lundo .b{width:64px;min-width:64px;" in css and "li.lrow .b{transition:none}" in css, None)
 
