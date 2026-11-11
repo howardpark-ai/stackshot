@@ -117,7 +117,7 @@ class Wait:
 class Model:
     """The item as the model reads it. `state` is dead | alive | waiting; `today` is today's state word it came from ("" for a closed item), `today_derived` whether
     that word was derived (no stored state). For an alive item `mover` is who moves it (`mover_explicit`: stored, False = defaulted), `then` who takes it after the
-    owner's answer or step (only while the owner is the mover, or picks the waiting item up; `then_explicit` likewise) and `checkback` the wake that stands on it (the mover's own check-back: the item
+    owner's answer or step (only while the owner is the mover, or picks the waiting item up; `then_explicit` likewise) and `checkback` the wake that stands on it (a wake an alive item carries, a hand-off's backstop or one stored before until: the item
     stays alive). For a waiting item `wait` says what it waits on and who picks it up when it ends (`wait.mover`, also `Model.picker`; `mover` itself stays empty while it waits). `conflicts` lists what the fields say that cannot both stand (two different
     pickers stored on a waiting item, wait fields on an alive one); the model still answers, the guards of the write path refuse them later."""
     state: str
@@ -312,7 +312,7 @@ def view(item: dict[str, Any], mod: Model, now: float | None = None, after_open:
     An open item that stores no usable pair (a new one not yet saved, or a half-written pair: a phase waiting with no kind) is shown as the writer would store it, and UNSTAMPED counts the read (/audit/status);
     the next save or sweep stores the pair.
 
-    `check` False is the writer that is about to store the pair (server._stamp_values, and the audit's own readings): it works the pair out from the fields, `_shown`, which reads a doing item whose check-back wake is
+    `check` False is the writer that is about to store the pair (server._stamp_values, and the audit's own readings): it works the pair out from the fields, `_shown`, which reads a doing item whose wake is
     more than an hour out while every open step is dated for that day or later (dated_wait.py) as waiting on a time, as it does one stored as doing and put on hold with a wake more than that hour out, and one whose
     still-future wake carries a wait_basis. Doing is work in hand and carries no expected time; an item held there for days is a wait that was stored as work. `derive` itself is unchanged (the guards, the router and
     the hand-off read it as stored)."""
@@ -387,7 +387,7 @@ def shown_pair(mod: Model) -> tuple[str, str]:
 def shown_waiting(item: dict[str, Any], now: float | None = None, after_open: Callable[[dict[str, Any]], Any] | None = None) -> bool:
     """Does the board show this item as waiting? True exactly when the phase the board draws for an open item (`view` of `derive`, the stored pair first) is waiting; an item the board shows alive ("on agent",
     or the owner's move) and a closed one are not. The one test the passes that look for a quiet item (the silence pass, the stall pass's `not_due`) use to leave a waiting item alone, so that what they skip is
-    what the board shows as waiting and nothing else: a wake alone is a reminder and leaves the item on agent, a wake with a wait_basis is a wait. Raises what `derive` raises for an item it cannot read."""
+    what the board shows as waiting and nothing else: a stored until (a date alone too), a hold with a wake and a wake with a wait_basis are waits, and a wake kept as a hand-off's backstop (no until) leaves the item on agent. Raises what `derive` raises for an item it cannot read."""
     if item.get("status") != "open":
         return False
     return view(item, derive(item, now, after_open), now, after_open).state == WAITING
@@ -441,7 +441,7 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     if mod.state == ALIVE:
         out = f"model: alive · mover {who(mod.mover)}" + (f" (then {who(mod.then)})" if mod.then else "")
         if mod.checkback:
-            out += f" · check-back {mod.checkback}"
+            out += f" · backstop {mod.checkback}"
         return out + tail
     w = mod.wait
     if w is None:

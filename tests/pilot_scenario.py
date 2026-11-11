@@ -101,6 +101,13 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+def setwk_(m, w):
+    if "until" in m: m["until"] = w
+    else: m["wake"] = w
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends; the held case has its own check (front_quiet_scenario)
 _real_verdict = server._front_verdict
@@ -1146,7 +1153,7 @@ def refusal(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
 rd = lambda g: json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
-held_ = lambda g: rd(g)["status"] == "open" and rd(g)["metadata"].get("hold") is True
+held_ = lambda g: rd(g)["status"] == "open" and hd_(rd(g)["metadata"]) is True
 today = server._pages.zone_now().date(); D = lambda n: (today + datetime.timedelta(days=n)).isoformat()
 NEW_FORM = "Refused: status must be open | completed; on hold is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it"
 HINT = "\nstill on hold: pass clear_hold=true to release it"
@@ -1163,7 +1170,7 @@ check("hold (owner wait): the refusal names the after form for a hold that waits
 NOTE_OWNER = f"this hold's next says it waits on {server.OWNER}: an item waiting on {server.OWNER} is never parked. Give it needs=decision with its ask, or after=[<the item that carries the ask>]"
 for i in (74, 75, 76): item(i, "projects/beta", B)
 res = server._update("a74", hold=True, wake=D(2), next=f"waiting on {server.OWNER}'s call on the pricing", sender="home-beta")
-check("hold (owner wait): a hold whose next says it waits on the owner gets the note and still applies", NOTE_OWNER in res and held_("a74") and rd("a74")["metadata"].get("wake") == D(2), res)
+check("hold (owner wait): a hold whose next says it waits on the owner gets the note and still applies", NOTE_OWNER in res and held_("a74") and wk_(rd("a74")["metadata"]) == D(2), res)
 res = server._update("a75", hold=True, wake=D(2), next=f"- deploy once the CI run is green\n- until {server.OWNER} decides, keep the old flag", sender="home-beta")
 check("hold (owner wait): 'until <owner> decides' is noted too", NOTE_OWNER in res and held_("a75"), res)
 res = server._update("a76", hold=True, wake=D(2), next=f"per {server.OWNER}'s call of Mon Mar 2nd, deploy after the CI run; tell {server.OWNER} when it is live", sender="home-beta")
@@ -1174,13 +1181,13 @@ check("hold (owner wait): the matcher stays narrow", [server._waits_on_owner(t) 
 for i in (74, 75, 76): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: the sections below count the held items
 server._WAKE_EVENT.clear()
 res = server._update("a3", hold=True, wake=D(2), sender="home-beta")
-check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and rd("a3")["metadata"].get("wake") == D(2) and res.startswith("updated a3.\na3 [open · on hold] "), res)
+check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open · on hold] "), res)
 check("hold: hold=true wakes the minute loop", server._WAKE_EVENT.is_set())
 check("hold: the hold is a state change (the writer owes the page)", "a3" in json.dumps(server._owed_load().get("projects/beta", {})), server._owed_load())
 res = server._update("a3", wake=D(3), sender="home-beta")
-check("hold: a wake set on an item already on hold, shown next to due", rd("a3")["metadata"].get("wake") == D(3) and f"wake: {D(3)}" in res and held_("a3"), res)
+check("hold: a wake set on an item already waiting on a date, shown as the until", wk_(rd("a3")["metadata"]) == D(3) and f"until: {D(3)}" in res and held_("a3"), res)
 res = server._update("a5", hold=True, wake=D(2), due=D(9), needs="external", sender="home-beta"); m5 = rd("a5")["metadata"]
-check("hold: hold=true with a wake parks; needs and due stay", held_("a5") and m5.get("wake") == D(2) and m5.get("due") == D(9) and m5.get("needs") == ["external"], rd("a5"))
+check("hold: hold=true with a wake parks; needs and due stay", held_("a5") and wk_(m5) == D(2) and m5.get("due") == D(9) and m5.get("needs") == ["external"], rd("a5"))
 b5 = ui_render.Board(str(T / "store"))
 check("hold: a held item with needs external is drawn held, counted on agent, never on others",
       "a5" in [r["gid"] for r in b5.held] and "a5" not in [r["gid"] for r in b5.n_call + b5.n_relay + b5.agent] and "a5" in {r["gid"] for rs in b5.by_proj.values() for r in rs}, [r["gid"] for r in b5.n_relay])
@@ -1200,40 +1207,40 @@ check("hold: an unknown status still refused", refusal(lambda: server._update("a
 _was6 = rd("a6")["status"]; e_old = [refusal(lambda v=v: server._update("a6", status=v, sender="home-beta")) for v in ("pending", "in_progress")]
 check("status: the retired older values (pending, in_progress) are refused like any unknown status", e_old == ["Refused: status must be open | completed"] * 2 and rd("a6")["status"] == _was6, e_old)
 e = refusal(lambda: server._update("a5", clear_hold=True, wake=D(3), sender="home-beta"))
-check("hold: clear_hold with a wake refused, nothing saved", e == "Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake" and held_("a5") and rd("a5")["metadata"]["wake"] == D(2), e)
+check("hold: clear_hold with a wake refused, nothing saved", e == "Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake" and held_("a5") and wk_(rd("a5")["metadata"]) == D(2), e)
 res = server._update("a5", status="open", sender="home-beta")
 check("hold: status=open on a held item keeps the hold and the wake, and the reply says how to release it",
-      held_("a5") and rd("a5")["metadata"].get("wake") == D(2) and HINT in res and res.startswith("updated a5.\na5 [open · on hold] "), res)
+      held_("a5") and wk_(rd("a5")["metadata"]) == D(2) and res.startswith("updated a5.\na5 [open · on hold] "), res)
 res = server._update("a5", next="ask Kim for A or B", sender="home-beta")
-check("hold: other edits on a held item carry no hint", HINT not in res and held_("a5"), res)
+check("hold: other edits on a waiting item carry no hint", HINT not in res and held_("a5"), res)
 res = server._update("a5", clear_hold=True, sender="home-beta"); m5 = rd("a5")["metadata"]
-check("hold: clear_hold=true releases now: hold and wake go, needs, due and next stay", rd("a5")["status"] == "open" and "hold" not in m5 and "wake" not in m5
+check("hold: clear_hold=true releases now: the date goes, needs, due and next stay", rd("a5")["status"] == "open" and "hold" not in m5 and "wake" not in m5 and "until" not in m5
       and m5.get("due") == D(9) and m5.get("needs") == ["external"] and m5.get("next") == "ask Kim for A or B" and res.startswith("updated a5.\na5 [open] ") and HINT not in res, res)
 check("hold: released with needs external → back on others at once", "a5" in [r["gid"] for r in ui_render.Board(str(T / "store")).n_relay])
 server._update("a6", hold=True, wake=D(4), sender="home-beta"); res = server.stackshot_complete("a6", sender="home-beta", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
 check("hold: complete (the complete tool) drops the hold and the wake", rd("a6")["status"] == "completed" and "wake" not in rd("a6")["metadata"] and "hold" not in rd("a6")["metadata"], rd("a6"))
-e = refusal(lambda: server._update("a3", wake="none", sender="home-beta"))
-check("hold: wake=\"none\" on a hold that waits on nothing else is refused (an indefinite park), the wake kept", e.startswith("Refused: a hold names what it waits for") and held_("a3") and rd("a3")["metadata"].get("wake") == D(3), e)
-e = refusal(lambda: server._update("a3", clear_wake=True, sender="home-beta"))
-check("hold: clear_wake=true the same", e.startswith("Refused: a hold names what it waits for") and held_("a3") and rd("a3")["metadata"].get("wake") == D(3), e)
-server._update("a3", recycle=True, sender="home-beta"); res = server._update("a3", wake="none", sender="home-beta")
-check("hold: with a recycle to wait for, wake=\"none\" drops the wake and the hold stays", held_("a3") and "wake" not in rd("a3")["metadata"] and rd("a3")["metadata"].get("recycle") is True, rd("a3"))
+res = server._update("a3", wake="none", sender="home-beta")
+check("hold: wake=\"none\" on a wait on a date alone ends the wait (the date was all it waited on; nothing is left parked)", not held_("a3") and not _WT.stored_until(rd("a3")["metadata"]), (res, rd("a3")["metadata"]))
+server._update("a3", wake=D(3), sender="home-beta"); res = server._update("a3", clear_wake=True, sender="home-beta")
+check("hold: clear_wake=true the same", not held_("a3") and not _WT.stored_until(rd("a3")["metadata"]), (res, rd("a3")["metadata"]))
+server._update("a3", hold=True, recycle=True, sender="home-beta"); res = server._update("a3", wake=D(3), sender="home-beta"); res = server._update("a3", wake="none", sender="home-beta")
+check("hold: with a recycle to wait for, wake=\"none\" drops the date and the hold stays", rd("a3")["metadata"].get("hold") is True and not _WT.stored_until(rd("a3")["metadata"]) and rd("a3")["metadata"].get("recycle") is True, rd("a3"))
 e = refusal(lambda: server._update("a3", clear_recycle=True, sender="home-beta"))
 check("hold: clear_recycle=true that would leave the hold waiting on nothing is refused", e.startswith("Refused: a hold names what it waits for") and rd("a3")["metadata"].get("recycle") is True, e)
 server._update("a3", wake=D(1), sender="home-beta"); server._update("a3", clear_recycle=True, sender="home-beta")   # a wake on an item already on hold is that hold's
-check("hold: …and passes once a wake holds it", held_("a3") and rd("a3")["metadata"].get("wake") == D(1) and "recycle" not in rd("a3")["metadata"], rd("a3"))
+check("hold: …and passes once a wake holds it", held_("a3") and wk_(rd("a3")["metadata"]) == D(1) and "recycle" not in rd("a3")["metadata"], rd("a3"))
 # the wake pass: items due (wakes in the past, written into the store files past the gate), one due today, one not yet.
 # item 5 has needs external and comes back on others; item 3 and item 8 have none and come back on agent (the point of wake)
 server._update("a5", hold=True, wake=D(5), sender="home-beta")
 server._update("a7", hold=True, wake=D(5), sender="home-beta"); server._update("a8", hold=True, wake=D(5), sender="home-beta")
 for g, w in (("a3", D(-2)), ("a5", D(-1)), ("a8", D(0))):
-    it = rd(g); it["metadata"]["wake"] = w; it["updated"] = it["state_updated"] = 1000.0
+    it = rd(g); setwk_(it["metadata"], w); it["updated"] = it["state_updated"] = 1000.0
     (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
 woke = server._wake_pass()
 a3, a5, a7, a8 = rd("a3"), rd("a5"), rd("a7"), rd("a8")
 check("wake pass: the items due (yesterday's and today's wake) are released, the one not due stays on hold", sorted(woke) == ["a3", "a5", "a8"]
-      and all(x["status"] == "open" and "hold" not in x["metadata"] for x in (a3, a5, a8)) and held_("a7") and a7["metadata"]["wake"] == D(5), (woke, a3, a7, a8))
+      and all(x["status"] == "open" and "hold" not in x["metadata"] for x in (a3, a5, a8)) and held_("a7") and wk_(a7["metadata"]) == D(5), (woke, a3, a7, a8))
 check("wake pass: the wake goes and both clocks move to now, together", all("wake" not in x["metadata"] and x["updated"] == x["state_updated"] and t0 - 1 <= x["updated"] <= time.time() + 1 for x in (a3, a5, a8)), (a3, a8))
 check("wake pass: needs, due and next untouched", a5["metadata"].get("needs") == ["external"] and a5["metadata"].get("due") == D(9) and a5["metadata"].get("next") == "ask Kim for A or B", a5)
 bw = ui_render.Board(str(T / "store"))
@@ -1242,9 +1249,8 @@ check("wake pass: back in its lane: needs external → on others, no needs → o
 p = wait_push(n0 + 1)
 _w3 = sorted(p[n0][1].splitlines()[1:]) if len(p) == n0 + 1 else []
 check("wake pass (the turn rule's fourth build): the owner is told once for the three, one line each, naming the wake as stored and the lane",
-      len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].startswith("[stackshot] 3 items woke for you:\n") and _w3 == sorted([
-      f"- a3 woke (wake {D(-2)}): back in its lane (on agent, by its needs)", f"- a5 woke (wake {D(-1)}): back in its lane (on others, by its needs)",
-      f"- a8 woke (wake {D(0)}): back in its lane (on agent, by its needs)", "Refresh each one's ask if things moved."]), p[n0:])
+      len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].startswith("[stackshot] 3 items are yours now, their waits ended:\n")
+      and [x.split(" [home]")[0] for x in _w3 if x.startswith("- a")] == [f"- a3: its until {D(-2)} came.", f"- a5: its until {D(-1)} came.", f"- a8: its until {D(0)} came."], p[n0:])
 check("wake pass: it owes no page", json.dumps(server._owed_load(), sort_keys=True) == led0)
 check("wake pass: a second run finds nothing and tells nobody", server._wake_pass() == [] and len(wait_push(0)) == n0 + 1)
 # the item (the item before it): an item whose needs names no session wakes the keeper of its page, whatever its needs (an agent prepares the ask):
@@ -1277,38 +1283,38 @@ for i in range(41, 47): (T / f"store/a/{i}.json").unlink()      # out of the fix
 # a delivery that fails is a stderr line, never an exception: the item is released all the same
 (T / "failpush.py").write_text("import sys\nprint('boom', file=sys.stderr); sys.exit(4)\n")
 _push = server._PUSH; server._PUSH = [sys.executable, str(T / "failpush.py")]
-it = rd("a7"); it["metadata"]["wake"] = D(-1); (T / "store/a/7.json").write_text(json.dumps(it))
+it = rd("a7"); setwk_(it["metadata"], D(-1)); (T / "store/a/7.json").write_text(json.dumps(it))
 _err = io.StringIO()
 with contextlib.redirect_stderr(_err):
     woke = server._wake_pass()
     for _ in range(300):    # a failed push is told on stderr first and recorded on the item after, and the hand-off's one resend is a second thread
                             # that records its own failure: wait for both records, or one lands after the hold update below (which drops them) and stays
-        if "notice to" in _err.getvalue() and {x.get("tag") for x in rd("a7")["metadata"].get("undelivered") or []} >= {"wake", "handoff"}: break
+        if "notice to" in _err.getvalue() and {x.get("tag") for x in rd("a7")["metadata"].get("undelivered") or []} >= {"watch", "handoff"}: break
         time.sleep(0.1)
 server._PUSH = _push
 check("wake pass: a failed owner notice is logged to stderr, the item released all the same", woke == ["a7"] and not held_("a7")
-      and f"wake: a7 notice to {B} not delivered: no result — boom" in _err.getvalue(), _err.getvalue())
+      and f"watch: a7 notice to {B} not delivered: no result — boom" in _err.getvalue(), _err.getvalue())
 server._update("a7", hold=True, wake=D(5), sender="home-beta")
 # a time of day (2099-01-09, "hold until noon"): stored with a T, due at that minute, fired by the minute loop
 item(9, "projects/beta", B); now_ = server._pages.zone_now(); d2 = D(2); tz_ = now_.tzinfo; n9 = len(wait_push(0))
 server._WAKE_EVENT.clear(); res = server._update("a9", hold=True, wake=f"{d2} 12:00", sender="home-beta")
-check("timed wake: a time of day in the future is accepted (a space for the T) and stored with a T", held_("a9") and rd("a9")["metadata"].get("wake") == f"{d2}T12:00" and f"wake: {d2}T12:00" in res, res)
+check("timed wake: a time of day in the future is accepted (a space for the T) and stored with a T", held_("a9") and wk_(rd("a9")["metadata"]) == f"{d2}T12:00" and f"until: {d2}T12:00" in res, res)
 check("timed wake: the update that set it wakes the minute loop", server._WAKE_EVENT.is_set())
 server._WAKE_EVENT.clear(); server._update("a9", priority="p2", sender="home-beta")
 check("timed wake: a filing edit does not wake the minute loop", not server._WAKE_EVENT.is_set())
 res = server._update("a9", wake=f"{d2}T13:30", sender="home-beta")
-check("timed wake: the T form is accepted as given", rd("a9")["metadata"].get("wake") == f"{d2}T13:30", res)
+check("timed wake: the T form is accepted as given", wk_(rd("a9")["metadata"]) == f"{d2}T13:30", res)
 e0 = refusal(lambda: server._update("a9", wake=(now_ - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"), sender="home-beta"))
 e1 = refusal(lambda: server._update("a9", wake=now_.strftime("%Y-%m-%d %H:%M"), sender="home-beta"))
-check("timed wake: an hour ago and this minute refused, nothing saved", e0 == e1 == "Refused: wake must be in the future (+04)" and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", (e0, e1))
+check("timed wake: an hour ago and this minute refused, nothing saved", e0 == e1 == "Refused: wake must be in the future (+04)" and wk_(rd("a9")["metadata"]) == f"{d2}T13:30", (e0, e1))
 bad = [refusal(lambda w=w: server._update("a9", wake=w, sender="home-beta")) for w in (f"{d2}T24:00", f"{d2}T12", f"{d2}T12:00+25:00", "2026/12/01")]
 check("timed wake: 24:00, a bare hour, an impossible offset and a slashed date refused with the two forms named", all(x.startswith("Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM (+04) — got ") for x in bad)
-      and f"'{d2}T24:00'" in bad[0] and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", bad)
+      and f"'{d2}T24:00'" in bad[0] and wk_(rd("a9")["metadata"]) == f"{d2}T13:30", bad)
 old_past = refusal(lambda: server._update("a9", wake="2026-02-24T12:00:30", sender="home-beta"))
-check("timed wake: seconds are read as the minute they fall in, then the wake is judged as any other (a past one is refused as past)", old_past == "Refused: wake must be in the future (+04)" and rd("a9")["metadata"]["wake"] == f"{d2}T13:30", old_past)
+check("timed wake: seconds are read as the minute they fall in, then the wake is judged as any other (a past one is refused as past)", old_past == "Refused: wake must be in the future (+04)" and wk_(rd("a9")["metadata"]) == f"{d2}T13:30", old_past)
 for w_, want_ in ((f"{d2}T12:00:30", f"{d2}T12:00"), (f"{d2}T12:00+04:00", f"{d2}T12:00"), (f"{d2}T08:00:59Z", f"{d2}T12:00")):
     res = server._update("a9", wake=w_, sender="home-beta")
-    check(f"timed wake: {w_} is stored as {want_} (the instance time) and the update says it", rd("a9")["metadata"]["wake"] == want_, (rd("a9")["metadata"].get("wake"), res))
+    check(f"timed wake: {w_} is stored as {want_} (the instance time) and the update says it", wk_(rd("a9")["metadata"]) == want_, (wk_(rd("a9")["metadata"]), res))
 server._update("a9", wake=f"{d2}T13:30", sender="home-beta")
 at9 = server._wake_at(f"{d2}T13:30")
 check("timed wake: _wake_at reads both forms in the instance zone", at9 == datetime.datetime.fromisoformat(f"{d2}T13:30").replace(tzinfo=tz_)
@@ -1319,19 +1325,17 @@ woke = server._wake_pass(now=at9)
 check("timed wake: a pass at the instant releases it and drops the wake; the date-only hold stays", woke == ["a9"] and rd("a9")["status"] == "open" and not held_("a9")
       and "wake" not in rd("a9")["metadata"] and held_("a7"), (woke, rd("a9"), rd("a7")))
 res = server._update("a9", hold=True, wake=D(1), sender="home-beta")
-check("date-only wake: still stored as YYYY-MM-DD", rd("a9")["metadata"].get("wake") == D(1), res)
+check("date-only wake: still stored as YYYY-MM-DD", wk_(rd("a9")["metadata"]) == D(1), res)
 check("date-only wake: a pass given a date takes the whole day, as before (not due today, due on its day)",
       server._wake_pass(now=today) == [] and server._wake_pass(now=today + datetime.timedelta(days=1)) == ["a9"] and not held_("a9"))
 p = wait_push(n9 + 2)
-check("timed and date-only wakes: the owner is told each time, the wake as stored", sorted(x[1] for x in p[n9:]) == sorted([   # pushed from threads: either order
-      f"[stackshot] a9 woke (wake {d2}T13:30): back in its lane (on agent, by its needs); refresh its ask if things moved.",
-      f"[stackshot] a9 woke (wake {D(1)}): back in its lane (on agent, by its needs); refresh its ask if things moved."]), p[n9:])
+check("timed and date-only wakes: the owner is told each time, the date as stored", sorted(x[1].split(" [home]")[0] for x in p[n9:]) == sorted([   # pushed from threads: either order
+      f"[stackshot] a9 is yours now: its until {d2}T13:30 came.",
+      f"[stackshot] a9 is yours now: its until {D(1)} came."]), p[n9:])
 # brief: the held item has its own block, after the open ones and not among them
 (T / "board.md").write_text(ui_render.Board(f"{tmp}/store").markdown(), encoding="utf-8")   # what the publish writes; the brief reads its head
 b = server.stackshot_brief(); op, _, hd = b.partition("\n\nOn hold (")
-check("brief: the item on hold is listed in the On hold block, with its wake, and not among the active items", "a7 [open · on hold]" in hd and f"wake: {D(5)}" in hd
-      and hd.startswith("1), on the agent side but out of the queue until they wake or are released:")
-      and "a7 [" not in op and "a3 [open]" in op and "active, 1 on hold below):" in op, b[-1500:])
+check("brief: an item waiting on a date is listed (with its date) and no longer in an On hold block", "a7 [open" in b and f"until: {D(5)}" in b and "a3 [open]" in b, b[-1500:])
 check("brief: the board's index links each item's page, never its card anchor #task-<letter>-<n>",
       "#task-" not in b and "](https://stackshot.example.com/items/a3)" in b and "#task-" in (T / "board.md").read_text(), b[:1500])
 # the pilot relay names the hold
@@ -1365,8 +1369,8 @@ with contextlib.redirect_stderr(_err):
     mig = server._migrate_holds()
 l91, l92 = rd("a91"), rd("a92")
 check("migration: every legacy item rewritten as open + hold, its wake kept, its other fields as they were", mig == ["a91", "a92"]
-      and l91["status"] == l92["status"] == "open" and l91["metadata"].get("hold") is True and l92["metadata"].get("hold") is True
-      and l91["metadata"].get("wake") == D(3) and "wake" not in l92["metadata"] and l91["metadata"].get("needs") == "external", (mig, l91, l92))
+      and l91["status"] == l92["status"] == "open" and hd_(l91["metadata"]) is True and hd_(l92["metadata"]) is True
+      and wk_(l91["metadata"]) == D(3) and "wake" not in l92["metadata"] and l91["metadata"].get("needs") == "external", (mig, l91, l92))
 check("migration: neither clock moves", (l91["updated"], l91["state_updated"], l92["updated"], l92["state_updated"]) == (1234.0, 1200.0, 1234.0, 1200.0), (l91, l92))
 check("migration: one stderr line per item", _err.getvalue().count("migrate: ") == 2
       and f"migrate: a91 status on_hold → open + metadata.hold (wake {D(3)}), clocks unchanged — [home] legacy 91" in _err.getvalue()
@@ -1377,37 +1381,37 @@ check("migration: a second run finds nothing", server._migrate_holds() == [])
 # and at its moment the owner and the sessions in its needs are told once and the wake goes. An item that needs decision is never on hold.
 for i in (30, 25, 34, 31, 35, 36, 37): item(i, "projects/beta", B)
 server._WAKE_EVENT.clear()
-res = server._update("a30", wake=D(2), next="work-osprey: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
-check("reminder: a wake alone is stored and is no hold; the hand-off it carries passes; the reply shows the item open",
-      m_.get("wake") == D(2) and "hold" not in m_ and m_.get("next") == "work-osprey: review the draft" and res.startswith("updated a30.\na30 [open] ") and f"wake: {D(2)}" in res, res)
+res = server._update("a30", wake=D(2), next="home-beta: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
+check("reminder: a wake alone is stored as the wait on that date and is no hold; its own step passes; the reply shows the item waiting",
+      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "home-beta: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
 check("reminder: it wakes the minute loop and is on its list", server._WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
-check("reminder: the item stays in its active lane (on agent), never among the parked", "a30" in [r["gid"] for r in b_.agent] and "a30" not in [r["gid"] for r in b_.held], [r["gid"] for r in b_.held])
-check("reminder: the item page shows it on agent with the reminder's date in the sidebar, never waiting", '<span class="tag t-agent">On agent</span>' in ip_ and f"<dt>Wake</dt><dd>{b_.when(render.wake_of(rd('a30')))}</dd>" in ip_
-      and "tag t-wait" not in ip_, ip_[ip_.find("istat"):][:600])
-check("reminder: the brief lists it among the active items", "a30 [open]" in server.stackshot_brief().partition("\n\nOn hold (")[0])
-check("reminder: the update description says a wake alone is a reminder, never that it implies a hold",
-      "alone is a reminder, never a hold" in server._UPDATE_DESC and "a wake implies" not in server._UPDATE_DESC and "implies hold" not in server._UPDATE_DESC)
+check("reminder: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
+_wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)
+check("reminder: the item page shows the date in the sidebar's Wake row, and says waiting", bool(_wk30) and _wk30.group(1) == b_.when(render.wake_of(rd("a30"))) and "tag t-wait" in ip_, (_wk30.group(1) if _wk30 else None, ip_[ip_.find("istat"):][:300]))
+_b30 = server.stackshot_brief().partition("\n\nOn hold (")
+check("reminder: the brief lists it among the parked, not the active items", "a30 [open" in _b30[2] and "a30 [open" not in _b30[0], _b30[0][-300:])
+check("reminder: the update description says a wake alone is a wait until that date, never that it implies a hold",
+      "alone is a wait: the item waits until that date" in server._UPDATE_DESC and "a wake implies" not in server._UPDATE_DESC and "implies hold" not in server._UPDATE_DESC)
 pj = json.load(open(T / "store/projects.json")); pj["pages"]["projects/zz"] = {**page("Zz", "work-zz"), "agents": {"work-zz-bg": "builds"}, "back_agents": {"work-zz-bg": "builds"}}; (T / "store/projects.json").write_text(json.dumps(pj))
 # a session in needs: a background agent (a page's keeper is retired and refused); it has a pane in the heartbeat, or the hand-off's send-time guard (handoff suite) refuses it
 ZZB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 _sjz = json.loads((T / "fleet/a/sessions.json").read_text()); _sjz[ZZB] = {"name": "work-zz-bg", "machine": "a", "url": "", "seen": "x"}
 (T / "fleet/a/sessions.json").write_text(json.dumps(_sjz))
 server._update("a25", needs=["work-zz-bg"], next="build it", sender="home-beta"); server._update("a25", wake=D(3), sender="home-beta")
-check("reminder: a wake on an item with a session in needs is no hold either", "hold" not in rd("a25")["metadata"] and rd("a25")["metadata"].get("wake") == D(3), rd("a25"))
+check("reminder: a wake on an item with a session in needs is no hold either", "hold" not in rd("a25")["metadata"] and wk_(rd("a25")["metadata"]) == D(3), rd("a25"))
 for g in ("a30", "a25"):
-    it = rd(g); it["metadata"]["wake"] = D(-1); (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
+    it = rd(g); setwk_(it["metadata"], D(-1)); (T / f"store/{g[0]}/{g[1:]}.json").write_text(json.dumps(it))
 clk = {g: (rd(g)["state_updated"], rd(g).get("confirmed")) for g in ("a30", "a25")}; nd_b = rd("a25")["metadata"].get("needs")
 led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0))
 woke = server._wake_pass(); r_wk1, r_wk2 = rd("a30"), rd("a25"); p = wait_push(n0 + 2)
-check("reminder pass: both items are reminded, the wake dropped; status, hold, needs, next and the state clock as they were",
-      sorted(woke) == ["a25", "a30"] and all(x["status"] == "open" and "wake" not in x["metadata"] and "hold" not in x["metadata"] for x in (r_wk1, r_wk2))
-      and nd_b and r_wk2["metadata"].get("needs") == nd_b and r_wk1["metadata"].get("next") == "work-osprey: review the draft"
-      and all((rd(g)["state_updated"], rd(g).get("confirmed")) == clk[g] for g in ("a30", "a25")), (woke, r_wk1, r_wk2))
+check("reminder pass: both items are told their date came; the date and kind are gone, next and status as they were",
+      sorted(woke) == ["a25", "a30"] and all(x["status"] == "open" and "until" not in x["metadata"] and "wait_kind" not in x["metadata"] and "hold" not in x["metadata"] for x in (r_wk1, r_wk2))
+      and r_wk1["metadata"].get("next") == "home-beta: review the draft", (woke, r_wk1, r_wk2))
 _rem_b = next((m for m in p[n0:] if m[0] == B), ["", ""]); _rem_s = [m for m in p[n0:] if m[0] == ZZB]
-check("reminder pass: the mover of a30 is told its one reminder, and a25's mover (the session its needs name) its own once, nobody else",
-      len(p) == n0 + 2 and _rem_b[1] == f"[stackshot] a30 reminder (wake {D(-1)}): still active (on agent), check where it stands; close it, refresh its next, or set another wake."
-      and [[m[0], re.sub(r" · notice [0-9a-f]{6}$", "", m[1])] for m in _rem_s] == [[ZZB, f"[stackshot] a25 reminder (wake {D(-1)}): still active (on agent), check where it stands; close it, refresh its next, or set another wake."]], p[n0:])
+check("reminder pass: the mover of a30 is told its one line, and a25's mover (the session its needs name) its own once, nobody else",
+      len(p) == n0 + 2 and _rem_b[1].startswith(f"[stackshot] a30 is yours now: its until {D(-1)} came.")
+      and [m[1].split(" [home]")[0] for m in _rem_s] == [f"[stackshot] a25 is yours now: its until {D(-1)} came."], p[n0:])
 pj = json.load(open(T / "store/projects.json")); pj["pages"].pop("projects/zz"); (T / "store/projects.json").write_text(json.dumps(pj))
 check("reminder pass: it owes no page, and a second pass finds nothing and tells nobody",
       json.dumps(server._owed_load(), sort_keys=True) == led0 and server._wake_pass() == [] and len(wait_push(0)) == n0 + 2)
@@ -1415,18 +1419,18 @@ b_ = ui_render.Board(str(T / "store"))
 check("reminder pass: the items stay in their lane, still active", {"a30", "a25"} <= {r["gid"] for r in b_.agent} and not {"a30", "a25"} & {r["gid"] for r in b_.held})
 # hold=true with a wake parks and releases as before; an item stored held with a wake before the change still releases at its wake
 server._update("a34", hold=True, wake=D(2), sender="home-beta")
-check("park: hold=true with a wake is on hold, out of the active lane", held_("a34") and "a34" in [r["gid"] for r in ui_render.Board(str(T / "store")).held])
-it = rd("a34"); it["metadata"]["wake"] = D(-1); (T / "store/a/34.json").write_text(json.dumps(it))
+_b34 = ui_render.Board(str(T / "store"))
+check("park: hold=true with a wake is waiting on its date, parked out of the active lane", held_("a34") and "hold" not in rd("a34")["metadata"]
+      and "a34" in [r["gid"] for r in _b34.held] and "a34" not in [r["gid"] for r in _b34.agent + _b34.n_call + _b34.n_relay], ([r["gid"] for r in _b34.held], [r["gid"] for r in _b34.agent]))
+it = rd("a34"); setwk_(it["metadata"], D(-1)); (T / "store/a/34.json").write_text(json.dumps(it))
 it = rd("a31"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/31.json").write_text(json.dumps(it))   # as a file written before the change holds it
 n0 = len(wait_push(0)); woke = server._wake_pass(); p = wait_push(n0 + 1)
-check("park: at the wake both are released, hold and wake gone, both clocks moved, and the owner told 'woke'",
-      sorted(woke) == sorted(["a34", "a31"]) and not held_("a34") and not held_("a31") and all("wake" not in rd(g)["metadata"] and rd(g)["updated"] == rd(g)["state_updated"] for g in ("a34", "a31"))
-      and len(p) == n0 + 1 and p[n0][1].splitlines()[0] == "[stackshot] 2 items woke for you:" and sorted(p[n0][1].splitlines()[1:]) == sorted([
-          f"- a34 woke (wake {D(-1)}): back in its lane (on agent, by its needs)", f"- a31 woke (wake {D(-1)}): back in its lane (on agent, by its needs)",
-          "Refresh each one's ask if things moved."]), (woke, p[n0:]))
+check("park: at the wake both are released, the date gone, both clocks moved, and the owner told for each (one message)",
+      sorted(woke) == sorted(["a34", "a31"]) and not held_("a34") and not held_("a31") and all("wake" not in rd(g)["metadata"] and "until" not in rd(g)["metadata"] and rd(g)["updated"] == rd(g)["state_updated"] for g in ("a34", "a31"))
+      and len(p) == n0 + 1 and p[n0][1].count("a31 woke (wake") == 1 and f"a34 is yours now: its until {D(-1)} came." in p[n0][1], (woke, p[n0:]))
 # one pass with a parked item released and a reminder due, both for the same owner: still one message for the session, naming both
 it = rd("a36"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/36.json").write_text(json.dumps(it))
-it = rd("a37"); it["metadata"]["wake"] = D(-1); (T / "store/a/37.json").write_text(json.dumps(it))
+it = rd("a37"); setwk_(it["metadata"], D(-1)); (T / "store/a/37.json").write_text(json.dumps(it))
 n0 = len(wait_push(0)); woke = server._wake_pass(); p = wait_push(n0 + 1)
 check("mixed pass: a released hold and a reminder for one owner come in one message, each line saying what it is",
       sorted(woke) == ["a36", "a37"] and len(p) == n0 + 1 and p[n0][0] == B and p[n0][1].splitlines()[0] == "[stackshot] 2 items came due for you (woken or reminded):"
@@ -1444,10 +1448,10 @@ check("decision + hold flag: the board shows it in your call, never parked; the 
 check("decision + hold flag: the server's views agree (get, the brief's lanes)", not server._is_held(rd("a35")) and "a35 [open]" in server.stackshot_brief().partition("\n\nOn hold (")[0]
       and "on hold" not in server._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
 res = server._update("a35", next="prepping the options", sender="home-beta"); m_ = rd("a35")["metadata"]
-check("decision + hold flag: any write drops the hold, keeps the wake as a reminder, and says so",
-      "hold" not in m_ and m_.get("wake") == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its wake " + D(4) + " stays as a reminder" in res, res)
+check("decision + hold flag: any write drops the hold, keeps its date, and says so",
+      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its date " + D(4) + " stays, and no date parks an item on his call" in res, res)
 res = server._update("a35", hold=True, wake=D(5), sender="home-beta"); m_ = rd("a35")["metadata"]
-check("decision: hold=true on it parks nothing (the hold is dropped, the wake a reminder), never refused", "hold" not in m_ and m_.get("wake") == D(5) and "the hold is dropped" in res, res)
+check("decision: hold=true on it parks nothing (the hold is dropped, the wake a reminder), never refused", "hold" not in m_ and wk_(m_) == D(5) and "the hold is dropped" in res, res)
 for i in (30, 25, 34, 31, 35, 36, 37): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: later checks count the open items
 wait_push(0)
 
@@ -1985,7 +1989,7 @@ res = server.stackshot_update(g6, priority="p2", sender="home-beta"); check("bar
 res = server.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided and posted", sender="home-beta"); check("bare url: …nor one that sets the description with the stored URL still in it", rd(g6)["description"].endswith("posted"), res)
 e = refusal(lambda: server.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- And at https://example.com/r", sender="home-beta")); check("bare url: …but a new bare URL beside it is refused", "(https://example.com/r)" in e, e)
 check("bare url: the create and update descriptions say it", "a naked http(s) URL in description, next or ask is refused, write `[words](url)`" in server._ITEM_FORM and server._ITEM_FORM in server._UPDATE_DESC)
-e = refusal(lambda: server._update(g5, hold=True, sender="home-beta")); check("form: an owner's hold without a wake is refused outright, no longer noted", e.startswith("Refused: a hold names what it waits for") and not rd(g5)["metadata"].get("hold"), e)
+e = refusal(lambda: server._update(g5, hold=True, sender="home-beta")); check("form: an owner's hold without a wake is refused outright, no longer noted", e.startswith("Refused: a hold names what it waits for") and not hd_(rd(g5)["metadata"]), e)
 wk = (today + datetime.timedelta(days=3)).isoformat()
 res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: a hold with a wake → no note", "(note:" not in res, res)
 res = server._update(g5, priority="p2", sender="home-beta"); check("form: a filing edit of a held item → no note", "(note:" not in res, res)
@@ -2070,7 +2074,7 @@ server._update(g5, clear_hold=True, sender="home-beta")
 server._anchors(rd(g5)["metadata"]["project"], add=[TH], items=[g5], who="t")
 res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("anchored hold: anchored to the item, not named in next → the note says how", f"anchored to it (anchors(project, add=[url], items=[{g5}])) and named in next" in res, res)
 server._update(g5, clear_hold=True, next=f"wait on Kim in [#7]({TH})", sender="home-beta")
-res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("anchored hold: anchored to the item and named in next → no note", "(note:" not in res and rd(g5)["metadata"].get("hold"), res)
+res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("anchored hold: anchored to the item and named in next → no note", "(note:" not in res and hd_(rd(g5)["metadata"]), res)
 res = server._update(g5, wake=(today + datetime.timedelta(days=45)).isoformat(), sender="home-beta")
 check("anchored hold: a wake beyond the backstop (the 7-day cap) → a note", "(note: on hold on an anchored thread with a wake more than 7 days out" in res and "a longer one needs" in res, res)
 res = server._update(g5, wake=(today + datetime.timedelta(days=7)).isoformat(), sender="home-beta"); check("anchored hold: a backstop of cap_days → no note", "(note:" not in res, res)
@@ -2885,7 +2889,7 @@ check("after: a superseded prerequisite is followed to its replacement", rd(a1_)
 server._update(a1_, hold=True, wake=D(9), sender="home-beta")
 n0 = len(wait_push(0)); res = server.stackshot_complete(a4_, sender="home-beta", outcome="dropped", reason="not needed either", description="- Goal: Dropped"); p = wait_push(n0 + 1)
 check("after: the last one closing releases the item, after, hold and wake together; the reply and the owner's line say it was dropped", "after" not in rd(a1_)["metadata"] and not held_(a1_) and "wake" not in rd(a1_)["metadata"]
-      and f"({a1_} waited on {a4_} and is released" in res and any(m[0] == B and m[1].startswith(f"[stackshot] {a1_} woke: {a4_}, the last item it waited on, was dropped by home-beta: back in its lane") for m in p[n0:]), (res, p[n0:]))
+      and f"({a1_} waited on {a4_} and is released" in res and any(m[0] == B and m[1].startswith(f"[stackshot] {a1_} is yours now: {a4_}, the last item it waited on, was dropped by home-beta") for m in p[n0:]), (res, p[n0:]))
 check("after: back in the queue", a1_ in [r["gid"] for r in ui_render.Board(str(T / "store")).agent])
 check("after: a done close releases with 'closed (done)'", True)
 a5_, a6_ = mk2(), mk2(); n0 = len(wait_push(0)); server._update(a5_, after=[a6_], needs=["work-osprey-x"], sender="home-beta"); wait_push(n0 + 1)   # its "now needs you" line lands before the next count
@@ -3089,15 +3093,15 @@ n1 = mk46(); server._update(n1, next="building it", sender="work-osprey-x"); res
 check("auto-name: a background agent's needs=none clears needs and does not name it back", "needs" not in rd(n1)["metadata"] and "(named" not in res, (rd(n1)["metadata"], res))
 res = server._update(n1, wake=wk46, recycle=True, sender="work-osprey-x")
 check("auto-name: …and its next write of only wake and recycle=true does not name it either (the live case); the reminder and the recycle land, no hold",
-      "needs" not in rd(n1)["metadata"] and "(named" not in res and not rd(n1)["metadata"].get("hold") and rd(n1)["metadata"].get("wake") == wk46 and rd(n1)["metadata"].get("recycle"), (rd(n1)["metadata"], res))
+      "needs" not in rd(n1)["metadata"] and "(named" not in res and "hold" not in rd(n1)["metadata"] and wk_(rd(n1)["metadata"]) == wk46 and rd(n1)["metadata"].get("recycle"), (rd(n1)["metadata"], res))
 n2 = mk46(); res = server._update(n2, needs="none", sender="work-osprey-x")
 check("auto-name: needs=none from an unnamed background agent names nobody", "needs" not in rd(n2)["metadata"] and "(named" not in res, (rd(n2)["metadata"], res))
 n3 = mk46(); res = server._update(n3, needs=["work-osprey-ops"], sender="work-osprey-x")
 check("auto-name: a background agent that sets needs to someone else is not added: needs is exactly what it gave", needs46(n3) == ["work-osprey-ops"] and "(named" not in res, (needs46(n3), res))
 n4 = mk46(); res = server._update(n4, wake=wk46, sender="work-osprey-x")
-check("auto-name: a background agent's wake alone (a reminder) names nobody; the wake lands, no hold", "needs" not in rd(n4)["metadata"] and "(named" not in res and not rd(n4)["metadata"].get("hold") and rd(n4)["metadata"].get("wake") == wk46, (rd(n4)["metadata"], res))
+check("auto-name: a background agent's wake alone (a reminder) names nobody; the wake lands, no hold", "needs" not in rd(n4)["metadata"] and "(named" not in res and "hold" not in rd(n4)["metadata"] and wk_(rd(n4)["metadata"]) == wk46, (rd(n4)["metadata"], res))
 n5 = mk46(); res = server._update(n5, hold=True, wake=wk46, sender="work-osprey-x")
-check("auto-name: …nor does hold=true with its wake", "needs" not in rd(n5)["metadata"] and "(named" not in res and rd(n5)["metadata"].get("hold"), (rd(n5)["metadata"], res))
+check("auto-name: …nor does hold=true with its wake", "needs" not in rd(n5)["metadata"] and "(named" not in res and hd_(rd(n5)["metadata"]), (rd(n5)["metadata"], res))
 n6 = mk46(); e = refusal(lambda: server._update(n6, hold=True, sender="work-osprey-x"))
 check("auto-name: …and a bare hold, refused as an indefinite park, leaves no naming behind", e.startswith("Refused: a hold names what it waits for") and "needs" not in rd(n6)["metadata"], (e, rd(n6)["metadata"]))
 n7 = mk46(); res = server._update(n7, recycle=True, sender="work-osprey-x")

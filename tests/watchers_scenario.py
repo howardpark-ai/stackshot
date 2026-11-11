@@ -68,6 +68,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
@@ -146,7 +150,7 @@ check("time: …the model reads it as alive, the mover the post-wake mover", mod
 check("time: …and records what arrived, once", m.get("woke", {}).get("what") == f"its wake {day(-1)} came" and m["woke"]["to"] == BACK, m.get("woke"))
 check("time: the mover is told in one line: the item, what it waited on, that it is theirs", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "is yours now" in sent("watch")[0][2] and "its wake" in sent("watch")[0][2]
       and "time wait" in sent("watch")[0][2] and "\n" not in sent("watch")[0][2], sent())
-check("time: an item whose wake has not come is left as it was", mt(11).get("wait_kind") == "time" and mt(11).get("hold") is True and mt(11).get("wake") == day(3), mt(11))
+check("time: an item whose wake has not come is left as it was", mt(11).get("wait_kind") == "time" and hd_(mt(11)) is True and wk_(mt(11)) == day(3), mt(11))
 reset(); server._wake_pass()
 check("time: the next pass tells nobody again and moves nothing", not sent() and mt(10).get("mover") == BACK, sent())
 check("time: the next moment of an item still waiting is its wake", server._next_wake() is not None and server._next_wake().strftime("%Y-%m-%d") == day(3), server._next_wake())
@@ -274,23 +278,23 @@ check("relay answer: …it is his move still, and the page has lines for it",
       and "askedback" in render.Board._SENT and "stalenote" in render.Board._SENT and "closednote" in render.Board._SENT and "needdate" not in render.Board._SENT, (m, sent()))
 out = server._answer("a50", wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=14)), "", "answer")
 m = mt(50)
-check("relay answer: a day picked from the ask-back puts the wait back on that day", out == "decision" and m.get("wait_kind") == "relay" and m.get("ask_by") == ymd(14) and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []), (out, m))
+check("relay answer: a day picked from the ask-back puts the wait back on that day", out == "decision" and m.get("wait_kind") == "relay" and ab_(m) == ymd(14) and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []), (out, m))
 # the same question again, and a date typed in the box over a pick
 it = rd(50); m = it["metadata"]
 m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "ask_by": ymd(20), "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options()
 (T / "store/a/50.json").write_text(json.dumps(it))
 out = server._answer("a50", "not yet, ask again on <date>", "one more week", "answer")
-check("relay answer: one more week counts from the date the wait already ended on", out == "decision" and mt(50).get("ask_by") == ymd(27), (out, mt(50)))
+check("relay answer: one more week counts from the date the wait already ended on", out == "decision" and ab_(mt(50)) == ymd(27), (out, mt(50)))
 it = rd(50); m = it["metadata"]
 m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options()
 (T / "store/a/50.json").write_text(json.dumps(it))
-check("relay answer: …and from today when the wait had no date", server._answer("a50", "not yet, ask again on <date>", "park it for a week", "answer") == "decision" and mt(50).get("ask_by") == ymd(7), mt(50))
+check("relay answer: …and from today when the wait had no date", server._answer("a50", "not yet, ask again on <date>", "park it for a week", "answer") == "decision" and ab_(mt(50)) == ymd(7), mt(50))
 it = rd(50); m = it["metadata"]
 m.pop("wait_kind"); m.pop("ask_by"); m["needs"] = ["decision"]; m["watch"] = {"asked": "relay", "was": {"wait_kind": "relay", "wait_event": "countersigned NDA", "post_wake_mover": BACK}}; m["ask"] = RASK; m["options"] = wk.relay_options()
 (T / "store/a/50.json").write_text(json.dumps(it))
 server._answer("a50", "not yet, ask again on <date>", f"ask again on {day(10)}", "answer")
 m = mt(50)
-check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and m.get("ask_by") == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("post_wake_mover") == BACK
+check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and ab_(m) == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("post_wake_mover") == BACK
       and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and "then" not in m, m)
 check("relay answer: …and the loop's next moment is that date", server._next_wake().strftime("%Y-%m-%d") <= day(10), server._next_wake())
 item(52, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay to arrive")
@@ -351,7 +355,7 @@ def fresh_relay(i, ask_by=None):
 for i_, txt_, want_ in ((70, "Friday, a day after the review", next_dow(4)), (71, "I'll look at it next week, it is a month-end task", ymd(7)), (72, "ok, a month-end report", None)):
     fresh_relay(i_)
     out_ = server._answer(f"a{i_}", "not yet, ask again on <date>", txt_, "answer")
-    check(f"answer box: {txt_!r} reads as the older readers do" if want_ else f"answer box: {txt_!r} reads as no date and is asked back", (mt(i_).get("ask_by") == want_ and out_ == "decision") if want_ else (out_ == "askedback" and "ask_by" not in mt(i_)), (out_, mt(i_)))
+    check(f"answer box: {txt_!r} reads as the older readers do" if want_ else f"answer box: {txt_!r} reads as no date and is asked back", (ab_(mt(i_)) == want_ and out_ == "decision") if want_ else (out_ == "askedback" and "ask_by" not in mt(i_)), (out_, mt(i_)))
 
 # ================================================================ the ask-back: the day is stored, the subject is the wait's
 fresh_relay(73)
@@ -360,7 +364,7 @@ m = mt(73)
 check("ask-back: each day button stores its ISO day, and the ask names the wait (watch.was holds its event)", [o.get("date") for o in m["options"][:3]] == [ymd(7), ymd(14), wk._add_months(TODAY, 1).isoformat()] and "the contract" in m["ask"] and "the news" not in m["ask"], m["ask"])
 it = rd(73); it["metadata"]["options"][0]["label"] = "Ask again on Mon Jan 1st"; it["metadata"]["options"][0]["date"] = ymd(5); it["metadata"]["ask"] = it["metadata"]["ask"].replace(wk.ASK_AGAIN + wk.day_words(TODAY + datetime.timedelta(days=7)), "Ask again on Mon Jan 1st")
 (T / "store/a/73.json").write_text(json.dumps(it))
-check("ask-back: a pick is read from the stored day, never from the label (a label that names a month-day already past would roll to next year)", server._answer("a73", "Ask again on Mon Jan 1st", "", "answer") == "decision" and mt(73).get("ask_by") == ymd(5), mt(73))
+check("ask-back: a pick is read from the stored day, never from the label (a label that names a month-day already past would roll to next year)", server._answer("a73", "Ask again on Mon Jan 1st", "", "answer") == "decision" and ab_(mt(73)) == ymd(5), mt(73))
 fresh_relay(74)
 server._answer("a74", "not yet, ask again on <date>", "later please", "answer")
 it = rd(74); lab = it["metadata"]["options"][1]["label"]; it["metadata"]["options"][1]["date"] = ymd(-1); (T / "store/a/74.json").write_text(json.dumps(it))
@@ -373,8 +377,8 @@ reset()
 g = server.stackshot_get("a60")
 check("chase: get shows chases: n with the last note of a stored chase", "chases: 1 (last by team-back: mailed Robin a reminder)" in g, g)
 out = server._update("a60", sender=BACK, ask_by=day(5))
-check("chase: a moved ask_by resets the backstop and the chases (they were about the old date)", "chases" not in mt(60) and mt(60)["ask_by"] == day(5), mt(60))
-it = rd(60); it["metadata"]["ask_by"] = day(-1); it["metadata"]["chases"] = [{"at": 1.0, "by": BACK, "note": "one"}, {"at": 2.0, "by": BACK, "note": "two"}]; (T / "store/a/60.json").write_text(json.dumps(it))
+check("chase: a moved ask_by resets the backstop and the chases (they were about the old date)", "chases" not in mt(60) and ab_(mt(60)) == day(5), mt(60))
+it = rd(60); it["metadata"].pop("until", None); it["metadata"]["ask_by"] = day(-1); it["metadata"]["chases"] = [{"at": 1.0, "by": BACK, "note": "one"}, {"at": 2.0, "by": BACK, "note": "two"}]; (T / "store/a/60.json").write_text(json.dumps(it))
 reset(); woke = server._wake_pass()
 m = mt(60)
 check("chase: two chases and no arrival: at the wait's end the item comes to the owner as drop it?", "a60" in woke and m["ask"].startswith("Decide: drop it?") and "· Options: drop / keep waiting until <date>" in m["ask"] and m.get("needs") == ["decision"]
@@ -385,7 +389,7 @@ check("chase: keep waiting with no date keeps the note and asks back, the wait i
       and [o["label"] for o in render.options_of(rd(60))][-2:] == ["drop", "keep waiting until <date>"], mt(60))
 server._answer("a60", "keep waiting until <date>", f"until {day(12)}", "answer")
 m = mt(60)
-check("chase: keep waiting until a date puts the wait back on it and starts the chases over", m.get("wait_kind") == "relay" and m["ask_by"] == day(12) and "chases" not in m and "ask" not in m, m)
+check("chase: keep waiting until a date puts the wait back on it and starts the chases over", m.get("wait_kind") == "relay" and ab_(m) == day(12) and "chases" not in m and "ask" not in m, m)
 item(61, wait_kind="relay", wait_event="the schedule", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] chased then dropped", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
 server._wake_pass()
 server._answer("a61", "drop", "", "answer")
@@ -397,7 +401,7 @@ item(63, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(
 reset(); server._wake_pass()
 check("chase: an anchor that stayed silent after two chases comes to the owner as drop it?, not to the post-wake mover", mt(63).get("ask", "").startswith("Decide: drop it?") and not sent("watch") and "mover" not in mt(63), mt(63))
 server._answer("a63", "keep waiting until <date>", f"{day(7)}", "answer")
-check("chase: …keep waiting restores the anchor wait with its anchor and event", mt(63).get("wait_kind") == "anchor" and mt(63).get("wait_anchor") == AURL and mt(63).get("wait_event") == "a reply" and mt(63).get("ask_by") == day(7), mt(63))
+check("chase: …keep waiting restores the anchor wait with its anchor and event", mt(63).get("wait_kind") == "anchor" and mt(63).get("wait_anchor") == AURL and mt(63).get("wait_event") == "a reply" and ab_(mt(63)) == day(7), mt(63))
 item(64, subject="[home] closes with chases", chases=[{"at": 1.0, "by": BACK, "note": "a"}], woke={"what": "x", "to": BACK, "at": 1.0}, watch={"set_at": 1.0}, needs=[BACK])
 server._update("a64", sender=BACK, status="completed", outcome="dropped", reason="not wanted any more", description="- Dropped: it was not wanted any more")
 check("chase: a close drops the chases, the arrival and the wait's record", not any(k in mt(64) for k in ("chases", "woke", "watch")), mt(64))
@@ -409,8 +413,8 @@ item(73, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=OTHER, needs
 item(74, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=FRONT, needs=[], subject="[home] batch front")
 item(75, hold=True, wake=day(-1), needs=[BACK], subject="[home] plain hold, today's wake pass")
 cfg(pause=True); reset()
-check("pause: the wake pass does nothing and the watchers do nothing", server._wake_pass() == [] and server._watch_pass() == [] and not SENT and mt(70).get("wait_kind") == "time" and mt(75).get("hold") is True, (SENT, mt(70)))
-check("pause: …the item whose wake passed is left exactly as it was, the plain hold too", mt(75).get("wake") == day(-1), mt(75))
+check("pause: the wake pass does nothing and the watchers do nothing", server._wake_pass() == [] and server._watch_pass() == [] and not SENT and mt(70).get("wait_kind") == "time" and hd_(mt(75)) is True, (SENT, mt(70)))
+check("pause: …the item whose wake passed is left exactly as it was, the plain hold too", wk_(mt(75)) == day(-1), mt(75))
 check("pause: the wake loop does not spin on a due wake", server._next_wake() is not None and server._next_wake() < server._pages.zone_now(), None)
 rel = server._anchor_release("projects/alpha", notice("PR #5 merged", ts=now0 + 1))
 check("pause: a notice for an anchor wait does not turn it either", mt(47).get("wait_kind") == "anchor" and rel == [], mt(47))
@@ -507,7 +511,7 @@ nid = server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"],
 server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
 reset(); out = server._anchor_pass()
 check("review 1: the minute pass replays the keeper's ruling for the watched wait", "a57" in out and mt(57).get("mover") == BACK, (out, mt(57)))
-check("review 1: …and gives the held item on the same anchor no release it did not get before (a keeper's ruling released it in no pass, only in _route)", "a15" not in out and mt(15).get("hold") is True and not mt(15).get("woke"), (out, mt(15)))
+check("review 1: …and gives the held item on the same anchor no release it did not get before (a keeper's ruling released it in no pass, only in _route)", "a15" not in out and hd_(mt(15)) is True and not mt(15).get("woke"), (out, mt(15)))
 
 # --- 2 and 3. the lock order, and no pending-answer registration for a wait put back
 class _Spy:
@@ -611,7 +615,7 @@ try:
     reset(); moved = server._watch_pass()
 finally:
     wk.due = _real_due
-check("review 9: an item that reads as due outside the lock but is not due under it is left alone", "a76" not in moved and mt(76).get("wait_kind") == "time" and mt(76).get("hold") is True and not any("a76" in x[0] for x in sent()), (moved, mt(76)))
+check("review 9: an item that reads as due outside the lock but is not due under it is left alone", "a76" not in moved and mt(76).get("wait_kind") == "time" and hd_(mt(76)) is True and not any("a76" in x[0] for x in sent()), (moved, mt(76)))
 
 # --- 12. a due item that keeps failing is backed off, not retried in a loop
 item(92, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, needs=[], subject="[home] fails to turn")
@@ -679,7 +683,7 @@ check("review 12: a superseded blocker whose replacement is closed too: the arri
 item(93, wait_kind="relay", wait_event="the draft", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] one chase, then not yet", chases=[{"at": 1.0, "by": BACK, "note": "a"}])
 server._wake_pass()
 server._answer("a93", "not yet, ask again on <date>", f"on {day(8)}", "answer")
-check("review 12: not yet with a new date resets the chases as well", mt(93).get("ask_by") == day(8) and "chases" not in mt(93) and mt(93).get("wait_kind") == "relay", mt(93))
+check("review 12: not yet with a new date resets the chases as well", ab_(mt(93)) == day(8) and "chases" not in mt(93) and mt(93).get("wait_kind") == "relay", mt(93))
 server._anc.save({"projects/alpha": [{"url": A5, "items": ["a39", "a49"], "added": now0, "by": "x"}]})
 item(39, wait_kind="anchor", wait_anchor=A5, wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] route: watched", watch=WATCHED())
 item(49, hold=True, wake=day(9), needs=[BACK], subject="[home] route: held")

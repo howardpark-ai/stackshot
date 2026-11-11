@@ -329,6 +329,27 @@ def turn_alive(meta: dict[str, Any], mover: str, what: str, now: float) -> None:
             meta.pop("watch")
 
 
+DATE_DROP = ("hold", "hold_set", "wake", "until", "wait_basis", "waiting", "wait_failed", "idle")      # what the end of a wait on the date alone clears
+
+
+def end_date(meta: dict[str, Any], what: str, to: str, now: float) -> None:
+    """A wait on a date alone (no wait_kind) ends: the date and what stood on it go and the arrival is recorded; `needs`, an open `after` link, a pane recycle and the mover stay as stored, so an
+    item that waited with needs=external goes back to others, and no date passing takes a link the item still waits on."""
+    for k in DATE_DROP:
+        meta.pop(k, None)
+    if isinstance(meta.get("cap_ok"), dict):
+        co = {k: v for k, v in meta["cap_ok"].items() if k not in ("wake", "by", "quote", "source")}
+        if co.get("due"):
+            meta["cap_ok"] = co
+        else:
+            meta.pop("cap_ok", None)
+    meta["woke"] = {"what": what, "to": to, "at": now}
+    if isinstance(meta.get("watch"), dict):
+        meta["watch"] = {k: v for k, v in meta["watch"].items() if k not in ("asked", "was", "failed_at")}
+        if not meta["watch"]:
+            meta.pop("watch")
+
+
 def turn_to_owner(meta: dict[str, Any], then: str, ask: str, options: list[dict[str, Any]], what: str, now: float) -> None:
     """The wait is over and the item is the owner's move: needs is decision alone (a second mover in needs is refused by the guards; the one who takes it after him is `then`, the post-wake
     mover), the ask and its options up."""

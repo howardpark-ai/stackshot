@@ -1109,8 +1109,7 @@ fake("good", answer([(m18["id"], "passed", "work-osprey-docs", False)])); p0 = l
 check("18 hand-off: the router passes the notice to the page's keeper (a background agent), delivered", rule_of(m18["id"])["ruling"] == "passed" and rule_of(m18["id"])["ruled_to"] == "work-osprey-docs"
       and any(x[0] == "work-osprey-docs" and m18["id"] in x[1] for x in pushes()[p0:]), (rule_of(m18["id"]), pushes()[p0:]))
 ZONE_HOURS = 4                                    # the instance timezone pinned above (Asia/Dubai, UTC+4, no DST)
-FUT18 = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 86400 + ZONE_HOURS * 3600))
-p0 = len(pushes()); server._update("a40", sender="work-osprey-docs", mover="home-beta", next="home-beta: answer the vendor about the quote", wake=FUT18); time.sleep(1.0); settle()
+p0 = len(pushes()); server._update("a40", sender="work-osprey-docs", mover="home-beta", next="home-beta: answer the vendor about the quote", check="unit_active watchtest.service"); time.sleep(1.0); settle()
 h18 = json.loads((T / "store/a/40.json").read_text())["metadata"].get("handoff") or {}
 check("18 hand-off: that session hands the item on: a hand-off record to home-beta from it, told once and delivered", h18.get("to") == "home-beta" and h18.get("from") == "work-osprey-docs" and isinstance(h18.get("delivered_at"), float)
       and len([x for x in pushes()[p0:] if x[0] in ("home-beta", B) and "a40" in x[1]]) == 1, (h18, pushes()[p0:]))

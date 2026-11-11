@@ -246,11 +246,13 @@ def is_held(r):
     status "on_hold" (a stale file, an old version in the store's git) reads as held. The one place here that knows the field.
     An item whose needs hold decision is never shown on hold, whatever
     its stored flag says; it is in the owner's queue (the server's _is_held, the same rule; its update drops such a flag). A
-    wake on an item not on hold is a reminder and leaves it in its lane."""
+    wake an item still carries with no hold and no until (a hand-off's backstop, or one stored before until) is no wait and leaves it in its lane."""
     st = str(r.get("status") or "")
-    return (st == "on_hold" or (st == "open" and bool((r.get("metadata") or {}).get("hold")))) and needs_kind(r) != "call"
+    m = r.get("metadata") or {}
+    date_wait = bool(_wt.stored_until(m)) and _wt.kind_of(m) == "time"        # a wait on a date alone (an until with no kind, or the kind time): parked like the hold with a wake it replaces
+    return (st == "on_hold" or (st == "open" and (bool(m.get("hold")) or date_wait))) and needs_kind(r) != "call"
 def wake_of(r):
-    """An item's wake (on hold: when it is released; not on hold: a reminder): a date ("YYYY-MM-DD", start of that day), a datetime in the instance timezone ("YYYY-MM-DDTHH:MM", the owner
+    """An item's wake (on hold: when it is released; not on hold: a hand-off's backstop): a date ("YYYY-MM-DD", start of that day), a datetime in the instance timezone ("YYYY-MM-DDTHH:MM", the owner
     "until friday evening"), or None. Board.when() draws either: "Fri Mar 6th" or "Fri Mar 6th 12:00"."""
     md = r.get("metadata") or {}
     v = (str(md.get("until") or "").strip() or str(md.get("wake", "")).strip()).replace(" ", "T")      # a stored `until` first, else the wake
@@ -2489,7 +2491,7 @@ class Board:
                         ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(coded(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")), "needs_named"))
                 elif is_held(v) and is_held(prev) and wake_of(prev) != wake_of(v):
                     w = wake_of(v); ev.append(("hold", _t("item.log.wake_set", when=e(self.when(w))) if w else _t("item.log.wake_cleared")))
-                if not h_ and not ph and s_ != "completed" and ps == s_ and wake_of(prev) != wake_of(v):   # a reminder: set, moved or gone
+                if not h_ and not ph and s_ != "completed" and ps == s_ and wake_of(prev) != wake_of(v):   # a wake that is no wait: set, moved or gone
                     w = wake_of(v); ev.append(("hold", _t("item.log.reminder_set", when=e(self.when(w))) if w else _t("item.log.reminder_cleared")))
                 if s_ != "completed" and after_of({"metadata": pm}) != after_of({"metadata": m}):   # what it waits on
                     af = after_of({"metadata": m}); ev.append(("hold", _t("item.log.after", ids="<b>" + e(", ".join(shown(g) for g in af)) + "</b>") if af else _t("item.log.after_cleared")))

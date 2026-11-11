@@ -325,7 +325,7 @@ def prior_state_ts(gid: str, wake: str, limit: int = 200) -> "float | None | _Un
             if show.returncode != 0:
                 return UNREADABLE
             v = json.loads(show.stdout)
-            if str((v.get("metadata") or {}).get("wake") or "") == wake:
+            if str(wake_value(v.get("metadata") or {}) or "") == wake:
                 continue
             u = v.get("state_updated")
             return None if u is None else float(u)
@@ -441,7 +441,7 @@ def mover_for(item: dict[str, Any], load: Callable[[str], dict[str, Any] | None]
             if not b or b.get("status") != "open":
                 continue
             return {**mover_for({**b, "gid": g}, load, (*_path, gid)), "via": g}
-    if is_held(item) and m.get("recycle") and not (m.get("wake") and wake_epoch(m.get("wake")) is not None):
+    if is_held(item) and m.get("recycle") and not (wake_value(m) and wake_epoch(wake_value(m)) is not None):
         return {"kind": "outside", "who": f"{_cfg.fleet_tool() or 'the fleet tool'} (pane recycle)"}
     return mv
 

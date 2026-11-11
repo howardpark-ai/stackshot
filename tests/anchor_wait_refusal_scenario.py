@@ -123,7 +123,7 @@ accepted("order: …and accepted once the anchors tool has added it scoped to th
 item(65, subject="[home] stored anchor wait, anchor not listed", wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(5), post_wake_mover=BACK, needs=[])
 anchors(projects_alpha=[])
 accepted("re-save: a new backstop day on a stored anchor wait whose anchor is not listed is not refused", lambda: server._update("a65", sender=FRONT, ask_by=day(8)))
-check("re-save: …the new day stands", mt(65).get("ask_by") == day(8) and mt(65).get("wait_anchor") == A1, mt(65))
+check("re-save: …the new day stands", mt(65).get("until") == day(8) and mt(65).get("wait_anchor") == A1, mt(65))
 accepted("re-save: the same wait_kind and wait_anchor sent again are not refused", lambda: server._update("a65", sender=FRONT, wait_kind="anchor", wait_anchor=A1, wait_event="PR merged"))
 accepted("re-save: the wait_event changed alone is not refused", lambda: server._update("a65", sender=FRONT, wait_event="PR merged and live"))
 refused("re-save: a changed wait_anchor is judged", lambda: server._update("a65", sender=FRONT, wait_anchor=A2), "anchors list", A2)

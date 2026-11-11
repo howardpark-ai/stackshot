@@ -65,6 +65,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
@@ -74,7 +78,7 @@ def stamped(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w2 = local_day(now0 + 2 * DAY)
 PARK = "(parked: wake"
-SN_HEAD = "alone is a reminder, and this item's only open next line"
+SN_HEAD = "alone is a wait until that date, and this item's only open next line"
 TIMED = f"{BACK}: at 08:00 run the nightly check and report"
 
 from stackshot.waits import server_fixes as SF; from stackshot.tools import board_report as BR
@@ -88,15 +92,15 @@ fm_marked = lambda meta: any(e.startswith(f"mover={FRONT}|") for e in SF.mark_to
 # ================================================================ 1. wake_park
 item(101, needs=[BACK], next="")
 out = bupd(101, next=TIMED, wake=f"{w2}T08:00", wait_reason="the nightly job writes the report at 08:00")
-check("1 the write parks it, as before", out.count(PARK) == 1 and mt(101).get("hold") is True, out)
+check("1 the write parks it, as before", out.count(PARK) == 1 and hd_(mt(101)) is True, out)
 check("1 History: one line in the item's log, naming the wake and the way out", len(log(101)) == 1 and "parked" in log(101)[0] and f"{w2}T08:00" in log(101)[0] and "clear_hold" in log(101)[0], log(101))
 check("1 …and the fix is recorded for that wake", SF.marked(mt(101), SF.WAKE_PARK, f"{w2}T08:00"), mt(101).get(SF.MARK))
 out = bupd(101, clear_hold=True, next=f"{BACK}: write the report now")
-check("1 the mover who disagrees sends it back with clear_hold: released, and the wake is recorded as declined", not mt(101).get("hold") and SF.declined(mt(101), SF.WAKE_PARK, f"{w2}T08:00") and not SF.marked(mt(101), SF.WAKE_PARK, f"{w2}T08:00"), mt(101))
+check("1 the mover who disagrees sends it back with clear_hold: released, and the wake is recorded as declined", not hd_(mt(101)) and SF.declined(mt(101), SF.WAKE_PARK, f"{w2}T08:00") and not SF.marked(mt(101), SF.WAKE_PARK, f"{w2}T08:00"), mt(101))
 out = bupd(101, next=TIMED, wake=f"{w2}T08:00")
-check("1 …and the same wake with the same kind of step is not parked again (the field is left alone)", PARK not in out and not mt(101).get("hold") and mt(101).get("wake") == f"{w2}T08:00", (out[-300:], mt(101)))
+check("1 …and the same wake with the same kind of step is not parked again (the date is stored as until and no hold)", PARK not in out and "hold" not in mt(101) and wk_(mt(101)) == f"{w2}T08:00", (out[-300:], mt(101)))
 out = bupd(101, next=TIMED, wake=f"{w3}T08:00", wait_reason="the nightly job writes the report at 08:00")
-check("1 …a different wake is a new fact and is parked", out.count(PARK) == 1 and mt(101).get("hold") is True, (out[-300:], mt(101)))
+check("1 …a different wake is a new fact and is parked", out.count(PARK) == 1 and hd_(mt(101)) is True, (out[-300:], mt(101)))
 
 # the ten-minute pass
 H = 3600; now = time.time()
@@ -119,13 +123,13 @@ shape = dict([aitem(9031), aitem(9071)])
 fs, _f = AC.filing_findings(shape, {}, now, env())
 check("1 (as before) the check itself still finds the shape, for a run that cannot write", sorted(re.sub(r"\D", "", f["id"]) for f in fs if f["category"] == "why-not-now") == ["9031", "9071"], fs)
 dry = AR.filing_pass(now=now, items=shape, anchors={}, env=env(wake_park=server._wake_park), dry=True)
-check("1 --dry-run lists them and parks nothing", dry["findings"] == 2 and not mt(9031).get("hold") and not sent, (dry, sent))
+check("1 --dry-run lists them and parks nothing", dry["findings"] == 2 and not hd_(mt(9031)) and not sent, (dry, sent))
 r0 = AR.filing_pass(now=now, items=shape, anchors={}, env=env())
 check("1 a pass with no writer (the command line) sends the finding as it always did", r0["fresh"] == 2 and sent and "· why-not-now ·" in sent[0][1], (r0, sent))
 sent.clear(); (T / "state/audit/filing.json").unlink(missing_ok=True)
-w9031 = mt(9031)["wake"]
+w9031 = wk_(mt(9031))
 r1 = AR.filing_pass(now=now, items=shape, anchors={}, env=env(wake_park=server._wake_park))
-check("1 the pass parks each item itself: on hold with the wake as it was, a wait_basis from the step, stored waiting on a time", all(mt(i).get("hold") is True and mt(i).get("wake") for i in (9031, 9071))
+check("1 the pass parks each item itself: on hold with the wake as it was, a wait_basis from the step, stored waiting on a time", all(hd_(mt(i)) is True and wk_(mt(i)) for i in (9031, 9071))
       and "text" in (mt(9031).get("wait_basis") or {}) and stamped(9031) == ("waiting", "time"), (mt(9031), stamped(9031)))
 check("1 …History has a line for each, and the fix is recorded", len(log(9031)) == 1 and "parked" in log(9031)[0] and "clear_hold" in log(9031)[0] and SF.marked(mt(9031), SF.WAKE_PARK, w9031), (log(9031), mt(9031).get(SF.MARK)))
 check("1 …the why-not-now finding is not sent (the audit message is retired): one short message to the mover says what the server did and how to undo it", r1["fresh"] == 0
@@ -135,13 +139,13 @@ sent.clear()
 r2 = AR.filing_pass(now=now + 600, items={"a9031": rd(9031), "a9071": rd(9071)}, anchors={}, env=env(wake_park=server._wake_park))
 check("1 the next pass finds nothing to do and sends nothing", r2["findings"] == 0 and not sent, (r2, sent))
 server._update("a9031", sender="team-back", clear_hold=True, next="team-back: write the report now")
-check("1 clear_hold on the pass's park is the mover's no: recorded as declined", SF.declined(mt(9031), SF.WAKE_PARK, w9031) and not mt(9031).get("hold"), mt(9031))
+check("1 clear_hold on the pass's park is the mover's no: recorded as declined", SF.declined(mt(9031), SF.WAKE_PARK, w9031) and not hd_(mt(9031)), mt(9031))
 back_ = dict([aitem(9031, nxt=f"team-back: at {w9031[-5:]} run the nightly check and report")])
 back_["a9031"]["metadata"]["wake"] = w9031; back_["a9031"]["metadata"]["fix_declined"] = {"wake_park": [w9031]}
 (T / "store/a/9031.json").write_text(json.dumps(back_["a9031"]))
 sent.clear()
 r3 = AR.filing_pass(now=now + 1200, items=back_, anchors={}, env=env(wake_park=server._wake_park))
-check("1 a declined wake is left alone by the pass: not parked, no finding, no message", not mt(9031).get("hold") and r3["findings"] == 0 and not sent, (r3, sent, mt(9031)))
+check("1 a declined wake is left alone by the pass: not parked, no finding, no message", not hd_(mt(9031)) and r3["findings"] == 0 and not sent, (r3, sent, mt(9031)))
 
 # ================================================================ 2. front_mover
 def fput(i, **meta):
@@ -189,13 +193,13 @@ check("2 a project with no builder keeps the refusal, as before (nothing to subs
 # ================================================================ 3. wait_reason
 item(301, needs=[BACK], next="")
 out = bupd(301, hold=True, wake=w2, next=f"{BACK}: collect the logs until {w2}, then review")
-check("3 a hold with a wake and no reason, whose own next says what it waits for on that day, goes through", "Refused" not in out and mt(301).get("hold") is True, out[:400])
+check("3 a hold with a wake and no reason, whose own next says what it waits for on that day, goes through", "Refused" not in out and hd_(mt(301)) is True, out[:400])
 check("3 …the line is the wait_basis, with the wake it stands for", "collect the logs until" in mt(301)["wait_basis"]["text"] and w2 in mt(301)["wait_basis"]["text"] and mt(301)["wait_basis"]["wake"] == w2, mt(301).get("wait_basis"))
 check("3 …the reply says what was missing and what the server took", "wait_basis" in out and "collect the logs until" in out, out)
 check("3 …History has a line", len(log(301)) == 1 and "wait reason" in log(301)[0], (log(301), mt(301).get(SF.MARK)))
 item(302, needs=[BACK], next=f"{BACK}: carry on", desc=f"- The export is not ready\n- We wait for the vendor's export until {w2}\n- Done when imported")
 out = bupd(302, hold=True, wake=w2)
-check("3 the loose reason in the description is lifted the same way", "Refused" not in out and mt(302).get("hold") is True and "vendor's export until" in mt(302)["wait_basis"]["text"], (out[:300], mt(302)))
+check("3 the loose reason in the description is lifted the same way", "Refused" not in out and hd_(mt(302)) is True and "vendor's export until" in mt(302)["wait_basis"]["text"], (out[:300], mt(302)))
 item(303, needs=[BACK], next="")
 out = bupd(303, hold=True, wake=w2, wait_basis=f"the export ships the export on {w2}", next=f"{BACK}: collect the logs until {w2}, then review")
 check("3 a mover's own wait_basis in the call is used as given (the server leaves the field alone)", mt(303)["wait_basis"]["text"] == f"the export ships the export on {w2}" and not log(303), (mt(303), log(303)))
@@ -203,10 +207,10 @@ out = bupd(303, priority="p2")
 check("3 …and a later write leaves it alone", mt(303)["wait_basis"]["text"] == f"the export ships the export on {w2}" and not log(303), mt(303))
 item(304, needs=[BACK], next="")
 msg = refusal(lambda: bupd(304, hold=True, wake=w2, next=f"{BACK}: carry on with the thing"))
-check("3 with no loose reason the refusal stands, as before", msg.startswith("Refused:") and "no reason" in msg and not mt(304).get("hold"), msg[:300])
+check("3 with no loose reason the refusal stands, as before", msg.startswith("Refused:") and "no reason" in msg and not hd_(mt(304)), msg[:300])
 item(305, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", mover=OWN, state="your-call", next=f"{OWN}: pick one")
 msg = refusal(lambda: bupd(305, hold=True, wake=w2, next=f"{OWN}: pick one, we wait until {w2}"))
-check("3 an item that waits on the owner is never fixed (a hold beside his decision is refused as before)", msg.startswith("Refused:") and not mt(305).get("hold") and not log(305), (msg[:300], mt(305)))
+check("3 an item that waits on the owner is never fixed (a hold beside his decision is refused as before)", msg.startswith("Refused:") and not hd_(mt(305)) and not log(305), (msg[:300], mt(305)))
 
 # ================================================================ 4. settled_pick
 names = SF.owner_names()
@@ -264,11 +268,11 @@ server._answers_save({"a9200": {"told": [server._session_id(BACK)], "kind": "dec
 before_ = rd(9200)
 res_ = server._wake_park("a9200", now)
 after_ = rd(9200)
-check("6.2 the pass parks it", res_.get("parked") is True and after_["metadata"].get("hold") is True and "text" in (after_["metadata"].get("wait_basis") or {}), (res_, after_["metadata"]))
+check("6.2 the pass parks it", res_.get("parked") is True and hd_(after_["metadata"]) is True and "text" in (after_["metadata"].get("wait_basis") or {}), (res_, after_["metadata"]))
 check("6.2 …written_by and written_at are as they were", after_.get("written_by") == "someone-else" and after_.get("written_at") == before_.get("written_at"), (before_.get("written_by"), after_.get("written_by")))
 check("6.2 …the activity clock did not move", before_.get("activity") and after_.get("activity") == before_.get("activity"), (before_.get("activity"), after_.get("activity")))
 check("6.2 …and the pending answer record is still there", "a9200" in server._answers_load(), server._answers_load())
-check("6.2 …with the History line and the record", len(log(9200)) == 1 and "parked" in log(9200)[0] and SF.marked(mt(9200), SF.WAKE_PARK, str(before_["metadata"]["wake"])), (log(9200), mt(9200)))
+check("6.2 …with the History line and the record", len(log(9200)) == 1 and "parked" in log(9200)[0] and SF.marked(mt(9200), SF.WAKE_PARK, str(wk_(before_["metadata"]))), (log(9200), mt(9200)))
 
 # 6.3 the front_mover mark is bound to the session whose write was fixed, and lasts a day
 fput(210, mover=BUILD, needs=[BUILD])

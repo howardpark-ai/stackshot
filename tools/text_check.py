@@ -11,7 +11,7 @@ of the lines they return, all from the snapshot at the PR's head) and the diff o
 
 Also takes --repo (default: this checkout), --exact (compare --base itself, not its fork point with --head) and, for the size caps, --max-diff-chars and
 --max-text-chars. The affected tools are those whose function changed (`@mcp.tool(name=…)`) or that list a changed function among their output helpers
-(HELPERS in tool_text.py), the same watch `touched` keeps. The diff is cut to 60,000 characters and the tools' text to 150,000, and the cut is said in the pack.
+(HELPERS in tool_text.py), the same watch `touched` keeps. The diff is cut to 60,000 characters and the tools' text to 160,000, and the cut is said in the pack.
 Standard library only: no dependency, no lock, no network."""
 from __future__ import annotations
 
@@ -31,8 +31,8 @@ import tool_text as tt   # noqa: E402
 
 MAX_DIFF = 60_000
 # The snapshot of every tool together is large. A cap below it would cut a tool's parameters off, and the reader would then
-# call them missing (a false alarm). 150,000 holds all tools with room to grow.
-MAX_TEXT = 150_000
+# call them missing (a false alarm). 160,000 holds all tools with room to grow (raised from 150,000 when the update and create tools gained the until parameter, which left no room under the old cap).
+MAX_TEXT = 160_000
 CONTEXT = 6                                                   # lines of context around each hunk
 
 
