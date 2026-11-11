@@ -170,7 +170,7 @@ orphan_handover = "report"                          # mode "script": an open ite
                                                     # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`stackshot/audit/audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check
 summary_to = "projects/example"                     # mode "script": the page key (or session name) the summary of each run is sent to. The default is the stand-in page of the example config: point
                                                     # it at a page of your own, for example "projects/example-reports"
-builder = "my-engineer"                             # mode "script": who a tripped threshold, and an unmoved finding of a project with no builder, is sent to
+builder = "my-engineer"                             # mode "script": who a tripped threshold, and an unmoved finding of a project with no builder, is sent to (a front-only project's own -main agent takes its unmoved findings instead)
 main = "my-main"                                   # mode "script": the -main agent that gets the findings addressed to the owner (marked [for <owner>]) and the run's summary
 model = ""                                          # mode "script": the model of the per-suspect calls; "" = the [router] model
 lane = ""                                           # mode "script": a sala lane for the per-suspect calls (`salamander lane exec <lane> -- claude …`, e.g. "cloud-lane"); "" = the [router] command's own lane.
