@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from stackshot.waits import event_waits as _ew
 from stackshot.web import home as _home
+from stackshot.web.i18n import t as _t
 from stackshot.model import step_commands as _sc
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -63,7 +64,7 @@ def clip(text: Any, n: int = CLIP) -> str:
 
 def watched_by(kind: str) -> str:
     """Who watches a wait of this kind: the scheduler (a date: a wake, an ask-by day), the server (another item's close), the anchor module (an outside event)."""
-    return _WATCHERS.get(kind, "the server")
+    return _home.watcher_word(_WATCHERS.get(kind, "the server"))
 
 
 def age_text(seconds: float, age_words: Callable[[float], str]) -> str:
@@ -96,30 +97,30 @@ def wait_what(w: "_model.Wait", *, shown: Callable[[str], str] = str, party: str
     """What a wait waits on, as the state line says it: a time → his words or the basis, else "a date"; an item → the close of board#N; an anchor → the anchor's event; a relay → the
     party's news. `party` names who the relay waits on, `words` is the time wait's reason (the basis, or his recorded words)."""
     if w.kind == "time":
-        return clean(words) or "a date"
+        return clean(words) or _t("wait.a_date")
     if w.kind == "item":
-        return "the close of " + (", ".join(shown(x) for x in w.after) or "an item")
+        return _t("wait.what.close_of", items=", ".join(shown(x) for x in w.after) or _t("wait.what.an_item"))
     if w.kind == "anchor":
-        return clean(w.event) or "an anchor event"
+        return clean(w.event) or _t("wait.what.anchor_event")
     if w.kind == "event":
-        return _ew.words(w.event) if clean(w.event) else "a fleet event"
+        return _ew.words(w.event) if clean(w.event) else _t("wait.what.fleet_event")
     ev = clean(w.event)
     p = clean(party)
     if not ev:
-        return f"news from {p}" if p else "outside news"
-    return f"{ev} from {p}" if p and p.lower() not in ev.lower() else ev
+        return _t("wait.what.news_from", party=p) if p else _t("wait.what.outside_news")
+    return _t("wait.what.event_from", event=ev, party=p) if p and p.lower() not in ev.lower() else ev
 
 
 def wait_end_label(w: "_model.Wait") -> str:
     """The word before a wait's end date: "until" for a time, "ask by" for a relay (the day it turns into a question), "backstop" for an event wait's fallback date; "until" whatever the kind
     when the date is the item's stored `until`."""
     if w.by_until:
-        return "until"
+        return _t("wait.end.until")
     if w.kind == "relay":
-        return "ask by"
+        return _t("wait.end.ask_by")
     if w.kind in ("anchor", "item", "event") and not w.until:
-        return "backstop"
-    return "until"
+        return _t("wait.end.backstop")
+    return _t("wait.end.until")
 
 
 # ---------------------------------------------------------------------------------------------------------------- Next
@@ -284,18 +285,18 @@ def plain_change(what: Any) -> str:
         if _DROPPED_CLAUSE.match(c) or (moved and _NEEDS_CLAUSE.match(c) and not asked):
             continue
         if asked and c.lower() in ("needs: decision", "state: your-call"):
-            if "asked for your decision" not in out:
-                out.append("asked for your decision")
+            if _t("item.change.asked") not in out:
+                out.append(_t("item.change.asked"))
         elif m and clean(m.group("to")) not in ("", "no one"):
-            out.append(f"handed to {clean(m.group('to'))}")
+            out.append(_t("item.change.handed", who=clean(m.group("to"))))
         elif _CLEARED_CLAUSE.match(c):
-            out.append("took it back to work")
+            out.append(_t("item.change.back_to_work"))
         elif c == "state: your-step":
-            out.append("gave you a step")
+            out.append(_t("item.change.gave_step"))
         elif re.match(r"^next\b", c) and not _KEPT_CLAUSE.match(c):
-            out.append("changed what comes next")
+            out.append(_t("item.change.next_changed"))
         elif re.match(r"^description\b", c):
-            out.append("updated the background")
+            out.append(_t("item.change.background"))
         else:
             out.append(c)                                   # completed …, woke: …, named … and anything unrecognised: as written
     return ", ".join(out[:LAST_CLAUSES]) if out else t
@@ -307,7 +308,7 @@ def last_change(who: Any, what: Any, esc: Callable[[str], str] = str) -> str:
     t = clip(plain_change(what), UPDATED_CLIP).rstrip(".:")
     if not clean(t):
         return ""
-    return (f" by {esc(clean(who))}" if clean(who) else "") + f": {esc(t)}"
+    return _t("item.change.by", who=esc(clean(who)), what=esc(t)) if clean(who) else _t("item.change.plain", what=esc(t))
 
 
 # ---------------------------------------------------------------------------------------------------------------- the History's plain text
