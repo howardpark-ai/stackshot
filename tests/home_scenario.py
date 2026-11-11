@@ -575,6 +575,32 @@ check("home answer: every answer form carries a hidden `back` field, empty in th
 _hj = render._HOME_JS
 check("home answer: the script sets back to location.pathname alone when the form is sent: no row fragment (it scrolled home to the item's new place)", "f.matches('form.hanswer')" in _hj and "input[name=back]" in _hj and "b.value=location.pathname;" in _hj
       and "'#'+li.id" not in _hj and "li.id" not in _hj and "closest&&f.closest('li[id]')" not in _hj, _hj)
+# the answer form's double-send guard, run in node over a stub (no browser): a second submit of the same form inside 8 seconds is cancelled, one after it goes through, a form with no token is cancelled,
+# and a form that is not an answer form is left alone. The handler is cut out of the page script by its own first and last text, so the check fails if the guard is taken out.
+_h0 = _hj.find("document.addEventListener('submit',function(ev){var f=ev.target;if(!f||!f.matches||!f.matches('form.hanswer'))")
+_h1 = _hj.find("},true);", _h0) + len("},true);") if _h0 >= 0 else -1
+check("home answer: the submit handler is found in the page script", _h0 >= 0 and _h1 > _h0, _h0)
+if _h0 >= 0 and shutil.which("node"):
+    _guard_js = r"""
+const src = require('fs').readFileSync(0, 'utf8'); let now = 1000000; const out = []; let handler = null;
+const ctx = {SK: 'sk', JSON, Math, Date: {now: () => now}, window: {scrollY: 0}, location: {pathname: '/'}, sessionStorage: {setItem() {}},
+  document: {addEventListener: (t, fn) => { if (t === 'submit') handler = fn }}};
+require('vm').runInNewContext(src, ctx);
+function form(token, answer) { const back = {value: ''};
+  return {matches: sel => answer && sel === 'form.hanswer', querySelector: sel => sel === 'input[name=token]' ? (token ? {value: token} : {value: ''}) : sel === 'input[name=back]' ? back : null}; }
+function send(f) { let stopped = false; handler({target: f, preventDefault: () => { stopped = true }}); return stopped; }
+const f = form('t', true);
+out.push(send(f)); now += 3000; out.push(send(f)); now += 4000; out.push(send(f)); now += 1000; out.push(send(f));
+out.push(send(form('', true))); out.push(send(form('t', false)));
+const g = form('t', true); out.push(send(g)); out.push(send(form('t', true)));
+console.log(JSON.stringify(out));
+"""
+    _gr = subprocess.run(["node", "-e", _guard_js], input=_hj[_h0:_h1], capture_output=True, text=True, timeout=30)
+    _go = json.loads(_gr.stdout) if _gr.returncode == 0 and _gr.stdout.strip() else []
+    check("home answer: a second submit of the same answer form within 8 seconds is cancelled; one after the window goes through, and each form has its own window",
+          _go[:4] == [False, True, True, False], (_go, _gr.stderr[:300]))
+    check("home answer: a form with no token is cancelled, a form that is not an answer form is left alone, another answer form is not held by the first one's window",
+          _go[4:] == [True, False, False, False], (_go, _gr.stderr[:300]))
 check("home answer: the page stays where it was sent from: scrollY saved in sessionStorage as the form is sent, restored once on the page the ?sent= answer lands on, only when fresh (under 15 s), the same path and without a hash, the notice's height added, the notice kept in view",
       "sessionStorage.setItem(SK,JSON.stringify({y:Math.round(window.scrollY||0),t:Date.now(),p:location.pathname}))" in _hj and "sessionStorage.removeItem(SK)" in _hj and "window.scrollTo(0,Y)" in _hj
       and "S.p===location.pathname" in _hj and "!location.hash" in _hj and "Date.now()-S.t<15000" in _hj and "document.documentElement.scrollHeight-h0" in _hj and "position:sticky" in _hj and "addEventListener('load'" in _hj
