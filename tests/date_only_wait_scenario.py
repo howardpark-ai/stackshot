@@ -80,10 +80,14 @@ item(1, needs=[BACK], next="")
 out = bupd(1, next=TIMED, wake=f"{w2}T08:00", wait_reason="the nightly job writes the report at 08:00")
 m1 = mt(1)
 check("1 the write parks it: one parked line, no note", out.count(PARK) == 1 and SN_HEAD not in out, out)
+check("1 the parked note says the item waits until the date (outside a hand-off), never that the date is a reminder", "alone is a wait until that date (outside a hand-off)" in out and "so the item waits until then" in out and "reminder" not in out.split(PARK, 1)[1].split("\n", 1)[0], out)
+import json as _j
+rec1 = _j.dumps(m1.get("server_fixes") or m1.get("fixes") or m1)
+check("1 the History line the server keeps for the park says the same", "alone is a wait until that date (outside a hand-off)" in rec1 and "alone was a reminder" not in rec1, rec1[:400])
 check("1 …on hold with the wake as given and a wait_basis made of the reason and the wake day", hd_(m1) is True and wk_(m1) == f"{w2}T08:00"
       and m1["wait_basis"]["text"] == f"the nightly job writes the report at 08:00 (wake {w2})" and m1["wait_basis"]["wake"] == f"{w2}T08:00", m1)
 check("1 …stored as waiting on a time from this write, and the board reads it so", stamped(1) == ("waiting", "time") and MODEL.view({**rd(1), "gid": "a1"}, MODEL.derive({**rd(1), "gid": "a1"}), time.time()).state == "waiting", (stamped(1), m1))
-check("1 …the reply says what the park is and what to write if a step can run now", "so the item is on hold until then, stored as waiting on a time" in out and "write it as the action and pass clear_hold=true" in out, out)
+check("1 …the reply says what the park is and what to write if a step can run now", "so the item waits until then, stored as waiting on a time" in out and "write it as the action and pass clear_hold=true" in out, out)
 item(2, needs=[BACK], next="")
 out = bupd(2, next=f"{BACK}: on {w2} rotate the key", wake=w2)
 check("1 with no wait_reason (a gate that failed open, a script's write) the basis is the step's own words, and the item is parked all the same",

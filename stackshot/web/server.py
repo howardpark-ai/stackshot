@@ -7796,8 +7796,8 @@ def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any,
                 _gate_wait_basis({**item, "metadata": w}, text, w["wake"], held=True)
             except ToolError:
                 continue
-            return text, (f"\n(parked: wake {w['wake']} alone is a reminder, and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
-                          f"so the item is on hold until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
+            return text, (f"\n(parked: wake {w['wake']} alone is a wait until that date (outside a hand-off), and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
+                          f"so the item waits until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
     except Exception as e:  # noqa: BLE001  — the correction is an extra: a failure leaves the write as it was, with the note
         print(f"date-only wait: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return "", ""
@@ -7839,7 +7839,7 @@ def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: An
 
 def _wake_park_line(wake: str, basis: str) -> str:
     """The History line of a park the server made (server_fixes.WAKE_PARK): what it did, the reason it kept, and how the mover sends it back."""
-    return (f"parked: wake {wake} alone was a reminder and the only open next line waits for it; on hold until then (reason: {_clip_line(basis, 70)}). "
+    return (f"parked: wake {wake} alone is a wait until that date (outside a hand-off) and the only open next line waits for it; the item waits until then (reason: {_clip_line(basis, 70)}). "
             "clear_hold=true sends it back and the server leaves that wake alone")
 
 
