@@ -589,7 +589,7 @@ _notes = json.loads(_html.unescape(_nt.group(1))) if _nt else {}
 check("home answer: the page carries the item page's own notices (one text per ?sent= code, the same as the item page shows), and the script shows one naming the item, then drops ?sent from the address",
       set(_notes) == set(render.Board._SENT) and _notes["decision"][1] == render.Board._SENT["decision"][1] and "q.get('sent')" in _hj and "q.get('item')" in _hj and "q.get('name')" not in _hj and "get('name')" not in _hj
       and _notes["stale"][1] != render.Board._SENT["stale"][1] and "Read it again below" not in _notes["stale"][1] and "open the item to read it again" in _notes["stale"][1]
-      and _notes["needdate"][1] != render.Board._SENT["needdate"][1] and "press the button again" not in _notes["needdate"][1] and "open the item to answer again" in _notes["needdate"][1]
+      and _notes["askedback"][1] != render.Board._SENT["askedback"][1] and "pick one" not in _notes["askedback"][1] and "open the item to pick a day" in _notes["askedback"][1]
       and render.Board(str(T / "store")).sent_html({"sent": "stale"}).count("Read it again below") == 1
       and "p.className='isent '+m[0]" in _hj and "textContent" in _hj and "history.replaceState(null,'',location.pathname+location.hash)" in _hj and "innerHTML" not in _hj, _notes.keys())
 check("the home page's notices say the agent on it has been told, never its owner",

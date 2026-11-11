@@ -1428,8 +1428,11 @@ class Board:
              "toolong": ("warn", "Nothing sent: the text is too long."),
              "stale": ("warn", "Nothing sent: the item no longer asks this (its options or its needs changed). Read it again below.",
                        "Nothing sent: the ask changed before your answer arrived; open the item to read it again."),
-             "needdate": ("warn", "Nothing sent: write the date in the box (for example Mar 9th, or 2099-03-09), then press the button again.",
-                          "Nothing sent: the answer needs a date; open the item to answer again."),
+             "askedback": ("warn", "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
+                           "Sent: your note is on the item. I could not read a date from it; open the item to pick a day."),
+             "stalenote": ("ok", "Sent as a comment: the item no longer asks this, so your note is on it as a comment and the agent on it has been told. Read the item again below.",
+                           "Sent as a comment: the ask changed before your answer arrived, so your note is on the item as a comment; open the item to read it again."),
+             "closednote": ("ok", "Sent as a comment: the item is closed, and your note is on it."),
              "closed": ("warn", "Nothing sent: the item is closed."),
              "done": ("ok", "Done: the item goes on to its next mover."),
              "stepreply": ("ok", "Sent: your note is on the item and its next mover has it. It decides whether the step is done, and hands the item back to you if it was a question."),      # the item page names who: sent_html(taken_by=)

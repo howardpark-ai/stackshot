@@ -16681,9 +16681,37 @@ def _check_his_step(meta: dict[str, Any], step: str, now: float) -> str:
     return _steps.first_line(cl[mine[0]]["text"])
 
 
+def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str = "", why: str = "") -> str:
+    """An answer note that has no decision to go with it (the item is closed, or the question it answered has changed) is kept as his comment on the item and told to the mover, as any comment of his
+    is: the board never drops what he wrote. `pick` is the option he sent with it and `why` the words that name it in front of the note ("the item is closed", "the item no longer asks this"). A second
+    send of the same thing is a no-op: the same text, or the same pick with the same note that a decision just recorded, among the item's latest answers within ten minutes (a double click).
+    → `code`, the notice the page shows (it says the note was kept). The caller holds the item and answer locks."""
+    now = time.time()
+    meta = dict(item.get("metadata") or {})
+    text = f"({why}: {pick}) {note}" if why and pick else note
+    def _ts(a: dict[str, Any]) -> float:
+        try:
+            return float(a.get("ts") or 0)
+        except (TypeError, ValueError):      # a hand-edited record
+            return 0.0
+    for a in (meta.get("answers") if isinstance(meta.get("answers"), list) else [])[-3:]:
+        if isinstance(a, dict) and now - _ts(a) < 600 and (a.get("text") == text or (pick and a.get("choice") == pick and a.get("text") == note)):
+            return code
+    rec: dict[str, Any] = {"ts": now, "kind": "comment", "text": text, "via": "board"}
+    prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
+    meta["answers"] = [*prior, rec]
+    item["metadata"], item["updated"] = meta, now
+    _save(gid, item, note=_answer_note(rec), author=(OWNER, "board"))
+    item["gid"] = gid
+    told = [t for t in _answer_deliver(gid, item, rec) if t]
+    print(f"answer: {gid} {code}: his note kept as a comment, told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
+    _publish()
+    return code
+
+
 def _answer(gid: str, choice: str, text: str, act: str) -> str:
-    """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), or
-    empty | toolong | stale | nostep | nomover | closed (nothing written). A step form has one button, Send (act=send): with an empty box it is the owner's word that the step is done (`done`: the item goes to
+    """Record one answer from the board → what happened, the code the page's notice reads: decision | comment | done (sent), askedback (a date button whose note held no date it could read: the note is kept
+    and the item asks him back with dates), closednote | stalenote (a note he wrote on a closed item, or on a question that changed, is kept as a comment), closed | stale (no note: nothing written), or empty | toolong | nostep | nomover (nothing written). A step form has one button, Send (act=send): with an empty box it is the owner's word that the step is done (`done`: the item goes to
     its then-mover, recorded as his answer "Done"), with a note it is his note on the step (`stepreply`: kind step-reply, and the item goes to its then-mover too, which judges whether the note finishes the step).
     A page loaded before the release posts act=done (as the empty Send) or act=comment (a comment only, as before: the step stands)."""
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
@@ -16692,7 +16720,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
     with _ITEM_LOCK, _ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
         item = _load(gid)
         if item.get("status") != "open":
-            return "closed"
+            return _keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
         meta = dict(item.get("metadata") or {})
         stepped, then, handed, letter, until = False, "", "", "", ""
         if choice:
@@ -16701,7 +16729,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             valid = [f[0] for f in _option_forms(item)] or [o["label"] for o in _rmod.yesno_options(item)]
             if "decision" not in _needs_kinds(meta) or choice not in valid:
                 if "decision" in _needs_kinds(meta) or not isinstance(meta.get(_askl.LEFT), dict):
-                    return "stale"
+                    return _keep_note(gid, item, text, "stalenote", choice, "late, the item no longer asks this") if text else "stale"      # his note is kept as a comment; a bare pick on a question that changed is not an answer to the new one
                 text, choice, kind = f"(late, on the ask the server took off his move: {_clip_line(str(meta[_askl.LEFT].get('ask') or ''), 120)}) {choice}" + (f" — {text}" if text else ""), "", "comment"      # his pick is kept as his comment, never lost
             else:
                 kind = "decision"
@@ -16721,8 +16749,9 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         else:
             return "empty"
         eff = _watch.answer_effect(meta, choice, text, _pages.zone_now().date()) if kind == "decision" and not stepped else {"do": ""}     # a pick on a watcher ask, or his words in the box, acts on the item
-        if eff["do"] == _watch.NEEDS_DATE:
-            return "needdate"
+        askback = eff["do"] == _watch.NEEDS_DATE      # a date button, and no date he gave can be read: the answer and the note are kept below, and the item asks him back with dates
+        if askback:
+            asked_note, kind, text, choice, eff = text, "comment", text or f"(pressed: {choice})", "", {"do": ""}      # `asked_note`: the note as he wrote it
         now = time.time()
         rec: dict[str, Any] = {"ts": now, "kind": kind}
         if choice:
@@ -16805,6 +16834,8 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
                 handed = _decision_hand_over(meta, mover_in, then_in, parked=bool(parked),
                                     waiting=_model_of({**item, "gid": gid, "metadata": meta}).state == _model.WAITING, now=now)
+        if askback:                     # the question put back: three days to pick from (watchers.ask_back); the item stays his, needs still names his decision
+            meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
         item["metadata"] = meta
         item["updated"] = now
         _save(gid, item, note=_answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
@@ -16825,7 +16856,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
     kind = ("stepreply" if kind == "step-reply" else "done") if stepped else kind
     print(f"answer: {gid} {kind} from the board" + (f", parked until {parked}" if parked else "") + f", told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
     _publish()
-    return kind
+    return "askedback" if askback else kind
 
 
 def _answer_tick(now: float | None = None) -> list[str]:
