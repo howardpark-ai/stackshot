@@ -23,7 +23,7 @@ status busy | idle and when it changed); the clocks are given to the pass as `no
   13 a quiet builder is nudged at once: a `doing` item carries no expected time, so the pass waits for none (a time stored by an earlier version is not read)
   14 the 24-hour bound on a kept item (+23 h nothing, +25 h the ladder runs again), a restart (the state is the file's), a front agent's recovery request is not pushed to it
   15 the builder taking the item ends the stall flag on its record
-  16 an item is looked at only when its work is due now: a wake ahead, a hold, an `after` an open item, a wait on the owner or an outsider leave it alone and leave no record; once due it is stepped as before, its minutes counted from then
+  16 an item is looked at only when its work is due now: a wake with a wait_basis ahead (a bare wake is only a reminder), a hold with a dated wake, an `after` an open item, a wait on the owner or an outsider leave it alone and leave no record; once due it is stepped as before, its minutes counted from then
   17 a pause of the pass ends on its own: [stall] paused_until holds it until then; enabled = false holds it at most [stall] max_pause_hours (4) from when the server first saw it, a restart keeping that
      start (<state>/stall_pause.json); a paused_until beyond the cap is cut to it; one journal line at the start and one at the end (and a routing-log line); doctor, the start and a reload name the end
   18 an agent never switches the pass off: a pause is honored only when [stall] pause_item names a board item with Oliver's own answer dated within 4 hours of when
@@ -507,26 +507,34 @@ def wk(ep): return time.strftime("%Y-%m-%dT%H:%M", time.gmtime(ep + ZONE_OFFSET)
 for w_ in ("home-front", "team-back", "home-peer", "home-peer2", "home-peer3"): cli_row(w_, "idle", IDLE0)
 server._stall_save({}); server._stall_write({"_pass": {"since": B}})
 WAKE16 = wk(N + 3600)
-item(70, mover="home-front", wake=WAKE16)                                              # a front agent's item with a check-back ahead
-item(71, mover="team-back", needs=["team-back"], wake=WAKE16)                            # a background agent's
+BASIS16 = {"text": "the vendor answers on that day", "wake": WAKE16, "by": "team-back", "at": N}      # a wake that stands on a real-world date: the board shows the item waiting
+item(70, mover="home-front", wake=WAKE16, wait_basis=BASIS16)                          # a front agent's item parked until a dated event
+item(71, mover="team-back", needs=["team-back"], wake=WAKE16, wait_basis=BASIS16)        # a background agent's
 item(73, mover="home-peer", hold=True, wake=WAKE16)                                    # parked
 item(74, mover="home-send")                                                            # the open item 75 is ordered after (no pane on this box: not looked at itself)
-item(75, mover="home-peer2", state="doing", after=["a74"])
+item(75, mover="home-peer2", after=["a74"])
 item(76, mover="home-peer3", needs=["decision"], ask=ASK, next=f"{OWN}: decide")       # waiting on the owner, though a session is stored as mover
 item(77, mover="home-peer", needs=["external"], next="a vendor: reply")                # waiting on someone outside
-item(78, mover="home-peer2", wake=WAKE16)                                              # a wake ahead, with a leftover record from an earlier episode
+item(78, mover="home-peer2", wake=WAKE16, wait_basis=BASIS16)                          # a dated wait, with a leftover record from an earlier episode
 server._stall_save({"a78": {"mover": "home-peer2", "ver": [B, B], "step": 2, "last": N - 100.0, "cold_at": N - 200.0}})
 ids16 = (70, 71, 73, 75, 76, 77, 78)
 before16 = {i: rd(i) for i in ids16}
 done = stk(N) + stk(N + 1800)
 gids16 = {f"a{i}" for i in ids16}
-check("16 not due: a future wake (front mover and background mover), a parked item, an item after an open one, a needs-decision item and a needs-external item: none is stepped, written or sent anything",
+check("16 not due: a wake with a wait_basis (front mover and background mover), a parked item, an item after an open one, a needs-decision item and a needs-external item: none is stepped, written or sent anything",
       not (set(done) & gids16) and all(rd(i) == before16[i] for i in ids16) and not [p for p in pushes() if any(f"a{i}" in p[1] for i in ids16)], (done, pushes()[-3:]))
 check("16 not due: ...and the pass keeps no record of them, a leftover one included", not (set(server._stall_load()) & gids16), server._stall_load())
 check("16 not due: pure: not_due says why, and nothing for an item whose work is due",
-      S.not_due(rd(70), N) == "wake still ahead" and S.not_due(rd(73), N) == "state parked" and S.not_due(rd(76), N) == "state your-call"
-      and S.not_due(rd(77), N) == "state outside" and S.not_due(rd(75), N, lambda it: ["a74"]) == "ordered after an open item" and S.not_due(rd(75), N, lambda it: []) == ""
+      S.not_due(rd(70), N) == "the board shows it waiting (time)" and S.not_due(rd(73), N) == "the board shows it waiting (time)" and S.not_due(rd(76), N) == "waiting on the owner"
+      and S.not_due(rd(77), N) == "the board shows it waiting (relay)" and S.not_due(rd(75), N, lambda it: ["a74"]) == "the board shows it waiting (item)" and S.not_due(rd(75), N, lambda it: []) == ""
       and S.not_due(rd(70), N + 7200) == "", [S.not_due(rd(i), N) for i in (70, 73, 75, 76, 77)])
+# a wake alone is a reminder: the board shows the item on agent, so the pass looks at it (it used to hold the pass off, and an item sat on agent for a day)
+item(79, mover="home-front", wake=WAKE16)
+check("16 not due: a bare wake ahead is a reminder, not a wait: not_due says nothing, and due_at counts nothing from a wake that has not passed",
+      S.not_due(rd(79), N) == "" and S.due_at(rd(79), N) == 0.0 and S.due_at(rd(79), N + 7200) > 0.0 and S.due_at(rd(79)) > 0.0, (S.not_due(rd(79), N), S.due_at(rd(79), N)))
+done = stk(N + 1900)
+check("16 not due: ...and the pass steps that item with the wake still ahead (a front mover: its History line)", "a79" in done and len(log_of(79)) == 1, (done, log_of(79)))
+close(79)
 D = N + 3600                                                                         # the wakes (to the minute) have passed
 done = stk(D + 9 * MIN)
 check("16 due: just past the wake the item has its minutes first: nothing at 9 minutes (the clock starts when the work is due)", not (set(done) & gids16), done)

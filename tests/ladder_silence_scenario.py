@@ -261,7 +261,7 @@ check("5 not due: an item on a stored wait is not silent and never enters", sile
 close(17)
 # the item put on a hold after it was asked: not due, its entry dropped
 clear_records(); put(18, act=60); cli_row("home-peer", "idle", IDLE_SINCE)
-silence_pass([18]); d = rd(18); d["metadata"]["hold"] = True; (T / "store/a/18.json").write_text(json.dumps(d))
+silence_pass([18]); d = rd(18); d["metadata"]["hold"] = True; d["metadata"].pop("phase", None); d["metadata"].pop("waits_on", None); d["metadata"]["wake"] = local(now0 + 5 * H); (T / "store/a/18.json").write_text(json.dumps(d))
 stk(now0 + 31 * MIN)
 check("5 not due: …put on a hold after the ask, the entry is dropped and nothing is sent", entry(18) is None and not look_notices("home-peer", 18), (entry(18), pushes_to("home-peer", "a18")))
 close(18)

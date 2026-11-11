@@ -20,8 +20,8 @@ has a later `statusUpdatedAt`, so a turn starting restarts the count.
 
 The cold call is made at most once per item in `KEEP` seconds (it bounds a ping-pong between two sessions that each hand the item back).
 
-An item is looked at only when its work is due now (`not_due`): a wake or check-back still ahead, a hold or park, an `after` link to an open item, or a wait on the
-owner or an outside party leaves it alone, whatever the mover's role, and any record the pass kept for it is dropped, so the clock starts when the item becomes due.
+An item is looked at only when its work is due now (`not_due`): an item the board shows as waiting (a hold with a dated wake, an `after` link to an open item, a stored wait, a wake that carries a wait_basis) or that is the owner's
+or an outsider's move is left alone, whatever the mover's role, and any record the pass kept for it is dropped, so the clock starts when the item becomes due. A wake alone is a reminder and holds nothing off.
 
 A pause of the whole pass always ends on its own (a pause once outlasted its window and nothing woke idle builders): `[stall] paused_until`
 (an ISO-8601 time with an offset) holds the pass until then, and `enabled = false` holds it for at most `max_pause_hours` (4) from when the server first saw it; a paused_until further out than
@@ -49,9 +49,9 @@ from typing import Any, Callable
 
 from stackshot.core import config as _cfg
 from stackshot.fleet import liveness as _lv
+from stackshot.model import model as _model
 from stackshot.model import states as _states
 from stackshot.waits import waiting as _wt
-from stackshot.waits import watchers as _watchers
 
 MINUTES = 10.0          # [stall] minutes: how long a mover's pane may have no turn running before a step is taken
 EVERY = 20.0            # [stall] every_seconds: how often the pass runs (the runner ticks every 60 s, so a smaller value runs at every tick)
@@ -66,37 +66,34 @@ RESTARTS = 3            # the mover's confirms that start an item's episode over
 
 
 def not_due(item: dict[str, Any], now: float, after_open: Callable[[dict[str, Any]], Any] | None = None) -> str:
-    """Why the item's work is not due now ("" when it is, and the pass may look at it). The item model's own fields decide: the state (states.of: parked, blocked, outside, your-call and your-step are
-    waits or the owner's move), a need of the owner (decision) or an outside party (external), a hold, an `after` link to an item still open (`after_open(item)` → the open ones), a wake or
-    check-back still ahead (waiting.wake_epoch). A wake that has passed is due. A doing item carries no expected time, so a quiet mover is due at once."""
+    """Why the item's work is not due now ("" when it is, and the pass may look at it). The board's own phase decides what waits: an item the board shows as waiting (`model.shown_waiting`: a hold with a dated wake, an
+    `after` link to an item still open, a stored wait, a wake that carries a wait_basis, the states parked, blocked, outside and verifying) is left alone, and nothing else is. A wake alone is a reminder that leaves the
+    item on agent, so it does not hold the pass off; a wake that has passed is due as before. Not on an agent at all are an item in the owner's move (the states your-call and your-step, a need of `decision`) and one that
+    waits on an outsider (a need of `external`): those are the owner's and the outsider's lanes on the board, never an agent's work. A doing item carries no expected time, so a quiet mover is due at once."""
     if item.get("status") != "open":
         return "closed"
     m = item.get("metadata") or {}
-    if _watchers.watches(item):
-        return f"a {_watchers.stored_kind(m)} wait the server watches"      # an item that stores a wait the watchers can end is waiting, whoever its post-wake mover is: the watcher turns it, not this pass
-    state, _derived = _states.of(item, after_open)
-    if state != "doing":
-        return f"state {state or 'unknown'}"
+    try:
+        mod = _model.view(item, _model.derive(item, now, after_open), now, after_open)
+    except Exception:  # noqa: BLE001  (an item the model cannot read is not looked at)
+        return "not readable"
+    if mod.state == _model.WAITING:
+        return f"the board shows it waiting ({mod.wait.kind if mod.wait else 'unknown'})"
     kinds = _states.kinds_of(m)
-    if "decision" in kinds:
+    if "decision" in kinds or _states.of(item, after_open)[0] in _model.OWNER_STATES:
         return "waiting on the owner"
     if "external" in kinds:
         return "waiting on someone outside"
-    if _wt.is_held(item):
-        return "on hold"
-    if _wt.after_of(m) and (after_open(item) if after_open else True):
-        return "ordered after an open item"
-    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None
-    if wake is not None and wake > now:
-        return "wake still ahead"
     return ""
 
 
-def due_at(item: dict[str, Any]) -> float:
-    """When the item's work fell due: its wake (0.0 when it has none). The pass counts a mover's idle time from then, as it counts from the item's arrival, so
-    an item whose wake has just passed gets the minutes before its first step, not an instant one on the pane's age alone."""
+def due_at(item: dict[str, Any], now: float | None = None) -> float:
+    """When the item's work fell due: its wake once it has passed (0.0 when it has none, or it is still ahead, a reminder). The pass counts a mover's idle time from then, as it counts from the item's arrival, so
+    an item whose wake has just passed gets the minutes before its first step, not an instant one on the pane's age alone. With no `now` the wake is returned whenever it is set."""
     m = item.get("metadata") or {}
-    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None
+    wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None      # a stored until is read as a wake is
+    if wake is not None and now is not None and wake > now:
+        return 0.0
     return wake or 0.0
 
 

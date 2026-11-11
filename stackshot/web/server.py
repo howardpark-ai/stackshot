@@ -6148,20 +6148,66 @@ def _silence_skip() -> "Callable[[str, dict[str, Any], str], bool]":
     return skip
 
 
+def _silence_env() -> Any:
+    """The silence pass's environment, built in one place for the pass and its backstop: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
+    role map (a project's keeper is not front for its own project; a transcript id resolves). The backstop must judge a hand-off by the very answer the pass did, or it lists what the pass found and hides what it did not."""
+    from stackshot.audit import audit_run as _ar
+    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0])
+
+
 def _silence_tick() -> "dict[str, Any] | None":
     """The ten-minute silence pass (silence.silence_pass): an open item on an agent with no real activity for 45 minutes goes to its mover once per silence episode, in the daily audit's `stale`
     wording, whatever the mover's pane is doing (a busy pane hides nothing), unless the stall ladder is already on the item (`_silence_skip`). Stands still when the audit is off or runs in agent
     mode (the rollback), like the filing and dates passes. A ladder view that cannot be built sends nothing."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
-    from stackshot.audit import audit_run as _ar
     from stackshot.audit import silence as _silence
     try:
         skip = _silence_skip()
     except Exception as e:  # noqa: BLE001  — fail open: with no view of the panes nothing is sent
         print(f"silence: ladder view not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return None
-    return _silence.silence_pass(env=_ar.Env(deliver=_filing_deliver), skip=skip, entered=_ladder_enter_quiet if _ladder_silence_on() else None)
+    env = _silence_env()
+    res = _silence.silence_pass(env=env, skip=skip, entered=_ladder_enter_quiet if _ladder_silence_on() else None)
+    try:
+        _silence_backstop(skip=skip, env=env)
+    except Exception as e:  # noqa: BLE001  — the backstop is an extra: the pass above has run
+        print(f"silence: backstop not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return res
+
+
+_BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
+_BACKSTOP_LAST = [0.0]
+_BACKSTOP_TOLD: "set[str]" = set()      # the items the builder has been told of while they stay uncovered (memory only: a restart tells once more); one that has a finding again, or is gone, drops out
+_BACKSTOP_LINES = 10          # at most this many items in one message, then "+N more"
+
+
+def _silence_backstop(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, skip: Any = None, env: Any = None) -> "list[dict[str, Any]]":
+    """The silence pass's backstop, looked at once an hour from the ten-minute silence tick: an open item the board shows on an agent that has had no activity for 2 hours (`silence.BACKSTOP_S`) and that the
+    pass has no finding for (`silence.uncovered`) is a defect of the pass, whatever exemption hid it. Each such item is told ONCE to the builder (the audit's builder, the way the runner's watchdog tells it) in one
+    stderr line and one message that asks nothing of the owner and makes no board item; it is told again only after it has had a finding (or left the board) and is then missed again. `now`, `items`, `skip`, `env` are for tests
+    and the tick (the tick passes the pass's own `env`; with none it is built the same way, `_silence_env`). → the uncovered items, told or not."""
+    now = time.time() if now is None else now
+    if now - _BACKSTOP_LAST[0] < _BACKSTOP_EVERY:
+        return []
+    _BACKSTOP_LAST[0] = now
+    from stackshot.audit import silence as _silence
+    from stackshot.tools import next_report as _nr
+    late = _silence.uncovered(items if items is not None else _nr.load_all(None), now, env if env is not None else _silence_env(), skip)
+    _BACKSTOP_TOLD.intersection_update({x["id"] for x in late})
+    fresh = [x for x in late if x["id"] not in _BACKSTOP_TOLD]
+    if not fresh:
+        return late
+    _BACKSTOP_TOLD.update(x["id"] for x in fresh)
+    lines = [f"{x['id']} · {x['mover'] or 'no mover'} · no activity for {_silence.minutes(x['silent'])}" for x in fresh]
+    print(f"silence: backstop: {len(fresh)} item(s) on an agent silent for over {_silence.minutes(_silence.BACKSTOP_S)} with no silence finding: {', '.join(x['id'] for x in fresh)}", file=sys.stderr, flush=True)
+    to = _cfg.audit_builder()
+    if to:
+        _inbox_flag_send(to, f"[stackshot] The silence pass has no finding for {len(fresh)} item(s) the board shows on an agent that have had no activity for over {_silence.minutes(_silence.BACKSTOP_S)} "
+                             f"(it should have found each after {_silence.minutes(_silence.LIMIT)}; some exemption in silence.py hides it, or the hand-off audit that holds it has not acted: a defect of the passes, not of the item). id · mover · silent for:\n"
+                             + "\n".join(lines[:_BACKSTOP_LINES]) + (f"\n+{len(lines) - _BACKSTOP_LINES} more" if len(lines) > _BACKSTOP_LINES else "")
+                             + f"\nSent once for each item; nothing here is for {OWNER} and no reply is owed.")
+    return late
 
 
 def _make_runner() -> "_minute.Runner":
@@ -9803,7 +9849,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
             if it.get("status") != "open":
                 continue
             if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})):
-                continue                 # its work is not due now (a wake ahead, a hold, an after link, a wait on the owner or an outsider): no record is kept, so its clock starts when it is due
+                continue                 # its work is not due now (the board shows it waiting, or it is the owner's or an outsider's move): no record is kept, so its clock starts when it is due
             old = old_st.get(gid)
             if not ladder_on:
                 old = _ladder.unwind(old)      # the flag was turned off in the middle of a ladder: its steps are read in the old table (the builder rung stays reachable)
@@ -9850,7 +9896,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
             floor = max(float(it.get("state_updated") or it.get("updated") or 0), 0.0 if rec.get("capped") else float(rec.get("conf") or 0))      # the mover's own last confirm, kept in the entry (another session's later confirm does not erase it): the minutes count from it, up to stall.RESTARTS times
             if r and _ho_same(r.get("to"), who):
                 floor = max(floor, float(r.get("at") or 0))
-            floor = max(floor, _stall.due_at(it))    # an item whose wake has just passed has its minutes first
+            floor = max(floor, _stall.due_at(it, now))    # an item whose wake has just passed has its minutes first
             if quiet:
                 floor = 0.0              # the silence entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
             live = bool(back and (status or not idx or not _handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live

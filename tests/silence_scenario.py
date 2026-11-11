@@ -1,9 +1,9 @@
 """Scenario test for the ten-minute silence pass (silence.findings, silence.silence_pass, server._silence_tick): has an item on an agent had no real activity for 45 minutes? Fixture items, messages
 replaced by recorders, a fake clock (every pass is given its `now`), no live store, no network, no model call.
 
-  1  the rule: an open item in the state doing, on a session, with no activity for more than 45 minutes is a `stale` finding in the daily run's wording (the time in minutes); not found: 45 minutes or less, a
-     wake of its own (ahead, or passed: the dates pass's), a hold, an item behind an open one, a stored wait, an untaken hand-off, the owner's or an outside party's item, a closed item, a state that is itself a
-     wait; the clock is the item's `activity` stamp, so a bare confirm and a recent `updated` do not move it; an item the idle pass poked is an idle-pass entry, no finding
+  1  the rule: an open item in the state doing, on a session, with no activity for more than 45 minutes is a `stale` finding in the daily run's wording (the time in minutes); not found: 45 minutes or less, an item the board shows
+     waiting (a wake with a wait_basis, a hold with a dated wake, an item behind an open one, a stored wait), an untaken hand-off to a back agent (a front agent's is checked), the owner's or an outside party's item, a closed item, a state that is itself a
+     wait; a wake alone (ahead or passed) is only a reminder and the item is found; the clock is the item's `activity` stamp, so a bare confirm and a recent `updated` do not move it; an item the idle pass poked is an idle-pass entry, no finding
   2  the pass: a finding goes to its mover, once per silence episode, headed as a silence check; a second pass sends nothing; activity on the item ends the episode and a new silence is sent afresh; a bare confirm
      and the pass's own delivery (a save while delivering) are no activity; a finding that went away with no activity (a wait filed and lifted) is not sent again; the record is <state>/audit/silence.json;
      the daily run neither sends a silence finding nor sends again what the pass sent; a dry run sends and writes nothing; the pass skips while a daily run is in progress; a message no one received is tried again
@@ -46,6 +46,7 @@ if min((now + ZONE_OFFSET) % 86400, 86400 - (now + ZONE_OFFSET) % 86400) < 600: 
 ZONE = dt.timezone(dt.timedelta(seconds=ZONE_OFFSET)); OWNER = "00000000-0000-4000-8000-000000000001"
 local_str = lambda ts: dt.datetime.fromtimestamp(ts, ZONE).strftime("%Y-%m-%dT%H:%M")
 fails = []; ran = []
+bid = lambda n: f"board#{n}"                           # an item's id as the board writes it
 def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
@@ -90,10 +91,10 @@ OPEN_A1 = item(8, wrote=now - M, state="doing", needs=["home-agent"], next="home
 rules = build(
     quiet(1, 50),                                                                                       # 50 minutes silent: found
     quiet(2, 40),                                                                                       # 40 minutes: not yet
-    quiet(3, 50, wake=local_str(now + 5 * H)),                                                                # a wake ahead is its expected time
-    quiet(4, 50, wake=local_str(now - 2 * H)),                                                                # a wake passed is the dates pass's
-    quiet(5, 50, hold=True),                                                                            # held
-    quiet(6, 50, after=["a8"]),                                                                         # behind an open item
+    quiet(3, 50, wake=local_str(now + 5 * H)),                                                          # a wake ahead that stands on a dated event (its wait_basis, set below): the board shows it waiting
+    quiet(4, 50, wake=local_str(now - 2 * H)),                                                          # a wake passed, with no write: only a reminder, the board shows it on agent
+    quiet(5, 50, hold=True, wake=local_str(now + 5 * H)),                                               # held until a dated wake: the board shows it waiting
+    quiet(6, 50, state="blocked", supplies="its output", after=["a8"]),                                 # behind an open item
     quiet(7, 50, wait_kind="relay"),                                                                    # a stored wait
     OPEN_A1,                                                                                            # the open item a6 waits after
     quiet(9, 50, **{HO.KEY: HO.new_record("home-agent", "", "alpha-main", now - 50 * M)}),              # a hand-off nobody took: the hand-off audit's alone
@@ -101,7 +102,9 @@ rules = build(
     item(11, status="completed", wrote=now - 40 * H, state="doing", needs=["home-agent"], next="home-agent: done", outcome="done"),   # closed
     item(12, wrote=now - M, state="parked", needs=["home-agent"], hold=True, wake=local_str(now + 3 * H), next="home-agent: later", cap_ok=True),   # a state that is itself a wait
     quiet(13, 50, mover="home-nobody-else"),                                                            # a session mover: found like a1
+    quiet(14, 50, wake=local_str(now + 5 * H)),                                                         # a wake ahead and nothing else is a reminder: the board shows it on agent, so it is found
 )
+rules["a3"]["metadata"]["wait_basis"] = {"text": "the vendor answers on that day", "wake": rules["a3"]["metadata"]["wake"], "by": "home-agent", "at": now}
 rules["a12"]["activity"] = now - 3 * H
 rules["a10"]["activity"] = now - 3 * H
 rules["a9"]["metadata"][HO.KEY]["taken_at"] = None
@@ -112,10 +115,13 @@ got = sorted(f["id"] for f in fs)
 check("1 an item silent for 50 minutes is found: stale, in the daily run's wording with the time in minutes", ("board#1" in got) and next(f["detail"] for f in fs if f["id"] == "board#1") == "no write for 50 minutes and no date of its own", fs)
 check("1 …with the daily run's shape: id, project, owner, mover, category, detail, fix, source code", all(set(f) >= {"id", "project", "owner", "mover", "category", "detail", "fix", "source"} and f["source"] == "code" and f["category"] == "stale" and f["fix"] == AC.FIX["stale"] for f in fs), fs)
 check("1 the limit is 45 minutes: 40 is not found, and a bare confirm two minutes ago does not keep an item fresh", SL.LIMIT == 45 * 60 and "board#2" not in got and "board#1" in got, got)
-check("1 a wake of its own (ahead or passed), a hold, an item behind an open one, a stored wait, an untaken hand-off: none found",
-      not any(f["id"] in ("board#3", "board#4", "board#5", "board#6", "board#7", "board#9") for f in fs), fs)
+check("1 a wake with a wait_basis, a hold with a dated wake, an item behind an open one, a stored wait, an untaken hand-off: none found (the board shows each waiting, or the hand-off audit has it)",
+      not any(f["id"] in (bid(3), bid(5), bid(6), bid(7), bid(9)) for f in fs), fs)
+detail14 = next((f["detail"] for f in fs if f["id"] == bid(14)), "")
+check("1 a wake alone, ahead (item 14) or passed (item 4), is a reminder and leaves the item on agent: found, and the evidence says the wake only reminds",
+      {bid(4), bid(14)} <= set(got) and detail14.startswith("no write for 50 minutes and a wake that only reminds and does not park the item"), fs)
 check("1 the owner's item, a closed item and a state that is itself a wait: none found", not any(f["id"] in ("board#10", "board#11", "board#12") for f in fs), fs)
-check("1 the pass raises exactly these and no other", got == ["board#1", "board#13"], got)
+check("1 the pass raises exactly these and no other", got == [bid(1), bid(13), bid(14), bid(4)], got)
 check("1 a finding is the daily run's `stale` finding by key (one finding to both)", all(AR.finding_key(f) == (f["id"], "stale", "") for f in fs))
 nf = build(item(20, wrote=now - 3 * H, state="doing", needs=["home-agent"], next="home-agent: build it"))
 nf["a20"].pop("written_at"); nf["a20"].pop("written_by"); nf["a20"]["updated"] = now - 3 * H; nf["a20"]["state_updated"] = now - 3 * H
@@ -192,7 +198,7 @@ check("2 …but activity after the pass's end is: the episode ends, and the next
 clear_state()
 SL.silence_pass(now=now, items=pass_items, env=env()); sent.clear()
 held = {k: dict(v, metadata=dict(v["metadata"])) for k, v in pass_items.items()}
-held["a1"]["metadata"]["hold"] = True
+held["a1"]["metadata"]["hold"] = True; held["a1"]["metadata"]["wake"] = local_str(now + 5 * H)      # a hold the board shows waiting: held until a dated wake
 SL.silence_pass(now=now + 600, items=held, env=env())
 rec_held = json.loads(fp.read_text())
 check("2 an item that went on hold with no activity leaves the findings, and its send stamp is carried on the record", "board#1" not in {f["id"] for f in rec_held["findings"]} and "board#1" in {f["id"] for f in rec_held.get("carried", [])} and sent == [], rec_held)

@@ -174,6 +174,7 @@ class Env:
         self.wait_end = kw.get("wait_end")          # (gid, plan, now) -> {"fixed": bool, "what": str, "why": str}: the server sets the wait a next line names, with a History line (wait_end.py, server_fixes.py); None = the pass only asks the mover
         self.wait_facts = kw.get("wait_facts")      # () -> wait_end.Facts: the machines, the pull requests and the links the wait-end rule reads; None = the rule reads only the items themselves
         self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
+        self.front = kw.get("front")                # (name, project) -> whether that session is a front agent of the project (the server's `_front_keeper`); None = the role map's `front` role
 
     def role_map(self) -> dict[str, dict[str, Any]]:
         if self.roles is None:
@@ -183,6 +184,16 @@ class Env:
             except Exception:  # noqa: BLE001
                 self.roles = {}
         return self.roles if isinstance(self.roles, dict) else {}
+
+    def is_front(self, who: Any, project: str = "") -> bool:
+        """Is `who` a front agent (a session the owner talks to)? The server's answer when it gave one (`front`), else the role map's."""
+        if self.front:
+            try:
+                return bool(self.front(who, project))
+            except Exception:  # noqa: BLE001
+                return False
+        name = str(who or "").strip().lower()
+        return any(str(k).strip().lower() == name and isinstance(v, dict) and v.get("role") == "front" for k, v in self.role_map().items())
 
     def main_of(self, project: str) -> str:
         try:
@@ -1791,8 +1802,10 @@ def dates_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | N
     recs = _audit.runs(limit=5)
     latest = next((r for r in recs if r.get("finished") is not None and not r.get("error")), None)
     prior = read_dates()
-    before = merged_sent(latest, prior)
-    repeats, fresh = split_sent(findings, items, before, by_shown, tries_before(latest, prior), now, levels=levels_before(latest, prior))
+    from stackshot.audit import silence as _silence  # noqa: PLC0415  (silence imports this module)
+    quiet = _silence.sent_record()      # the silence pass's sends: one `stale` finding is one finding, whichever pass found it first (a passed wake on an item on an agent is both passes')
+    before = merged_sent(latest, prior, quiet)
+    repeats, fresh = split_sent(findings, items, before, by_shown, tries_before(latest, prior, quiet), now, levels=levels_before(latest, prior, quiet))
     res = {"open": n_open, "findings": len(findings), "fresh": len(fresh), "repeats": len(repeats), "idle_pass": len(passes), "sent": []}
     if dry:
         return {**res, "dry": True, "detail": findings, "idle_pass_detail": passes}

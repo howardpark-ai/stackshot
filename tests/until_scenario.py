@@ -184,10 +184,12 @@ parked = item(hold=True, until=day(4), cap_ok={"wake": day(4), "by": "x", "quote
 check("states.derive: a hold with an until and the owner's words for that until is parked, as a wake is", S.derive(parked) == "parked" and S.derive(item(hold=True, until=day(4), needs=[BACK])) == "parked"
       and S.derive(item(until=day(4), needs=[BACK])) == "doing")
 base = lambda **kw: item(state="doing", needs=[BACK], **kw)
-check("stall.not_due: a wait the watchers own is not chased, an until-only wait included", ST.not_due(base(until=day(2)), now).startswith("a time wait the server watches") and ST.not_due(base(until=day(-1)), now).startswith("a time wait the server watches"))
+WAITING_TIME = "the board shows it waiting (time)"
+check("stall.not_due: an until-only wait is a wait the board shows, ahead or passed, so the stall pass leaves it alone", ST.not_due(base(until=day(2)), now) == WAITING_TIME and ST.not_due(base(until=day(-1)), now) == WAITING_TIME)
 _cfg.CFG.setdefault("model", {})["watchers"] = False
-check("stall.not_due (watchers off): an until ahead is 'wake still ahead', one that passed is due; due_at is the until", ST.not_due(base(until=day(2)), now) == "wake still ahead" and ST.not_due(base(until=day(-1)), now) == ""
-      and ST.due_at(base(until=day(-1))) == ep(day(-1)) and ST.not_due(base(wake=day(2)), now) == "wake still ahead" and ST.due_at(base(wake=day(-1))) == ep(day(-1)))
+check("stall.not_due (watchers off): the board's reading is the same, a bare wake ahead is only a reminder and holds nothing off; due_at is the until, or the wake once it has passed",
+      ST.not_due(base(until=day(2)), now) == WAITING_TIME and ST.not_due(base(until=day(-1)), now) == WAITING_TIME and ST.not_due(base(wake=day(2)), now) == ""
+      and ST.due_at(base(until=day(-1))) == ep(day(-1)) and ST.due_at(base(wake=day(-1))) == ep(day(-1)) and ST.due_at(base(wake=day(2)), now) == 0.0)
 _cfg.CFG["model"]["watchers"] = True
 check("stall.due_at: no date is 0", ST.due_at(base()) == 0.0)
 # silence: an item that waits is no silent item, whatever its last write; the same item with no date is
