@@ -19,13 +19,16 @@ from __future__ import annotations
 import html as H
 import re
 
+from stackshot.web import i18n as _i18n     # the state words come from the string table (state.*), in the person's language
+
 # ----------------------------------------------------------------------------- the state words
 YOUR_MOVE, AGENT, WAITING, DONE, DROPPED, SUPERSEDED, CLOSED = "you", "agent", "wait", "done", "dropped", "superseded", "closed"
 RELEASE = "release"     # an agent's item whose pull request is in the release script's queue (ui/releasing.py): it leaves On agent for Queued for release
 NEW = "new"            # the edge of a close on the Closed page's New section: green, whatever its outcome
 EDGES = (YOUR_MOVE, AGENT, RELEASE, WAITING, NEW)      # the kinds whose color a card's left edge takes: orange Your move, blue On agent, purple Queued for release, grey Waiting, green New on Closed
-WORDS = {YOUR_MOVE: "Your move", AGENT: "On agent", RELEASE: "Queued for release", WAITING: "Waiting", DONE: "Done", DROPPED: "Dropped", SUPERSEDED: "Superseded", CLOSED: "Closed"}
-TITLES = {YOUR_MOVE: "Your move", AGENT: "On agent", RELEASE: "Queued for release", WAITING: "Waiting"}        # the home page's section headings and count cards (the board's own count words)
+_KINDS = (YOUR_MOVE, AGENT, RELEASE, WAITING, DONE, DROPPED, SUPERSEDED, CLOSED)
+WORDS = {k: _i18n.EN[f"state.{k}"] for k in _KINDS}      # the English state words; word() says them in the request's language (string table keys state.<kind>)
+TITLES = {k: WORDS[k] for k in (YOUR_MOVE, AGENT, RELEASE, WAITING)}        # the home page's section headings and count cards (the board's own count words); title() says them in the request's language
 _OF_LIST = {"your-move": YOUR_MOVE, "agents": AGENT, "waiting": WAITING}              # home.py's list names → a state kind
 _OF_OUTCOME = {"done": DONE, "dropped": DROPPED, "superseded": SUPERSEDED}            # a close's outcome → a state kind (anything else is a plain "Closed")
 
@@ -41,13 +44,18 @@ def kind_of_outcome(oc: str) -> str:
 
 
 def word(kind: str) -> str:
-    """The state word of a kind, as every page says it."""
-    return WORDS[kind]
+    """The state word of a kind, as every page says it (in the request's language)."""
+    return _i18n.t(f"state.{kind}")
+
+
+def title(kind: str) -> str:
+    """The heading and count-card word of one of the four lists (the state word of its kind, in the request's language)."""
+    return _i18n.t(f"state.{kind}")
 
 
 def tag(kind: str) -> str:
     """The state tag: a small tinted label with the word in it. Never a link or a button; the word carries the meaning, the color only helps."""
-    return f'<span class="tag t-{kind}">{H.escape(WORDS[kind])}</span>'
+    return f'<span class="tag t-{kind}">{H.escape(word(kind))}</span>'
 
 
 def esc(x) -> str:

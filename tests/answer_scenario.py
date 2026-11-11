@@ -215,7 +215,7 @@ check("Yes and No are drawn only on an open decision with no options: not with o
       all('value="Yes"' not in x and 'value="No"' not in x for x in (p1, p2, p3, p4)) and re.findall(r'name="choice" value="([^"]*)"', p2) == ["Approve", "Decline"], [re.findall(r'name="choice" value="([^"]*)"', x) for x in (p1, p2, p3, p4)])
 check("beside Yes and No the box keeps its one Send (act=answer), with the note worded as optional; no Done, no comment button",
       '<form class="ianswer"' in p26 and '<textarea id="atext" name="text"' in p26 and re.findall(r'<button type="submit"[^>]*name="act" value="([^"]*)">([^<]*)</button>', p26) == [("answer", "Send")]
-      and "Note (optional)" in p26 and "Done" not in p26, re.findall(r'<button [^>]*>([^<]*)</button>', p26))
+      and "Note (optional)" in p26 and "Done" not in re.sub(r"(?s)<script.*?</script>", "", p26), re.findall(r'<button [^>]*>([^<]*)</button>', p26))      # the page's text, not its scripts: every page head carries the script-word table (js.sent_done reads "Done: ... takes it from here")
 check("the wording: the agent on it is told (the comment box and the notices), never its owner",
       "Write a comment; the agent on it is told" in p3 and "its owner is told" not in p3 + p26 + p1 + p2
       and "and the agent on it has been told." in ui_render.Board._SENT["decision"][1] and "and the agent on it has been told." in ui_render.Board._SENT["comment"][1]

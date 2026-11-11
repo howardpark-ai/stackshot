@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+from stackshot.web import i18n as _i18n
 from stackshot.waits import handoff as _ho
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
@@ -71,6 +72,14 @@ def first_next(text: Any, known: tuple = ()) -> tuple[str, str]:
 def watched_by(kind: str) -> str:
     """Who notices the end of a wait of this kind: the scheduler (a time, a relay's ask-by day), the anchor module, the server (another item's close)."""
     return WATCHED_BY.get(kind, "the scheduler")
+
+
+_WATCHERS = {"the scheduler": "home.watcher.scheduler", "the anchor module": "home.watcher.anchor", "the server": "home.watcher.server"}      # WATCHED_BY's English words → the string table's keys
+
+
+def watcher_word(english: str) -> str:
+    """Who watches a wait, in the request's language (the string table; the English word when it has no key)."""
+    return _i18n.t(_WATCHERS[english]) if english in _WATCHERS else english
 
 
 def age_class(seconds: float) -> str:
@@ -164,6 +173,6 @@ def copyables(step: str) -> tuple[str, list[str]]:
     cmds = [m.group(1) for m in re.finditer(r"`([^`\n]+)`", step) if " " in m.group(1).strip()]
     if cmds:
         n = iter(range(1, len(cmds) + 1))
-        text = re.sub(r"`([^`\n]+)`", lambda m: ("the command below" if len(cmds) == 1 else f"command {next(n)} below") if " " in m.group(1).strip() else m.group(0), step)
+        text = re.sub(r"`([^`\n]+)`", lambda m: (_i18n.t("home.cmd_below") if len(cmds) == 1 else _i18n.t("home.cmd_n_below", n=next(n))) if " " in m.group(1).strip() else m.group(0), step)
         return text, [c.strip() for c in cmds]
     return step, []

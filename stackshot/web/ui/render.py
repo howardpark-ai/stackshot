@@ -37,6 +37,8 @@ from stackshot.waits import quiet as _quiet   # what a front agent was or was no
 from stackshot.waits import handoff as _hand   # a hand-off not yet taken
 from stackshot.web import whatschanged as _wc  # what changed in the tools in the last 7 days: a line in the brief
 from stackshot.web import uiprefs as _up   # the signed-in person's panel order (uiprefs.py): the default order, normalize
+from stackshot.web import i18n as _i18n   # the string table: a page's words in the person's language, the English ones when it has none (i18n.py)
+from stackshot.web.i18n import t as _t
 from stackshot.web import foryou as _fy  # the For you list: rows for what the owner should see, newest first (foryou.py)
 from stackshot.web import landed as _ld  # the Landed list: the closes of agents that the owner did not make, and which he has seen (landed.py)
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id (item_project.py)
@@ -95,8 +97,8 @@ _NET_ERR = (r"errno|timed? ?out|timeout|connect|resolv|name or service|temporary
             r"|ssl|eof occurred|refused|reset by peer|broken pipe|max retries|dns")
 def receiver_state(v):
     """A receiver's status as (word, class): ("healthy ✓", "ok"), ("unreachable ✗", "warn") or ("error ✗", "bad")."""
-    if v.get("ok"): return "healthy ✓", "ok"
-    return ("unreachable ✗", "warn") if re.search(_NET_ERR, str(v.get("error") or ""), re.I) else ("error ✗", "bad")
+    if v.get("ok"): return _t("js.rcv.ok"), "ok"
+    return (_t("js.rcv.warn"), "warn") if re.search(_NET_ERR, str(v.get("error") or ""), re.I) else (_t("js.rcv.bad"), "bad")
 
 
 # ---------------- text helpers (pure: no board state) ----------------
@@ -369,9 +371,10 @@ def recycle_due(r, open_after):
     so the two never disagree about which items wait."""
     if r.get("status") != "open" or not waits_recycle(r): return False
     return not is_held(r) or held_only_for_recycle(r, open_after)
-LANE_WORDS = {"call": _ui.word(_ui.YOUR_MOVE), "relay": _ui.word(_ui.WAITING), "": _ui.word(_ui.AGENT)}      # needs_kind → the lists' words, for an item with no stored state
-STATE_WORDS = {"doing": _ui.word(_ui.AGENT), "your-call": _ui.word(_ui.YOUR_MOVE), "your-step": _ui.word(_ui.YOUR_MOVE),
-               "outside": _ui.word(_ui.WAITING), "blocked": _ui.word(_ui.WAITING), "parked": _ui.word(_ui.WAITING), "verifying": _ui.word(_ui.WAITING)}   # whose move, in words: needs_kind → the board's names
+_W = _ui.WORDS      # the English words (module level code runs once, at the first import, in whatever language that request had: never ask the request's language here)
+LANE_WORDS = {"call": _W[_ui.YOUR_MOVE], "relay": _W[_ui.WAITING], "": _W[_ui.AGENT]}      # needs_kind → the lists' words, for an item with no stored state
+STATE_WORDS = {"doing": _W[_ui.AGENT], "your-call": _W[_ui.YOUR_MOVE], "your-step": _W[_ui.YOUR_MOVE],
+               "outside": _W[_ui.WAITING], "blocked": _W[_ui.WAITING], "parked": _W[_ui.WAITING], "verifying": _W[_ui.WAITING]}   # whose move, in words: needs_kind → the board's names
 
 
 def list_word(state, kind=None):
@@ -435,9 +438,7 @@ def option_lines(r):
 def when_words(t, clock=True):
     """"Thu Mar 5th 18:30" (clock=False: "Thu Mar 5th"): the rulebook's form for a date a person reads. t = an aware datetime
     (drawn in its own zone) or a date (no clock). Board.when and the server's replies use it."""
-    if not isinstance(t, datetime.datetime): clock = False
-    d = t.day
-    return f"{t:%a %b} {d}{'th' if 11 <= d % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(d % 10, 'th')}" + (f" {t:%H:%M}" if clock else "")
+    return _i18n.fmt_date(t, clock=clock)      # the string table's date forms (i18n.fmt_date): English unless the request is in another language
 def age_words(seconds):
     """An age in words: "12 min", "5 h", "2 d" (minutes below 90 min, hours below 36 h, days from then on)."""
     m = int(max(0.0, float(seconds)) // 60)
@@ -572,7 +573,7 @@ def dur(s):
     """A span of time, 9m / 1h / 2d — the page's one format; the page script's dur() says the same, keep them in step."""
     m_ = max(int(s), 0) // 60
     return f"{m_}m" if m_ < 60 else f"{m_ // 60}h" if m_ < 48 * 60 else f"{m_ // 1440}d"
-def ago(s): return "just now" if s < 60 else dur(s) + " ago"
+def ago(s): return _i18n.fmt_age(s)      # "just now", "12m ago" (i18n.fmt_age: the catalog's age forms)
 def landed_ago(s):
     """A close's age on the Landed page, in the page's one format (ago): "just now", "12m ago", "3h ago" (to 48 h), "5d ago". _LANDED_JS's ago() says the same, keep them in step."""
     return ago(max(int(s), 0))
@@ -585,17 +586,18 @@ def _update_word(latest):
     """A machine row's update notice: `→ <latest version>`, and nothing at all while the latest version is not known (no arrow pointing nowhere)."""
     v = str(latest or "").strip()
     return "" if v in ("", "?") else "→ " + esc(v)
-def _cmd_block(text, link=True, label="Copy to the clipboard"):
+def _cmd_block(text, link=True, label=None):
     """A command to copy (a step's command or fenced block): its text escaped in a code block, with a Copy button beside it. The one place a command box is drawn. With [steps] owner_shell set, a line
     above the box names where the command runs ("Runs on <machine>", "In PowerShell"); in sala's Shell (owner_shell = "sala-shell") with a valid [steps] shell_url, an "Open shell" link to that page in a new tab
     sits on the line too, when `link` is true (a step with several commands passes it for its first box only). A box with no place to name and no link is the plain box."""
+    label = _t("home.copy_clipboard") if label is None else label
     place, in_shell = _sc.runs_on(text)
     url = _cfg.shell_url() if in_shell and link else ""
     head = ""
     if place or url:
         head = ('<div class="cplace">' + (f'<span>{esc(place)}</span>' if place else "")
-                + (f'<a class="cshell" href="{esc(url)}" target="_blank" rel="noopener noreferrer">Open shell</a>' if url else "") + '</div>')
-    return head + f'<div class="cmd"><pre><code>{esc(text)}</code></pre><button type="button" class="b copy" aria-label="{esc(label)}">Copy</button></div>'
+                + (f'<a class="cshell" href="{esc(url)}" target="_blank" rel="noopener noreferrer">{esc(_t("home.open_shell"))}</a>' if url else "") + '</div>')
+    return head + f'<div class="cmd"><pre><code>{esc(text)}</code></pre><button type="button" class="b copy" aria-label="{esc(label)}">{esc(_t("js.copy"))}</button></div>'
 def _cmd_blocks(cmds, seen=None, **kw):
     """The boxes of several commands, with the Open shell link on the first box that can carry one: `seen` is a one-item list that says a link is already drawn in the same step (or in the same block of steps), and is
     kept across calls. A box that cannot carry a link (a bare link, a `! ` line) leaves it for the next."""
@@ -859,7 +861,15 @@ _THEME_HEAD = ("<script>(function(){var p='system';try{p=localStorage.getItem('"
 # The icon and font files, their versions and addresses are the shared ones (render.py): static files at their root addresses, served once for both UIs.
 from stackshot.web.render import ICON_DIR, asset_version, ICON_V, icon_href, FONT_DIR, FONT_FILE, font_href
 _D2_FACE = '@font-face{font-family:"D2Coding";src:url("' + font_href() + '") format("woff2");font-weight:400;font-style:normal;font-display:swap}'
-_APP_HEAD = ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
+# The page scripts' words: SST(key, {field: value}) answers from window.SSI (the person's language, put in the head by apply_lang) else window.SSD (these English ones, from the string table's js.* and age.* keys), so the English page
+# says exactly what the table says and a script never carries a copy of a word. A key in neither is returned as it is.
+_SST_HEAD = ("<script>window.SSD=" + json.dumps(_i18n.js_table("en")).replace("</", "<\\/") + ";window.SSI=window.SSI||{};"
+             "window.SST=function(k,f){var s=window.SSI[k];if(s==null)s=window.SSD[k];if(s==null)s=k;"
+             "return f?s.replace(/\\{(\\w+)\\}/g,function(m,x){return f[x]==null?m:f[x]}):s}</script>")
+# How long ago, in script: the same forms as i18n.fmt_age ("just now", "12m ago", "3h ago" to 48 h, "5d ago"; q: the ">21h ago" mark of a silence's start), from the table's age.* keys.
+_AGE_FN = ("function fa(s,q){var m=Math.floor(Math.max(s,0)/60),k=m<60?'age.min':m<2880?'age.hour':'age.day',n=m<60?m:m<2880?Math.floor(m/60):Math.floor(m/1440);"
+           "return q?'>'+SST(k,{n:n}):s<60?SST('age.now'):SST(k,{n:n})}")
+_APP_HEAD = _SST_HEAD + ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
              f'<link rel="apple-touch-icon" href="{icon_href("apple-touch-icon.png")}">'          # 180 px, opaque (signin.py _APP_ICONS)
              '<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)">'   # the app's title bar: each theme's --bg
              '<meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)">'
@@ -874,9 +884,16 @@ _APP_HEAD = ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use
              "var u;try{u=new URL(f.getAttribute('action')||location.href,location.href)}catch(e){return}if(u.origin!==location.origin)return;"
              "u.search=new URLSearchParams(new FormData(f)).toString();ev.preventDefault();location.assign(u.href)})})();</script>")
 _APP_HEAD += _ct.HEAD   # the color tool's library (once per page) and the script that applies the stored look, in the head of every page after the theme script, before the page's own style
-_PANEL_BTN = ('<button type="button" class="b ico pbtn" id="panel-open" aria-label="Summary panel" aria-controls="panel" aria-expanded="true" title="Hide summary panel">'
-              '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.8v12.4"/></svg></button>')
-_PANEL_BTN_CLOSED = _PANEL_BTN.replace('aria-expanded="true" title="Hide summary panel"', 'aria-expanded="false" title="Show summary panel"')   # the button as drawn for a person whose panel is stored closed (apply_panel_open)
+def _panel_btn(is_open: bool = True, lang: str | None = None) -> str:
+    """The summary panel's button in the title bar, in `lang` (default: the request's): drawn for an open panel (aria-expanded true, "Hide summary panel"), or for a closed one (apply_panel_open)."""
+    return ('<button type="button" class="b ico pbtn" id="panel-open" aria-label="' + esc(_t("panel.button", lang)) + '" aria-controls="panel" aria-expanded="' + ("true" if is_open else "false")
+            + '" title="' + esc(_t("panel.hide" if is_open else "panel.show", lang)) + '">'
+            '<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><path d="M12.5 3.8v12.4"/></svg></button>')
+_PANEL_BTN = _panel_btn(True, "en")
+_PANEL_BTN_CLOSED = _panel_btn(False, "en")   # the button as drawn for a person whose panel is stored closed (apply_panel_open)
+def _theme_btn(lang: str | None = None) -> str:
+    """The theme button (system, light, dark) in `lang`; the page script puts the label of the theme in use on it (js.theme.*)."""
+    return _THEME_BTN.replace('aria-label="Theme: system" title="Theme: system"', 'aria-label="' + esc(_t("js.theme.system", lang)) + '" title="' + esc(_t("js.theme.system", lang)) + '"', 1)
 _THEME_BTN = ('<button type="button" class="b ico theme" id="theme" aria-label="Theme: system" title="Theme: system">'
               '<svg class="i-system" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>'
               '<svg class="i-light" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
@@ -965,23 +982,24 @@ def _site_title(title: str, src: str, h1: bool = False) -> str:
 # warn colour are kept current by the home page's tick and live update, and on every other page by _STAMP_JS (panel_tail). Under 600 px the word "rendered" is left off (.rw), the age stays.
 # `tip` is the span's title text: home's (the default) is about the server's publishing; a page drawn per request says when it was drawn, since its amber only means that page is old.
 def _rendered_line(stamp_html: str, tip: str | None = None) -> str:
-    tip = f"normally re-rendered at least every {_every_m():g} minutes; older than {_stale_s() // 60} minutes means the server has not published since" if tip is None else tip
-    return f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}">{stamp_html}</span></p>'
+    tip = _t("home.rendered_tip", every=f"{_every_m():g}", stale=_stale_s() // 60) if tip is None else tip
+    return f'<p class="rline"><span class="rw">{esc(_t("home.rendered"))} </span><span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}">{stamp_html}</span></p>'
 # The age on a page that is not home (home's tick does the same for the whole page): the stamp's text redrawn every 30 s from its data-ts and the old class set past data-stale. A page without the line does nothing.
 _STAMP_JS = ("<script>(function(){var g=document.getElementById('rendered'),s=g&&g.querySelector('[data-ts]');if(!s)return;"
-             "function dur(x){var m=Math.floor(Math.max(x,0)/60);return m<60?m+'m':m<2880?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'}"
-             "function tick(){var d=Date.now()/1000-(+s.getAttribute('data-ts'));s.textContent=d<60?'just now':dur(d)+' ago';g.classList.toggle('old',d>+g.getAttribute('data-stale'))}"
+             + _AGE_FN +
+             "function tick(){var d=Date.now()/1000-(+s.getAttribute('data-ts'));s.textContent=fa(d);g.classList.toggle('old',d>+g.getAttribute('data-stale'))}"
              "tick();setInterval(tick,30000)})();</script>")
 # The summary panel's frame: the hover strip, the aside with its five blocks (Board.panel_blocks, keyed as the home page swaps them) and the scrim. The
 # home page draws it from its blocks (or their placeholders, for its shell fingerprint), every other page from Board.panel_tail; both put it after the page's <main>
 # inside <div id="layout">, the grid that docks it (the CSS, _PANEL_DOCK_PX).
 def _panel_frame(B: dict) -> str:
-    return ('<div id="panel-edge" aria-hidden="true"></div>\n<aside id="panel" aria-label="Summary">\n'
-            '<div class="phead"><span class="ptitle">Summary</span><button type="button" class="b ico pbtn" id="panel-close" aria-label="Close summary panel">&times;</button></div>\n'
+    return ('<div id="panel-edge" aria-hidden="true"></div>\n<aside id="panel" aria-label="' + esc(_t("panel.title")) + '">\n'
+            '<div class="phead"><span class="ptitle">' + esc(_t("panel.title")) + '</span><button type="button" class="b ico pbtn" id="panel-close" aria-label="' + esc(_t("panel.close")) + '">&times;</button></div>\n'
             + "\n".join(f'<!--ps:{k}-->{B[k]}<!--/ps:{k}-->' for k in _up.PANEL_SECTIONS)
+            + _lang_toggle()
             + '\n<div id="panel-colors-gap" aria-hidden="true"></div><div id="panel-colors"></div>'      # the color tool's mount (ui/colortool.py): the last thing in the panel, outside the sections that move, with the gap before it
-            + '\n<div id="panel-menu" class="pmenu" role="menu" aria-label="Move section" hidden>'
-            + "".join(f'<button type="button" role="menuitem" class="pmi" data-act="{a}" tabindex="-1">{t}</button>' for a, t in _PANEL_MOVES)
+            + '\n<div id="panel-menu" class="pmenu" role="menu" aria-label="' + esc(_t("panel.move_menu")) + '" hidden>'
+            + "".join(f'<button type="button" role="menuitem" class="pmi" data-act="{a}" tabindex="-1">{esc(_t("panel.move." + a))}</button>' for a in _PANEL_MOVES)
             + '</div>\n<div id="panel-live" class="pvh" role="status" aria-live="polite" aria-atomic="true"></div>\n</aside>\n<div id="panel-scrim"></div>')
 # The order of the side panel's sections (Machines, Runners, Anchor hub, Audit, Projects) is the signed-in person's own, kept on the server (uiprefs.py) so a PC tab and a
 # phone show the same. The page is drawn in the default order and the server puts it in the person's order on the way out (apply_panel_order, called by the root
@@ -990,15 +1008,41 @@ def _panel_frame(B: dict) -> str:
 # header (_pgrip; in the section, outside the fold's <summary>, at the header's right end) is the one control: dragged with a pointer (mouse, touch, pen) it moves the section, with an accent-coloured (orange) drop line where it will land; clicked, or
 # focused and Enter / Space, it opens a menu of the four moves (Move up, Move down, Move to top, Move to bottom; the ones that do not apply are disabled), the way for the
 # keyboard and a phone. Each move is announced in the live region and saved at once (POST /prefs/panel-order). The default order needs no control of its own: moving the sections back is moving them.
-_PANEL_LABELS = {"machines": "Machines", "runners": "Runners", "anchorhub": "Anchor hub", "audit-panel": "Audit", "projects-panel": "Projects"}
+_AUDIT_GROUPS = {v: k[len("panel.audit.group."):] for k, v in _i18n.EN.items() if k.startswith("panel.audit.group.")}     # an audit group's English name -> its key (audit_overview.GROUPS names, the audit card)
+_AUDIT_NOTES = {v: k[len("panel.audit.note."):] for k, v in _i18n.EN.items() if k.startswith("panel.audit.note.")}        # the card's note line, English -> key (audit_overview.NOTE_*)
+def _audit_word(table: dict, english: str, prefix: str) -> str:
+    """An audit group's name or the card's note in the request's language: by the English text the audit module gives; one the table does not know stays as it is."""
+    k = table.get(english)
+    return _t(prefix + k) if k else english
+_PANEL_LABELS = {"machines": "Machines", "runners": "Runners", "anchorhub": "Anchor hub", "audit-panel": "Audit", "projects-panel": "Projects"}      # English; the section's name in the person's language is panel.sec.<id> (panel_label)
 assert tuple(_PANEL_LABELS) == _up.PANEL_SECTIONS
-_PANEL_MOVES = (("up", "Move up"), ("down", "Move down"), ("top", "Move to top"), ("bottom", "Move to bottom"))
+_PANEL_MOVES = ("up", "down", "top", "bottom")      # the move menu's items; their words are panel.move.<name>
+def panel_label(sid: str) -> str:
+    """A side-panel section's name in the request's language."""
+    return _t("panel.sec." + sid)
+def _lang_toggle() -> str:
+    """The language switch at the foot of the side panel: EN and KO as two buttons (the pressed one is the language in use), drawn only when a second language has loaded (i18n.available()), so a board
+    with no locale folder shows none. _LANG_JS saves the choice (POST /prefs/lang) and reloads the page."""
+    langs = _i18n.available()
+    if len(langs) < 2: return ""
+    cur = _i18n.norm(_i18n.current())
+    btns = "".join(f'<button type="button" class="b plg" data-lang="{c}" lang="{c}" aria-pressed="{"true" if c == cur else "false"}" title="{esc(_t("panel.lang." + c))}">{c.upper()}</button>' for c in langs)
+    return f'\n<div id="panel-lang" role="group" aria-label="{esc(_t("panel.lang"))}">{btns}</div>'
+_LANG_TOGGLE_RX = re.compile(r'\n<div id="panel-lang" .*?</div>', re.S)
+def strip_lang_toggle(page: str) -> str:
+    """The page without its language switch. The switch saves a choice for a signed-in person (POST /prefs/lang), so a visitor who is not signed in gets none: the draw is shared, the server takes it out on the way."""
+    return _LANG_TOGGLE_RX.sub("", page, count=1)
+_LANG_JS = ("(function(){var G=document.getElementById('panel-lang');if(!G||!window.fetch)return;"
+            "G.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button[data-lang]');if(!b||b.getAttribute('aria-pressed')==='true')return;"
+            "[].forEach.call(G.querySelectorAll('button'),function(x){x.disabled=true});"
+            "fetch('@ROOT@/prefs/lang',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({lang:b.getAttribute('data-lang')})})"
+            ".then(function(r){if(!r.ok)throw 0;location.reload()},function(){[].forEach.call(G.querySelectorAll('button'),function(x){x.disabled=false})}).catch(function(){})})})();").replace("@ROOT@", PREFIX)
 _PGRIP_SVG = ('<svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true" focusable="false"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/>'
               '<circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></g></svg>')
 def _pgrip(sid: str) -> str:
-    lab = _PANEL_LABELS[sid]
-    return (f'<button type="button" class="pgrip" id="pgrip-{sid}" data-sec="{sid}" data-label="{lab}" aria-label="Move {lab} section" aria-haspopup="menu" aria-expanded="false" aria-controls="panel-menu" '
-            f'title="Drag to move; click for the move menu">{_PGRIP_SVG}</button>')
+    lab = esc(panel_label(sid))
+    return (f'<button type="button" class="pgrip" id="pgrip-{sid}" data-sec="{sid}" data-label="{lab}" aria-label="{esc(_t("panel.move_section", label=panel_label(sid)))}" aria-haspopup="menu" aria-expanded="false" aria-controls="panel-menu" '
+            f'title="{esc(_t("panel.grip_tip"))}">{_PGRIP_SVG}</button>')
 _PSEC_RX = re.compile(r"<!--ps:([a-z0-9-]+)-->(.*?)<!--/ps:\1-->", re.S)
 def apply_panel_order(page: str, order) -> str:
     """The page (drawn in the default order) with the side panel's sections in `order` (made whole by uiprefs.normalize).
@@ -1013,7 +1057,7 @@ def apply_panel_order(page: str, order) -> str:
     return _PSEC_RX.sub(lambda m: secs[next(it)].group(0), page)
 # The copy button on a command block: the clipboard API on the https board, a hidden textarea where it is missing
 _COPY_JS = ("<script>document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('button.copy');if(!b)return;"
-            "var p=b.closest('.draft')||b.parentNode,t=p.querySelector('code').textContent;function ok(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)}"
+            "var p=b.closest('.draft')||b.parentNode,t=p.querySelector('code').textContent;function ok(){b.textContent=SST('js.copied');setTimeout(function(){b.textContent=SST('js.copy')},1500)}"
             "function fb(){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.opacity='0';"
             "document.body.appendChild(a);a.select();var d=false;try{d=document.execCommand('copy')}catch(e){}a.remove();"
             "if(d)ok();else{var c=p.querySelector('code'),g=document.createRange(),n=window.getSelection();g.selectNodeContents(c);n.removeAllRanges();n.addRange(g)}}"      # no copy at all: the text is selected, for the person's own copy
@@ -1021,7 +1065,7 @@ _COPY_JS = ("<script>document.addEventListener('click',function(ev){var b=ev.tar
 _SAID_JS = ("<script>(function(){function o(){var h=location.hash;if(!h||h.indexOf('#said-')!==0)return;var d=document.getElementById(h.slice(1));"
             "if(d&&d.tagName==='DETAILS'){d.open=true;d.scrollIntoView()}}o();addEventListener('hashchange',o)})()</script>")   # the issue's trailer link opens its entry
 _THEME_JS = ("<script>(function(){var b=document.getElementById('theme');if(!b)return;var r=document.documentElement,"
-             "o=['system','light','dark'],n={system:'Theme: system',light:'Theme: light',dark:'Theme: dark'};"
+             "o=['system','light','dark'],n={system:SST('js.theme.system'),light:SST('js.theme.light'),dark:SST('js.theme.dark')};"
              "function show(p){if(o.indexOf(p)<0)p='system';r.setAttribute('data-pref',p);if(p==='system')r.removeAttribute('data-theme');"
              "else r.setAttribute('data-theme',p);b.setAttribute('aria-label',n[p]);b.title=n[p]}"
              "show(r.getAttribute('data-pref'));"
@@ -1077,12 +1121,24 @@ def _scoped(css: str, prefix: str) -> str:
 # closed panel open. A pin or unpin made with the button on a wide screen is saved (POST /prefs/panel-open) and so holds on the next page, reload and device.
 _PANEL_BODY = '<body class="panel-pin">'
 _PANEL_BODY_CLOSED = '<body>'   # the closed form of _PANEL_BODY
-def apply_panel_open(page: str, is_open: bool) -> str:
+def apply_panel_open(page: str, is_open: bool, lang: str | None = None) -> str:
     """The page (drawn with the panel open) with the panel closed when `is_open` is false: the body without panel-pin and the button offering to show the panel, so the first paint is closed on a wide
     screen (a narrow one shows a closed drawer either way). A page with no side panel comes back as it was; only the first body tag and the first panel button are touched."""
-    if is_open or _PANEL_BODY not in page or _PANEL_BTN not in page:
+    open_btn = _panel_btn(True, lang)
+    if is_open or _PANEL_BODY not in page or open_btn not in page:
         return page
-    return page.replace(_PANEL_BODY, _PANEL_BODY_CLOSED, 1).replace(_PANEL_BTN, _PANEL_BTN_CLOSED, 1)
+    return page.replace(_PANEL_BODY, _PANEL_BODY_CLOSED, 1).replace(open_btn, _panel_btn(False, lang), 1)
+_CHROME = (('aria-label="Reload" title="Reload page"', "chrome.reload", "chrome.reload_tip"), ('aria-label="Back to top" title="Back to top"', "chrome.totop", "chrome.totop"))      # fixed English markup every page carries (the floating buttons), in the person's language by apply_lang
+def apply_lang(page: str, lang: str) -> str:
+    """The page (drawn in `lang` by a Board) with the language put in on the way out: <html lang>, the page scripts' words (window.SSI, the table's js.* and age.* keys in that language, ahead of the English ones the head
+    carries), and the fixed chrome the pages share as constants (the floating buttons). English comes back as it was; so does a page already done (the marker id="ssi")."""
+    if not isinstance(lang, str) or lang == _i18n.DEFAULT or 'id="ssi"' in page: return page
+    page = page.replace('<html lang="en">', f'<html lang="{esc(lang)}">', 1)
+    blob = json.dumps(_i18n.js_table(lang)).replace("</", "<\\/")
+    page = page.replace('<meta charset="utf-8">', f'<meta charset="utf-8"><script id="ssi">window.SSI={blob};</script>', 1)
+    for frag, aria, tip in _CHROME:
+        if frag in page: page = page.replace(frag, f'aria-label="{esc(_t(aria, lang))}" title="{esc(_t(tip, lang))}"')
+    return page
 _PANEL_JS = r"""(function(){var P=document.getElementById('panel'),B=document.getElementById('panel-open'),E=document.getElementById('panel-edge'),S=document.getElementById('panel-scrim'),X=document.getElementById('panel-close');
 if(!P||!B)return;
 var M=window.matchMedia('(max-width: __NARROW__px)'),b=document.body,D=b.classList.contains('panel-pin'),s={peek:false,pin:D&&!M.matches,open:false,t:0},LV=250;
@@ -1094,7 +1150,7 @@ fetch('@ROOT@/prefs/panel-open',{method:'POST',keepalive:true,credentials:'same-
 .then(null,function(){}).then(function(){KB=false;kflush()})}
 function apply(){b.classList.toggle('panel-peek',s.peek);b.classList.toggle('panel-pin',s.pin);b.classList.toggle('panel-open',s.open);
 var held=s.pin||s.open,on=held||s.peek;
-B.setAttribute('aria-expanded',String(on));B.title=held?'Hide summary panel':s.peek?'Pin summary panel':'Show summary panel'}
+B.setAttribute('aria-expanded',String(on));B.title=SST(held?'panel.hide':s.peek?'panel.pin':'panel.show')}
 function peek(){clearTimeout(s.t);if(narrow()||s.pin)return;s.peek=true;apply()}
 function leave(){clearTimeout(s.t);if(!narrow()&&s.peek)s.t=setTimeout(settle,LV)}
 function settle(){if([E,P,B].some(function(e){return e&&e.matches(':hover')})||document.querySelector('.ct-pop:not([hidden])')){s.t=setTimeout(settle,LV);return}s.peek=false;apply()}
@@ -1128,16 +1184,16 @@ function save(b){next=b;if(!busy)flush()}
 function flush(){var b=next;next=null;if(!b)return;busy=true;
 fetch(URL,{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(b)})
 .then(function(r){if(!r.ok)throw r.status;return r.json()})
-.then(null,function(e){say('The order is changed on this page but was not saved'+(e===403||e===401?': sign in to the board to keep it.':'. Check the connection and move it again.'))})
+.then(null,function(e){say(SST(e===403||e===401?'panel.order_signin':'panel.order_failed'))})
 .then(function(){busy=false;flush()})}
-function moved(id,refocus){var o=order();say(label(id)+' moved to position '+(o.indexOf(id)+1)+' of '+o.length);save({order:o});
+function moved(id,refocus){var o=order();say(SST('panel.moved',{label:label(id),pos:o.indexOf(id)+1,n:o.length}));save({order:o});
 if(refocus){var g=grip(id);if(g)g.focus()}}
 function act(id,a){var o=order(),i=o.indexOf(id),n=o.length;if(i<0)return;var to=a==='up'?i-1:a==='down'?i+1:a==='top'?0:n-1;if(to<0||to>=n)return;if(place(id,to))moved(id,true)}
 function closeMenu(back){if(M.hidden)return;M.hidden=true;if(cur){cur.setAttribute('aria-expanded','false');if(back)cur.focus()}cur=null}
 function items(){return [].slice.call(M.querySelectorAll('.pmi')).filter(function(b){return !b.disabled})}
 function openMenu(g){var id=g.getAttribute('data-sec'),o=order(),i=o.indexOf(id),n=o.length;
 [].forEach.call(M.querySelectorAll('.pmi'),function(b){var a=b.getAttribute('data-act');b.disabled=(a==='up'||a==='top')?i<=0:i>=n-1});
-M.setAttribute('data-for',id);M.setAttribute('aria-label','Move '+label(id));M.hidden=false;g.setAttribute('aria-expanded','true');cur=g;
+M.setAttribute('data-for',id);M.setAttribute('aria-label',SST('panel.move_for',{label:label(id)}));M.hidden=false;g.setAttribute('aria-expanded','true');cur=g;
 var pr=P.getBoundingClientRect(),gr=g.getBoundingClientRect(),h=M.offsetHeight,top=gr.bottom-pr.top+P.scrollTop+4;
 if(gr.bottom+4+h>pr.bottom&&gr.top-4-h>pr.top)top=gr.top-pr.top+P.scrollTop-h-4;
 M.style.top=Math.max(0,top)+'px';var f=items()[0];if(f)f.focus()}
@@ -1237,7 +1293,7 @@ body.pdrag,body.pdrag *{cursor:grabbing!important;user-select:none;-webkit-user-
 def _abox(textarea: str, tid: str) -> str:
     """The textarea (it carries id=tid) with its handle after it; the handle stays hidden until the script marks the box (.abox.js)."""
     return (f'<div class="abox">{textarea}<div class="rsz" role="separator" aria-orientation="horizontal" tabindex="0" '
-            f'aria-controls="{tid}" aria-label="Resize the answer box"></div></div>')
+            f'aria-controls="{tid}" aria-label="{esc(_t("home.resize_box"))}"></div></div>')
 _ABOX_CSS = """
 textarea::placeholder{color:var(--iph);opacity:1}.abox{position:relative}.abox textarea{resize:none}.abox:not(.js) .rsz{display:none}
 .rsz{position:absolute;left:0;right:0;bottom:0;height:12px;cursor:row-resize;touch-action:none;-webkit-tap-highlight-color:transparent;border-radius:0 0 6px 6px}
@@ -1294,8 +1350,8 @@ def _cards_html(opts) -> str:
         val = (f"{chr(65 + i)} · {o['label']}" if o["label"] else chr(65 + i)) if lettered else o["label"]      # a label that was only its letter (option_labels) posts the letter alone
         cards.append(f'<label class="acard"><input type="radio" name="choice" value="{esc(val)}">'
                      f'<span class="adot" aria-hidden="true"></span><span class="abody"><span class="alab">{key}{esc(o["label"])}</span>'
-                     + (' <span class="badge rec">recommended</span>' if o["recommended"] else "") + f'<span class="adesc">{esc(o["line"])}</span></span></label>')
-    return '<div class="acards" role="radiogroup" aria-label="Options">' + "".join(cards) + '</div>'
+                     + (f' <span class="badge rec">{esc(_t("home.recommended"))}</span>' if o["recommended"] else "") + f'<span class="adesc">{esc(o["line"])}</span></span></label>')
+    return f'<div class="acards" role="radiogroup" aria-label="{esc(_t("home.options"))}">' + "".join(cards) + '</div>'
 _ABOX_JS = r"""(function(){var H={},seen=[],D=null,MQ=window.matchMedia?matchMedia('(pointer: coarse)'):null,RO=window.ResizeObserver?new ResizeObserver(function(l){l.forEach(function(e){var t=e.target,h=hd(t);if(h)sync(h);if(coarse())requestAnimationFrame(function(){grow(t)})})}):null;
 function coarse(){return !!(MQ&&MQ.matches)}
 function hd(t){return t.parentNode&&t.parentNode.querySelector('.rsz')}
@@ -1365,7 +1421,7 @@ b.value=location.pathname;try{sessionStorage.setItem(SK,JSON.stringify({y:Math.r
 var S=null,h0=document.documentElement.scrollHeight,np=null,Y=0;try{S=JSON.parse(sessionStorage.getItem(SK));sessionStorage.removeItem(SK)}catch(e){}
 if(m){var p=document.createElement('p');p.className='isent '+m[0];p.setAttribute('role','status');var id=q.get('item'),nm='',lab='';
 if(id&&/^(?:[a-z]\d+|[1-9]\d*|board-tmp-[a-z0-9-]*[a-z0-9]-[1-9]\d*)$/.test(id)){lab=/^\d+$/.test(id)?(N.getAttribute('data-hash')||'')+id:id;var d=id.match(/^([a-z])(\d+)$/),rw=document.getElementById(d?'task-'+d[1]+'-'+d[2]:/^\d+$/.test(id)?'task-g-'+id:''),g=rw&&rw.querySelector('.hgoal');nm=g?g.textContent:''}
-var th=q.get('then'),ms=m[1];if((k==='done'||k==='stepreply')&&th&&th.length<=80&&[].some.call(document.querySelectorAll('.hwho'),function(x){return x.textContent===th}))ms=(k==='done'?'Done: '+th+' takes it from here.':'Your note is sent: '+th+' takes it from here and decides whether the step is done.');
+var th=q.get('then'),ms=m[1];if((k==='done'||k==='stepreply')&&th&&th.length<=80&&[].some.call(document.querySelectorAll('.hwho'),function(x){return x.textContent===th}))ms=SST(k==='done'?'js.sent_done':'js.sent_note',{who:th});
 if((k==='done'||k==='stepreply')&&rw)[].forEach.call(rw.querySelectorAll('form.hstep button[value=send]'),function(b){b.disabled=true;b.setAttribute('data-spent','1')});
 p.textContent=(nm?nm+' ('+lab+')':lab)+(nm||lab?' — ':'')+ms;
 var c=document.querySelector('header.top')||document.getElementById('counts')||N;if(c&&c.parentNode){c.parentNode.insertBefore(p,c.nextSibling);np=p}}
@@ -1504,8 +1560,9 @@ _AUDIT_JS = r"""(function(){var E=document.getElementById('audit');if(!E)return;
 var T=E.querySelector('.a-txt'),N=document.getElementById('audit-now'),P=document.getElementById('audit-now-page'),G=[E.querySelector('.a-msg'),document.getElementById('audit-page-msg')].filter(Boolean),B=[N,P].filter(Boolean),Z=E.getAttribute('data-tz'),inflight=false,run=false,hold=0,mt=null;
 var O={weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'},F;try{F=new Intl.DateTimeFormat('en-US',Object.assign({timeZone:Z},O))}catch(e){F=new Intl.DateTimeFormat('en-US',O)}
 function pt(ts){var o={};F.formatToParts(new Date(ts*1000)).forEach(function(p){o[p.type]=p.value});return o}
-function ord(d){return d+(d%100>=11&&d%100<=13?'th':({1:'st',2:'nd',3:'rd'})[d%10]||'th')}
-function when(ts){var p=pt(ts);return p.weekday+' '+p.month+' '+ord(+p.day)+' '+p.hour+':'+p.minute}
+var WD=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],MO=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],GK=@GK@,NK=@NK@;
+function ord(d){return d%100>=11&&d%100<=13?'date.ord.n':({1:'date.ord.1',2:'date.ord.2',3:'date.ord.3'})[d%10]||'date.ord.n'}
+function when(ts){var p=pt(ts);return SST('date.full',{wd:SST('date.wd.'+WD.indexOf(p.weekday)),month:SST('date.mon.'+(MO.indexOf(p.month)+1)),day:SST('date.day',{n:+p.day,ord:SST(ord(+p.day))}),hm:p.hour+':'+p.minute})}
 function clock(ts){var p=pt(ts),q=pt(Date.now()/1000);return p.month===q.month&&p.day===q.day?p.hour+':'+p.minute:when(ts)}
 function num(v){return typeof v==='number'&&isFinite(v)}
 function sig(e){return [].map.call(e.childNodes,function(c){return c.nodeType===1?c.className+'|'+c.title+'|'+c.textContent:'#'+c.textContent}).join('\u0001')}
@@ -1513,11 +1570,11 @@ function sp(c,t,tip){var e=document.createElement('span');e.className=c;e.textCo
 function btn(){B.forEach(function(b){b.disabled=run||inflight||Date.now()<hold;if(inflight)b.setAttribute('aria-busy','true');else b.removeAttribute('aria-busy')})}
 function draw(d){if(!d.enabled){E.hidden=true;if(P)P.hidden=true;return}
 var L=d.last,C=d.card,f=document.createDocumentFragment();run=!!d.running;
-if(run)f.appendChild(sp('a-run','Audit running'+(num(d.running_since)?' since '+clock(d.running_since):'')+'…'));
-else if(L&&L.finished==null)f.appendChild(sp('a-run a-bad','Last audit did not finish'));
-if(C&&C.groups&&C.groups.length){f.appendChild(sp('a-h',''));f.appendChild(sp('a-h','audits'));f.appendChild(sp('a-h','found, 24 h'));
-C.groups.forEach(function(g){f.appendChild(sp('lbl',g.name));f.appendChild(sp('val a-n',String(g.audits)));f.appendChild(sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found)))});
-if(C.note)f.appendChild(sp('a-cn',C.note))}
+if(run)f.appendChild(sp('a-run',num(d.running_since)?SST('panel.audit.running_since',{at:clock(d.running_since)}):SST('panel.audit.running')));
+else if(L&&L.finished==null)f.appendChild(sp('a-run a-bad',SST('panel.audit.unfinished')));
+if(C&&C.groups&&C.groups.length){f.appendChild(sp('a-h',''));f.appendChild(sp('a-h',SST('panel.audit.h_audits')));f.appendChild(sp('a-h',SST('panel.audit.h_found')));
+C.groups.forEach(function(g){f.appendChild(sp('lbl',GK[g.name]?SST('panel.audit.group.'+GK[g.name]):g.name));f.appendChild(sp('val a-n',String(g.audits)));f.appendChild(sp('val a-n'+(g.found?' hit':''),g.found===null?'–':String(g.found)))});
+if(C.note)f.appendChild(sp('a-cn',NK[C.note]?SST('panel.audit.note.'+NK[C.note]):C.note))}
 else{btn();E.hidden=false;if(P)P.hidden=false;return}
 if(sig(f)!==sig(T)){if(T.replaceChildren)T.replaceChildren(f);else{T.textContent='';T.appendChild(f)}}
 btn();E.hidden=false;if(P)P.hidden=false}
@@ -1530,14 +1587,15 @@ fetch('@ROOT@/audit/now',{method:'POST',cache:'no-store',credentials:'same-origi
 .then(function(r){if(r.redirected||r.status===401)return[0,''];return r.text().then(function(t){return[r.status,t]})})
 .then(function(a){var s=a[0],t=String(a[1]||'').trim().slice(0,200);
 if(s===404){E.hidden=true;if(P)P.hidden=true;return}
-if(s===202){hold=Date.now()+10000;say(t||'audit cued',false)}
-else if(s===409||s===503)say(t||'HTTP '+s,true);
-else say(s?'could not cue the audit (HTTP '+s+')':'could not cue the audit: sign in again',true)})
-.catch(function(){say('could not reach stackshot',true)})
+if(s===202){hold=Date.now()+10000;say(t||SST('panel.audit.cued'),false)}
+else if(s===409||s===503)say(t||SST('panel.audit.http',{n:s}),true);
+else say(s?SST('panel.audit.cue_failed',{n:s}):SST('panel.audit.cue_signin'),true)})
+.catch(function(){say(SST('panel.audit.unreachable'),true)})
 .then(function(){inflight=false;btn();refresh()})}
 B.forEach(function(b){b.addEventListener('click',function(){if(!b.disabled)cue()})});
 document.addEventListener('stackshot:poll',refresh)})();"""
 # The scripts above are written with @ROOT@ where an address starts, filled in once here.
+_AUDIT_JS = _AUDIT_JS.replace("@GK@", json.dumps(_AUDIT_GROUPS)).replace("@NK@", json.dumps(_AUDIT_NOTES))     # the English names of the audit groups and the card's notes, to the keys the script asks the table for
 _ANSWER_JS, _HOME_JS, _LANDED_JS, _LIVE_JS, _AUDIT_JS = (x.replace("@ROOTR@", PREFIX.replace("/", "\\/")).replace("@ROOT@", PREFIX) for x in (_ANSWER_JS, _HOME_JS, _LANDED_JS, _LIVE_JS, _AUDIT_JS))
 
 
@@ -2035,7 +2093,7 @@ class Board:
         s_ = (self.now - t).total_seconds()
         return (f'<span class="tip{" " + cls if cls else ""}" data-ts="{int(t.timestamp())}"{" data-q" if quiet else ""} '
                 f'data-tip="{"no change since " if quiet else ""}{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}" title="">'
-                f'{">" + dur(s_) + " ago" if quiet else ago(s_)}</span>')
+                f'{_i18n.fmt_age(s_, quiet=True) if quiet else ago(s_)}</span>')
     def anchor_entries(self, page):
         """One page's anchors from the anchors file, as clean dicts (clean_anchor_entries)."""
         return clean_anchor_entries(self.anchors.get(page))
@@ -3176,6 +3234,7 @@ main header.top+h1,main header.top+p.pjback{margin-top:32px}
 #panel{position:fixed;z-index:30;top:0;right:0;height:100dvh;width:min(300px,88vw);overflow-y:auto;overscroll-behavior:contain;padding:calc(12px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) 16px;background:var(--bg);border-left:1px solid var(--line);box-shadow:-4px 0 24px rgba(0,0,0,.16);font-size:13px;line-height:1.45;transform:translateX(100%);visibility:hidden;transition:transform .18s ease,visibility 0s .18s;overflow-wrap:anywhere}
 body.panel-open #panel{transform:none;visibility:visible;transition:transform .18s ease,visibility 0s}
 .phead{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px}.ptitle{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+#panel-lang{display:flex;gap:6px;margin:14px 0 0;padding-top:14px;border-top:1px solid var(--line)}#panel-lang .plg{min-width:44px;padding:0 10px;font-weight:600}#panel-lang .plg[aria-pressed=true]{color:var(--acc);border-color:var(--acc)}
 nav.lpager{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0 0}nav.lpager .pg{display:inline-block;min-width:80px;padding:8px 14px;text-align:center;border:1px solid var(--ibd);border-radius:8px;background:var(--card);color:var(--acc);font-weight:600;text-decoration:none}nav.lpager a.pg:hover{border-color:var(--acc)}nav.lpager .pg.off{color:var(--mut);background:none;font-weight:400}nav.lpager .lpos{font-size:13px;color:var(--mut);text-align:center}
 p.lpgnote{margin:8px 0 0;font-size:13px;color:var(--mut)}section.lcompleted{margin-top:8px}section.lcompleted ul.ir-rows{margin-top:8px}p.pjnote{margin:0 0 12px;font-size:13px;color:var(--mut)}p.pjback{margin:0 0 4px;font-size:13px;color:var(--mut)}p.pjback a{display:inline-block;padding:4px 0}p.pjback a:hover{color:var(--acc)}
 #panel-edge{display:none}#panel-scrim{display:none;position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.35)}body.panel-open #panel-scrim{display:block}
@@ -3212,7 +3271,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         audit.py needs only config). Hidden only when the audit is not enabled; a status that cannot be read leaves the card hidden and empty for the script to fill."""
         z = _cfg.tz()
         head = f'<div id="audit" class="pc audit" data-tz="{esc(str(z))}"'
-        name = f'<b class="lbl mh"><a class="nm" href="{under("/audits")}">Audits ↗</a><button type="button" id="audit-now"{{dis}}>Audit now</button></b>'      # the card's name row: the link to the page, and the text link beside it (a real button, styled as a link in _RUN_CSS: no .b)
+        name = f'<b class="lbl mh"><a class="nm" href="{under("/audits")}">{esc(_t("panel.audit.name"))}</a><button type="button" id="audit-now"{{dis}}>{esc(_t("panel.audit.now"))}</button></b>'      # the card's name row: the link to the page, and the text link beside it (a real button, styled as a link in _RUN_CSS: no .b)
         tail = ' <span class="a-msg" role="status" aria-live="polite"></span></div>'
         try:
             from stackshot.audit import audit as _audit
@@ -3230,16 +3289,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def cell(cls, text): return f'<span class="{cls}">{esc(text)}</span>'
         L, run = d.get("last"), bool(d.get("running"))
         if run:
-            txt = cell("a-run", "Audit running" + (f" since {clock(d['running_since'])}" if _num_ok(d.get("running_since")) else "") + "…")
+            txt = cell("a-run", _t("panel.audit.running_since", at=clock(d['running_since'])) if _num_ok(d.get("running_since")) else _t("panel.audit.running"))
         elif L and L.get("finished") is None:
-            txt = cell("a-run a-bad", "Last audit did not finish")
+            txt = cell("a-run a-bad", _t("panel.audit.unfinished"))
         else:
             txt = ""
-        txt += cell("a-h", "") + cell("a-h", "audits") + cell("a-h", "found, 24 h")
+        txt += cell("a-h", "") + cell("a-h", _t("panel.audit.h_audits")) + cell("a-h", _t("panel.audit.h_found"))
         for g in c["groups"]:
-            txt += cell("lbl", g["name"]) + cell("val a-n", str(g["audits"])) + cell("val a-n" + (" hit" if g["found"] else ""), "–" if g["found"] is None else str(g["found"]))
+            txt += cell("lbl", _audit_word(_AUDIT_GROUPS, g["name"], "panel.audit.group.")) + cell("val a-n", str(g["audits"])) + cell("val a-n" + (" hit" if g["found"] else ""), "–" if g["found"] is None else str(g["found"]))
         if c["note"]:
-            txt += cell("a-cn", c["note"])
+            txt += cell("a-cn", _audit_word(_AUDIT_NOTES, c["note"], "panel.audit.note."))
         return f'{head}>' + name.format(dis=" disabled" if run else "") + f'<span class="a-txt">{txt}</span>' + tail
 
     def gh_calls_card(self):
@@ -3252,8 +3311,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         if b is None: return ""
         end = self.now.astimezone(_cfg.tz()); start = end - datetime.timedelta(minutes=60)
         def row(lab, n, cap): return f'<span class="lbl">{lab}</span><span class="val">{n:,} <span class="cap">/ {cap:,}</span></span>'
-        return ('<div id="ghcalls" class="pc ghc"><b class="lbl mh">GitHub calls</b>' + row("writes", b["writes"], b["write_cap"]) + row("reads", b["reads"], b["read_cap"])
-                + f'<span class="lbl">counted</span><span class="val">{start:%H:%M} – {end:%H:%M}</span></div>')
+        return (f'<div id="ghcalls" class="pc ghc"><b class="lbl mh">{esc(_t("panel.gh.title"))}</b>' + row(esc(_t("panel.gh.writes")), b["writes"], b["write_cap"]) + row(esc(_t("panel.gh.reads")), b["reads"], b["read_cap"])
+                + f'<span class="lbl">{esc(_t("panel.gh.counted"))}</span><span class="val">{start:%H:%M} – {end:%H:%M}</span></div>')
 
     def recycle_html(self):
         """HTML: the one "Pane recycle pending for … (<the fleet tool> runs it)" status line, listing the
@@ -3266,14 +3325,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         rs = self.recycle
         if not rs: return ""
         ids = ", ".join(f'<a class="r-id" href="{item_href(r)}" target="_blank" rel="noopener" title="{esc(r["subject"])}">{esc(rid(r))}</a>' for r in rs)
-        return f'<p id="recycle" class="mnote" role="status">Pane recycle pending for {ids} ({esc(_cfg.fleet_tool() or "the fleet tool")} runs it)</p>\n'
+        return f'<p id="recycle" class="mnote" role="status">{_t("panel.recycle", ids=ids, tool=esc(_cfg.fleet_tool() or _t("panel.fleet_tool")))}</p>\n'
 
     def provision_html(self):
         """HTML: the "Provision needed for …" line under "Need your call (agents)", in the notice style the recycle line had before it became a status line, naming the boxes whose
         puller is behind, "(offline)" after a box that is off (the fleet tool provisions it when it wakes). Nothing while every box is current."""
         if not self.provision: return ""
-        hs = ", ".join(f'<b class="r-host">{esc(h)}</b>' + ("" if on else ' <span class="r-off">(offline)</span>') for h, on in self.provision)
-        return f'<p id="provision" class="rnote" role="status"><span class="r-ico" aria-hidden="true">⟳</span> Provision needed for {hs}</p>'
+        hs = ", ".join(f'<b class="r-host">{esc(h)}</b>' + ("" if on else f' <span class="r-off">{esc(_t("panel.offline_paren"))}</span>') for h, on in self.provision)
+        return f'<p id="provision" class="rnote" role="status"><span class="r-ico" aria-hidden="true">⟳</span> {_t("panel.provision", hosts=hs)}</p>'
 
     @staticmethod
     def bare(t):
@@ -3324,8 +3383,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 _home.AGENTS: _home.sort_agents(lists[_home.AGENTS], sort_key, same_ref),
                 _home.WAITING: _home.sort_waiting(lists[_home.WAITING], sort_key)}
     def list_title(self, which):
-        """The heading of one of the four lists, the home page's own words (ui/kit.py TITLES)."""
-        return {_home.YOUR_MOVE: _ui.TITLES[_ui.YOUR_MOVE], _home.AGENTS: _ui.TITLES[_ui.AGENT], RELEASE_LIST: _ui.TITLES[_ui.RELEASE], _home.WAITING: _ui.TITLES[_ui.WAITING]}[which]
+        """The heading of one of the four lists, the home page's own words (ui/kit.py title)."""
+        return {_home.YOUR_MOVE: _ui.title(_ui.YOUR_MOVE), _home.AGENTS: _ui.title(_ui.AGENT), RELEASE_LIST: _ui.title(_ui.RELEASE), _home.WAITING: _ui.title(_ui.WAITING)}[which]
     def queued_release_ids(self):
         """The ids of the items linked to a pull request whose release is in the release script's queue (ui/releasing.py: that release's unit is running; the link is an anchor, an open step's proof or an open step's words): read once per Board, one systemctl call, no GitHub call."""
         if getattr(self, "_rel_ids", None) is None: self._rel_ids = _rel.queued_items(self.scoped_urls(), self.rows)
@@ -3348,7 +3407,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return _ui.AGENT
     def home_mover(self, who):
         """A mover as a row shows him: the owner by name; a session by name, linked to its view in the fleet tool while its pane lives (sess_html)."""
-        if not who: return '<span class="hwho dim">no mover</span>'
+        if not who: return f'<span class="hwho dim">{esc(_t("home.no_mover"))}</span>'
         if _model.is_owner(who): return f'<span class="hwho own">{esc(_model.owner_display())}</span>'
         return self.sess_html(self.mover_name(who), cls="hwho")
     def day_words(self, s):
@@ -3512,18 +3571,18 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         looks like one (a channel `#email-alerts`, an address, `gmail`) is no email, and the item's summary is not asked where a step is: a Slack post under a summary that says e-mail is a message. Only the paths with no step line of his (the step field drawn alone, a draft with no step block)
         pass the step field's words, since the step field is the step there."""
         # \uBA54\uC77C is the Korean word for "mail" (also inside the one for "email"); it is written as escapes so the public scan finds no Hangul in the repo
-        return "Email text to paste" if re.search(r"(?<![\w#@/.-])e-?mails?(?![A-Za-z0-9_-])|\uBA54\uC77C", " ".join(str(t or "") for t in texts), re.I) else "Message to paste"
+        return _t("home.draft.email") if re.search(r"(?<![\w#@/.-])e-?mails?(?![A-Za-z0-9_-])|\uBA54\uC77C", " ".join(str(t or "") for t in texts), re.I) else _t("home.draft.message")
     def draft_html(self, r, label, home=False):
         """The item's draft, the verbatim text the owner pastes elsewhere (draft.py), under `label` (draft_label) with Copy just beside it, then the text in the page's own body font with its lines and
         spaces as stored (the block wraps long lines but keeps every break), escaped, not monospace. It sits inside the step that uses it. On the home row it is a collapsed <details> whose summary is the label
         with Copy beside it (a tap on Copy copies without opening it; the page's copy script reads the text from the .draft block). "" when the item is closed or carries none."""
         d = _draft.of(r)
         if not d: return ""
-        aria = f'Copy the {label[0].lower()}{label[1:]}'
+        aria = esc(_t("home.copy_the", label=f"{label[0].lower()}{label[1:]}"))
         if home:
-            return (f'<div class="draft hdraft"><details><summary><span class="dlab">{esc(label)}</span><button type="button" class="b copy" aria-label="{aria}">Copy</button></summary>'
+            return (f'<div class="draft hdraft"><details><summary><span class="dlab">{esc(label)}</span><button type="button" class="b copy" aria-label="{aria}">{esc(_t("js.copy"))}</button></summary>'
                     f'<pre><code>{esc(d)}</code></pre></details></div>')
-        return (f'<div class="draft"><div class="dhead"><b class="dlab">{esc(label)}</b><button type="button" class="b copy" aria-label="{aria}">Copy</button></div><pre><code>{esc(d)}</code></pre></div>')
+        return (f'<div class="draft"><div class="dhead"><b class="dlab">{esc(label)}</b><button type="button" class="b copy" aria-label="{aria}">{esc(_t("js.copy"))}</button></div><pre><code>{esc(d)}</code></pre></div>')
     def draft_alone_html(self, r):
         """The draft of an item that draws no Your step block, in a block of its own (the same label and Copy)."""
         b = self.draft_html(r, self.draft_label((r["metadata"] or {}).get("step"), open_ask(r)))
@@ -3537,8 +3596,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         drawn as the item page's Your step block draws it (your_step_html): his open steps, numbered, each command with its Copy box. None for any other item."""
         if open_ask(r) or not _ip.step_block(r): return None
         form = (f'<form class="hanswer hstep" method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">'
-                + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="A note, or nothing: Send with an empty box finishes the step" placeholder="A note, or nothing to finish the step"></textarea>', f'astep-{esc(r["gid"])}') +
-                '<div class="abtns"><button type="submit" class="b main" name="act" value="send" disabled>Send</button></div></form>')
+                + _abox(f'<textarea id="astep-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{esc(_t("home.step_note_aria"))}" placeholder="{esc(_t("home.step_note"))}"></textarea>', f'astep-{esc(r["gid"])}') +
+                f'<div class="abtns"><button type="submit" class="b main" name="act" value="send" disabled>{esc(_t("home.send"))}</button></div></form>')
         return self.your_step_html(r, home=True), form
     def home_ask(self, r):
         """(the question as the row shows it, its answer form) for an open decision of the owner's, None when the item carries none. The question is the ask's Decide part (a watcher's
@@ -3553,8 +3612,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         stored = open_options(r)
         opts = _card_order(stored or yesno_options(r))      # with no stored options, Yes and No
         cards = _cards_html(opts) if opts else ""
-        hint = "Note (optional)" if cards else "Write your answer"
-        send = ('<button type="submit" class="b main" name="act" value="answer" disabled>Send</button>' + ('<span class="ahint" hidden>Pick an option or write a note</span>' if cards else ""))
+        hint = esc(_t("home.note_optional" if cards else "home.write_answer"))
+        send = (f'<button type="submit" class="b main" name="act" value="answer" disabled>{esc(_t("home.send"))}</button>' + (f'<span class="ahint" hidden>{esc(_t("home.pick_hint"))}</span>' if cards else ""))
         form = (f'<form class="hanswer" {"data-cards " if cards else ""}method="post" action="{esc(id_href(r["gid"]))}/answer" data-gid="{esc(r["gid"])}"><input type="hidden" name="token" value=""><input type="hidden" name="back" value="">{cards}'
                 + _abox(f'<textarea id="atext-{esc(r["gid"])}" name="text" rows="2" maxlength="4000" aria-label="{hint}" placeholder="{hint}"></textarea>', f'atext-{esc(r["gid"])}') +
                 f'<div class="abtns{"-send" if cards else ""}">{send}</div></form>')
@@ -3564,43 +3623,43 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         the proof of a verifying item), "After #5, #6" for another item's close (with its backstop day), "On <anchor>: <event>" for an anchor, "On <event> · backstop <day>" for an outside event, "On <party's news>, ask by <day>" for news only the owner
         relays; then the chases when there are any. Who takes it after and who watches it are the who line's (wait_who); the next step follows it on its own line, labeled "after the wait:" (home_row)."""
         w, m, e = mod.wait, r["metadata"], esc
-        if w is None: return '<span class="dim">Waiting</span>'
+        if w is None: return f'<span class="dim">{esc(_ui.word(_ui.WAITING))}</span>'
         if w.kind == "time":
             quote = (_wt.words_of(m) or {}).get("quote") or ""
             proof = _model.clean(m.get("proof")) if is_verifying(r) else ""      # a verifying item waits on its end date with the proof named
-            why = w.basis or (f"“{quote}”" if quote else "") or (f"proof: {proof}" if proof else "")
-            text = (f"Until {e(self.day_words(w.until))}" if w.until else "With no date set") + (f": {e(why)}" if why else "")
+            why = w.basis or (f"“{quote}”" if quote else "") or (_t("home.wait.proof", proof=proof) if proof else "")
+            text = (_t("home.wait.until", day=e(self.day_words(w.until))) if w.until else esc(_t("home.wait.no_date"))) + (f": {e(why)}" if why else "")
         elif w.kind == "item":
-            text = ("After " + ", ".join(f'<a href="{e(id_href(g))}" target="_blank" rel="noopener">{e(shown(g))}</a>' for g in w.after)) if w.after else "On an item (none recorded)"
-            if w.backstop: text += f' <span class="dim">· back anyway {e(self.day_words(w.backstop))}</span>'
+            text = _t("home.wait.after", ids=", ".join(f'<a href="{e(id_href(g))}" target="_blank" rel="noopener">{e(shown(g))}</a>' for g in w.after)) if w.after else esc(_t("home.wait.item_none"))
+            if w.backstop: text += f' <span class="dim">{_t("home.wait.back_anyway", day=e(self.day_words(w.backstop)))}</span>'
         elif w.kind == "anchor":
-            text = "On " + self.wait_anchor_html(r, w)      # the anchor the wait stores, else the ones scoped to the item
-            if w.backstop: text += f' <span class="dim">· backstop {e(self.day_words(w.backstop))}</span>'
+            text = _t("home.wait.on", what=self.wait_anchor_html(r, w))      # the anchor the wait stores, else the ones scoped to the item
+            if w.backstop: text += f' <span class="dim">{_t("home.wait.backstop", day=e(self.day_words(w.backstop)))}</span>'
         elif w.kind == "event":
-            text = "On " + e(_ip.wait_what(w))      # an event wait has no relay party to ask: the row names the event, with its backstop day as an anchor's does
-            if w.backstop: text += f' <span class="dim">· backstop {e(self.day_words(w.backstop))}</span>'
+            text = _t("home.wait.on", what=e(_ip.wait_what(w)))      # an event wait has no relay party to ask: the row names the event, with its backstop day as an anchor's does
+            if w.backstop: text += f' <span class="dim">{_t("home.wait.backstop", day=e(self.day_words(w.backstop)))}</span>'
         else:
-            text = "On " + e(_watch.subject_of(m)) + f", ask by {e(self.day_words(w.until)) if w.until else 'no date set'}"
+            text = _t("home.wait.relay", what=e(_watch.subject_of(m)), day=e(self.day_words(w.until)) if w.until else esc(_t("home.wait.no_date_short")))
         n = len(_watch.chases_of(m))
-        return text + (f' <span class="dim">· chased {n}×</span>' if n else "")
+        return text + (f' <span class="dim">{esc(_t("home.wait.chased", n=n))}</span>' if n else "")
     def wait_end_slot(self, mod, t0):
         """A Waiting row's right-hand slot on line one: the date the wait ends, "until Wed Mar 4th" ("… 09:00" when the stored wake has a time), read by home.end_of, the one reader the Waiting sort uses; "no end date"
         (dimmed) when the wait has none. Plain text, not a live stamp (no data-ts: the page script has no age to keep current here); how long the wait has run is the hover, "waiting since <time>" (the age stamp's tooltip)."""
         v = _home.end_of(mod)
-        tip = f' data-tip="waiting since {t0:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t0)}" title=""' if t0 else ""
-        return f'<span class="tip ir-age ir-end{"" if v else " dim"}"{tip}>{esc("until " + self.day_words(v)) if v else "no end date"}</span>'
+        tip = f' data-tip="{esc(_t("home.waiting_since", at=f"{t0:%Y-%m-%d %H:%M}", tz=_cfg.tz_abbr(t0)))}" title=""' if t0 else ""
+        return f'<span class="tip ir-age ir-end{"" if v else " dim"}"{tip}>{esc(_t("home.until", day=self.day_words(v))) if v else esc(_t("home.no_end"))}</span>'
     def wait_who(self, r, mod):
         """A waiting row's who line: "<who picks it up when the wait ends> picks it up" ("<owner>, then <who>" when he does and a `then` stands) · watched by <what notices its end> · set by <who set the date>" (a long wait that stands on a real-world date says who set it). Nothing is
         said to watch a wait nothing can notice the end of: a time or a relay with no date, an item wait with neither an item nor a backstop date, an anchor wait with no anchor."""
         w = mod.wait
         if w is None: return ""
-        if not w.mover: bits = ["nobody set to pick it up"]
-        elif _model.is_owner(w.mover): bits = [f'{self.home_mover(w.mover)}, then {self.home_mover(mod.then)}' if mod.then else f'{self.home_mover(w.mover)} picks it up']
-        else: bits = [f'{self.home_mover(w.mover)} picks it up']
+        if not w.mover: bits = [esc(_t("home.nobody_picks"))]
+        elif _model.is_owner(w.mover): bits = [_t("home.owner_then", who=self.home_mover(w.mover), then=self.home_mover(mod.then)) if mod.then else _t("home.picks_up", who=self.home_mover(w.mover))]
+        else: bits = [_t("home.picks_up", who=self.home_mover(w.mover))]
         noticed = {"time": bool(w.until), "relay": bool(w.until), "item": bool(w.after or w.backstop), "anchor": bool(w.anchor or self.scoped_urls(r["gid"]))}.get(w.kind, True)
-        if noticed: bits.append(f'watched by {esc("the scheduler" if w.kind == "item" and not w.after else _home.watched_by(w.kind))}')      # an item wait with only its backstop date is the scheduler's (watchers.can_end)
+        if noticed: bits.append(_t("home.watched_by", who=esc(_home.watcher_word("the scheduler" if w.kind == "item" and not w.after else _home.watched_by(w.kind)))))      # an item wait with only its backstop date is the scheduler's (watchers.can_end)
         wb = (r["metadata"] or {}).get("wait_basis")
-        if w.kind == "time" and w.basis and isinstance(wb, dict): bits.append(f'set by {esc(shown_ref(str(wb.get("by") or "")) or "unknown")}')
+        if w.kind == "time" and w.basis and isinstance(wb, dict): bits.append(_t("home.set_by", who=esc(shown_ref(str(wb.get("by") or "")) or _t("home.unknown"))))
         return " · ".join(bits)
     def known_movers(self, r, mod):
         """The names a next line may open with and have the row drop them: the item's mover, owner and the one who picks it up when its wait ends, as stored (a name or a session id) and as the board names them
@@ -3630,7 +3689,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             ho = _ho.record_of(r)
             front, _b = self.agent_roles(self.row_of(proj_key(r))) if proj_key(r) else ({}, {})
             exempt = self.mover_name(mod.mover) in front        # a front agent is no hand-off waiting to be taken
-            if ho and same_ref(ho.get("to"), mod.mover) and _ho.awaiting_session(r) and not exempt: who.append(f'<span class="attn">handed to {self.home_mover(mod.mover)}, not yet taken</span>')
+            if ho and same_ref(ho.get("to"), mod.mover) and _ho.awaiting_session(r) and not exempt: who.append(f'<span class="attn">{_t("home.handed", who=self.home_mover(mod.mover))}</span>')
             else: who.append(self.home_mover(mod.mover))
         elif which == _home.WAITING:
             who.append(self.wait_who(r, mod))
@@ -3641,14 +3700,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         notes = []
         wk = m.get("woke")
         if which != _home.WAITING and isinstance(wk, dict) and wk.get("what"):
-            notes.append(f'<div class="hnote">woke: {e(wk["what"])} → {self.home_mover(str(wk.get("to") or mod.mover))}</div>')
+            notes.append(f'<div class="hnote">{_t("home.woke", what=e(wk["what"]), who=self.home_mover(str(wk.get("to") or mod.mover)))}</div>')
         ask = self.home_ask(r) if which == _home.YOUR_MOVE else None
         stp = self.home_step(r) if (which == _home.YOUR_MOVE and not ask) else None
         dr = self.home_draft_html(r) if (which == _home.YOUR_MOVE and not stp) else ""      # a step's draft is drawn inside its step, under the step's text (home_step); an ask's, or a row with no step form, right under the detail
         _name, step = _home.first_next(m.get("next"), self.known_movers(r, mod))
-        nxt = (self.step_html(step, gid) if which == _home.YOUR_MOVE else self.md_line(step, gid)) if step else '<span class="dim">no next step on the item</span>'
+        nxt = (self.step_html(step, gid) if which == _home.YOUR_MOVE else self.md_line(step, gid)) if step else f'<span class="dim">{esc(_t("home.no_next"))}</span>'
         actions = ""
-        if which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">after the wait:</span> {nxt}</span>' if step else "")
+        if which == _home.WAITING: detail = f'<span class="hwait">{self.home_wait(r, mod)}</span>' + (f'<span class="hnext hafter"><span class="dim">{esc(_t("home.after_wait"))}</span> {nxt}</span>' if step else "")
         elif ask: detail, actions = f'<span class="hnext hq">{ask[0]}</span>{dr}', ask[1]
         elif stp: detail, actions = f'<span class="hnext">{stp[0]}</span>', stp[1]      # a your-step item: the step itself in place of the next line, with the note box and its one Send
         else: detail = f'<span class="hnext">{nxt}</span>{dr}'
@@ -3707,16 +3766,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def card(href, cls, label, n, tip="", short="", new=0):
             t = f' title="{esc(tip)}"' if tip else ""
             if short and label.startswith(short): label = f'{short}<span class="more">{label[len(short):]}</span>'      # the short form is the label's start: narrow, the rest is clipped away but stays for a screen reader
-            badge = f' <i class="hnew{f" w{min(len(str(new)), 4)}" if new > 9 else ""}">{new}<em> new</em></i>' if new else ""        # in the label line, right after the label (the number line holds the number alone); where the line is too narrow for " new" (the card's content under 80 px for one digit, 86, 93 and 99 for two, three and four or more; a class w2, w3, w4 says which) the word is clipped away, but a screen reader still reads it
+            badge = f' <i class="hnew{f" w{min(len(str(new)), 4)}" if new > 9 else ""}">{_t("home.new_fmt", n=new, word="<em>" + esc(_t("home.new_word")) + "</em>")}</i>' if new else ""        # in the label line, right after the label (the number line holds the number alone); where the line is too narrow for " new" (the card's content under 80 px for one digit, 86, 93 and 99 for two, three and four or more; a class w2, w3, w4 says which) the word is clipped away, but a screen reader still reads it
             return f'<a class="hcard{cls}" href="{href}"{t}><b>{n}</b><span>{label}{badge}</span></a>'
         nl = self.landed_count()        # the closes of agents that he has not cleared: exactly the lines of the New section of the Closed page
         nd = len(self.done)             # the items closed in the last 14 days, done, dropped and superseded alike: exactly the rows of the Last 14 days section
-        return ('<nav class="hcards" id="counts" aria-label="Counts">'
-                + card(at + "#your-move", " call", "Your move", len(lists[_home.YOUR_MOVE]))
-                + card(at + "#agents-at-work", "", _ui.TITLES[_ui.AGENT], len(lists[_home.AGENTS]))
-                + card(at + "#queued-release", "", _ui.TITLES[_ui.RELEASE], len(lists[RELEASE_LIST]), "Items whose pull request is in the release queue: its release has started and not ended", short="Queued")
-                + card(at + "#waiting-list", "", "Waiting", len(lists[_home.WAITING]))
-                + card(under("/closed"), "" if nd else " zero", "Closed", nd, f"Items closed in the last 14 days (done, dropped and superseded){f'; {nl} new: closed by an agent, not cleared yet' if nl else ''}", new=nl)
+        return (f'<nav class="hcards" id="counts" aria-label="{esc(_t("home.counts"))}">'
+                + card(at + "#your-move", " call", _ui.title(_ui.YOUR_MOVE), len(lists[_home.YOUR_MOVE]))
+                + card(at + "#agents-at-work", "", _ui.title(_ui.AGENT), len(lists[_home.AGENTS]))
+                + card(at + "#queued-release", "", _ui.title(_ui.RELEASE), len(lists[RELEASE_LIST]), _t("home.queued_tip"), short=_t("home.queued_short"))
+                + card(at + "#waiting-list", "", _ui.title(_ui.WAITING), len(lists[_home.WAITING]))
+                + card(under("/closed"), "" if nd else " zero", _ui.word(_ui.CLOSED), nd, _t("home.closed_tip") + (_t("home.closed_tip_new", n=nl) if nl else ""), new=nl)
                 + '</nav>')
     def done_row(self, r, sub="", who_html=None, named=False):
         """One closed item as the one row: its outcome as the state tag (Done, Dropped, Superseded; Closed for one closed with no outcome recorded), `#id title` and how long ago it closed at the right, the close reason
@@ -3907,15 +3966,15 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         the title a <p> because those pages have their own h1. The panel button is drawn for an open panel, as every page is (apply_panel_open changes it for a person whose panel is stored closed); `q` is the search box's text (the Search page); `search_page=True` (the Search page) makes the box search in place, where every other page's box opens its results in a new tab (_search.box). Cost: one
         classification of the open rows, which the Board holds (home_lists) and the page's own lists may share, and the Closed numbers the Board already computed; no store read, no GitHub call of its own."""
         counts = self.home_counts(off_home=True) if counts is None else counts
-        rl = (_rendered_line(self.stamp(self.now), f"this page was drawn at {self.when(self.now)}; reload for the current board") if rstamp is None
+        rl = (_rendered_line(self.stamp(self.now), _t("home.drawn_tip", when=self.when(self.now))) if rstamp is None
               else _rendered_line(rstamp))         # a page drawn per request says when it was drawn; home's line is about the published board
-        return (f'<header class="top">\n{_THEME_BTN}{_PANEL_BTN}\n{conn}<div class="hbar">{_site_title(self.title, icon_href("favicon.svg"), h1=h1)}{rl}</div>\n{counts}\n{_search.box(q, in_place=search_page)}\n</header>')
+        return (f'<header class="top">\n{_theme_btn()}{_panel_btn()}\n{conn}<div class="hbar">{_site_title(self.title, icon_href("favicon.svg"), h1=h1)}{rl}</div>\n{counts}\n{_search.box(q, in_place=search_page)}\n</header>')
 
     def panel_tail(self) -> str:
         """What follows a page's </main> on every page but home: the summary panel as the home page has it (the same frame, the same
         five blocks from panel_blocks), the end of <div id="layout"> (opened before the <main>, with <body class="panel-pin">: every page is drawn with the panel open, and apply_panel_open closes it for a person who has), the panel's scripts and the header's height script (_HDR_JS). The script of
         the Audit card is the home page's; the card's refresh on the page's poll stays the home page's (these pages do not poll). GitHub calls: see panel_blocks (none of its own; at most one throttled background runners refresh per 120 s, shared by all pages)."""
-        return _panel_frame(self.panel_blocks()) + f'</div><script>{_PANEL_JS}</script><script>{_PORDER_JS}</script><script>{_AUDIT_JS}</script><script>{_HDR_JS}</script>' + _STAMP_JS
+        return _panel_frame(self.panel_blocks()) + f'</div><script>{_PANEL_JS}</script><script>{_PORDER_JS}</script><script>{_LANG_JS}</script><script>{_AUDIT_JS}</script><script>{_HDR_JS}</script>' + _STAMP_JS
 
     def panel_blocks(self) -> dict:
         """The side panel's five blocks (Machines, Runners, Anchor hub, Audit, Projects) as HTML, keyed as the home page swaps them: the one builder the home page and every other page
@@ -3929,37 +3988,37 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         _COLS = [PUB] + sorted(x for x in FLEET if x != PUB)   # the publisher, then the fleet; no cloud column — never a store letter
         def when_tip(v):
             t = _fact_time(v)
-            return f"{ago((now - t).total_seconds())} ({t:%m-%d %H:%M} {_cfg.tz_abbr(t)})" if t else "at an unknown time"
+            return f"{ago((now - t).total_seconds())} ({t:%m-%d %H:%M} {_cfg.tz_abbr(t)})" if t else _t("panel.unknown_time")
         def failures(L, who=""):
             """Machine L's failed setup run and failed update attempts, each as (kind, detail, tip): kind is "setup" or "update", detail the step, or the package and the version it tried,
             tip the raw reason for the hover text (prefixed with `who` for a machine that has no card). An empty list when all went well."""
             s, ups = machine_alerts(self.mfacts.get(L) or {}, self.server_commit)
             out = []
             if s:
-                tip = f"setup failed at step {s.get('step') or '?'} {when_tip(s.get('at'))}: {s.get('reason') or 'no reason given'}"
-                out.append(("setup", f"step {s.get('step') or '?'}", who + tip))
+                tip = _t("panel.mach.setup_tip", step=s.get('step') or '?', when=when_tip(s.get('at')), reason=s.get('reason') or _t("panel.no_reason"))
+                out.append(("setup", _t("panel.mach.step", step=s.get('step') or '?'), who + tip))
             for u in ups:
                 ver = " → ".join(str(x) for x in (u.get("from"), u.get("to")) if x)
-                tip = f"{u.get('what')} update{' ' + ver if ver else ''} failed {when_tip(u.get('at'))}: {u.get('reason') or 'no reason given'}"
+                tip = _t("panel.mach.update_tip", what=u.get('what'), ver=' ' + ver if ver else '', when=when_tip(u.get('at')), reason=u.get('reason') or _t("panel.no_reason"))
                 out.append(("update", " ".join(str(x) for x in (u.get("what"), u.get("to")) if x), who + tip))
             return out
         def fail_lines(L):
             """The failure lines at the foot of machine L's card, under its version rows (the receiver-card rule: a short state word inline, the step or the package
             named, the raw reason in the tooltip). Empty when all went well."""
-            return "".join(f'<div class="mf" title="{esc(tip)}"><span class="lbl bad">{kind} failed ✗</span> <span class="val">{esc(detail)}</span></div>' for kind, detail, tip in failures(L))
+            return "".join(f'<div class="mf" title="{esc(tip)}"><span class="lbl bad">{esc(_t("panel.mach.failed", kind=_t("panel.mach.kind." + kind)))}</span> <span class="val">{esc(detail)}</span></div>' for kind, detail, tip in failures(L))
         def orphan_alert_cards(L):
             """The separate card for a failure of a machine that has no card (a machine view the fleet has no name for), so the failure never vanishes: its tip names the machine by its letter."""
-            return [f'<div class="pc alert bad" title="{esc(tip)}"><b class="lbl">{kind}</b><span class="lbl st bad">failed ✗</span><span class="val wide">{esc(detail)}</span></div>'
-                    for kind, detail, tip in failures(L, f"machine {L}: ")]
+            return [f'<div class="pc alert bad" title="{esc(tip)}"><b class="lbl">{esc(_t("panel.mach.kind." + kind))}</b><span class="lbl st bad">{esc(_t("panel.mach.failed_short"))}</span><span class="val wide">{esc(detail)}</span></div>'
+                    for kind, detail, tip in failures(L, _t("panel.mach.orphan_prefix", name=L))]
         def mrow(name, inst, latest, state):
             """One package row inside a machine's card: the package (a link to its owner's view while the owner has a live pane), its
             version, and the state word: `latest ✓` (the same green + check as a healthy receiver), `→ <latest version>` (no word "update", the text colour (bold) says it; one line),
             `offline`, or `latest unknown`. The row's state class colours the word (_MACH_CSS)."""
             own = OWNER.get(name); u = self.sess_href((sess_of(own) or {}).get("name")) if own else ""
             if state == "update": st = f'<span class="st">{_update_word(latest)}</span>'
-            elif state == "offline": st = '<span class="st">offline</span>'
-            elif state == "latest": st = '<span class="st ok">latest ✓</span>'
-            else: st = '<span class="st">latest unknown</span>'
+            elif state == "offline": st = f'<span class="st">{esc(_t("panel.mach.offline"))}</span>'
+            elif state == "latest": st = f'<span class="st ok">{esc(_t("panel.mach.latest"))}</span>'
+            else: st = f'<span class="st">{esc(_t("panel.mach.unknown"))}</span>'
             lab = (f'<a class="lbl" href="{esc(u)}" target="_blank" rel="noopener">{esc(name)}</a>' if u else f'<span class="lbl">{esc(name)}</span>')
             return f'<div class="mr {state}">{lab}<span class="val">{esc(inst)}</span>{st}</div>'
         def fleet_rows(L):
@@ -3992,7 +4051,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 state = "offline" if not up else ("update" if cli_behind(inst, latest) else ("latest" if latest else "unknown"))
                 out.append((name, mrow(name, inst, latest, state)))
             if not out and not up:
-                out.append(("", '<div class="mr offline"><span class="st">offline</span></div>'))
+                out.append(("", f'<div class="mr offline"><span class="st">{esc(_t("panel.mach.offline"))}</span></div>'))
             return out
         def mcard(name, rows, fails=""):
             """A machine as one card (the machine name sits inside the card, like the anchor hub style): its
@@ -4004,7 +4063,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 : per package the ssh-probed row wins while the host answers (it is read live from the machine), else the fleet's row; when the probe
             failed (the host is unreachable) the fleet's own row wins and the host's last-known row fills only a package the fleet does not know; the host's lone
             `offline` row only when neither has a package."""
-            name = FLEET.get(L, "cloud sessions" if L == "c" else L)
+            name = FLEET.get(L, _t("panel.mach.cloud") if L == "c" else L)
             fails = fail_lines(L)
             if h is None: return mcard(name, [r for _, r in fleet_rows(L)], fails)
             f, p = dict(fleet_rows(L)), host_rows(h); hostd = dict(p)
@@ -4026,13 +4085,13 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                     t = datetime.datetime.strptime(ck, "%Y-%m-%d %H:%M:%S").replace(tzinfo=now.tzinfo)
                     when = stamp(t, "val"); t_ck = t.timestamp()
                 except Exception: when = f'<span class="val">{esc(ck[11:16])}</span>'
-                word, cls = receiver_state(v); raw = str(v.get("error") or ("healthy" if ok else "down"))[:500]
+                word, cls = receiver_state(v); raw = str(v.get("error") or (_t("js.rcv.healthy") if ok else _t("js.rcv.down")))[:500]
                 late = _rh.stale_age(k, ok, t_ck, now.timestamp(), (_AST.get("hold") or {}).get(k, 0))      # a healthy receiver that has not reported for over twice its beat: stale, with the age
-                if late: word, cls, raw = f"stale {_rh.age_words(late)} ✗", "warn", _rh.stale_note(k, late)
-                return (f'<div class="pc rcv {cls}" data-rcv="{esc(k)}" title="{esc(raw)} · checked {esc(v.get("checked",""))} {_cfg.tz_abbr()}">'
-                        f'<b class="lbl">{esc(k)}</b><span class="lbl">last checked</span>'   # status on row 2, like a machine card's "latest"
-                        f'<span class="lbl st {cls}" title="{esc(raw)}">{word}</span>{when}<span class="lbl">type</span><span class="val rtype">{esc(delivery(k))}</span></div>')
-            return _top_fold("anchorhub", '<h2 class="hdr">Anchor hub</h2>', '<div class="matrix rcvs">'
+                if late: word, cls, raw = _t("js.rcv.stale", age=_rh.age_words(late)), "warn", _rh.stale_note(k, late)
+                return (f'<div class="pc rcv {cls}" data-rcv="{esc(k)}" title="{esc(_t("js.rcv.title", raw=raw, checked=v.get("checked", ""), tz=_cfg.tz_abbr()))}">'
+                        f'<b class="lbl">{esc(k)}</b><span class="lbl">{esc(_t("panel.rcv.last_checked"))}</span>'   # status on row 2, like a machine card's "latest"
+                        f'<span class="lbl st {cls}" title="{esc(raw)}">{word}</span>{when}<span class="lbl">{esc(_t("panel.rcv.type"))}</span><span class="val rtype">{esc(delivery(k))}</span></div>')
+            return _top_fold("anchorhub", f'<h2 class="hdr">{esc(panel_label("anchorhub"))}</h2>', '<div class="matrix rcvs">'
                              + "".join(card(k, v) for k, v in _RCV.items()) + '</div>', is_open=True)
         def runners_html():
             """Runners (a sidebar section like Machines): a one-line card per
@@ -4041,16 +4100,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             Runners page keeps the split). The heading is plain text. Drawn from runners.peek(), the last snapshot: this render never waits on GitHub or ssh, and a
             missing snapshot reads "not read yet". With no repo listed in [runners] repos the section reads "not used on this board", and once a clean read has found no runner at all "no self-hosted runners" (no cards, no link).
             The hour's GitHub calls are a card in the Audit section (gh_calls_card), no longer a line here."""
-            head = '<h2 class="hdr">Runners</h2>'
+            head = f'<h2 class="hdr">{esc(panel_label("runners"))}</h2>'
             if not _runners.enabled():                 # no repo in [runners] repos (or no [runners] table): one plain line, no cards, nothing read (the section stays, so the panel keeps its five sections and their order)
-                return _top_fold("runners", head, '<p class="mnote">not used on this board</p>', is_open=True)
+                return _top_fold("runners", head, f'<p class="mnote">{esc(_t("panel.runners.unused"))}</p>', is_open=True)
             snap = _runners.peek()
-            if snap is None: return _top_fold("runners", head, '<p class="mnote">not read yet</p>', is_open=True)
+            if snap is None: return _top_fold("runners", head, f'<p class="mnote">{esc(_t("panel.runners.unread"))}</p>', is_open=True)
             if _runners.unused(snap):                  # a clean read found no runner at all: the same plain line, in its own words
-                return _top_fold("runners", head, '<p class="mnote">no self-hosted runners</p>', is_open=True)
+                return _top_fold("runners", head, f'<p class="mnote">{esc(_t("panel.runners.none"))}</p>', is_open=True)
             note = ""
             if now.timestamp() - float(snap.get("ts") or 0) > _run_stale_s():
-                note = f'<p class="mnote">last read at {esc(datetime.datetime.fromtimestamp(float(snap["ts"]), _cfg.tz()).strftime("%H:%M"))} {esc(_cfg.tz_abbr())}</p>'
+                note = f'<p class="mnote">{esc(_t("panel.runners.last_read", hm=datetime.datetime.fromtimestamp(float(snap["ts"]), _cfg.tz()).strftime("%H:%M"), tz=_cfg.tz_abbr()))}</p>'
             cards = []
             for c in _runners.counts(snap):
                 t = _runners.card_total(c)
@@ -4062,16 +4121,16 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             scope appears here by itself), in the Runners cards' look: the scope's name and its count of projects, archived ones included (the card's hover text says how many of them are
             archived), and a link to the scope's group on that page (/projects#grp-<name>, the id projects_table writes). A scope with no project shows 0; the same list of projects
             the page's table draws (project_keys), so the two cannot differ."""
-            head = '<h2 class="hdr">Projects</h2>'
-            if not self.scopes: return _top_fold("projects-panel", head, '<p class="mnote">no projects yet</p>', is_open=True)
+            head = f'<h2 class="hdr">{esc(panel_label("projects-panel"))}</h2>'
+            if not self.scopes: return _top_fold("projects-panel", head, f'<p class="mnote">{esc(_t("panel.projects.none"))}</p>', is_open=True)
             keys = self.project_keys()
             cards = []
             for sc in self.scopes:
                 ks = [k for k in keys if self.proj_scope(k) == sc]
                 n, nfin = len(ks), sum(1 for k in ks if self.finished(k))
-                tip = f' title="{n - nfin} active, {nfin} archived"' if nfin else ""
+                tip = f' title="{esc(_t("panel.projects.tip", active=n - nfin, archived=nfin))}"' if nfin else ""
                 cards.append(f'<a class="pc rc" href="{under("/projects")}#{self.scope_anchor(sc)}"{tip}><b class="rn">{esc(sc)}</b>'
-                             f'<span class="rv">{n} project{"" if n == 1 else "s"}</span><span class="go" aria-hidden="true">→</span></a>')
+                             f'<span class="rv">{esc(_t("panel.projects.one" if n == 1 else "panel.projects.many", n=n))}</span><span class="go" aria-hidden="true">→</span></a>')
             return _top_fold("projects-panel", head, f'<div class="rlist">{"".join(cards)}</div>', is_open=True)
         # one card per machine, its name inside as the card's first label, the cards stacked one to a row in the side
         # panel and side by side as wide as they fit elsewhere, wrapping onto a second band on a narrow screen. A machine's failed
@@ -4081,14 +4140,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         # An ssh host that is also a fleet machine is that machine's one card, found by its full hostname.
         _HOSTS = {}
         for h in self.ssh_hosts: _HOSTS.setdefault(str(h["name"]), h)
-        _fleet_cards = [FLEET.get(L, "cloud sessions" if L == "c" else L) for L in _COLS]
+        _fleet_cards = [FLEET.get(L, _t("panel.mach.cloud") if L == "c" else L) for L in _COLS]
         _orphans = [c for L in sorted(self.mfacts) if L not in _COLS for c in orphan_alert_cards(L)]       # a failed machine the panel draws no card for
         matrix_html = ('<div class="matrix">' + "".join(f'<div class="mcol">{fleet_card(L, _HOSTS.get(n))}</div>' for L, n in zip(_COLS, _fleet_cards))
                        + "".join(f'<div class="mcol">{host_card(h)}</div>' for n, h in _HOSTS.items() if n not in _fleet_cards)
                        + (f'<div class="mcol">{"".join(_orphans)}</div>' if _orphans else "") + '</div>')
-        return {"machines": _top_fold("machines", '<h2 class="hdr">Machines</h2>', f'\n{self.recycle_html()}{matrix_html}', is_open=True),
+        return {"machines": _top_fold("machines", f'<h2 class="hdr">{esc(panel_label("machines"))}</h2>', f'\n{self.recycle_html()}{matrix_html}', is_open=True),
                 "runners": runners_html(), "anchorhub": receivers_html(),
-                "audit-panel": _top_fold("audit-panel", '<h2 class="hdr">Audit</h2>', self.audit_line() + self.gh_calls_card(), is_open=True),
+                "audit-panel": _top_fold("audit-panel", f'<h2 class="hdr">{esc(panel_label("audit-panel"))}</h2>', self.audit_line() + self.gh_calls_card(), is_open=True),
                 "projects-panel": projects_panel_html()}
 
     NO_OWN_AGENT = "no agent of its own"        # the Agents cell of a project whose page lists no agent and has no keeper session
@@ -4184,10 +4243,10 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         status = self.provision_html()      # the "Provision needed" note; the daily audit's line moved into the side panel's Audit section, kept current by _AUDIT_JS
         # the page's top-level blocks, in order (the in-place update swaps these one by one; see _LIVE_JS)
         BL = {"counts": self.home_counts(lists), "status": f'<div id="status">{status}</div>', "for-you": self.for_you_html() if _SHOW_FOR_YOU else "",
-              "your-move": self.home_section("your-move", "Your move", lists[_home.YOUR_MOVE], _home.YOUR_MOVE, "nothing waits on you"),
-              "agents-at-work": self.home_section("agents-at-work", _ui.TITLES[_ui.AGENT], lists[_home.AGENTS], _home.AGENTS, "no agent has an open item"),
-              "queued-release": self.home_section("queued-release", _ui.TITLES[_ui.RELEASE], lists[RELEASE_LIST], RELEASE_LIST, "no release is queued"),
-              "waiting-list": self.home_section("waiting-list", "Waiting", lists[_home.WAITING], _home.WAITING, "nothing is waiting"),
+              "your-move": self.home_section("your-move", _ui.title(_ui.YOUR_MOVE), lists[_home.YOUR_MOVE], _home.YOUR_MOVE, _t("home.empty.your_move")),
+              "agents-at-work": self.home_section("agents-at-work", _ui.title(_ui.AGENT), lists[_home.AGENTS], _home.AGENTS, _t("home.empty.agents")),
+              "queued-release": self.home_section("queued-release", _ui.title(_ui.RELEASE), lists[RELEASE_LIST], RELEASE_LIST, _t("home.empty.release")),
+              "waiting-list": self.home_section("waiting-list", _ui.title(_ui.WAITING), lists[_home.WAITING], _home.WAITING, _t("home.empty.waiting")),
               **self.panel_blocks()}
         # The shell: the page with every block and every per-render value (the render time, the "as of" in the banner, the
         # rendered stamp) taken out, fingerprinted into the stackshot-shell meta. It changes only when the page's frame does
@@ -4201,7 +4260,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         """The board page around its blocks BL (Board.html); ts / as_of / rstamp are the per-render values, shell and blocks
         the fingerprints _LIVE_JS reads."""
         TITLE = self.title
-        conn = f'''<div id="conn" class="conn" role="status" aria-live="polite" hidden><span class="c-down">Can't reach stackshot — showing the board as of {as_of}. Retrying…</span><span class="c-new">A newer board is available — <button type="button" id="conn-reload" class="b warn">Reload</button></span><span class="c-out">Signed out — <a href="{under('/')}" id="conn-signin">sign in again</a></span></div>\n'''
+        conn = f'''<div id="conn" class="conn" role="status" aria-live="polite" hidden><span class="c-down">{_t("home.conn.down", as_of=as_of)}</span><span class="c-new">{_t("home.conn.new", btn='<button type="button" id="conn-reload" class="b warn">' + esc(_t("home.conn.reload")) + '</button>')}</span><span class="c-out">{_t("home.conn.out", link=f'<a href="{under("/")}" id="conn-signin">' + esc(_t("home.conn.signin")) + '</a>')}</span></div>\n'''
         _h = io.StringIO()
         with contextlib.redirect_stdout(_h):
             print(f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><meta name="stackshot-rendered" content="{ts}"><meta name="stackshot-shell" content="{shell}"><meta name="stackshot-blocks" content="{blocks}"><title>{esc(TITLE)}</title><link rel="icon" href="{icon_href('favicon.svg')}" type="image/svg+xml">{_font_link}{_THEME_HEAD}{_APP_HEAD}<style>{css}</style><noscript><style>form.hanswer{{display:none}}</style></noscript></head>{_PANEL_BODY}<div id="layout"><main id="top">
@@ -4217,6 +4276,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 </div>
 <script>{_PANEL_JS}</script>
 <script>{_PORDER_JS}</script>
+<script>{_LANG_JS}</script>
 <script>{_HOME_FOLD_JS}</script>
 {self.sent_notes_html()}
 {_CARDS_JS}
@@ -4228,9 +4288,9 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
 {_TOTOP_JS}
 <script>
 {_HDR_JS}
-(function(){{function dur(s){{var m=Math.floor(Math.max(s,0)/60);return m<60?m+'m':m<2880?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'}}
-function tick(){{var n=Date.now()/1000;document.querySelectorAll('[data-ts]').forEach(function(e){{var s=n-(+e.getAttribute('data-ts'));e.textContent=e.hasAttribute('data-q')?'>'+dur(s)+' ago':s<60?'just now':dur(s)+' ago'}});
-document.querySelectorAll('[data-wait]').forEach(function(e){{e.textContent='waiting '+dur(n-(+e.getAttribute('data-wait')))}});
+(function(){{function dur(s){{var m=Math.floor(Math.max(s,0)/60);return m<60?m+'m':m<2880?Math.floor(m/60)+'h':Math.floor(m/1440)+'d'}}{_AGE_FN}
+function tick(){{var n=Date.now()/1000;document.querySelectorAll('[data-ts]').forEach(function(e){{var s=n-(+e.getAttribute('data-ts'));e.textContent=fa(s,e.hasAttribute('data-q'))}});
+
 var g=document.getElementById('rendered'),gs=g&&g.querySelector('[data-ts]');if(gs)g.classList.toggle('old',n-(+gs.getAttribute('data-ts'))>+g.getAttribute('data-stale'))}}
 tick();setInterval(tick,30000);
 var NET=new RegExp({json.dumps(_NET_ERR)},'i');
@@ -4238,9 +4298,9 @@ var gone=false;document.addEventListener('stackshot:signedout',function(){{gone=
 function rcv(){{if(gone)return;fetch('{PREFIX}/receivers.json',{{cache:'no-store'}}).then(function(r){{if(r.status===401)gone=true;return r.ok?r.json():null}}).then(function(d){{if(!d)return;
 document.querySelectorAll('[data-rcv]').forEach(function(c){{var v=d[c.getAttribute('data-rcv')];if(!v)return;
 var raw=String(v.error||(v.ok?'healthy':'down')).slice(0,500),k=v.ok?'ok':NET.test(raw)?'warn':'bad';
-['ok','warn','bad'].forEach(function(x){{c.classList.toggle(x,x===k)}});c.title=raw+' · checked '+v.checked+' {_cfg.tz_abbr()}';
-var h=c.querySelector('.st');if(h){{h.className='lbl st '+k;h.title=raw;h.textContent=k==='ok'?'healthy ✓':k==='warn'?'unreachable ✗':'error ✗'}}
-if(v.ok&&+v.stale>0){{var sw='stale '+dur(+v.stale)+' ✗',sn=String(v.stale_note||sw);c.classList.remove('ok','bad');c.classList.add('warn');c.title=sn+' · checked '+v.checked+' {_cfg.tz_abbr()}';if(h){{h.className='lbl st warn';h.title=sn;h.textContent=sw}}}}
+['ok','warn','bad'].forEach(function(x){{c.classList.toggle(x,x===k)}});c.title=SST('js.rcv.title',{{raw:raw,checked:v.checked,tz:'{_cfg.tz_abbr()}'}});
+var h=c.querySelector('.st');if(h){{h.className='lbl st '+k;h.title=raw;h.textContent=SST(k==='ok'?'js.rcv.ok':k==='warn'?'js.rcv.warn':'js.rcv.bad')}}
+if(v.ok&&+v.stale>0){{var sw=SST('js.rcv.stale',{{age:dur(+v.stale)}}),sn=String(v.stale_note||sw);c.classList.remove('ok','bad');c.classList.add('warn');c.title=SST('js.rcv.title',{{raw:sn,checked:v.checked,tz:'{_cfg.tz_abbr()}'}});if(h){{h.className='lbl st warn';h.title=sn;h.textContent=sw}}}}
 var t=c.querySelector('[data-ts]');if(t&&v.ts){{t.setAttribute('data-ts',v.ts);t.setAttribute('data-tip',v.checked+' {_cfg.tz_abbr()}')}}
 var y=c.querySelector('.rtype');if(y&&v.type)y.textContent=v.type}});tick()}}).catch(function(){{}})}}
 rcv();setInterval(rcv,60000);document.addEventListener('stackshot:swapped',function(){{tick();rcv()}});}})();

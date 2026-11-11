@@ -1,0 +1,213 @@
+"""i18n_catalog.py — the English strings of the board pages, by area (the data half of i18n.py, which holds the mechanism).
+
+One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
+
+    state.*    the state words (Your move, On agent, ...), also the home page's headings and count cards
+    panel.*    the side panel: its chrome, its sections and their cards, the audit card, the language switch
+    home.*     the home page: count cards, lists, rows, waits, the answer and copy boxes, the connection notice
+    js.*       words only a page script says (copy, theme, receiver states, sent notes)
+    chrome.*   the fixed buttons every page carries (reload, back to top)
+
+(`date.*` and `age.*`, the date and age forms, are in i18n.py beside the code that fills them.)
+
+A template's `{name}` fields are the ones the page fills in; a translation may leave a field out and may not name another (i18n.validate). A value with markup in it (`<em>`) is a field the page supplies, never
+part of the text. A new page string goes in here, with its English text, in the same change that routes the page through `t()` (CONTRIBUTING.md); the file for another language is kept outside this repository.
+"""
+from __future__ import annotations
+
+CATALOG: dict[str, str] = {
+    # ------------------------------------------------------------------ state words
+    "state.you": "Your move",
+    "state.agent": "On agent",
+    "state.release": "Queued for release",
+    "state.wait": "Waiting",
+    "state.done": "Done",
+    "state.dropped": "Dropped",
+    "state.superseded": "Superseded",
+    "state.closed": "Closed",
+
+    # ------------------------------------------------------------------ fixed chrome
+    "chrome.reload": "Reload",
+    "chrome.reload_tip": "Reload page",
+    "chrome.totop": "Back to top",
+
+    # ------------------------------------------------------------------ side panel: frame
+    "panel.title": "Summary",
+    "panel.button": "Summary panel",
+    "panel.hide": "Hide summary panel",
+    "panel.show": "Show summary panel",
+    "panel.pin": "Pin summary panel",
+    "panel.close": "Close summary panel",
+    "panel.move_menu": "Move section",
+    "panel.move.up": "Move up",
+    "panel.move.down": "Move down",
+    "panel.move.top": "Move to top",
+    "panel.move.bottom": "Move to bottom",
+    "panel.move_section": "Move {label} section",
+    "panel.move_for": "Move {label}",
+    "panel.grip_tip": "Drag to move; click for the move menu",
+    "panel.moved": "{label} moved to position {pos} of {n}",
+    "panel.order_signin": "The order is changed on this page but was not saved: sign in to the board to keep it.",
+    "panel.order_failed": "The order is changed on this page but was not saved. Check the connection and move it again.",
+    "panel.lang": "Language",
+    "panel.lang.en": "English",
+    "panel.lang.ko": "Korean",
+    "panel.sec.machines": "Machines",
+    "panel.sec.runners": "Runners",
+    "panel.sec.anchorhub": "Anchor hub",
+    "panel.sec.audit-panel": "Audit",
+    "panel.sec.projects-panel": "Projects",
+
+    # ------------------------------------------------------------------ side panel: machines
+    "panel.unknown_time": "at an unknown time",
+    "panel.no_reason": "no reason given",
+    "panel.mach.setup_tip": "setup failed at step {step} {when}: {reason}",
+    "panel.mach.step": "step {step}",
+    "panel.mach.update_tip": "{what} update{ver} failed {when}: {reason}",
+    "panel.mach.failed": "{kind} failed ✗",
+    "panel.mach.failed_short": "failed ✗",
+    "panel.mach.kind.setup": "setup",
+    "panel.mach.kind.update": "update",
+    "panel.mach.orphan_prefix": "machine {name}: ",
+    "panel.mach.offline": "offline",
+    "panel.mach.latest": "latest ✓",
+    "panel.mach.unknown": "latest unknown",
+    "panel.mach.cloud": "cloud sessions",
+    "panel.recycle": "Pane recycle pending for {ids} ({tool} runs it)",
+    "panel.fleet_tool": "the fleet tool",
+    "panel.provision": "Provision needed for {hosts}",
+    "panel.offline_paren": "(offline)",
+
+    # ------------------------------------------------------------------ side panel: receivers, runners, projects
+    "panel.rcv.last_checked": "last checked",
+    "panel.rcv.type": "type",
+    "panel.runners.unused": "not used on this board",
+    "panel.runners.unread": "not read yet",
+    "panel.runners.none": "no self-hosted runners",
+    "panel.runners.last_read": "last read at {hm} {tz}",
+    "panel.projects.none": "no projects yet",
+    "panel.projects.tip": "{active} active, {archived} archived",
+    "panel.projects.one": "{n} project",
+    "panel.projects.many": "{n} projects",
+
+    # ------------------------------------------------------------------ side panel: audit and GitHub calls
+    "panel.audit.name": "Audits ↗",
+    "panel.audit.now": "Audit now",
+    "panel.audit.running": "Audit running…",
+    "panel.audit.running_since": "Audit running since {at}…",
+    "panel.audit.unfinished": "Last audit did not finish",
+    "panel.audit.h_audits": "audits",
+    "panel.audit.h_found": "found, 24 h",
+    "panel.audit.group.silence": "Silence",
+    "panel.audit.group.filing": "Filing",
+    "panel.audit.group.wording": "Wording",
+    "panel.audit.group.dates": "Dates",
+    "panel.audit.group.proof": "Proof and patterns",
+    "panel.audit.group.pages": "Pages and agents",
+    "panel.audit.group.fleet": "Fleet and services",
+    "panel.audit.group.text": "Text and rules",
+    "panel.audit.note.unlogged": "– keeps no findings log",
+    "panel.audit.note.off": "– the findings log is off",
+    "panel.audit.cued": "audit cued",
+    "panel.audit.http": "HTTP {n}",
+    "panel.audit.cue_failed": "could not cue the audit (HTTP {n})",
+    "panel.audit.cue_signin": "could not cue the audit: sign in again",
+    "panel.audit.unreachable": "could not reach stackshot",
+    "panel.gh.title": "GitHub calls",
+    "panel.gh.writes": "writes",
+    "panel.gh.reads": "reads",
+    "panel.gh.counted": "counted",
+
+    # ------------------------------------------------------------------ page scripts
+    "js.copy": "Copy",
+    "js.copied": "Copied",
+    "js.theme.system": "Theme: system",
+    "js.theme.light": "Theme: light",
+    "js.theme.dark": "Theme: dark",
+    "js.rcv.ok": "healthy ✓",
+    "js.rcv.warn": "unreachable ✗",
+    "js.rcv.bad": "error ✗",
+    "js.rcv.healthy": "healthy",
+    "js.rcv.down": "down",
+    "js.rcv.title": "{raw} · checked {checked} {tz}",
+    "js.rcv.stale": "stale {age} ✗",
+    "js.sent_done": "Done: {who} takes it from here.",
+    "js.sent_note": "Your note is sent: {who} takes it from here and decides whether the step is done.",
+
+    # ------------------------------------------------------------------ home page: header, count cards, connection notice
+    "home.counts": "Counts",
+    "home.queued_short": "Queued",
+    "home.queued_tip": "Items whose pull request is in the release queue: its release has started and not ended",
+    "home.closed_tip": "Items closed in the last 14 days (done, dropped and superseded)",
+    "home.closed_tip_new": "; {n} new: closed by an agent, not cleared yet",
+    "home.new_fmt": "{n}{word}",
+    "home.new_word": " new",
+    "home.rendered": "rendered",
+    "home.rendered_tip": "normally re-rendered at least every {every} minutes; older than {stale} minutes means the server has not published since",
+    "home.drawn_tip": "this page was drawn at {when}; reload for the current board",
+    "home.conn.down": "Can't reach stackshot — showing the board as of {as_of}. Retrying…",
+    "home.conn.new": "A newer board is available — {btn}",
+    "home.conn.reload": "Reload",
+    "home.conn.out": "Signed out — {link}",
+    "home.conn.signin": "sign in again",
+
+    # ------------------------------------------------------------------ the search box in every page's header
+    "home.search.hint": "Search items, history, projects, sessions",
+    "home.search.hint_short": "Search the board",
+    "home.search.aria": "Search the board",
+    "home.search.button": "Search",
+
+    # ------------------------------------------------------------------ home page: lists and rows
+    "home.empty.your_move": "nothing waits on you",
+    "home.empty.agents": "no agent has an open item",
+    "home.empty.release": "no release is queued",
+    "home.empty.waiting": "nothing is waiting",
+    "home.no_mover": "no mover",
+    "home.handed": "handed to {who}, not yet taken",
+    "home.woke": "woke: {what} → {who}",
+    "home.no_next": "no next step on the item",
+    "home.after_wait": "after the wait:",
+    "home.cmd_below": "the command below",
+    "home.cmd_n_below": "command {n} below",
+
+    # ------------------------------------------------------------------ home page: waits
+    "home.wait.until": "Until {day}",
+    "home.wait.no_date": "With no date set",
+    "home.wait.proof": "proof: {proof}",
+    "home.wait.after": "After {ids}",
+    "home.wait.item_none": "On an item (none recorded)",
+    "home.wait.back_anyway": "· back anyway {day}",
+    "home.wait.on": "On {what}",
+    "home.wait.backstop": "· backstop {day}",
+    "home.wait.relay": "On {what}, ask by {day}",
+    "home.wait.no_date_short": "no date set",
+    "home.wait.chased": "· chased {n}×",
+    "home.waiting_since": "waiting since {at} {tz}",
+    "home.until": "until {day}",
+    "home.no_end": "no end date",
+    "home.picks_up": "{who} picks it up",
+    "home.owner_then": "{who}, then {then}",
+    "home.nobody_picks": "nobody set to pick it up",
+    "home.watched_by": "watched by {who}",
+    "home.watcher.scheduler": "the scheduler",
+    "home.watcher.anchor": "the anchor module",
+    "home.watcher.server": "the server",
+    "home.set_by": "set by {who}",
+    "home.unknown": "unknown",
+
+    # ------------------------------------------------------------------ home page: copy box, answer box, option cards
+    "home.copy_clipboard": "Copy to the clipboard",
+    "home.copy_the": "Copy the {label}",
+    "home.open_shell": "Open shell",
+    "home.draft.email": "Email text to paste",
+    "home.draft.message": "Message to paste",
+    "home.resize_box": "Resize the answer box",
+    "home.step_note_aria": "A note, or nothing: Send with an empty box finishes the step",
+    "home.step_note": "A note, or nothing to finish the step",
+    "home.send": "Send",
+    "home.note_optional": "Note (optional)",
+    "home.write_answer": "Write your answer",
+    "home.pick_hint": "Pick an option or write a note",
+    "home.recommended": "recommended",
+    "home.options": "Options",
+}

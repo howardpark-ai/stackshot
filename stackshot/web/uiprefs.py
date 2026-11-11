@@ -2,13 +2,15 @@
 
 What is stored, in one small JSON file in the state dir (<state>/ui-prefs.json), written atomically (a temporary file, then os.replace), under a lock:
 
-  {"users": {"<signed-in address>": {"panel_order": ["runners", "machines", ...], "panel_open": false}}}
+  {"users": {"<signed-in address>": {"panel_order": ["runners", "machines", ...], "panel_open": false, "lang": "ko"}}}
 
   panel_order  the order of the side panel's sections, as the person last left it. Only a section the person moved is stored; a person who never
                moved one has no entry, and the panel is in its default order (PANEL_SECTIONS).
   panel_open   whether the side panel is open (pinned beside the page) on a wide screen, as the person last left it: the same on every page. The default is open and is
                stored as no key; only a person who closed it has `"panel_open": false`, and opening it again removes the key. A key of any other value reads as open, so a file
                written before this key existed needs no migration. Under 800 px the panel is a drawer that starts closed whatever this says, and the drawer is never stored.
+  lang         the language the person reads the pages in, a code of i18n.LANGS. English is the default and is stored as no key; only a person who picked another language has `"lang": "<code>"`,
+               and picking English again removes the key. A value that is not one of LANGS reads as English. Whether that language has a catalog is the page renderer's question (i18n.available), not this file's.
 
 A file that does not parse (or is not a JSON object) is moved aside to ui-prefs.json.bad-<epoch> and the settings start empty; nothing in it is worth
 more than the person's next drag. A file that cannot be read at all (any error but "no such file") is a different matter: it may hold other people's orders, so a
@@ -33,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.web import i18n as _i18n
 
 # The side panel's sections, in their default order, by the ids the page gives them (Machines, Runners, Anchor hub, Audit, Projects).
 PANEL_SECTIONS: tuple[str, ...] = ("machines", "runners", "anchorhub", "audit-panel", "projects-panel")
@@ -163,6 +166,49 @@ def _put_open(d: dict[str, Any], email: str, is_open: bool) -> None:
 def _open_of(entry: Any) -> bool:
     """Open unless the entry says `false` (no key, or a value of any other kind, is the default)."""
     return not (isinstance(entry, dict) and entry.get("panel_open") is False)
+
+
+def _put_lang(d: dict[str, Any], email: str, lang: str) -> None:
+    """Set the person's language in the loaded settings; English (the default) is no key."""
+    if lang == _i18n.DEFAULT:
+        u = d["users"].get(email)
+        if isinstance(u, dict):
+            u.pop("lang", None)
+            _tidy(d, email)
+    else:
+        d["users"].setdefault(email, {})["lang"] = lang
+
+
+def _lang_of(entry: Any) -> str:
+    """The entry's language when it is one of i18n.LANGS, else English."""
+    v = entry.get("lang") if isinstance(entry, dict) else None
+    return v if isinstance(v, str) and v in _i18n.LANGS else _i18n.DEFAULT
+
+
+def lang_of(email: str) -> str:
+    """The language the person reads the pages in ("en" for someone who never picked one, for nobody signed in, for a value this version does not know and for a file that cannot be read)."""
+    if not email:
+        return _i18n.DEFAULT
+    try:
+        with _LOCK:
+            entry = _load()["users"].get(email, {})
+    except OSError:
+        return _i18n.DEFAULT
+    return _lang_of(entry)
+
+
+def set_lang(email: str, lang: Any) -> str:
+    """Save the person's language and return it. `lang` must be one of i18n.LANGS (ValueError otherwise, nothing is changed). English is stored as no key; choosing the language already stored writes nothing.
+    Raises OSError when the file cannot be read or written; nothing is changed then."""
+    if not isinstance(lang, str) or lang not in _i18n.LANGS:
+        raise ValueError(f"lang must be one of {', '.join(_i18n.LANGS)}")
+    with _LOCK:
+        d = _load()
+        if _lang_of(d["users"].get(email, {})) == lang:
+            return lang
+        _put_lang(d, email, lang)
+        _save(d)
+    return lang
 
 
 def panel_order(email: str) -> list[str]:

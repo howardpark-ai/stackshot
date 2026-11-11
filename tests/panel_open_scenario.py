@@ -358,7 +358,7 @@ function run(wide,bodyPin){calls.length=0;const els={};['panel','panel-open','pa
 const cls=new Set(bodyPin?['panel-pin']:[]);
 const body={classList:{contains:c=>cls.has(c),toggle:(c,on)=>{on?cls.add(c):cls.delete(c)}}};const mm={matches:!wide,addEventListener(t,f){this.f=f}};
 const ctx={document:{getElementById:i=>els[i],body,addEventListener(){},querySelector(){return null}},window:{matchMedia:()=>mm,addEventListener(){},fetch:true},location:{hash:''},
-fetch:(u,o)=>{calls.push([u,o.method,o.body,o.keepalive]);return P(undefined)},clearTimeout(){},setTimeout(){return 1},decodeURIComponent};
+fetch:(u,o)=>{calls.push([u,o.method,o.body,o.keepalive]);return P(undefined)},clearTimeout(){},setTimeout(){return 1},decodeURIComponent,SST:k=>k};      // SST: the page head's word lookup (a stub: this run does not read the words)
 ctx.window.fetch=ctx.fetch;vm.runInNewContext(src,ctx);const click=()=>els['panel-open']._l.click[0]();return{click,cls,calls,mm,els}}
 const out={};
 let r=run(true,true);r.click();out.wideClose=[r.calls.slice(),[...r.cls]];r.click();out.wideOpen=r.calls.slice();

@@ -253,7 +253,8 @@ const tick=()=>new Promise(r=>setImmediate(r));
     o = run_rcv("signedout")
     check("…and, working until the page's own poll says signed out, it asks no more after that (the interval and the swap event)", o.get("first") == 1 and o.get("total") == 1 and o.get("ints", 0) >= 1, o)
 check("the audit-now click and the panel-order save read a 401 as signed out (the old redirect wording)",
-      "if(r.redirected||r.status===401)return[0,'']" in R._AUDIT_JS and "(e===403||e===401?': sign in to the board to keep it.'" in pathlib.Path(STACK, "stackshot/web/ui/render.py").read_text(encoding="utf-8"))
+      "if(r.redirected||r.status===401)return[0,'']" in R._AUDIT_JS and "(e===403||e===401?'panel.order_signin':'panel.order_failed')" in pathlib.Path(STACK, "stackshot/web/ui/render.py").read_text(encoding="utf-8")
+      and __import__("stackshot.web.i18n", fromlist=["t"]).t("panel.order_signin", "en") == "The order is changed on this page but was not saved: sign in to the board to keep it.")     # the sentence is in the string table now; the script picks it by a 401/403
 check("the page's banner has a Signed out line with a link that opens the page again (a visit signs in)", '<span class="c-out">Signed out — <a href="/" id="conn-signin">sign in again</a></span>' in HOME
       and ".conn.out .c-out{display:inline}" in HOME and 'href=""' not in HOME)
 check("the Runners page's script stops asking after a 401 (it keeps a flag, and neither the timer nor the visibility event asks again)", "if(r.status===401)throw 'login'" in RN._JS and "if(busy||gone)return" in RN._JS and "if(e==='login')gone=true" in RN._JS)

@@ -127,6 +127,12 @@ checkout reuses it, and `--locked` fails on a stale `uv.lock` instead of resolvi
 `tests/run-suite <name>`** (`pilot`, or `phone_width_check`): it shares the one environment and gives the run a scratch folder that is
 removed afterwards. `./tests/x_scenario.py` does not run, the suites have no shebang.
 
+## Page text: the string table, and no text in another language
+
+**A word a person reads on a board page goes through the string table** (`stackshot/web/i18n.py`, with the English text in `stackshot/web/i18n_catalog.py`): a dotted key by area (`panel.*`, `home.*`, `state.*`, `js.*`) and its English `str.format` template, asked for with `t(key, **fields)` in Python and `SST(key, {fields})` in a page script. A new page string, or a changed one, is added to the catalog in the same change; English output stays what it was. Item text and the text of the tools are not page text and stay out of the table. `python3 tools/i18n_report.py` counts what a module still says on its own.
+
+**The repository holds English only, in code and in tests: no Hangul and no other non-English text, in any file, test fixture or commit.** A second language is a JSON file kept outside the repository and found through `[ui] locale_dir` (see `docs/board-ui.md`). The tests use an ASCII test language instead, each value being the English text wrapped as `[x:...]`, so the mechanism is proved without any real translation. A test that checks a localized page writes that file into its own temporary folder and removes it when it ends.
+
 ## Scratch folders: a suite leaves nothing behind
 
 A folder made with `tempfile.mkdtemp` and removed by one line at the very end of a suite is left in `/tmp` by a failing check, an
@@ -189,7 +195,7 @@ does both (its docstring has the rules in full):
   a pass is recorded as the last good commit, a failure rolls the deploy back to it (see step 4 above). When the deploy gate is closed (a merge the queue did not make, a failed or unreadable run since the last good commit, no readable last-good commit, a paused release queue, a checkout that cannot fast-forward), `release.sh` waits for the run that covers
   its merge (step 4, *Which run covers a merge*) before deploying, and deploys only when it passes (merged and not deployed when it does not: fix forward). Every deploy goes to one commit (`DEPLOY_TO=<sha> ./deploy.sh`), the newest one containing the merge whose run passed, never to a
   tip with no passing run: a merge another release lands meanwhile is deployed by that release.
-- **A new suite** is a new `tests/<name>_scenario.py`: CI finds it by name, nothing else to edit, and runs it on the PR that adds it.
+- **A new suite** is a new `tests/<name>_scenario.py`: CI finds it by name, nothing else to edit, and runs it on the PR that adds it. (`tests/locale_scenario.py` is the one for the string table: the loader's fallbacks, the date and age forms, the per-person language, the switch, `<html lang>`, and the home page and side panel in English and in the ASCII test language.)
 - **A fixture never names a real box** when a suite compares it with the box it runs on (`socket.gethostname()`): CI's hosts
   differ from your own, so a fixture that named one box as the remote machine fails on the host that is that box. The remote machine is `far-host`.
 - **Fixtures use invented names**: no real person, company, host or session name, in a fixture, a test comment or an expected string. `Acme`, `Pat`, `you@example.com`, `far-host` and `my-engineer` are the stand-ins; the clean-text job reads only the PR's text (its title, body, branch name and commit messages), not the files, so review is what catches a real name in a fixture.

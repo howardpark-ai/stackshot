@@ -148,6 +148,7 @@ from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
 from stackshot.waits import reports as _reports  # noqa: E402  — does a background agent's message to a front agent ask for anything: a report goes onto the item it names instead (reports.py)
+from stackshot.web import i18n as _i18n  # noqa: E402  — the pages' string table and the second language's loader (i18n.py): the server sets the request's language from the person's stored choice
 from stackshot.web import uiprefs as _uiprefs  # noqa: E402  — a signed-in person's settings for the pages, kept on the server: the side panel's section order (uiprefs.py)
 from stackshot.web import foryou as _fy  # noqa: E402  — the owner's For you list: rows for what he should see, in place of messages to a front agent (foryou.py)
 from stackshot.web import foryou_slack as _fyslack  # noqa: E402,F401  — the For you list's Slack hook, its queue and its worker thread; the suites stub the hook and read its switch on this module (foryou_slack.py)
@@ -3891,7 +3892,7 @@ from stackshot.projects import project_archive as _archive  # noqa: E402  — a 
 from stackshot.fleet import session_ids as _sid  # noqa: E402  — the migration to permanent session ids: applied from here at start, under the item lock
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
 from stackshot.web import shared as _shared  # noqa: E402  — the helpers more than one area reads: a session's name, an item's page and the board's URL (`_shared.BOARD_URL`), the owner's words, the debounced publish (and its timer, `_shared._PUB_TIMER`), the roles and projects files, the board home's drop (shared.py)
-from stackshot.web.shared import ROLES, _BOARD_GEN_LOCK, _BOARD_HOME, _board_home_drop, _item_url, _owner_words, _projects_sync, _projects_sync_safe, _publish, _publish_every, _publish_if_idle, _publish_now, _registry, _roles_sync, _roles_sync_safe, _session_label, _sessions_index, _waits_decision  # noqa: E402,F401  — kept on this module as well: the writes, the tools and the suites call `server.<name>` (shared.py)
+from stackshot.web.shared import ROLES, _BOARD_GEN_LOCK, _BOARD_HOME, _board_home_drop, _board_home_slot, _item_url, _owner_words, _projects_sync, _projects_sync_safe, _publish, _publish_every, _publish_if_idle, _publish_now, _registry, _roles_sync, _roles_sync_safe, _session_label, _sessions_index, _waits_decision  # noqa: E402,F401  — kept on this module as well: the writes, the tools and the suites call `server.<name>` (shared.py)
 from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
 from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `_save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
 from stackshot.web import project_form as _pform  # noqa: E402,F401  — the New session form's calls that make and list projects and register their agents, with the one lock they share and the page store they write through; a suite sets `PAGE_IO` on this module (project_form.py)
@@ -7480,21 +7481,45 @@ mcp.add_middleware(_RetiredInputs())
 # readonly.REFUSAL, and so is any method on /audit/now (it starts a run); a read goes on to its handler and an HTML answer gets the banner. The
 # live instance runs the handler as it always did. FastMCP's own /mcp and OAuth routes are not custom routes: the tool middleware above refuses
 # the writes there.
+def _request_lang(request) -> str:
+    """The language a request's page is drawn in: the signed-in person's stored choice (uiprefs.lang_of) when that language has a catalog loaded (i18n.available), else English. Worked out once per
+    request (kept on request.state); a visitor not signed in, a person who never picked one and a board with no locale folder read English without a second look at the catalog."""
+    try:
+        got = getattr(request.state, "ui_lang", None)
+        if got is not None:
+            return got
+        email = _ui_email(request) if request.method in ("GET", "HEAD") else ""
+        lang = _uiprefs.lang_of(email) if email else _i18n.DEFAULT
+        lang = _i18n.norm(lang) if lang != _i18n.DEFAULT else lang
+        request.state.ui_lang = lang
+        return lang
+    except Exception as e:  # noqa: BLE001  — a language that cannot be worked out is English, never a refused page
+        print(f"page language not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return _i18n.DEFAULT
+
+
 def _panel_ordered(request, resp):
     """A page's HTML answer with the side panel as the signed-in person left it: its sections in their saved order (ui/render.py apply_panel_order) and the panel closed when they closed
-    it (apply_panel_open); any other answer, a visitor not signed in and a person who never moved a section or closed the panel get it as it is. The page is drawn in the default
-    order with the panel open (the home is one kept draw for everyone), so both are put in on the way out and are in the first paint. A page that cannot be read or changed is
-    served as it was, never refused for it."""
+    it (apply_panel_open), and in their language (apply_lang: <html lang>, the page scripts' words, the fixed buttons); any other answer, a visitor not signed in and a person who never moved a
+    section, closed the panel or picked a language get it as it is. The page is drawn in the default order with the panel open (the home is one kept draw per language), so both are put in on
+    the way out and are in the first paint. A page that cannot be read or changed is served as it was, never refused for it."""
     try:
         if (request.method != "GET" or not isinstance(resp, HTMLResponse)
                 or resp.status_code != 200 or not str(resp.media_type or "").startswith("text/html")):
             return resp
         email = _ui_email(request)
-        order, is_open = _uiprefs.panel_prefs(email) if email else ([], True)
-        if not email or (_uiprefs.is_default(order) and is_open):
-            return resp
         from stackshot.web.ui import render as r2
-        page = r2.apply_panel_open(r2.apply_panel_order(bytes(resp.body).decode("utf-8"), order), is_open)
+        if not email:       # not signed in: nothing of a person's to put in, and the language switch (it saves per person) comes out
+            page = bytes(resp.body).decode("utf-8")
+            if 'id="panel-lang"' not in page:
+                return resp
+            page = r2.strip_lang_toggle(page)
+        else:
+            order, is_open = _uiprefs.panel_prefs(email)
+            lang = _request_lang(request)
+            if _uiprefs.is_default(order) and is_open and lang == _i18n.DEFAULT:
+                return resp
+            page = r2.apply_lang(r2.apply_panel_open(r2.apply_panel_order(bytes(resp.body).decode("utf-8"), order), is_open, lang), lang)
         resp.body = page.encode("utf-8")
         resp.headers["content-length"] = str(len(resp.body))
     except Exception as e:  # noqa: BLE001
@@ -7503,7 +7528,7 @@ def _panel_ordered(request, resp):
 
 
 _UI_WRITES = ("/items/", "/for-you/", "/landed/", "/runners/", "/prefs/")      # the write routes of the root pages: a post to one drops the kept home
-_UI_WRITES_KEEP_HOME = ("/prefs/panel-open",)      # …except this one: the home's draw does not depend on whether the panel is open (apply_panel_open puts it in per person on the way out), so a toggle leaves the kept draw
+_UI_WRITES_KEEP_HOME = ("/prefs/panel-open", "/prefs/lang")      # …except these: the home's draw does not depend on whether the panel is open (apply_panel_open puts it in per person on the way out) nor on whose language it is (each language has its own kept draw), so a toggle leaves the kept draws
 _RO_REFUSED_PATHS = ("/audit/now",)
 _RO_LIVE_ONLY = ("/runners", "/runners.json")       # these read GitHub and other machines over ssh on each request: the live board does that, a standby asks nobody
 
@@ -7537,7 +7562,12 @@ def _custom_route_ro(path, methods, **kw):
         async def guarded(request):
             path = request.url.path
             if not _ro.is_read_only():
-                resp = _ui_renewed(request, _panel_ordered(request, await fn(request)))
+                tok = _i18n.set_current(_request_lang(request))      # the page handler draws in the person's language (i18n.current)
+                try:
+                    resp = await fn(request)
+                finally:
+                    _i18n.reset_current(tok)
+                resp = _ui_renewed(request, _panel_ordered(request, resp))
                 if request.method == "POST" and path.startswith(_UI_WRITES) and not path.startswith(_UI_WRITES_KEEP_HOME):      # a write from a page of the board: the home is drawn again on its next read
                     _board_home_drop()
                 return resp
@@ -7545,7 +7575,12 @@ def _custom_route_ro(path, methods, **kw):
                 return PlainTextResponse(_ro.REFUSAL, status_code=503, headers={"Cache-Control": "no-store"})
             if path in _RO_LIVE_ONLY:
                 return PlainTextResponse("this page reads GitHub and the other machines; on a read-only standby copy (STACKSHOT_READ_ONLY) it is on the live board.", status_code=503, headers={"Cache-Control": "no-store"})
-            return _ui_renewed(request, _ro_with_banner(_panel_ordered(request, await fn(request))))
+            tok = _i18n.set_current(_request_lang(request))
+            try:
+                resp = await fn(request)
+            finally:
+                _i18n.reset_current(tok)
+            return _ui_renewed(request, _ro_with_banner(_panel_ordered(request, resp)))
         deco(guarded)
         return fn
     return wrap
@@ -17039,6 +17074,26 @@ async def panel_open_save(request: Request):
     return JSONResponse({"open": is_open}, headers={"Cache-Control": "no-store"})
 
 
+@mcp.custom_route("/prefs/lang", methods=["POST"])
+async def lang_save(request: Request):
+    """Save the language the signed-in person reads the board's pages in: the page's KO/EN switch at the foot of the side panel sends it. Body (JSON): {"lang": "en"} or {"lang": "ko"}, one of the codes
+    in i18n.LANGS (anything else, a body that is not an object, or no `lang` is 400). Kept per person on the server beside the panel settings (uiprefs.py), so every page, reload, browser and device reads
+    the same language; English is the default and is stored as no key. A code with no catalog loaded is kept all the same and draws in English until its catalog (the folder [ui] locale_dir names) loads.
+    The gates are the order save's (_prefs_body): signed in to the board (403 otherwise), from the board's own origin (403), a JSON body of at most 4 KB (413, 415, 400). A settings file that cannot be
+    read or written is 503 ("could not be saved"), and nothing is changed. Answers {"lang": code}."""
+    email, d, refused = await _prefs_body(request, "language")
+    if refused is not None:
+        return refused
+    if not isinstance(d, dict) or not isinstance(d.get("lang"), str) or d["lang"] not in _i18n.LANGS:
+        return PlainTextResponse("send " + " or ".join('{"lang": "%s"}' % c for c in _i18n.LANGS), status_code=400)
+    try:
+        lang = _uiprefs.set_lang(email, d["lang"])
+    except OSError as e:
+        print(f"language not saved: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return PlainTextResponse("the language could not be saved on the server; try again", status_code=503, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"lang": lang}, headers={"Cache-Control": "no-store"})
+
+
 @mcp.custom_route("/prefs/panel-order", methods=["POST"])
 async def panel_order_save(request: Request):
     """Save the signed-in person's order of the board's side panel's sections (Machines, Runners, Anchor hub, Audit, Projects), or put it back to the default. Body (JSON):
@@ -17529,24 +17584,28 @@ _BOARD_FAIL_BACKOFF_S = 10.0                # after a failed draw no other is tr
 
 
 def _board_home_draw_locked() -> None:
-    """Draw the root home if none is held or the held one is older than _BOARD_HOME_TTL_S, and no draw failed within _BOARD_FAIL_BACKOFF_S. The caller holds _BOARD_HOME_LOCK."""
+    """Draw the root home if none is held or the held one is older than _BOARD_HOME_TTL_S, and no draw failed within _BOARD_FAIL_BACKOFF_S. The caller holds _BOARD_HOME_LOCK. Each language has its own
+    kept draw (the request's, i18n.current(); English is _BOARD_HOME)."""
     now = time.time()
-    if _BOARD_HOME["html"] is not None and now - _BOARD_HOME["at"] <= _BOARD_HOME_TTL_S:
+    slot = _board_home_slot(_i18n.current())
+    sig = _i18n.signature()      # a catalog added, removed or edited makes the held draws stale at once (the switch and the words are in them)
+    if slot["html"] is not None and now - slot["at"] <= _BOARD_HOME_TTL_S and slot.get("sig") == sig:
         return
-    if now - _BOARD_HOME["failed"] < _BOARD_FAIL_BACKOFF_S:
+    if now - slot["failed"] < _BOARD_FAIL_BACKOFF_S:
         return
     with _BOARD_GEN_LOCK:
-        gen = _BOARD_HOME["gen"]
+        gen = slot["gen"]
     try:
         from stackshot.web.ui import render as r2
         page = r2.Board(str(_store.STORE), contact_of=_contact_label).html()
-        _BOARD_HOME["drawn"] = int(now)
-        _BOARD_HOME["html"] = page
-        _BOARD_HOME["failed"] = 0.0
+        slot["drawn"] = int(now)
+        slot["sig"] = sig
+        slot["html"] = page
+        slot["failed"] = 0.0
         with _BOARD_GEN_LOCK:                # a drop between the start of the draw and here is not overwritten: the next read draws again
-            _BOARD_HOME["at"] = now if _BOARD_HOME["gen"] == gen else 0.0
+            slot["at"] = now if slot["gen"] == gen else 0.0
     except Exception as e:  # noqa: BLE001
-        _BOARD_HOME["failed"] = time.time()  # when it failed, not when it started: a slow failing draw still backs off
+        slot["failed"] = time.time()  # when it failed, not when it started: a slow failing draw still backs off
         print(f"home render failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
@@ -17554,7 +17613,7 @@ def _board_home() -> str | None:
     """The root home page as HTML: the kept one while it is younger than _BOARD_HOME_TTL_S, else drawn now; the last good one if a draw fails (and for _BOARD_FAIL_BACKOFF_S after it, with no new draw); None before the first."""
     with _BOARD_HOME_LOCK:
         _board_home_draw_locked()
-        return _BOARD_HOME["html"]
+        return _board_home_slot(_i18n.current())["html"]
 
 
 def _board_home_kick() -> None:
@@ -17565,10 +17624,13 @@ def _board_home_kick() -> None:
     started = False
     try:
         now = time.time()
-        if (_BOARD_HOME["html"] is None or now - _BOARD_HOME["at"] > _BOARD_HOME_TTL_S) and now - _BOARD_HOME["failed"] >= _BOARD_FAIL_BACKOFF_S:
+        lang = _i18n.current()
+        slot = _board_home_slot(lang)
+        if (slot["html"] is None or now - slot["at"] > _BOARD_HOME_TTL_S or slot.get("sig") != _i18n.signature()) and now - slot["failed"] >= _BOARD_FAIL_BACKOFF_S:
             def run() -> None:
                 try:
-                    _board_home_draw_locked()
+                    with _i18n.use(lang):       # a new thread has no request language: the draw is the one asked for
+                        _board_home_draw_locked()
                 finally:
                     _BOARD_HOME_LOCK.release()
             threading.Thread(target=run, name="home-draw", daemon=True).start()
@@ -17581,11 +17643,12 @@ def _board_home_kick() -> None:
 def _board_home_stamp() -> int | None:
     """When the root home the server holds was drawn (epoch seconds): the stamp the page carries, else the time of the draw; None while nothing has been drawn. It only reads: it never draws and
     never waits for a draw, and a drop does not change it (the copy held is the one the stamp tells). Never 0."""
-    page = _BOARD_HOME["html"]
+    slot = _board_home_slot(_i18n.current())
+    page = slot["html"]
     if page is None:
         return None
     m_ = _STAMP_RE.search(page.encode("utf-8", "replace")[:4096])
-    ts = int(m_.group(1)) if m_ else int(_BOARD_HOME["drawn"])
+    ts = int(m_.group(1)) if m_ else int(slot["drawn"])
     return ts if ts > 0 else None
 
 
