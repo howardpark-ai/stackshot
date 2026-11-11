@@ -381,6 +381,18 @@ check("5.14 the parked state's missing-field hint no longer says a wake alone is
 stale14 = [str(f.relative_to(root14)) for f in (root14 / "stackshot").rglob("*.py")
            if any(x in f.read_text(encoding="utf-8") for x in ("a wake alone is a reminder", "A wake alone is a reminder", "is a reminder that leaves the item active", "check-back reminder, and the item stays alive"))]
 check("5.14 no stackshot source still says a wake alone is a reminder (the comments and docstrings too)", not stale14, stale14)
+phrases14 = {str(f.relative_to(root14)): [x for x in ("shows no wait", "show no wait") if x in f.read_text(encoding="utf-8")] for f in (root14 / "stackshot").rglob("*.py")}
+check("5.14 no stackshot source says a wake alone shows no wait (the get and brief text, the update description, comments)", not any(phrases14.values()), {k: v for k, v in phrases14.items() if v})
+served14 = [r for r in ("stackshot/web/server.py", "stackshot/waits/self_wait.py", "stackshot/model/model_guards.py", "stackshot/model/states.py") if "check-back" in (root14 / r).read_text(encoding="utf-8")]
+check("5.14 no served text or prompt (server.py, self_wait.py, model_guards.py, states.py) still calls a date a check-back", not served14, served14)
+# what the update description now says about a basis is what the guard does: a bare date within the cap refuses one, a hold's wake and a date past the cap take one
+item(94, needs=[BACK]); item(95, needs=[BACK]); item(96, needs=[BACK])
+refused("5.14 a bare date within the cap refuses a wait_basis as not needed", lambda: bupd(94, until=w(3), wait_basis=f"the vendor ships {w(3)}"), "wait_basis is not needed", "a wait on its own")
+check("5.14 …a hold's wake takes it", bool(bupd(95, hold=True, wake=w(3), wait_basis=f"the vendor ships {w(3)}")) and bool(W.basis_of(mt(95))), mt(95))
+check("5.14 …and a date past the cap takes it", bool(bupd(96, until=w(40), wait_basis=f"the vendor ships {w(40)}")) and bool(W.basis_of(mt(96))), mt(96))
+upd14 = server._UPDATE_DESC + server._WAIT_FORM
+check("5.14 the update description says so: a bare date within the cap refuses a basis unless the item is on hold or verifying, and a date no longer leaves an item active as a reminder",
+      "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "refused as not needed unless the item is on hold (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
 check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
