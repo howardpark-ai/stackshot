@@ -442,7 +442,10 @@ for lg in ("en", "ko"):
     runs[lg] = json.loads(sp.stdout) if sp.returncode == 0 and sp.stdout.strip() else sp.stderr[-400:]
 ok_runs = all(isinstance(v, dict) for v in runs.values())
 check("ui.render imported first under a non-English request language: every module-level value is what an English import gives", ok_runs and runs["ko"] == runs["en"], runs if not ok_runs else [k for k in runs["en"] if runs["en"][k] != runs["ko"].get(k)][:5])
-check("…in particular the lists' state and lane words, and no marker of the test language anywhere in the module", ok_runs and runs["ko"].get("STATE_WORDS", {}).get("doing") == "On agent" and runs["ko"].get("LANE_WORDS", {}).get("call") == "Your move" and "[x:" not in json.dumps(runs["ko"]), ok_runs and runs["ko"].get("STATE_WORDS"))
+_ko = runs["ko"] if ok_runs else {}
+_lane_words = {k: r2._ui.WORDS.get(v) for k, v in _ko.get("_LANE_KINDS", {}).items()}      # the lists' words per lane and state, from the module's own tables
+_state_words = {k: r2._ui.WORDS.get(v) for k, v in _ko.get("_STATE_KINDS", {}).items()}
+check("…in particular the lists' state and lane words are the English ones, and no marker of the test language anywhere in the module", ok_runs and _state_words.get("doing") == "On agent" and _lane_words.get("call") == "Your move" and "[x:" not in json.dumps(_ko), _state_words)
 
 # ---- 8. the item page: every interface word of it reads through the string table (stage 2)
 # item-page fixture begin
@@ -829,7 +832,9 @@ check("…and the age is never a word of any translation (the template's own mar
 _all_keys = list(EN); _block = _all_keys[_all_keys.index("item.unknown") + 1:]
 _src_all = "\n".join(pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/itempage.py"))
 _unused = [k for k in _block if k not in used and not re.search(r"""['"]""" + re.escape(k) + r"""['"]""", _src_all)]
-check("every key the string table gained after item.unknown is asked for by the source", len(_block) >= 30 and not _unused, _unused)
+_STAGE_PREFIXES = ("item.log.", "item.when.", "js.answer.", "home.rendered_line", "home.command", "link.mockup_", "link.session_", "item.due_", "item.no_agent", "item.cloud", "item.work", "wait.")      # the groups that stage added: each one must still be found after item.unknown, so the scan cannot go quiet by finding no block
+_missing_prefix = [pf for pf in _STAGE_PREFIXES if not any(k.startswith(pf) for k in _block)]
+check("every key the string table gained after item.unknown is asked for by the source", not _missing_prefix and not _unused, (_missing_prefix, _unused))
 
 # a translated value goes into an attribute escaped: a value with a double quote (and a tag in it) must not break the attribute or open an element
 from html.parser import HTMLParser

@@ -403,7 +403,7 @@ check("History: an item with no stored state is read by its lane", "moved to <b>
 check("History: the creation line says the list's word (item 32 was born asking for a decision), not 'your call' / 'on agent'", re.search(r"created as “[^”]*” · Your move · ", h31) is not None and re.search(r"created as “[^”]*” · Your move · ", h32) is not None and re.search(r"created as “[^”]*” · On agent · ", h33) is not None, re.findall(r"created as [^<]*", h31 + h32 + h33)[:3])
 check("History: no page carries 'your call', 'on others' or 'on agent' as a whose-move word", not re.search(r"· (?:your call|on others|on agent)\b|whose move", h31 + h32 + h33 + p1 + p6 + p14), None)
 check("History: a stored state that is no string does not raise", "<h1>" in h33 and "state cleared" in h33, re.findall(r"state cleared[^<]*", h33))
-check("STATE_WORDS is looked up safely: a list, None and an unknown word give no word", [r2.list_word(x) for x in (["a"], None, "nonsense", {"a": 1})] == ["", "", "", ""] and r2.list_word("your-step", "") == "Your move" and r2.list_word(["a"], "relay") == "Waiting")
+check("list_word is looked up safely: a list, None and an unknown word give no word", [r2.list_word(x) for x in (["a"], None, "nonsense", {"a": 1})] == ["", "", "", ""] and r2.list_word("your-step", "") == "Your move" and r2.list_word(["a"], "relay") == "Waiting")
 # the item page prints no computed date: a wait on a date shows no Expected by row, on time or late, and no 'past due by'
 import datetime as _dt
 ZONE = _dt.timezone(_dt.timedelta(hours=4))   # the pinned instance timezone, Asia/Dubai: UTC+4, no DST

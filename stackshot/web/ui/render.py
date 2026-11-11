@@ -371,12 +371,9 @@ def recycle_due(r, open_after):
     so the two never disagree about which items wait."""
     if r.get("status") != "open" or not waits_recycle(r): return False
     return not is_held(r) or held_only_for_recycle(r, open_after)
-_W = _ui.WORDS      # the English words (module level code runs once, at the first import, in whatever language that request had: never ask the request's language here)
 _LANE_KINDS = {"call": _ui.YOUR_MOVE, "relay": _ui.WAITING, "": _ui.AGENT}      # needs_kind → the lists' state kind, for an item with no stored state
 _STATE_KINDS = {"doing": _ui.AGENT, "your-call": _ui.YOUR_MOVE, "your-step": _ui.YOUR_MOVE,
                 "outside": _ui.WAITING, "blocked": _ui.WAITING, "parked": _ui.WAITING, "verifying": _ui.WAITING}   # a stored state → the state kind whose word the lists use
-LANE_WORDS = {k: _W[v] for k, v in _LANE_KINDS.items()}      # the same in English (module level: never the request's language; list_word says them in the request's)
-STATE_WORDS = {k: _W[v] for k, v in _STATE_KINDS.items()}
 
 
 def list_word(state, kind=None):
