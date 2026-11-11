@@ -23,7 +23,8 @@ from stackshot.web import render as _rmod
 from stackshot.web.common import _clip_line
 from stackshot.web.foryou_slack import _foryou_slack
 from stackshot.web.shared import _item_url, _owner_words, _publish, _session_label
-from stackshot.web.store import _item_files, _load
+from stackshot.core.store import _item_files
+from stackshot.web.store import _load
 
 
 # A notice for the owner is a row in the For you list (foryou.py: the board's section, `client.py get for-you` for the fleet tool's web server), never a front

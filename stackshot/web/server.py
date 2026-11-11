@@ -225,39 +225,20 @@ def _pub_letter() -> str:
     return str(_cfg.get("fleet", "publisher_letter") or "a")
 
 
-from stackshot.web import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import) and the readers of it (store.py); `STORE` is read and set on that module, never here
-from stackshot.web.store import _item_files, _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of the store, kept on this module as well (store.py)
-LETTER = str(_cfg.get("ids", "letter") or "s")
-NEXT_ID = _store.STORE / "next-id"
+from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
+from stackshot.core.store import _item_files, _next_id, _write_item  # noqa: E402  — core/store.py
+from stackshot.web.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item, kept on this module as well (web/store.py)
 REQUESTS = _cfg.state("requests.json")
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
 else:
-    (_store.STORE / LETTER).mkdir(parents=True, exist_ok=True)
+    (_store.STORE / _store.LETTER).mkdir(parents=True, exist_ok=True)
     REQUESTS.parent.mkdir(parents=True, exist_ok=True)
 
 
 # ----------------------------------------------------------------------------- store (the one store, every letter)
-# _item_files, _path and _load, and STORE they read, are store.py's (imported where STORE was defined, above); _shown_ids is store.py's too.
-
-
-def _next_id() -> str:
-    """Allocate the next global id. The file is the single counter; seeded from the highest id in the store."""
-    import fcntl
-    _ro.guard("id allocation")                # next-id is part of the store
-    NEXT_ID.parent.mkdir(parents=True, exist_ok=True)
-    with open(NEXT_ID, "a+", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0)
-        raw = f.read().strip()
-        cur = int(raw) if raw.isdigit() else 0
-        if cur == 0:
-            cur = max([int(g[1:]) for g, _ in _item_files()] or [0])
-        nxt = cur + 1
-        f.seek(0); f.truncate(); f.write(str(nxt)); f.flush()
-        fcntl.flock(f, fcntl.LOCK_UN)
-    return f"{LETTER}{nxt}"
+# STORE, _item_files, _next_id and the file write are core/store.py's; _path, _load and _shown_ids are web/store.py's (imported where STORE was defined, above).
 
 
 # _norm_id, _bare_id_ok and _GID (an id as a session writes it → the store's) are model/ids.py's.
@@ -767,10 +748,7 @@ def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", auth
     _phase_stamp(gid, item)      # last, once the fields are final: the phase the board shows the item as (alive or waiting) is stored beside the fields it is read from
     _stamp_progress(item, before, writer, author, activity)      # the progress clock reads the phase just stored: only a step marked, a state change or a merge moves it
     _ip.stamp(item.get("metadata"))      # and the project's permanent id beside the page it is filed on (a key that names a project sets it)
-    tmp = p.with_name(f".{p.name}.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(item, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, p)
+    _write_item(p, item)
     try:
         _foryou_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
     except Exception as e:  # noqa: BLE001  — the list never fails a write

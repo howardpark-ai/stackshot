@@ -73,6 +73,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -535,7 +536,7 @@ src = pathlib.Path(os.environ.get("PHASE_REPLAY_STORE") or "/nonexistent").expan
 if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):
     R = pathlib.Path(_scratch.mkdtemp(prefix="pr2stamp-replay-"))
     lockfd = os.open(R, os.O_RDONLY | os.O_DIRECTORY); fcntl.flock(lockfd, fcntl.LOCK_SH)          # tmpfiles ageing skips a locked folder
-    real_store = server._store.STORE
+    real_store = _core_store.STORE
     try:
         subprocess.run(["cp", "-a", str(src), str(R / "store")], check=True)
         shutil.rmtree(R / "store" / ".git", ignore_errors=True)
@@ -544,7 +545,7 @@ if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):
         pr = run("--dry-run", "--store", str(R), "--report-dir", str(RDIR / "replay"))
         rep_j = sorted((RDIR / "replay").glob("*.json"))
         check("15 replay: the dry run over the copy of the live store ends well with every proof at 0", pr.returncode == 0 and len(rep_j) == 1, (pr.returncode, ({k: v for k, v in (json.loads(rep_j[0].read_text()).get("proofs") or {}).items() if v}, json.loads(rep_j[0].read_text()).get("display_diff_detail")) if rep_j else None, pr.stderr[-300:]))
-        server._store.STORE = R / "store"
+        _core_store.STORE = R / "store"
         items0 = SP.load_dir(R / "store")
         opens = sorted((g for g, it in items0.items() if it.get("status") == "open"), key=SP.num)
         t_ = time.time()                                              # one clock for both reads: the stamp between them takes a while and a minute edge is no change of the stamp's
@@ -570,7 +571,7 @@ if src.is_dir() and any(q.is_dir() and len(q.name) == 1 for q in src.iterdir()):
         print(f"replay: {len(items0)} items copied, {len(opens)} open stamped ({collections.Counter(r['action'] for r in applied)}); waiting by kind {dict(kinds1)}; storing a wait_kind {len(stored_wk)}; "
               f"changes by row {rj_.get('by_change')}")
     finally:
-        server._store.STORE = real_store
+        _core_store.STORE = real_store
         os.close(lockfd)
         shutil.rmtree(R, ignore_errors=True)
 else:

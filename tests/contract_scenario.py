@@ -233,6 +233,7 @@ check("…a line addressed by that name records the live session's id", line["uu
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
 from stackshot.web import server
+from stackshot.core import store as _core_store
 ls = server._sessions_listing("", now=T3 + 2).split("\n"); ly = [l for l in ls if l.startswith("- work-y2 ")]
 check("sessions tool: the live namesake plain, the gone owner of an open item kept with its last sign of life",
       len(ly) == 2 and any(l == f"- work-y2 — {NEW} · box-far" for l in ly) and any(re.fullmatch(rf"- work-y2 — {re.escape(LINK)} · box-far · not running \(last seen \d\d-\d\d \d\d:\d\d \+04; kept as the mover of open items\)", l) for l in ly), ly)
@@ -818,7 +819,7 @@ with TestClient(app) as c:
     check("titles: the board keeps the instance's title as it is in every title bar and tab",
           all(x.status_code == 200 for x in _pages.values())
           and all("stackshot: example" in _site(_pages[u].text) for u in ("/", "/closed", "/search?q=item")), {u: (x.status_code, _site(x.text), _tab(x.text)) for u, x in _pages.items()})
-    _bt = server._rmod.Board(str(server._store.STORE)); _md = _bt.markdown()
+    _bt = server._rmod.Board(str(_core_store.STORE)); _md = _bt.markdown()
     check("titles: Board.title is the plain instance title, and the markdown render (board.md) heads with it", _bt.title == "stackshot: example" and _md.startswith("# stackshot: example\n"), (_bt.title, _md[:60]))
     check("…and the files next to the board are served as before", c.get("/healthz").text == "ok" and c.get("/board.md", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code in (200, 503)
           and c.get("/nothing.txt", cookies={"stackshot_ui": sess}, follow_redirects=False).status_code == 404)

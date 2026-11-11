@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -164,13 +165,13 @@ def counts(store, t, on):
         return dict(c), w
 def with_store(src, fn):
     """fn(path) on a private copy of `src`, the server pointed at it and removed after, whatever happens."""
-    R_ = pathlib.Path(_scratch.mkdtemp(prefix="storedpair-copy-")); real, anc = server._store.STORE, server._anc.FILE
+    R_ = pathlib.Path(_scratch.mkdtemp(prefix="storedpair-copy-")); real, anc = _core_store.STORE, server._anc.FILE
     try:
         shutil.copytree(src, R_ / "store", ignore=shutil.ignore_patterns(".git", "*.tmp", ".*"))
-        server._store.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
+        _core_store.STORE = R_ / "store"; server._anc.FILE = R_ / "store/anchors.json"
         return fn(R_ / "store")
     finally:
-        server._store.STORE, server._anc.FILE = real, anc
+        _core_store.STORE, server._anc.FILE = real, anc
         shutil.rmtree(R_, ignore_errors=True)
 def counters(): return _model.UNSTAMPED["count"]
 def quietly(fn, *a):

@@ -51,6 +51,7 @@ def reload_with(text):
     return out, err.getvalue()
 
 from stackshot.core import config; from stackshot.projects import pages; from stackshot.fleet import clients; from stackshot.fleet import fleet; from stackshot.web import server
+from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
 from stackshot.anchors.anchorhub import core as hubcore
 
@@ -119,7 +120,7 @@ check("restart-only: only the live key is applied", out == ["page_rule.slack_sec
 check("restart-only: the running values stay in CFG", config.get("server", "port") == 8020 and config.get("instance", "owner") == "the owner"
       and str(config.path("paths", "store")) == f"{tmp}/store" and config.audit_at() == ["05:00", "20:00"] and config.freshness_days()["call_days"] == 1.0,
       (config.get("server", "port"), config.get("instance", "owner"), config.path("paths", "store")))
-check("restart-only: what was wired at import agrees with CFG", server.OWNER == "the owner" and server._store.STORE == T / "store")
+check("restart-only: what was wired at import agrees with CFG", server.OWNER == "the owner" and _core_store.STORE == T / "store")
 for k in ("instance.owner", "paths.store", "freshness.call_days"):
     check(f"restart-only: {k} is logged as waiting for the restart", f"config reload: {k} changed: takes effect at the next restart\n" in log, log)
 for k in ("audit.at", "server.port"):
