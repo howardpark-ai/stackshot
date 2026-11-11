@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -48,6 +49,7 @@ LIMIT = 45 * 60.0          # seconds without activity on an item on an agent bef
 BACKSTOP_S = 2 * 3600.0   # an item on an agent silent this long with no finding is a defect of the pass (`uncovered`)
 SUBAGENT_S = 90 * 60.0    # a step status in progress counts as a running build subagent for this long after it was last changed (a pane recycle stops subagents and leaves the line behind)
 FILE = "silence.json"
+BACKSTOP_FILE = "silence-backstop.json"      # the ids the backstop has told the builder of, kept so a restart does not tell them again
 STAMP_KEYS = ("id", "project", "owner", "category", "mover", "detail", "source", "sent", "sending_from", "run_started")
 
 
@@ -63,6 +65,32 @@ def read_silence() -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return d if isinstance(d, dict) else {}
+
+
+def read_backstop() -> set[str]:
+    """The item ids the backstop has told the builder of and that were still uncovered when it last looked (`<paths.state>/audit/silence-backstop.json`, a JSON list). An empty set when none, or when the file cannot be read."""
+    try:
+        d = json.loads((_audit.state_dir() / BACKSTOP_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    return {x for x in d if isinstance(x, str)} if isinstance(d, list) else set()
+
+
+def write_backstop(ids: set[str]) -> None:
+    """Keep the told ids, written whole through a temporary file and renamed over the old one (a reader never sees half). A file that cannot be written is logged and never stops the backstop: the cost is one repeat message after a restart."""
+    tmp: Path | None = None
+    try:
+        p = _audit.state_dir() / BACKSTOP_FILE      # inside the try: the folder is made on first use, and that can fail too
+        tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(sorted(ids)), encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError as e:
+        print(f"silence: backstop record not kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def minutes(secs: float) -> str:

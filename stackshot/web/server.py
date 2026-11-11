@@ -1305,9 +1305,18 @@ def _front_pair_ok(sender: str, key: str, project: str) -> bool:
         return False
 
 
-def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]") -> ToolError:
+def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", project: str = "") -> ToolError:
+    """The refusal of a front-mover case with no builder to substitute. A project with no background agent says so; one whose background agent only the project record holds (its page line
+    still owed: front_only is False but no builder is listed yet) says the page does not list it yet, not that there is none."""
     key, proj, builder, hub = case
+    owed = False
+    if not builder and project:
+        try:
+            owed = not _anc.front_only(project)
+        except Exception:  # noqa: BLE001  — the wording only: a failed read gives the plain text
+            owed = False
     where = (f"Hand build work to the project's builder, {builder[0]} ({field}={builder[0]}); " if builder
+             else f"{hub or 'The project'}'s background agent is not on its page yet, so there is no builder to hand it to yet; keep the item with its current mover; " if owed
              else f"{hub or 'The project'} has no builder and no background agent to hand it to, so keep the item with its current mover; ")
     return ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
                      f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). {where}"
@@ -1330,9 +1339,9 @@ def _fix_front_mover(field: str, value: str, sender: str, project: str, current:
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
-        if field == "mover" and _front_pair_ok(sender, key, project):      # a project with no builder: one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
+        if field == "mover" and _front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
             return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is told it is handed the item)", []
-        raise _front_mover_refusal(field, case)
+        raise _front_mover_refusal(field, case, project)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
                         f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent; for a check or an answer only {key} can give, message it)"), \
         [(_sf.FRONT_MOVER, _sf.bind(token, by, now), f"{field} {key} → {builder[0]}: {key} is a user-facing agent and gets no hand-off notice from another session; sending {field}={key} again keeps it as sent")]
@@ -4210,7 +4219,7 @@ from stackshot.web.decision_gates import (  # noqa: E402,F401
     _code_defined, _one_decision_kind, _one_decision, _gate_one_decision, _OWN_VERBS, _OWN_DONE, _OWN_JUDGE_RX, _OWN_NOT_DO, _OWN_END, _OPEN_Q_RX,
     _OWN_ALT_RX, _OWN_STOP, _OWN_MATCH_SHARE, _own_word, _own_words, _YESNO_LABELS, _GOAHEAD_LABELS, _own_action_rx, _labels_in, _yes_no_options,
     _own_action_lines, _own_line_named, _own_action_ask, _gate_own_action, _recommend_missing, _options_note, _QUOTED_RX, _BARE_PRONOUN_RX,
-    _OPT_PRONOUN_RX, _ACTOR_EXAMPLE, _PRONOUN_HEAD, _PRONOUN_TAIL, _bare_pronoun, _actor_note,
+    _OPT_PRONOUN_RX, _ACTOR_EXAMPLE, _PRONOUN_HEAD, _PRONOUN_TAIL, _ROMAN_NOUN_RX, _ROMAN_SEP, _ROMAN_AFTER_RX, _ROMAN_BEFORE_RX, _roman_one, _bare_pronoun, _actor_note,
 )
 
 
@@ -6193,14 +6202,15 @@ def _silence_tick() -> "dict[str, Any] | None":
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
 _BACKSTOP_LAST = [0.0]
-_BACKSTOP_TOLD: "set[str]" = set()      # the items the builder has been told of while they stay uncovered (memory only: a restart tells once more); one that has a finding again, or is gone, drops out
+_BACKSTOP_TOLD: "set[str]" = set()      # the items the builder has been told of while they stay uncovered; one that has a finding again, or is gone, drops out. Kept in `<state>/audit/silence-backstop.json` and read once per process, so a restart does not tell them again
+_BACKSTOP_LOADED = [False]
 _BACKSTOP_LINES = 10          # at most this many items in one message, then "+N more"
 
 
 def _silence_backstop(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, skip: Any = None, env: Any = None) -> "list[dict[str, Any]]":
     """The silence pass's backstop, looked at once an hour from the ten-minute silence tick: an open item the board shows on an agent that has had no activity for 2 hours (`silence.BACKSTOP_S`) and that the
     pass has no finding for (`silence.uncovered`) is a defect of the pass, whatever exemption hid it. Each such item is told ONCE to the builder (the audit's builder, the way the runner's watchdog tells it) in one
-    stderr line and one message that asks nothing of the owner and makes no board item; it is told again only after it has had a finding (or left the board) and is then missed again. `now`, `items`, `skip`, `env` are for tests
+    stderr line and one message that asks nothing of the owner and makes no board item; it is told again only after it has had a finding (or left the board) and is then missed again, and a restart does not tell it again (the told ids are kept on disk). `now`, `items`, `skip`, `env` are for tests
     and the tick (the tick passes the pass's own `env`; with none it is built the same way, `_silence_env`). → the uncovered items, told or not."""
     now = time.time() if now is None else now
     if now - _BACKSTOP_LAST[0] < _BACKSTOP_EVERY:
@@ -6208,12 +6218,19 @@ def _silence_backstop(now: float | None = None, items: "dict[str, dict[str, Any]
     _BACKSTOP_LAST[0] = now
     from stackshot.audit import silence as _silence
     from stackshot.tools import next_report as _nr
+    if not _BACKSTOP_LOADED[0]:      # the first look of this process: whom the builder was told of before a restart stays told
+        _BACKSTOP_LOADED[0] = True
+        _BACKSTOP_TOLD.update(_silence.read_backstop())
     late = _silence.uncovered(items if items is not None else _nr.load_all(None), now, env if env is not None else _silence_env(), skip)
+    told_before = set(_BACKSTOP_TOLD)
     _BACKSTOP_TOLD.intersection_update({x["id"] for x in late})
     fresh = [x for x in late if x["id"] not in _BACKSTOP_TOLD]
     if not fresh:
+        if _BACKSTOP_TOLD != told_before:
+            _silence.write_backstop(_BACKSTOP_TOLD)
         return late
     _BACKSTOP_TOLD.update(x["id"] for x in fresh)
+    _silence.write_backstop(_BACKSTOP_TOLD)      # before the send: a restart in between loses one message at worst, never repeats one
     lines = [f"{x['id']} · {x['mover'] or 'no mover'} · no activity for {_silence.minutes(x['silent'])}" for x in fresh]
     print(f"silence: backstop: {len(fresh)} item(s) on an agent silent for over {_silence.minutes(_silence.BACKSTOP_S)} with no silence finding: {', '.join(x['id'] for x in fresh)}", file=sys.stderr, flush=True)
     to = _cfg.audit_builder()
@@ -8722,7 +8739,7 @@ def _handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool
 
 
 def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
-    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a project with no builder (the case _fix_front_mover lets through)?"""
+    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a front-only project (anchors.front_only; the case _fix_front_mover lets through)?"""
     try:
         _roles, key = _role_of(to)
         return bool(key) and _front_pair_ok(str(rec.get("from") or ""), key, project)
@@ -8743,7 +8760,7 @@ def _handoff_notify(gid: str, item: dict[str, Any]) -> str:
         if any(g == gid and (s == tid or _ho_same(s, to)) for g, s in told):
             return ""
         proj = str((item.get("metadata") or {}).get("project") or "")
-        if _front_keeper(to, proj)[0] and not _front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project that has no builder
+        if _front_keeper(to, proj)[0] and not _front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project when that project is front-only
             return ""
         _tell_woken(gid, tid or to, _handoff_text(gid, item, r), tag="handoff")
         return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)})"

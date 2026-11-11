@@ -341,18 +341,34 @@ def _options_note(meta: dict[str, Any]) -> str:
 # A note in the reply, never a refusal. English only; text inside double quotes or backticks is skipped (a person's quoted words).
 _QUOTED_RX = re.compile(r"`[^`]*`|\"[^\"]*\"|\u201c[^\u201d]*\u201d")
 _PRONOUN_TAIL = r"(?:['\u2019](?:ll|re|ve|d|m))?(?![\w/'\u2019-])(?!\.\w)"
-_PRONOUN_HEAD = r"(?<![\w'\u2019/.-])"
+_PRONOUN_HEAD = r"(?<![\w'\u2018\u2019/.-])"      # a straight or a curly single quote before the word reads the same: the word sits inside a quote
 _BARE_PRONOUN_RX = re.compile(_PRONOUN_HEAD + r"(you|your|yours|yourself|i|me|my|mine|myself)" + _PRONOUN_TAIL, re.I)
 # For an option's label and line: the same words plus we/our/ours/us (and ourselves). A whole word only: "usage", "mine-sweeper", "US-EAST" and
 # "I/O" are not hits, and an all-caps "US" (the abbreviation) is not the pronoun.
 _OPT_PRONOUN_RX = re.compile(_PRONOUN_HEAD + r"(you|your|yours|yourself|i|me|my|mine|myself|we|our|ours|ourselves|us)" + _PRONOUN_TAIL, re.I)
+# A capital I that is the Roman numeral one ("Phase I", "Type I", "Part I and II", "II, I") is not the pronoun.
+_ROMAN_NOUNS = r"(?:phase|part|stage|tier|level|section|chapter|volume|vol|appendix|annex|wave|round|batch|milestone|grade|category|schedule|exhibit|option|type|class|group|war)"
+_ROMAN_NOUN_RX = re.compile(r"\b" + _ROMAN_NOUNS + r"\s+$", re.I)
+# After a numbering noun the I is the numeral only where it ends the clause: at the end of the text, before punctuation, or before a numeral-style continuation ("Type I and Type II", "Phase I or 2").
+# "the option I prefer", "the batch I wrote" start a relative clause: there the I is the pronoun.
+_ROMAN_END_RX = re.compile(r"\s*(?:$|[,;:.!?)\]/&\u2013\u2014-]|(?:and|or|to|vs\.?|through)\s+(?:" + _ROMAN_NOUNS + r"\s+)?(?:[IVX]+|\d+)\b)", re.I)
+_ROMAN_SEP = r"\s*(?:[,/&-]|and|or|to)\s*"
+_ROMAN_AFTER_RX = re.compile(r"\s*(?:[,/&-]|and\b|or\b|to\b)\s*(?:II|III|IV|V)\b")
+_ROMAN_BEFORE_RX = re.compile(r"\b(?:II|III|IV)" + _ROMAN_SEP + r"$")
 _ACTOR_EXAMPLE = "\u201c{who} unpublishes\u201d instead of \u201cI unpublish\u201d"
+
+
+def _roman_one(text: str, start: int, end: int) -> bool:
+    """Is the capital I at text[start:end] the Roman numeral one: right after a numbering noun and ending the clause (Phase I, Type I; not "the option I prefer"), or next to another numeral in a list (I and II, II or I)?"""
+    return bool((_ROMAN_NOUN_RX.search(text[:start]) and _ROMAN_END_RX.match(text, end)) or _ROMAN_AFTER_RX.match(text, end) or _ROMAN_BEFORE_RX.search(text[:start]))
 
 
 def _bare_pronoun(text: str, rx: re.Pattern[str] = _BARE_PRONOUN_RX) -> str:
     """The first bare you/your/I/I'll/me/my in `text` (quoted and backticked spans skipped), else "". `rx` widens the word list (see _OPT_PRONOUN_RX)."""
     for m in rx.finditer(_QUOTED_RX.sub(" ", text)):
         if m.group(0) == "US":      # the abbreviation, not the pronoun
+            continue
+        if m.group(0) == "I" and _roman_one(m.string, m.start(), m.end()):
             continue
         return m.group(0)
     return ""

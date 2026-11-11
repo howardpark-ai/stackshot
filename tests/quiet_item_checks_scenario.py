@@ -218,12 +218,34 @@ try:
     check("5 inside the hour the server looks at nothing", again == [] and len(told) == n, (again, len(told)))
     again = server._silence_backstop(now=now + 2 * H, items=b5)
     check("5 an hour on, the item is still uncovered and returned, but the builder is not told twice", [x["id"] for x in again] == [shown(1)] and len(told) == n, (again, len(told)))
+    check("5 the told id is kept on disk", SL.read_backstop() == {shown(1)}, SL.read_backstop())
+    server._BACKSTOP_LAST[0] = 0.0; server._BACKSTOP_TOLD.clear(); server._BACKSTOP_LOADED[0] = False      # a restart: nothing in memory, the first look of a new process
+    again = server._silence_backstop(now=now + 3 * H, items=b5)
+    check("5 after a restart the item is still returned, but the builder is not told a second time", [x["id"] for x in again] == [shown(1)] and len(told) == n and server._BACKSTOP_TOLD == {shown(1)}, (again, len(told), server._BACKSTOP_TOLD))
+    (SL._audit.state_dir() / SL.BACKSTOP_FILE).write_text("not json", encoding="utf-8")
+    check("5 a record that cannot be read is no told id", SL.read_backstop() == set(), SL.read_backstop())
+    SL.write_backstop({shown(1)})
     hidden.clear()
     clear = server._silence_backstop(now=now + 4 * H, items=b5)
     check("5 once the rule finds it, the backstop is clear and forgets the item", clear == [] and server._BACKSTOP_TOLD == set(), (clear, server._BACKSTOP_TOLD))
+    check("5 …and the disk record forgets it too, so a restart then tells it again if it is missed again", SL.read_backstop() == set(), SL.read_backstop())
     hidden.add("a1")
     server._silence_backstop(now=now + 6 * H, items=b5)
     check("5 missed again after having a finding, it is told again", len(told) == n + 1, len(told))
+    # a state folder that cannot be made or read must not keep the message back: the record is only a convenience
+    hidden.clear()
+    server._silence_backstop(now=now + 8 * H, items=b5)
+    hidden.add("a1")
+    real_state_dir, n2, raised = SL._audit.state_dir, len(told), None
+    def broken_state_dir(): raise OSError("state folder cannot be made")
+    SL._audit.state_dir = broken_state_dir
+    try:
+        server._silence_backstop(now=now + 10 * H, items=b5)
+    except Exception as e:  # noqa: BLE001
+        raised = e
+    finally:
+        SL._audit.state_dir = real_state_dir
+    check("5 a state folder that raises still lets the message go out, and the backstop does not raise", raised is None and len(told) == n2 + 1, (raised, len(told), n2))
     server._inbox_flag_send = real_flag
 finally:
     SL.silent = real_silent

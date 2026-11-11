@@ -193,7 +193,7 @@ try:
               clearOfNumber: !meet(ri, rb), clearOfLabel: !meet(ri, l), labelLines: Math.round(l.height / 14) , labelCut: sp.scrollWidth > sp.clientWidth + 0.5, numCut: rb.right > r.right - 1 || rb.left < r.left, fs: ci.fontSize, bfs: getComputedStyle(b).fontSize,
               side: ci.position === 'absolute' ? (ri.left >= rb.right - 0.5 ? 'beside the number' : 'overlaps') : (ri.left >= l.right - 0.5 && Math.abs(ri.top - l.top) <= 3 ? 'on the label line' : 'misplaced')};
     }"""
-    ZOOMS = (1.0, 1.1, 1.25); NW_WIDTHS = (360, 480, 640, 768, 960, 1024, 1280, 1440)
+    ZOOMS = (1.0, 1.1, 1.25); NW_WIDTHS = (360, 480, 520, 560, 600, 640, 768, 960, 1024, 1280, 1440)      # 481 to 600 px is where five cards share the row and a card's content is narrowest
     NW_CASES = ((40, 2), (5, 3), (42, 12), (123, 123), (1234, 1234), (1234, 3), (7, 1234))          # (closed in 14 days, closes not cleared yet): one to four digits each way
     LONG_STANDIN = "fresh and unread"          # an invented English stand-in for a longer word (16 characters, as a longer translation of "new" might be)
     nw_seen = {}
@@ -214,7 +214,7 @@ try:
                         m = pg.evaluate(NEWWORD); nw_seen[tag] = m
                         want = {"text": m["text"] == f"{n_new} {word}", "word": m["word"] == word, "shown": m["display"] != "none" and m["visibility"] == "visible" and m["opacity"] == "1", "em shown": m["eDisplay"] != "none" and m["eVisibility"] == "visible" and m["eClip"] == "none",
                                 "em size": m["eW"] > 1 and m["eH"] > 1, "nothing covers or clips it": all(m["probe"]), "inside the card": m["inside"], "inside the screen": m["inView"], "clear of the number": m["clearOfNumber"], "clear of the label": m["clearOfLabel"],
-                                "number whole": not m["numCut"], "label whole": not m["labelCut"], "place": m["side"] in ("beside the number", "on the label line"), "one label line": m["labelLines"] <= 1} if m["hnew"] else {"badge drawn": False}
+                                "number whole": not m["numCut"], "label whole": not m["labelCut"], "badge at least 9 px": float(m["fs"][:-2]) >= 8.99 or word != "new", "place": m["side"] in ("beside the number", "on the label line"), "one label line": m["labelLines"] <= 1} if m["hnew"] else {"badge drawn": False}
                         check(f"{tag}: the word is shown, whole, inside the card ({m.get('side')}), clear of the number and the label", all(want.values()), ([k for k, v in want.items() if not v], m.get("fs"), m.get("bfs"), m.get("probe")))
                         check(f"{tag}: five cards, every one 60 px tall, nothing past the screen", m["n"] == 5 and all(abs(h - 60) < 0.01 for h in m["heights"]) and m["sw"] <= m["vw"], (m["heights"], m["sw"], m["vw"]))
                         if SHOTS and word == "new" and (n_closed, n_new) == (40, 2) and w == 960 and z == 1.1 and panel == "closed":
