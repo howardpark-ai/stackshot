@@ -28,7 +28,7 @@ from stackshot.projects import brains as _brains
 from stackshot.projects import pages as _pages
 from stackshot.projects import projects as _prj
 from stackshot.web import render as _rmod
-from stackshot.web import store as _store
+from stackshot.core import store as _store
 from stackshot.web.common import OWNER, _clip_line
 from stackshot.web.shared import _registry, _roles_sync_safe
 

@@ -9,6 +9,11 @@ a builder is unchanged. Fixture data (English stand-in names) in a temporary sto
      for a finding that went to a builder) is not sent, as -main has been told; a project with a builder's goes to the builder unmarked and then on to -main, as before; a front-only project with no -main
      agent goes to [audit] builder as before
   3  the unmoved digest (the daily run): the same split, one message per recipient, marked for the owner when it goes to a front agent; a digest that is not delivered leaves the item unchased
+  4  the two lows of the review of that change: (a) a session that is a front-only project's -main agent and another project's builder gets one message of each kind (the mark is keyed by recipient AND
+     whether it is a front agent, not by the recipient alone), for the unanswered finding and for the digest; (b) the digest never tells a -main agent to chase itself: when the mover of a front-only
+     project's unmoved item is its -main agent, the page key takes it, unmarked, as at the finding's first level (chase_to); (c) the ordinary findings of one run are grouped by (recipient, front) too, so
+     one session that gets an owner-decision finding as a project's -main agent and a finding for an item it moves in another project gets two messages, only the first marked; (d) so are the page agent
+     lines (page_agent_groups): a line that names a background session and a line that falls to the audit's -main agent are two groups when that agent is the same session
 
     tests/run-suite audit_front_only        -> exit 0 / 1"""
 import contextlib, copy, datetime as dt, io, json, os, pathlib, re, sys, time
@@ -163,6 +168,65 @@ with contextlib.redirect_stderr(io.StringIO()):
     sent.clear(); rx = AR.run(now=now, items={"a1": json.loads(path("a1").read_text())}, anchors={}, env=env(deliver=refuse_main), rubric="rubric")
 check("3 a digest to -main that is not delivered leaves the item unchased, and the record says so", [(s["id"], s["chased"]) for s in rx["stuck"]] == [(B + "1", False)]
       and any(m.get("kind") == "unmoved" and m["to"] == "solo-main" and m["delivered"] is False for m in rx["messages"]), (rx["stuck"], rx["messages"]))
+
+# ---------------------------------------------------------------- 4. the two lows: the mark is keyed by (recipient, front); the digest never tells a -main agent to chase itself
+SHARED = "projects/shared"       # a project with a builder that is the -main agent of SOLO as well: one session, a front agent for one project and a builder for another
+MAINS[SHARED] = "shared-main"; BUILDERS[SHARED] = "solo-main"; FRONT_ONLY[SHARED] = False
+ROLES["shared-main"] = {"role": "front"}
+wipe_store(); clear_state(); sent.clear()
+for i, p in ((9201, SOLO), (9202, SHARED)):
+    k, d = doing(i, p, "ops-other: do the first part\nhome-agent: then the second"); put(k, d)
+tk = now
+for n in range(3):
+    sent.clear(); AR.filing_pass(now=tk, env=env()); tk += REM + 60
+sent.clear(); AR.filing_pass(now=tk, env=env())
+to_sm = [t for t in said("solo-main") if "unmoved after 3 messages" in t]
+marked = [t for t in to_sm if t.startswith("[for Oliver]\n")]; plain = [t for t in to_sm if not t.startswith("[for Oliver]")]
+check("4a one session, two kinds of recipient: the unanswered findings make two messages to it, one for each project", len(to_sm) == 2, [t[:70] for t in to_sm])
+check("4a …the one for the project it is -main of is marked for the owner and holds only that project's item", len(marked) == 1 and B + "9201" in marked[0] and B + "9202" not in marked[0], marked)
+check("4a …the one for the project it builds is not marked and holds only that project's item (it was marked before: the mark followed the recipient's name)", len(plain) == 1 and B + "9202" in plain[0] and B + "9201" not in plain[0], plain)
+
+wipe_store(); clear_state(); sent.clear()
+(T / "state/audit" / f"run-{prev_day}.json").write_text(json.dumps({"started": now - 2 * 86400, "finished": now - 2 * 86400 + 60, "items_read": 10, "by_session": {}, "by_category": {},
+      "findings": [{"id": f"{B}{i}", "project": p, "owner": "home-agent", "mover": mv, "category": "stale", "detail": f"flagged on {p}"}
+                   for i, p, mv in ((11, SOLO, "home-agent"), (12, SHARED, "home-agent"), (13, SOLO, "solo-main"))]}))
+for i, p, mv in ((11, SOLO, "home-agent"), (12, SHARED, "home-agent"), (13, SOLO, "solo-main")):
+    k, d = item(i, p, wrote=now - 3 * 86400, state="doing", needs=[mv], next=f"{mv}: build it", expected_by=dt.datetime.fromtimestamp(now + 30 * H, ZONE).strftime("%Y-%m-%d %H:%M"), expected_reason="the build runs overnight")
+    d["updated"] = now - 3 * 86400; put(k, d)
+with contextlib.redirect_stderr(io.StringIO()):
+    sent.clear(); rec4 = AR.run(now=now, items={f"a{i}": json.loads(path(f"a{i}").read_text()) for i in (11, 12, 13)}, anchors={}, env=env(), rubric="rubric")
+dg = [(to, t) for to, t, _f in sent if "still unmoved since an earlier run" in t]
+dg_sm = [t for to, t in dg if to == "solo-main"]
+check("4a the digest too: two messages to the session that is -main of one project and the builder of another, the first marked and holding its own item, the other not and holding its own",
+      len(dg_sm) == 2 and sum(t.startswith("[for Oliver]\n") for t in dg_sm) == 1
+      and any(t.startswith("[for Oliver]\n") and B + "11 · " in t and B + "12 · " not in t for t in dg_sm) and any(not t.startswith("[for") and B + "12 · " in t and B + "11 · " not in t for t in dg_sm), [(to, t[:90]) for to, t in dg])
+check("4b the digest never tells a -main agent to chase itself: the item its -main agent moves goes to the project's page key, unmarked, and not to the -main agent",
+      any(to == SOLO and not t.startswith("[for") and B + "13 · " in t for to, t in dg) and not any(B + "13 · " in t for t in dg_sm), [(to, t[:90]) for to, t in dg])
+check("4b …the other item of that project still goes to its -main agent", any(to == "solo-main" and B + "11 · " in t for to, t in dg), [(to, t[:90]) for to, t in dg])
+check("4b …and the record says who was sent which digest, the item chased once", sorted(s["chased"] for s in rec4["stuck"]) == [True, True, True]
+      and sorted((m["to"], m["lines"]) for m in rec4["messages"] if m.get("kind") == "unmoved") == [(SOLO, 1), ("solo-main", 1), ("solo-main", 1)], [m for m in rec4["messages"] if m.get("kind") == "unmoved"])
+
+# 4c: ordinary findings (deliver_findings' groups) are keyed by (recipient, front): "dual" is the -main agent of DUALP (an owner-decision finding goes to it, marked) and moves an item of BUILT (its finding goes to it, unmarked)
+DUALP = "projects/dualp"
+MAINS[DUALP] = "dual"; FRONT_ONLY[DUALP] = True; ROLES["dual"] = {"role": "background"}
+sent.clear()
+fnd = [{"id": f"{B}9301", "project": DUALP, "to": "Oliver", "mover": "", "category": "stale", "detail": "an item that waits on his answer", "fix": "answer it"},
+       {"id": f"{B}9302", "project": BUILT, "to": "dual", "mover": "dual", "category": "stale", "detail": "an item it moves", "fix": "write it"}]
+with contextlib.redirect_stderr(io.StringIO()):
+    AR.deliver_findings(env(), fnd, "Board audit test")
+to_dual = [t for to, t, _f in sent if to == "dual"]
+check("4c one session, two kinds of ordinary finding: two messages to it, one marked for the owner and one not", len(to_dual) == 2 and sum(t.startswith("[for Oliver]\n") for t in to_dual) == 1, [t[:80] for t in to_dual])
+check("4c …the marked one holds only the finding it got as -main agent, the unmarked one only the finding for the item it moves (one message of both, marked by the first finding's kind, before)",
+      any(t.startswith("[for Oliver]\n") and B + "9301" in t and B + "9302" not in t for t in to_dual) and any(not t.startswith("[for") and B + "9302" in t and B + "9301" not in t for t in to_dual), [t[:120] for t in to_dual])
+
+# 4d: page agent lines (page_agent_groups) are keyed by (recipient, front): "falcon-main" is the audit's -main agent and also a background session a page line names
+pa_res = {"findings": [{"to": "falcon-main", "page": "projects/pa-one", "line": "a session sala no longer knows", "name": "gone-one", "fix": "retire it"},
+                       {"to": "", "page": "projects/pa-two", "line": "no agents map", "name": "-", "fix": "add the map"}]}
+pa_env = AR.Env(roles={"falcon-main": {"role": "background"}}, sessions=lambda: None, page_of=lambda p: ("", None), deliver=deliver)
+pa = AR.page_agent_groups(pa_res, pa_env)
+check("4d one session reached both ways (named as a background session, and as the audit's -main agent): two groups, one marked and one not", sorted(pa) == [("falcon-main", False), ("falcon-main", True)] and
+      [g["front"] for _k, g in sorted(pa.items())] == [False, True], {k: v["front"] for k, v in pa.items()})
+check("4d …each holds only its own page's line (the unmarked one was marked or not by the first line alone, before)", all(len(g["lines"]) == 1 for g in pa.values()) and "pa-one" in pa[("falcon-main", False)]["lines"][0] and "pa-two" in pa[("falcon-main", True)]["lines"][0], pa)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

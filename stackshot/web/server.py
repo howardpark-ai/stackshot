@@ -226,39 +226,20 @@ def _pub_letter() -> str:
     return str(_cfg.get("fleet", "publisher_letter") or "a")
 
 
-from stackshot.web import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import) and the readers of it (store.py); `STORE` is read and set on that module, never here
-from stackshot.web.store import _item_files, _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of the store, kept on this module as well (store.py)
-LETTER = str(_cfg.get("ids", "letter") or "s")
-NEXT_ID = _store.STORE / "next-id"
+from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
+from stackshot.core.store import _item_files, _next_id, _write_item  # noqa: E402  — core/store.py
+from stackshot.web.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item, kept on this module as well (web/store.py)
 REQUESTS = _cfg.state("requests.json")
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
 else:
-    (_store.STORE / LETTER).mkdir(parents=True, exist_ok=True)
+    (_store.STORE / _store.LETTER).mkdir(parents=True, exist_ok=True)
     REQUESTS.parent.mkdir(parents=True, exist_ok=True)
 
 
 # ----------------------------------------------------------------------------- store (the one store, every letter)
-# _item_files, _path and _load, and STORE they read, are store.py's (imported where STORE was defined, above); _shown_ids is store.py's too.
-
-
-def _next_id() -> str:
-    """Allocate the next global id. The file is the single counter; seeded from the highest id in the store."""
-    import fcntl
-    _ro.guard("id allocation")                # next-id is part of the store
-    NEXT_ID.parent.mkdir(parents=True, exist_ok=True)
-    with open(NEXT_ID, "a+", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0)
-        raw = f.read().strip()
-        cur = int(raw) if raw.isdigit() else 0
-        if cur == 0:
-            cur = max([int(g[1:]) for g, _ in _item_files()] or [0])
-        nxt = cur + 1
-        f.seek(0); f.truncate(); f.write(str(nxt)); f.flush()
-        fcntl.flock(f, fcntl.LOCK_UN)
-    return f"{LETTER}{nxt}"
+# STORE, _item_files, _next_id and the file write are core/store.py's; _path, _load and _shown_ids are web/store.py's (imported where STORE was defined, above).
 
 
 # _norm_id, _bare_id_ok and _GID (an id as a session writes it → the store's) are model/ids.py's.
@@ -782,10 +763,7 @@ def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", auth
     _phase_stamp(gid, item)      # last, once the fields are final: the phase the board shows the item as (alive or waiting) is stored beside the fields it is read from
     _stamp_progress(item, before, writer, author, activity)      # the progress clock reads the phase just stored: only a step marked, a state change or a merge moves it
     _ip.stamp(item.get("metadata"))      # and the project's permanent id beside the page it is filed on (a key that names a project sets it)
-    tmp = p.with_name(f".{p.name}.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(item, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, p)
+    _write_item(p, item)
     try:
         _foryou_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
     except Exception as e:  # noqa: BLE001  — the list never fails a write
@@ -6371,13 +6349,38 @@ def _fleet_builder() -> str:
     return op
 
 
+_RECOVERY_ROLE = {"main": "the project's -main agent", "fleet": "the fleet's builder"}      # who a recovery request was asked of, in words, by `_recovery_target`'s kind
+
+
+def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
+    """(who is asked to recover a quiet mover's item, which kind of recipient it is: "main" | "fleet", whether the project has no builder: it is front-only, so the ladder had none to try). The caller computes
+    it ONCE per request, on the raw session (a name or an id, never its label), and hands it to `_recovery_tell` and to the wording of what was tried, so the text and the real recipient cannot disagree.
+    A front-only project (anchors.front_only: its `agents:` map lists no background agent, so there is no
+    builder for the ladder to try) ends at its -main agent (`_main_agent`), the session its owner talks to. Every other project ends at the fleet's builder (`_fleet_builder`), as before, and so does a front-only
+    project with no -main agent to name, and one whose quiet mover is its -main agent itself (nobody is above it in the project): those are still builderless, so the third value is True for them. A front-only test
+    that fails keeps the fleet's builder and says the project has one (False: nothing is claimed about a builder that was not read)."""
+    builderless = False
+    try:
+        proj = str(project or "").strip()
+        if proj and _anc.front_only(proj):
+            builderless = True
+            main = _main_agent(proj)
+            if main and not (_ho_same(main, quiet) or _session_id(main) == (_session_id(quiet) or quiet)):
+                return main, "main", True
+    except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the fleet's builder
+        print(f"recovery: front-only test of {project} failed ({e.__class__.__name__}: {e}); the fleet's builder is asked", file=sys.stderr, flush=True)
+        builderless = False
+    return _fleet_builder(), "fleet", builderless
+
+
 def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried: str, outcome: str, to: str = "") -> str:
-    """The History line of a fleet recovery request (metadata.stall.log, shown on the item as a line said by the server): which session is quiet, what happened to the request
-    (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. Written onto `item` in place; the caller saves it. → the text."""
+    """The History line of a recovery request (metadata.stall.log, shown on the item as a line said by the server): which session is quiet, what happened to the request
+    (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. The line names the session asked by its own name, so it
+    says the same whether that is the fleet's builder or a front-only project's -main agent. Written onto `item` in place; the caller saves it. → the text."""
     label = _session_label(to) or to
     said = {"asked": f"{label} was asked to recover it",
             "held": f"not sent: the message to {label} was held back, not delivered",
-            "self": f"not sent: {label} is the fleet's builder itself, so nobody else could be asked",
+            "self": f"not sent: {label} is the fleet's builder itself, so nobody else could be asked",      # only a fleet request can be its own quiet session: the -main agent is never chosen for itself (_recovery_target)
             "failed": f"not sent: the send to {label} failed",
             "nobody": "not sent: no fleet builder resolves (operator_session unset, retired or without a keeper)"}.get(outcome, outcome)
     text = f"{quiet} is quiet and nobody could take the item: {said} (why: {_clip_line(why, 90)}; tried: {tried})"
@@ -6385,7 +6388,7 @@ def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried
     return text
 
 
-def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: str, now: float | None = None) -> None:
+def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: str, now: float | None = None, kind: str = "fleet") -> None:
     """Write the History line of a recovery request once its outcome is known: on a fresh read of the item under the lock (the send's thread may have recorded a failure on it meanwhile). Never raises."""
     try:
         with _ITEM_LOCK:
@@ -6393,20 +6396,23 @@ def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: 
             if item.get("status") != "open":
                 return
             _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to)
-            _save(gid, item, note="nobody could take it: " + ("the fleet's builder was asked" if outcome == "asked" else "the fleet's builder could not be asked"))      # the server's own act: the state clock stays, and no page is owed
+            role = _RECOVERY_ROLE.get(kind, _RECOVERY_ROLE["fleet"])
+            _save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
     except Exception as e:  # noqa: BLE001
         print(f"recovery: {gid} History line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: str, tag: str = "stall", now: float | None = None) -> str:
+def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: str, tag: str = "stall", now: float | None = None, target: "tuple[str, str, bool] | None" = None) -> str:
     """The last rung of the ladders: ONE message to the fleet's builder naming the item and the quiet session and asking it to take the fix through its usual path (the callers send it once
     per episode: a hand-off record, a stall record; they mark the episode BEFORE this send, on purpose: a failed send is not retried every pass, `metadata.undelivered`
     records it and the audit's unmoved digest is the backstop). The item stays with its mover; the message is not for the owner and owes no reply. The History line is written here, after the
-    outcome is known, so it says what happened. → the outcome: "asked" (the send was started; a delivery that fails later lands in metadata.undelivered), "held" (the front gate held it), "self" (the quiet
-    session is the builder itself), "nobody" (no builder resolves), "failed" (the send raised). Never raises."""
-    to, outcome = "", "failed"
+    outcome is known, so it says what happened. A front-only project's request goes to its -main agent instead (`_recovery_target`), marked for the owner as every message to a front agent is, and asks it to decide
+    (bring the session back, message it, or hand the item on); the others go to the fleet's builder. → the outcome: "asked" (the send was started; a delivery that fails later lands in metadata.undelivered), "held" (the front gate held it), "self" (the quiet
+    session is the builder itself), "nobody" (no builder resolves), "failed" (the send raised). `target` is the caller's `_recovery_target` (computed once on the raw session, as the caller's wording of `tried` used it);
+    without it the target is read here on `quiet`. Never raises."""
+    to, outcome, kind = "", "failed", "fleet"
     try:
-        to = _fleet_builder()
+        to, kind, _bl_less = target if target is not None else _recovery_target(str((item.get("metadata") or {}).get("project") or ""), quiet)
         to_id = (_session_id(to) or to) if to else ""
         if not to:
             outcome = "nobody"
@@ -6416,15 +6422,20 @@ def _recovery_tell(gid: str, item: dict[str, Any], quiet: str, why: str, tried: 
             print(f"recovery: {gid} {quiet} is quiet and is the fleet's builder itself; nobody else to ask", file=sys.stderr, flush=True)
         else:
             meta = item.get("metadata") or {}
-            th = _tell_woken(gid, to_id,
-                             f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
-                             f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please take the fix through your usual path: bring the session back, or hand the item to a session that runs. "
-                             f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_notice_link(gid)}", tag=tag)
+            if kind == "main":
+                text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it, and the project lists no builder to take it. "
+                        f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please decide what it needs: bring the session back, message {quiet}, or hand the item on (update mover=<session>). "
+                        f"The item stays with {quiet} meanwhile, and no reply is owed (put the result on the item). → {_notice_link(gid)}")
+            else:
+                text = (f"[stackshot] fleet recovery: {_gh.shown(gid)} \"{item.get('subject') or ''}\" ({meta.get('project') or ''}) has gone quiet: {quiet} is its mover and is not working it. "
+                        f"Why: {_clip_line(why, 300)}. What the ladder tried: {tried}. Please take the fix through your usual path: bring the session back, or hand the item to a session that runs. "
+                        f"The item stays with {quiet} meanwhile; nothing here is for {OWNER}, and no reply is owed (put the result on the item). → {_notice_link(gid)}")
+            th = _tell_woken(gid, to_id, text, tag=tag)
             outcome = "asked" if th is not None else "held"
             print(f"recovery: {gid} {quiet} is quiet; " + (f"{to} asked to recover it" if th is not None else f"the message to {to} was held back"), file=sys.stderr, flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"recovery: {gid} not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    _recovery_log(gid, quiet, why, tried, outcome, to, now)
+    _recovery_log(gid, quiet, why, tried, outcome, to, now, kind)
     return outcome
 
 
@@ -8936,7 +8947,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
     to_sender: list[tuple[str, str, str]] = []       # (sender, gid, the line)
     to_again: list[tuple[str, str, str]] = []        # (gid, the mover, the notice) of a hand-off sent again after a relaunch
     to_remind: list[tuple[str, str, str, str]] = []  # (gid, the session id, the item's line, the reminder alone) of a hand-off a background agent did not take
-    to_recover: list[tuple[str, dict[str, Any], str, str, str]] = []   # (gid, the item, the quiet session, why, what was tried) of an item nobody could take: the fleet's builder is asked
+    to_recover: list[tuple[str, dict[str, Any], str, str, str, "tuple[str, str, bool]"]] = []   # (gid, the item, the quiet session, why, what was tried, the recipient chosen once) of an item nobody could take: the fleet's builder, or a front-only project's -main agent, is asked
     entered: list[tuple[str, str, dict[str, Any]]] = []   # (gid, the mover, its entry) of an item the one ladder took: its first rung is taken after the loop
     done: list[str] = []
     cold_started = False
@@ -8954,15 +8965,17 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
                         continue
                     st = fresh[0]
                 if st.kind == "recover":
-                    # nobody is left to hand the item to: the item stays with its mover and the fleet's builder is asked once for this record (mark_recovery returns None for one asked already)
-                    r = _ho.mark_recovery(item, st, now, _ho_same, _session_label)
+                    # nobody is left to hand the item to: the item stays with its mover and the fleet's builder (a front-only project's -main agent) is asked once for this record (mark_recovery returns None for one asked already)
+                    target = _recovery_target(str((item.get("metadata") or {}).get("project") or ""), st.frm)      # once, on the raw session: the record, the wording of `tried` and the send all follow it
+                    r = _ho.mark_recovery(item, st, now, _ho_same, _session_label, asked=_RECOVERY_ROLE[target[1]])
                     if r is None:
                         continue
                     quiet = _session_label(st.frm) or st.frm
-                    tried = ("the stall pass sent the notice again, asked a fresh session who takes it and tried the project's builder" if r.get("stall")
-                             else "the hand-off ladder tried the project's builder, a fresh session's call and the sender")
-                    _save(st.gid, item, note=f"nobody could take it: fleet recovery requested ({st.why})")      # the mark (recovery_at) is written BEFORE the send, on purpose: a failed send is not retried every pass (metadata.undelivered records it, the audit's unmoved digest is the backstop); the send writes the History line
-                    to_recover.append((st.gid, dict(item), quiet, st.why, tried))
+                    nobuilder = target[2]      # a front-only project has no builder to have tried, whoever is asked
+                    tried = (("the stall pass sent the notice again and asked a fresh session who takes it" if nobuilder else "the stall pass sent the notice again, asked a fresh session who takes it and tried the project's builder") if r.get("stall")
+                             else "the hand-off ladder tried " + ("a fresh session's call and the sender" if nobuilder else "the project's builder, a fresh session's call and the sender"))
+                    _save(st.gid, item, note=f"nobody could take it: recovery requested ({st.why})")      # the mark (recovery_at) is written BEFORE the send, on purpose: a failed send is not retried every pass (metadata.undelivered records it, the audit's unmoved digest is the backstop); the send writes the History line
+                    to_recover.append((st.gid, dict(item), quiet, st.why, tried, target))
                 elif st.kind == "enter":
                     # the one ladder takes the item (ladder.py): its entry is written now, the first rung is taken below once the item lock is let go
                     rec = _ladder_enter(item, st, now)
@@ -9006,8 +9019,8 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
             print(f"handoff: {st.gid} step {st.kind} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for gid, who, rec in entered:
         _ladder_first(gid, who, rec, now)
-    for gid, it, quiet, why, tried in to_recover:
-        _recovery_tell(gid, it, quiet, why, tried, tag="handoff", now=now)
+    for gid, it, quiet, why, tried, target in to_recover:
+        _recovery_tell(gid, it, quiet, why, tried, tag="handoff", now=now, target=target)
     for gid, who, text in to_again:
         try:
             _tell_woken(gid, _session_id(who) or who, text, tag="handoff")      # its push result makes the record delivered (or queued), which starts the clock again
@@ -9317,7 +9330,7 @@ def _handoff_brief() -> str:
 # _handoff_status: the mover's pane is idle (or `shell`: turn over, a background Bash task running) and its status changed that long ago. Every [stall] every_seconds (20), every open alive item whose mover is a session, a front
 # agent included, is looked at. After the minutes: (1) the notice goes to the mover once more; (2) the same minutes later, with no turn and no write: the hand-off's cold call
 # (_handoff_cold) names who takes it, or hands over to the builder when it names no one: it never asks the owner (_stall_cold_no_taker); (3) the same minutes after that, the project's builder (_handoff_builder, through _handoff_exec); (4) when none can take it, ONE message
-# goes to the fleet's builder (_recovery_tell: the item, the quiet session, what was tried, asking it to take the fix through its usual path), once for the hand-off record (recovery_at), with a History line; the item stays with its mover and does not go to the owner. Not looked at: an item in a hold or on a wait, one the owner or an outside party
+# goes to the fleet's builder (_recovery_tell: the item, the quiet session, what was tried, asking it to take the fix through its usual path), or to the project's -main agent when the project is front-only (anchors.front_only: no background agent on its map, so no builder was tried; _recovery_target), once for the hand-off record (recovery_at), with a History line; the item stays with its mover and does not go to the owner. Not looked at: an item in a hold or on a wait, one the owner or an outside party
 # moves (the model derives no session mover), a hand-off in flight to a session that is not a front agent (the hand-off ladder has it), a cold call running, a pane
 # the registry does not show (nothing can be told of it), and an item whose hand-off record already carries the recovery request. Each step is written onto the item (metadata.stall.log, a History line) and the journal.
 _STALL_LAST = [0.0]
@@ -9583,7 +9596,8 @@ def _stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
 
 
 def _stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
-    """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff_exec`, a `recover` step)."""
+    """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff_exec`, a `recover` step), or, for a front-only project
+    (anchors.front_only: no background agent on its map), the project's -main agent (`_recovery_target`)."""
     with _ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
@@ -9593,9 +9607,9 @@ def _stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
         st = _ho.next_step({**item, "gid": gid}, r, who, why, _handoff_env(now), gid=gid, allow_return=False, cold_ok=False)
         if st.kind == "move":
             _stall.note(item["metadata"], now, f"{why}: handed to {_session_label(st.to)}, the project's builder")
-        _save(gid, item, note="stall: " + ("handed to the builder" if st.kind == "move" else "nobody can take it: fleet recovery is requested"))      # a `recover` step writes its own History line
+        _save(gid, item, note="stall: " + ("handed to the builder" if st.kind == "move" else "nobody can take it: recovery is requested"))      # a `recover` step writes its own History line
     done = _handoff_exec([st], now, verify=False)
-    print(f"stall: {gid} {who} no turn: " + (f"handed to {st.to}" if st.kind == "move" else f"nobody can take it ({st.why}); fleet recovery requested"), file=sys.stderr, flush=True)
+    print(f"stall: {gid} {who} no turn: " + (f"handed to {st.to}" if st.kind == "move" else f"nobody can take it ({st.why}); recovery requested"), file=sys.stderr, flush=True)
     return "builder" if done else ""
 
 
@@ -10228,7 +10242,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
             + _answer_words(a, 1200) + (f" [chosen option: {a['choice']}: {a['choice_line']}]" if a.get("choice") and a.get("choice_line") else "") for a in ans[-3:]))
     idle = m.get("idle") if isinstance(m.get("idle"), dict) else {}
-    if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm
+    if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
         w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), ZONE))
         out.append(f"idle: poked {idle.get('to') or '?'} {w('poked')}" + (f", the fleet's builder was asked to recover it {w('recovery')}" if idle.get("recovery") else ""))
     for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
@@ -10440,7 +10454,7 @@ def _notice_report(nid: str) -> str:
 # What an agent does when the stall pass takes a wrong step; the same path is in stall.py's docstring and docs/stall-and-ladder.md.
 _STALL_FORM = (
     f" A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as mover, follow-ups after the first notice go by the item's step status, not its pane): resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
-    f"recovery (nobody could take it: the fleet's builder is sent one message, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
+    f"recovery (nobody could take it: one message goes to the project's -main agent when the project lists no background agent, to the fleet's builder otherwise, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
     f"and no pause lasts longer than 24 hours."

@@ -57,6 +57,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -316,11 +317,11 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
     for p in copy_dir.rglob("*"):
         if p.is_file():
             p.chmod(0o444)                  # a read-only copy: the replay never writes it, and a write would fail
-    real_store = server._store.STORE
-    server._store.STORE = copy_dir
+    real_store = _core_store.STORE
+    _core_store.STORE = copy_dir
     rows = []
     try:
-        for gid, _path in server._item_files():
+        for gid, _path in _core_store._item_files():
             try:
                 it = server._load(gid)
             except Exception as e:  # noqa: BLE001
@@ -334,7 +335,7 @@ if live.is_dir() and any(p.is_dir() and len(p.name) == 1 for p in live.iterdir()
             rows.append((gid, it, (old, new, stamped, server._item_list(bare(it)), server._item_list(stamped), server._model_lines(bare(it), short=True), server._model_lines(stamped, short=True),
                                          server._fmt(bare(it)) + server._fmt(bare(it), brief=True), server._fmt(stamped) + server._fmt(stamped, brief=True))))
     finally:
-        server._store.STORE = real_store
+        _core_store.STORE = real_store
     bad = [g for g, it, r in rows if it is None]
     check("7 replay: every item of the copy loads", not bad, bad[:5])
     got = [(g, it, r) for g, it, r in rows if it is not None]

@@ -49,6 +49,7 @@ from stackshot.waits import waiting as _WT  # the wait is stored as one date, un
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
+from stackshot.core import store as _core_store
 server._publish = lambda: None
 check("a valid token names its machine", server._client_machine("Bearer " + tok) == "box-far" and server._client_machine("bearer " + mine) == me)
 check("a replaced token is dead", server._client_machine("Bearer " + old) == "")
@@ -151,7 +152,7 @@ check("client.py holds exits 1 when the server is not reached", rc == 1)
 BAD = {30: 1e12, 31: 1.76e12, 32: 1e300, 33: "1e12", 34: float("inf"), 35: -5, 36: 4102444801}
 for n, v in BAD.items(): mk(n, hold=True, wake="2026-11-28", hold_set={"at": v, "by": "sparrow"})
 mk(37, hold=True, wake="2026-11-29", hold_set={"at": _t.time() - 60, "by": "sparrow\n## injected heading\r\n- [a1](#x) fake"})
-md_ = server._rmod.render(str(server._store.STORE), "full"); br_ = server._rmod.render(str(server._store.STORE), "brief"); rows_ = server._holds_unexplained(); rep_ = server._holds_report()
+md_ = server._rmod.render(str(_core_store.STORE), "full"); br_ = server._rmod.render(str(_core_store.STORE), "brief"); rows_ = server._holds_unexplained(); rep_ = server._holds_report()
 check("a hold time outside 0 < t < year 2100 (1e12, 1.76e12, 1e300, \"1e12\", inf, negative, 2100+1 s) reads as no record: board.md, the brief, the report, get and an update all work, the item listed as before the record",
       all(server._rmod.hold_at({"metadata": {"hold_set": {"at": v}}}) == 0.0 for v in BAD.values()) and all(f"a{n} · mover sparrow · wake 2026-11-28 · set by sparrow (before the record)" in rep_ for n in BAD)
       and all(next(r for r in rows_ if r["gid"] == f"a{n}")["at"] == 0 for n in BAD) and all(server.stackshot_get(f"a{n}") for n in BAD) and not upd(30, next="sparrow: the step that comes now", dropped=[1])[1]
@@ -180,7 +181,7 @@ for i in (3, 4, 5): mk(i)
 mk(3, hold=True, wake=WK, hold_set={"at": _t.time() - 60, "by": "sparrow"})                      # new, nothing holds it
 mk(4, hold=True, wake=WK, after=["a20"], hold_set={"at": _t.time() - 60, "by": "sparrow"})       # new, an open after holds it
 mk(23, hold=True, wake="2026-11-24", hold_set={"at": _t.time() - 3 * 86400, "by": "sparrow"})   # set three days ago: not new
-md = server._rmod.render(str(server._store.STORE), "full"); br = server._rmod.render(str(server._store.STORE), "brief")
+md = server._rmod.render(str(_core_store.STORE), "full"); br = server._rmod.render(str(_core_store.STORE), "brief")
 sect = md[md.find("## New holds"):md.find("Shared by every")]
 check("board.md has a section of the holds set in the last 24 hours, each with its owner, setter, wake and what holds it",
       "## New holds (last 24 hours)" in md and re.search(r"- \[a3\]\(#task-a-3\) · mover `[^`]*` · set by sparrow .* · wake .* · nothing holds it now", sect)
@@ -194,7 +195,7 @@ check("the brief tool's head carries the section (it reads board.md up to the fi
 check("a hold_set whose time is no number never raises in the renderer or in get", server._rmod.hold_at({"metadata": {"hold_set": {"at": "x"}}}) == 0.0 and server._rmod.hold_at({"metadata": {"hold_set": {"at": float("nan")}}}) == 0.0
       and "hold: set by sparrow" in server.stackshot_get("a21") and server.stackshot_get("a22"), server.stackshot_get("a21"))
 server._update("a3", clear_hold=True, sender="sparrow")
-check("a released hold is no longer new", "[a3]" not in server._rmod.render(str(server._store.STORE), "full").split("Shared by every")[0].split("## New holds")[-1])
+check("a released hold is no longer new", "[a3]" not in server._rmod.render(str(_core_store.STORE), "full").split("Shared by every")[0].split("## New holds")[-1])
 for i in range(2, 50): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 
 # ---- 4. over HTTP, in-process

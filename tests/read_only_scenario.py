@@ -105,6 +105,7 @@ before = tree(*ROOTS)
 threads_before = {t.name for t in threading.enumerate()}
 
 from stackshot.core import readonly
+from stackshot.core import store as _core_store
 from stackshot.web import server
 atexit.register(lambda: readonly._reload_for_test(False))        # runs before _scratch's clean-up: the backstop must be off when the folders are removed
 REFUSAL = "stackshot here is a read-only standby copy (STACKSHOT_READ_ONLY); writes go to the live board."
@@ -167,7 +168,7 @@ def raises(name, f):
 
 
 raises("server._save (the item write) raises", lambda: server._save("a1", {"id": "1", "subject": "x"}))
-raises("server._next_id (id allocation) raises", lambda: server._next_id())
+raises("core store _next_id (id allocation) raises", lambda: _core_store._next_id())
 raises("anchors.save raises", lambda: anc_mod.save({}))
 raises("projects.write_atomic raises", lambda: proj_mod.write_atomic(T / "inst/store/projects.json", "{}"))
 raises("publish.publish raises", lambda: pub_mod.publish())
