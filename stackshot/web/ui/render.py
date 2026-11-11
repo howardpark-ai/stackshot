@@ -372,16 +372,19 @@ def recycle_due(r, open_after):
     if r.get("status") != "open" or not waits_recycle(r): return False
     return not is_held(r) or held_only_for_recycle(r, open_after)
 _W = _ui.WORDS      # the English words (module level code runs once, at the first import, in whatever language that request had: never ask the request's language here)
-LANE_WORDS = {"call": _W[_ui.YOUR_MOVE], "relay": _W[_ui.WAITING], "": _W[_ui.AGENT]}      # needs_kind → the lists' words, for an item with no stored state
-STATE_WORDS = {"doing": _W[_ui.AGENT], "your-call": _W[_ui.YOUR_MOVE], "your-step": _W[_ui.YOUR_MOVE],
-               "outside": _W[_ui.WAITING], "blocked": _W[_ui.WAITING], "parked": _W[_ui.WAITING], "verifying": _W[_ui.WAITING]}   # whose move, in words: needs_kind → the board's names
+_LANE_KINDS = {"call": _ui.YOUR_MOVE, "relay": _ui.WAITING, "": _ui.AGENT}      # needs_kind → the lists' state kind, for an item with no stored state
+_STATE_KINDS = {"doing": _ui.AGENT, "your-call": _ui.YOUR_MOVE, "your-step": _ui.YOUR_MOVE,
+                "outside": _ui.WAITING, "blocked": _ui.WAITING, "parked": _ui.WAITING, "verifying": _ui.WAITING}   # a stored state → the state kind whose word the lists use
+LANE_WORDS = {k: _W[v] for k, v in _LANE_KINDS.items()}      # the same in English (module level: never the request's language; list_word says them in the request's)
+STATE_WORDS = {k: _W[v] for k, v in _STATE_KINDS.items()}
 
 
 def list_word(state, kind=None):
-    """The word the lists use for a stored `state` (STATE_WORDS); "" for a state this board does not know, a missing one or a value that is no string. With `kind` (needs_kind) given and no
-    word for the state, the lane's word (LANE_WORDS). The History says every move in these words ("moved to Your move")."""
-    w = STATE_WORDS.get(state) if isinstance(state, str) else None
-    return w or LANE_WORDS.get(kind, "")
+    """The word the lists use for a stored `state` (_STATE_KINDS), in the request's language; "" for a state this board does not know, a missing one or a value that is no string. With `kind` (needs_kind)
+    given and no word for the state, the lane's word (_LANE_KINDS). The History says every move in these words ("moved to Your move")."""
+    k = _STATE_KINDS.get(state) if isinstance(state, str) else None
+    k = k or _LANE_KINDS.get(kind)
+    return _ui.word(k) if k else ""
 # The ask line: what a needs=decision item asks of him, in one line of four
 # labelled parts in this order, separated by " · " (space, U+00B7, space). The shape lives here, importable; the server validates
 # through parse_ask. The By part is free text by design: the rulebook's date form ("Thu Mar 12th") or "no date".
@@ -496,7 +499,7 @@ def mockup_link(r, shown=""):
     the page draws, already carries that link (the refusal tells a session to put [mockup](url) in the ask, so the chip would sit beside the same link)."""
     u = mockup_url(r)
     if u and u in shown: return ""
-    return f' <a class="mockup" href="{esc(u)}" target="_blank" rel="noopener" title="open the mockup this decision is about">Mockup ↗</a>' if u else ""
+    return f' <a class="mockup" href="{esc(u)}" target="_blank" rel="noopener" title="{esc(_t("link.mockup_tip"))}">{esc(_t("link.mockup_chip"))}</a>' if u else ""
 def stale_tip(r, label=str):
     """The tooltip of a stale item's ⚠: a your-call item's ask may be out of date; any other lane has gone unconfirmed (a parked item is never stale)."""
     a = age_words(r.get("_age") or 0)
@@ -581,6 +584,8 @@ def cli_behind(v, latest):
     try: return bool(latest) and tuple(int(x) for x in v.split(".")) < tuple(int(x) for x in str(latest).split("."))
     except Exception: return False
 def esc(x): return H.escape(str(x), quote=True)
+def esc_dq(x):      # for the value of a double-quoted attribute that is written in plain English with an apostrophe ("open this item's GitHub issue"): & < > and " are escaped, ' is not (esc turns it into &#x27;)
+    return H.escape(str(x), quote=False).replace('"', "&quot;")
 def _update_word(latest):
     """A machine row's update notice: `→ <latest version>`, and nothing at all while the latest version is not known (no arrow pointing nowhere)."""
     v = str(latest or "").strip()
@@ -984,9 +989,12 @@ def _site_title(title: str, src: str, h1: bool = False) -> str:
 # (_stale_s: 1.5 publish periods). `stamp_html` is the stamp span (Board.stamp); the home page's shell fingerprint passes "" (the per-render value taken out). The text of the span and the
 # warn colour are kept current by the home page's tick and live update, and on every other page by _STAMP_JS (panel_tail). Under 600 px the word "rendered" is left off (.rw), the age stays.
 # `tip` is the span's title text: home's (the default) is about the server's publishing; a page drawn per request says when it was drawn, since its amber only means that page is old.
+_AGE_AT = "\x00age\x00"      # where the template of the rendered line puts the age (never in a translation)
 def _rendered_line(stamp_html: str, tip: str | None = None) -> str:
     tip = _t("home.rendered_tip", every=f"{_every_m():g}", stale=_stale_s() // 60) if tip is None else tip
-    return f'<p class="rline"><span class="rw">{esc(_t("home.rendered"))} </span><span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}">{stamp_html}</span></p>'
+    pre, _sep, post = _t("home.rendered_line", age=_AGE_AT).partition(_AGE_AT)      # one template, so a language can put the age first ("3m ago updated"); the words around the age are what the narrow page leaves off (.rw)
+    rw = lambda x: f'<span class="rw">{esc(x)}</span>' if x else ""
+    return f'<p class="rline">{rw(pre)}<span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}">{stamp_html}</span>{rw(post)}</p>'
 # The age on a page that is not home (home's tick does the same for the whole page): the stamp's text redrawn every 30 s from its data-ts and the old class set past data-stale. A page without the line does nothing.
 _STAMP_JS = ("<script>(function(){var g=document.getElementById('rendered'),s=g&&g.querySelector('[data-ts]');if(!s)return;"
              + _AGE_FN +
@@ -1270,14 +1278,14 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&drag){e.pre
 _ANSWER_JS = r"""<script>(function(){var F=document.querySelector('form.ianswer');if(!F||!window.fetch||!window.URLSearchParams)return;
 var E=F.querySelector('.aerr'),busy=false,S=null,L='';
 function btns(on){[].forEach.call(F.querySelectorAll('button'),function(b){b.disabled=!on})}
-function fail(t){busy=false;btns(true);F.removeAttribute('aria-busy');if(S){S.removeAttribute('aria-busy');S.innerHTML=L;S=null}if(E){E.textContent='Nothing sent: '+t;E.hidden=false}if(window.ssCards)ssCards.sync(F)}
+function fail(t){busy=false;btns(true);F.removeAttribute('aria-busy');if(S){S.removeAttribute('aria-busy');S.innerHTML=L;S=null}if(E){E.textContent=SST('js.answer.nothing_sent',{why:t});E.hidden=false}if(window.ssCards)ssCards.sync(F)}
 F.addEventListener('submit',function(ev){var s=ev.submitter;if(s===undefined)return;ev.preventDefault();if(busy)return;
-var d=new FormData(F);if(s&&s.name)d.append(s.name,s.value);busy=true;btns(false);F.setAttribute('aria-busy','true');if(s){S=s;L=s.innerHTML;s.setAttribute('aria-busy','true');if(s.name==='act')s.textContent='Sending\u2026'}if(E)E.hidden=true;
+var d=new FormData(F);if(s&&s.name)d.append(s.name,s.value);busy=true;btns(false);F.setAttribute('aria-busy','true');if(s){S=s;L=s.innerHTML;s.setAttribute('aria-busy','true');if(s.name==='act')s.textContent=SST('js.answer.sending')}if(E)E.hidden=true;
 fetch(F.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin',redirect:'follow'}).then(function(r){
 var u=new URL(r.url,location.href);if(r.ok&&r.redirected&&u.origin===location.origin&&/^@ROOTR@\/items\/[^\/]+$/.test(u.pathname)){location.replace(u.href);return}
 return r.text().then(function(t){t=String(t||'').replace(/\s+/g,' ').trim();if(!r.ok&&t&&t.length<400&&!/^</.test(t))return fail(t);
-fail('the board answered '+(r.ok?'with an unexpected page':r.status)+'. Your text is still in the box; reload the page to sign in again if it asks.')})
-},function(){fail('the board did not answer. Your text is still in the box; check the connection and send again.')})})})();</script>"""
+fail(SST('js.answer.bad_reply',{what:r.ok?SST('js.answer.unexpected_page'):r.status}))})
+},function(){fail(SST('js.answer.no_answer'))})})})();</script>"""
 # The answer boxes' resize handle, by the main pointer. Fine pointer (a mouse or trackpad): the browser's own corner grip is off (resize:none) and the box's whole bottom edge is the
 # handle, a full-width separator (cursor row-resize, 12 px tall) that draws a corner grip, the two short diagonals, at its right end; the height a viewer drags to is kept per box (H in
 # _ABOX_JS, keyed by the form) and put back after the home page's in-place swap. Coarse pointer (a phone or tablet: `@media (pointer: coarse)`, never the screen's width): no handle and no
@@ -1878,7 +1886,7 @@ class Board:
         "open this session's view" when that is unset), and on the span only when given."""
         body = inner if inner is not None else esc(name if label is None else label)
         u = self.sess_href(name); c = f' class="{esc(cls)}"' if cls else ""
-        tool = _cfg.fleet_tool(); lt = title or (f"open this session in {tool}" if tool else "open this session's view")
+        tool = _cfg.fleet_tool(); lt = title or (_t("link.session_in", tool=tool) if tool else _t("link.session_view"))
         if u: return (f'<a{c} href="{esc(u)}" target="_blank" rel="noopener" title="{esc(lt)}">'
                       f'{body}{" ↗" if arrow else ""}</a>')
         t = f' title="{esc(title)}"' if title else ""
@@ -1929,15 +1937,14 @@ class Board:
         if not cmds: return fmt(x, own)
         n = iter(range(1, len(cmds) + 1))
         line = _LINK_OR_CODE.sub(lambda m: m.group(0) if not is_cmd(m) else
-                                 ("the command below" if len(cmds) == 1 else f"command {next(n)} below"), x)
-        return fmt(line, own) + _cmd_blocks([c.strip() for c in cmds], label="Copy the command")
+                                 (_t("home.cmd_below") if len(cmds) == 1 else _t("home.cmd_n_below", n=next(n))), x)
+        return fmt(line, own) + _cmd_blocks([c.strip() for c in cmds], label=_t("home.copy_the", label=_t("home.command")))
     def due_badge(self, r):
         d = due_of(r)
         if not d: return ""
         left = (d - self.now.date()).days
         cls = "due"   # one color for every due date (no traffic-light coloring)
-        when = "today" if left == 0 else f"{-left} d overdue" if left < 0 else f"in {left} d"
-        return badge(f"Due {when} ({d:%m-%d %a})", cls)
+        return badge(_t("item.due_today" if left == 0 else "item.due_overdue" if left < 0 else "item.due_in", n=abs(left), md=f"{d:%m-%d} {_t(f'date.wd.{d.weekday()}')}"), cls)
     NO_AGENT = "no agent"      # D7: the group of an open item that sits under no agent (it is the owner's and its `then` names none)
     def _sess_obj(self, r): return self.sess_of(*self.mover_ref(r))
     def mover_ref(self, r):
@@ -2089,7 +2096,7 @@ class Board:
     def proj_name(self, k):
         """The project's name without its scope: the page's `name:`, else the slug — never the long title."""
         info = self.proj.get(k) or {}
-        return info.get("name") or (k.split("/", 1)[1] if "/" in k else k) or "no project"
+        return info.get("name") or (k.split("/", 1)[1] if "/" in k else k) or _t("item.no_project")
     def proj_title(self, k):
         """The name the board shows for a project: its scope, a slash and its name ("ops/general", "home/general", "work/General"; projects.scoped_name). Made here,
         at display time, from the page key and the page's own lines: the `display-name:` line, the session names and the keys are never changed. An instance with
@@ -2126,8 +2133,9 @@ class Board:
         """HTML: a time shown as its age (">21h ago" when it only marks the start of a silence), the full time in an instant CSS
         tooltip (a native title waits ~1 s); the page script keeps the age current. title="" stops a card's own title popping up."""
         s_ = (self.now - t).total_seconds()
+        at = f"{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}"
         return (f'<span class="tip{" " + cls if cls else ""}" data-ts="{int(t.timestamp())}"{" data-q" if quiet else ""} '
-                f'data-tip="{"no change since " if quiet else ""}{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}" title="">'
+                f'data-tip="{esc(_t("item.when.no_change_since", when=at) if quiet else at)}" title="">'
                 f'{_i18n.fmt_age(s_, quiet=True) if quiet else ago(s_)}</span>')
     def anchor_entries(self, page):
         """One page's anchors from the anchors file, as clean dicts (clean_anchor_entries)."""
@@ -2138,8 +2146,8 @@ class Board:
         the start of anchor-hub's unbroken change record."""
         u = st.get("unreadable")
         if u:       # the hub asked the source and was refused: no notice can come from it
-            return f'<span class="aflag" title="{H.escape("anchor-hub cannot read it since " + str(u.get("since")) + " " + _cfg.tz_abbr() + ": " + str(u.get("why")), quote=True)}">unreadable</span>'
-        when = "quiet"
+            return f'<span class="aflag" title="{H.escape(_t("item.when.unreadable_tip", since=str(u.get("since")), tz=_cfg.tz_abbr(), why=str(u.get("why"))), quote=True)}">{esc(_t("item.when.unreadable"))}</span>'
+        when = esc(_t("item.when.quiet"))
         if st.get("last"):
             try: when = self.stamp(datetime.datetime.strptime(st["last"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=self.now.tzinfo))
             except Exception: when = H.escape(str(st["last"]))
@@ -2148,7 +2156,7 @@ class Board:
             except (TypeError, ValueError, OverflowError, OSError): ad = None      # an `added` that is no time shows nothing
             since = [x for x in (self.anchor_since, ad) if x]
             if since: when = self.stamp(max(since), quiet=True)
-        if st.get("mode") == "poll": when += " · poll"
+        if st.get("mode") == "poll": when += esc(_t("item.when.poll"))
         return when
     def anchor_row(self, e):
         """One anchor entry as the lists draw it: (kind, (name, url, when, scope, hot)): the name and link anchor-hub knows it by, the stamp of its last activity, the items it is about, whether it moved in the last day."""
@@ -2287,7 +2295,7 @@ class Board:
         items = "".join(f'<li class="w-{e(l["state"].replace(" ", "-"))}"><span class="wtext">{L(l["text"])}</span>{badge(l["state"], "w-" + l["state"].replace(" ", "-"))}'
                         + (f'<span class="wagent">{L(l["agent"])}</span>' if l["agent"] else "") + (f'<span class="dim">· {e(self.when(l["ts"]))}</span>' if l["ts"] else "") + '</li>'
                         for l in sorted(ls, key=lambda l: rank.get(l["state"], 4)))
-        return f'<dt>Work <span class="count">{len(ls)}</span></dt><dd><ul class="iwork">{items}</ul></dd>'
+        return f'<dt>{esc(_t("item.work"))} <span class="count">{len(ls)}</span></dt><dd><ul class="iwork">{items}</ul></dd>'
     # ---------------- the trailers: his words on an item ----------------
     def said_tag(self, r, n, tag, who="", checked=True):
         """The History's tag for one of his recorded words, on the line of the write that recorded them: "Acked-by the owner",
@@ -2360,16 +2368,18 @@ class Board:
         next: the new text's first line, clipped to HIST_NEXT_CLIP characters (markdown as the Next list reads it), with a closed fold for the rest when there is any; ask, options,
         description: "<field> edited" and a closed fold with the new text; a field emptied: "<field> cleared". `suffix`: a bundle's " (2×, 09:00–09:01)"."""
         t = str(text or "").strip()
+        fk = {"next": "item.log.field.next", "ask": "item.log.field.ask", "options": "item.log.field.options", "description": "item.log.field.description"}.get(field)
+        fw = _t(fk) if fk else field          # the field's name in the request's language
         if not t:
-            return f"{field} cleared" + esc(suffix), ""
+            return _t("item.log.field_cleared", field=fw) + esc(suffix), ""
         if field == "next":
             lines = [ln for ln in t.splitlines() if ln.strip()]
             shown = _ip.clip_md(lines[0], self.HIST_NEXT_CLIP)
-            bullet = "next: " + self.md_line(shown, r["gid"]) + esc(suffix)
+            bullet = _t("item.log.next_line", line=self.md_line(shown, r["gid"])) + esc(suffix)
             more = len(lines) > 1 or shown != _ip.clean(lines[0])
-            title = "the whole next"
+            title = _t("item.log.fold_next")
         else:
-            bullet, more, title = f"{field} edited" + esc(suffix), True, f"the new {field}"
+            bullet, more, title = _t("item.log.field_edited", field=fw) + esc(suffix), True, _t("item.log.fold_field", field=fw)
         fold = f'<details class="ehold"><summary class="more">{title}</summary><div class="body md">{md_block(t)}</div></details>' if more else ""
         return bullet, fold
     @staticmethod
@@ -2401,10 +2411,19 @@ class Board:
         reopened; priority; project; subject, next, ask and description edits; a confirm with nothing else changed. One entry per revision (the item page): its author
         (`written_by`, which every save records since step 1; an older revision names none), then everything the revision changed; a comment he wrote on GitHub is an entry of its own.
         merge=False gives one entry per change instead (item_events).
-        → ([{ts, kind, html, who, what (the entry as plain text), comment (True: it belongs under Comments)}], n_more)."""
+        → ([{ts, kind, html, who, what (the entry as plain text), changes ([(kind, fields)] of its lines, itempage.change: what plain_change reads), comment (True: it belongs under Comments)}], n_more)."""
         e = esc
+        def coded(x, code, **f):       # an event with the kind of change it is in the 6th place (itempage.change): the plain words of the latest change are read from it, never from the line's English
+            return (x[0], x[1], x[2] if len(x) > 2 else None, x[3] if len(x) > 3 else "", x[4] if len(x) > 4 else "", _ip.change(code, **f))
+        def rec(x):                    # an event as one change record of its entry
+            pl = _ip.plain(x[1])
+            if len(x) > 5 and x[5]:
+                code, f = x[5]
+                return _ip.change(code, **f) if code in _ip.CHANGE_CODES else _ip.change(code, text=pl)
+            return _ip.change("text", text=pl)
         def fev(field, text):          # a text field's change: its bullet and, in the 4th place, the fold with its text
-            b_, f_ = self.hist_field(r, field, text); return ("edit", b_, None, f_)
+            b_, f_ = self.hist_field(r, field, text); x = ("edit", b_, None, f_)
+            return coded(x, {"next": "next_changed", "description": "background"}[field]) if field in ("next", "description") else x
         def owner(v):          # the creator's name (creator_name, also the sidebar's Creator row); "nobody" when the version names none
             return self.creator_name(r, v) or _t("item.log.nobody")
         def mover_of(v):       # step 4b: who moves the item in this version, as the model reads its fields ("" for a closed or a waiting item)
@@ -2427,7 +2446,8 @@ class Board:
         for vi, (ts, v) in enumerate(vs):
             m = v.get("metadata") or {}; ev = []
             if prev is None:
-                ev.append(("created", _t("item.log.created_mover" if mover_of(v) else "item.log.created", subject=e(v.get('subject') or ''), whose=e(whose(v)), mover=e(mover_show(mover_of(v))), owner=e(owner(v)))   # the subject it was born with
+                ev.append(("created", (_t("item.log.created_mover", subject=e(v.get('subject') or ''), whose=e(whose(v)), mover=e(mover_show(mover_of(v))), owner=e(owner(v))) if mover_of(v)
+                                  else _t("item.log.created", subject=e(v.get('subject') or ''), whose=e(whose(v)), owner=e(owner(v))))   # the subject it was born with
                            + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in _said.new_entries(None, m))))   # his words the first version already held
                 rl = _gh.refile_line(None, m)          # "Refile itself": filed under another project, moved to the owner's
                 if rl: ev.append(("project", e(rl)))
@@ -2449,7 +2469,9 @@ class Board:
                         po = options_of(prev) if a == "call" else []    # the options leave the page with the decision and stay here
                         pk = ask_of(prev) if a == "call" else ""        # and so does the ask, its Decide part (the raw line if misshaped)
                         pk = ((parse_ask(pk) or {}).get("decide") or pk) if pk else ""
-                        ev.append(("needs", _t("item.log.moved_to", lane=f"<b>{e(list_word(m.get('state'), b))}</b>")))
+                        lc = "gave_step" if m.get("state") == "your-step" else "asked" if b == "call" else "back_to_work" if b == "" else None      # whose move it became, in the plain words of the latest change
+                        mv = ("needs", _t("item.log.moved_to", lane=f"<b>{e(list_word(m.get('state'), b))}</b>"))
+                        ev.append(coded(mv, lc) if lc else mv)
                         if pk: ev.append(("needs", _t("item.log.ask_was", ask=e(_ip.clip(pk, 160))), None, f'<details class="ehold"><summary class="more">{_t("item.log.whole_ask")}</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
                         dec = self.decision_made(prev, v)                # his answer written with this change, when it is one
                         kept = {"metadata": {"options": (dec or {}).get("options")}}
@@ -2464,7 +2486,7 @@ class Board:
                                 ev.append(("needs", _t("item.log.opt_rec" if o["recommended"] else "item.log.opt", label=f'<b>{e(_ol.listed(o["label"], i))}</b>', line=e(o["line"])) + (_t("item.log.opt_picked", picked=f'<b>{_t("item.log.picked")}</b>') if taken else ""), None, "", "osub"))
                             if dec and not dec.get("choice"): ev.append(("needs", _t("item.log.no_pick")))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
-                        ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")))
+                        ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(coded(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")), "needs_named"))
                 elif is_held(v) and is_held(prev) and wake_of(prev) != wake_of(v):
                     w = wake_of(v); ev.append(("hold", _t("item.log.wake_set", when=e(self.when(w))) if w else _t("item.log.wake_cleared")))
                 if not h_ and not ph and s_ != "completed" and ps == s_ and wake_of(prev) != wake_of(v):   # a reminder: set, moved or gone
@@ -2474,6 +2496,7 @@ class Board:
                 if s_ != "completed" and (pm.get("state") != m.get("state") or any(pm.get(k) != m.get(k) for k in _states.CARRY_FIELDS)):   # where it stands, with what the state carries
                     ev.append(("hold", (_t("item.log.state_moved", old=e(pm['state']), new=f"<b>{e(m['state'])}</b>") if pm.get("state") in (*_states.STATES, *_states.LEGACY_STATES) and pm.get("state") != m.get("state") else _t("item.log.state", new=f"<b>{e(m['state'])}</b>")) + "".join(_t("item.log.state_carry", label=k, value=e(_ip.clip(m[k], 300))) for k in _states.CARRY.get(m["state"], ()) if m.get(k)) if m.get("state") in _states.STATES
                                else _t("item.log.state_cleared", old=e(list_word(pm.get('state')) or pm.get('state')))))
+                    if m.get("state") not in _states.STATES: ev[-1] = coded(ev[-1], "back_to_work")
                 if s_ != "completed" and (pm.get("draft") or "") != (m.get("draft") or ""):   # the draft's own line its text is on the item
                     ev.append(("edit", _t("item.log.draft_cleared") if not m.get("draft") else _t("item.log.draft_edited") if pm.get("draft") else _t("item.log.draft_set")))
                 if s_ != "completed" and pm.get("rank") != m.get("rank"):   # the builder's queue order
@@ -2485,11 +2508,12 @@ class Board:
                 if s_ != "completed" and ps == "open":      # a mover change, in the model's words; a close or a reopening says its own line
                     mv_a, mv_b = mover_of(prev), mover_of(v)
                     if mv_a and mv_b and mv_a != mv_b and not same_ref(mv_a, mv_b):      # a hold or a wait takes the mover away: its own line says that
-                        ev.append(("mover", _t("item.log.mover", old=e(mover_show(mv_a)), new=f"<b>{e(mover_show(mv_b))}</b>")))
+                        ev.append(coded(("mover", _t("item.log.mover", old=e(mover_show(mv_a)), new=f"<b>{e(mover_show(mv_b))}</b>")), "handed", who=mover_show(mv_b)))
                 ho_ = _hov.fresh(pm, m) if s_ != "completed" else {}       # a finished step handed the item on, or could not: its own line (handover.py)
                 if ho_:
                     ev.append(("mover", (_t("item.log.handover_moved_from", old=e(mover_show(mover_of(prev))), to=f"<b>{e(mover_show(mover_of(v)))}</b>") if mover_of(prev) else _t("item.log.handover_moved", to=f"<b>{e(mover_show(mover_of(v)))}</b>")) if ho_.get("kind") == _hov.MOVED
                                else _t("item.log.handover_kept", who=e(self.mover_name(ho_.get('to') or '')), to=f"<b>{e(mover_show(mover_of(v)) if mover_of(v) != 'no one' else _t('item.log.its_mover'))}</b>")))
+                    if ho_.get("kind") == _hov.MOVED and mover_of(v): ev[-1] = coded(ev[-1], "handed", who=mover_show(mover_of(v)))
                 a, b = due(prev), due(v)
                 if a != b:
                     ev.append(("due", _t("item.log.due_set", when=f"<b>{e(self.when(b))}</b>") if not a else _t("item.log.due_cleared", old=e(self.when(a))) if not b
@@ -2513,7 +2537,7 @@ class Board:
                         just_closed.add(g["step"])
                 for word, line in _steps.changes(pm, m, s_ == "completed"):     # a step checked or dropped, one line each (a step with status updates has the folded line instead)
                     if line in just_closed: continue
-                    ev.append(("step", _t("item.log.step_word", word=step_word(word), line=self.md_line(_ip.clip_md(line, self.HIST_NEXT_CLIP), r["gid"]))))
+                    ev.append(("step", _t("item.log.step_mark", mark=step_word(word), line=self.md_line(_ip.clip_md(line, self.HIST_NEXT_CLIP), r["gid"]))))
                 if (pm.get("next") or "") != (m.get("next") or ""): ev.append(fev("next", m.get("next")))
                 pa, a_ = str(pm.get("ask") or "").strip(), str(m.get("ask") or "").strip()
                 if pa != a_: ev.append(fev("ask", a_))
@@ -2544,13 +2568,13 @@ class Board:
             who = " ".join(str(v.get("written_by") or "").split())          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
-                out += [(vi, j, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": x[0], "html": x[1], "who": who, "what": _ip.plain(x[1]), "comment": x[0] == "comment"}) for j, x in enumerate(ev)]
+                out += [(vi, j, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": x[0], "html": x[1], "who": who, "what": _ip.plain(x[1]), "changes": [rec(x)], "comment": x[0] == "comment"}) for j, x in enumerate(ev)]
             else:
                 if chg:                                                      # one entry per revision: its author and time on the header line, one bullet per change (a text field's text in a fold)
                     h = self.hist_bullets([(x[1], x[3] if len(x) > 3 else "", x[4] if len(x) > 4 else "") for x in chg])
-                    out.append((vi, 0, {"ts": ts, "kind": next((k_ for k_ in ("completed", "reopened", "answer", "created", "said") if any(x[0] == k_ for x in chg)), chg[0][0]), "html": h, "who": who, "what": "; ".join(_ip.plain(x[1]) for x in chg), "comment": False}))
+                    out.append((vi, 0, {"ts": ts, "kind": next((k_ for k_ in ("completed", "reopened", "answer", "created", "said") if any(x[0] == k_ for x in chg)), chg[0][0]), "html": h, "who": who, "what": "; ".join(_ip.plain(x[1]) for x in chg), "changes": [rec(x) for x in chg], "comment": False}))
                 for j, x in enumerate(c for c in ev if c[0] == "comment"):   # his comment written on GitHub: its own line, at the comment's own time
-                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "comment": True}))
+                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "changes": [rec(x)], "comment": True}))
             prev = v
         for g in groups.values():          # one line per step: a closed step says it was closed, the status updates written on it folded under; an open step's updates are one line too, at its newest update
             n = len(g["ups"])
@@ -2561,9 +2585,10 @@ class Board:
                      f'<details class="ehold"><summary class="more">{nstat}</summary><div class="body"><ul class="estat">{fold}</ul></div></details>')]
             ent = {"ts": g["last"], "ts_from": g["first"], "kind": "work", "html": self.hist_bullets(body), "who": g.get("who", ""),
                    "what": (_t("item.log.step_mark", mark=step_word(g["mark"]), line=g["step"]) if g["closed"] else _t("item.log.step_open", line=g["step"])) + f'; {nstat}: ' + "; ".join(te["text"] for _w, te in g["ups"]), "comment": False}
+            ent["changes"] = [_ip.change("text", text=ent["what"])]
             host = next((x[2] for x in out if merge and g["closed"] and x[0] == g["vi"] and x[1] == 0), None)      # the write that closed the step is one entry: its step line first, its other changes (a new next) after it
             if host is not None:
-                host["html"], host["ts_from"], host["what"] = ent["html"] + host["html"], g["first"], ent["what"] + "; " + host["what"]
+                host["html"], host["ts_from"], host["what"], host["changes"] = ent["html"] + host["html"], g["first"], ent["what"] + "; " + host["what"], ent["changes"] + host["changes"]
             else:
                 out.append((g["vi"], 0.5, ent))
         out.sort(key=lambda x: (-x[0], x[1]))
@@ -2582,6 +2607,14 @@ class Board:
                   "nomover": ("warn", "sent.nomover"),
                   "nostep": ("warn", "sent.nostep", "sent.nostep_home")}
     _SENT = {k: (v[0], *[_i18n.EN[x] for x in v[1:]]) for k, v in _SENT_KEYS.items()}      # the English view of the table above (what the tests read)
+    def sent_msg(self, code, taken_by="", home=False) -> str:
+        """The notice of a ?sent= code (a key of _SENT_KEYS) in the request's language, as plain text (not escaped): the item page's wording, or with `home` the home page's own where the code has one.
+        After Done or a note on the step, `taken_by` (who moves the item now) names them. "" for a code that is none."""
+        v = self._SENT_KEYS.get(code)
+        if not v: return ""
+        if taken_by and code == "done": return _t("js.sent_done", who=taken_by)
+        if taken_by and code == "stepreply": return _t("sent.stepreply_by", who=taken_by)
+        return _t(v[-1] if home else v[1])
     def answer_html(self, r, answer, comment_only=False) -> str:
         """the answer box under the Ask of an open item, for a signed-in viewer (`answer` = {"action", "token"} from
         the server; None draws nothing). While it needs his decision: one card per stored option (_cards_html: the label and the whole text of the option, the recommended one marked by its badge;
@@ -2652,9 +2685,8 @@ class Board:
         """The short notice after a POST (?sent=<code>): sent, or why nothing was. After Done or a note on the step `taken_by` is who moves the item now."""
         k = str((answer or {}).get("sent") or "")
         if k not in self._SENT: return ""
-        cls, msg = self._SENT_KEYS[k][0], _t(self._SENT_KEYS[k][1])      # the item page's wording; a third entry is the home page's own (it has no "below" and no box to press again in)
-        if k == "done" and taken_by: msg = _t("js.sent_done", who=taken_by)
-        if k == "stepreply" and taken_by: msg = _t("sent.stepreply_by", who=taken_by)
+        cls = self._SENT[k][0]
+        msg = self.sent_msg(k, taken_by)      # the item page's wording (the home page's own is sent_msg(home=True))
         return f'<p class="isent {cls}" role="status">{esc(msg)}</p>'
     def contact_name(self, r, contact=None) -> str:
         """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, server._contact_label), else the stored metadata.contact as the session's name now; "" when none."""
@@ -2684,8 +2716,8 @@ class Board:
         line, "created by"). The row is drawn once, first in the column, in the group with Owner and Creator; the line under the title no longer names the mover."""
         e = esc
         x = self._sess_obj(r) or {}; mach = str(x.get("machine") or "")
-        where = "cloud" if mach == "c" else (self.fleet.get(mach) or mach)
-        nm = x.get("name") or x.get("id") or self.NO_AGENT
+        where = _t("item.cloud") if mach == "c" else (self.fleet.get(mach) or mach)
+        nm = x.get("name") or x.get("id") or _t("item.no_agent")
         return (_t("item.mover"), self.sess_html(nm, arrow=True) + (f' <span class="dim">· {e(where)}</span>' if where else ""))
     def creator_row(self, r) -> tuple:
         """The side column's row under Owner (Mover, Owner, Creator are its first three) → (the "Creator" label with its hover text, the value): whoever created the item, by the name the History's first line gives (creator_name),
@@ -2831,7 +2863,7 @@ class Board:
         wlabel = {"relay": _t("wait.label.ask_by"), "anchor": _t("wait.label.backstop"), "item": _t("wait.label.backstop")}.get(w_.kind if w_ else "", _t("item.wake")) if (w_ and (w_.until or w_.backstop)) else _t("item.wake")
         wakev = e(self.when(wk)) if (wk and not done and not waiting) else (e(self.wait_day(wend)) if (waiting and wend) else "")
         gu = issue_url(r["gid"], self.data_dir)       # in the sidebar: the item's GitHub issue, when it has one and the mirror is on
-        ghl = (f'<a class="hgh" href="{e(gu)}" target="_blank" rel="noopener" title="{e(_t("item.github_issue_tip"))}">{_t("item.github_issue")}</a>' if gu else "")
+        ghl = (f'<a class="hgh" href="{e(gu)}" target="_blank" rel="noopener" title="{esc_dq(_t("item.github_issue_tip"))}">{_t("item.github_issue")}</a>' if gu else "")
         def grp(*fields):                             # one sidebar group: a small heading over each value, a thin line between groups
             body = "".join(f'<dt>{h}</dt><dd>{v}</dd>' for h, v in fields if v)
             return f'<dl class="sgrp">{body}</dl>' if body else ""
@@ -3410,8 +3442,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         def label(i):      # several anchors with the same label are numbered, in the order they are shown ("mail.google.com (1)", "(2)")
             seen[labels[i]] = seen.get(labels[i], 0) + 1
             return f"{labels[i]} ({seen[labels[i]]})" if labels.count(labels[i]) > 1 else labels[i]
-        what = ", ".join(f'<a href="{esc(u)}" target="_blank" rel="noopener">{esc(label(i))}</a>' if u.startswith(("http://", "https://")) else esc(u) for i, u in enumerate(urls)) or "an anchor (none recorded)"
-        if more: what += f' <span class="dim">+{more} more</span>'
+        what = ", ".join(f'<a href="{esc(u)}" target="_blank" rel="noopener">{esc(label(i))}</a>' if u.startswith(("http://", "https://")) else esc(u) for i, u in enumerate(urls)) or esc(_t("wait.anchor_none"))
+        if more: what += f' <span class="dim">{esc(_t("wait.more", n=more))}</span>'
         return what + (f": {esc(w.event)}" if w.event else "")
     def home_pairs(self, rows=None):
         """The open rows (default: every open item of the board) in the three lists, sorted as the page says: {your-move, agents, waiting} → [(row, model)].
@@ -3735,7 +3767,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         if flags:
             if due_of(r): who.append(self.due_badge(r))      # the old project line was the one place a deadline showed: kept, on the who line
             if r.get("_fresh") == "stale": who.append(f'<span class="iwarn" title="{e(stale_tip(r, self.mover_name))}">⚠</span>')
-            if waits_recycle(r): who.append(badge("waits for recycle", "recycle"))
+            if waits_recycle(r): who.append(badge(_t("item.waits_recycle"), "recycle"))
         notes = []
         wk = m.get("woke")
         if which != _home.WAITING and isinstance(wk, dict) and wk.get("what"):
@@ -3823,7 +3855,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         Its card keeps the plain edge."""
         oc, why, _by = outcome_of(r)
         return _ui.row(tag_html=_ui.tag(_ui.kind_of_outcome(oc)), href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=self.stamp(r["_updated"], "ir-age"),
-                       who_html=who_html if who_html is not None else (esc(sub) if sub else ""), detail_html=esc(why) if why else ('<span class="dim">no outcome recorded</span>' if oc in ("", "unrecorded") else ""), li_id=anchor(r),
+                       who_html=who_html if who_html is not None else (esc(sub) if sub else ""), detail_html=esc(why) if why else (f'<span class="dim">{esc(_t("item.no_outcome"))}</span>' if oc in ("", "unrecorded") else ""), li_id=anchor(r),
                        project_html=self.row_line(r, project=named))
     COMPLETED_PAGE = 25          # rows to a page of the Completed section on the Landed page
     def completed_page(self, page):

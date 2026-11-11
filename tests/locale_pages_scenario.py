@@ -92,9 +92,33 @@ SRC = {rel: pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in SOUR
 check("this file and the four sources hold no Hangul letter", not HANGUL.search(pathlib.Path(__file__).read_text(encoding="utf-8")) and not [r for r, s in SRC.items() if HANGUL.search(s)])
 
 # ---- 2. the keys
-KEY_USE = re.compile(r"""(?:\b_t|\b_i18n\.t|\bi18n\.t|\bSST)\(\s*['"]([a-z0-9_.-]+)['"]""")
+KEY_CALL = re.compile(r"""(?:\b_t|\b_i18n\.t|\bi18n\.t|\bSST)\(""")
+KEY_LIT = re.compile(r"""\s*['"]([a-z0-9_.-]+)['"]""")
+KEY_ELSE = re.compile(r"""\belse\s+['"]([a-z0-9_.-]+)['"]""")
+def keys_in(text):
+    """The keys a source asks for by a literal name: the first argument's literal and each literal after an `else` in that argument (`_t("a" if c else "b", ...)` asks for both)."""
+    out = set()
+    for m in KEY_CALL.finditer(text):
+        lit = KEY_LIT.match(text, m.end())
+        if not lit: continue
+        out.add(lit.group(1))
+        depth, i, q, stop = 1, lit.end(), "", min(len(text), lit.end() + 400)
+        while i < stop and depth:
+            c = text[i]
+            if q:
+                if c == "\\": i += 1
+                elif c == q: q = ""
+            elif c in "'\"": q = c
+            elif c in "([{": depth += 1
+            elif c in ")]}": depth -= 1
+            elif c == "," and depth == 1: break
+            i += 1
+        out.update(KEY_ELSE.findall(text[lit.end():i]))
+    return out
+check("the key scan reads both keys of a conditional (the first literal, and the one after else), and only the first argument", keys_in('_t("a.b" if c(x, y) else "c.d", n=1)') == {"a.b", "c.d"}
+      and keys_in("_t('a.b', k='x.y' if c else 'z.w')") == {"a.b"} and keys_in("_t(f'a.{n}')") == set() and keys_in("SST('js.a',{b:SST('js.b')})") == {"js.a", "js.b"})
 used = set()
-for s in SRC.values(): used |= set(KEY_USE.findall(s))
+for s in SRC.values(): used |= keys_in(s)
 used = {k for k in used if not k.endswith((".", "_"))}      # "search.kind." + k is a prefix, checked with DYN below
 check("the four sources ask for keys by their literal names (a regex that matches nothing would prove nothing)", len(used) > 60, len(used))
 check("every key they ask for by its literal name is in the English catalog", not [k for k in used if k not in EN], [k for k in used if k not in EN])

@@ -224,10 +224,34 @@ for p in pathlib.Path(STACK).rglob("*"):
         except (OSError, UnicodeDecodeError): continue
         if HANGUL.search(text): bad.append(str(p.relative_to(STACK)))
 check("no file of the repository holds a Hangul letter", not bad, bad[:5])
-KEY_USE = re.compile(r"""(?:\b_t|\b_i18n\.t|\bi18n\.t|\bSST)\(\s*['"]([a-z0-9_.-]+)['"]""")
+KEY_CALL = re.compile(r"""(?:\b_t|\b_i18n\.t|\bi18n\.t|\bSST)\(""")
+KEY_LIT = re.compile(r"""\s*['"]([a-z0-9_.-]+)['"]""")
+KEY_ELSE = re.compile(r"""\belse\s+['"]([a-z0-9_.-]+)['"]""")
+def keys_in(text):
+    """The keys a source asks for by a literal name: the first argument's literal and each literal after an `else` in that argument (`_t("a" if c else "b", ...)` asks for both)."""
+    out = set()
+    for m in KEY_CALL.finditer(text):
+        lit = KEY_LIT.match(text, m.end())
+        if not lit: continue
+        out.add(lit.group(1))
+        depth, i, q, stop = 1, lit.end(), "", min(len(text), lit.end() + 400)
+        while i < stop and depth:
+            c = text[i]
+            if q:
+                if c == "\\": i += 1
+                elif c == q: q = ""
+            elif c in "'\"": q = c
+            elif c in "([{": depth += 1
+            elif c in ")]}": depth -= 1
+            elif c == "," and depth == 1: break
+            i += 1
+        out.update(KEY_ELSE.findall(text[lit.end():i]))
+    return out
+check("the key scan reads both keys of a conditional (the first literal, and the one after else), and only the first argument", keys_in('_t("a.b" if c(x, y) else "c.d", n=1)') == {"a.b", "c.d"}
+      and keys_in("_t('a.b', k='x.y' if c else 'z.w')") == {"a.b"} and keys_in("_t(f'a.{n}')") == set() and keys_in("SST('js.a',{b:SST('js.b')})") == {"js.a", "js.b"})
 used = set()
 for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/i18n.py", "stackshot/web/uiprefs.py", "stackshot/web/itempage.py"):
-    used |= set(KEY_USE.findall(pathlib.Path(STACK, rel).read_text(encoding="utf-8")))
+    used |= keys_in(pathlib.Path(STACK, rel).read_text(encoding="utf-8"))
 check("every key a page or a script asks for by its literal name is in the English catalog", not [k for k in used if k not in EN and not any(e.startswith(k) for e in EN)], [k for k in used if k not in EN and not any(e.startswith(k) for e in EN)])
 check("the state words and the panel sections the pages build a key for are all there", all(f"state.{k}" in EN for k in ("you", "agent", "release", "wait", "done", "dropped", "superseded", "closed"))
       and all(f"panel.sec.{s}" in EN for s in up.PANEL_SECTIONS) and all(f"panel.move.{a}" in EN for a in r2._PANEL_MOVES) and all(f"panel.lang.{c}" in EN for c in i18n.LANGS)
@@ -343,7 +367,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the home's headings, count cards and state words are in the test locale", all(MARK(s) in kv for s in ("Your move", "On agent", "Queued for release", "Waiting", "Closed", "Counts")), [s for s in ("Your move", "On agent", "Waiting", "Closed") if MARK(s) not in kv])
     check("the home's empty lists and its connection notice are in the test locale", MARK("nothing waits on you") in kv or MARK("no agent has an open item") in kv, kv[:200])
     check("the fixed buttons every page carries are in the test locale", f'aria-label="{MARK("Reload")}" title="{MARK("Reload page")}"' in ko_home and f'aria-label="{MARK("Back to top")}"' in ko_home and 'aria-label="Reload"' not in ko_home)
-    check("the rendered line and the ages are in the test locale (the age template, the 'rendered' word)", re.search(r"A<(now|\d+min|\d+hr|\d+day)>", kv) is not None and MARK("rendered") in kv and " ago<" not in kv, re.findall(r"A<[^>]*>|\d+[mhd] ago|just now", kv)[:6])
+    check("the rendered line and the ages are in the test locale (the age template, the 'rendered' word)", re.search(r"A<(now|\d+min|\d+hr|\d+day)>", kv) is not None and re.search(r'<p class="rline"><span class="rw">\[x:rendered </span><span id="rendered"[^>]*>.*?</span></span><span class="rw">\]</span></p>', kv, re.S) and " ago<" not in kv, re.findall(r"A<[^>]*>|\d+[mhd] ago|just now", kv)[:6])
     check("the item's title and the rest of the item's text stay English", TITLE in kv and MARK(TITLE) not in ko_home and "the next step" in kv and "[x:the next step]" not in ko_home)
     check("the search box in the header is in the test locale (placeholder, label, button) and English for the English person", f'placeholder="{MARK("Search items, history, projects, sessions")}"' in ko_home and f'aria-label="{MARK("Search the board")}"' in ko_home
           and f'aria-label="{MARK("Search")}" title="{MARK("Search")}"' in ko_home and 'placeholder="Search items, history, projects, sessions"' in en_home and 'aria-label="Search" title="Search"' in en_home)
@@ -557,6 +581,10 @@ ic(250, {"project": "projects/alpha", "hold": True, "needs": ["alpha-helper"]}, 
 ic(250, {"hold": False, "needs": []}, updated=now0 - 7 * HR)
 ic(250, {"mover": "", "handover": {"step": "cccccccccccc", "kind": "moved", "to": "alpha-helper", "at": now0 - 6 * HR}}, updated=now0 - 6 * HR)
 ic(250, {"mover": "", "handover": {"step": "dddddddddddd", "kind": "fallback", "to": "alpha-gone", "at": now0 - 5 * HR}}, updated=now0 - 5 * HR)
+ic(250, {"needs": ["decision"], "ask": ASKX}, updated=now0 - int(4.8 * HR))          # the lane moves to his call: "asked"
+ic(250, {"needs": [], "ask": ""}, updated=now0 - int(4.6 * HR))                      # and back to the agent: "back_to_work"
+ic(250, {"state": "your-step"}, updated=now0 - int(4.4 * HR))
+ic(250, {"needs": ["decision"], "ask": ASKX}, updated=now0 - int(4.2 * HR))          # his call while the state is a step of his: "gave_step"
 ix(253, "Handovers from and to a wait", mover="alpha-main", next="alpha-main: x"); git("add", "-A"); git("commit", "-q", "-m", "ipx 253")
 ic(253, {"wait_kind": "time", "wake": "2099-01-01", "post_wake_mover": "alpha-helper", "next": "alpha-helper: later", "handover": {"step": "eeeeeeeeeeee", "kind": "moved", "to": "alpha-helper", "at": now0 - 4 * HR}}, updated=now0 - 4 * HR)
 ic(253, {"mover": "alpha-main", "next": "alpha-main: again", "handover": {"step": "ffffffffffff", "kind": "moved", "to": "alpha-main", "at": now0 - 3 * HR}}, drop=("wait_kind", "wake", "post_wake_mover"), updated=now0 - 3 * HR)
@@ -568,11 +596,19 @@ ix(256, "Owner unnamed", written_by="", owner="", mover="alpha-main", next="alph
 ix(257, "Stale question", mover=OWN, needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide", su=now0 - 90 * DY)
 ix(258, "Closed without a word", mover="alpha-main", next="alpha-main: x", su=now0 - 5 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 258")
 ic(258, {"outcome": "unrecorded"}, status="completed", updated=now0 - 4 * HR, written_by="alpha-main")
+# 259: names and values that carry markup, where the History puts a person's or session's own text into a template (the rank that was cleared, who closed it, the GitHub comment's text)
+ESC_RANK, ESC_BY, ESC_GH = "<u>3</u>", "<s>closer</s>", '<i>hi</i> & "q"'
+ix(259, "Escapes", mover="alpha-main", next="alpha-main: x", su=now0 - 6 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 259")
+ic(259, {"rank": ESC_RANK}, updated=now0 - 5 * HR)
+ic(259, {}, drop=("rank",), updated=now0 - 4 * HR)
+ic(259, {"next": ""}, updated=now0 - int(3.5 * HR))
+ic(259, {"outcome": "done"}, status="completed", updated=now0 - 3 * HR, written_by=ESC_BY)
+ic(259, {"answers": [{"ts": now0 - 2 * HR, "kind": "comment", "text": ESC_GH, "via": "github", "url": "https://github.com/o/r/issues/5#issuecomment-8", "comment_id": 8}]}, written_by=ESC_BY, updated=now0 - 2 * HR)
 ix(251, "A long History", mover="alpha-main", next="alpha-main: x", priority="p2"); git("add", "-A"); git("commit", "-q", "-m", "ipx 251")
 for n_ in range(56): ic(251, {"priority": "p1" if n_ % 2 == 0 else "p3"}, updated=now0 - (100 - n_) * 60)
 (IPX / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "https://github.com/o/r/pull/9", "items": ["a201"], "added": 1, "by": "t"}], "projects/beta": [{"url": "https://github.com/o/r/pull/10", "items": ["a201"], "added": 1, "by": "t"}]}))
 git("add", "-A"); git("commit", "-q", "-m", "ipx all")
-IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258]
+IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258, 259]
 IPX_BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 IPX_WATCH = {"action": "/items/a1/watch", "token": "TOKEN", "flag": "", "watched": True, "why": "it is yours"}
 def ipx_pages():
@@ -612,7 +648,11 @@ def _ipx_pat(v):
     return re.compile(r"\[x:" + ".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)) + r"\]", re.S)
 # keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
 IPX_DIRECT = {"item.change.asked", "item.change.back_to_work", "item.change.background", "item.change.by", "item.change.gave_step", "item.change.handed", "item.change.next_changed", "item.change.plain",
-              "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news"}
+              "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news",
+              "answer.sent.askedback", "answer.sent.askedback_home", "answer.sent.closed", "answer.sent.closednote", "answer.sent.comment", "answer.sent.decision", "answer.sent.done", "answer.sent.done_by", "answer.sent.empty",
+              "answer.sent.nomover", "answer.sent.nostep", "answer.sent.nostep_home", "answer.sent.stale", "answer.sent.stale_home", "answer.sent.stalenote", "answer.sent.stalenote_home", "answer.sent.stepreply", "answer.sent.stepreply_by", "answer.sent.toolong",
+              "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
+              "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more"}
 seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
 check("every string of the item page's areas shows in the test locale on some fixture page, but the ones the direct calls below cover", set(IPX_NEW) - seen <= IPX_DIRECT, sorted(set(IPX_NEW) - seen - IPX_DIRECT))
 
@@ -646,10 +686,40 @@ check("the History's completed line says its outcome from the table (done, dropp
       and MARK(EN["item.outcome_word.unrecorded"]) in ipx_ko[(258, "plain")] and "<b>closed (no outcome recorded)</b>" in ipx_en[(258, "plain")] and "<b>dropped</b>" in ipx_en[(204, "plain")])
 check("…and the English pages say what they always said (the words the table holds, in the place of the markers)", all(s in ipx_en[(201, "plain")] for s in ("History", "<b>done</b> by alpha-main")) and "Waiting" in ipx_en[(210, "plain")])
 
+# markup in a person's or session's own words, put by the History into a template (the rank that was cleared, who closed it, a GitHub comment's text) reaches the page escaped, in both languages
+def _m(key, **f): return MARK(EN[key].format(**f))
+def _nojs(h): return re.sub(r"<(script|style)[^>]*>.*?</\1>", "", h, flags=re.S)
+ESCP = ("&lt;u&gt;3&lt;/u&gt;", "&lt;s&gt;closer&lt;/s&gt;", "&lt;i&gt;hi&lt;/i&gt; &amp; &quot;q&quot;")
+for lang_, pg_ in (("English", ipx_en), ("the test locale", ipx_ko)):
+    b_ = _nojs(pg_[(259, "plain")])
+    check(f"markup in a cleared rank, in the name of whoever closed an item and in a GitHub comment's text reaches the History escaped ({lang_})",
+          all(x in b_ for x in ESCP) and not any(x in b_ for x in ("<u>3</u>", "<s>closer</s>", "<i>hi</i>")), [x for x in ESCP if x not in b_])
+check("…the rank's line reads from its own template in both languages (the escaped rank in 'was …')", "rank cleared (was &lt;u&gt;3&lt;/u&gt;)" in ipx_en[(259, "plain")]
+      and _m("item.log.rank_cleared", old="&lt;u&gt;3&lt;/u&gt;") in ipx_ko[(259, "plain")])
+check("a cleared next reads 'next cleared' in English and from its two templates (the field name inside the line) in the test locale",
+      "next cleared" in html.unescape(ipx_en[(259, "plain")]) and _m("item.log.field_cleared", field=_m("item.log.field.next")) in ipx_ko[(259, "plain")])
+
+# the due line's three kinds say what happened: set, moved and cleared each carry the right date, in English and in the test locale
+_en201, _ko201 = html.unescape(ipx_en[(201, "plain")]), ipx_ko[(201, "plain")]
+check("the History's due lines in English: set to the first date, moved from the first to the second, cleared with the second as the old one", all(x in _en201 for x in ("due set to <b>Sun Mar 1st</b>", "due moved: Sun Mar 1st → <b>Wed Apr 1st</b>", "due cleared (was Wed Apr 1st)")))
+_ds, _dm, _dc = (re.search(p_, _ko201) for p_ in (r"\[x:due set to <b>(?P<w>[^<]*)</b>\]", r"\[x:due moved: (?P<a>.*?) → <b>(?P<b>[^<]*)</b>\]", r"\[x:due cleared \(was (?P<w>[^)]*)\)\]"))
+check("…and in the test locale each kind reads from its own key with the same dates (set's new = moved's old, moved's new = cleared's old)", bool(_ds and _dm and _dc) and _ds["w"] == _dm["a"] and _dm["b"] == _dc["w"] and _ds["w"] != _dm["b"], (_ds, _dm, _dc))
+
+# the English-only values of the item page's areas, in both languages: the English page says the table's words, the test locale's page marks them
+_en_all = html.unescape(_nojs("\n".join(ipx_en.values())))
+def _en_pat(v): return re.compile(".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)), re.S)
+LOW_B = sorted(k for k in IPX_NEW if (k.startswith(("link.google_", "item.log.", "wait.what.")) or k in ("item.earlier_steps", "item.no_open_steps", "item.github_issue", "item.github_issue_tip", "wait.chase_note", "watch.not_watched")) and k not in IPX_DIRECT)
+check("the English-only values (the Google links, the earlier and open steps, the GitHub issue, the History's lines, the wait's words and chase note, the watch's) are listed", len(LOW_B) >= 40, len(LOW_B))
+check("…each reads as the table's words on some English fixture page", all(_en_pat(EN[k]).search(_en_all) for k in LOW_B), [k for k in LOW_B if not _en_pat(EN[k]).search(_en_all)])
+check("…and each is marked on some page in the test locale", all(k in seen for k in LOW_B), [k for k in LOW_B if k not in seen])
+
+# the GitHub link's title: a plain apostrophe in English (and in the test locale), a value's double quote still escaped (see QKEYS below)
+check("the GitHub issue link's title shows a plain apostrophe, not &#x27;, in English and in the test locale", 'title="open this item\'s GitHub issue"' in ipx_en[(201, "gh")] and "item&#x27;s GitHub" not in ipx_en[(201, "gh")]
+      and f'title="{MARK(EN["item.github_issue_tip"])}"' in ipx_ko[(201, "gh")], re.findall(r'title="[^"]*GitHub[^"]*"', ipx_en[(201, "gh")]))
+
 # the strings only a direct call reaches
 from stackshot.web import itempage as ipg
 from stackshot.model import model as _mm
-def _m(key, **f): return MARK(EN[key].format(**f))
 cl_ = _cfg.CFG.setdefault("client", {}); had_hosts = "mockup_hosts" in cl_; cfg_old = cl_.get("mockup_hosts")
 with i18n.use("ko"):
     W = lambda kind, **k: _mm.Wait(kind=kind, kind_explicit=True, **k)
@@ -657,8 +727,11 @@ with i18n.use("ko"):
               ipg.wait_what(W("relay", event="the contract"), party="Acme"), ipg.wait_what(W("relay"), party="Acme"), ipg.wait_what(W("relay")), ipg.wait_what(W("relay", event="the contract from Acme"), party="Acme"),
               ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday")]
     d_end = [ipg.wait_end_label(W("time")), ipg.wait_end_label(W("relay")), ipg.wait_end_label(W("anchor")), ipg.wait_end_label(W("item", until="2099-01-01"))]
-    d_chg = {s: ipg.plain_change(s) for s in ("needs: decision; state: your-call", "mover: alpha-main → alpha-helper", "state cleared (was your-call)", "state: your-step", "next edited", "description edited", "completed: done")}
-    d_last = [ipg.last_change("alpha-main", "state: your-step"), ipg.last_change("", "state: your-step"), ipg.last_change("alpha-main", "")]
+    CH = ipg.change
+    d_chg = [ipg.plain_change(c) for c in ([CH("needs_named"), CH("asked")], [CH("handed", who="alpha-helper"), CH("needs_named")], [CH("back_to_work")], [CH("gave_step")], [CH("next_changed")], [CH("background")],
+                                           [CH("text", text="completed: done")], "completed: done", [CH("gave_step"), CH("next_changed"), CH("background")], [CH("asked"), CH("asked")],
+                                           [CH("handed", who="no one", text="mover: a to no one")], [CH("needs_named")], [])]
+    d_last = [ipg.last_change("alpha-main", [CH("gave_step")]), ipg.last_change("", [CH("gave_step")]), ipg.last_change("alpha-main", []), ipg.last_change("a<b", [CH("text", text="x<y")], esc=html.escape)]
     d_age = [r2.age_words(600), r2.age_words(3 * 3600), r2.age_words(3 * 86400)]
     d_tip = [r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}}), r2.stale_tip({"_age": 3 * 3600, "metadata": {}})]
     try:
@@ -670,17 +743,110 @@ with i18n.use("ko"):
 check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
       _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday"], d_wait)
 check("wait_end_label in the test locale", d_end == [_m("wait.end.until"), _m("wait.end.ask_by"), _m("wait.end.backstop"), _m("wait.end.until")], d_end)
-check("plain_change in the test locale: each clause reads from the table, the rest is as the log wrote it", d_chg == {"needs: decision; state: your-call": _m("item.change.asked"), "mover: alpha-main → alpha-helper": _m("item.change.handed", who="alpha-helper"),
-      "state cleared (was your-call)": _m("item.change.back_to_work"), "state: your-step": _m("item.change.gave_step"), "next edited": _m("item.change.next_changed"), "description edited": _m("item.change.background"),
-      "completed: done": "completed: done"}, d_chg)
-check("last_change in the test locale: ' by <who>: <what>' and ': <what>' are one text each, the what in the table's words; no entry, nothing", d_last == [_m("item.change.by", who="alpha-main", what=_m("item.change.gave_step")),
-      _m("item.change.plain", what=_m("item.change.gave_step")), ""], d_last)
+check("plain_change in the test locale: each kind of change reads from its own whole-line text, a change with no line of its own stays as written, the first two are joined", d_chg == [
+      _m("item.change.asked"), _m("item.change.handed", who="alpha-helper"), _m("item.change.back_to_work"), _m("item.change.gave_step"), _m("item.change.next_changed"), _m("item.change.background"),
+      "completed: done", "completed: done", _m("item.change.gave_step") + ", " + _m("item.change.next_changed"), _m("item.change.asked"), "mover: a to no one", "", ""], d_chg)
+check("last_change in the test locale: ' by <who>: <what>' and ': <what>' are one text each, the what in the table's words; no entry, nothing; the words go through esc",
+      d_last == [_m("item.change.by", who="alpha-main", what=_m("item.change.gave_step")), _m("item.change.plain", what=_m("item.change.gave_step")), "",
+                 _m("item.change.by", who="a&lt;b", what="x&lt;y")], d_last)
 check("age_words and stale_tip in the test locale", d_age == [_m("more.age_min", n=10), _m("more.age_hour", n=3), _m("more.age_day", n=3)]
       and d_tip == [_m("more.stale_tip_call", age=_m("more.age_hour", n=3)), _m("more.stale_tip", age=_m("more.age_hour", n=3))], (d_age, d_tip))
 check("link_label in the test locale: a mockup page, a releases page and a session link read from the table", d_link == [_m("link.mockup"), _m("link.releases", repo="r"), _m("link.session")], d_link)
 check("…and the config the test touched is put back", cl_.get("mockup_hosts") == cfg_old and ("mockup_hosts" in cl_) == had_hosts)
-d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "chg": ipg.last_change("alpha-main", "state: your-step"), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
-check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "chg": " by alpha-main: gave you a step", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
+
+# the shared helpers of the sidebar and the rows, called direct: no fixture page reaches every branch of them
+bdx = r2.Board(f"{tmp}/store"); DT = datetime.timedelta
+fl_ = _cfg.CFG.setdefault("fleet", {}); had_tool = "tool_name" in fl_; tool_old = fl_.get("tool_name"); since_old = bdx.anchor_since
+def _wd(d): return f"{d:%m-%d} {i18n.t(f'date.wd.{d.weekday()}', 'ko')}"
+def _dueof(days): return {"gid": "a1", "metadata": {"due": (bdx.now.date() + DT(days=days)).isoformat()}}
+with i18n.use("ko"):
+    d_due = [bdx.due_badge(_dueof(0)), bdx.due_badge(_dueof(-3)), bdx.due_badge(_dueof(5)), bdx.due_badge({"gid": "a1", "metadata": {}})]
+    bdx._sess_obj = lambda r: {"name": "cloud-x", "machine": "c"}; d_mc = bdx.mover_row({"gid": "a1", "metadata": {}})
+    bdx._sess_obj = lambda r: None; d_mn = bdx.mover_row({"gid": "a1", "metadata": {}})
+    del bdx._sess_obj
+    d_work = bdx.work_html({"gid": "a1", "metadata": {"work": [{"text": "oil the hinges", "agent": "alpha-main", "state": "defined", "ts": 0}]}})
+    bdx.anchor_since = None
+    d_wn = [bdx._when({"unreadable": {"since": "2026-01-01 00:00", "why": "refused"}}), bdx._when({}), bdx._when({"mode": "poll"})]
+    bdx.anchor_since = since_old
+    d_stamp = bdx.stamp(bdx.now - DT(hours=3), quiet=True)
+    bdx.sess_href = lambda n: "https://fleet.example/v/" + n
+    try:
+        fl_["tool_name"] = "Fleety"; d_s1 = bdx.sess_html("alpha-main")
+        fl_["tool_name"] = ""; d_s2 = bdx.sess_html("alpha-main")
+        cl_["mockup_hosts"] = ["mockup.example"]
+        d_mk = r2.mockup_link({"gid": "a1", "status": "open", "metadata": {"needs": ["decision"], "ask": "pick one, see https://mockup.example/mockup/7"}})
+    finally:
+        del bdx.sess_href
+        if had_tool: fl_["tool_name"] = tool_old
+        else: fl_.pop("tool_name", None)
+        if had_hosts: cl_["mockup_hosts"] = cfg_old
+        else: cl_.pop("mockup_hosts", None)
+    bdx.scoped_urls = lambda gid: [f"https://example.com/{i}" for i in range(5)]
+    d_wa = [bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")), bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor"), full=True)]
+    bdx.scoped_urls = lambda gid: []; d_wa.append(bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")))
+    del bdx.scoped_urls
+    d_sent = {k_: (bdx.sent_msg(k_), bdx.sent_msg(k_, home=True)) for k_ in bdx._SENT}
+    d_sent_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
+_d0, _d3, _d5 = bdx.now.date(), bdx.now.date() - DT(days=3), bdx.now.date() + DT(days=5)
+check("due_badge in the test locale: today, overdue and ahead each read from their own template, the weekday from the table; no date, no badge",
+      d_due == [r2.badge(_m("item.due_today", n=0, md=_wd(_d0)), "due"), r2.badge(_m("item.due_overdue", n=3, md=_wd(_d3)), "due"), r2.badge(_m("item.due_in", n=5, md=_wd(_d5)), "due"), ""], d_due)
+check("mover_row in the test locale: a cloud session names 'cloud' and an item under no session says 'no agent', each from the table",
+      f'<span class="dim">· {MARK(EN["item.cloud"])}</span>' in d_mc[1] and "cloud-x" in d_mc[1] and MARK(EN["item.no_agent"]) in d_mn[1] and "cloud-x" not in d_mn[1], (d_mc, d_mn))
+check("work_html in the test locale: the legacy Work field's name from the table, the line's own text as written", f'<dt>{MARK(EN["item.work"])} <span class="count">1</span></dt>' in d_work and "oil the hinges" in d_work, d_work)
+check("_when in the test locale: an unreadable anchor (its tip with the reason), a quiet one and a polled one read from the table",
+      d_wn[0] == f'<span class="aflag" title="{html.escape(_m("item.when.unreadable_tip", since="2026-01-01 00:00", tz=_cfg.tz_abbr(), why="refused"), quote=True)}">{_m("item.when.unreadable")}</span>'
+      and d_wn[1] == _m("item.when.quiet") and d_wn[2] == _m("item.when.quiet") + _m("item.when.poll"), d_wn)
+_t3 = bdx.now - DT(hours=3)
+check("stamp in the test locale: a stamp that only marks the start of a silence says 'no change since <time>' in its tip", f'data-tip="{html.escape(_m("item.when.no_change_since", when=f"{_t3:%Y-%m-%d %H:%M} {_cfg.tz_abbr(_t3)}"), quote=True)}"' in d_stamp, d_stamp)
+check("sess_html in the test locale: the link's title names the fleet tool when one is set, else says 'this session's view'",
+      f'title="{MARK("open this session in Fleety")}"' in d_s1 and f'title="{html.escape(_m("link.session_view"), quote=True)}"' in d_s2, (d_s1, d_s2))
+check("…and the fleet and client config the test touched is put back", fl_.get("tool_name") == tool_old and ("tool_name" in fl_) == had_tool and cl_.get("mockup_hosts") == cfg_old)
+check("mockup_link in the test locale: the chip and its tip read from the table", f'title="{MARK(EN["link.mockup_tip"])}"' in d_mk and f'>{MARK(EN["link.mockup_chip"])}</a>' in d_mk, d_mk)
+check("wait_anchor_html in the test locale: more than three anchors say '+N more' (not when all are listed), none recorded says so",
+      _m("wait.more", n=2) in d_wa[0] and _m("wait.more", n=2) not in d_wa[1] and _m("wait.anchor_none") in d_wa[2] and _m("wait.anchor_none") not in d_wa[0], d_wa)
+_S = r2.Board._SENT; _K = {k_: v_[1] for k_, v_ in r2.Board._SENT_KEYS.items()}; _KH = {k_: v_[2] for k_, v_ in r2.Board._SENT_KEYS.items() if len(v_) > 2}
+e_sent = {k_: (bdx.sent_msg(k_), bdx.sent_msg(k_, home=True)) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
+check("sent_msg in English is _SENT's wording, code by code: the item page's, and with home the home page's own where the code has one; who takes it names them; a code that is none is empty",
+      e_sent == {k_: (v_[1], v_[2] if len(v_) > 2 else v_[1]) for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", ""), (e_sent, e_by))
+check("sent_msg in the test locale: every code reads from its own key (the home page's where it has one), who takes it is named in the table's wording, and every code has a key",
+      set(_K) == set(_S) and d_sent == {k_: (MARK(EN[_K[k_]]), MARK(EN[_KH.get(k_, _K[k_])])) for k_ in _S}
+      and d_sent_by == (_m("js.sent_done", who="alpha-main"), _m("sent.stepreply_by", who="alpha-main"), ""), (d_sent, d_sent_by))
+d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "chg": ipg.last_change("alpha-main", [ipg.change("gave_step")]), "plain": ipg.plain_change([ipg.change("handed", who="alpha-helper"), ipg.change("next_changed")]), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
+check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "chg": " by alpha-main: gave you a step", "plain": "handed to alpha-helper, changed what comes next", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
+
+# the History's entries carry what kind of change each line is, as structured data (what plain_change and last_change read), in every path that builds an entry
+_chg_codes = set(); _chg_ok = True; _chg_bad = []
+for i_ in IPX_IDS:
+    ents_, _more = bdx.item_log(bdx.item(f"a{i_}"))
+    for en_ in ents_:
+        cs_ = en_.get("changes")
+        ok_ = isinstance(cs_, list) and len(cs_) >= 1 and all(isinstance(c_, tuple) and len(c_) == 2 and isinstance(c_[0], str) and isinstance(c_[1], dict) for c_ in cs_)
+        if not ok_: _chg_ok = False; _chg_bad.append((i_, en_.get("what"), cs_))
+        else: _chg_codes |= {c_[0] for c_ in cs_}
+check("every History entry of every fixture item carries its changes as [(kind, fields)]", _chg_ok, _chg_bad[:3])
+check("…the kinds a line can have all occur, and a line with no kind of its own is a 'text' change that keeps its plain words", set(ipg.CHANGE_CODES) | {"text"} <= _chg_codes and _chg_codes <= set(ipg.CHANGE_CODES) | set(ipg.DROPPED_CODES) | {"text"}, sorted(_chg_codes))
+_h250 = [en_ for en_ in bdx.item_log(bdx.item("a250"))[0] if any(c_[0] == "handed" for c_ in en_["changes"])]
+check("…a handover's change names who it was handed to, as the plain words read it", bool(_h250) and any(ipg.plain_change(en_["changes"]).startswith("handed to alpha-main") for en_ in _h250), [en_["changes"] for en_ in _h250])
+
+# the "rendered ... ago" line is one template: English keeps its words and its order, a language can put the age anywhere, and the words around it are what the narrow page leaves off
+_rl = lambda: r2._rendered_line("<b>S</b>", tip="T"); _st = r2._stale_s()
+rl_en = _rl()
+write_ko(test_locale(**{"home.rendered_line": "{age} was drawn"})); set_dir(LOC); reset_warned()
+with i18n.use("ko"): rl_ko = _rl()
+write_ko(test_locale(**{"home.rendered_line": "{age}"})); set_dir(LOC); reset_warned()
+with i18n.use("ko"): rl_bare = _rl()
+write_ko(test_locale()); set_dir(LOC); reset_warned()
+check("the rendered line in English: 'rendered ' before the age, byte for byte what it always was",
+      rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_en)
+check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
+check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_bare)
+check("…and the age is never a word of any translation (the template's own marker stays out of the page)", "\x00" not in rl_en + rl_ko + rl_bare)
+
+# every key the stage added to the table is asked for somewhere (a literal key in the source, or a dict of keys the source reads): none is dead
+_all_keys = list(EN); _block = _all_keys[_all_keys.index("item.unknown") + 1:]
+_src_all = "\n".join(pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/itempage.py"))
+_unused = [k for k in _block if k not in used and not re.search(r"""['"]""" + re.escape(k) + r"""['"]""", _src_all)]
+check("every key the string table gained after item.unknown is asked for by the source", len(_block) >= 30 and not _unused, _unused)
 
 # a translated value goes into an attribute escaped: a value with a double quote (and a tag in it) must not break the attribute or open an element
 from html.parser import HTMLParser

@@ -247,7 +247,7 @@ for _g, _fn in (("a90", "cb-doing"), ("a91", "cb-waiting"), ("a92", "cb-verifyin
 _item_log = b.item_log
 b.item_log = lambda r, merge=True: ([{"ts": (now - 7 * H).timestamp(), "kind": "edit", "html": "", "who": LONG, "what": "subject edited: " + LONG + " " + "x" * 30 + " /opt/example/very/long/path/that/does/not/break/anywhere/config.toml " + "y" * 60, "comment": False, "mark": ""}], 0)
 (OUT / "items/a69.html").write_text(b.item_html("a68", answer={"action": "/items/a68/answer", "token": "T", "sent": ""}), encoding="utf-8")
-b.item_log = lambda r, merge=True: ([{"ts": (now - 2 * H).timestamp(), "kind": "needs", "html": "", "who": LONG, "what": "needs: decision; state: your-call; next and ask edited", "comment": False, "mark": ""}], 0)   # the real clauses, in plain words (itempage.plain_change)
+b.item_log = lambda r, merge=True: ([{"ts": (now - 2 * H).timestamp(), "kind": "needs", "html": "", "who": LONG, "what": "needs: decision; state: your-call; next and ask edited", "changes": [("asked", {}), ("next_changed", {})], "comment": False, "mark": ""}], 0)   # the entry's changes as the log records them, in plain words (itempage.plain_change)
 (OUT / "items/a70.html").write_text(b.item_html("a60", answer={"action": "/items/a60/answer", "token": "T", "sent": ""}), encoding="utf-8")
 b.item_log = _item_log
 # a second render two minutes later with the machines card changed (claude code 2.1.140 → 2.1.141 on a): what the in-place update swaps in
