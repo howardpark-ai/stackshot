@@ -345,7 +345,7 @@ check("Landed: no old notification words", not re.search(r"\d+ min ago|\d+ h ago
 ages = [(0, "just now"), (59, "just now"), (60, "1m ago"), (12 * 60, "12m ago"), (59 * 60, "59m ago"), (60 * 60, "1h ago"), (3 * 3600, "3h ago"), (30 * 3600, "30h ago"), (47 * 3600, "47h ago"), (48 * 3600, "2d ago"), (20 * 86400, "20d ago"), (-5, "just now")]
 check("Landed: landed_ago reads in the page's one format", [r2.landed_ago(a) for a, _w in ages] == [w for _a, w in ages], [r2.landed_ago(a) for a, _w in ages])
 js = ld_html.split("<script>")[-1]
-check("Landed: the page script says the same words, and finds Clear and the id in the new row", "m<60?m+'m ago'" in js and "m<2880?Math.floor(m/60)+'h ago'" in js and "Math.floor(m/1440)+'d ago'" in js and "'.ir-act'" in js and "'.ir-id'" in js and "min ago" not in js and "yesterday" not in js)
+check("Landed: the page script says the same words, and finds Clear and the id in the new row", "function ago(s){return fa(s)}" in js and "m<60?'age.min':m<2880?'age.hour':'age.day'" in js and "Math.floor(m/1440)" in js and "'.ir-act'" in js and "'.ir-id'" in js and "min ago" not in js and "yesterday" not in js)
 check("Landed: the hooks the script reads are still there", all(x in ld_html for x in ("li.lrow", "form.lclear", ".lago[data-ts]")) or all(x in js for x in ("li.lrow", "form.lclear", ".lago[data-ts]")))
 
 # ---- 8. Search: the item's state as its tag, the project on the who line, the snippet behind the guide line, the link in the page's own tab
@@ -1092,7 +1092,7 @@ check("the project page says the router rules every notice; the watch words name
 # the Closed page's script keeps a cleared line in place, and re-enables Clear all after a successful request
 LJ = r2._LANDED_JS
 check("Closed: the page script restores the Clear all button before it draws the new state, and a Clear all shows 'Clearing…' on the button alone",
-      "function rest(){if(b){b.disabled=false;b.removeAttribute('aria-busy');b.textContent=lab}}" in LJ and "if(!d||!d.ok)throw 0;rest();lis.forEach(function(x){setState(x,!undo," in LJ and "if(all)b.textContent='Clearing\\u2026'" in LJ, LJ[1500:1900])
+      "function rest(){if(b){b.disabled=false;b.removeAttribute('aria-busy');b.textContent=lab}}" in LJ and "if(!d||!d.ok)throw 0;rest();lis.forEach(function(x){setState(x,!undo," in LJ and "if(all)b.textContent=SST('js.closed.clearing')" in LJ, LJ[1500:1900])
 check("Closed: a cleared line keeps its place (no fade) and Clear and Undo share one fixed width, so the row does not jump", "li.lrow .b{transition:none}" in css
       and "li.lrow form.lclear .b,li.lrow form.lundo .b{width:64px;min-width:64px;padding-left:0;padding-right:0}" in css and re.search(r"span\.lgone\{[^}]*min-width:64px", css) is not None)
 check("the stylesheet carries no board number in a note of its own", "board#" not in css and "task-a-" not in css)

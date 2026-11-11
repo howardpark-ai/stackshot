@@ -715,7 +715,7 @@ with sync_playwright() as p:
     # ---- the relative words are the server's: the page script's ago() (its own source, run in the page) and render.landed_ago() read the same for a range of ages ----
     ctx = br.new_context(viewport={"width": 390, "height": 900}); pg = ctx.new_page(); pg.goto(PAGES["landed page"].as_uri()); pg.wait_for_timeout(100)
     AGES = (0, 59, 60, 719, 5399, 5400, 10800, 86399, 86400, 169199, 172800, 1728000)
-    src_ = re.search(r"function ago\(s\)\{.*\}", render._LANDED_JS).group(0)
+    src_ = render._AGE_FN + "; " + re.search(r"function ago\(s\)\{.*\}", render._LANDED_JS).group(0)
     js_ = pg.evaluate("([src, ages]) => { const f = new Function(src + '; return ago')(); return ages.map(a => f(a)) }", [src_, list(AGES)])
     check("the page script's relative words are render.landed_ago's for just now, a minute, 12 min, 89 min, 90 min, 3 h, 23 h, 24 h and 47 h, 2 d and 20 d", js_ == [render.landed_ago(a) for a in AGES] and "24h ago" in js_ and "just now" in js_ and "20d ago" in js_, js_)
     ctx.close()
