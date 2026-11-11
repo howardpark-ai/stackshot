@@ -1,4 +1,4 @@
-"""builderless.py: how a project with no builder routes an item that its front agents carry.
+"""builderless.py: how a front-only project (no background agent on its page) routes an item that its front agents carry.
 
 A project whose page lists only front agents (user-facing ones) has no background agent to receive build work: it is front-only (anchors.front_only, the one test; the server supplies it). Two routing decisions then fall to the front agents, and this module
 holds their pure parts (the server supplies what needs the project registry):
@@ -40,7 +40,7 @@ def next_named_step(meta: dict[str, Any], keeper: str = "") -> str:
 
 
 def answer_target(meta: dict[str, Any], usable: Callable[[str], bool], keeper: str = "") -> str:
-    """Who takes an item of a project with no builder when the owner's step is answered and the item stores no `then`: the session its next open step names, when `usable(name)` says it is a
+    """Who takes an item of a front-only project (anchors.front_only) when the owner's step is answered and the item stores no `then`: the session its next open step names, when `usable(name)` says it is a
     live front agent of the item's project (the server reads the roles; the same test as pair_allowed, so a step line does no more than `mover=`); else the item's stored contact when that is usable; else "". The caller keeps the project's -main agent as the last resort."""
     nm = next_named_step(meta, keeper)
     if nm and usable(nm):

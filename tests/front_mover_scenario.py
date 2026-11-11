@@ -135,6 +135,18 @@ msg = refusal(lambda: server.stackshot_update(item_id="a10", sender=SIDE, mover=
 check("no builder: the refusal says there is no builder or background agent, with no placeholder", msg.startswith("Refused:") and "no builder and no background agent" in msg and "<background agent>" not in msg
       and msg.count("background agent") == 1 and "builder, " not in msg, msg)
 
+# ---- a background agent only the project record holds (its page line still owed): the project is not front-only, but no builder is listed yet; the refusal says the page does not list it yet
+from stackshot.projects import projects as _P
+_PID = _P.ensure_ids(["projects/echo"])["projects/echo"]
+(T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"},
+    "pending_agents": {_PID: {"home-echo-engineer": {"mandate_line": "takes the build work", "front": False, "role": "engineer"}}}}))
+msg = refusal(lambda: server.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+check("owed background agent: the refusal says it is not on the page yet, never that there is none", msg.startswith("Refused:") and "not on its page yet" in msg and "no builder and no background agent" not in msg
+      and "keep the item with its current mover" in msg and "<background agent>" not in msg, msg)
+(T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"}, "pending_agents": {}}))
+msg = refusal(lambda: server.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+check("owed agent gone: the plain refusal is back", msg.startswith("Refused:") and "no builder and no background agent" in msg, msg)
+
 # ---- a failing roles read lets the write through (one stderr line)
 import io, contextlib
 _real_roles = server._anc.session_roles

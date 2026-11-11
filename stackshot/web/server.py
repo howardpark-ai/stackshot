@@ -1255,9 +1255,18 @@ def _front_pair_ok(sender: str, key: str, project: str) -> bool:
         return False
 
 
-def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]") -> ToolError:
+def _front_mover_refusal(field: str, case: "tuple[str, str, list[str], str]", project: str = "") -> ToolError:
+    """The refusal of a front-mover case with no builder to substitute. A project with no background agent says so; one whose background agent only the project record holds (its page line
+    still owed: front_only is False but no builder is listed yet) says the page does not list it yet, not that there is none."""
     key, proj, builder, hub = case
+    owed = False
+    if not builder and project:
+        try:
+            owed = not _anc.front_only(project)
+        except Exception:  # noqa: BLE001  — the wording only: a failed read gives the plain text
+            owed = False
     where = (f"Hand build work to the project's builder, {builder[0]} ({field}={builder[0]}); " if builder
+             else f"{hub or 'The project'}'s background agent is not on its page yet, so there is no builder to hand it to yet; keep the item with its current mover; " if owed
              else f"{hub or 'The project'} has no builder and no background agent to hand it to, so keep the item with its current mover; ")
     return ToolError(f"Refused: {key} is a user-facing agent of {proj}, and {field}={key} from another session hands it an item it gets no notice of "
                      f"(the server sends a front agent no hand-off notice, so the item would sit handed and not taken). {where}"
@@ -1280,9 +1289,9 @@ def _fix_front_mover(field: str, value: str, sender: str, project: str, current:
         return value, (f"\n(note: {field}={key} is kept as you sent it: {key} is a user-facing agent of {proj} and gets no hand-off notice, so the item sits with it until it looks; "
                        f"the server substituted the builder for this value before, and now leaves the field alone)"), [(_sf.FRONT_MOVER, hit, "")]
     if not builder:
-        if field == "mover" and _front_pair_ok(sender, key, project):      # a project with no builder: one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
+        if field == "mover" and _front_pair_ok(sender, key, project):      # a front-only project (anchors.front_only): one of its front agents may hand an item to another; the target is told by a notice (_handoff_notify)
             return value, f"\n(note: {project} has no builder, so mover={key} stays as sent; {key} is told it is handed the item)", []
-        raise _front_mover_refusal(field, case)
+        raise _front_mover_refusal(field, case, project)
     return builder[0], (f"\n(fixed: {field}={key} is a user-facing agent of {proj} and gets no hand-off notice from another session, so {field}={builder[0]}, the project's builder, was used instead. "
                         f"If {key} really is who should take it, send {field}={key} again: the server then keeps it as sent; for a check or an answer only {key} can give, message it)"), \
         [(_sf.FRONT_MOVER, _sf.bind(token, by, now), f"{field} {key} → {builder[0]}: {key} is a user-facing agent and gets no hand-off notice from another session; sending {field}={key} again keeps it as sent")]
@@ -8644,7 +8653,7 @@ def _handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool
 
 
 def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
-    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a project with no builder (the case _fix_front_mover lets through)?"""
+    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a front-only project (anchors.front_only; the case _fix_front_mover lets through)?"""
     try:
         _roles, key = _role_of(to)
         return bool(key) and _front_pair_ok(str(rec.get("from") or ""), key, project)
@@ -8665,7 +8674,7 @@ def _handoff_notify(gid: str, item: dict[str, Any]) -> str:
         if any(g == gid and (s == tid or _ho_same(s, to)) for g, s in told):
             return ""
         proj = str((item.get("metadata") or {}).get("project") or "")
-        if _front_keeper(to, proj)[0] and not _front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project that has no builder
+        if _front_keeper(to, proj)[0] and not _front_handed_by_peer(r, to, proj):      # a front agent is told only of a hand-off from a front agent of its own project when that project is front-only
             return ""
         _tell_woken(gid, tid or to, _handoff_text(gid, item, r), tag="handoff")
         return f"\n({_session_label(to)} has been told it is handed {_gh.shown(gid)})"
