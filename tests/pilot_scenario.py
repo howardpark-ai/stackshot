@@ -1633,6 +1633,14 @@ for word in ["I", "I'm", "I'll", "I've", "me", "my", "mine", "myself", "we", "we
 for line in ["The session redrafts it", "Pat usage report", "Run the mine-sweeper", "Deploy to US-EAST", "Deploy to the US market", "Mirrors the I/O path, i.e. now", "Because the user said so",
              'Pat replies "you can go ahead" to it', "Pat says \u201cwe agree\u201d", "Pat runs `my_script`", "Pat unpublishes it", "The ours-of-it-sweeper runs", "Focus on status"]:
     check(f"actor: \"{line}\" is no hit", actor_hits("Pat unpublishes", line) == "" and actor_hits(line, "Pat acts") == "", (line, actor_hits("Pat unpublishes", line)))
+for line in ["Ship it in Phase I", "Pat finishes Part I and II", "Pat covers Type I, II and III", "Pat does Option I first", "Pat starts with II or I", "Pat reads Stage I."]:
+    check(f"actor: the Roman numeral in \"{line}\" is no hit", actor_hits("Pat unpublishes", line) == "" and actor_hits(line, "Pat acts") == "", (line, actor_hits("Pat unpublishes", line)))
+for line in ["Pat unpublishes, then I approve", "Pat does Phase 1 and I review", "Pat does X and I review", "Pat ships it, I decide later"]:
+    check(f"actor: \"{line}\" still notes the pronoun I", "says \u201cI\u201d" in actor_hits("Pat unpublishes", line), (line, actor_hits("Pat unpublishes", line)))
+check("actor: a pronoun inside curly single quotes reads like one inside straight ones (both skipped as a quoted word)",
+      actor_hits("Pat unpublishes", "Pat says 'you can go' to it") == "" and actor_hits("Pat unpublishes", "Pat says \u2018you can go\u2019 to it") == ""
+      and actor_hits("Pat unpublishes", "Pat says 'I will' to it") == actor_hits("Pat unpublishes", "Pat says \u2018I will\u2019 to it") == "", "")
+check("actor: curly and straight apostrophes in a contraction are the same hit", "says \u201cI\u2019ll\u201d" in actor_hits("Pat unpublishes", "then I\u2019ll approve") and "says \u201cI'll\u201d" in actor_hits("Pat unpublishes", "then I'll approve"), "")
 check("actor: a quote does not hide a bare word next to it", "says \u201cyou\u201d" in actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'), actor_hits("Pat unpublishes", 'Pat quotes "we win" and you click Unpublish'))
 check("actor: we/our/us are noted in an option only; the ask line keeps its own word list",
       server._actor_note({"ask": "Decide: do we ship it · Recommend: yes", "options": []}) == "" and "says \u201cwe\u201d" in actor_hits("Pat ships", "we ship it"), "")

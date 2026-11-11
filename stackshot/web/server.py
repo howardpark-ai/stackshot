@@ -4167,7 +4167,7 @@ from stackshot.web.decision_gates import (  # noqa: E402,F401
     _code_defined, _one_decision_kind, _one_decision, _gate_one_decision, _OWN_VERBS, _OWN_DONE, _OWN_JUDGE_RX, _OWN_NOT_DO, _OWN_END, _OPEN_Q_RX,
     _OWN_ALT_RX, _OWN_STOP, _OWN_MATCH_SHARE, _own_word, _own_words, _YESNO_LABELS, _GOAHEAD_LABELS, _own_action_rx, _labels_in, _yes_no_options,
     _own_action_lines, _own_line_named, _own_action_ask, _gate_own_action, _recommend_missing, _options_note, _QUOTED_RX, _BARE_PRONOUN_RX,
-    _OPT_PRONOUN_RX, _ACTOR_EXAMPLE, _PRONOUN_HEAD, _PRONOUN_TAIL, _bare_pronoun, _actor_note,
+    _OPT_PRONOUN_RX, _ACTOR_EXAMPLE, _PRONOUN_HEAD, _PRONOUN_TAIL, _ROMAN_NOUN_RX, _ROMAN_SEP, _ROMAN_AFTER_RX, _ROMAN_BEFORE_RX, _roman_one, _bare_pronoun, _actor_note,
 )
 
 

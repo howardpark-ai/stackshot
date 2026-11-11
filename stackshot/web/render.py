@@ -1430,7 +1430,7 @@ class Board:
                        "Nothing sent: the ask changed before your answer arrived; open the item to read it again."),
              "askedback": ("warn", "Sent: your note is on the item. I could not read a date from it, so the question is back below with days to pick from. Pick one, or write a date in the box.",
                            "Sent: your note is on the item. I could not read a date from it; open the item to pick a day."),
-             "stalenote": ("ok", "Sent as a comment: the item no longer asks this, so your note is on it as a comment and the agent on it has been told. Read the item again below.",
+             "stalenote": ("ok", "Sent as a comment: the item no longer asks this, so your note is on it as a comment. Read the item again below.",
                            "Sent as a comment: the ask changed before your answer arrived, so your note is on the item as a comment; open the item to read it again."),
              "closednote": ("ok", "Sent as a comment: the item is closed, and your note is on it."),
              "closed": ("warn", "Nothing sent: the item is closed."),
