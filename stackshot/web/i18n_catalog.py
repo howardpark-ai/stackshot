@@ -318,6 +318,8 @@ CATALOG: dict[str, str] = {
     "home.queued_tip": "Items whose pull request is in the release queue: its release has started and not ended",
     "home.closed_tip": "Items closed in the last 14 days (done, dropped and superseded)",
     "home.closed_tip_new": "; {n} new: closed by an agent, not cleared yet",
+    # The Closed card's "N new" badge: new_fmt puts the count and the word together ({word} is the next key, drawn in the badge's <em>); new_word carries its own leading space, which is the gap
+    # after the count (the card's width rules read the word without it). A language that writes the word before the count or with no gap changes these two together.
     "home.new_fmt": "{n}{word}",
     "home.new_word": " new",
     "home.rendered_tip": "normally re-rendered at least every {every} minutes; older than {stale} minutes means the server has not published since",

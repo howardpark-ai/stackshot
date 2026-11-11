@@ -487,6 +487,22 @@ _bsz = r2._hnew_parts(1234, 1234)
 check("Closed card (a big count in a narrow card): the badge's font size never goes under 9 px, the card carries the number's width at 22 px (--nk) and the badge's width per px of font (--bk), and at the 61 px content of a card at 481 to 600 px the number and the badge at its floor still fit",
       "font-size:max(9px,min(12px," in css and ";--nk:" in _cn and ";--bk:" in _cn and _bsz[0] == 61.6 and _bsz[1] > 4
       and r2._HNEW_BF.startswith("max(9px,") and (61 + 2) - _bsz[1] * 9 > 0 and r2._hnew_parts(40, 2) == (30.8, round((7.2 + 3.4 + 21) / 12, 2)), _bsz)
+# the language default: a person with no saved language reads English, and so does everyone on a board where English is the only language (no locale folder: no switch, a stored or asked-for "ko" reads English)
+from stackshot.web import i18n as _i18n, uiprefs as _uip
+class _Req:      # a bare request: what _request_lang reads is the method, the state it keeps its answer on, and the signed-in person (server._ui_email)
+    method = "GET"
+    def __init__(self): self.state = type("S", (), {})()
+_ue0 = server._ui_email
+try:
+    server._ui_email = lambda request: "nobody-saved@example.org"      # signed in, never picked a language
+    _lang_nosaved = server._request_lang(_Req())
+    server._ui_email = lambda request: ""                              # not signed in
+    _lang_anon = server._request_lang(_Req())
+finally:
+    server._ui_email = _ue0
+check("language default: with no locale folder English is the only language (no switch drawn), a person with no saved language and a visitor read English, and a code that is not available reads English too",
+      _i18n.available() == ["en"] and r2._lang_toggle() == "" and _uip.lang_of("nobody-saved@example.org") == "en" and _uip.lang_of("") == "en" and _lang_nosaved == "en" and _lang_anon == "en"
+      and _i18n.norm("ko") == "en" and _i18n.norm(None) == "en" and _i18n.norm("") == "en" and _i18n.current() == "en", (_i18n.available(), _lang_nosaved, _lang_anon))
 # a longer word for "new" (a catalog string) moves up sooner and still never clips: the limits grow with the word's estimated width, the English word's stay as they were
 _long_css = re.findall(r"@container hcard \(max-width:(\d+)px\)\{a\.hcard i\.hnew", r2._hnew_css("an invented longer word"))
 check("Closed card (a longer word): a word of 23 characters moves the count up beside the number at wider cards (limits 79, 85, 92 and 98 plus the room the word needs), the English word keeps its limits, and a short word takes no more room than the English one",
