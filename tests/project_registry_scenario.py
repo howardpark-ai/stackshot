@@ -13,7 +13,7 @@ import hashlib, io, json, logging, os, pathlib, re, shutil, subprocess, sys
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="prjregtest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -56,7 +56,7 @@ def tool(*args, store=None):
     r = subprocess.run(TOOL + list(args), capture_output=True, text=True, env=os.environ, cwd=str(T))
     return r.returncode, r.stdout, r.stderr
 
-from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 p.cmd_registry(quiet=True)
 ids = {k: e["id"] for k, e in reg().items()}
@@ -287,7 +287,7 @@ def create(project, owner, **kw): return server.stackshot_create(subject="[home]
 def refusal(project, owner="home-nopage-main"):
     try: create(project, owner); return ""
     except server.ToolError as ex: return str(ex)
-r = create(NOPAGE, "home-nopage-main"); gid = server._norm_id(r.split()[1]); it = server._load(gid)
+r = create(NOPAGE, "home-nopage-main"); gid = _model_ids._norm_id(r.split()[1]); it = server._load(gid)
 check("no page: an item can be filed on it — the gate does not refuse a project the record says has no page; the item stores the project's id", it["metadata"]["project"] == NOPAGE, it["metadata"])
 check("no page: …and the readers of an item's project take the id as it is (no page key made of it)", anchors.project_of(it) == NOPAGE and not any("prj_" in k for k in prj.recent_items(prj.registry())), (anchors.project_of(it), prj.recent_items(prj.registry())))
 check("no page: a name the record does not hold, and an id it does not hold, are still refused as before", "names no page" in refusal("projects/nowhere") and "names no page" in refusal("prj_00000000"))

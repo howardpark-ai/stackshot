@@ -15,6 +15,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
+from stackshot.model import ids as _ids
 from stackshot.model import item_project as _ip
 
 KEYS = ("project_id",)                          # the one key the pass writes, and the only one it may name
@@ -78,7 +79,7 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
     if not isinstance(w, dict):
         return S._migrate_refuse("?", "an entry is an object {item, before, after}")
     try:
-        gid = S._norm_id(str(w.get("item") or ""))
+        gid = _ids._norm_id(str(w.get("item") or ""))
     except ToolError as e:
         return S._migrate_refuse(str(w.get("item") or "?"), str(e))
     shown = S._gh.shown(gid)
@@ -135,7 +136,7 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
             results.append(undo_one(S, it))
             continue
         try:
-            gid = S._norm_id(str(it or ""))
+            gid = _ids._norm_id(str(it or ""))
         except ToolError as e:
             results.append(S._migrate_refuse(str(it or "?"), str(e)))
             continue

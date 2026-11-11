@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import html as _html
 import json
 import os
 import re
@@ -65,6 +66,7 @@ import urllib.request
 from typing import Any
 
 from stackshot.core import config as _cfg
+from stackshot.web import i18n as _i18n
 from stackshot.fleet import fleet as _fleet
 from stackshot.github import ghsync as _gh
 from stackshot.core import ghbudget as _gb   # the hourly ledger of GitHub calls shared with the mirror and anchor-hub
@@ -1242,11 +1244,21 @@ def card_total(card: dict[str, Any]) -> dict[str, str]:
 
 
 def _dur(s: float) -> str:
+    """A span in English, for the text the snapshot stores (a runner's reason, the error line): kept in the file and shared by every reader, so it carries no request's language."""
     s = max(0, int(s))
     if s < 60:
         return f"{s}s"
     m = s // 60
     return f"{m}m" if m < 60 else f"{m // 60}h {m % 60:02d}m"
+
+
+def dur(s: float) -> str:
+    """The same span in the request's language (the page's own lines: the as-of line, a running job's length)."""
+    s = max(0, int(s))
+    if s < 60:
+        return _i18n.t("runners.dur_s", n=s)
+    m = s // 60
+    return _i18n.t("runners.dur_m", n=m) if m < 60 else _i18n.t("runners.dur_hm", h=m // 60, m=f"{m % 60:02d}")
 
 
 def asof_html(snap: dict[str, Any], now: float) -> str:
@@ -1255,13 +1267,13 @@ def asof_html(snap: dict[str, Any], now: float) -> str:
     import datetime as dt
     when = f'{dt.datetime.fromtimestamp(snap["ts"], _cfg.tz()).strftime("%H:%M:%S")} {_cfg.tz_abbr()}'
     age = max(0, int(now - snap["ts"]))
-    bits = [f"Updated {when}"] + ([f"{_dur(age)} ago"] if age >= 5 else []) + (["refreshing now"] if snap.get("refreshing") else []) + ["page checks every 30 s"]
-    out = f'<p class="sub rasof">{" · ".join(bits)}</p>'
+    bits = [_i18n.t("runners.updated", when=when)] + ([_i18n.t("runners.ago", dur=dur(age))] if age >= 5 else []) + ([_i18n.t("runners.refreshing")] if snap.get("refreshing") else []) + [_i18n.t("runners.checks")]
+    out = f'<p class="sub rasof">{_html.escape(" · ".join(bits))}</p>'
     if snap.get("stale"):
-        out += f'<p class="rstale" role="status">not refreshed since {when}</p>'
+        out += f'<p class="rstale" role="status">{_html.escape(_i18n.t("runners.stale", when=when))}</p>'
     return out
 
 
 def pending_html() -> str:
     """Nothing has been read since the server started and no file was kept: the first read is running; the page asks again every few seconds."""
-    return '<p class="sub rasof" role="status">Reading the runners from GitHub and the machines… this fills in by itself.</p>'
+    return f'<p class="sub rasof" role="status">{_html.escape(_i18n.t("runners.pending"))}</p>'

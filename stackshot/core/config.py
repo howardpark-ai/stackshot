@@ -334,7 +334,7 @@ def registry_audit_send() -> bool:
 
 
 def audit_builder() -> str:
-    """[audit] builder: the session a tripped threshold, and an unmoved finding of a project with no builder of its own, is sent to. Default "my-engineer"."""
+    """[audit] builder: the session a tripped threshold, and an unmoved finding or the unmoved digest of a project with no builder of its own, is sent to. A front-only project (anchors.front_only) is the exception: its -main agent takes those (audit_run.Env.chase_of), and this session only when that agent cannot be named. Default "my-engineer"."""
     return str(get("audit", "builder") or "").strip() or AUDIT_BUILDER
 
 

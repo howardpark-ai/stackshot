@@ -15,7 +15,7 @@ import contextlib, io, json, os, re, socket, subprocess, sys, pathlib, tempfile,
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="prjrectest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -87,7 +87,7 @@ stripped = json.loads((T / "store/projects.json").read_text())
 for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
-from stackshot.web import server
+from stackshot.web import server; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 check("start-time backfill: stamps every page with its existing id (none minted afresh), once", server._prj.stamp_registry() is True
       and {k: e["id"] for k, e in reg().items()} == ids0 and server._prj.stamp_registry() is False, {k: e.get("id") for k, e in reg().items()})
@@ -314,13 +314,13 @@ with TestClient(app) as c:
 # ---- 7. every entry that takes a project takes its id
 def create(project, owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, owner=owner, **{"next": f"{owner}: carry on", **kw})
 r = create(A_ID, "home-sparrow-main", next="home-sparrow-engineer: carry on"); gid = r.split()[1]
-gid = server._norm_id(gid)
+gid = _model_ids._norm_id(gid)
 check("create: project = the id; the item stores the page's key (the replies and the store keep writing the key)", server._load(gid)["metadata"]["project"] == "projects/alpha", server._load(gid)["metadata"])
 check("create: …and the item is on the project, as any key-filed item", server._anc.project_of(server._load(gid)) == "projects/alpha" and "projects/alpha" in r and A_ID not in r, r)
 try: create("prj_00000000", "home-sparrow-main"); r2 = ""
 except server.ToolError as e: r2 = str(e)
 check("create: an id that names no page is refused as an unknown project is", "names no page" in r2, r2)
-r = create("projects/beta", "home-beta", mover="home-beta"); gid2 = server._norm_id(r.split()[1])
+r = create("projects/beta", "home-beta", mover="home-beta"); gid2 = _model_ids._norm_id(r.split()[1])
 try: out = server.stackshot_update(item_id=gid2, project=A_ID, sender="home-sparrow-main", owner="home-sparrow-main"); r3 = ""
 except server.ToolError as e: r3 = str(e)
 check("update: project = the id moves the item there, stored as the key", server._load(gid2)["metadata"]["project"] == "projects/alpha" and not r3, (r3, server._load(gid2)["metadata"]))

@@ -294,6 +294,281 @@ for rel, edit in (("pyproject.toml", lambda: write("pyproject.toml", "[project]\
     out, err, _ = sel_after(edit, rel)
     check(f"the harness's {rel} reaches all, even a comment", out == "all" and "the harness" in err, (out, err))
 
+# ---- the example config (Tue Nov 10th 2026): a synthetic map, nothing measured. direct opens stackshot.example.toml itself, fx1 and fx2 read
+# it through the link tests/example_base.toml (the fixture suites), other opens data.txt
+R_MAIN = R; R = T / "repo2"; R.mkdir()
+git("init", "-q", "-b", "main")
+EX = '''
+    # the example config
+    [model]
+    guards = true            # a comment
+    digest = 5
+
+    # Nothing special here, just prose.
+    [runners]
+    boxes = ["box-a", "box-b"]
+
+    [runners.ids]
+
+    [router]
+    digest_hour = 6
+
+    [pages]
+    rules = "~/a/RULES.md"
+
+    [audit]
+    enabled = false
+
+    [flags]
+    flags = [1]
+'''
+write("stackshot.example.toml", EX); write("data.txt", "one\n")
+for s in ("direct", "fx1", "fx2", "other"): write(f"tests/{s}_scenario.py", "print('x')\n")
+os.symlink("../stackshot.example.toml", R / "tests/example_base.toml"); shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+shutil.copy(os.path.join(SCR, "_instance.py"), R / "tests" / "_instance.py")   # the names the selection reads (what apply() sets or appends) are this checkout's own
+base2 = commit("base of the example config cases")
+def fmap(fixture_path):
+    ent = lambda files: {"ok": True, "failed": False, "files": files, "dirs": ["", "tests"], "whole": [], "py": {}, "seconds": 1}
+    return {"format": 1, "commit": base2, "strace": True, "suites": {
+        "direct": ent(["stackshot.example.toml"]), "fx1": ent([fixture_path]), "fx2": ent([fixture_path, "data.txt"]), "other": ent(["data.txt"])}}
+MAP2 = T / "map2.json"; MAP2.write_text(json.dumps(fmap("tests/example_base.toml")))
+OLDMAP = T / "oldmap.json"; OLDMAP.write_text(json.dumps(fmap("stackshot.example.toml")))
+def ex_sel(edit, msg, *, map_=MAP2, env=None):
+    git("checkout", "-q", "-B", f"x{len(ran)}", base2)
+    edit()
+    head = commit(msg)
+    r = tool("select", "--map", str(map_), "--to", head, env={"SUITEMAP_ROOT": str(R), **(env or {})})
+    return r.stdout.strip(), r.stderr
+def ex_sub(a, b): sub("stackshot.example.toml", a, b)
+FIX = ["direct", "fx1", "fx2"]
+# The comment, blank-line and reorder cases below pin that a change to the file's text but not to its data is NOT over-selected: they pass with DATA
+# emptied (a plain file rule picks only the real-path readers here, the same as the "same data" answer) and fail when a textual change is read as a change.
+# The old-map and no-strace cases pin behaviour the rule must leave alone (a map from before the link; a map with no file measurement).
+PLAIN = "# Some plain prose about nothing in particular."
+def ex_end(extra): write("stackshot.example.toml", textwrap.dedent(EX).lstrip("\n") + extra)
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment line")
+check("example config: a whole plain-prose comment line added selects the direct readers only (the link readers stay out)", out.split() == ["direct"] and "plain comments" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", "\n\n[runners]\n"), "blank lines")
+check("example config: blank lines only: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# Nothing special here, just prose.\n", ""), "plain comment removed")
+check("example config: a plain whole-line comment removed: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("# Nothing special here, just prose.\n", PLAIN + " More of it.\n"), "plain comment replaced")
+check("example config: a plain whole-line comment replaced by another: the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: write("stackshot.example.toml", PLAIN + "\n" + textwrap.dedent(EX).lstrip("\n")), "comment above line 1")
+check("example config: a plain comment inserted above the first line is a change (cli.py anchors on that line)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", PLAIN + "\n"), "first line replaced")
+check("example config: a change to the first line is a change, even to plain prose", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", ""), "first line removed")
+check("example config: the first line removed is a change", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", "# the example config\n\n"), "blank line after the first line")
+check("example config: a blank line right after the first line is a change (the hunk starts at old line 1)", out.split() == FIX, (out, err))
+for what, line in (("a word of a key (digest)", "# the digest count"), ("a table name (runners)", "# about the runners"), ("a name inside a longer word (digests)", "# the digests count"),
+                   ("a `=` (a commented-out sample)", "# digest = 7"), ("a quote", "# the \"digest\" count"), ("a digit", "# every 5 minutes"), ("an underscore", "# a plain_word"),
+                   ("a bracket", "# see [model] above")):
+    out, err = ex_sel(lambda: ex_sub("[runners]\n", line + "\n[runners]\n"), f"comment: {what}")
+    check(f"example config: a comment with {what} is not plain: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true            # a comment", "guards = true            # another comment"), "trailing comment edited")
+check("example config: a trailing comment edited on a code line selects the fixture readers (a suite's regex takes the whole line)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5  # x"), "trailing comment added")
+check("example config: a trailing comment added to a code line selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true            # a comment", "guards = true\t# a comment"), "tab before comment")
+check("example config: spaces turned into a tab before a trailing comment select the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: write("stackshot.example.toml", EX.replace("guards = true            # a comment\n    digest = 5\n", "digest = 5\n    guards = true            # a comment\n")), "reordered")
+check("example config: two lines of a table in another order select the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nnew_key = 1"), "key added")
+check("example config: a key added, whatever its name, selects the fixture readers (where it lands and what a suite patches are not predictable)", out.split() == FIX and "changed" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nbrand_new_key = 1"), "unrelated key")
+check("example config: an unrelated key with a name of its own: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[a_new_feature]\nswitch = 1\n'), "unrelated table")
+check("example config: an unrelated table added: the fixture readers too", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end("\nzz_end = 1\n"), "key at the end")
+check("example config: a key at the end of the file (it lands in the last table) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\ndirect = {}"), "inline table")
+check("example config: an inline table added (a name a suite patches, and a value the old name check skipped) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[units]\nscope = "user"\n'), "units table")
+check("example config: a [units] table added (set by hand in suites, in no constant) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end("\n[units]\n"), "empty units table")
+check("example config: an empty [units] table selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("# the example config\n", "# the example config\nlive = true\n"), "uncommented sample")
+check("example config: an uncommented sample line (a key added) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true", "guards = false"), "flipped")
+check("example config: an existing setting changed selects the direct readers and the fixture readers (fx1, fx2), not the others", out.split() == FIX and "changed" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest_hour = 6", "digest_hour = 7"), "digest hour")
+check("example config: another existing setting changed: the same", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub('boxes = ["box-a", "box-b"]', 'boxes = ["box-a", "box-b", "box-c"]'), "list grown")
+check("example config: a list that grew selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5\n", ""), "key removed")
+check("example config: a key removed selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners.ids]\n", ""), "empty table removed")
+check("example config: an empty table removed selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nrules = \"~/x/RULES.md\""), "rules added under [model]")
+check("example config: a key named like one the example holds elsewhere selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[job_gap.repos]\n"example-owner/ops-hub" = "ops/general"\n'), "job_gap.repos added")
+check("example config: a table apply() appends ([job_gap.repos]; declared twice it is a parse error) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[[router.watch]]\npage = "p"\n'), "router.watch added")
+check("example config: an array of tables apply() appends ([[router.watch]]) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_end('\n[project_scopes.by_tag]\nops = "ops"\n'), "by_tag added")
+check("example config: a table apply() appends, under a parent the example does not hold, selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[pages]\n", "[pages]\ndirs = [\"x\"]\n"), "pages.dirs added")
+check("example config: a key apply() sets (pages.dirs) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\nretries = 3\n"), "key under a pinned table")
+check("example config: a key right under a table a suite's pattern anchors on ([audit]) selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\n" + PLAIN + "\n"), "plain comment under a pinned header")
+check("example config: a plain comment right under a pinned header ([audit]) is a change (a pattern takes the header line and the next as one text)", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\n", "[audit]\n\n"), "blank line under a pinned header")
+check("example config: a blank line right under a pinned header is a change", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[audit]\nenabled = false", "[audit]\nenabled = false\n" + PLAIN), "plain comment after the first key of a pinned table")
+check("example config: a plain comment after the first key of a pinned table stays at the direct readers", out.split() == ["direct"], (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5\nbroken = ["), "unparseable new")
+check("example config: a text that does not parse (new) selects every suite", out == "all" and "does not parse" in err, (out, err))
+git("checkout", "-q", "-B", "broken", base2); ex_sub("digest = 5", "digest = 5\nbroken = ["); broken = commit("broken base")
+fixed_map = T / "broken.json"; fixed_map.write_text(json.dumps({**json.loads(MAP2.read_text()), "commit": broken}))
+git("checkout", "-q", "-B", "fixed", broken); ex_sub("broken = [\n", ""); fixed = commit("fixed")
+r = tool("select", "--map", str(fixed_map), "--to", fixed, env={"SUITEMAP_ROOT": str(R)})
+check("example config: a text that does not parse (old) selects every suite", r.stdout.strip() == "all" and "does not parse" in r.stderr, (r.stdout, r.stderr))
+def link_edit():
+    os.remove(R / "tests/example_base.toml"); os.symlink("../data.txt", R / "tests/example_base.toml")
+out, err = ex_sel(link_edit, "link moved")
+check("example config: a change to the link tests/example_base.toml selects every suite", out == "all" and "link" in err, (out, err))
+out, err = ex_sel(lambda: (ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), sub("data.txt", "one", "two")), "comment and data")
+check("example config: a plain comment beside another file's change selects the direct readers and the other file's (fx2, other open data.txt)",
+      out.split() == ["direct", "fx2", "other"], (out, err))
+out, err = ex_sel(lambda: ex_sub("digest = 5", "digest = 5.0"), "int to float")
+check("example config: 5 to 5.0 selects the fixture readers", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true", "guards = 1"), "bool to int")
+check("example config: true to 1 selects the fixture readers", out.split() == FIX, (out, err))
+A1 = {"SUITEMAP_EXAMPLE_RULE": "A1"}
+r = tool("list", env={"SUITEMAP_EXAMPLE_RULE": "A-1"})
+check("example config: a bad SUITEMAP_EXAMPLE_RULE is refused at the start of any command, `list` included (the check in main(), not only where a rule reads it)",
+      r.returncode != 0 and "A1" in r.stderr and "A2" in r.stderr and r.stdout.strip() == "", (r.returncode, r.stdout, r.stderr[-300:]))
+for bad in ("A-1", "a3", "off"):
+    r = tool("select", "--map", str(MAP2), "--to", "HEAD", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_EXAMPLE_RULE": bad})
+    check(f"example config: SUITEMAP_EXAMPLE_RULE={bad} is an error that names A1 and A2, not a silent A2", r.returncode != 0 and "A1" in r.stderr and "A2" in r.stderr and r.stdout.strip() == "", (r.returncode, r.stdout, r.stderr[-300:]))
+r = tool("select", "--map", str(MAP2), "--to", "HEAD", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_EXAMPLE_RULE": " a1 "})
+check("example config: the switch is read without case or spaces (a1)", r.returncode == 0, (r.returncode, r.stderr[-300:]))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment, A1", env=A1)
+check("example config (switch A1): even a plain comment selects the fixture readers (no cheap case)", out.split() == FIX and "rule A1" in err, (out, err))
+out, err = ex_sel(lambda: ex_sub("guards = true", "guards = false"), "flipped, A1", env=A1)
+check("example config (switch A1): a changed setting selects the same as under A2", out.split() == FIX, (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment, old map", map_=OLDMAP)
+# pins the change-over: on a map made before the link (every suite opens the real path) nothing is lost while the rule waits for main's next measurement
+check("example config: on a map from before the link (every suite opens the real path) a comment still selects all of them, as before", out.split() == ["direct", "fx1", "fx2"], (out, err))
+out, err = ex_sel(lambda: ex_sub("[runners]\n", PLAIN + "\n[runners]\n"), "plain comment, no strace", map_={**json.loads(MAP2.read_text()), "strace": False})
+check("example config: a map without the file measurement selects every suite, as for any data file", out == "all", (out, err))
+
+# ---- the edits of the delta review, on the real example config and the real tests/_instance.py: each of E1-E4 and E6-E9 breaks the fixture suites
+# (run by hand on a scratch copy: audits_page, button_set, install, orange, server_fixes, wait_end ... fail on E1/E7; stall on E2; 141 of 148 on E3;
+# all of them on E8/E9/E6), so each must select the fixture readers; E5 and E10 break nothing and stay at the direct readers
+R = T / "repo3"; R.mkdir()
+git("init", "-q", "-b", "main")
+REAL_EX = (pathlib.Path(SCR).parent / "stackshot.example.toml").read_text(encoding="utf-8")
+write_raw = lambda rel, text: (R / rel).parent.mkdir(parents=True, exist_ok=True) or (R / rel).write_text(text, encoding="utf-8")
+write_raw("stackshot.example.toml", REAL_EX); write_raw("data.txt", "one\n")
+for s in ("direct", "fx1", "fx2", "other"): write(f"tests/{s}_scenario.py", "print('x')\n")
+os.symlink("../stackshot.example.toml", R / "tests/example_base.toml")
+shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py"); shutil.copy(os.path.join(SCR, "_instance.py"), R / "tests" / "_instance.py")
+base3 = commit("real example config")
+m3 = json.loads(MAP2.read_text()); m3["commit"] = base3; MAP4 = T / "map4.json"; MAP4.write_text(json.dumps(m3))
+def cur(): return (R / "stackshot.example.toml").read_text(encoding="utf-8")
+def put(text): write_raw("stackshot.example.toml", text)
+def real_sel(edit, msg, env=None):
+    git("checkout", "-q", "-B", f"r{len(ran)}", base3)
+    edit()
+    head = commit(msg)
+    r = tool("select", "--map", str(MAP4), "--to", head, env={"SUITEMAP_ROOT": str(R), **(env or {})})
+    return r.stdout.strip(), r.stderr
+def after_line(prefix, new_lines):
+    ls = cur().split("\n"); i = next(k for k, l in enumerate(ls) if l.startswith(prefix))
+    put("\n".join(ls[:i + 1] + new_lines + ls[i + 1:]))
+def swap(a, b):
+    assert cur().count(a) == 1, a; put(cur().replace(a, b, 1))
+def e7():
+    ls = cur().split("\n"); a_i = next(k for k, l in enumerate(ls) if l.startswith("[audit]")); en = ls[a_i + 1]
+    mode_i = next(k for k in range(a_i, len(ls)) if ls[k].startswith("mode = "))
+    assert en.startswith("enabled = false"); put("\n".join(ls[:a_i + 1] + ls[a_i + 2:mode_i + 1] + [en] + ls[mode_i + 1:]))
+def e8():
+    ls = cur().split("\n"); i = ls.index("[registries.projects]")
+    ls[i:i + 3] = ["[registries]", "projects.key = " + ls[i + 1].split("=", 1)[1].split("#")[0].strip(), "projects.match = " + ls[i + 2].split("=", 1)[1].strip()]
+    put("\n".join(ls))
+REAL_PLAIN = "# Some plain prose about nothing in particular."
+for word in ("git", "ssh", "cap"):
+    out, err = real_sel(lambda: swap("[router]  ", f"# the {word} thing\n[router]  "), f"real: comment with {word}")
+    check(f"real example: a plain comment holding the short key word {word!r} selects the fixture readers (whole-word test, not only the 4-letter substring)", out.split() == FIX, (out, err))
+out, err = real_sel(lambda: put(REAL_PLAIN + "\n" + cur()), "real: comment above line 1")
+check("real example: a plain comment inserted above the first line selects the fixture readers (cli.py anchors on it)", out.split() == FIX, (out, err))
+first = REAL_EX.split("\n", 1)[0]
+out, err = real_sel(lambda: put(REAL_EX.replace(first, REAL_PLAIN, 1)), "real: line 1 changed")
+check("real example: a change to the first line selects the fixture readers", out.split() == FIX, (out, err))
+out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "\n[router]  "), "real: comment")
+check("real example: a plain comment line away from a pinned header stays at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: put(cur().rstrip("\n") + "\n\n" + REAL_PLAIN + "\n"), "real: comment and blank lines at the end")
+check("real example: a plain comment and blank lines at the end of the file stay at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: after_line("[model] ", [REAL_PLAIN]), "real: comment under [model]")
+check("real example: a plain comment right under a header that no suite anchors on stays at the direct readers", out.split() == ["direct"], (out, err))
+out, err = real_sel(lambda: swap("[router]  ", REAL_PLAIN + "\n[router]  "), "real: comment, A1", env={"SUITEMAP_EXAMPLE_RULE": "A1"})
+check("real example (switch A1): the same plain comment selects the fixture readers", out.split() == FIX, (out, err))
+def trailing_tab(prefix):
+    ls = cur().split("\n"); i = next(k for k, l in enumerate(ls) if l.startswith(prefix)); code, _, cm = ls[i].partition("#")
+    ls[i] = code.rstrip() + "\t#" + cm; put("\n".join(ls))
+def uncomment(sample):
+    swap("# " + sample, sample)
+for name, edit in (("E1 a plain comment line right under [audit]", lambda: after_line("[audit]", [REAL_PLAIN])),
+                   ("E1 a blank line right under [audit]", lambda: after_line("[audit]", [""])),
+                   ("E1 a plain comment line right under [anchor_hub]", lambda: after_line("[anchor_hub]", [REAL_PLAIN])),
+                   ("E2 an extra space before = in [stall]", lambda: swap("max_pause_hours = 4", "max_pause_hours  = 4")),
+                   ("E3 an extra space before = in [paths] repo", lambda: swap('repo = "~/stackshot-data"', 'repo  = "~/stackshot-data"')),
+                   ("E4 a new [[foo.bar]] row with a repo key", lambda: put(cur().rstrip("\n") + '\n\n[[foo.bar]]\nrepo = "x"\n')),
+                   ("E5 an unrelated key in an unrelated table", lambda: put(cur().rstrip("\n") + "\n\n[a_new_feature]\nswitch = 1\n")),
+                   ("E6 a new multi-line value in [instance]", lambda: after_line("[instance]", ["zzz = [", "[1],", "]"])),
+                   ("E7 enabled moved below mode in [audit]", e7),
+                   ("E8 [registries.projects] rewritten as dotted keys", e8),
+                   ("E9 [ runners.ssh_hosts ] with spaces in the brackets", lambda: swap("[runners.ssh_hosts] ", "[ runners.ssh_hosts ] ")),
+                   ("E10 a key added after owner_aliases", lambda: after_line("owner_aliases = []", ["unrelated_after_aliases = 1"])),
+                   ("E10 a key added after rules", lambda: after_line("rules = ", ["unrelated_after_rules = 1"])),
+                   ("F1 a trailing comment on port = 8020", lambda: swap("\nport = 8020\n", "\nport = 8020  # x\n")),
+                   ("F1 a trailing comment on hook_port = 8010", lambda: swap("\nhook_port = 8010\n", "\nhook_port = 8010 # x\n")),
+                   ("F1 a tab before the comment on cap_needs_owner", lambda: trailing_tab("cap_needs_owner = true")),
+                   ("F2 a first line # session_view = \"\"", lambda: put('# session_view = ""\n' + cur())),
+                   ("F3 direct = {} added in [model]", lambda: after_line("[model] ", ["direct = {}"])),
+                   ("F3 a [units] table added", lambda: put(cur().rstrip("\n") + "\n\n[units]\n")),
+                   ("F3 a [units] table with scope = user added", lambda: put(cur().rstrip("\n") + '\n\n[units]\nscope = "user"\n')),
+                   ("F4 zz_end = 1 at the end of the file", lambda: put(cur().rstrip("\n") + "\nzz_end = 1\n")),
+                   ("F4 zz_gate = 1 under [page_gate]", lambda: after_line("[page_gate]", ["zz_gate = 1"])),
+                   ("F4 the sample # paused_until uncommented", lambda: uncomment("paused_until = ")),
+                   ("F4 the sample # pause_item uncommented", lambda: uncomment("pause_item = ")),
+                   ("F4 the sample # live = true uncommented", lambda: uncomment("live = true"))):
+    out, err = real_sel(edit, name)
+    check(f"real example: {name} selects the fixture readers", out.split() == FIX, (out, err))
+R = R_MAIN
+# what apply() touches, run for real: every setting it sets and every table it appends is a name the selection knows (the names come from the constants
+# of tests/_instance.py, so a new line in apply() that changes something the constants do not list fails here)
+sys.path.insert(0, SCR)
+import _instance
+MLS = 'a = """\nx\n\ny\n"""\nb = 1\n'
+check("layout_only: a blank line inside a multi-line string is content, not layout", not smod.layout_only(MLS, MLS.replace("x\n\ny", "x\n\n\ny"), set(), set()))
+check("layout_only: a '#' line inside a multi-line string is content, not a comment", not smod.layout_only(MLS, MLS.replace("x\n", "x\n# plain\n"), set(), set()))
+check("layout_only: a blank line outside the string is layout", smod.layout_only(MLS, MLS + "\n\n", set(), set()))
+names = smod.names_from_source((pathlib.Path(SCR) / "_instance.py").read_text(encoding="utf-8"))
+check("apply(): the selection reads the names from tests/_instance.py", names is not None and len(names[0]) > 20 and names[1] == set(_instance.PINNED_TABLES), names and len(names[0]))
+if names:
+    before = smod.toml_items(_instance.base_toml())
+    # the example text itself, as apply() would find it without the table it appends: apply(x) minus TABLES is what it patched
+    after = smod.toml_items(_instance.apply(_instance.base_toml(), gbrain=True, owner=True, login=True, keywords=True))
+    touched = sorted(p for p, v in after - before if v != "{}")
+    uncovered = [p for p in touched if not any(p == t or p.startswith(t + ".") for t in names[0] if t)]
+    check("apply(): every setting it changes and every table it appends is covered by a name the selection knows", touched and not uncovered, uncovered)
+    check("apply(): the tables it appends are all in the names (job_gap.repos, router.watch, project_scopes.by_prefix)",
+          {"job_gap.repos", "router.watch", "router.quiet", "project_scopes.by_prefix", "project_scopes.by_tag"} <= names[0], names[0])
+src = (pathlib.Path(SCR) / "_instance.py").read_text(encoding="utf-8")
+bad_pinned = re.sub(r"(?m)^PINNED_TABLES = .*$", 'PINNED_TABLES = "audit"', src)
+check("apply(): PINNED_TABLES as a bare string is refused, not read as a set of letters", bad_pinned != src and smod.names_from_source(bad_pinned) is None, bad_pinned != src)
+check("apply(): PINNED_TABLES as a list of strings is read", smod.names_from_source(re.sub(r"(?m)^PINNED_TABLES = .*$", 'PINNED_TABLES = ["audit"]', src)) is not None)
+# a suite's pattern that anchors on a table's header line names that table in PINNED_TABLES
+anchored = set()
+for f in sorted(pathlib.Path(SCR).glob("*_scenario.py")):
+    anchored |= set(re.findall(r"\(\?m\)\^\(\\\[(\w+)\\\]", f.read_text(encoding="utf-8")))
+check("apply(): every table a suite's pattern anchors on the header of is in PINNED_TABLES", anchored and anchored <= set(_instance.PINNED_TABLES), (anchored, _instance.PINNED_TABLES))
+
 # no map, a broken map, an unknown commit: all
 _, _, head = sel_after(lambda: sub("data.txt", "one", "three"), "data again")
 r = tool("select", "--map", str(T / "none.json"), "--to", head)

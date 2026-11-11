@@ -17,7 +17,7 @@ import contextlib, io, json, os, re, socket, sys, pathlib, logging, threading
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="terminaltest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = ""', f'session_links = "{tmp}/sala"', 1); assert f'session_links = "{tmp}/sala"' in toml   # the fixture registry, never the host's sala store
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -67,7 +67,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_
+from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:
@@ -82,7 +82,7 @@ from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
 SALA = "https://sala.example.org/#s="
 def items(): return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit())
-def item(shown): return server._load(server._norm_id(shown))
+def item(shown): return server._load(_model_ids._norm_id(shown))
 def tp(action, session="home-sparrow-builder", question="May I run the migration against the staging database?", sender="sala-hook", machine=None, **kw):
     b = {"action": action, "session": session, "sender": sender}
     if question is not None: b["question"] = question
@@ -96,7 +96,7 @@ n0 = len(items())
 Q = "May I run the migration against the staging database?"
 st, out = tp("open", "home-sparrow-builder", Q)
 check("open: 200 with the item id as shown, the session's name, the project, repeat false", st == 200 and out["session"] == "home-sparrow-builder" and out["project"] == "projects/alpha" and out["repeat"] is False
-      and out["item"] == server._gh.shown(server._norm_id(out["item"])), (st, out))
+      and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, filed under the session's project from the registry, marked with the resolved session name", it["status"] == "open" and m["project"] == "projects/alpha" and m["terminal_prompt"] == "home-sparrow-builder", (it["status"], m))
 check("…the subject names the session and what it waits for", it["subject"] == "[home] home-sparrow-builder is waiting for your answer in its terminal", it["subject"])
@@ -145,10 +145,10 @@ st, oo = tp("open", "home-other", "Is the plan right?")
 check("another session has its own item, under the same project, owned by the same -main agent", st == 200 and oo["item"] != out["item"] and oo["repeat"] is False and len(items()) == n1 + 1
       and item(oo["item"])["metadata"]["terminal_prompt"] == "home-other", (st, oo))
 # the session found by an old name when it was renamed after the item was filed: the mark is the old name, the call uses the new one
-rn = server._load(server._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; server._save(server._norm_id(oo["item"]), rn)
-check("a mark that holds an old name (a rename since) still matches the session by the registry", server._terminal_open_items("home-sparrow-builder") == [server._norm_id(out["item"]), server._norm_id(oo["item"])]
-      or server._terminal_open_items("home-sparrow-builder") == sorted([server._norm_id(out["item"]), server._norm_id(oo["item"])]), server._terminal_open_items("home-sparrow-builder"))
-rn["metadata"]["terminal_prompt"] = "home-other"; server._save(server._norm_id(oo["item"]), rn)
+rn = server._load(_model_ids._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; server._save(_model_ids._norm_id(oo["item"]), rn)
+check("a mark that holds an old name (a rename since) still matches the session by the registry", server._terminal_open_items("home-sparrow-builder") == [_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]
+      or server._terminal_open_items("home-sparrow-builder") == sorted([_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]), server._terminal_open_items("home-sparrow-builder"))
+rn["metadata"]["terminal_prompt"] = "home-other"; server._save(_model_ids._norm_id(oo["item"]), rn)
 st, c2 = tp("clear", "home-other", None)
 check("…and a clear of one session closes only its own item", c2["cleared"] == [oo["item"]] and item(oo["item"])["status"] == "completed" and item(out["item"])["status"] == "open", (c2, item(out["item"])["status"]))
 

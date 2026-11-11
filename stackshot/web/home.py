@@ -25,7 +25,7 @@ YOUR_MOVE, AGENTS, WAITING = "your-move", "agents", "waiting"
 LISTS = (YOUR_MOVE, AGENTS, WAITING)
 AMBER_S = 2 * 86400.0          # Your move: the age turns amber past two days
 RED_S = 5 * 86400.0
-WATCHED_BY = {"time": "the scheduler", "relay": "the scheduler", "anchor": "the anchor module", "item": "the server", "event": "the server"}      # model section 4's table: who notices the wake event
+WATCHED_BY = {"time": "the scheduler", "relay": "the scheduler", "anchor": "the anchor module", "item": "the server", "event": "the server"}      # model section 4's table: who notices the wake event      # i18n: skip  (English keys of watcher_word, which routes them)
 _FAR = float("inf")
 
 

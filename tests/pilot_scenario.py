@@ -17,7 +17,7 @@ BID_B = 9190
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="pilottest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), keywords=True)
+toml = _instance.apply(_instance.base_toml(), keywords=True)
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 toml = toml.replace('lanes_file = ""', f'lanes_file = "{tmp}/sala/lanes.tsv"', 1); assert f'lanes_file = "{tmp}/sala/lanes.tsv"' in toml   # a lane record in the temp dir (the example has none)
 toml = toml.replace('limit_file = ""', f'limit_file = "{tmp}/sala/limit.json"', 1); assert f'limit_file = "{tmp}/sala/limit.json"' in toml   # and a limit watch
@@ -3214,7 +3214,7 @@ _anc47 = (T / "store/anchors.json").read_text()
 GREEN = "[release] PR #113 merged and deployed — a change — main at 0606060, restarted: stackshot.service, healthz ok · log /x/pr-113.log"
 n0 = len(wait_push(0)); owed0 = json.dumps(server._owed_load(), sort_keys=True); comments = []
 _ge, _goc = server._gh.enabled, server._gh.on_change
-server._gh.enabled = lambda: True; server._gh.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k != "activity"}, name, note, after.get("activity")))      # an item from before the activity clock gains the field at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
+server._gh.enabled = lambda: True; server._gh.on_change = lambda gid, before, after, name="", sid="", note="", background=False: comments.append((gid, before == {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in after.items() if k not in ("activity", "progress")}, name, note, after.get("activity")))      # an item from before the activity and progress clocks gains the fields at its first save (seeded from its last update, so a server note moves nothing), and an open item gains its stored phase: the item is otherwise unchanged
 st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN, "sender": "release", "release": "green", "pr": PRU})
 server._gh.enabled, server._gh.on_change = _ge, _goc
 time.sleep(0.3)

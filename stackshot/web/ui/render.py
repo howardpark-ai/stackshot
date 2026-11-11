@@ -444,7 +444,7 @@ def when_words(t, clock=True):
 def age_words(seconds):
     """An age in words: "12 min", "5 h", "2 d" (minutes below 90 min, hours below 36 h, days from then on)."""
     m = int(max(0.0, float(seconds)) // 60)
-    return f"{m} min" if m < 90 else (f"{m // 60} h" if m < 60 * 36 else f"{m // 1440} d")
+    return _t("more.age_min", n=m) if m < 90 else (_t("more.age_hour", n=m // 60) if m < 60 * 36 else _t("more.age_day", n=m // 1440))
 def confirmed_at(r, path=None):
     """When an item was last confirmed true (epoch seconds): its top-level `confirmed` (set on create, on every state
     change and by the confirm tool); an item without one reads as confirmed at its state_updated, else updated, else the
@@ -502,8 +502,7 @@ def mockup_link(r, shown=""):
 def stale_tip(r, label=str):
     """The tooltip of a stale item's ⚠: a your-call item's ask may be out of date; any other lane has gone unconfirmed (a parked item is never stale)."""
     a = age_words(r.get("_age") or 0)
-    return (f"ask last confirmed {a} ago — may be out of date" if needs_kind(r) == "call"
-            else f"no confirmation for {a} — may be out of date")
+    return _t("more.stale_tip_call", age=a) if needs_kind(r) == "call" else _t("more.stale_tip", age=a)
 def _vtime(v):
     """A stored version's own time: the later of its `updated` and `confirmed` clocks, 0.0 when it has neither."""
     out = 0.0
@@ -546,15 +545,15 @@ def link_label(u):
     m = re.search(r"github\.com/([^/]+/[^/]+)/(issues|pull)/(\d+)", u)
     if m: return f"{m.group(1).split('/')[1]}#{m.group(3)}" if m.group(2) == "issues" else f"{m.group(1).split('/')[1]} PR #{m.group(3)}"
     m = re.search(r"github\.com/[^/]+/([^/]+)/releases(?:/latest)?/?$", u)
-    if m: return f"{m.group(1)} releases"
+    if m: return _t("link.releases", repo=m.group(1))
     m = re.search(r"github\.com/[^/]+/([^/]+)/blob/[^/]+/(.+)", u)
     if m: return m.group(2).split("/")[-1]
     if "github.com" in h: return "GitHub"
     if "notion" in h: return "Notion"
-    if "docs.google.com" in h: return {"/document": "Google Doc", "/spreadsheets": "Google Sheet", "/presentation": "Google Slides"}.get(next((k for k in ("/document", "/spreadsheets", "/presentation") if path.startswith(k)), ""), "Google Docs")
+    if "docs.google.com" in h: return {"/document": _t("link.google_doc"), "/spreadsheets": _t("link.google_sheet"), "/presentation": _t("link.google_slides")}.get(next((k for k in ("/document", "/spreadsheets", "/presentation") if path.startswith(k)), ""), _t("link.google_docs"))
     if "drive.google.com" in h: return "Drive"
-    if "claude.ai" not in h and mockup_hit(u) == u: return "mockup"   # a fleet tool's mockup page: a plain link, never embedded (its pages share the terminal's address)
-    if "claude.ai" in h: return "session"
+    if "claude.ai" not in h and mockup_hit(u) == u: return _t("link.mockup")   # a fleet tool's mockup page: a plain link, never embedded (its pages share the terminal's address)
+    if "claude.ai" in h: return _t("link.session")
     if "slack.com" in h: return "Slack"
     return h
 def m_link(text):
@@ -822,6 +821,10 @@ NO_OUTCOME = "closed (no outcome recorded)"      # what an item the migration ba
 def outcome_word(oc):
     """An outcome as a person reads it: `unrecorded` (closed before the item model with no outcome in its record, written by the migration only) is "closed (no outcome recorded)"."""
     return NO_OUTCOME if oc == "unrecorded" else oc
+_OUTCOME_KEYS = {"done": "item.outcome_word.done", "dropped": "item.outcome_word.dropped", "superseded": "item.outcome_word.superseded", "unrecorded": "item.outcome_word.unrecorded"}
+def outcome_ui(oc):
+    """An outcome as the item page says it in the viewer's language (the History's completed line); outcome_word stays the English every other reader (tool text, the markdown) gets."""
+    return _t(_OUTCOME_KEYS[oc]) if oc in _OUTCOME_KEYS else oc
 
 
 def outcome_of(r):
@@ -2378,7 +2381,8 @@ class Board:
         return next((a for a in (na[len(pa):] if na[:len(pa)] == pa else []) if a.get("kind") == "decision" and a.get("via") != "github"), None)
     def item_events(self, r):
         """The item's history as (ts, kind, html) tuples, one per change, newest first (item_log without the merge, the author and the plain text); → ([(ts, kind, html)], n_more)."""
-        evs, more = self.item_log(r, merge=False)
+        with _i18n.use(_i18n.DEFAULT):          # English whatever the viewer reads: the search index and the migration comment are not a page
+            evs, more = self.item_log(r, merge=False)
         return [(x["ts"], x["kind"], re.sub(r'</div><div class="eb(?: osub)?">', "; ", x.get("brief", x["html"]))) for x in evs], more     # a bullet each, without the fold that holds a field's text (the migration comment, the search index)
     def creator_name(self, r, v=None) -> str:
         """The name of whoever created an item, the one rule behind the History's "created by" and the sidebar's Creator row: the version's owner (a cloud owner's
@@ -2400,27 +2404,28 @@ class Board:
         def fev(field, text):          # a text field's change: its bullet and, in the 4th place, the fold with its text
             b_, f_ = self.hist_field(r, field, text); return ("edit", b_, None, f_)
         def owner(v):          # the creator's name (creator_name, also the sidebar's Creator row); "nobody" when the version names none
-            return self.creator_name(r, v) or "nobody"
+            return self.creator_name(r, v) or _t("item.log.nobody")
         def mover_of(v):       # step 4b: who moves the item in this version, as the model reads its fields ("" for a closed or a waiting item)
             try:
                 mod = _model.derive(v, self.now.timestamp(), after_open=after_open)
             except Exception: return ""
             return mod.mover if mod.state == _model.ALIVE else ""
-        def mover_show(w): return "no one" if not w else (w if _model.is_owner(w) else self.mover_name(w))
+        def mover_show(w): return _t("item.log.no_one") if not w else (w if _model.is_owner(w) else self.mover_name(w))
         def whose(v):
-            if is_held(v): return "on hold"
-            return "completed" if v.get("status") == "completed" else list_word((v.get("metadata") or {}).get("state"), needs_kind({"metadata": v.get("metadata") or {}}))
+            if is_held(v): return _t("item.log.on_hold")
+            return _t("item.log.completed_word") if v.get("status") == "completed" else list_word((v.get("metadata") or {}).get("state"), needs_kind({"metadata": v.get("metadata") or {}}))
         def due(v): return due_of({"metadata": v.get("metadata") or {}})
+        def step_word(w): return {"done": _t("item.log.step_word.done"), "dropped": _t("item.log.step_word.dropped")}.get(w, w)     # the mark a step took, as the History says it
         def proj(v):
             k = proj_key({"metadata": v.get("metadata") or {}})
-            return self.proj_label(k) if k in self.proj else (k or "no project")
+            return self.proj_label(k) if k in self.proj else (k or _t("item.no_project"))
         out = []
         groups = {}          # a step's key -> the status updates written on it while it was open (folded under its one line); a closed group stays here only for the line it made
         vs = self.item_versions(r); prev = None
         for vi, (ts, v) in enumerate(vs):
             m = v.get("metadata") or {}; ev = []
             if prev is None:
-                ev.append(("created", f"created as “{e(v.get('subject') or '')}” · {e(whose(v))} · " + (f"mover {e(mover_show(mover_of(v)))} · " if mover_of(v) else "") + f"created by {e(owner(v))}"   # the subject it was born with
+                ev.append(("created", _t("item.log.created_mover" if mover_of(v) else "item.log.created", subject=e(v.get('subject') or ''), whose=e(whose(v)), mover=e(mover_show(mover_of(v))), owner=e(owner(v)))   # the subject it was born with
                            + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in _said.new_entries(None, m))))   # his words the first version already held
                 rl = _gh.refile_line(None, m)          # "Refile itself": filed under another project, moved to the owner's
                 if rl: ev.append(("project", e(rl)))
@@ -2431,46 +2436,46 @@ class Board:
                 if ps != s_ or ph != h_:
                     if s_ == "completed":
                         oc, why, by = outcome_of(v)   # an item closed before then says only "completed"
-                        ev.append(("completed", "completed" + (f" · <b>{e(outcome_word(oc))}</b>" if oc else "") + (f" by {e(shown(by))}" if by else "") + (f" — {e(why)}" if why else "")))
+                        ev.append(("completed", (_t("item.log.completed_outcome", outcome=f"<b>{e(outcome_ui(oc))}</b>") if oc else _t("item.log.completed")) + (" " + _t("item.by", who=e(shown(by))) if by else "") + (_t("item.log.completed_why", why=e(why)) if why else "")))
                     elif h_ and not ph:
-                        w = wake_of(v); ev.append(("hold", "put on hold" + (f" · wake {e(self.when(w))}" if w else "")))
-                    elif ph and not h_: ev.append(("unhold", f"back from hold · {e(whose(v))}"))
-                    elif ps == "completed": ev.append(("reopened", f"reopened · {e(whose(v))}"))
+                        w = wake_of(v); ev.append(("hold", _t("item.log.hold_wake", when=e(self.when(w))) if w else _t("item.log.hold")))
+                    elif ph and not h_: ev.append(("unhold", _t("item.log.unhold", whose=e(whose(v)))))
+                    elif ps == "completed": ev.append(("reopened", _t("item.log.reopened", whose=e(whose(v)))))
                 if not h_ and not ph and s_ != "completed" and ps == s_:
                     a, b = needs_kind({"metadata": pm}), needs_kind({"metadata": m})
                     if a != b:
                         po = options_of(prev) if a == "call" else []    # the options leave the page with the decision and stay here
                         pk = ask_of(prev) if a == "call" else ""        # and so does the ask, its Decide part (the raw line if misshaped)
                         pk = ((parse_ask(pk) or {}).get("decide") or pk) if pk else ""
-                        ev.append(("needs", f"moved to <b>{e(list_word(m.get('state'), b))}</b>"))
-                        if pk: ev.append(("needs", f"the ask was: {e(_ip.clip(pk, 160))}", None, f'<details class="ehold"><summary class="more">the whole ask</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
+                        ev.append(("needs", _t("item.log.moved_to", lane=f"<b>{e(list_word(m.get('state'), b))}</b>")))
+                        if pk: ev.append(("needs", _t("item.log.ask_was", ask=e(_ip.clip(pk, 160))), None, f'<details class="ehold"><summary class="more">{_t("item.log.whole_ask")}</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
                         dec = self.decision_made(prev, v)                # his answer written with this change, when it is one
                         kept = {"metadata": {"options": (dec or {}).get("options")}}
                         po, rpo = (options_of(kept), options_of(kept, raw=True)) if options_of(kept) else (po, options_of(prev, raw=True) if a == "call" else [])      # the options he was shown, kept on his answer (a record from before that has them from the version before); rpo = their labels as stored
                         if po:
-                            ev.append(("needs", "the options were:"))
+                            ev.append(("needs", _t("item.log.options_were")))
                             hits = [j for j, (o, ro) in enumerate(zip(po, rpo)) if dec and dec.get("choice") and dec["choice"] in (o["label"], ro["label"])]      # the label as shown, or as stored (an answer from before the letter was dropped on read)
                             lt = str((dec or {}).get("letter") or "")
                             hit = (ord(lt) - 65 if len(lt) == 1 and lt.isascii() and lt.isalpha() and ord(lt) - 65 in hits else hits[0] if hits else -1)      # one option is marked: the letter's place when the answer carries one, else the first match (as the pick resolves)
                             for i, (o, ro) in enumerate(zip(po, rpo)):
                                 taken = i == hit
-                                ev.append(("needs", f'<b>{e(_ol.listed(o["label"], i))}</b>{" (recommended)" if o["recommended"] else ""}: {e(o["line"])}' + (" · <b>picked</b>" if taken else ""), None, "", "osub"))
-                            if dec and not dec.get("choice"): ev.append(("needs", "no option was picked"))
+                                ev.append(("needs", _t("item.log.opt_rec" if o["recommended"] else "item.log.opt", label=f'<b>{e(_ol.listed(o["label"], i))}</b>', line=e(o["line"])) + (_t("item.log.opt_picked", picked=f'<b>{_t("item.log.picked")}</b>') if taken else ""), None, "", "osub"))
+                            if dec and not dec.get("choice"): ev.append(("needs", _t("item.log.no_pick")))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
-                        ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", "needs: <b>" + e(", ".join(ns)) + "</b>" if ns else "needs: no session named any more"))
+                        ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")))
                 elif is_held(v) and is_held(prev) and wake_of(prev) != wake_of(v):
-                    w = wake_of(v); ev.append(("hold", f"wake {'set to ' + e(self.when(w)) if w else 'cleared'}"))
+                    w = wake_of(v); ev.append(("hold", _t("item.log.wake_set", when=e(self.when(w))) if w else _t("item.log.wake_cleared")))
                 if not h_ and not ph and s_ != "completed" and ps == s_ and wake_of(prev) != wake_of(v):   # a reminder: set, moved or gone
-                    w = wake_of(v); ev.append(("hold", f"reminder {'set to ' + e(self.when(w)) if w else 'cleared'}"))
+                    w = wake_of(v); ev.append(("hold", _t("item.log.reminder_set", when=e(self.when(w))) if w else _t("item.log.reminder_cleared")))
                 if s_ != "completed" and after_of({"metadata": pm}) != after_of({"metadata": m}):   # what it waits on
-                    af = after_of({"metadata": m}); ev.append(("hold", "after: <b>" + e(", ".join(shown(g) for g in af)) + "</b>" if af else "after cleared: nothing left to wait on"))
+                    af = after_of({"metadata": m}); ev.append(("hold", _t("item.log.after", ids="<b>" + e(", ".join(shown(g) for g in af)) + "</b>") if af else _t("item.log.after_cleared")))
                 if s_ != "completed" and (pm.get("state") != m.get("state") or any(pm.get(k) != m.get(k) for k in _states.CARRY_FIELDS)):   # where it stands, with what the state carries
-                    ev.append(("hold", (f"state {e(pm['state'])} → <b>{e(m['state'])}</b>" if pm.get("state") in (*_states.STATES, *_states.LEGACY_STATES) and pm.get("state") != m.get("state") else f"state <b>{e(m['state'])}</b>") + "".join(f" · {k}: {e(_ip.clip(m[k], 300))}" for k in _states.CARRY.get(m["state"], ()) if m.get(k)) if m.get("state") in _states.STATES
-                               else f"state cleared (was {e(list_word(pm.get('state')) or pm.get('state'))})"))
+                    ev.append(("hold", (_t("item.log.state_moved", old=e(pm['state']), new=f"<b>{e(m['state'])}</b>") if pm.get("state") in (*_states.STATES, *_states.LEGACY_STATES) and pm.get("state") != m.get("state") else _t("item.log.state", new=f"<b>{e(m['state'])}</b>")) + "".join(_t("item.log.state_carry", label=k, value=e(_ip.clip(m[k], 300))) for k in _states.CARRY.get(m["state"], ()) if m.get(k)) if m.get("state") in _states.STATES
+                               else _t("item.log.state_cleared", old=e(list_word(pm.get('state')) or pm.get('state')))))
                 if s_ != "completed" and (pm.get("draft") or "") != (m.get("draft") or ""):   # the draft's own line its text is on the item
-                    ev.append(("edit", "draft cleared" if not m.get("draft") else "draft edited" if pm.get("draft") else "draft set"))
+                    ev.append(("edit", _t("item.log.draft_cleared") if not m.get("draft") else _t("item.log.draft_edited") if pm.get("draft") else _t("item.log.draft_set")))
                 if s_ != "completed" and pm.get("rank") != m.get("rank"):   # the builder's queue order
-                    ev.append(("hold", f"rank set to <b>{e(m['rank'])}</b>" if m.get("rank") else f"rank cleared (was {e(pm.get('rank'))})"))
+                    ev.append(("hold", _t("item.log.rank_set", rank=f"<b>{e(m['rank'])}</b>") if m.get("rank") else _t("item.log.rank_cleared", old=e(pm.get('rank')))))
                 if s_ != "completed":                       # a step the stall pass took (its mover's pane had no turn running), one line each, said by stackshot
                     for x in _stall.new_entries(pm, m): ev.append(("stall", "stackshot: " + e(x["text"])))
                 if s_ != "completed":                       # a front agent's notice about the item (told on his next turn, or not told), the board keeps the news either way
@@ -2478,20 +2483,20 @@ class Board:
                 if s_ != "completed" and ps == "open":      # a mover change, in the model's words; a close or a reopening says its own line
                     mv_a, mv_b = mover_of(prev), mover_of(v)
                     if mv_a and mv_b and mv_a != mv_b and not same_ref(mv_a, mv_b):      # a hold or a wait takes the mover away: its own line says that
-                        ev.append(("mover", f"mover: {e(mover_show(mv_a))} → <b>{e(mover_show(mv_b))}</b>"))
+                        ev.append(("mover", _t("item.log.mover", old=e(mover_show(mv_a)), new=f"<b>{e(mover_show(mv_b))}</b>")))
                 ho_ = _hov.fresh(pm, m) if s_ != "completed" else {}       # a finished step handed the item on, or could not: its own line (handover.py)
                 if ho_:
-                    ev.append(("mover", f"step hand-over: item moved{(' from ' + e(mover_show(mover_of(prev)))) if mover_of(prev) else ''} to <b>{e(mover_show(mover_of(v)))}</b>" if ho_.get("kind") == _hov.MOVED
-                               else f"step hand-over: the next step is {e(self.mover_name(ho_.get('to') or ''))}'s but that session isn't running; it stays with <b>{e(mover_show(mover_of(v)) if mover_of(v) != 'no one' else 'its mover')}</b>"))
+                    ev.append(("mover", (_t("item.log.handover_moved_from", old=e(mover_show(mover_of(prev))), to=f"<b>{e(mover_show(mover_of(v)))}</b>") if mover_of(prev) else _t("item.log.handover_moved", to=f"<b>{e(mover_show(mover_of(v)))}</b>")) if ho_.get("kind") == _hov.MOVED
+                               else _t("item.log.handover_kept", who=e(self.mover_name(ho_.get('to') or '')), to=f"<b>{e(mover_show(mover_of(v)) if mover_of(v) != 'no one' else _t('item.log.its_mover'))}</b>")))
                 a, b = due(prev), due(v)
                 if a != b:
-                    ev.append(("due", f"due set to <b>{e(self.when(b))}</b>" if not a else f"due cleared (was {e(self.when(a))})" if not b
-                               else f"due moved: {e(self.when(a))} → <b>{e(self.when(b))}</b>"))
-                if (pm.get("priority") or "p2") != (m.get("priority") or "p2"): ev.append(("priority", f"priority: {e(pm.get('priority') or 'p2')} → <b>{e(m.get('priority') or 'p2')}</b>"))
+                    ev.append(("due", _t("item.log.due_set", when=f"<b>{e(self.when(b))}</b>") if not a else _t("item.log.due_cleared", old=e(self.when(a))) if not b
+                               else _t("item.log.due_moved", old=e(self.when(a)), new=f"<b>{e(self.when(b))}</b>")))
+                if (pm.get("priority") or "p2") != (m.get("priority") or "p2"): ev.append(("priority", _t("item.log.priority", old=e(pm.get('priority') or 'p2'), new=f"<b>{e(m.get('priority') or 'p2')}</b>")))
                 if proj_key({"metadata": pm}) != proj_key({"metadata": m}):
                     rl = _gh.refile_line(pm, m)        # "Refile itself": the server moved it to its owner's project
-                    ev.append(("project", e(rl) if rl else f"project: {e(proj(prev))} → <b>{e(proj(v))}</b>"))
-                if prev.get("subject") != v.get("subject"): ev.append(("edit", f"subject edited (was “{e(prev.get('subject') or '')}”)"))
+                    ev.append(("project", e(rl) if rl else _t("item.log.project", old=e(proj(prev)), new=f"<b>{e(proj(v))}</b>")))
+                if prev.get("subject") != v.get("subject"): ev.append(("edit", _t("item.log.subject_edited", old=e(prev.get('subject') or ''))))
                 who_ = " ".join(str(v.get("written_by") or "").split())
                 for te in _work.tag_events(pm, m):          # a step's status line set, moved or cleared: folded under the step's one line (below), not a line of its own
                     g = groups.get(te["key"])
@@ -2506,7 +2511,7 @@ class Board:
                         just_closed.add(g["step"])
                 for word, line in _steps.changes(pm, m, s_ == "completed"):     # a step checked or dropped, one line each (a step with status updates has the folded line instead)
                     if line in just_closed: continue
-                    ev.append(("step", f"step {word}: " + self.md_line(_ip.clip_md(line, self.HIST_NEXT_CLIP), r["gid"])))
+                    ev.append(("step", _t("item.log.step_word", word=step_word(word), line=self.md_line(_ip.clip_md(line, self.HIST_NEXT_CLIP), r["gid"]))))
                 if (pm.get("next") or "") != (m.get("next") or ""): ev.append(fev("next", m.get("next")))
                 pa, a_ = str(pm.get("ask") or "").strip(), str(m.get("ask") or "").strip()
                 if pa != a_: ev.append(fev("ask", a_))
@@ -2517,23 +2522,23 @@ class Board:
                     for a in na_[len(pa_):]:
                         ch, tx = str(a.get("choice") or ""), str(a.get("text") or "")
                         if ch and a.get("letter"): ch = _ol.pick_words(ch, a["letter"])      # the letter the answer box drew beside the option
-                        ev.append(("answer", f"{e(_OWNER)} ({e(a.get('via') or 'board')}): " + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
-                                   + e(tx) + (' <span class="dim">· comment</span>' if a.get("kind") == "comment" else ' <span class="dim">· note on his step</span>' if a.get("kind") == "step-reply" else "")))
+                        ev.append(("answer", _t("item.log.answer_via", owner=e(_OWNER), via=e(a.get('via') or _t("item.log.via_board"))) + (f"<b>{e(ch)}</b>" if ch else "") + (" — " if ch and tx else "")
+                                   + e(tx) + (f' <span class="dim">{_t("item.log.tag_comment")}</span>' if a.get("kind") == "comment" else f' <span class="dim">{_t("item.log.tag_step_note")}</span>' if a.get("kind") == "step-reply" else "")))
                 for w in _work.legacy_changes(pm, m): ev.append(("work", e(w)))   # a line of the old work list added, moved, reassigned or removed, one line each (an item the migration has not reached)
                 new_said = _said.new_entries(pm, m)                          # the trailers: his words recorded by this version, a tag each
                 if new_said: ev.append(("said", e(_said.recorded_words([x for _n, x in new_said])) + "".join(" " + self.said_tag(r, n, x["tag"], "", x["checked"]) for n, x in new_said)))
                 if (prev.get("confirmed") != v.get("confirmed") and v.get("confirmed")
                         and {k_: ({kk: vv for kk, vv in x.items() if kk not in ("phase", "waits_on", "project_id")} if k_ == "metadata" and isinstance(x, dict) else x) for k_, x in prev.items() if k_ not in ("confirmed", "activity")} == {k_: ({kk: vv for kk, vv in x.items() if kk not in ("phase", "waits_on", "project_id")} if k_ == "metadata" and isinstance(x, dict) else x) for k_, x in v.items() if k_ not in ("confirmed", "activity")}):      # `activity` is a clock too (activity.py): seeding it is no change to the item, and neither are the stored phase and the kind of its wait that every save of an open item writes (metadata.phase, metadata.waits_on)
-                    ev.append(("confirm", "confirmed"))   # the confirm tool: confirmed changed alone
+                    ev.append(("confirm", _t("item.log.confirmed")))   # the confirm tool: confirmed changed alone
                 pa_ = answers_of(prev)
                 for a in answers_of(v)[len(pa_):]:      # phase 3: the owner's comment written on GitHub, at the comment's own time
                     if a.get("via") == "github":
                         u, t = str(a.get("url") or ""), re.sub(r"\s+", " ", str(a.get("text") or "")).strip()
                         t = t if len(t) <= 160 else t[:159].rstrip() + "…"
-                        where = f'<a href="{e(u)}" target="_blank" rel="noopener">on GitHub</a>' if u else "on GitHub"
+                        where = f'<a href="{e(u)}" target="_blank" rel="noopener">{_t("item.log.on_github")}</a>' if u else _t("item.log.on_github")
                         try: at = float(a.get("ts") or 0) or None
                         except (TypeError, ValueError): at = None
-                        ev.append(("comment", f"{e(_OWNER)} commented {where}: “{e(t)}”", at))
+                        ev.append(("comment", _t("item.log.gh_comment", owner=e(_OWNER), where=where, text=e(t)), at))
             who = " ".join(str(v.get("written_by") or "").split())          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
@@ -2547,12 +2552,13 @@ class Board:
             prev = v
         for g in groups.values():          # one line per step: a closed step says it was closed, the status updates written on it folded under; an open step's updates are one line too, at its newest update
             n = len(g["ups"])
-            fold = ("".join(f'<li><span class="dim">{e(self.when(t_))}</span> {e(te["text"]) if not te["removed"] else "status cleared: " + e(te["text"])}'
+            fold = ("".join(f'<li><span class="dim">{e(self.when(t_))}</span> {e(te["text"]) if not te["removed"] else _t("item.log.status_cleared", text=e(te["text"]))}'
                             + (f' <span class="dim">· {e(te["state"])}</span>' if te["state"] else "") + '</li>' for t_, te in g["ups"]))
-            body = [(("step " + g["mark"] + ": " if g["closed"] else "step: ") + self.md_line(_ip.clip_md(g["step"], self.HIST_NEXT_CLIP), r["gid"]),
-                     f'<details class="ehold"><summary class="more">{n} status update{"" if n == 1 else "s"}</summary><div class="body"><ul class="estat">{fold}</ul></div></details>')]
+            nstat = _t("item.log.status_one" if n == 1 else "item.log.status_many", n=n)
+            body = [((_t("item.log.step_mark", mark=step_word(g["mark"]), line="") if g["closed"] else _t("item.log.step_open", line="")) + self.md_line(_ip.clip_md(g["step"], self.HIST_NEXT_CLIP), r["gid"]),
+                     f'<details class="ehold"><summary class="more">{nstat}</summary><div class="body"><ul class="estat">{fold}</ul></div></details>')]
             ent = {"ts": g["last"], "ts_from": g["first"], "kind": "work", "html": self.hist_bullets(body), "who": g.get("who", ""),
-                   "what": f'{"step " + g["mark"] if g["closed"] else "step"}: {g["step"]}; {n} status update{"" if n == 1 else "s"}: ' + "; ".join(te["text"] for _t, te in g["ups"]), "comment": False}
+                   "what": (_t("item.log.step_mark", mark=step_word(g["mark"]), line=g["step"]) if g["closed"] else _t("item.log.step_open", line=g["step"])) + f'; {nstat}: ' + "; ".join(te["text"] for _w, te in g["ups"]), "comment": False}
             host = next((x[2] for x in out if merge and g["closed"] and x[0] == g["vi"] and x[1] == 0), None)      # the write that closed the step is one entry: its step line first, its other changes (a new next) after it
             if host is not None:
                 host["html"], host["ts_from"], host["what"] = ent["html"] + host["html"], g["first"], ent["what"] + "; " + host["what"]
@@ -2589,26 +2595,26 @@ class Board:
         if not answer or r.get("status") == "completed": return ""
         e = esc
         if comment_only:
-            return (f'<form class="ianswer" data-comment-only method="post" action="{e(answer["action"])}"><b>Add a comment</b>'
+            return (f'<form class="ianswer" data-comment-only method="post" action="{e(answer["action"])}"><b>{_t("answer.add_comment")}</b>'
                     f'<input type="hidden" name="token" value="{e(answer["token"])}">'
-                    f'<label for="atext">Write a comment; the agent on it is told</label>'
+                    f'<label for="atext">{_t("answer.write_comment")}</label>'
                     + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
-                    '<div class="abtns"><button type="submit" class="b main" name="act" value="comment">Send</button></div>'
+                    f'<div class="abtns"><button type="submit" class="b main" name="act" value="comment">{_t("home.send")}</button></div>'
                     '<p class="isent warn aerr" role="alert" hidden></p></form>')
         call = "decision" in [x.lower() for x in needs_of(r)]          # the server takes a choice only then (server._answer)
         opts = _card_order(options_of(r) or yesno_options(r)) if call else []     # three or more in the stored order (lettered), two with the recommended one first; the owner's stored options only, and with none, Yes and No
         if opts:                  # the cards (_cards_html), an optional note and one Send, greyed by the page script (_CARDS_JS) until a card is picked or the note has text
-            return (f'<form class="ianswer" data-cards method="post" action="{e(answer["action"])}"><b>Your answer</b>'
+            return (f'<form class="ianswer" data-cards method="post" action="{e(answer["action"])}"><b>{_t("answer.your_answer")}</b>'
                     f'<input type="hidden" name="token" value="{e(answer["token"])}">{_cards_html(opts)}'
-                    '<label class="anote" for="atext">Note (optional)</label>'
+                    f'<label class="anote" for="atext">{_t("home.note_optional")}</label>'
                     + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
-                    '<div class="abtns-send"><button type="submit" class="b main" name="act" value="answer">Send</button><span class="ahint" hidden>Pick an option or write a note</span></div>'
+                    f'<div class="abtns-send"><button type="submit" class="b main" name="act" value="answer">{_t("home.send")}</button><span class="ahint" hidden>{_t("home.pick_hint")}</span></div>'
                     '<p class="isent warn aerr" role="alert" hidden></p></form>')
-        return (f'<form class="ianswer" method="post" action="{e(answer["action"])}"><b>{"Your answer" if call else "Add a comment"}</b>'
+        return (f'<form class="ianswer" method="post" action="{e(answer["action"])}"><b>{_t("answer.your_answer") if call else _t("answer.add_comment")}</b>'
                 f'<input type="hidden" name="token" value="{e(answer["token"])}">'
-                f'<label for="atext">{"Write your answer; the agent on it is told" if call else "Write a comment; the agent on it is told"}</label>'
+                f'<label for="atext">{_t("answer.write_answer") if call else _t("answer.write_comment")}</label>'
                 + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
-                f'<div class="abtns"><button type="submit" class="b main" name="act" value="{"answer" if call else "comment"}">Send</button></div>'
+                f'<div class="abtns"><button type="submit" class="b main" name="act" value="{"answer" if call else "comment"}">{_t("home.send")}</button></div>'
                 '<p class="isent warn aerr" role="alert" hidden></p></form>')
     def watch_html(self, watch) -> str:
         """The For you control in an item page's sidebar, for a signed-in viewer (`watch` from the server; None draws
@@ -2616,15 +2622,15 @@ class Board:
         one pressed). A plain form POST to /items/<n>/watch."""
         if not watch: return ""
         e = esc; flag = str(watch.get("flag") or "")
-        state = "Muted" if flag == "mute" else ("Watched" if watch.get("watched") else "Not watched")
+        state = _t("watch.muted") if flag == "mute" else (_t("watch.watched") if watch.get("watched") else _t("watch.not_watched"))
         def btn(mode, label):
             on = flag == mode or (mode == "default" and not flag)
             return (f'<button type="submit" class="b{" on" if on else ""}" name="mode" value="{mode}"'
                     + (' aria-pressed="true" disabled' if on else ' aria-pressed="false"') + f'>{label}</button>')
         why = f' <span class="dim">· {e(watch.get("why") or "")}</span>' if watch.get("why") else ""
-        return ('<dl class="sgrp"><dt>For you</dt><dd><form class="iwatch" method="post" action="' + e(watch["action"]) + '">'
+        return ('<dl class="sgrp"><dt>' + _t("watch.for_you") + '</dt><dd><form class="iwatch" method="post" action="' + e(watch["action"]) + '">'
                 '<input type="hidden" name="token" value="' + e(watch["token"]) + f'"><span class="wstate">{state}</span>{why}'
-                '<div class="abtns">' + btn("watch", "Watch") + btn("mute", "Mute") + btn("default", "Default") + '</div></form></dd></dl>')
+                '<div class="abtns">' + btn("watch", _t("watch.watch")) + btn("mute", _t("watch.mute")) + btn("default", _t("watch.default")) + '</div></form></dd></dl>')
     def for_you_html(self) -> str:
         """The board's For you section: what he should see, newest first, one row each: the item (linked), what
         happened, when (the board's zone) and a "seen" button that clears it (POST /for-you/seen; the page script sends it as a fetch
@@ -2651,7 +2657,6 @@ class Board:
         if k == "done" and taken_by: msg = f"Done: {taken_by} takes it from here."
         if k == "stepreply" and taken_by: msg = f"Sent: {taken_by} has your note and decides whether the step is done."
         return f'<p class="isent {cls}" role="status">{esc(msg)}</p>'
-    OWNER_TIP = "the front agent to talk to about this item"      # the hover text on the side column's "Owner" label (no line under the row)
     def contact_name(self, r, contact=None) -> str:
         """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, server._contact_label), else the stored metadata.contact as the session's name now; "" when none."""
         stored = str((r.get("metadata") or {}).get("contact") or "").strip()
@@ -2673,7 +2678,7 @@ class Board:
         name = self.contact_name(r, contact)
         if not name: return ("", "")
         val = self.sess_html(name, arrow=True)      # the page's one rule: a link to the session's view while its pane lives, plain text otherwise
-        return (f'<span title="{esc(self.OWNER_TIP)}">Owner</span>', val)
+        return (f'<span title="{esc(_t("item.owner_tip"))}">{_t("item.owner")}</span>', val)
     def mover_row(self, r) -> tuple:
         """The side column's first row → (the "Mover" label, the value): the agent the item sits under (its mover; for an item the owner moves, its `then`; for a waiting one, the session
         that takes it when the wait ends), drawn as every session on the page is (sess_html) with the machine it runs on, or "no agent" when none. The creator is no one's agent (a History
@@ -2682,14 +2687,13 @@ class Board:
         x = self._sess_obj(r) or {}; mach = str(x.get("machine") or "")
         where = "cloud" if mach == "c" else (self.fleet.get(mach) or mach)
         nm = x.get("name") or x.get("id") or self.NO_AGENT
-        return ("Mover", self.sess_html(nm, arrow=True) + (f' <span class="dim">· {e(where)}</span>' if where else ""))
-    CREATOR_TIP = "who created this item"      # the hover text on the side column's "Creator" label
+        return (_t("item.mover"), self.sess_html(nm, arrow=True) + (f' <span class="dim">· {e(where)}</span>' if where else ""))
     def creator_row(self, r) -> tuple:
         """The side column's row under Owner (Mover, Owner, Creator are its first three) → (the "Creator" label with its hover text, the value): whoever created the item, by the name the History's first line gives (creator_name),
         drawn as every session on the page is (sess_html). It is on every item, open or closed; one that names no creator reads as a muted "unknown", never blank."""
         name = self.creator_name(r)
-        val = self.sess_html(name, arrow=True) if name else '<span class="dim">unknown</span>'
-        return (f'<span title="{esc(self.CREATOR_TIP)}">Creator</span>', val)
+        val = self.sess_html(name, arrow=True) if name else f'<span class="dim">{_t("item.unknown")}</span>'
+        return (f'<span title="{esc(_t("item.creator_tip"))}">{_t("item.creator")}</span>', val)
     def item_html(self, gid, answer=None, watch=None, contact=None) -> str:
         """An item's own page at /items/<gid>, on the item model (the layout is GitHub's: a main column beside a right-hand sidebar, one
         column under 768px). The goal as the title (the subject when it has none; the id first, muted, beside the item's GitHub issue link), then in the main column: one state line in
@@ -2710,7 +2714,7 @@ class Board:
         pk = proj_key(r); mirror = self.proj_mirror(pk) if pk else ""
         # the anchors that count for the item are the ones scoped to it on any project's page (anchor_scope.anchor_scope: the rule the server and the lists read); one held by another project's page says whose
         arows = sorted(((self.anchor_row(x), x) for x in _ascope.anchor_scope(self.anchors, r["gid"], pk)), key=lambda t: _KIND_ORDER.index(t[0][0]) if t[0][0] in _KIND_ORDER else len(_KIND_ORDER))
-        held_on = lambda x: (f' · <span class="dim">on {e(self.proj_label(x["page"]) if x["page"] in self.proj else x["page"])}</span>' if x["page"] != pk else "")
+        held_on = lambda x: (f' · <span class="dim">{_t("item.anchor_on", page=e(self.proj_label(x["page"]) if x["page"] in self.proj else x["page"]))}</span>' if x["page"] != pk else "")
         alist = "".join(f'<li><b>{e(kind)}</b> ' + (f'<a href="{e(u)}" target="_blank" rel="noopener">{e(nm_)}</a>' if u else e(nm_)) + f' <em>· {w}</em>{held_on(x)}</li>'
                         for (kind, (nm_, u, w, _sc, _h)), x in arows)
         mod = _model.view(r, _model.derive(r, now=tnow, after_open=after_open, anchored=lambda _i: bool(arows)), tnow, after_open)      # a doing item whose wake is far out with every step dated reads as waiting
@@ -2722,23 +2726,22 @@ class Board:
         since = _ip.since_of(r, mod)
         oc, why, by = outcome_of(r)
         not_taken = bool(alive and _hand.awaiting_session(r, mod.mover, same_ref))      # a hand-off to a session only, never the owner's
-        wtext = wbits = wend = wlab = ""                # a waiting item: what it waits on and its end, as plain text
+        wtext = wend = wlab = ""                # a waiting item: what it waits on and its end, as plain text
         w_ = mod.wait
         wbasis = "" if done else _wt.basis_of(m)         # a long wait that stands on a real-world date (wait_basis), and his words when they were recorded
         wwords = {} if done else _wt.words_of(m)
         if waiting and w_:
             reason = wbasis or (wwords.get("quote") or "")
             wtext = _ip.wait_what(w_, shown=shown, party=str(m.get("party") or ""), words=reason)
-            wlab = _ip.wait_end_label(w_) if (w_.until or w_.backstop) else "until"
+            wlab = _ip.wait_end_label(w_) if (w_.until or w_.backstop) else _t("wait.end.until")
             wend = w_.until or w_.backstop or _ip.clean(m.get("wake"))      # a wait the fields end by a date (a relay's ask-by, an event's backstop), else the wake the item carries
-            wbits = f"{wlab} {self.wait_day(wend)}" if wend else "no end date set"
         post = w_.mover if (waiting and w_) else ""
         # ---- the History, split: what changed, and what people said
         evs, more = self.item_log(r)
         changes, said_ = [x for x in evs if not x["comment"]], [x for x in evs if x["comment"]]
         li = lambda x: f'<li class="ev ev-{x["kind"]}"><div class="eh">{"<b>" + e(x["who"]) + "</b> · " if x["who"] else ""}<span class="t">{e(self.span_words(x["ts_from"], x["ts"]) if x.get("ts_from") else self.when(x["ts"]))}</span>{" " + x["mark"] if x.get("mark") else ""}</div><div class="w">{self.mentions(x["html"], r["gid"])}</div></li>'
         extra = []
-        if not done and waits_recycle(r): extra.append(badge("waits for recycle", "recycle"))   # held ones too (they keep the field)
+        if not done and waits_recycle(r): extra.append(badge(_t("item.waits_recycle"), "recycle"))   # held ones too (they keep the field)
         # ---- Next: every line, numbered, each `<mover>: <action>` (no "+N more" fold)
         nmover = who_text(mod.mover if alive else post)
         lines = _ip.next_lines(m.get("next") or "", nmover)
@@ -2749,20 +2752,20 @@ class Board:
         checklist = _steps.drawn_order(sl, self.decision_rows(r, sl))
         def cli(x):
             if x["status"] == "decided":
-                return (f'<li class="cl-decided"><span class="cb" aria-hidden="true">✓</span><div class="cl-b"><span class="sr">Decided: </span><span class="cl-t">{self.md_line(x["text"], r["gid"])}</span>'
-                        f'<span class="cl-by"><b>decided on the board</b>{" · " + e(self.when(float(x["at"]))) if x.get("at") else ""}</span></div></li>')
+                return (f'<li class="cl-decided"><span class="cb" aria-hidden="true">✓</span><div class="cl-b"><span class="sr">{_t("item.sr", word=_t("item.step.decided"))}</span><span class="cl-t">{self.md_line(x["text"], r["gid"])}</span>'
+                        f'<span class="cl-by"><b>{_t("item.stamp.decided")}</b>{" · " + e(self.when(float(x["at"]))) if x.get("at") else ""}</span></div></li>')
             nl = (_ip.next_lines(x["text"], "" if _steps.is_bare(x["text"]) else nmover) or [_ip.NextLine("", True)])[0]      # a bare bullet is a step of its own (nextlines) and reads as a sub-step: no mover put in front of it
             st = x["status"]; fmt = self.cmd_step if st == _steps.OPEN else (lambda t_, g_, f_: f_(t_, g_))      # a command block (with Copy) only on a step still to do
             subs = "".join(f"<li class=\"icode\"><div class=\"md\">{self.md_html(s_, r['gid'])}</div></li>" if _ip.is_fence(s_) else f"<li>{fmt(s_, r['gid'], self.md_line)}</li>" for s_ in nl.subs)
             body = fmt(nl.text, r['gid'], self.md_line) if nl.text else ''
             who = e(str(x.get("by") or "")); when_ = e(self.when(float(x["at"]))) if x.get("at") else ""
-            stamp = " · ".join(b_ for b_ in ((f"<b>{'done' if st == _steps.DONE else 'dropped'}</b>" + (f" by {who}" if who else "")), when_) if b_)      # the verb opens the byline, done and dropped alike
-            word = {_steps.OPEN: "To do", _steps.DONE: "Done", _steps.DROPPED: "Dropped"}[st]
+            stamp = " · ".join(b_ for b_ in ((f"<b>{_t('item.stamp.done') if st == _steps.DONE else _t('item.stamp.dropped')}</b>" + (" " + _t("item.by", who=who) if who else "")), when_) if b_)      # the verb opens the byline, done and dropped alike
+            word = {_steps.OPEN: _t("item.step.todo"), _steps.DONE: _t("item.step.done"), _steps.DROPPED: _t("item.step.dropped")}[st]
             glyph = {_steps.OPEN: "", _steps.DONE: "✓", _steps.DROPPED: "×"}[st]
             tg = _steps.tag_of(x) if st == _steps.OPEN else None      # an open step's status line, under its words: where its session is with it, and since when
             tag = (f'<span class="cl-tag">{self.md_line(tg["text"], r["gid"])}' + (f' <span class="dim">· {e(tg["state"])}</span>' if tg["state"] != "in progress" else "")
                    + (f' <span class="dim">· {e(self.when(tg["ts"]))}</span>' if tg["ts"] else "") + '</span>') if tg else ""
-            return (f'<li class="cl-{st}"><span class="cb" aria-hidden="true">{glyph}</span><div class="cl-b"><span class="sr">{word}: </span><span class="cl-t">{body}</span>' + tag
+            return (f'<li class="cl-{st}"><span class="cb" aria-hidden="true">{glyph}</span><div class="cl-b"><span class="sr">{_t("item.sr", word=word)}</span><span class="cl-t">{body}</span>' + tag
                     + (f"<ul>{subs}</ul>" if subs else "") + (f'<span class="cl-by">{stamp}</span>' if st != _steps.OPEN and stamp else "") + "</div></li>")
         opens = [x for x in checklist if x["status"] == _steps.OPEN]; earlier = [x for x in checklist if x["status"] != _steps.OPEN]
         if checklist:
@@ -2772,27 +2775,27 @@ class Board:
             nxt = ""
             if folded:        # every earlier line kept as it was drawn (the board's record, struck-through drops); only the order changes
                 nd, ndr, ndec = (sum(1 for x in folded if x["status"] == k) for k in (_steps.DONE, _steps.DROPPED, "decided"))
-                tally = f' ({", ".join(f"{n} {w}" for n, w in ((nd, "done"), (ndr, "dropped"), (ndec, "decided on the board")) if n)})' if (ndr or ndec) else ""
-                head = f'{len(folded)} {"step" if len(folded) == 1 else "steps"} done' if nd == len(folded) else f'{len(folded)} earlier step{"" if len(folded) == 1 else "s"}{tally}'
-                nxt += (f'<details class="iearlier"><summary>{head} · <span class="sh-show">show</span><span class="sh-hide">hide</span></summary>'
-                        f'<ul class="inext" aria-label="Earlier steps">{"".join(cli(x) for x in folded)}</ul></details>')
+                tally = _t("item.tally", parts=_t("item.tally_sep").join(_t(k_, n=n) for n, k_ in ((nd, "item.tally.done"), (ndr, "item.tally.dropped"), (ndec, "item.tally.decided")) if n)) if (ndr or ndec) else ""
+                head = _t("item.steps_done_one" if len(folded) == 1 else "item.steps_done", n=len(folded)) if nd == len(folded) else _t("item.earlier_one" if len(folded) == 1 else "item.earlier", n=len(folded), tally=tally)
+                nxt += (f'<details class="iearlier"><summary>{head} · <span class="sh-show">{_t("item.show")}</span><span class="sh-hide">{_t("item.hide")}</span></summary>'
+                        f'<ul class="inext" aria-label="{e(_t("item.earlier_steps"))}">{"".join(cli(x) for x in folded)}</ul></details>')
             shown_ = ([newest] if newest is not None else []) + opens
-            nxt += f'<ul class="inext" aria-label="Next steps">{"".join(cli(x) for x in shown_)}</ul>' if shown_ else ""
-            if not opens and not done: nxt += '<p class="empty">no open steps</p>'
-        else: nxt = '<p class="empty">none</p>'
+            nxt += f'<ul class="inext" aria-label="{e(_t("item.next_steps"))}">{"".join(cli(x) for x in shown_)}</ul>' if shown_ else ""
+            if not opens and not done: nxt += f'<p class="empty">{_t("item.no_open_steps")}</p>'
+        else: nxt = f'<p class="empty">{_t("item.none")}</p>'
         def fold(sid, h2, body, open_=False, cls=""):      # every section of the page is a fold with the same heading and indent; the key is remembered per browser
             return f'<details class="fold{" " + cls if cls else ""}" data-fold="item.{sid}"{" open" if open_ else ""} id="{sid}"><summary><h2>{h2}</h2></summary>{body}</details>'
         ask = open_ask(r); pa = parse_ask(ask) if ask else None   # a completed item shows no ask; nor one whose decision left its needs
         # ---- the ask, the options, the answer box: while the owner moves it
-        if pa: ask_html = ('<div class="iask"><b>Ask</b><dl>' + "".join(f'<dt>{lb}</dt><dd>{L(pa[k_])}{mockup_link(r, ask) if k_ == "decide" else ""}</dd>' for lb, k_ in
-                           (("Decide", "decide"), ("Recommend", "recommend"), ("Stakes", "stakes"), ("By", "by"))) + '</dl></div>')
-        elif ask: ask_html = f'<div class="iask"><b>Ask</b><p>{L(ask)}{mockup_link(r, ask)}</p></div>'   # present but misshaped (a hand edit): the raw line
+        if pa: ask_html = (f'<div class="iask"><b>{_t("item.ask")}</b><dl>' + "".join(f'<dt>{lb}</dt><dd>{L(pa[k_])}{mockup_link(r, ask) if k_ == "decide" else ""}</dd>' for lb, k_ in
+                           ((_t("item.ask.decide"), "decide"), (_t("item.ask.recommend"), "recommend"), (_t("item.ask.stakes"), "stakes"), (_t("item.ask.by"), "by"))) + '</dl></div>')
+        elif ask: ask_html = f'<div class="iask"><b>{_t("item.ask")}</b><p>{L(ask)}{mockup_link(r, ask)}</p></div>'   # present but misshaped (a hand edit): the raw line
         else: ask_html = ""
         opts = open_options(r)                        # the options, one line each, the recommended one marked; only while his decision is open
         ol = ""
         if opts:                                      # in the root UI the answer box's cards show each option with its whole text, so the Ask block lists them only when no box is drawn (below)
             ol = ('<ol class="iopts">' + "".join(f'<li{" class=rec" if o["recommended"] else ""}><b>{e(_ol.listed(o["label"], i))}</b>'
-                                                  + (' <span class="badge rec">recommended</span>' if o["recommended"] else "") + f'<span class="oline">{L(o["line"])}</span></li>'
+                                                  + (f' <span class="badge rec">{_t("home.recommended")}</span>' if o["recommended"] else "") + f'<span class="oline">{L(o["line"])}</span></li>'
                                                   for i, o in enumerate(opts)) + '</ol>')
         asked = bool(ask_html) or bool(ol)            # the item asks something (an ask line or options), whether or not the options are listed in the Ask block
         # his answer is asked while the item is open and his: the model says he moves it, or its needs still hold his decision (old data, until the step 4 migration)
@@ -2800,36 +2803,36 @@ class Board:
         if not his: ask_html = ""
         sb_html = ""
         if his and not asked and answer and _ip.step_block(r):       # a your-step item: the step, directly under the state line, then Done, the note box and Send
-            sb_html = (f'<div class="iask istep"><b>Your step</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
+            sb_html = (f'<div class="iask istep"><b>{_t("item.your_step")}</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
                        f'<form class="ianswer" method="post" action="{e(answer["action"])}"><input type="hidden" name="token" value="{e(answer["token"])}">'
-                       '<label for="atext">A note, or nothing: Send with an empty box finishes the step</label>'
+                       f'<label for="atext">{_t("home.step_note_aria")}</label>'
                        + _abox('<textarea id="atext" name="text" rows="3" maxlength="4000"></textarea>', "atext") +
-                       '<div class="abtns"><button type="submit" class="b main" name="act" value="send">Send</button></div>'
+                       f'<div class="abtns"><button type="submit" class="b main" name="act" value="send">{_t("home.send")}</button></div>'
                        '<p class="isent warn aerr" role="alert" hidden></p></form>')
         elif his and not asked and _ip.step_block(r):                 # signed out (or no token): the step is still the page's
-            sb_html = f'<div class="iask istep"><b>Your step</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
+            sb_html = f'<div class="iask istep"><b>{_t("item.your_step")}</b><div class="istepbody">{self.your_step_html(r)}</div></div>'
         draft_html = "" if sb_html else self.draft_alone_html(r)               # a draft on an item that is not in the Your step block (stored before the step, or a step that is not his) is still on the page, under the state line
         form = sb_html or (self.answer_html(r, answer) if his else "")
         if his and ol and "data-cards" not in form:   # no answer box with cards is drawn (signed out, or no token): the options are still the page's, as a list in the Ask block
-            ask_html = (ask_html[:-len('</div>')] + '<b class="osub">Options</b>' + ol + '</div>') if ask_html else f'<div class="iask"><b>Options</b>{ol}</div>'
+            ask_html = (ask_html[:-len('</div>')] + f'<b class="osub">{_t("home.options")}</b>' + ol + '</div>') if ask_html else f'<div class="iask"><b>{_t("home.options")}</b>{ol}</div>'
         cform = "" if his else self.answer_html(r, answer, comment_only=True)     # an item he does not move: the comment box takes the answer box's slot, open
         # ---- the wait and its chases
-        wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else ("End", "no end date set")), post, who_html) if waiting and w_ else ""
+        wait_html = self.wait_html(r, mod, wtext, ((wlab.capitalize(), self.wait_day(wend)) if wend else (_t("wait.label.end"), _t("item.no_end_date"))), post, who_html) if waiting and w_ else ""
         # ---- the sidebar: mover, owner and creator first, then project, then, priority, wake, anchors, the GitHub issue (and the For you control)
         tk = proj_top(r) or pk                        # the project it shows is the top-level one; the link stays the page the item is filed on (pk), as the gbrain page link below does
         if pk in self.proj: prj = f'<a href="{e(under("/" + pk))}">{e(self.proj_label(tk))}</a>'
         elif tk in self.proj: prj = f'<a href="{e(under("/" + tk))}">{e(self.proj_label(tk))}</a>'      # the filed page has no row of its own: the project's page stands in
-        elif pk: prj = (f'<code>{e(tk)}</code> <span class="dim">·</span> ' if tk != pk else "") + f'<code>{e(pk)}</code> <span class="aflag">page missing</span>'      # the flag sits beside the page that is missing, the one the item is filed on
-        else: prj = '<span class="dim">no project</span>'
-        if mirror: prj += f' <span class="dim">·</span> <a href="{e(mirror)}" target="_blank" rel="noopener">gbrain page ↗</a>'
+        elif pk: prj = (f'<code>{e(tk)}</code> <span class="dim">·</span> ' if tk != pk else "") + f'<code>{e(pk)}</code> <span class="aflag">{_t("item.page_missing")}</span>'      # the flag sits beside the page that is missing, the one the item is filed on
+        else: prj = f'<span class="dim">{_t("item.no_project")}</span>'
+        if mirror: prj += f' <span class="dim">·</span> <a href="{e(mirror)}" target="_blank" rel="noopener">{_t("item.gbrain_page")}</a>'
         then_v = who_html(mod.then) if mod.then else ""      # who takes it after his answer: the sidebar's Then row, only while it stands (the owner moves the item, or picks it up when its wait ends)
         pr = str(m.get("priority") or "p2")
         prio = '<span class="tag t-p1">P1</span>' if pr == "p1" else e(pr.upper())      # P1 red; P2 and P3 plain
         wk = wake_of(r)
-        wlabel = {"relay": "Ask by", "anchor": "Backstop", "item": "Backstop"}.get(w_.kind if w_ else "", "Wake") if (w_ and (w_.until or w_.backstop)) else "Wake"
+        wlabel = {"relay": _t("wait.label.ask_by"), "anchor": _t("wait.label.backstop"), "item": _t("wait.label.backstop")}.get(w_.kind if w_ else "", _t("item.wake")) if (w_ and (w_.until or w_.backstop)) else _t("item.wake")
         wakev = e(self.when(wk)) if (wk and not done and not waiting) else (e(self.wait_day(wend)) if (waiting and wend) else "")
         gu = issue_url(r["gid"], self.data_dir)       # in the sidebar: the item's GitHub issue, when it has one and the mirror is on
-        ghl = (f'<a class="hgh" href="{e(gu)}" target="_blank" rel="noopener" title="open this item\'s GitHub issue">GitHub issue ↗</a>' if gu else "")
+        ghl = (f'<a class="hgh" href="{e(gu)}" target="_blank" rel="noopener" title="{e(_t("item.github_issue_tip"))}">{_t("item.github_issue")}</a>' if gu else "")
         def grp(*fields):                             # one sidebar group: a small heading over each value, a thin line between groups
             body = "".join(f'<dt>{h}</dt><dd>{v}</dd>' for h, v in fields if v)
             return f'<dl class="sgrp">{body}</dl>' if body else ""
@@ -2837,42 +2840,45 @@ class Board:
         cl, cv = self.creator_row(r)
         ml, mv = self.mover_row(r)
         who_rows = f'<dt>{ml}</dt><dd>{mv}</dd>' + (f'<dt>{ol}</dt><dd>{ov}</dd>' if ov else "") + f'<dt>{cl}</dt><dd>{cv}</dd>'      # Mover first, then Owner, then Creator, in one group
-        side = (f'<dl class="sgrp">{who_rows}</dl>' + grp(("Project", prj)) + grp(("Then", then_v)) + grp(("Priority", prio))
-                + grp((wlabel if waiting else "Wake", wakev))
-                + (f'<dl class="sgrp"><dt>Anchors <span class="count">{alist.count("<li>")}</span></dt><dd><ul class="alist">{alist}</ul></dd></dl>' if alist else "")
+        acnt = f'<span class="count">{alist.count("<li>")}</span>'
+        side = (f'<dl class="sgrp">{who_rows}</dl>' + grp((_t("item.project"), prj)) + grp((_t("item.then"), then_v)) + grp((_t("item.priority"), prio))
+                + grp((wlabel if waiting else _t("item.wake"), wakev))
+                + (f'<dl class="sgrp"><dt>{_t("item.anchors", count=acnt)}</dt><dd><ul class="alist">{alist}</ul></dd></dl>' if alist else "")
                 + grp(("GitHub", ghl))
                 + self.watch_html(watch)
                 + self.more_html(r, done))
         # ---- the header line: [state tag] · since (the words and colors of the lists; the mover, the then and the project are the sidebar's Mover, Then and Project rows, never this line), then why it ended when it has
         bits = [_ui.tag(self.state_kind(r))]
-        if since: bits.append(("" if done else "since ") + self.stamp(datetime.datetime.fromtimestamp(since, self.now.tzinfo)))
-        if done and by: bits.append(f'by <a href="{e(id_href(by))}">{e(shown(by))}</a>')
-        if not_taken: bits.append('<span class="iwarn">handed over, not yet taken</span>')
+        if since:
+            stamp_ = self.stamp(datetime.datetime.fromtimestamp(since, self.now.tzinfo))
+            bits.append(stamp_ if done else _t("item.since", when=stamp_))
+        if done and by: bits.append(_t("item.by", who=f'<a href="{e(id_href(by))}">{e(shown(by))}</a>'))
+        if not_taken: bits.append(f'<span class="iwarn">{_t("item.not_taken")}</span>')
         sline = " · ".join(bits)
-        said = "" if not done else ("no outcome recorded" if oc == "unrecorded" else (_ip.clean(why) or ("no outcome recorded" if not by else "")))
+        said = "" if not done else (_t("item.no_outcome") if oc == "unrecorded" else (_ip.clean(why) or (_t("item.no_outcome") if not by else "")))
         reason_html = f'<p class="ireason">{M(said)}</p>' if said else ""
         goal_html = f'<p class="igoal">{self.mentions(e(goal), r["gid"])}</p>' if goal and goal != title else ""
         font_css = str(_cfg.get("instance", "font_css") or "")
         # Next, Background, History and Comments are folds: Next and Background open, History and Comments closed (the page's folds remember a reader's choice per browser, as the board's)
-        none = "no history in the store's git"
-        hist = (f'<ul class="hist">{"".join(li(x) for x in changes)}</ul>' + (f'<p class="empty">{more} older events not shown</p>' if more else "")) if changes else f'<p class="empty">{none}</p>'
-        comm = f'<ul class="hist">{"".join(li(x) for x in said_)}</ul>' if said_ else '<p class="empty">no comments</p>'      # the list only: the form is drawn in the answer box's slot
+        none = _t("item.no_history")
+        hist = (f'<ul class="hist">{"".join(li(x) for x in changes)}</ul>' + (f'<p class="empty">{_t("item.older_events", n=more)}</p>' if more else "")) if changes else f'<p class="empty">{none}</p>'
+        comm = f'<ul class="hist">{"".join(li(x) for x in said_)}</ul>' if said_ else f'<p class="empty">{_t("item.no_comments")}</p>'      # the list only: the form is drawn in the answer box's slot
         desc = (r.get("description") or "").strip()
-        dsc = f'<div class="desc md">{self.md_html(desc, r["gid"])}</div>' if desc and desc != r["subject"] else '<p class="empty">none</p>'
+        dsc = f'<div class="desc md">{self.md_html(desc, r["gid"])}</div>' if desc and desc != r["subject"] else f'<p class="empty">{_t("item.none")}</p>'
         outcome_text = str(m.get("outcome_text") or "").strip() if done else ""      # how a closed item ended, in bullets, kept apart from the description (a close leaves that as it was); an open item, or a close with no outcome text, has no block
-        outcome_html = fold("outcome", "Outcome", f'<div class="desc md">{self.md_html(outcome_text, r["gid"])}</div>', True, "ioutcome") if outcome_text else ""
+        outcome_html = fold("outcome", _t("item.outcome"), f'<div class="desc md">{self.md_html(outcome_text, r["gid"])}</div>', True, "ioutcome") if outcome_text else ""
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow">'
                 f'<title>{e(rid(r))} · {e(title)}</title><link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
                 + _THEME_HEAD + _FOLD_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main class="itempage" id="top">' + self.page_header() +
                 f'<h1><span class="hid">{e(rid(r))}</span> {self.mentions(e(title), r["gid"])}</h1>{goal_html}{self.sent_html(answer, who_text(mod.mover) if alive else "")}'
                 # the sidebar comes first in the source; from 768px wide the grid puts it in the right-hand column. On a phone
                 # (one column) the CSS orders it after the state line, the Ask and the answer box and before Next (the Ask first, not a screen below the fields as on GitHub's mobile page)
-                f'<div class="ilayout"><aside class="iside" aria-label="Details">{side}</aside><div class="imain">'
+                f'<div class="ilayout"><aside class="iside" aria-label="{e(_t("item.details"))}">{side}</aside><div class="imain">'
                 f'<div class="istat"><p class="istate">{sline}</p>{" ".join(extra)}</div>{reason_html}{outcome_html}{sb_html}{draft_html}{ask_html}{"" if sb_html else (form or cform)}{wait_html}'
-                + ("" if done and not checklist else fold("next", "After the wait" if waiting else "Next", nxt, True))
-                + fold("description", "Background", dsc, True)
-                + fold("history", f'History <span class="count">{len(changes)}{"+" if more else ""}</span>', hist)
-                + fold("comments", f'Comments <span class="count">{len(said_)}</span>', comm)
+                + ("" if done and not checklist else fold("next", _t("item.after_wait") if waiting else _t("item.next"), nxt, True))
+                + fold("description", _t("item.background"), dsc, True)
+                + fold("history", _t("item.history", count=f'<span class="count">{len(changes)}{"+" if more else ""}</span>'), hist)
+                + fold("comments", _t("item.comments", count=f'<span class="count">{len(said_)}</span>'), comm)
                 + f'</div></div><script>{_FOLD_JS}</script></main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _SAID_JS + _BFCACHE_JS + (_ANSWER_JS + _CARDS_JS + "<script>" + _ABOX_JS + "</script>" + _SENDKEY_JS if '<form class="ianswer"' in form + cform else "") + '</body></html>')
     def wait_day(self, v) -> str:
         """A wait's end as a person reads it: "Sat Mar 28th" for a date, "Sat Mar 28th 09:00" for a date and a time (the board's zone); the text itself when it reads as neither."""
@@ -2889,24 +2895,24 @@ class Board:
             what = self.wait_anchor_html(r, w, full=True)      # the stored anchor in full, else the ones scoped to the item
         elif w.kind == "item":
             opn = set(after_open(r))
-            what = ", ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">({"open" if g in opn else "closed"})</span>' for g in w.after) or "an item (none recorded)"
-        elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">(news only {e(_model.owner_display())} relays)</span>'
+            what = ", ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">{_t("wait.state_open" if g in opn else "wait.state_closed")}</span>' for g in w.after) or _t("wait.item_none")
+        elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">{_t("wait.relay_note", who=e(_model.owner_display()))}</span>'
         else:
-            what = e(wtext) if wtext and wtext != "a date" else "a date"
-        rows += [("Waits on", what), ("Watched by", e(_ip.watched_by(w.kind))), (e(end[0]), e(end[1])), ("Picks it up", f'<b>{who_html(post)}</b>')] + ([("Then", f'<b>{who_html(mod.then)}</b>')] if mod.then else [])
+            what = e(wtext) if wtext and wtext != _t("wait.a_date") else _t("wait.a_date")
+        rows += [(_t("wait.waits_on"), what), (_t("wait.watched_by"), e(_ip.watched_by(w.kind))), (e(end[0]), e(end[1])), (_t("wait.picks_up"), f'<b>{who_html(post)}</b>')] + ([(_t("item.then"), f'<b>{who_html(mod.then)}</b>')] if mod.then else [])
         wwords = _wt.words_of(m)
         if wwords.get("quote"):
-            rows.append(("His words", f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))
+            rows.append((_t("wait.his_words"), f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))
         ch = _ip.chase_rows(m)
         if ch:
             def one(c):
                 try: at = self.when(float(c.get("at") or 0))
                 except (TypeError, ValueError): at = ""
                 return f'<li><span class="dim">{e(at)}</span> · <b>{self.mentions(e(str(c.get("by") or "")), r["gid"])}</b>: {self.mentions(e(str(c.get("note") or "")), r["gid"])}</li>'
-            more = f' <span class="dim">· after {_wat.CHASES_MAX} with no reply it comes to {e(_model.owner_display())} as "drop it?"</span>' if w.kind in _wat.CHASE_KINDS else ""
-            rows.append(("Chases", f'{len(ch)}{more}<ul class="ichases">{"".join(one(c) for c in ch)}</ul>'))
-        elif w.kind in _wat.CHASE_KINDS: rows.append(("Chases", '<span class="dim">none yet</span>'))
-        return '<section class="iwait"><h2>Waiting</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
+            more = f' <span class="dim">{_t("wait.chase_note", n=_wat.CHASES_MAX, owner=e(_model.owner_display()))}</span>' if w.kind in _wat.CHASE_KINDS else ""
+            rows.append((_t("wait.chases"), f'{len(ch)}{more}<ul class="ichases">{"".join(one(c) for c in ch)}</ul>'))
+        elif w.kind in _wat.CHASE_KINDS: rows.append((_t("wait.chases"), f'<span class="dim">{_t("wait.none_yet")}</span>'))
+        return f'<section class="iwait"><h2>{_t("state.wait")}</h2><dl class="iwl">' + "".join(f'<dt>{k}</dt><dd>{v}</dd>' for k, v in rows) + '</dl></section>'
     def more_html(self, r, done) -> str:
         """The sidebar's closed "More details" fold: the fields the page showed before the item model and the sidebar's rows do not cover (agent at work on the item, due, confirmed and
         stale, a leftover old work list, after and observers, a wait's basis and his words). Nothing is dropped, and it is one fold to delete once the owner has seen the page."""
@@ -2917,25 +2923,25 @@ class Board:
         due_b = self.due_badge(r) if not done and due_of(r) else ""
         ca = confirmed_at(r); conf = ""
         if not done and ca > 0:            # when the item was last confirmed true; " · stale" past its lane's limit
-            conf = (f'{e(self.when(ca))}' + (f' <span class="iwarn stw" title="{e(stale_tip(r, self.mover_name))}">· stale</span>' if r.get("_fresh") == "stale" else ""))
+            conf = (f'{e(self.when(ca))}' + (f' <span class="iwarn stw" title="{e(stale_tip(r, self.mover_name))}">{_t("more.stale")}</span>' if r.get("_fresh") == "stale" else ""))
         waits = ""                                    # what it waits on, who observes it (open items only)
         if not done:
             af = after_of(r)
             if af:
                 opn = set(after_open(r))
-                waits += '<dt>After</dt><dd>' + " · ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">({"open" if g in opn else "closed"})</span>' for g in af) + '</dd>'
+                waits += f'<dt>{_t("more.after")}</dt><dd>' + " · ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">{_t("wait.state_open" if g in opn else "wait.state_closed")}</span>' for g in af) + '</dd>'
             ob = observers_of(r)
-            if ob: waits += f'<dt>Observers</dt><dd>{self.mentions(e(", ".join(shown_ref(x) for x in ob)), r["gid"])}</dd>'
+            if ob: waits += f'<dt>{_t("more.observers")}</dt><dd>{self.mentions(e(", ".join(shown_ref(x) for x in ob)), r["gid"])}</dd>'
         agents = [] if done else list(dict.fromkeys(l["agent"] for l in _work.in_progress(m) if l["agent"]))   # who is working on it now
         wbasis = "" if done else e(_wt.basis_of(m))
         wwords = {} if done else _wt.words_of(m)
         wwhy = (f'{e(wwords["quote"])} <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else e(wwords["quote"])) if wwords else ""
-        body = (grp(("On agent", " · ".join(L(a) for a in agents)))
-                + grp(("Due", due_b), ("Confirmed", conf))
+        body = (grp((_t("state.agent"), " · ".join(L(a) for a in agents)))
+                + grp((_t("more.due"), due_b), (_t("more.confirmed"), conf))
                 + (f'<dl class="sgrp">{wk}</dl>' if (wk := self.work_html(r)) else "")
                 + (f'<dl class="sgrp">{waits}</dl>' if waits else "")
-                + grp(("Waits on", wbasis), ("His words", wwhy)))
-        return f'<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>{body}</details>' if body else ""
+                + grp((_t("wait.waits_on"), wbasis), (_t("wait.his_words"), wwhy)))
+        return f'<details class="fold imore" data-fold="item.more"><summary><h3>{_t("item.more_details")}</h3></summary>{body}</details>' if body else ""
     def project_items(self, k):
         """The project page's Items section → (open count without the verifying ones, completed count, HTML, verifying count): the open items of the row and its sub-pages (the items sessions_html counts:
         sub-pages rolled up as on the index) in the home page's four lists, Your move, On agent, Queued for release and Waiting (home_lists: the same classification, home.classify, and the same sorts), each row

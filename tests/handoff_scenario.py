@@ -27,7 +27,7 @@ import contextlib, datetime, io, json, os, re, subprocess, sys, pathlib, tempfil
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="handofftest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -1323,7 +1323,7 @@ for p_ in (T / "cli").glob("*.json"): p_.unlink()
 set_cfg(); clear_pushes(); inbox(); failing(); queued(); paused(); cold("no json at all here"); COLD_MSGS.clear()
 server._cfg.CFG["stall"] = {}
 server._stall_since(now0 - 7200)                   # the stall pass first ran before every clock below
-def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, **kw}
+def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main_hours": 10000, **kw}      # main_hours: a value no scenario reaches; the hand-up of an item that has not moved is tests/ladder_progress_scenario.py's
 def stk(at):
     """One stall pass at `at` (its 20-second gate reset), the threads it started finished → the items it acted on."""
     server._STALL_LAST[0] = 0.0

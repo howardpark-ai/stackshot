@@ -15,7 +15,7 @@ import contextlib, io, json, os, re, socket, sys, pathlib, logging, threading, t
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="jobgaptest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = ""', f'session_links = "{tmp}/sala"', 1); assert f'session_links = "{tmp}/sala"' in toml   # the fixture registry, never the host's sala store
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -56,7 +56,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M
+from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
 _orig_run = server.subprocess.run
@@ -72,7 +72,7 @@ def settle():
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); HD = {"Authorization": "Bearer " + tok}
 def items(): return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit())
-def item(shown): return server._load(server._norm_id(shown))
+def item(shown): return server._load(_model_ids._norm_id(shown))
 def jg(action, timer="sala-foo.timer", code="no-lane", repo="acme/alpha", sender="sala-unit-gaps", machine=None, **kw):
     b = {"action": action, "timer": timer, "code": code, "repo": repo, "sender": sender}
     b.update(kw)
@@ -86,7 +86,7 @@ n0 = len(items())
 st, out = jg("open", detail="/home/user/.config/systemd/user/sala-foo.timer, script /home/user/bin/foo.sh")
 check("open: 200 with the item id as shown, the timer, the code, the project, the mover, the keeper, repeat false, no fallback",
       st == 200 and out["timer"] == "sala-foo.timer" and out["code"] == "no-lane" and out["project"] == "projects/alpha" and out["mover"] == "home-sparrow-builder" and out["owner"] == "home-sparrow-main"
-      and out["repeat"] is False and out["fallback"] is False and out["item"] == server._gh.shown(server._norm_id(out["item"])), (st, out))
+      and out["repeat"] is False and out["fallback"] is False and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, filed under the repo's project page, marked with the timer and the code", it["status"] == "open" and m["project"] == "projects/alpha" and m["job_gap"] == "sala-foo.timer: no-lane", (it["status"], m))
 check("…the subject names the unit and the gap", it["subject"] == "[home] sala-foo.timer: has no X-Model-Lane", it["subject"])
@@ -118,7 +118,7 @@ st, o4 = jg("open", code="not-git")
 check("another code on the same timer is another item", st == 200 and o4["item"] != gid1 and o4["repeat"] is False and item(o4["item"])["subject"] == "[home] sala-foo.timer: is not in git" and len(items()) == n1 + 1, (st, o4))
 st, o5 = jg("open", timer="sala-bar.timer")
 check("another timer with the same code is another item", st == 200 and o5["item"] not in (gid1, o4["item"]) and item(o5["item"])["subject"] == "[home] sala-bar.timer: has no X-Model-Lane" and len(items()) == n1 + 2, (st, o5))
-check("…each open gap finds its own item", open_for("sala-foo.timer", "no-lane") == [server._norm_id(gid1)] and len(open_for("sala-foo.timer", "not-git")) == 1 and len(open_for("sala-bar.timer", "no-lane")) == 1)
+check("…each open gap finds its own item", open_for("sala-foo.timer", "no-lane") == [_model_ids._norm_id(gid1)] and len(open_for("sala-foo.timer", "not-git")) == 1 and len(open_for("sala-bar.timer", "no-lane")) == 1)
 for code, subj in (("no-description", "has no Description="), ("bad-lane", "has a bad X-Model-Lane"), ("git-differs", "differs from its file in git"), ("odd-new-code", "has the gap odd-new-code")):
     st, o = jg("open", timer="sala-codes.timer", code=code)
     check(f"code {code}: its words in the subject", st == 200 and item(o["item"])["subject"] == f"[home] sala-codes.timer: {subj}", (st, o, item(o["item"])["subject"] if st == 200 else ""))

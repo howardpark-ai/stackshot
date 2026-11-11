@@ -102,7 +102,7 @@ def check(name, cond, got=None):
 def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
-from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers
+from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -115,7 +115,7 @@ D = lambda t: f"- Goal: {t}\n- It lives here\n- Finished when it works"
 DW = lambda t: DESC + f"\n- {t}"      # the author's own sentence as a new bullet of its own, the only new line of the description
 upd = lambda i, **kw: server.stackshot_update(i, **{"sender": "home-agent", **kw})
 history = lambda i: [str(x.get("text") if isinstance(x, dict) else x) for x in (rd(i)["metadata"].get("stall") or {}).get("log", [])]
-stood = lambda i: bool(rd(i)["metadata"].get("ask")) and "decision" in server._needs_kinds(rd(i)["metadata"])
+stood = lambda i: bool(rd(i)["metadata"].get("ask")) and "decision" in _model_needs._needs_kinds(rd(i)["metadata"])
 
 check("the fixture: the owner is Oliver", server.OWNER == "Oliver")
 
@@ -270,7 +270,7 @@ check("the check line says what to do with a note that answers the ask", "update
 upd("a3", ask=ASK, needs=["decision"], options=OPTS); told.clear()
 r = upd("a3", description=DW("The ask is wrong."))
 m = rd(3)["metadata"]
-check("the author's plain sentence takes the ask off his move: ask, options, decision and the stored your-call are gone", not stood(3) and "ask" not in m and "options" not in m and "decision" not in server._needs_kinds(m), m)
+check("the author's plain sentence takes the ask off his move: ask, options, decision and the stored your-call are gone", not stood(3) and "ask" not in m and "options" not in m and "decision" not in _model_needs._needs_kinds(m), m)
 check("the item goes back to its author and stays open; the server closed nothing", m.get("mover") == "home-agent" and rd(3)["status"] == "open" and rd(3).get("outcome") is None, m)
 check("History says what the server did and why; the reply says so; the ask and options are kept in ask_left",
       any("ask taken off Oliver's move by the server" in h and "its author said so" in h for h in history(3)) and "the server took the ask off Oliver's move" in r
@@ -461,7 +461,7 @@ check("the write path, by the ask's author: every ask stands and the reminder ca
 check("... and every gated form, the five reviewer examples and the plain shapes got the fact (the reminder is the one thing the server does)",
       all(ra[k].count(fact) == 1 for k, txt, w in CASES if any(txt == X(t.replace("{B}20", "{B}600")) for t in list(GATED) + list(CTRL) + list(NEW5) + list(COORD))), [k for k, txt, w in CASES if ra[k].count(fact) != 1][:8])
 a600 = rd(1000)["metadata"]
-check("the author's write leaves the item as it was: same mover, same ask, still a decision, not closed", rd(1000)["status"] == "open" and a600.get("mover") == "home-other" and "decision" in server._needs_kinds(a600) and a600.get("ask") == CASES[0][1], a600)
+check("the author's write leaves the item as it was: same mover, same ask, still a decision, not closed", rd(1000)["status"] == "open" and a600.get("mover") == "home-other" and "decision" in _model_needs._needs_kinds(a600) and a600.get("ask") == CASES[0][1], a600)
 
 # the reminder reaches the author only, and only for a drop after the ask was written
 item(710, rec_at=now - 7200, mover="home-agent", needs=["decision"], ask=X("Decide: approve the export once {B}20 lands · Recommend: ship · Stakes: none · By: no date"))

@@ -175,6 +175,8 @@ class Env:
         self.wait_facts = kw.get("wait_facts")      # () -> wait_end.Facts: the machines, the pull requests and the links the wait-end rule reads; None = the rule reads only the items themselves
         self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
         self.front = kw.get("front")                # (name, project) -> whether that session is a front agent of the project (the server's `_front_keeper`); None = the role map's `front` role
+        self.front_only_of = kw.get("front_only")   # (project) -> whether the project is front-only (anchors.front_only); None = read it from the registry (`registry` when given), except that an environment which names the builder itself (`builder`) says the project has one
+        self._told: set[str] = set()                # the projects whose "front-only, no -main agent" line this run has already printed
 
     def role_map(self) -> dict[str, dict[str, Any]]:
         if self.roles is None:
@@ -212,6 +214,44 @@ class Env:
             return _rl.builder(project) or _cfg.audit_builder()
         except Exception:  # noqa: BLE001
             return _cfg.audit_builder()
+
+    def is_front_only(self, project: str) -> bool:
+        """Is the project front-only (anchors.front_only: its `agents:` map lists no background agent)? `front_only` (a fixture's or caller's answer) when given; an environment that names the builder itself
+        (`builder`) has said the project has one; else the registry's answer (`registry` when given). A read that fails raises: the caller keeps the old target."""
+        if self.front_only_of:
+            return bool(self.front_only_of(project))
+        if self.builder:
+            return False
+        from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+        return _anc.front_only(project, self.registry() if self.registry else None)
+
+    def main_named(self, project: str) -> str:
+        """The project's -main agent (its page's, its hub's, else the scope's general one), "" when none can be named; `main_of` falls to [audit] main instead, which is no agent of the project."""
+        try:
+            if self.fallback:
+                return str(self.fallback(project) or "").strip()
+            from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+            return str(_anc.fallback_main(project, self.registry() if self.registry else None) or "").strip()
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def chase_of(self, project: str) -> tuple[str, bool]:
+        """(who is told a finding its mover did not answer, and the unmoved digest; whether that session is a front agent, so the message is marked `[for <owner>]`). A front-only project (anchors.front_only: no
+        background agent on its map) has no builder to chase: its -main agent takes both. Every other project goes to `builder_of`, as before, and so does a front-only project whose -main agent cannot be
+        named (said once on stderr), a project with no key, and a project whose registry cannot be read."""
+        proj = str(project or "").strip()
+        if proj:
+            try:
+                if self.is_front_only(proj):
+                    main = self.main_named(proj)
+                    if main:
+                        return main, True
+                    if proj not in self._told:
+                        self._told.add(proj)
+                        print(f"audit run: {proj} is front-only but names no -main agent; its unmoved findings go to {_cfg.audit_builder()}", file=sys.stderr, flush=True)
+            except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the builder
+                print(f"audit run: front-only test of {proj} failed ({e.__class__.__name__}: {e}); its unmoved findings go to the builder", file=sys.stderr, flush=True)
+        return self.builder_of(proj), False
 
     def page_agents(self, items: Any = None, now: float | None = None) -> dict[str, Any]:
         """The page agent lines check (tools/page_agent_report.py) on this environment's registry and sala sessions, and the run's board items (None reads the store's). A check that fails is a check not made, never the end of the run."""
@@ -797,11 +837,12 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
     groups: dict[str, dict[str, Any]] = {}
     esc: dict[str, list[tuple[dict[str, Any], str]]] = {}
     up: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    esc_front: set[str] = set()       # the recipients of `esc` that are front agents: their message is marked for the owner
     for f in [f for f in fresh if f.get("escalate") == 2]:       # still unanswered after the builder was told: the project's -main agent hears of a finding that went to a builder, once (marked for the owner, as every message to it)
         proj = str(f.get("project") or "")
         to0, front0 = recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")
         main = env.main_of(proj)
-        if front0 or not to0 or to0 == page_key(proj) or not main or _norm_name(to0) == _norm_name(main):
+        if front0 or not to0 or to0 == page_key(proj) or not main or _norm_name(to0) == _norm_name(main) or _norm_name(env.chase_of(proj)[0]) == _norm_name(main):
             f["lvl"] = 2
             reached_fs.append(f)       # its first recipient was not a builder (a front agent's or a retired mover's finding went to the builder at level 1, by design, and ends there), or -main is the builder: nobody is left to tell, the finding goes quiet
             continue
@@ -814,15 +855,17 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             reached_fs += [f for f, _ln in ls]
     for f in [f for f in fresh if f.get("escalate") == 1]:       # a finding that stayed unanswered through its reminders goes to the project's builder, as the daily run's unmoved flag does, and to no one else
         proj = str(f.get("project") or "")
-        b = env.builder_of(proj)
+        b, bfront = env.chase_of(proj)       # a front-only project's -main agent (marked for the owner), else its builder
         if proj and _norm_name(b) in {_norm_name(f.get("mover")), _norm_name(recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")[0])}:
-            b = page_key(proj)       # the builder is the one that did not answer: the page key, where the router rules it, never the mover itself
+            b, bfront = page_key(proj), False       # the one told is the one that did not answer: the page key, where the router rules it, never the mover itself
         elif not proj and not b:
             continue
+        if bfront:
+            esc_front.add(b)
         esc.setdefault(b, []).append((f, f"{f['id']} · unmoved after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
     fresh = [f for f in fresh if not f.get("escalate")]
     for to, ls in sorted(esc.items()):
-        ok, said = _send(env, to, compose([ln for _f, ln in ls], f"[stackshot] {label}: {len(ls)} finding(s) its mover did not answer after repeated messages; chase the mover (job).", False))
+        ok, said = _send(env, to, compose([ln for _f, ln in ls], f"[stackshot] {label}: {len(ls)} finding(s) its mover did not answer after repeated messages; chase the mover (job).", to in esc_front))
         sent.append({"to": to, "lines": len(ls), "delivered": ok, "said": _clip(said, 120), "kind": "unmoved"})
         if ok:
             for f, _ln in ls: f["lvl"] = 1       # kept on the record: only a builder send made with the level kept is followed by the message to -main (split_sent)
@@ -1345,12 +1388,16 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     sending_from = max(sending_from, t0)
     # the unmoved digest lists an item once: the run that first finds it unmoved chases it to the builder, and only a delivered digest counts as a chase; the record's `stuck` and the summary keep naming it until it is written
     jobs: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    job_front: set[str] = set()       # the recipients of `jobs` that are front agents (a front-only project's -main): their digest is marked for the owner
     for s in stuck:
         if s["chased"]:
             continue
-        jobs.setdefault(env.builder_of(s["project"]), []).append((s, f"{s['id']} · unmoved since {s['first_flagged']} · {s['category']} · {s['detail']} · {s['mover'] or 'its mover'} writes it, or says what holds it"))
+        to_s, front_s = env.chase_of(s["project"])
+        if front_s:
+            job_front.add(to_s)
+        jobs.setdefault(to_s, []).append((s, f"{s['id']} · unmoved since {s['first_flagged']} · {s['category']} · {s['detail']} · {s['mover'] or 'its mover'} writes it, or says what holds it"))
     for to, ls in sorted(jobs.items()):
-        ok, said = _send(env, to, compose([ln for _s, ln in ls], f"[stackshot] Board audit {label}: {len(ls)} flagged item(s) still unmoved since an earlier run; chase the mover (job).", False))
+        ok, said = _send(env, to, compose([ln for _s, ln in ls], f"[stackshot] Board audit {label}: {len(ls)} flagged item(s) still unmoved since an earlier run; chase the mover (job).", to in job_front))
         sent.append({"to": to, "lines": len(ls), "delivered": ok, "said": _clip(said, 120), "kind": "unmoved"})
         if ok:
             for st, _ln in ls:

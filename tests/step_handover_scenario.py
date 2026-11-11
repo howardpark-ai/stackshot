@@ -12,7 +12,7 @@ import json, os, re, sys, pathlib, subprocess, time, logging
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="stephandovertest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -71,7 +71,7 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing. It lives here. Done when done.",
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
-from stackshot.web import server
+from stackshot.web import server; from stackshot.model import needs as _model_needs
 OWNER = server.OWNER
 IDS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 def fixtures():
@@ -132,7 +132,7 @@ rows = {x["item"]: x for x in d["items"]}
 a1 = rd(1); m1 = a1["metadata"]
 check("two sessions: one's step is ticked by the server (the proof is its PR) and the step after it stays open", [(s["text"], s["status"]) for s in m1["steps"]] == [("home-one: merge PR #11", "done"), ("home-two: verify the pages", "open")]
       and m1["next"] == "home-two: verify the pages" and a1["status"] == "open", m1)
-check("…the item's mover is the session the next step names, and its needs say so", mover_of(1) == "home-two" and m1.get("mover") == "home-two" and server._needs_of(m1)[:1] == ["home-two"], (m1.get("mover"), m1.get("needs")))
+check("…the item's mover is the session the next step names, and its needs say so", mover_of(1) == "home-two" and m1.get("mover") == "home-two" and _model_needs._needs_of(m1)[:1] == ["home-two"], (m1.get("mover"), m1.get("needs")))
 check("…the record says which step was handed to whom", m1.get("handover", {}).get("kind") == HO.MOVED and m1["handover"]["to"] == "home-two" and m1["handover"]["step"] == HO.step_hash("home-two: verify the pages"), m1.get("handover"))
 n2 = pushes_for("a1", "home-two")
 check("…home-two is told, by the server, with the step's text, that the item is its own now (nobody else sent anything)", len(n2) == 1 and "is yours" in n2[0][1] and "home-two: verify the pages" in n2[0][1]

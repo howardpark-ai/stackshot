@@ -52,7 +52,8 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
 
 The rules, per changed file F (git diff --name-status -M), the first that applies:
   1. no map, a map of another format, a commit that does not resolve           → all
-  2. F is the harness: .github/, tests/run-suite, pyproject.toml, uv.lock, tests/suitemap.py → all
+  2. F is the harness: .github/, tests/run-suite, pyproject.toml, uv.lock, tests/suitemap.py → all;
+     F is a link of the DATA table (tests/example_base.toml) → all
   3. F = tests/<suite>_scenario.py                                              → that suite
   4. F ends in .lock (a script's lock: the lock step checks every one)          → none;
      F is tests/*_check.py (a manual check, not in CI)                         → none
@@ -63,7 +64,8 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
   6. F is a .py file → the suites that read it whole, the suites that ran the functions its changed lines are in, and
      those that read the names its module-level changes bind (a new file: whoever imports it changed too; one named like a
      module the suites import, which it could shadow → all)
-  7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory
+  7. any other file → the suites that touched it; added, deleted or renamed: also the suites that listed its directory;
+     a data file of the DATA table (stackshot.example.toml) is first read by what it holds, not by who touched it: see *The example config*
   A suite the map has no clean measurement for (new since, or `ok: false`) always runs. When the union is every suite: all.
   INNER names the suites that run other suites as their own checks (scratch runs rename, redact, lead and migration to see
   that they leave no folder behind): they pass or fail with them, but the code those inner runs ran is not in the outer
@@ -77,6 +79,38 @@ The rules, per changed file F (git diff --name-status -M), the first that applie
   union of the two, takes the drift since `at` as main's news, and refuses a carry older than its own age limit. `ok` stays
   false, so the selection above still runs the suite on every PR.
 
+The example config (Tue Nov 10th 2026). About 150 of the suites read stackshot.example.toml, and only to make the base of their own temp
+config, so every change to it (11 of the last 30 PRs, a comment among them) ran about 188 of the 196 suites. Now those suites read it through
+the tracked link tests/example_base.toml (-> ../stackshot.example.toml; tests/_instance.py base_toml()), and strace records the path a process
+opens as it was written, so the map tells two kinds of reader apart: a DIRECT reader opens the real path (it parses, greps, copies or patches
+the example config, or runs code that reads it: about 40 suites, the suitemap scenario among them), a FIXTURE reader opens the link. The DATA
+table names the file and its link. A change to the file selects the direct readers ALONE only when it is provably harmless to a fixture suite,
+and that is narrow on purpose:
+  * every changed line of the file, on the old side and the new, is a whole blank line or a whole comment-only line (outside a multi-line
+    string), and a comment line is plain prose: letters, spaces and . , ; : ! ? ( ) ' - only, with no word of it (and no 4-letter-or-longer
+    name inside a longer word) that is a name the fixtures patch, read or grep: the table and key names of the file itself (old and new)
+    and the constants SETTINGS, KEYWORDS, FLAG_SETTINGS, TABLES and PINNED_TABLES of tests/_instance.py. A comment with `=`, `[`, a quote,
+    a digit or an underscore is not plain (a commented-out sample such as `# live = true` or `# session_view = ""` is code to a suite that
+    replaces text without anchoring it). → the direct readers
+  * the lines from the header of a PINNED_TABLES table ([audit], [anchor_hub]) to its first code line are as they were (a suite's pattern
+    takes the header line and the one after it as one text); a comment or a blank line put there is a change. So is a change at, or directly
+    after, the first line of the file (stackshot/cli.py anchors `\\A(# stackshot\\.example\\.toml)` on it for the configs it writes; the
+    test is wider than that line on purpose, the safe side).
+Anything else selects the direct readers AND the fixture readers (the behaviour before this rule): any change to a code line, a trailing
+comment or the whitespace before it included; any key, table, inline table or array-of-tables row added, removed or moved; a value
+changed; an uncommented sample; a comment that is not plain. What a fixture suite breaks on depends on where a line lands and on text
+a suite patches (`re.subn(...); assert n == 1`, a bare str.replace, a regex anchored on a header), and no rule short of "the code is
+untouched" has held up against the edits reviewers tried, so none is attempted. A text that does not parse (old or new) → all; the link
+itself changes → all (rule 2 above). The names come from ONE place, the constants of tests/_instance.py at the target commit, read by
+ast.literal_eval (no import of repo code); the scenario of this tool runs apply() and fails when it changes a name the constants do not
+list, which holds for a name in a hardcoded `_set` or append of apply() (a name dropped from a constant and from apply() together is not
+caught). A _instance.py that cannot be read this way makes every change to the example count as a change of code.
+SUITEMAP_EXAMPLE_RULE=A1 (A2 by default; any other value is an error, checked when a command starts) leaves no cheap case: every change
+to the example, a comment included, selects the fixture readers too (the old behaviour of the file), for the day a comment edit is found
+to break a fixture suite: no code change, set it in tests.yml's selection step. Until main's next measured run records the link for the
+fixture suites, the map lists the real path for every suite that opened it, so the old behaviour (every suite that read the file) holds by
+itself. `audit` applies the same rule on both maps.
+
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
 `shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
@@ -88,7 +122,7 @@ plan, for all six lists alike), and handed to the `measure` matrix as job output
 does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
 is in none or in two, and the run fails.
 """
-import argparse, ast, atexit, collections, datetime, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time
+import argparse, ast, atexit, collections, datetime, difflib, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, time, tomllib
 
 FORMAT = 1
 TRACE_MAX_AGE = 24   # hours: a suite's files are traced again at least this often
@@ -96,6 +130,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.realpath(os.environ.get("SUITEMAP_ROOT") or os.path.dirname(HERE))
 INNER = {"scratch": ("rename", "redact", "lead", "migration")}   # outer suite -> the suites it runs itself (rule above)
 HARNESS = (".github/", "tests/run-suite", "pyproject.toml", "uv.lock", "tests/suitemap.py")
+# data files the selection reads by what they hold (see *The example config* above): file -> the tracked link the fixture suites read it through.
+# Another data file joins by a line here; a change to a link selects everything (the link is what the fixture readers' map entries name).
+DATA = {"stackshot.example.toml": "tests/example_base.toml"}
+INSTANCE = "tests/_instance.py"   # where the names the fixture suites' config building touches are declared (see *The example config*)
+
+
+def example_rule():
+    """A2 (default): a change of blank lines and plain comments only selects the direct readers; A1: every change to the example selects the fixture readers too"""
+    v = os.environ.get("SUITEMAP_EXAMPLE_RULE", "A2").strip().upper()
+    if v not in ("A1", "A2"):
+        raise SystemExit(f"suitemap: SUITEMAP_EXAMPLE_RULE={os.environ.get('SUITEMAP_EXAMPLE_RULE')!r} is not a rule: the allowed values are A1 and A2")
+    return v
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
 TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"
@@ -1087,6 +1133,170 @@ def quiet_import(N, S, path, mod):
     return all(m.path in e.get("py", {}) for e in S.values() if path in e.get("py", {}))
 
 
+def toml_items(text):
+    """a set of (dotted path, value as typed JSON) for a TOML text: every table is (its path, "{}"), every other value its JSON (80 and
+    80.0, true and 1 differ); None when the text does not parse"""
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError, TypeError):
+        return None
+    items = set()
+
+    def walk(node, path):
+        for k, v in node.items():
+            p = f"{path}.{k}" if path else k
+            if isinstance(v, dict):
+                items.add((p, "{}"))
+                walk(v, p)
+            else:
+                items.add((p, json.dumps(v, sort_keys=True, default=str)))
+    walk(data, "")
+    return items
+
+
+def instance_names(rev):
+    """(paths, pinned) from tests/_instance.py at rev, read as data: `paths` the dotted paths of the settings apply() sets (SETTINGS, KEYWORDS,
+    FLAG_SETTINGS) and of the tables it appends (TABLES: a table that holds a value of its own, an array of tables); `pinned` PINNED_TABLES.
+    None when the file or one of the constants cannot be read as a literal"""
+    return names_from_source(show(rev, INSTANCE))
+
+
+def names_from_source(src):
+    """instance_names() of the text of tests/_instance.py"""
+    want = ("SETTINGS", "KEYWORDS", "FLAG_SETTINGS", "TABLES", "PINNED_TABLES")
+    try:
+        c = {}
+        for node in ast.parse(src).body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in want:
+                c[node.targets[0].id] = ast.literal_eval(node.value)
+        if set(c) != set(want):
+            return None
+        paths = {f"{s}.{k}" for d in (c["SETTINGS"], c["KEYWORDS"], *c["FLAG_SETTINGS"].values()) for s, keys in d.items() for k in keys}
+        tables = tomllib.loads(c["TABLES"])
+
+        def walk(node, path):
+            if any(not isinstance(v, dict) and not (isinstance(v, list) and v and all(isinstance(x, dict) for x in v)) for v in node.values()):
+                paths.add(path)
+            for k, v in node.items():
+                p = f"{path}.{k}" if path else k
+                if isinstance(v, dict):
+                    walk(v, p)
+                elif isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
+                    paths.add(p)
+        walk(tables, "")
+        pinned = c["PINNED_TABLES"]
+        if not isinstance(pinned, (tuple, list, set, frozenset)) or not all(isinstance(x, str) for x in pinned):
+            return None
+        return paths, set(pinned)
+    except (TypeError, ValueError, SyntaxError, KeyError, AttributeError, tomllib.TOMLDecodeError):
+        return None
+
+
+def code_lines(text):
+    """(raw lines, [(index of the raw line, its code)]): a line's code is the line without its trailing comment (and the blanks before
+    it); whole-line comments and blank lines have none and are left out. A line inside a multi-line string is code as it stands."""
+    raw = text.split("\n")
+    out, state = [], None            # state: the quote that is open at the start of a line ('"""' or "'''"), else None
+    for n, line in enumerate(raw):
+        started_in_string = state is not None
+        i, cut = 0, None
+        while i < len(line):
+            if state is None:
+                if line[i] == "#":
+                    cut = i
+                    break
+                for q in ('"""', "'''", '"', "'"):
+                    if line.startswith(q, i):
+                        state, i = q, i + len(q) - 1
+                        break
+            elif state in ('"""', '"') and line[i] == "\\":
+                i += 1
+            elif line.startswith(state, i):
+                i += len(state) - 1
+                state = None
+            i += 1
+        if state in ('"', "'"):         # a one-line string left open at the end of its line: not TOML, the parse above has refused it already
+            state = None
+        code = line if cut is None else line[:cut].rstrip()
+        if started_in_string or code.strip():
+            out.append((n, code))
+    return raw, out
+
+
+PLAIN_COMMENT = re.compile(r"[A-Za-z .,;:!?()'-]*")
+
+
+def name_words(paths, items):
+    """the lowercase words of every name a fixture suite may patch, read or grep: the dotted paths of the constants of tests/_instance.py and
+    of every table and key of the example (old and new)"""
+    words = set()
+    for p in list(paths) + [p for p, _ in items]:
+        words |= set(re.findall(r"[a-z]+", p.lower()))
+    return words
+
+
+def plain_comment(line, words):
+    """True for a blank line, or a whole-line comment of plain prose that names no setting (see *The example config*)"""
+    s = line.strip()
+    if not s:
+        return True
+    if not s.startswith("#"):
+        return False
+    text = s.lstrip("#").strip()
+    if not PLAIN_COMMENT.fullmatch(text):
+        return False
+    low = text.lower()
+    return not (set(re.findall(r"[a-z]+", low)) & words) and not any(w in low for w in words if len(w) >= 4)
+
+
+def layout_only(ot, nt, pinned, words):
+    """True when the two texts differ only in whole blank lines and plain whole-line comments (outside a multi-line string), the lines from a
+    pinned table's header to its first code line are as they were, and no change starts at, or directly after, the first line (stackshot/cli.py anchors
+    `\\A(# stackshot\\.example\\.toml)` on it; the test is wider than that line on purpose). Every other line is equal and in order, so the code is untouched."""
+    oraw, oc = code_lines(ot)
+    nraw, nc = code_lines(nt)
+
+    def anchors(raw, cl):
+        found = {}
+        for k, (n, code) in enumerate(cl):
+            m = re.match(r"\s*\[\s*([\w.-]+)\s*\]\s*$", code)
+            if m and m.group(1) in pinned:
+                end = cl[k + 1][0] if k + 1 < len(cl) else len(raw) - 1
+                found[m.group(1)] = tuple(raw[n:end + 1])
+        return found
+    if anchors(oraw, oc) != anchors(nraw, nc) or oraw[:1] != nraw[:1]:
+        return False
+    ofree = set(range(len(oraw))) - {n for n, _ in oc}
+    nfree = set(range(len(nraw))) - {n for n, _ in nc}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, oraw, nraw, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if i1 <= 1:      # a hunk that starts at old line 0 or 1: above the first line, or the first line itself
+            return False
+        for raw, free, lo, hi in ((oraw, ofree, i1, i2), (nraw, nfree, j1, j2)):
+            if any(n not in free or not plain_comment(raw[n], words) for n in range(lo, hi)):
+                return False
+    return True
+
+
+def data_change(a, b, old, new):
+    """how the data file changed between a and b: 'same' (blank lines and plain comments only: see layout_only), 'changed' (anything else,
+    the file added, deleted or renamed included), or None (a text that does not parse: the caller selects everything). Only 'same' is
+    cheap; anything that does not classify is 'changed'."""
+    if not (old and new):
+        return "changed"
+    ot, nt = show(a, old), show(b, new)
+    if ot is None or nt is None:
+        return None
+    oi, ni = toml_items(ot), toml_items(nt)
+    if oi is None or ni is None:
+        return None
+    names = instance_names(b)
+    if names is None:
+        return "changed"
+    return "same" if layout_only(ot, nt, names[1], name_words(names[0], oi | ni)) else "changed"
+
+
 def selection(m, a, b, pathspec=()):
     """(set of suites or 'all', [(file, reason)]) for the change a..b under map m"""
     if m is None:
@@ -1109,6 +1319,8 @@ def selection(m, a, b, pathspec=()):
         f = new or old
         if any(p.startswith(HARNESS[0]) or p in HARNESS[1:] for p in (old, new) if p):
             return "all", why + [(f, "the harness or the gate itself")]
+        if any(p in DATA.values() for p in (old, new)):
+            return "all", why + [(f, "the link the fixture suites read the example config through: every suite")]
         ms = SUITE_RE.match(f)
         if ms:
             if ms.group(1) in now:
@@ -1164,13 +1376,23 @@ def selection(m, a, b, pathspec=()):
         else:
             if not m.get("strace"):
                 return "all", why + [(f, "the map has no file measurement (no strace)")]
+            probe, note = [p for p in (old, new) if p], ""
+            dp = next((p for p in probe if p in DATA), None)
+            if dp:
+                kind = data_change(a, b, old, new)
+                if kind is None:
+                    return "all", why + [(f, "does not parse, in the old text or the new: every suite")]
+                if kind == "changed" or example_rule() == "A1":
+                    probe.append(DATA[dp])
+                note = ("blank lines and plain comments only: its direct readers" + (" and the fixture readers (rule A1)" if example_rule() == "A1" else "") if kind == "same" else
+                        "a code line, a setting, a name or a comment that names one changed: its direct readers and the fixture readers") + "; "
             for s, e in S.items():
-                if any(p in e.get("files", ()) for p in (old, new) if p):
+                if any(p in e.get("files", ()) for p in probe):
                     hit.add(s)
                 if st[0] in "ADR":
                     if any(os.path.dirname(p) in e.get("dirs", ()) for p in (old, new) if p):
                         hit.add(s)
-            why.append((f, f"touched by {len(hit)} suite(s)" if hit else "no suite touches it"))
+            why.append((f, note + (f"touched by {len(hit)} suite(s)" if hit else "no suite touches it")))
         sel |= hit & now
     for outer, inner in INNER.items():
         if outer in now and outer not in sel and sel & set(inner):
@@ -1270,6 +1492,7 @@ def main():
     p = sub.add_parser("select"); p.add_argument("--map", required=True); p.add_argument("--to", default="HEAD")
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
+    example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0

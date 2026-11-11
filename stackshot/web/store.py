@@ -17,7 +17,8 @@ from fastmcp.exceptions import ToolError
 from stackshot.core import config as _cfg
 from stackshot.github import ghsync as _gh
 from stackshot.model import item_project as _ip
-from stackshot.web.common import _CODE_FENCE, _CODE_SPAN, _canon_needs, _needs_list, _needs_of, _needs_store, _without_mq_groups
+from stackshot.model.ids import _CODE_FENCE, _CODE_SPAN, _without_mq_groups
+from stackshot.model.needs import _canon_needs, _needs_list, _needs_of, _needs_store
 
 STORE = _cfg.path("paths", "store")
 

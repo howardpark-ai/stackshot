@@ -16,7 +16,7 @@ import json, os, re, sys, pathlib, logging, subprocess, time
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="onelisttest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
@@ -44,7 +44,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import work as W; from stackshot.audit import silence as SL
+from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import work as W; from stackshot.audit import silence as SL; from stackshot.model import ids as _model_ids
 from stackshot.web.ui import render as ui_render
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
 server._publish = lambda: None
@@ -57,7 +57,7 @@ real_time = time.time; t0 = real_time(); clk = [t0]; time.time = lambda: clk[0]
 MIN = 60.0
 try:
     r = server.stackshot_create(subject="[home] a long build", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: pick stage 7")
-    g = server._norm_id(r.split()[1]); snap("create")
+    g = _model_ids._norm_id(r.split()[1]); snap("create")
     m0 = rd(g)["metadata"]
     check("the item starts with one open step and no work field", [x["status"] for x in S.view(m0)] == ["open"] and "work" not in m0, m0)
 
@@ -156,7 +156,7 @@ try:
 
     # ------------------------------------------------------------ 7 a close that marks the open step itself (dropped), a legacy `id`
     r2 = server.stackshot_create(subject="[home] a build that is called off", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
-    g2 = server._norm_id(r2.split()[1]); snap("create2")
+    g2 = _model_ids._norm_id(r2.split()[1]); snap("create2")
     clk[0] += 30 * MIN; server._update(g2, work={"text": "PR up"}, sender=ENG); snap("w2a")
     clk[0] += 30 * MIN; server._update(g2, work={"text": "review"}, sender=ENG); snap("w2b")
     clk[0] += 30 * MIN; server.stackshot_complete(g2, outcome="dropped", reason="called off", outcome_text="- called off", sender=ENG); snap("drop2")
@@ -167,7 +167,7 @@ try:
     check("History says the step was dropped, not done, with its status updates folded under it", len(steplines) == 1 and "step dropped: " in steplines[0]["html"] and "step done" not in steplines[0]["html"]
           and "2 status updates" in steplines[0]["html"], [x["html"][:300] for x in log2])
     r3 = server.stackshot_create(subject="[home] an old client writes", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
-    g3 = server._norm_id(r3.split()[1]); before3 = rd(g3)
+    g3 = _model_ids._norm_id(r3.split()[1]); before3 = rd(g3)
     refused = []
     for spec in ({"id": "x", "state": "done"}, {"id": "migrating-ids", "text": "migrating ids", "state": "done"}, '{"id": "x", "state": "done"}'):
         try:

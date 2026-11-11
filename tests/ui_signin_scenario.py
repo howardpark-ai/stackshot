@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlparse
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="uisessiontest-"); T = pathlib.Path(tmp)
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"), ("fleet_names", f"{tmp}/names.tsv"),
                  ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("session_links", f"{tmp}/sala"), ("project_touch", f"{tmp}/touch"), ("timezone", "Asia/Dubai"), ("base_url", "https://stackshot.test")):
     toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
@@ -261,6 +261,8 @@ check("the Runners page's script stops asking after a 401 (it keeps a flag, and 
 if NODE:
     rjs = RN._JS % (json.dumps("UTC"), json.dumps("UTC"))
     rjs = re.sub(r"^<script>|</script>$", "", rjs)
+    # The real head defines window.SST/SSD/SSI before any page script (the stub's window is not its global, so SST is also put on the global as a browser has it).
+    rjs = re.sub(r"^<script>|</script>$", "", R._SST_HEAD) + ";var SST=window.SST;" + rjs
     RH = r"""
 const fs = require('fs'), vm = require('vm'); const calls = []; const intervals = []; const dl = {};
 function el(){ return new Proxy(function(){}, { get: (t,k)=> k in t ? t[k] : (k==='getAttribute' ? ()=> '0' : k==='hasAttribute' ? ()=> false : k==='classList' ? {contains:()=>false} : ()=> el()), set:(t,k,v)=>{t[k]=v;return true} }) }

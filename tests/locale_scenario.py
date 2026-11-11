@@ -226,7 +226,7 @@ for p in pathlib.Path(STACK).rglob("*"):
 check("no file of the repository holds a Hangul letter", not bad, bad[:5])
 KEY_USE = re.compile(r"""(?:\b_t|\b_i18n\.t|\bi18n\.t|\bSST)\(\s*['"]([a-z0-9_.-]+)['"]""")
 used = set()
-for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/i18n.py", "stackshot/web/uiprefs.py"):
+for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/i18n.py", "stackshot/web/uiprefs.py", "stackshot/web/itempage.py"):
     used |= set(KEY_USE.findall(pathlib.Path(STACK, rel).read_text(encoding="utf-8")))
 check("every key a page or a script asks for by its literal name is in the English catalog", not [k for k in used if k not in EN and not any(e.startswith(k) for e in EN)], [k for k in used if k not in EN and not any(e.startswith(k) for e in EN)])
 check("the state words and the panel sections the pages build a key for are all there", all(f"state.{k}" in EN for k in ("you", "agent", "release", "wait", "done", "dropped", "superseded", "closed"))
@@ -419,6 +419,293 @@ for lg in ("en", "ko"):
 ok_runs = all(isinstance(v, dict) for v in runs.values())
 check("ui.render imported first under a non-English request language: every module-level value is what an English import gives", ok_runs and runs["ko"] == runs["en"], runs if not ok_runs else [k for k in runs["en"] if runs["en"][k] != runs["ko"].get(k)][:5])
 check("…in particular the lists' state and lane words, and no marker of the test language anywhere in the module", ok_runs and runs["ko"].get("STATE_WORDS", {}).get("doing") == "On agent" and runs["ko"].get("LANE_WORDS", {}).get("call") == "Your move" and "[x:" not in json.dumps(runs["ko"]), ok_runs and runs["ko"].get("STATE_WORDS"))
+
+# ---- 8. the item page: every interface word of it reads through the string table (stage 2)
+# item-page fixture begin
+IPX = pathlib.Path(tmp)
+B_ = "B2222222-2222-4222-8222-222222222222".lower()
+(IPX / "fleet/a/sessions.json").write_text(json.dumps({A: {"name": "alpha-main", "machine": "a", "url": "", "seen": "x"}, B_: {"name": "alpha-helper", "machine": "a", "url": "", "seen": "x"}}))
+_pj = json.loads((IPX / "store/projects.json").read_text())
+_pj["pages"]["projects/beta"] = {"title": "Beta", "name": "Beta", "org": "work", "tags": [], "type": "project", "session": "alpha-main", "status": "active", "board": [], "board_row": False, "updated": 1,
+                                 "mirror": "https://example.invalid/beta", "agents": {"alpha-main": "builds"}}
+(IPX / "store/projects.json").write_text(json.dumps(_pj))
+HR = 3600.0; DY = 86400.0
+def ix(i, subject, status="open", su=None, written_by="alpha-main", **meta):
+    su = now0 - 3 * HR if su is None else su
+    d = {"id": str(i), "subject": f"[work] {subject}", "description": "- a made-up thing\n- it lives in a drawer", "status": status, "updated": su, "state_updated": su, "confirmed": su,
+         "metadata": {"owner": A, "project": "projects/alpha", **meta}}
+    if written_by: d["written_by"] = written_by
+    (IPX / f"store/a/{i}.json").write_text(json.dumps(d))
+def ic(i, meta=None, drop=(), **top):          # a later revision of an item, committed to the store's git
+    p = IPX / f"store/a/{i}.json"; d = json.loads(p.read_text()); d.update(top); d["metadata"].update(meta or {})
+    for k_ in drop: d["metadata"].pop(k_, None)
+    p.write_text(json.dumps(d)); git("add", "-A"); git("commit", "-q", "-m", f"ipx {i}")
+OWN = "the owner"
+ASKX = "Decide: whether to buy it · Recommend: buy · Stakes: none either way · By: no date"
+OPX = [{"label": "Buy", "line": "Buy it now", "recommended": True}, {"label": "Skip", "line": "Skip it", "recommended": False}]
+ST = lambda t_, s_="open", by="", at=0, **k_: {"text": t_, "status": s_, "by": by, "at": at, **k_}
+# 201: one item that has been through most of what the History can say
+S1, S2, S3, S4, S5 = "alpha-main: oil the hinges", "alpha-main: sand the rails", "alpha-main: paint the frame", "alpha-main: hang the sign", "alpha-main: wipe the glass"
+NX = lambda *x: "\n".join(x)
+ix(201, "Shelf audit", mover="alpha-main", next=NX(S1, S2, S3, S4, S5), su=now0 - 40 * HR)
+git("add", "-A"); git("commit", "-q", "-m", "ipx base")
+ic(201, {"steps": [ST(S1, "done", "alpha-main", now0 - 30 * HR)], "next": NX(S2, S3, S4, S5)}, updated=now0 - 30 * HR)
+ic(201, {"steps": [ST(S1, "done", "alpha-main", now0 - 30 * HR), ST(S2, "dropped", "alpha-main", now0 - 29 * HR)], "next": NX(S3, S4, S5)}, updated=now0 - 29 * HR)
+TG = lambda t_, s_="in progress", ts=0: {"text": t_, "state": s_, "ts": ts}
+BASE = [ST(S1, "done", "alpha-main", now0 - 30 * HR), ST(S2, "dropped", "alpha-main", now0 - 29 * HR)]
+ic(201, {"steps": BASE + [ST(S3, tag=TG("first coat on", ts=now0 - 28 * HR)), ST(S4, tag=TG("sign cut", "assigned", now0 - 28 * HR))]}, updated=now0 - 28 * HR)
+ic(201, {"steps": BASE + [ST(S3, tag=TG("second coat on", ts=now0 - 27 * HR)), ST(S4, tag=TG("sign cut", "assigned", now0 - 28 * HR))]}, updated=now0 - 27 * HR)
+ic(201, {"steps": BASE + [ST(S3, "done", "alpha-main", now0 - 26 * HR, tag=TG("second coat on", ts=now0 - 27 * HR)), ST(S4, tag=TG("sign cut", "assigned", now0 - 28 * HR))], "next": NX(S4, S5)}, updated=now0 - 26 * HR)
+ic(201, {"steps": BASE + [ST(S3, "done", "alpha-main", now0 - 26 * HR), ST(S4), ST(S5, tag=TG("glass cloth found", ts=now0 - 25 * HR))]}, updated=now0 - 25 * HR)
+ic(201, {"priority": "p1", "due": "2099-03-01", "rank": "3"}, updated=now0 - 24 * HR)
+ic(201, {"due": "2099-04-01", "draft": "a first draft of the sign text", "rank": "2"}, updated=now0 - 23 * HR)
+ic(201, {"due": "", "draft": "a second draft of the sign text", "project": "projects/beta"}, drop=("rank",), updated=now0 - 22 * HR, subject="[work] Shelf audit, renamed")
+ic(201, {"draft": "", "state": "verifying", "proof": "the sign hangs straight", "end": "2099-06-01"}, updated=now0 - 21 * HR)
+ic(201, {"state": "doing", "priority": "p2"}, drop=("proof", "end"), updated=now0 - 20 * HR)
+ic(201, {"state": "your-call"}, updated=now0 - 19 * HR)
+ic(201, {}, drop=("state",), updated=now0 - 18 * HR)
+ic(201, {"next": NX(S4, S5, "alpha-main: sweep the floor"), "ask": "", "steps": BASE + [ST(S3, "done", "alpha-main", now0 - 26 * HR), ST(S4), ST(S5, tag=TG("glass cloth found", ts=now0 - 25 * HR))]}, updated=now0 - 17 * HR,
+   description="- a made-up thing\n- it lives in a drawer\n- a third fact")
+# 202: a decision asked and answered by a pick; 203 the same answered with a note only; 204 a closed one with its outcome
+ix(202, "Lamp purchase", mover=OWN, needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide", su=now0 - 20 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 202")
+ic(202, {"needs": [], "ask": "", "options": [], "mover": "alpha-main", "next": "alpha-main: order the lamp", "answers": [{"ts": now0 - 19 * HR, "kind": "decision", "choice": "Buy", "letter": "A", "text": "yes, from the usual shop", "via": "", "options": OPX}]}, written_by=OWN, updated=now0 - 19 * HR)
+ix(203, "Cable choice", mover=OWN, needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide", su=now0 - 20 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 203")
+ic(203, {"needs": [], "mover": "alpha-main", "next": "alpha-main: look again", "answers": [{"ts": now0 - 19 * HR, "kind": "decision", "text": "neither, look again", "via": "", "options": OPX}, {"ts": now0 - 18 * HR, "kind": "comment", "text": "a later note"},
+   {"ts": now0 - 17 * HR, "kind": "step-reply", "text": "a note on the step"}]}, written_by=OWN, updated=now0 - 17 * HR)
+ic(203, {"needs": ["alpha-helper"], "next": "alpha-helper: check it"}, written_by="alpha-main", updated=now0 - 16 * HR)
+ic(203, {"needs": []}, written_by="alpha-main", updated=now0 - 15 * HR)
+ic(203, {"answers": [{"ts": now0 - 19 * HR, "kind": "decision", "text": "neither, look again", "via": "", "options": OPX}, {"ts": now0 - 18 * HR, "kind": "comment", "text": "a later note"},
+   {"ts": now0 - 17 * HR, "kind": "step-reply", "text": "a note on the step"},
+   {"ts": now0 - 14 * HR, "kind": "comment", "text": "written on the issue", "via": "github", "url": "https://github.com/o/r/issues/5#issuecomment-9", "comment_id": 9}]}, written_by="alpha-main", updated=now0 - 14 * HR)
+ic(203, {"answers": [{"ts": now0 - 19 * HR, "kind": "decision", "text": "neither, look again", "via": "", "options": OPX}, {"ts": now0 - 18 * HR, "kind": "comment", "text": "a later note"},
+   {"ts": now0 - 17 * HR, "kind": "step-reply", "text": "a note on the step"},
+   {"ts": now0 - 14 * HR, "kind": "comment", "text": "written on the issue", "via": "github", "url": "https://github.com/o/r/issues/5#issuecomment-9", "comment_id": 9},
+   {"ts": now0 - 13 * HR, "kind": "comment", "text": "written on the issue, no link", "via": "github"}]}, written_by="alpha-main", updated=now0 - 13 * HR)
+ic(203, {}, written_by="alpha-main", updated=now0 - 13 * HR, confirmed=now0 - 12 * HR)          # a confirm with nothing else changed
+# 204: on hold with a wake, the wake moved, released; closed with an outcome; reopened; closed superseded
+ix(204, "Drawer clean-out", mover="alpha-main", next="alpha-main: empty it", su=now0 - 50 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 204")
+ic(204, {"hold": True, "wake": "2099-02-01"}, updated=now0 - 49 * HR)
+ic(204, {"wake": "2099-02-15T10:00"}, updated=now0 - 48 * HR)
+ic(204, {"wake": ""}, updated=now0 - 47 * HR)
+ic(204, {"wake": "2099-02-20"}, updated=now0 - 46 * HR)
+ic(204, {"hold": False, "wake": ""}, updated=now0 - 45 * HR)
+ic(204, {"hold": True}, updated=now0 - 44 * HR)
+ic(204, {"hold": False}, updated=now0 - 43 * HR)
+ic(204, {"wake": "2099-03-05"}, updated=now0 - 42 * HR)
+ic(204, {"wake": "2099-03-09"}, updated=now0 - 41 * HR)
+ic(204, {"wake": ""}, updated=now0 - 40 * HR)
+ic(204, {"after": ["a201"]}, updated=now0 - 39 * HR)
+ic(204, {"after": []}, updated=now0 - 38 * HR)
+ic(204, {"outcome": "done", "reason": "the drawer is empty", "superseded_by": ""}, status="completed", updated=now0 - 37 * HR, written_by="alpha-main")
+ic(204, {}, drop=("outcome", "reason"), status="open", updated=now0 - 36 * HR)
+ic(204, {"outcome": "dropped", "reason": "not needed any more"}, status="completed", updated=now0 - 35 * HR, written_by="alpha-helper")
+ic(204, {}, drop=("outcome", "reason"), status="open", updated=now0 - 34 * HR - 1800)
+ic(204, {"outcome": "superseded", "superseded_by": "a201", "reason": ""}, status="completed", updated=now0 - 34 * HR, written_by="alpha-main")
+# 205: handovers
+ix(205, "Cupboard move", mover="alpha-main", next="alpha-main: first part\nalpha-helper: second part", su=now0 - 12 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 205")
+ic(205, {"mover": "alpha-helper", "needs": ["alpha-helper"], "handover": {"step": "aaaaaaaaaaaa", "kind": "moved", "to": "alpha-helper", "at": now0 - 11 * HR}}, written_by="", updated=now0 - 11 * HR)
+ic(205, {"mover": "alpha-main", "needs": ["alpha-main"], "next": "alpha-main: third part", "handover": {"step": "bbbbbbbbbbbb", "kind": "fallback", "to": "alpha-gone", "at": now0 - 10 * HR, "why": "no pane of it is in the heartbeat"}}, written_by="", updated=now0 - 10 * HR)
+ic(205, {"mover": "alpha-helper", "needs": ["alpha-helper"], "next": "alpha-helper: fourth part"}, written_by="alpha-main", updated=now0 - 9 * HR)
+ic(205, {"needs": []}, written_by="alpha-main", updated=now0 - 8 * HR)
+# waits of each kind, a chase, his words, the recycle badge, an observer, a stale confirm, an after
+ix(210, "Time wait", wait_kind="time", wake="2099-01-01", post_wake_mover="alpha-helper", next="alpha-helper: check the date", wait_basis={"text": "the shop's holiday", "wake": "2099-01-01"},
+   cap_ok={"wake": "2099-01-01", "quote": "wait until the new year", "source": "chat", "by": OWN}, recycle=True, observers=["alpha-helper"], due="2099-01-05", confirmed=now0 - 90 * DY, su=now0 - 90 * DY)
+ix(211, "Item wait", wait_kind="item", after=["a201", "a210"], post_wake_mover="alpha-helper", next="alpha-helper: go on")
+ix(212, "Item wait, no ids", wait_kind="item", after=[], post_wake_mover="alpha-helper", next="alpha-helper: go on")
+ix(213, "Anchor wait", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", wait_event="the review lands", post_wake_mover="alpha-helper", wake="2099-02-01",
+   chases=[{"at": now0 - 2 * HR, "by": "alpha-main", "note": "asked in the thread"}, {"at": now0 - HR, "by": "alpha-main", "note": "pinged the reviewer"}], next="alpha-main: wait for it")
+ix(214, "Anchor wait, no event", wait_kind="anchor", wait_anchor="", post_wake_mover="alpha-helper", next="alpha-main: wait for it")
+ix(215, "Relay wait", wait_kind="relay", wait_event="the contract", party="Acme", ask_by="2099-03-01", post_wake_mover="alpha-helper", next="alpha-helper: read it")
+ix(216, "Relay wait, no event", wait_kind="relay", party="Acme", ask_by="2099-03-01", post_wake_mover="alpha-helper", next="alpha-helper: read it")
+ix(217, "Relay wait, nobody", wait_kind="relay", ask_by="2099-03-01", post_wake_mover="alpha-helper", next="alpha-helper: read it")
+ix(218, "Event wait", wait_kind="event", wait_event="a box comes up", post_wake_mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
+ix(219, "Event wait, plain", wait_kind="event", post_wake_mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
+ix(220, "Anchor wait, plain", wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/9", post_wake_mover="alpha-helper", wake="2099-02-01", next="alpha-helper: use it")
+ix(221, "Time wait, no words", wait_kind="time", wake="2099-01-01", post_wake_mover="alpha-helper", next="alpha-helper: check the date")
+# links, a closed one, a reminder, a long checklist with decided rows
+# a coding-session link, put together from parts so that no literal of this file has the shape of one
+SESSLINK = "/".join(["https:", "", "claude" + ".ai", "code", "_".join(["sess" + "ion", "abc"])])
+ix(230, "Links", mover="alpha-main", next="alpha-main: see https://docs.google.com/document/d/abc/edit and https://docs.google.com/spreadsheets/d/abc/edit and https://docs.google.com/presentation/d/abc/edit "
+   "and https://docs.google.com/forms/d/abc and https://github.com/o/r/releases and " + SESSLINK + " and https://example.com/mockups/m1.html and https://github.com/o/r/blob/main/a/b.md and https://github.com/o/r/pull/3 and https://github.com/o/r/issues/4")
+ix(231, "Reminder", mover="alpha-main", wake="2099-02-01", next="alpha-main: later")
+ix(232, "Closed, no outcome", status="completed", su=now0 - 2 * DY, mover=None, outcome="unrecorded")
+ix(233, "Closed, done", status="completed", su=now0 - 2 * DY, mover=None, outcome="done", reason="finished as asked", outcome_text="- it finished\n- nothing is left", steps=[ST("alpha-main: one", "done", "alpha-main", now0 - 3 * DY), ST("alpha-main: two", "dropped", "alpha-main", now0 - 3 * DY),
+   ST("alpha-main: three", "done", "alpha-main", now0 - 3 * DY), ST("alpha-main: four", "done", "alpha-main", now0 - 3 * DY)])
+ix(234, "Closed, all done", status="completed", su=now0 - 2 * DY, mover=None, outcome="done", reason="finished", outcome_text="- it finished", steps=[ST("alpha-main: one", "done", "alpha-main", now0 - 3 * DY), ST("alpha-main: two", "done", "alpha-main", now0 - 3 * DY)])
+ix(235, "Decision rows", mover=OWN, needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide\nalpha-main: after", su=now0 - 5 * HR,
+   steps=[ST("alpha-main: one", "done", "alpha-main", now0 - 3 * HR), ST("alpha-main: two", "dropped", "alpha-main", now0 - 3 * HR), ST("alpha-main: three", "done", "alpha-main", now0 - 3 * HR)],
+   answers=[{"ts": now0 - 4 * HR, "kind": "decision", "choice": "Buy", "letter": "A", "text": "", "via": "", "options": OPX}])
+ix(236, "Misshaped ask", mover=OWN, needs=["decision"], ask="whether to buy the lamp", next=f"{OWN}: decide")
+ix(237, "Project missing", mover="alpha-main", project="projects/nowhere", next="alpha-main: x")
+ix(238, "Handed to a session", mover="alpha-helper", next="alpha-helper: x", handoff={"to": "alpha-helper", "from": "alpha-main", "at": now0 - 600, "delivered_at": now0 - 590, "taken_at": None})
+ix(239, "Handed to the owner", mover=OWN, next=f"{OWN}: do it", handoff={"to": OWN, "from": "alpha-main", "at": now0 - 600, "delivered_at": None, "taken_at": None, "no_clock": True})
+ix(240, "Your step", mover=OWN, state="your-step", step="open the drawer and say done", next="alpha-main: check it")
+ix(241, "Open question", mover=OWN, needs=["decision"], ask=ASKX, next=f"{OWN}: decide")
+ix(242, "Verifying", state="verifying", proof="the drawer opens", end="2099-01-01", needs=["alpha-helper"], mover="alpha-helper", next="alpha-helper: check it")
+ix(243, "Observers", mover="alpha-main", observers=["alpha-helper"], next="alpha-main: x", after=["a201", "a210"])
+ix(244, "Stale", mover="alpha-main", next="alpha-main: x", confirmed=now0 - 90 * DY, su=now0 - 90 * DY, due="2099-01-05")
+# more cases: no creator, a broken option list, a then, a wait after a closed item, an item with all steps done, one with a long History, an item whose project and hold change, anchors
+ix(245, "No creator", written_by="", owner="", mover="alpha-main", next="alpha-main: x"); git("add", "-A"); git("commit", "-q", "-m", "ipx 245")
+ic(245, {"owner": A}, updated=now0 - 2 * HR)
+ix(246, "Broken options", mover=OWN, needs=["decision"], ask=ASKX, options=[{"bogus": 1}], next=f"{OWN}: decide")
+ix(247, "A then", mover=OWN, then="alpha-helper", needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide\nalpha-helper: after")
+ix(248, "Wait after a closed one", wait_kind="item", after=["a232", "a201"], post_wake_mover="alpha-helper", next="alpha-helper: go on")
+ix(249, "All steps done", mover="alpha-main", next="", steps=[ST("alpha-main: one", "done", "alpha-main", now0 - 3 * HR), ST("alpha-main: two", "done", "alpha-main", now0 - 3 * HR), ST("alpha-main: three", "done", "alpha-main", now0 - 3 * HR)])
+ix(250, "Project, hold and handover", mover="alpha-main", next="alpha-main: x"); git("add", "-A"); git("commit", "-q", "-m", "ipx 250")
+ic(250, {"project": ""}, updated=now0 - 9 * HR)
+ic(250, {"project": "projects/alpha", "hold": True, "needs": ["alpha-helper"]}, updated=now0 - 8 * HR)
+ic(250, {"hold": False, "needs": []}, updated=now0 - 7 * HR)
+ic(250, {"mover": "", "handover": {"step": "cccccccccccc", "kind": "moved", "to": "alpha-helper", "at": now0 - 6 * HR}}, updated=now0 - 6 * HR)
+ic(250, {"mover": "", "handover": {"step": "dddddddddddd", "kind": "fallback", "to": "alpha-gone", "at": now0 - 5 * HR}}, updated=now0 - 5 * HR)
+ix(253, "Handovers from and to a wait", mover="alpha-main", next="alpha-main: x"); git("add", "-A"); git("commit", "-q", "-m", "ipx 253")
+ic(253, {"wait_kind": "time", "wake": "2099-01-01", "post_wake_mover": "alpha-helper", "next": "alpha-helper: later", "handover": {"step": "eeeeeeeeeeee", "kind": "moved", "to": "alpha-helper", "at": now0 - 4 * HR}}, updated=now0 - 4 * HR)
+ic(253, {"mover": "alpha-main", "next": "alpha-main: again", "handover": {"step": "ffffffffffff", "kind": "moved", "to": "alpha-main", "at": now0 - 3 * HR}}, drop=("wait_kind", "wake", "post_wake_mover"), updated=now0 - 3 * HR)
+ic(253, {"mover": "no one", "handover": {"step": "gggggggggggg", "kind": "fallback", "to": "alpha-gone", "at": now0 - 2 * HR}}, updated=now0 - 2 * HR)
+ix(254, "Born on hold", mover="alpha-main", hold=True, wake="2099-02-01", next="alpha-main: x")
+ix(255, "No description, no steps", mover="alpha-main")
+_d255 = json.loads((IPX / "store/a/255.json").read_text()); _d255["description"] = ""; (IPX / "store/a/255.json").write_text(json.dumps(_d255))
+ix(256, "Owner unnamed", written_by="", owner="", mover="alpha-main", next="alpha-main: x")
+ix(257, "Stale question", mover=OWN, needs=["decision"], ask=ASKX, options=OPX, next=f"{OWN}: decide", su=now0 - 90 * DY)
+ix(258, "Closed without a word", mover="alpha-main", next="alpha-main: x", su=now0 - 5 * HR); git("add", "-A"); git("commit", "-q", "-m", "ipx 258")
+ic(258, {"outcome": "unrecorded"}, status="completed", updated=now0 - 4 * HR, written_by="alpha-main")
+ix(251, "A long History", mover="alpha-main", next="alpha-main: x", priority="p2"); git("add", "-A"); git("commit", "-q", "-m", "ipx 251")
+for n_ in range(56): ic(251, {"priority": "p1" if n_ % 2 == 0 else "p3"}, updated=now0 - (100 - n_) * 60)
+(IPX / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "https://github.com/o/r/pull/9", "items": ["a201"], "added": 1, "by": "t"}], "projects/beta": [{"url": "https://github.com/o/r/pull/10", "items": ["a201"], "added": 1, "by": "t"}]}))
+git("add", "-A"); git("commit", "-q", "-m", "ipx all")
+IPX_IDS = [201, 202, 203, 204, 205, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 253, 254, 255, 256, 257, 258]
+IPX_BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
+IPX_WATCH = {"action": "/items/a1/watch", "token": "TOKEN", "flag": "", "watched": True, "why": "it is yours"}
+def ipx_pages():
+    """Every fixture item page, plain and with the answer box and the watch control, in the language now current; {(id, variant): html}."""
+    bd_ = r2.Board(f"{tmp}/store"); out = {}
+    for i in IPX_IDS:
+        for k_, kw in (("plain", {}), ("box", {"answer": IPX_BOX, "watch": IPX_WATCH}), ("mute", {"watch": {**IPX_WATCH, "flag": "mute"}}), ("off", {"watch": {**IPX_WATCH, "flag": "", "watched": False, "why": ""}}), ("on", {"watch": {**IPX_WATCH, "flag": "watch"}})):
+            out[(i, k_)] = bd_.item_html(f"a{i}", **kw)
+        out[(i, "contact")] = bd_.item_html(f"a{i}", contact="alpha-main")
+    _iu = r2.issue_url
+    r2.issue_url = lambda gid, store: "https://github.com/o/r/issues/5"          # the GitHub issue link of the sidebar
+    try:
+        for i in (201, 210, 235): out[(i, "gh")] = bd_.item_html(f"a{i}")
+    finally: r2.issue_url = _iu
+    bd_.item_log = lambda r, merge=True: ([], 0)          # an item whose store has no version of it yet: no History
+    out[(201, "nolog")] = bd_.item_html("a201")
+    return out
+# item-page fixture end
+import html
+
+# -- the same pages, in English (no language folder) and in the test locale (every string of the item page's areas wrapped in a marker)
+set_dir(None); reset_warned()
+ipx_en = ipx_pages()
+write_ko(test_locale()); set_dir(LOC); reset_warned()
+with i18n.use("ko"):
+    ipx_ko = ipx_pages()
+IPX_NEW = sorted(k for k in EN if re.match(r"^(item|wait|answer|watch|more|link)\.", k))
+IPX_KO_ALL = "\n".join(ipx_ko.values()); IPX_KO_U = html.unescape(IPX_KO_ALL)
+check("the item page has strings in the table (the areas item, wait, answer, watch, more and link)", len(IPX_NEW) > 150, len(IPX_NEW))
+check("every fixture page rendered in both languages", len(ipx_en) == len(ipx_ko) == len(IPX_IDS) * 6 + 4 and all("<html" in h for h in ipx_en.values()), (len(ipx_en), len(ipx_ko)))
+check("the item pages in English carry no marker and keep <html lang=\"en\"> (apply_lang rewrites it per person)", all("[x:" not in h and '<html lang="en">' in h for h in ipx_en.values()),
+      [k for k, h in ipx_en.items() if "[x:" in h][:5])
+check("the item pages in the test locale carry markers", all("[x:" in h for h in ipx_ko.values()), [k for k, h in ipx_ko.items() if "[x:" not in h][:5])
+
+def _ipx_pat(v):
+    """A catalog text as a regex over the marked page: its fixed pieces in order, a field standing for anything (a marker nested inside it included)."""
+    return re.compile(r"\[x:" + ".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)) + r"\]", re.S)
+# keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
+IPX_DIRECT = {"item.change.asked", "item.change.back_to_work", "item.change.background", "item.change.by", "item.change.gave_step", "item.change.handed", "item.change.next_changed", "item.change.plain",
+              "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news"}
+seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
+check("every string of the item page's areas shows in the test locale on some fixture page, but the ones the direct calls below cover", set(IPX_NEW) - seen <= IPX_DIRECT, sorted(set(IPX_NEW) - seen - IPX_DIRECT))
+
+# no English leftover of a routed string: strip the markers (nested ones with them), then no piece of a routed text stands in the visible words, unless the fixture's own item text says it
+def _ipx_vis(h):
+    h = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", h, flags=re.S)
+    return html.unescape(re.sub(r"<[^>]+>", " ", h))
+def _ipx_strip(v):
+    out = []; depth = 0; i = 0
+    while i < len(v):
+        if depth == 0 and v.startswith("[x:", i): depth = 1; i += 3; out.append(" "); continue
+        if depth:
+            if v[i] == "[": depth += 1
+            elif v[i] == "]": depth -= 1
+            i += 1; continue
+        out.append(v[i]); i += 1
+    return "".join(out)
+IPX_ITEM_TEXT = "\n".join(p.read_text(encoding="utf-8") for p in sorted((T / "store/a").glob("*.json"))).replace("\\n", "\n")
+IPX_ITEM_TEXT += "\n" + ASKX + "\n" + "\n".join(json.dumps(o) for o in OPX)
+leaks = {}
+for name, h in ipx_ko.items():
+    v = _ipx_strip(_ipx_vis(re.sub(r'<span class="cl-t">.*?</span>', " ", h, flags=re.S)))          # a checklist row's text is the item's (a decided step is stored as "<owner>: picked A · Buy")
+    for k in IPX_NEW:
+        for chunk in re.split(r"\{[^}]*\}", EN[k]):
+            c = chunk.strip(" .,:;()·—-")
+            if len(c) >= 4 and c not in IPX_ITEM_TEXT and re.search(r"(?<![\w])" + re.escape(c) + r"(?![\w])", v): leaks.setdefault(k, set()).add((name, c))
+check("in the test locale no routed text stays English on the item pages (after the markers are taken out, the words of the table are gone)", not leaks, {k: sorted(s)[:2] for k, s in sorted(leaks.items())[:6]})
+check("…the item's own text stays English there (the subject, the description, the steps, the ask, the options)", all(s in ipx_ko[(201, "plain")] for s in ("Shelf audit, renamed", "oil the hinges", "a third fact")) and "[x:Shelf audit" not in IPX_KO_ALL
+      and "[x:oil the hinges" not in IPX_KO_ALL and all(s in ipx_ko[(202, "box")] for s in ("whether to buy it", "Buy it now")) and "[x:Buy it now" not in IPX_KO_ALL)
+check("the History's completed line says its outcome from the table (done, dropped, superseded, and the unrecorded one); the English page keeps the plain word", all(MARK(EN["item.outcome_word." + w]) in ipx_ko[(204, "plain")] for w in ("done", "dropped", "superseded"))
+      and MARK(EN["item.outcome_word.unrecorded"]) in ipx_ko[(258, "plain")] and "<b>closed (no outcome recorded)</b>" in ipx_en[(258, "plain")] and "<b>dropped</b>" in ipx_en[(204, "plain")])
+check("…and the English pages say what they always said (the words the table holds, in the place of the markers)", all(s in ipx_en[(201, "plain")] for s in ("History", "<b>done</b> by alpha-main")) and "Waiting" in ipx_en[(210, "plain")])
+
+# the strings only a direct call reaches
+from stackshot.web import itempage as ipg
+from stackshot.model import model as _mm
+def _m(key, **f): return MARK(EN[key].format(**f))
+cl_ = _cfg.CFG.setdefault("client", {}); had_hosts = "mockup_hosts" in cl_; cfg_old = cl_.get("mockup_hosts")
+with i18n.use("ko"):
+    W = lambda kind, **k: _mm.Wait(kind=kind, kind_explicit=True, **k)
+    d_wait = [ipg.wait_what(W("item", after=("a1", "a2"))), ipg.wait_what(W("item")), ipg.wait_what(W("anchor")), ipg.wait_what(W("anchor", event="the review lands")), ipg.wait_what(W("event")),
+              ipg.wait_what(W("relay", event="the contract"), party="Acme"), ipg.wait_what(W("relay"), party="Acme"), ipg.wait_what(W("relay")), ipg.wait_what(W("relay", event="the contract from Acme"), party="Acme"),
+              ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday")]
+    d_end = [ipg.wait_end_label(W("time")), ipg.wait_end_label(W("relay")), ipg.wait_end_label(W("anchor")), ipg.wait_end_label(W("item", until="2099-01-01"))]
+    d_chg = {s: ipg.plain_change(s) for s in ("needs: decision; state: your-call", "mover: alpha-main → alpha-helper", "state cleared (was your-call)", "state: your-step", "next edited", "description edited", "completed: done")}
+    d_last = [ipg.last_change("alpha-main", "state: your-step"), ipg.last_change("", "state: your-step"), ipg.last_change("alpha-main", "")]
+    d_age = [r2.age_words(600), r2.age_words(3 * 3600), r2.age_words(3 * 86400)]
+    d_tip = [r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}}), r2.stale_tip({"_age": 3 * 3600, "metadata": {}})]
+    try:
+        cl_["mockup_hosts"] = ["mockup.example"]
+        d_link = [r2.link_label("https://mockup.example/mockup/7"), r2.link_label("https://github.com/o/r/releases"), r2.link_label(SESSLINK)]
+    finally:
+        if had_hosts: cl_["mockup_hosts"] = cfg_old
+        else: cl_.pop("mockup_hosts", None)
+check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
+      _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday"], d_wait)
+check("wait_end_label in the test locale", d_end == [_m("wait.end.until"), _m("wait.end.ask_by"), _m("wait.end.backstop"), _m("wait.end.until")], d_end)
+check("plain_change in the test locale: each clause reads from the table, the rest is as the log wrote it", d_chg == {"needs: decision; state: your-call": _m("item.change.asked"), "mover: alpha-main → alpha-helper": _m("item.change.handed", who="alpha-helper"),
+      "state cleared (was your-call)": _m("item.change.back_to_work"), "state: your-step": _m("item.change.gave_step"), "next edited": _m("item.change.next_changed"), "description edited": _m("item.change.background"),
+      "completed: done": "completed: done"}, d_chg)
+check("last_change in the test locale: ' by <who>: <what>' and ': <what>' are one text each, the what in the table's words; no entry, nothing", d_last == [_m("item.change.by", who="alpha-main", what=_m("item.change.gave_step")),
+      _m("item.change.plain", what=_m("item.change.gave_step")), ""], d_last)
+check("age_words and stale_tip in the test locale", d_age == [_m("more.age_min", n=10), _m("more.age_hour", n=3), _m("more.age_day", n=3)]
+      and d_tip == [_m("more.stale_tip_call", age=_m("more.age_hour", n=3)), _m("more.stale_tip", age=_m("more.age_hour", n=3))], (d_age, d_tip))
+check("link_label in the test locale: a mockup page, a releases page and a session link read from the table", d_link == [_m("link.mockup"), _m("link.releases", repo="r"), _m("link.session")], d_link)
+check("…and the config the test touched is put back", cl_.get("mockup_hosts") == cfg_old and ("mockup_hosts" in cl_) == had_hosts)
+d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "chg": ipg.last_change("alpha-main", "state: your-step"), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
+check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "chg": " by alpha-main: gave you a step", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
+
+# a translated value goes into an attribute escaped: a value with a double quote (and a tag in it) must not break the attribute or open an element
+from html.parser import HTMLParser
+class _Attrs(HTMLParser):
+    def __init__(self): super().__init__(); self.found = []; self.ids = []
+    def handle_starttag(self, tag, attrs):
+        for k_, v_ in attrs:
+            if k_ == "id" and v_ == "inj": self.ids.append(tag)
+        self.found.append((tag, dict(attrs)))
+QKEYS = {"item.earlier_steps": "ul", "item.next_steps": "ul", "item.github_issue_tip": "a", "item.details": "aside"}
+QATTR = {"item.earlier_steps": "aria-label", "item.next_steps": "aria-label", "item.github_issue_tip": "title", "item.details": "aria-label"}
+QV = {k_: MARK(EN[k_]) + chr(0xD55C) + '" x="y"><i id="inj">' for k_ in QKEYS}          # built at run time: a Hangul letter, a double quote, a tag
+write_ko(test_locale(**QV)); set_dir(LOC); reset_warned()
+with i18n.use("ko"):
+    bq_ = r2.Board(f"{tmp}/store"); _iu = r2.issue_url
+    r2.issue_url = lambda gid, store: "https://github.com/o/r/issues/5"
+    try: q_pages = {i: bq_.item_html(f"a{i}") for i in (201, 235)}
+    finally: r2.issue_url = _iu
+for k_, tag_ in QKEYS.items():
+    pg_ = _Attrs(); [pg_.feed(h_) for h_ in q_pages.values()]
+    hits_ = [a for t_, a in pg_.found if t_ == tag_ and a.get(QATTR[k_]) == QV[k_]]
+    check(f"a value with a double quote in {k_} stays inside its {QATTR[k_]}= attribute on the item page (escaped, whole)", len(hits_) >= 1, [a.get(QATTR[k_]) for t_, a in pg_.found if t_ == tag_ and QATTR[k_] in a][:3])
+pg_ = _Attrs(); [pg_.feed(h_) for h_ in q_pages.values()]
+check("…and no element the value tried to open is on the page, nor its raw text in any attribute position", not pg_.ids and all('"><i id="inj">' not in h_ for h_ in q_pages.values()), pg_.ids)
+write_ko(test_locale()); reset_warned()
 
 set_dir(None)
 n_bad = len(fails)

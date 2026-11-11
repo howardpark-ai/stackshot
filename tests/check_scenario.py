@@ -70,7 +70,7 @@ srv = ThreadingHTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serv
 API = f"http://127.0.0.1:{srv.server_address[1]}"
 (T / "github.token").write_text("test-token\n")
 
-toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = _instance.apply(_instance.base_toml())
 toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml   # never the host's sala store (session links off)
 toml, n = re.subn(r'(?m)^lanes_file = ""', f'lanes_file = "{tmp}/sala/lanes.tsv"', toml); assert n == 1   # a lane record in the temp dir (the example has none)
 for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
