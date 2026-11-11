@@ -340,6 +340,23 @@ res = server._silence_tick()
 check("3 a ladder view that cannot be built sends nothing: the tick returns without a message or a record", res is None and msgs == [] and not fp.exists(), (res, msgs))
 server._stall_active = real_active_fn
 
+# the environment the tick hands to the pass and to the backstop: spy on both, so a change in how it is built is seen
+spy = {"pass": [], "backstop": []}
+real_pass, real_backstop = SL.silence_pass, server._silence_backstop
+SL.silence_pass = lambda **kw: (spy["pass"].append(kw.get("env")), {"findings": 0, "fresh": 0})[1]
+server._silence_backstop = lambda **kw: spy["backstop"].append(kw.get("env"))
+try:
+    server._silence_tick()
+finally:
+    SL.silence_pass, server._silence_backstop = real_pass, real_backstop
+pe, be = (spy["pass"] or [None])[0], (spy["backstop"] or [None])[0]
+check("3 the tick builds the environment once and hands the very same one to the pass and to its backstop", len(spy["pass"]) == 1 and len(spy["backstop"]) == 1 and pe is not None and pe is be, spy)
+check("3 …it sends through the filing deliver, not the default one", pe is not None and pe.deliver is server._filing_deliver, pe)
+check("3 …and its `front` answers with the server's own judgement: a keeper that is not front for its own project is not front there",
+      pe is not None and pe.front is not None and all(bool(pe.front(w, p)) == bool(server._front_keeper(w, p)[0]) for w, p in (("home-agent", "home"), ("home-main", "home"), ("nobody", "")))
+      , pe)
+msgs.clear(); clear_state()
+
 # ---- 4. a builder directing subagents is busy all day; its items are judged one by one
 from stackshot.model import activity as ACT
 def ev(i, ago_min, kind):
