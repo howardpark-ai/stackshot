@@ -20,7 +20,7 @@ from typing import Any
 from stackshot.core import config as _cfg
 
 BOARD_REF = re.compile(r"(?<![\w/#-])board#([1-9]\d*)\b", re.I)      # the board's own id form, the fallback when model/ids.py cannot be imported; a bare "#n" in a body is a pull request or an issue of the repository
-_REF_OK = re.compile(r"[\w#-]{2,80}")      # what a stored ref may look like: an id as written (board#7, board-tmp-<machine>#3, g7), never free text
+_REF_OK = re.compile(r"[\w#-]{2,80}")      # what a stored ref may look like: an id as written (board#N, board-tmp-<machine>#N, gNN), never free text
 _IDS: list[Any] = []      # model/ids.py, imported at the first body read (it brings fastmcp: the hub that never reads a merged pull request's body never pays for it)
 _GITHUB_PATH = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)", re.I)
 _ANCHOR = re.compile(r"^github:([\w.-]+/[\w.-]+)#(\d+)$", re.I)

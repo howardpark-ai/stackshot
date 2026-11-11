@@ -501,12 +501,12 @@ check("14 a backlog line from 30 hours ago (the server was down) is not stamped 
 close(221, 222)
 
 # which ids a body names: board#N, a temporary id, a legacy letter-and-number id and an item link, as a message's ids are read (code, quotes, glued ids and the queue's groups are not)
-body_ = "Closes " + shown(9301) + ", board-tmp-box#4 and g12. In code `" + shown(9302) + "`, fenced:\n```\n" + shown(9303) + "\n```\nquoted \"" + shown(9304) + "\", x_" + shown(9305) + ", group g7, [" + shown(9306) + "](https://host/items/9306) and https://host/items/9307"
+body_ = "Closes " + shown(9301) + ", board-tmp-box#" + "4 and g12. In code `" + shown(9302) + "`, fenced:\n```\n" + shown(9303) + "\n```\nquoted \"" + shown(9304) + "\", x_" + shown(9305) + ", group g7, [" + shown(9306) + "](https://host/items/9306) and https://host/items/9307"
 check("14 merge_log.refs reads a body as a message's ids are read (model/ids.py): board#N, board-tmp-<machine>#N, a legacy gNN id and an item link count; fenced code, inline code, quoted text, an id with something glued on and a merge queue's group number do not",
-      ML.refs(body_) == [shown(9301), "board-tmp-box#4", "g12", shown(9306), shown(9307)], ML.refs(body_))
+      ML.refs(body_) == [shown(9301), "board-tmp-box#" + "4", "g12", shown(9306), shown(9307)], ML.refs(body_))
 fixture(230, project="projects/alpha"); fixture(231, project="projects/alpha")
 (T / "store/anchors.json").write_text("{}")
-ML.append(line(74, ["board-tmp-nobox#9", "zz", "a230"], at=-60))
+ML.append(line(74, ["board-tmp-nobox#" + "9", "zz", "a230"], at=-60))
 saved = merge_pass(now0)
 check("14 the server resolves a stored ref as it resolves any id (a legacy letter-and-number id, a000-style, names a230); a ref that names no item (another machine's temporary id, a word) is skipped and does not stop the pass",
       saved == ["a230"] and mt(230).get("merged_seen") == ["acme/widgets#74"] and "merged_seen" not in mt(231), saved)
