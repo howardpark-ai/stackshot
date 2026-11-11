@@ -1,6 +1,6 @@
 """anchorhub.github — GitHub through the gh CLI: issues and PRs (comments, state, CI), a repo's releases, a repo's notifications."""
 import json, os, re, subprocess, threading, time, zlib
-from .core import Hub, Transient, _anc, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at
+from .core import Hub, Transient, _anc, _cfg, _merges, _ts, guarded_loop, log, now_iso, now_iso_at
 from stackshot.core import ghbudget as _gb   # the host's one hourly ledger of GitHub calls, shared with the stackshot server (a locked file under <state>/github)
 
 GHPOLL = 60   # s; conditional GETs — a 304 does not count against the API budget
@@ -183,7 +183,7 @@ def run(hub: Hub):
               "subscribed": "update", "manual": "update", "security_alert": "security alert", "invitation": "invitation"}
     def thread_news(repo, n, is_pr, since):
         """What happened on an issue/PR since `since`, from other people: comments, reviews, review comments, and a merge or
-        close by anyone. The owner's own pushes, force-pushes, edits and labels are not news (a push to a pull request is not reported as "on your thread" twice). → (text, who, link, etype) or None; etype names each kind of news (core.GH_TYPES),
+        close by anyone. The owner's own pushes, force-pushes, edits and labels are not news (a push to a pull request is not reported as "on your thread" twice). → (text, who, link, etype, board ids the body of a merged pull request names) or None; etype names each kind of news (core.GH_TYPES),
         joined with "+", for the hub's decision by type (the turn rule's third build)."""
         self_ok = bool(os.environ.get("ANCHOR_HUB_ALLOW_SELF")); t0 = _ts(since) if since else 0
         i = gh(f"/repos/{repo}/issues/{n}")
@@ -205,7 +205,7 @@ def run(hub: Hub):
             if rc: news.append(f"{len(rc)} review comment" + ("s" if len(rc) > 1 else "")); who += [c["user"]["login"] for c in rc]; link = rc[-1].get("html_url") or link; types.append("review_comment")
         if not news: return None
         who = [w for w in dict.fromkeys(who) if w]
-        return "; ".join(news), ", ".join(who[:3]) or "someone", link, "+".join(types)
+        return "; ".join(news), ", ".join(who[:3]) or "someone", link, "+".join(types), (_merges.refs(i.get("body")) if "pr_merged" in types else [])      # the board ids the merged pull request's body names: the issue read above already holds the body
     def notifications(a_id):
         """A repo root (anchoring a repo as a whole: whatever activity the owner's GitHub account gets notified
         of): the repo's notification threads of the owner's account (all=true, read-only), relying on GitHub's own subscription
@@ -234,6 +234,7 @@ def run(hub: Hub):
             m = re.search(r"/(?:issues|pulls)/(\d+)$", url)
             if m and cid(f"github:{repo}#{m.group(1)}") in bound: continue          # the issue/PR anchor already reports it
             if typ == "Release" and cid(f"github:{repo}@releases") in bound: continue
+            body_refs = []
             if m:
                 try: got = thread_news(repo, m.group(1), typ == "PullRequest", prev)
                 except Exception as e:
@@ -242,14 +243,14 @@ def run(hub: Hub):
                     else: seen[x["id"]] = prev
                     etags.pop(npath, None); continue
                 if not got: continue                                             # only the owner's own pushes/edits, labels, CI on the thread
-                text, who, link, etype = got; text = f"{text} on #{m.group(1)} \"{title[:70]}\""
+                text, who, link, etype, body_refs = got; text = f"{text} on #{m.group(1)} \"{title[:70]}\""
             elif x.get("reason") == "ci_activity" or typ == "CheckSuite":       # GitHub's own CI notice (failed runs, as the owner set it): delivered
                 text, who, link, etype = f"\"{title}\"", "CI", f"https://github.com/{repo}/actions", "ci_activity"
             else:                                                                # any other thread kind: unclassified, delivered
                 text, who, link, etype = f"({x.get('reason')}) {typ} \"{title}\"", REASON.get(x.get("reason"), "update"), html_of(url) or f"https://github.com/{repo}", ""
             if st["said"].get(x["id"]) == text: continue                          # one thread update, one notice
             st["said"][x["id"]] = text
-            hub.event(a_id, {"title": repo.split('/')[1], "who": who, "text": text, "url": link, "ts": x.get("updated_at"), "etype": etype, "repo_id": rid(repo)}, kind="github-state")
+            hub.event(a_id, {"title": repo.split('/')[1], "who": who, "text": text, "url": link, "ts": x.get("updated_at"), "etype": etype, "repo_id": rid(repo), **({"meta": {"refs": body_refs}} if body_refs else {})}, kind="github-state")
     FAIL =("failure", "timed_out", "action_required", "startup_failure", "stale")
     def pr_meta(c):
         """The head branch and author of the watched pull request, from the CI state `c` of its anchor (its last read of the PR; {} until it has been read): added to every event on the PR."""
@@ -333,7 +334,7 @@ def run(hub: Hub):
                 who = (i.get("closed_by") or {}).get("login") or "someone"
                 verb = "merged" if (i.get("pull_request") or {}).get("merged_at") else i["state"]
                 etype = ("pr_" if i.get("pull_request") else "issue_") + {"merged": "merged", "closed": "closed"}.get(verb, "reopened")
-                hub.event(a_id, {"title": title, "who": who, "text": f"{verb} it", "url": i["html_url"], "ts": i["updated_at"], "etype": etype, "repo_id": rid(repo), **pr_meta(ci_st.get(a_id))}, kind="github-state")
+                hub.event(a_id, {"title": title, "who": who, "text": f"{verb} it", "url": i["html_url"], "ts": i["updated_at"], "etype": etype, "repo_id": rid(repo), **({"meta": {"refs": _merges.refs(i.get("body"))}} if verb == "merged" else {}), **pr_meta(ci_st.get(a_id))}, kind="github-state")
             state[a_id] = snap(i)
         except Exception as e:
             log.warning("github %s: %s", a_id, str(e)[:120])
