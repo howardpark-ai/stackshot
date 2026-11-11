@@ -6126,14 +6126,15 @@ def _silence_tick() -> "dict[str, Any] | None":
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
 _BACKSTOP_LAST = [0.0]
-_BACKSTOP_TOLD: "set[str]" = set()      # the items the builder has been told of while they stay uncovered (memory only: a restart tells once more); one that has a finding again, or is gone, drops out
+_BACKSTOP_TOLD: "set[str]" = set()      # the items the builder has been told of while they stay uncovered; one that has a finding again, or is gone, drops out. Kept in `<state>/audit/silence-backstop.json` and read once per process, so a restart does not tell them again
+_BACKSTOP_LOADED = [False]
 _BACKSTOP_LINES = 10          # at most this many items in one message, then "+N more"
 
 
 def _silence_backstop(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, skip: Any = None, env: Any = None) -> "list[dict[str, Any]]":
     """The silence pass's backstop, looked at once an hour from the ten-minute silence tick: an open item the board shows on an agent that has had no activity for 2 hours (`silence.BACKSTOP_S`) and that the
     pass has no finding for (`silence.uncovered`) is a defect of the pass, whatever exemption hid it. Each such item is told ONCE to the builder (the audit's builder, the way the runner's watchdog tells it) in one
-    stderr line and one message that asks nothing of the owner and makes no board item; it is told again only after it has had a finding (or left the board) and is then missed again. `now`, `items`, `skip`, `env` are for tests
+    stderr line and one message that asks nothing of the owner and makes no board item; it is told again only after it has had a finding (or left the board) and is then missed again, and a restart does not tell it again (the told ids are kept on disk). `now`, `items`, `skip`, `env` are for tests
     and the tick (the tick passes the pass's own `env`; with none it is built the same way, `_silence_env`). → the uncovered items, told or not."""
     now = time.time() if now is None else now
     if now - _BACKSTOP_LAST[0] < _BACKSTOP_EVERY:
@@ -6141,12 +6142,19 @@ def _silence_backstop(now: float | None = None, items: "dict[str, dict[str, Any]
     _BACKSTOP_LAST[0] = now
     from stackshot.audit import silence as _silence
     from stackshot.tools import next_report as _nr
+    if not _BACKSTOP_LOADED[0]:      # the first look of this process: whom the builder was told of before a restart stays told
+        _BACKSTOP_LOADED[0] = True
+        _BACKSTOP_TOLD.update(_silence.read_backstop())
     late = _silence.uncovered(items if items is not None else _nr.load_all(None), now, env if env is not None else _silence_env(), skip)
+    told_before = set(_BACKSTOP_TOLD)
     _BACKSTOP_TOLD.intersection_update({x["id"] for x in late})
     fresh = [x for x in late if x["id"] not in _BACKSTOP_TOLD]
     if not fresh:
+        if _BACKSTOP_TOLD != told_before:
+            _silence.write_backstop(_BACKSTOP_TOLD)
         return late
     _BACKSTOP_TOLD.update(x["id"] for x in fresh)
+    _silence.write_backstop(_BACKSTOP_TOLD)      # before the send: a restart in between loses one message at worst, never repeats one
     lines = [f"{x['id']} · {x['mover'] or 'no mover'} · no activity for {_silence.minutes(x['silent'])}" for x in fresh]
     print(f"silence: backstop: {len(fresh)} item(s) on an agent silent for over {_silence.minutes(_silence.BACKSTOP_S)} with no silence finding: {', '.join(x['id'] for x in fresh)}", file=sys.stderr, flush=True)
     to = _cfg.audit_builder()

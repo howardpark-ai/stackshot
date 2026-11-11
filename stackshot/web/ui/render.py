@@ -1132,7 +1132,7 @@ _ISTRIP_CSS = '.ilayout{grid-template-columns:minmax(0,1fr)}.imain,.iside{grid-c
 # page's own, the string catalog's "home.new_word" in the person's language (_new_word); the limits below are the English word's (79 px for a count of one digit, 6 more for each digit up to four) plus the room a longer word needs, estimated
 # per character at the badge's size (a wide character, as east-asian text has, takes 12 px, any other 7: the English word's 21 px is within the limits as they were), so a longer word
 # only moves up sooner. The row then needs the number's width, the count and the word (the card's --need, estimated in px at the full sizes: 22 px digits, 12 px badge); where the card's
-# content (and the 6 px of its side padding the badge may use) is narrower than that, both shrink in that proportion (the badge never under 9 px; the number then takes what the badge leaves, --nk and --bk), so the whole stays inside the card. The card is 60 px tall and its label one line either way.
+# content (and the 6 px of its side padding the badge may use) is narrower than that, both shrink in that proportion (the badge never under 9 px unless the word is so long that the number would then fall under its 6 px; the number then takes what the badge leaves, --nk and --bk), so the whole stays inside the card. The card is 60 px tall and its label one line either way.
 def _new_word():
     """The word after the Closed card's count as the page says it, in the request's language: the catalog's "home.new_word" without its leading space."""
     return _t("home.new_word").strip()
@@ -1149,7 +1149,7 @@ def _hnew_parts(n, new, word=None):
     """The card's --nk (the number's width in px at its full 22 px size) and --bk (the badge's width per px of its font size: its digits, the space and the word at the full 12 px, over 12), for the narrow rules."""
     full = _HNEW_SMALL_DIGIT_PX * len(str(new)) + _HNEW_SPACE_PX + _word_px(_new_word() if word is None else word)
     return round(_HNEW_DIGIT_PX * len(str(n)), 1), round(full / 12, 2)
-_HNEW_BF = "max(9px,min(12px,calc((100cqw + 2px) * 12 / var(--need,1))))"      # the badge's font size: shrinks with the card as the number does, but never under 9 px, so a big count stays readable
+_HNEW_BF = "min(max(9px,min(12px,calc((100cqw + 2px) * 12 / var(--need,1)))),calc((100cqw + 2px - var(--nk,0) * 6px / 22) / var(--bk,1)))"      # the badge's font size: shrinks with the card as the number does, but never under 9 px, so a big count stays readable; the last term lets a very long word go under 9 px rather than leave the number under its own 6 px floor (the pair must fit)
 _HNEW_UP = ("a.hcard i.hnew{position:absolute;top:9px;right:12px;margin:0;font-size:" + _HNEW_BF + "}"
             "@supports (left:anchor(--hcn right)){a.hcard i.hnew{position-anchor:--hcn;left:calc(anchor(right) + 4px);right:auto;top:auto;bottom:calc(anchor(bottom) + 2px)}}"
             "a.hcard:has(i.hnew) b{font-size:min(22px,max(6px,calc((100cqw + 2px - var(--bk,0) * " + _HNEW_BF + ") * 22 / var(--nk,1))))}")      # the number takes what the badge at its own size leaves, so the pair stays inside the card
