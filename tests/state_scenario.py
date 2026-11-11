@@ -103,7 +103,7 @@ check("doing: …no page is owed for it", "page update" not in out.lower().repla
 item(2, needs=[BACK], state="doing")
 out = upd(2, expected_by=hrs(30), expected_reason="the builder runs the whole suite and the review")
 check("doing: expected_by and expected_reason, which older calls pass, are accepted and not stored: the item stays doing and the reply carries one note naming the park calls",
-      mt(2)["state"] == "doing" and "expected_by" not in mt(2) and "expected_reason" not in mt(2) and out.count("no longer kept") == 1 and "hold=true" in out and "wake=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, (mt(2), out[-500:]))
+      mt(2)["state"] == "doing" and "expected_by" not in mt(2) and "expected_reason" not in mt(2) and out.count("no longer kept") == 1 and "hold=true" in out and "until=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, (mt(2), out[-500:]))
 for n_, kw_ in ((92, dict(expected_by=hrs(-1))), (93, dict(expected_by="next week")), (94, dict(expected_by="2026-02-30")), (95, dict(expected_by=hrs(24 * 8), expected_reason="a long job that waits on a vendor"))):
     item(n_, needs=[BACK], state="doing"); o_ = upd(n_, **kw_)
     check(f"doing: …a time that was refused before (item {n_}: past, no date, a 7-day one) is no longer judged: accepted, not stored, with the note", mt(n_)["state"] == "doing" and "expected_by" not in mt(n_) and "no longer kept" in o_, (mt(n_), o_[-300:]))
@@ -237,7 +237,7 @@ upd(132, hold=True)
 check("hold: hold=true again on a parked item keeps its state", mt(132)["state"] == "parked", mt(132))
 item(133, needs=[BACK], state="doing", expected_by=hrs(2))
 upd(133, wake=day(3))
-check("hold: a wake alone is a reminder: it does not drop a stored state", mt(133)["state"] == "doing", mt(133))
+check("hold: a wake alone is a backstop: it does not drop a stored state", mt(133)["state"] == "doing", mt(133))
 item(39, needs=["decision", BACK], ask=ASK, options=[{"label": f"Park until {day(5)}", "line": "On hold.", "recommended": True, "wake": day(5)}, {"label": "Not needed", "line": "No.", "recommended": False}], state="doing", expected_by=hrs(2))
 server._answer("a39", f"Park until {day(5)}", "", "")
 check("answer: a park he picks ends a stored state of any kind (doing here), not only your-call", "state" not in mt(39) and "expected_by" not in mt(39) and hd_(mt(39)) is True, mt(39))

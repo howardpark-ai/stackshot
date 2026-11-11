@@ -213,7 +213,7 @@ check("a re-edit of a stored hand-off is not asked again (the check stays)", rd(
 server._update("a2", check="none", sender="home-owner")
 check("clearing the check on a stored hand-off is not a new hand-off", "check" not in rd(2)["metadata"], rd(2)["metadata"])
 refused("next handing it to the keeper: refused", lambda: server._update("a3", next="home-stew: rule on it", sender="home-owner"), "hands a3 to home-stew")
-# a wake alone is a reminder, not a hold (items kept showing while their work was live): the wake the refusal offers is a reminder, never a hold
+# a wake alone is a backstop, not a hold (items kept showing while their work was live): the wake the refusal offers is a backstop, never a hold
 try:
     server._update("a3", next="home-stew: rule on it", sender="home-owner"); e_h = ""
 except server.ToolError as e:

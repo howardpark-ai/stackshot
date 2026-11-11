@@ -219,7 +219,7 @@ upd(22, wake=day(5), wait_basis=BAS)
 check("4: …and the next push-out is the second", mt(22).get("repark") == 2, mt(22))
 item(23, needs=[BACK])
 upd(23, wake=day(3)); upd(23, wake=day(4)); upd(23, wake=day(5)); upd(23, wake=day(6))
-check("4: a wake with no hold is a reminder, not a park: never counted", "repark" not in mt(23) and wk_(mt(23)) == day(6), mt(23))
+check("4: a wake with no hold is a backstop, not a park: never counted", "repark" not in mt(23) and wk_(mt(23)) == day(6), mt(23))
 
 # a changed wait_basis text is no structural change; cap_ok words are not
 item(24, needs=[BACK])

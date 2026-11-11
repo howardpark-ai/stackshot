@@ -7,7 +7,7 @@ gives and stores `until` (and no old field). The readers of a stored `until` are
 The update path keeps its gates (the cap, the renewal guard, the wait_basis rules, the model guards) in the words of the old fields, so they judge every write the way they always did:
 `unfold` turns a stored `until` into the old working fields for the length of one update (kind relay or event: ask_by; kind anchor or item: wake, the backstop; no kind or time: wake with a
 hold), and `fold` turns the working fields back into `until` just before the item is saved. An item that stores the old fields and is not written to a wait stays as it is (the data
-migration of stored items is a later change).
+migration of stored items is until_pass.py, run by tools/until_migrate.py).
 
 A kind with no date is never refused: `fallback_date` takes a date the item's own words give, else one its deadline or the item it waits after suggests, else tomorrow.
 
@@ -40,6 +40,12 @@ def slot_of(kind: str) -> str:
     """The one working field the date of a kind of wait stands in while the gates judge a write: a relay's or an event wait's ask_by (the event-wait form's own backstop day), else the wake
     (a wait on the date alone, an anchor or an item wait's backstop)."""
     return "ask_by" if kind in ("relay", "event") else "wake"
+
+
+def is_bare(meta: dict[str, Any]) -> bool:
+    """A date with nothing else stated beside it: no hold, no kind, no wait_basis, no after link. Such a date is a wait on that date alone outside a hand-off, and only a hand-off's backstop inside one; a wake
+    stored this way before `until` is that backstop (the data migration, until_pass.py, leaves it as it is)."""
+    return not meta.get("hold") and not str(meta.get("wait_kind") or "").strip() and not _wt.basis_of(meta) and not _wt.after_of(meta)
 
 
 def unfold(meta: dict[str, Any]) -> bool:

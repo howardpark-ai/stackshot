@@ -151,7 +151,7 @@ def held_wait(item: dict[str, Any], now: float) -> DatedWait | None:
 
 def basis_wait(item: dict[str, Any], now: float, after_open: Any = None) -> DatedWait | None:
     """The wait of a stored doing item (or one read as doing) whose wake carries a wait_basis: `until` the wake and `reason` the basis text, while the wake is still ahead of `now`; None once it has passed, for a wake with no
-    wait_basis (a reminder: the item stays active), an item that is on hold (held_wait reads it), not doing, whose mover is not a session, or that names a decision or an outside party in needs or waits after another item
+    wait_basis (a wake with none is a backstop: the item stays active), an item that is on hold (held_wait reads it), not doing, whose mover is not a session, or that names a decision or an outside party in needs or waits after another item
     (those say their own state). `after_open(item)` says which of the items it waits after are still open, as model.derive takes it (without it every `after` link counts as open): a closed link is no wait."""
     m = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     if item.get("status") != "open" or _states.of(item)[0] != "doing" or _wt.is_held(item) or _wt.mover_of(m)["kind"] != "session":

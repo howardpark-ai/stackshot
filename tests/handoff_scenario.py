@@ -958,7 +958,7 @@ for n_, kw_ in ((140, {"wake": FUT}), (141, {"until": FUT}), (142, {"wake": FUT,
     check(f"15.1b a{n_} a hand-off with {'/'.join(sorted(kw_))}: the record names the new mover and the item is not parked", ho(n_).get("to") == "home-peer" and m_.get("mover") == "home-peer" and not stale_now(n_) and not m_.get("until") and not m_.get("hold"), m_)
     check(f"15.1b a{n_} …the date stays as the hand-off's backstop (a wake), and the board draws the item alive", m_.get("wake") == FUT and not server._is_parked(rd(n_)) and not server._date_parked(rd(n_)), m_)
 item(143); out143 = upd(143, "home-send", mover="home-peer", next="home-peer: do the thing", wake=FUT)
-check("15.1b the reply names no reminder note and no wait note for the backstop", "alone is a wait" not in out143 and "alone is a reminder" not in out143 and "put on hold" not in out143 and "until" not in out143.split("\n", 1)[0], out143[-400:])
+check("15.1b the reply names no wait note for the backstop", "alone is a wait" not in out143 and "put on hold" not in out143 and "until" not in out143.split("\n", 1)[0], out143[-400:])
 item(146); out146 = server.stackshot_update("a146", sender="home-send", mover="home-peer", next="home-peer: do the thing", wake=FUT)      # through the tool: the whole reply, the alias note included
 check("15.1b the whole reply of the tool says the date is stored as the wake, the hand-off's backstop, and no wait (not as until)",
       f"stored as wake={FUT}" in out146 and "no wait" in out146 and "stored as until" not in out146 and "now written as until" not in out146 and "alone is a" not in out146 and "put on hold" not in out146, out146[-700:])
@@ -1038,6 +1038,23 @@ try:
 finally:
     server._ho.detect = _real_detect
 check("15.1g a new date whose reading failed is kept as the wake, and the reply says the reading failed", mt(164).get("wake") == FUT and "the hand-off reading failed, so the date is kept as it was given" in out164, (mt(164), out164[-400:]))
+FUT2 = time.strftime("%Y-%m-%d", time.gmtime(now0 + 7 * 86400 + ZONE_OFFSET))
+item(165, mover="home-front"); server.stackshot_update("a165", sender="home-front", until=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
+server._ho.detect = _raising_detect
+try:
+    with _cl.redirect_stderr(_io.StringIO()):
+        out165 = server.stackshot_update("a165", sender="home-send", until=FUT2, needs=["team-back"], wait_reason="the nightly run finishes at 03:00 on the day after")
+finally:
+    server._ho.detect = _real_detect
+check("15.1g a new date on an item a bare until parks, with the reading failed: the reply names the date that is stored, not the one kept", mt(165).get("until") == FUT2 and f"stored as the wait until {FUT2}" in out165 and f"it was until {FUT}" in out165 and "is kept as it was" not in out165, (mt(165), out165[-500:]))
+item(166, mover="home-front"); server.stackshot_update("a166", sender="home-front", until=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
+server._ho.detect = _raising_detect
+try:
+    with _cl.redirect_stderr(_io.StringIO()):
+        out166 = server.stackshot_update("a166", sender="home-front", description="- Goal: the nightly run finishes")
+finally:
+    server._ho.detect = _real_detect
+check("15.1g a write that touches no date and cannot hand the item on (its description alone), with the reading failed, gets no hand-off note", "the hand-off reading failed" not in out166 and mt(166).get("until") == FUT, (mt(166), out166[-400:]))
 upd(90, "home-peer2", mover="home-peer2", next="home-peer2: carry on")
 check("15 session: the mover writing itself in as the mover takes it, the record stays its own", ho(90).get("to") == "home-peer2" and not stale_now(90), ho(90))
 # 15.2 a session makes ITSELF the mover over a record to someone else: the old record ends (no record for a self-naming)

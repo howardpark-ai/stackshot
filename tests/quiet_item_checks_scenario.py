@@ -1,13 +1,13 @@
 """Scenario test for the passes that look for a quiet item (silence.findings, stall.not_due, silence.uncovered, server._silence_backstop): they skip exactly what the board shows as waiting, and nothing more.
 Fixture items, messages replaced by recorders, a fake clock (every call is given its `now`), no live store, no network, no model call.
 
-  1  the shared test: model.shown_waiting is the board's own phase for an open item. One scenario per exemption kind a quiet-item pass used to carry: a bare wake (ahead, passed) is a reminder and leaves the item on
+  1  the shared test: model.shown_waiting is the board's own phase for an open item. One scenario per exemption kind a quiet-item pass used to carry: a bare wake (ahead, passed) is a backstop and leaves the item on
      agent; a wake with a wait_basis, a hold with a dated wake, a step dated after the wake, an open `after` link and a stored wait (a relay, an outside party) are waits; a hold with a wake inside the hour is not;
      a hold with no wake and no stored state derives parked and waits, while a stored `state: doing` on a hold with no wake (an artificial shape: the server refuses a hold with no date) reads on agent;
      an item behind an `after` link that has closed is not; a closed item is not
   2  the silence rule and the stall pass's `not_due` agree with it: for every kind above, an item the board shows waiting is neither found silent nor looked at by the stall pass, and an item it shows on agent is both;
      the lanes that are not an agent's work (the owner's states, a need of the owner or of an outsider, a mover that is no session) keep their own reasons; an untaken hand-off is the hand-off audit's alone
-  3  the evidence: a finding on an item with a wake says that the wake only reminds
+  3  the evidence: a finding on an item with a wake says that the wake is only a backstop
   4  a fixture board with one item of every kind: every item the board shows on an agent is covered by a silence finding once it has been silent past 45 minutes (an oracle that does not use the rule's own scope test);
      `shown_waiting` and `on_agent` agree with the board's own lists (`home.classify`, the lists the home page draws) for every item of that board
   6  an untaken hand-off: to a back agent the hand-off audit clocks it, so silence leaves it; to a front agent that audit never does, so silence checks it; the backstop lists a back agent's one that stays silent 2 hours
@@ -141,11 +141,11 @@ bad = quiet(55, 50); bad[1]["metadata"]["wake"] = {"not": "a string"}
 try: bad_nd = ST.not_due(bad[1], now)
 except Exception as e: bad_nd = f"raised {e.__class__.__name__}"
 check("2 an item the model cannot read is not looked at, and does not raise", bad_nd in ("not readable", ""), bad_nd)
-# due_at: a wake still ahead is a reminder and counts nothing
+# due_at: a wake still ahead is a backstop and counts nothing
 bare = dict([quiet(56, 50, wake=W_AHEAD)])["a56"]
 check("2 due_at: a wake still ahead counts nothing from `now`; one that has passed counts from the wake", ST.due_at(bare, now) == 0.0 and ST.due_at(bare, now + 6 * H) > 0.0, (ST.due_at(bare, now), ST.due_at(bare, now + 6 * H)))
 
-# ---- 3. the evidence says the wake only reminds
+# ---- 3. the evidence says the wake is only a backstop
 ahead = dict([quiet(60, 50, wake=W_AHEAD)]); past = dict([quiet(61, 50, wake=W_PAST)])
 d_ahead = SL.findings(ahead, now, env())[0][0]["detail"]; d_past = SL.findings(past, now, env())[0][0]["detail"]
 check("3 a bare wake ahead: the finding says the wake is only a hand-off backstop and no wait, and what would make it one", d_ahead.startswith("no write for 50 minutes and a wake kept as a hand-off's backstop, which is no wait") and "set a wait with until" in d_ahead, d_ahead)
@@ -332,7 +332,7 @@ check("9 a stored until ahead is a wait: shown waiting, not found, left alone by
 up, wp = twin(111, 130, until=W_PAST)
 r_past, r_wp = reading9(up), reading9(wp)
 check("9 a stored until that has passed is a wait that is due, which the board still shows waiting: the three passes leave it to the server's watcher, and the stall pass counts from the date", r_past["waiting"] and not r_past["found"] and not r_past["uncovered"] and r_past["not_due"] == "the board shows it waiting (time)" and r_past["due_at"], r_past)
-check("9 ...while the same date as a wake with a basis, passed, is a reminder that ended: on agent, found, looked at by the stall pass", not r_wp["waiting"] and r_wp["found"] and r_wp["not_due"] == "", r_wp)
+check("9 ...while the same date as a wake with a basis, passed, is a backstop that ended: on agent, found, looked at by the stall pass", not r_wp["waiting"] and r_wp["found"] and r_wp["not_due"] == "", r_wp)
 bw = quiet(112, 130, until=W_AHEAD, wake=W_PAST)
 check("9 an until ahead beside a bare wake that passed: the board shows it waiting, so none of the three looks at it", reading9(bw)["waiting"] and not reading9(bw)["found"] and not reading9(bw)["uncovered"], reading9(bw))
 wo = quiet(113, 130, wake=W_PAST)
@@ -394,7 +394,7 @@ st = quiet(122, 50, until=W_AHEAD, phase="alive")
 shown_st = MD.shown_waiting(st[1], now)
 if not shown_st:
     d_st = SL.findings(dict([st]), now, env())[0]
-    check("10 a stored until read as on agent (a stale alive stamp) reaches the wake branch: found, the evidence names it as a wake that only reminds", len(d_st) == 1 and "a wake kept as a hand-off's backstop" in d_st[0]["detail"], d_st)
+    check("10 a stored until read as on agent (a stale alive stamp) reaches the wake branch: found, the evidence names it as a wake that is only a backstop", len(d_st) == 1 and "a wake kept as a hand-off's backstop" in d_st[0]["detail"], d_st)
 else:
     print("note: a stored until always shows the item waiting here, so `silent`'s wake_value branch is reached by a wake alone only")
 
