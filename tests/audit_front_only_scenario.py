@@ -12,7 +12,8 @@ a builder is unchanged. Fixture data (English stand-in names) in a temporary sto
   4  the two lows of the review of that change: (a) a session that is a front-only project's -main agent and another project's builder gets one message of each kind (the mark is keyed by recipient AND
      whether it is a front agent, not by the recipient alone), for the unanswered finding and for the digest; (b) the digest never tells a -main agent to chase itself: when the mover of a front-only
      project's unmoved item is its -main agent, the page key takes it, unmarked, as at the finding's first level (chase_to); (c) the ordinary findings of one run are grouped by (recipient, front) too, so
-     one session that gets an owner-decision finding as a project's -main agent and a finding for an item it moves in another project gets two messages, only the first marked
+     one session that gets an owner-decision finding as a project's -main agent and a finding for an item it moves in another project gets two messages, only the first marked; (d) so are the page agent
+     lines (page_agent_groups): a line that names a background session and a line that falls to the audit's -main agent are two groups when that agent is the same session
 
     tests/run-suite audit_front_only        -> exit 0 / 1"""
 import contextlib, copy, datetime as dt, io, json, os, pathlib, re, sys, time
@@ -217,6 +218,15 @@ to_dual = [t for to, t, _f in sent if to == "dual"]
 check("4c one session, two kinds of ordinary finding: two messages to it, one marked for the owner and one not", len(to_dual) == 2 and sum(t.startswith("[for Oliver]\n") for t in to_dual) == 1, [t[:80] for t in to_dual])
 check("4c …the marked one holds only the finding it got as -main agent, the unmarked one only the finding for the item it moves (one message of both, marked by the first finding's kind, before)",
       any(t.startswith("[for Oliver]\n") and B + "9301" in t and B + "9302" not in t for t in to_dual) and any(not t.startswith("[for") and B + "9302" in t and B + "9301" not in t for t in to_dual), [t[:120] for t in to_dual])
+
+# 4d: page agent lines (page_agent_groups) are keyed by (recipient, front): "falcon-main" is the audit's -main agent and also a background session a page line names
+pa_res = {"findings": [{"to": "falcon-main", "page": "projects/pa-one", "line": "a session sala no longer knows", "name": "gone-one", "fix": "retire it"},
+                       {"to": "", "page": "projects/pa-two", "line": "no agents map", "name": "-", "fix": "add the map"}]}
+pa_env = AR.Env(roles={"falcon-main": {"role": "background"}}, sessions=lambda: None, page_of=lambda p: ("", None), deliver=deliver)
+pa = AR.page_agent_groups(pa_res, pa_env)
+check("4d one session reached both ways (named as a background session, and as the audit's -main agent): two groups, one marked and one not", sorted(pa) == [("falcon-main", False), ("falcon-main", True)] and
+      [g["front"] for _k, g in sorted(pa.items())] == [False, True], {k: v["front"] for k, v in pa.items()})
+check("4d …each holds only its own page's line (the unmarked one was marked or not by the first line alone, before)", all(len(g["lines"]) == 1 for g in pa.values()) and "pa-one" in pa[("falcon-main", False)]["lines"][0] and "pa-two" in pa[("falcon-main", True)]["lines"][0], pa)
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

@@ -804,12 +804,13 @@ def par_target(f: dict[str, Any], env: Env) -> tuple[str, bool]:
     return _cfg.audit_main(), True
 
 
-def page_agent_groups(res: dict[str, Any], env: Env) -> dict[str, dict[str, Any]]:
-    """The page agent lines by the agent they go to: {to: {"front", "lines", "pages"}}. A page whose own -main agent and fallbacks are none that sala knows goes to the audit's -main agent (`par_target`)."""
-    groups: dict[str, dict[str, Any]] = {}
+def page_agent_groups(res: dict[str, Any], env: Env) -> dict[tuple[str, bool], dict[str, Any]]:
+    """The page agent lines by the agent they go to and whether the message is marked for the owner: {(to, front): {"front", "lines", "pages"}}, as `deliver_findings` keys its groups (the one agent can be reached both
+    ways: a line that names a background session, and a line that falls to the audit's -main agent when that agent is the same session). A page whose own -main agent and fallbacks are none that sala knows goes to the audit's -main agent (`par_target`)."""
+    groups: dict[tuple[str, bool], dict[str, Any]] = {}
     for f in res.get("findings") or []:
         to, front = par_target(f, env)
-        g = groups.setdefault(to, {"front": front, "lines": [], "pages": set(), "gaps": 0})
+        g = groups.setdefault((to, front), {"front": front, "lines": [], "pages": set(), "gaps": 0})
         g["lines"].append(par_line(f))
         g["gaps"] += f.get("line") in ("no agents map", "no front agent", "other project's session", "session off the map")      # a project with items and no agent, or a session its map has no line for (tools/page_agent_report.py `agentless`, `offmap`), not a name sala has lost
         g["pages"].add(f["page"])
@@ -1405,7 +1406,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
                 st["chased"] = True
 
     # the page agent lines: one message per agent, listing its pages' leftovers (a front agent's starts with [for <owner>]); it asks the agent to fix the line or retire the name, so it is no fyi
-    for to, g in sorted(page_agent_groups(pa, env).items()):
+    for (to, _front), g in sorted(page_agent_groups(pa, env).items()):
         head = (f"[stackshot] Page agent lines {label}: {len(g['lines'])} line(s) on {len(g['pages'])} page(s) name a session sala no longer knows (page · line · name · what fixes it); fix the line or retire the name."
                 if not g["gaps"] else
                 f"[stackshot] Page agent lines {label}: {len(g['lines'])} line(s) on {len(g['pages'])} page(s) need a fix (page · line · name · what fixes it): a session sala no longer knows, a project with items and no agents map, or a session working on a project whose agents map has no line for it; each line says the fix.")
@@ -1418,7 +1419,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     registry_told: list[str] = []
     if _cfg.registry_audit_send() and not rg.get("unrouted"):
         told_today = {m.get("to") for h in hist if h.get("date") == date for m in (h.get("messages") or []) if m.get("kind") == "registry" and m.get("delivered")}
-        for to, g in sorted(page_agent_groups(rg, env).items()):
+        for (to, _front), g in sorted(page_agent_groups(rg, env).items()):
             if to in told_today:
                 registry_told.append(to)
                 continue
