@@ -15,7 +15,7 @@ anchor log only: each event is written to the routing log and delivered to nobod
 A summary may carry `etype`, the event's type at its source (GH_TYPES for GitHub): a routine event on the fleet's own pull
 request ([pilot] own_repos; routine_own) is logged for a pilot project, ruled by stackshot (auto), not delivered.
 Delivery goes through push.py (inbox socket; queued when the session is not live or the hub is paused for a reboot)."""
-import json, os, sys, glob, time, math, random, threading, subprocess, logging, queue
+import json, os, sys, glob, time, math, random, threading, subprocess, logging, queue, tempfile
 import urllib.error
 from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -118,6 +118,45 @@ HOOK_PORT = int(_cfg.get("anchor_hub", "hook_port") or 8010)
 WATCHES = f"{ADIR}/watches.json"
 log = logging.getLogger("anchor-hub")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+def write_atomic(path: str, text: str):
+    """Replace `path` with `text` so that a reader sees the old file or the new one, whole, and two writers never share a temp file:
+    the text goes to a temp file of its own name in the same folder (so os.replace stays on one filesystem), is flushed to disk, then
+    renamed over the target. A failure removes the temp file and leaves the old file as it was. (A fixed `<path>.tmp` shared by the
+    threads of the hub let one thread's rename take the file another was about to rename: FileNotFoundError, in the GitHub poll thread.)"""
+    folder = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text); f.flush(); os.fsync(f.fileno())
+        try: mode = os.stat(path).st_mode & 0o777           # mkstemp makes the file private (0600): keep the mode the file had, 0644 for a first write
+        except OSError: mode = 0o644
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+
+def guarded_loop(hub: "Hub", name: str, step, every=None, retry: float = 1.0, sleep=None, pause_first: bool = False):
+    """The loop of a receiver's thread: step() once per pass until hub.stopping is set. An exception inside a pass is logged (the receiver's
+    name, the exception and the line it came from, then the full traceback) and the loop goes on after `retry` seconds; one failed pass never
+    ends a receiver. Only the stop signal ends the loop. `every()` → seconds to wait after a pass that went well (None: the pass waits by
+    itself, as a receiver that blocks on its trigger queue does). `sleep(seconds)` defaults to hub.stopping.wait, which a stop cuts short.
+    pause_first waits before the first pass, as a watcher that checks once a minute does."""
+    sleep = sleep or hub.stopping.wait
+    if pause_first and not hub.stopping.is_set() and every: sleep(every())
+    while not hub.stopping.is_set():
+        try:
+            step(); pause = every() if every else 0
+        except Exception as e:
+            tb = e.__traceback__
+            while tb is not None and tb.tb_next is not None: tb = tb.tb_next
+            where = f"{os.path.basename(tb.tb_frame.f_code.co_filename)}:{tb.tb_lineno}" if tb is not None else "?"
+            log.error("receiver %s: a pass of its loop failed (%s: %s at %s); going on in %s s", name, type(e).__name__, str(e)[:160], where, retry, exc_info=True)
+            pause = retry
+        if pause: sleep(pause)
 
 
 def now_iso(): return datetime.now(ZONE).strftime("%Y-%m-%d %H:%M:%S")
@@ -231,6 +270,8 @@ class Hub:
         self.bindings: dict[str, set[str]] = {}
         self.pending: dict[tuple[str, str], dict] = {}   # (anchor, session) → {first, count, label, last: the newest Event}
         self.lock = threading.Lock()
+        self.stopping = threading.Event()      # set when a clean stop begins: the receivers' loops end then, and not before
+        self._status_io = threading.Lock()     # one status.json write at a time (its text is made and replaced inside it, so the newest text is the file's)
         self.savers: dict[str, object] = {}    # receiver → fn() returning its read position
         self.catchups: dict[str, object] = {}  # receiver → fn(since_epoch) returning the number of notices it caught up
         self.inflight = 0                      # deliveries running right now (a clean stop waits for them)
@@ -462,12 +503,13 @@ class Hub:
         for name, fn in list(self.savers.items()):
             try: out[name] = _jsonable(fn())
             except Exception as e: log.warning("persist %s: %s", name, str(e)[:120])
-        tmp = CURSORS + ".tmp"; json.dump(out, open(tmp, "w"), ensure_ascii=False); os.replace(tmp, CURSORS)
+        write_atomic(CURSORS, json.dumps(out, ensure_ascii=False))
         return out["saved"]
 
     def shutdown(self):
         """SIGTERM (a clean stop): let running deliveries finish, hand pending follow-ups to push.py (queued if paused),
         save every read position and the status, then exit."""
+        self.stopping.set()
         log.info("stopping: %d delivery(ies) in flight", self.inflight)
         t0 = time.time()
         while self.inflight and time.time() - t0 < 25: time.sleep(0.2)
@@ -562,16 +604,26 @@ class Hub:
             r = self.status.setdefault("receivers", {})
             r[name] = {"ok": bool(ok), "error": None if ok else (err or "check failed"), "checked": now_iso()}
             self.status["receivers_ok"] = all(v.get("ok") for v in r.values())
+            (self.status.get("hold") or {}).pop(name, None)       # a check ends any announced wait
         self.write_status()
+
+    def hold(self, name: str, seconds: float):
+        """A receiver announces that it will report no check for `seconds` (its first pass after a start, a wait after GitHub refuses calls): the board counts
+        its age from the end of the wait (receiver_health.stale_age). The next hub.health() of the receiver clears it. A failed status write is
+        logged, never raised: the announcement must not stop the wait it announces."""
+        with self.lock: self.status.setdefault("hold", {})[name] = time.time() + seconds
+        try: self.write_status()
+        except Exception as e: log.warning("receiver %s: hold not written: %s", name, str(e)[:120])
 
     def write_status(self):
         _ro.guard("anchor-hub status write")
         try: pz = json.load(open(PAUSED))
         except Exception: pz = None
-        with self.lock: self.status["push"] = self.push; self.status["paused"] = pz
-        tmp = STATUS + ".tmp"
-        with self.lock: json.dump(self.status, open(tmp, "w"), indent=1, ensure_ascii=False)
-        os.replace(tmp, STATUS)
+        with self._status_io:      # called from every receiver's thread at once: the text is made and put in place under one lock, each write whole
+            with self.lock:
+                self.status["push"] = self.push; self.status["paused"] = pz
+                text = json.dumps(self.status, indent=1, ensure_ascii=False)
+            write_atomic(STATUS, text)
 
 
 # ---------- receivers that fail at start ----------

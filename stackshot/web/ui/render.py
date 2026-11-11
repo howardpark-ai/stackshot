@@ -21,6 +21,7 @@ from stackshot.model import work as _work   # a step's status line, what is in m
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
+from stackshot.anchors import receiver_health as _rh   # when a receiver's last check is too old to call it healthy (receiver_health.py)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.model import draft as _draft   # an item's draft: the verbatim text the owner pastes elsewhere, drawn in a block with a Copy button (draft.py)
 from stackshot.web import itempage as _ip   # the item page's words on the item model: since, the latest change, next lines
@@ -4017,11 +4018,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             if not _RCV: return ""
             def card(k, v):
                 ok = bool(v.get("ok")); ck = str(v.get("checked", ""))
+                t_ck = 0.0
                 try:   # relative on the card, the full time on hover; the page script keeps it current between renders
                     t = datetime.datetime.strptime(ck, "%Y-%m-%d %H:%M:%S").replace(tzinfo=now.tzinfo)
-                    when = stamp(t, "val")
+                    when = stamp(t, "val"); t_ck = t.timestamp()
                 except Exception: when = f'<span class="val">{esc(ck[11:16])}</span>'
                 word, cls = receiver_state(v); raw = str(v.get("error") or ("healthy" if ok else "down"))[:500]
+                late = _rh.stale_age(k, ok, t_ck, now.timestamp(), (_AST.get("hold") or {}).get(k, 0))      # a healthy receiver that has not reported for over twice its beat: stale, with the age
+                if late: word, cls, raw = f"stale {_rh.age_words(late)} ✗", "warn", _rh.stale_note(k, late)
                 return (f'<div class="pc rcv {cls}" data-rcv="{esc(k)}" title="{esc(raw)} · checked {esc(v.get("checked",""))} {_cfg.tz_abbr()}">'
                         f'<b class="lbl">{esc(k)}</b><span class="lbl">last checked</span>'   # status on row 2, like a machine card's "latest"
                         f'<span class="lbl st {cls}" title="{esc(raw)}">{word}</span>{when}<span class="lbl">type</span><span class="val rtype">{esc(delivery(k))}</span></div>')
@@ -4233,6 +4237,7 @@ document.querySelectorAll('[data-rcv]').forEach(function(c){{var v=d[c.getAttrib
 var raw=String(v.error||(v.ok?'healthy':'down')).slice(0,500),k=v.ok?'ok':NET.test(raw)?'warn':'bad';
 ['ok','warn','bad'].forEach(function(x){{c.classList.toggle(x,x===k)}});c.title=raw+' · checked '+v.checked+' {_cfg.tz_abbr()}';
 var h=c.querySelector('.st');if(h){{h.className='lbl st '+k;h.title=raw;h.textContent=k==='ok'?'healthy ✓':k==='warn'?'unreachable ✗':'error ✗'}}
+if(v.ok&&+v.stale>0){{var sw='stale '+dur(+v.stale)+' ✗',sn=String(v.stale_note||sw);c.classList.remove('ok','bad');c.classList.add('warn');c.title=sn+' · checked '+v.checked+' {_cfg.tz_abbr()}';if(h){{h.className='lbl st warn';h.title=sn;h.textContent=sw}}}}
 var t=c.querySelector('[data-ts]');if(t&&v.ts){{t.setAttribute('data-ts',v.ts);t.setAttribute('data-tip',v.checked+' {_cfg.tz_abbr()}')}}
 var y=c.querySelector('.rtype');if(y&&v.type)y.textContent=v.type}});tick()}}).catch(function(){{}})}}
 rcv();setInterval(rcv,60000);document.addEventListener('stackshot:swapped',function(){{tick();rcv()}});}})();

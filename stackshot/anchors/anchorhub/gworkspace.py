@@ -1,6 +1,6 @@
 """anchorhub.gworkspace — Google Drive and Gmail: push channels (Drive changes.watch, Gmail Pub/Sub) with cursor polling behind them."""
 import json, os, re, glob, hmac, queue, threading, time, uuid
-from .core import Hub, HEALTH, HOOK_URL, WATCHES, _cfg, _ts, log, now_iso, now_iso_at, read_env
+from .core import Hub, HEALTH, HOOK_URL, WATCHES, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at, read_env, transient
 
 GDIR = str(_cfg.secrets("anchor-hub", "google"))
 ROUTES = ("/hook/drive", "/hook/gmail")   # the webhooks this receiver registers in run(); anchor-hub answers them 503, not 404, while its start is being retried
@@ -13,6 +13,7 @@ def _gmail_poll() -> int: return int(_cfg.get("anchor_hub", "gmail_poll_seconds"
 # crash the process.
 # Google calls here are few and light, so serializing them costs nothing.
 GAPI = threading.RLock()
+HEALTH_RETRY = (2.0, 6.0)   # s: a failed health re-read of one account is tried again after each of these waits before Google is marked down (one dropped connection is not an outage)
 def run(hub: Hub):
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -217,59 +218,74 @@ def run(hub: Hub):
         return 200, f"ignored {data.get('emailAddress')}"
     hub.hooks["/hook/drive"], hub.hooks["/hook/gmail"] = hook_drive, hook_gmail
 
-    def renewals():
-        while True:
-            for a in accounts:
-                w = watches.get("drive:" + a["email"], {})
-                if hub.push.get("drive", {}).get(a["email"], {}).get("mode") == "push" and w.get("expires", 0) - time.time() < 3600: drive_watch(a)
-                w = watches.get("gmail:" + a["email"], {})
-                if hub.push.get("gmail", {}).get(a["email"], {}).get("mode") == "push" and w.get("expires", 0) - time.time() < 86400: gmail_watch(a)
-            hub.write_status(); time.sleep(300)
+    def renew_pass():
+        for a in accounts:
+            w = watches.get("drive:" + a["email"], {})
+            if hub.push.get("drive", {}).get(a["email"], {}).get("mode") == "push" and w.get("expires", 0) - time.time() < 3600: drive_watch(a)
+            w = watches.get("gmail:" + a["email"], {})
+            if hub.push.get("gmail", {}).get(a["email"], {}).get("mode") == "push" and w.get("expires", 0) - time.time() < 86400: gmail_watch(a)
+        hub.write_status()
+    def renewals(): guarded_loop(hub, "google renewals", renew_pass, every=lambda: 300, retry=300)
 
-    def loop():
-        active: set[str] = set(); last_health = 0.0; last_fallback = {"drive": 0.0, "gmail": 0.0}
-        while True:
-            with hub.lock: kinds = {k.split(":", 1)[0] for k in hub.bindings} & {"drive", "gmail"}
-            for kind in kinds - active:                     # source just became bound → cursor from now, then register push
-                for a in accounts:
-                    try:
-                        if kind == "drive": a["page"] = a["drive"].changes().getStartPageToken(supportsAllDrives=True).execute()["startPageToken"]; drive_watch(a)
-                        if kind == "gmail" and a["gmail"] is not None: a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]; gmail_watch(a)
-                    except Exception as e: log.warning("google %s cursor reset %s: %s", a["email"], kind, str(e)[:120])
-                hub.write_status()
-            active = kinds
-            due: set[tuple[str, str]] = set()
-            try:
-                while True: due.add(hub.triggers.get(timeout=1))
-            except queue.Empty: pass
-            now = time.time()
-            if now - last_health >= HEALTH:               # health poll: same cursor calls; a hit here = the push missed it
-                last_health = now
-                for k in active:
-                    for a in accounts: due.add((k, a["email"], "health"))
-            for k in active:                                # once per wall-clock slot; poll only the accounts whose push is unavailable
-                every = _gmail_poll() if k == "gmail" else GPOLL
-                if int(now // every) == int(last_fallback[k] // every): continue
-                last_fallback[k] = now
-                for a in accounts:
-                    if k == "gmail" and a["gmail"] is None: continue
-                    if hub.push.get(k, {}).get(a["email"], {}).get("mode") != "push": due.add((k, a["email"]))
-            hchecked, herr = False, None
-            for item in due:
-                kind, email = item[0], item[1]
-                if kind not in active: continue
-                a = next((x for x in accounts if x["email"] == email), None)
-                if not a: continue
+    def poll_checked(poll, a, kind, health):
+        """One account's poll. A health re-read (the 30-min check that decides whether Google shows as down) that fails on the network is tried
+        again after each wait in HEALTH_RETRY: the cursor calls are repeatable, and a dropped connection (a broken pipe, an SSL EOF) is gone at the next try.
+        An error that waiting does not fix (a refused token, a bug) and the last failure are raised as before."""
+        for wait in (HEALTH_RETRY if health else ()):
+            try: return poll(a)
+            except Exception as e:
+                if not transient(e) or hub.stopping.is_set(): raise
+                log.warning("google %s %s: %s; health re-read tried again in %s s", a["email"], kind, str(e)[:120], wait)
+                if hub.stopping.wait(wait): raise
+        return poll(a)
+
+    state = {"active": set(), "last_health": 0.0, "last_fallback": {"drive": 0.0, "gmail": 0.0}}
+    def one_pass():
+        active = state["active"]; last_health = state["last_health"]; last_fallback = state["last_fallback"]
+        with hub.lock: kinds = {k.split(":", 1)[0] for k in hub.bindings} & {"drive", "gmail"}
+        for kind in kinds - active:                     # source just became bound → cursor from now, then register push
+            for a in accounts:
                 try:
-                    before = hub.status["notices"]
-                    (poll_drive if kind == "drive" else poll_gmail)(a)
-                    if len(item) > 2 and hub.status["notices"] > before and hub.push.get(kind, {}).get(email, {}).get("mode") == "push":
-                        hub.push[kind][email]["push_miss"] = now_iso(); log.warning("%s %s: health poll found events the push did not deliver", kind, email)
-                except Exception as e:
-                    log.warning("google %s %s: %s", email, kind, str(e)[:200])
-                    if len(item) > 2: herr = herr or f"{kind} {email}: {str(e)[:60]}"
-                if len(item) > 2: hchecked = True
-            if hchecked: hub.health("google", herr is None, herr)          # the 30-min re-read is Google's real check
+                    if kind == "drive": a["page"] = a["drive"].changes().getStartPageToken(supportsAllDrives=True).execute()["startPageToken"]; drive_watch(a)
+                    if kind == "gmail" and a["gmail"] is not None: a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]; gmail_watch(a)
+                except Exception as e: log.warning("google %s cursor reset %s: %s", a["email"], kind, str(e)[:120])
+            try: hub.write_status()
+            except Exception as e: log.warning("google status write after binding %s: %s", kind, str(e)[:120])   # a failed write must not leave the kind unbound: the cursors would be reset and the push channels registered again on every pass
+        active = state["active"] = kinds
+        due: set[tuple[str, str]] = set()
+        try:
+            while True: due.add(hub.triggers.get(timeout=1))
+        except queue.Empty: pass
+        now = time.time()
+        health_due = now - last_health >= HEALTH
+        if health_due:                                # health poll: same cursor calls; a hit here = the push missed it
+            last_health = state["last_health"] = now
+            for k in active:
+                for a in accounts: due.add((k, a["email"], "health"))
+        for k in active:                                # once per wall-clock slot; poll only the accounts whose push is unavailable
+            every = _gmail_poll() if k == "gmail" else GPOLL
+            if int(now // every) == int(last_fallback[k] // every): continue
+            last_fallback[k] = now
+            for a in accounts:
+                if k == "gmail" and a["gmail"] is None: continue
+                if hub.push.get(k, {}).get(a["email"], {}).get("mode") != "push": due.add((k, a["email"]))
+        hchecked, herr = health_due and not active, None     # nothing bound: no call to make, but the beat is stamped, so an idle receiver does not age on the board
+        for item in due:
+            kind, email = item[0], item[1]
+            if kind not in active: continue
+            a = next((x for x in accounts if x["email"] == email), None)
+            if not a: continue
+            try:
+                before = hub.status["notices"]
+                poll_checked(poll_drive if kind == "drive" else poll_gmail, a, kind, len(item) > 2)
+                if len(item) > 2 and hub.status["notices"] > before and hub.push.get(kind, {}).get(email, {}).get("mode") == "push":
+                    hub.push[kind][email]["push_miss"] = now_iso(); log.warning("%s %s: health poll found events the push did not deliver", kind, email)
+            except Exception as e:
+                log.warning("google %s %s: %s", email, kind, str(e)[:200])
+                if len(item) > 2: herr = herr or f"{kind} {email}: {str(e)[:60]}"
+            if len(item) > 2: hchecked = True
+        if hchecked: hub.health("google", herr is None, herr)          # the 30-min re-read is Google's real check
+    def loop(): guarded_loop(hub, "google", one_pass, retry=1.0)    # each pass waits on the trigger queue (a second at most); a pass that raises is logged and the next one runs
     threading.Thread(target=loop, daemon=True).start()
     threading.Thread(target=renewals, daemon=True).start()
 

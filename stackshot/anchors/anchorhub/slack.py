@@ -12,7 +12,9 @@ a direct anchor ([anchor_hub] direct, core.direct()) delivers in full. On a dire
 and catch-up included (the session's replies come back through a webhook as a bot post, and letting
 one through would loop the chat)."""
 import os, re, threading, time
-from .core import Hub, HEALTH, _cfg, direct, log, now_iso, now_iso_at, read_env
+from .core import Hub, HEALTH, _cfg, direct, log, now_iso, now_iso_at, read_env, guarded_loop
+
+WATCH = 60   # s; the socket check and the board's health stamp for Slack (receiver_health.EVERY holds the same beat)
 
 def self_channels() -> set[str]:
     """[anchor_hub] slack_allow_self_channels as a set of channel ids (a list, or a comma- or whitespace-separated string)."""
@@ -167,21 +169,20 @@ def run(hub: Hub):
                                            "text": "(caught up) " + txt[:140] + ("…" if len(txt) > 140 else ""), "url": url, "ts": m["ts"],
                                            "full": m.get("text") or "", "meta": {**ids(m), "caught_up": True}}); n += 1
         return n
-    def watch():
-        last_catch = time.time()
-        while True:
-            time.sleep(60)
-            try: ok = bool(client.is_connected())
-            except Exception: ok = False
-            with hub.lock: hub.status["slack"]["connected"] = ok
-            err = None if ok else "socket not connected"
-            if time.time() - last_catch >= HEALTH:
-                last_catch = time.time()
-                try:
-                    n = catch_up()
-                    hub.push.setdefault("slack", {})["last_catchup"] = now_iso()
-                    if n: hub.push["slack"]["push_miss"] = now_iso(); log.warning("slack: catch-up found %d message(s) the socket did not deliver", n)
-                except Exception as e: err = err or f"catch-up failed: {str(e)[:80]}"; log.warning("slack catch-up: %s", str(e)[:160])
-            hub.health("slack", ok and err is None, err)
+    last_catch = [time.time()]
+    def watch_pass():
+        try: ok = bool(client.is_connected())
+        except Exception: ok = False
+        with hub.lock: hub.status["slack"]["connected"] = ok
+        err = None if ok else "socket not connected"
+        if time.time() - last_catch[0] >= HEALTH:
+            last_catch[0] = time.time()
+            try:
+                n = catch_up()
+                hub.push.setdefault("slack", {})["last_catchup"] = now_iso()
+                if n: hub.push["slack"]["push_miss"] = now_iso(); log.warning("slack: catch-up found %d message(s) the socket did not deliver", n)
+            except Exception as e: err = err or f"catch-up failed: {str(e)[:80]}"; log.warning("slack catch-up: %s", str(e)[:160])
+        hub.health("slack", ok and err is None, err)
+    def watch(): guarded_loop(hub, "slack", watch_pass, every=lambda: WATCH, retry=WATCH, pause_first=True)    # a pass that raises is logged and the next one runs a minute later
     hub.catchups["slack"] = lambda since: catch_up(since)
     threading.Thread(target=watch, daemon=True).start()
