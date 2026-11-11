@@ -120,7 +120,8 @@ another statement shares them), a change whose changed lines in that function ar
     *names*), and the registrations at module level that read the name (a call such as mcp.tool()(f) is an effect that takes the file
     whole). A suite that reads names wide (getattr(module, <not a literal>), a module loaded by a path in a variable) is not chosen by that:
     it does not name the function, and the old rule chose it only if it ran the function;
-  * every suite that ran code which reads a docstring itself (an attribute `__doc__`, getdoc, get_docstring, render_doc, help) or hands a
+  * every suite that ran code which reads a docstring itself (an attribute `__doc__`, getattr(x, "__doc__"), getdoc or an alias of it made by
+    `from inspect import getdoc as gd`, get_docstring, render_doc, help) or hands a
     function to a registry that builds a description from it (add_tool, from_function, add_resource, add_prompt, mcp.tool(...)(fn)): DOC_CALLS;
     the checkout has none today, so this adds nothing now;
   * not the suites that only ran the body, and not the callers of the function.
@@ -129,10 +130,15 @@ reads the docstring at import: an @mcp.tool's is the description a session reads
 reads by: `obj.method`), a class, and the module's own docstring (read by name already: `client.__doc__`) are selected as before. So is a
 module that calls globals(). Limits, kept honest: a changed line that is blank or starts with `#` inside an undecorated docstring selects nothing (the line loop skips it as
 a comment, as it always did); a suite that fetches a function by a variable name (getattr(module, name), inspect.getmembers,
-`from m import *`) and then reads its docstring is not reached by name: tests/suitemap_scenario.py scans stackshot/, tools/ and tests/ for
-every docstring-reading or docstring-registering form and fails on a use that is not on its short allow list, so the first one to appear is
-looked at by its author. The readers of a docstring in non-suite code that DOC_CALLS does not know (a registry applied inside a function by
-another name: click, typer, fastapi) are the same case.
+`from m import *`) and then reads its docstring is not reached by name, and a suite's own docstring reads are not a guard (the name rule
+handles suites), so help(getattr(m, n)) in a suite is covered by neither. The tripwire in tests/suitemap_scenario.py selects nothing: it
+only makes a new use fail that scenario. It scans every Python file of the checkout (a .py file or a script with a python shebang) for the
+common forms (.__doc__, getdoc, getmembers, get_docstring, render_doc, help(...), getattr(x, "__doc__"), pydoc, doctest, `import *`, and the
+registries add_tool, .tool(, .resource(, .prompt(, .command(, add_api_route, from_function, add_resource, add_prompt, as a call, a bare call
+of the double form tool()(f) or a decorator) and pins the number of uses of each form per file, so a new use, in a file with an entry or not,
+fails until its author has looked at it. Left out because no code here uses them and they are implausible: vars(fn)["__doc__"],
+operator.attrgetter("__doc__"), an eval or exec string, and a registry applied through a variable (click, typer or fastapi by another call
+shape). A module-level function a suite reads by one of those is selected only if the suite names it.
 SUITEMAP_DOCSTRING_RULE=D1 (D2 by default; any other value is an error, checked when a command starts) gives
 the old rule everywhere: a docstring is part of the body. `audit` applies the same rule on both maps.
 

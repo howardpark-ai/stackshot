@@ -206,8 +206,9 @@ does both (its docstring has the rules in full):
   suites that ran code reading a docstring (`__doc__`, `getdoc`), not every suite that ran the function. A decorated function's docstring (an
   `@mcp.tool`'s is the description a session reads), a method's, a class's, a docstring changed together with its function's code, one that
   shares a line with other code and any file that calls `globals()` are selected as before. The rule's limit: a suite that fetches a function
-  by a variable name and then reads its docstring is caught only by the tripwire in `tests/suitemap_scenario.py`, which fails on any new use
-  of a docstring-reading or docstring-registering form that is not on its allow list.
+  by a variable name and then reads its docstring is not selected by it. The tripwire in `tests/suitemap_scenario.py` selects nothing; it only
+  makes a new use of the common docstring-reading and docstring-registering forms fail that scenario until its author has looked at it and
+  pinned it on the allow list (forms with no use here, such as `vars(fn)["__doc__"]`, `attrgetter` or an `eval` string, are not scanned).
   A new file (added, or a rename's new path) reaches the suites that listed its directory; in a
   directory no measured suite lists, every suite, since code may look it up by a name nobody tried before (the checkout and
   `tests/` are listed by every suite: the import machinery lists the directories on `sys.path`). No map, a change to the harness (`.github/`, `tests/run-suite`, `pyproject.toml`, `uv.lock`,
