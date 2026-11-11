@@ -378,7 +378,7 @@ def obsolete_wait_evidence(gid: str, items: dict[str, dict[str, Any]], by_num: d
     wb = meta.get("wait_basis")
     basis = " ".join(str(wb.get("text") or "").split()) if isinstance(wb, dict) else ""
     head = "; ".join(x for x in ((f"The wait began {_stamp(since)} ({_hours(max(0.0, env.clock() - since))} ago)" if since else ""), (f"basis: {_clip(basis, 200)}" if basis else ""),
-                                 (f"wake {meta['wake']}" if meta.get("wake") else "")) if x)
+                                 (f"{'until' if _wt.stored_until(meta) else 'wake'} {_wt.wake_value(meta)}" if _wt.wake_value(meta) else "")) if x)
     ctx = ([head] if head else []) + [f"- {c}" for c in closed[:5]] + [f"- page: {ln}" for ln in lines]
     sig = hashlib.sha1(("|".join(sorted(keys)) + "||" + "|".join(lines)).encode("utf-8")).hexdigest()[:12]
     return "; ".join(parts), ctx, sig, bool(closed)

@@ -691,9 +691,9 @@ def _plan_waiting(env: Env, plan: Plan, gid: str, it: dict[str, Any], mod: "_mod
                 else:
                     mover, swapped = _take(env, plan, gid, mod2.mover, project, "mover")
                     set_["mover"] = mover
-                    plan.note(gid, "snooze_alive", f"a time wait (wake {m.get('wake')}) with none of his words in its answers and no real date: the hold goes, the wake stays as the check-back, "
+                    plan.note(gid, "snooze_alive", f"a time wait (wake {m.get('wake')}) with none of his words in its answers and no real date: the hold goes, the wake stays as a backstop, "
                                                   f"the item is alive with {env.label(mover)}", hand=False)
-                    notes.append("a snooze: the hold goes, the wake stays as the check-back")
+                    notes.append("a snooze: the hold goes, the wake stays as a backstop")
                     who = f"{_model.owner_display()} moves it" if _model.is_owner(mover) else "an agent moves it"
                     _commit(env, plan, gid, it, f"{today_state} → alive, {who} (snooze: none of his words found)", set_, drop, notes, env.label(mover))
                     return

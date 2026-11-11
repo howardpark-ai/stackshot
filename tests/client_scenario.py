@@ -45,6 +45,10 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.core import store as _core_store
 server._publish = lambda: None
 check("a valid token names its machine", server._client_machine("Bearer " + tok) == "box-far" and server._client_machine("bearer " + mine) == me)
@@ -92,8 +96,8 @@ WK = (server._pages.zone_now() + server.dt.timedelta(days=5)).strftime("%Y-%m-%d
 BAS = "visit on " + (server._pages.zone_now() + server.dt.timedelta(days=9)).strftime("%Y-%m-%d")      # a time wait carries a reason
 for i in range(2, 12): mk(i)
 mk(20)                                                             # an item that others wait on
-res, err = upd(2, hold=True, wake=WK, wait_basis=BAS)
-check("hold=true behaves as before: a session's hold with a wake and a reason is accepted", not err and server._is_held(server._load("a2")), (err, rdm(2)))
+res, err = upd(2, hold=True, recycle=True)
+check("hold=true behaves as before: a session's hold for a pane recycle is accepted", not err and server._is_held(server._load("a2")), (err, rdm(2)))
 hs = rdm(2).get("hold_set") or {}
 check("…and records who set it and when, nothing more (the reason is the wait_basis, not in the hold record)", set(hs) == {"at", "by"} and hs["by"] == "sparrow" and abs(hs["at"] - _t.time()) < 60, hs)
 check("get shows who set the hold and when", "hold: set by sparrow " in server.stackshot_get("a2"), server.stackshot_get("a2"))
@@ -106,7 +110,7 @@ check("the update tool's text no longer invites a session to park its own item: 
       server._UPDATE_DESC[:200])
 # the server's own holds are untouched: the board button records the board as the setter
 mk(12)
-server._update("a12", hold=True, wake=WK, wait_basis=BAS, sender="sparrow")
+server._update("a12", hold=True, recycle=True, sender="sparrow")
 check("the core write (what the server's own paths use) holds as before", server._is_held(server._load("a12")), rdm(12))
 
 # the report: read only, a hold nothing holds now
@@ -125,12 +129,12 @@ try: rows = server._holds_unexplained(); rep = server._holds_report()
 finally: server._scoped_anchors = _sa
 gids = [r["gid"] for r in rows]
 check("the report lists a hold nothing holds now (stored before the record, recorded, or with a stored reason), and none that an after, a recycle, needs external or an anchor holds",
-      {"a13", "a14", "a15", "a12"} <= set(gids) and not {"a16", "a17", "a18", "a10", "a19", "a1", "a2"} & set(gids), gids)
+      {"a13", "a14", "a15"} <= set(gids) and not {"a16", "a17", "a18", "a10", "a19", "a1", "a2"} & set(gids), gids)
 check("a malformed record (a value that is no number, a record that is no object) breaks nothing and reads as no record", {"a21", "a22"} <= set(gids)
       and all(r["at"] == 0 for r in rows if r["gid"] in ("a21", "a22", "a13")) and next(r for r in rows if r["gid"] == "a22")["by"] == "", [r for r in rows if r["gid"] in ("a21", "a22")])
 row = next(r for r in rows if r["gid"] == "a14"); old = next(r for r in rows if r["gid"] == "a13")
-check("each row has the owner, the wake, who set it and when; a hold from before the record says so", row["owner"] and row["wake"] == "2026-11-20" and row["by"] == "sparrow" and row["at"] > 0
-      and old["by"] == "" and old["at"] == 0 and old["wake"] == "2026-11-19", (row, old))
+check("each row has the owner, the wake, who set it and when; a hold from before the record says so", row["owner"] and wk_(row) == "2026-11-20" and row["by"] == "sparrow" and row["at"] > 0
+      and old["by"] == "" and old["at"] == 0 and wk_(old) == "2026-11-19", (row, old))
 check("the printed report: one line per item with mover, wake, setter and time", "a14 · mover sparrow · wake 2026-11-20 · set by sparrow (" in rep and "a13 · mover sparrow · wake 2026-11-19 · set by unknown (before the record)" in rep
       and "a16 ·" not in rep and "update clear_hold=true" in rep, rep)
 check("the report writes nothing: every item file is as it was", before == {f.name: f.read_text() for f in (T / "store/a").glob("*.json")})
@@ -153,9 +157,9 @@ check("a hold time outside 0 < t < year 2100 (1e12, 1.76e12, 1e300, \"1e12\", in
       all(server._rmod.hold_at({"metadata": {"hold_set": {"at": v}}}) == 0.0 for v in BAD.values()) and all(f"a{n} · mover sparrow · wake 2026-11-28 · set by sparrow (before the record)" in rep_ for n in BAD)
       and all(next(r for r in rows_ if r["gid"] == f"a{n}")["at"] == 0 for n in BAD) and all(server.stackshot_get(f"a{n}") for n in BAD) and not upd(30, next="sparrow: the step that comes now", dropped=[1])[1]
       and server._rmod.hold_at({"metadata": {"hold_set": {"at": _t.time() - 5}}}) > 0, (rep_[:300], rows_[:2]))
-mk(38); upd(38, hold=True, wake=WK, wait_basis=BAS); mk(38, hold=True, wake=WK, wait_basis={"text": BAS, "wake": WK, "by": "x", "at": 1}, hold_set={"at": 1790000000.0, "by": "home-first"}); upd(38, hold=True, wake=WK)
+mk(38, hold=True, recycle=True, hold_set={"at": 1790000000.0, "by": "home-first"}); upd(38, hold=True)      # a hold with a date folds into until and keeps no record; one that waits on an item or a recycle keeps its flag and record
 check("hold=true passed again on an item already held keeps the original record (who and when)", rdm(38)["hold_set"] == {"at": 1790000000.0, "by": "home-first"}, rdm(38))
-mk(39, hold=True, wake=WK, wait_basis={"text": BAS, "wake": WK, "by": "x", "at": 1}); upd(39, hold=True, wake=WK)
+mk(39, hold=True, recycle=True); upd(39, hold=True)
 check("…but a hold with no record gets one when a session passes hold=true on it", set(rdm(39).get("hold_set") or {}) == {"at", "by"}, rdm(39))
 check("a hold_set.by with newlines is collapsed to one line before it reaches board.md, the report or get: no line is injected",
       "## injected heading" not in "\n".join(l for l in md_.splitlines() if l.startswith("## ") or l.startswith("- [a1]")) and "set by sparrow ## injected heading - [a1](#x) fake" in br_.replace("\n", " ") + md_
@@ -174,8 +178,8 @@ check("a held item whose after item is already closed, or missing, is listed as 
 
 # the briefing data: the holds set in the last 24 hours (board.md's head, the brief tool, the session-start brief); a malformed record breaks none
 for i in (3, 4, 5): mk(i)
-upd(3, hold=True, wake=WK, wait_basis=BAS)                                                        # new, nothing holds it
-upd(4, hold=True, wake=WK, after=["a20"], wait_basis=BAS)                                         # new, an open after holds it
+mk(3, hold=True, wake=WK, hold_set={"at": _t.time() - 60, "by": "sparrow"})                      # new, nothing holds it
+mk(4, hold=True, wake=WK, after=["a20"], hold_set={"at": _t.time() - 60, "by": "sparrow"})       # new, an open after holds it
 mk(23, hold=True, wake="2026-11-24", hold_set={"at": _t.time() - 3 * 86400, "by": "sparrow"})   # set three days ago: not new
 md = server._rmod.render(str(_core_store.STORE), "full"); br = server._rmod.render(str(_core_store.STORE), "brief")
 sect = md[md.find("## New holds"):md.find("Shared by every")]

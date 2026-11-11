@@ -381,8 +381,8 @@ def stored_gap(meta: dict[str, Any], facts: Facts, gid: str, now: float) -> Gap 
             return Gap(STORED, 0, "anchor", kind, f"the item waits on an anchor and names none in wait_anchor; it has one anchor scoped to it ({_clip(urls[0], 60)})", {"op": "anchor_pick", "url": urls[0]}, token(STORED, "anchor", urls[0]))
         return Gap(STORED, 0, "anchor", kind, "the item waits on an anchor and names none in wait_anchor" + ("" if not urls else f" (it has {len(urls)} anchors scoped to it: say which)"), {}, token(STORED, "anchor", "none"))
     if kind == "relay":
-        return Gap(STORED, 0, "relay", kind, "the item waits on news only the owner relays and has no ask_by day, so nobody is asked", {}, token(STORED, "relay", "ask_by"))
-    return Gap(STORED, 0, "time", kind, "the item waits on a time and has no wake, so nothing ends the wait", {}, token(STORED, "time", "wake"))
+        return Gap(STORED, 0, "relay", kind, "the item waits on news only the owner relays and has no until date, so nobody is asked", {}, token(STORED, "relay", "ask_by"))
+    return Gap(STORED, 0, "time", kind, "the item waits on a time and has no until date, so nothing ends the wait", {}, token(STORED, "time", "wake"))
 
 
 def event_gap_stored(meta: dict[str, Any]) -> Gap | None:
@@ -476,7 +476,7 @@ def history(plan: dict[str, Any], gap_line: str, pos: int, back: str, mover: str
     if op == "proof":
         return f"step {plan.get('pos')} now ticks when {plan.get('proof')} happens ({quote}). step_proof=none sends it back and the server leaves that step alone"
     if op == "backstop":
-        return f"backstop set: the wait had no day to come back on; ask_by={back}. clear_wait=true sends it back and the server leaves that wait alone"
+        return f"backstop set: the wait had no day to come back on; until={back}. clear_wait=true sends it back and the server leaves that wait alone"
     return f"wait completed: the anchor wait named none; wait_anchor={_clip(plan.get('url'), 50)} (the item's one scoped anchor). clear_wait=true sends it back and the server leaves that wait alone"
 
 

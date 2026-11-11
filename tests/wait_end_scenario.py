@@ -65,6 +65,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
@@ -148,6 +152,10 @@ g = gaps("team-back: write the summary")
 check("1 a step that waits for nothing is no gap", g == [], g)
 w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover="team-back", needs=[])
 check("1 a stored event wait with no backstop gets a backstop day", len(w) == 1 and w[0].kind == WE.STORED and w[0].plan == {"op": "backstop"}, w)
+w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover="team-back", until="2099-01-01", needs=[])
+check("1 …a stored event wait whose until is its backstop has none to fix (the wait's end date is read from until, not only from ask_by and wake)", w == [], w)
+w = gaps("x", state="waiting", wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover="team-back", until="someday", needs=[])
+check("1 …an until that is no date is no backstop: the stored event wait is asked for one", len(w) == 1 and w[0].plan == {"op": "backstop"}, w)
 w = gaps("x", state="waiting", wait_kind="event", wait_event="nonsense words", post_wake_mover="team-back", ask_by="2099-01-01", needs=[])
 check("1 …a stored event the server cannot read is a question", len(w) == 1 and w[0].plan == {}, w)
 w = gaps("x", state="waiting", wait_kind="event", wait_event="job_run nightly", post_wake_mover="team-back", ask_by="2099-01-01", needs=[])
@@ -196,7 +204,7 @@ r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
 m = mt(9201)
 check("3 after: the pass sets after on the item it waits for", m.get("after") == ["g9202"], m)
 check("3 …the item waits on an item's close, with the mover as post_wake_mover and no stored mover", MODEL.derive(rd(9201)).state == MODEL.WAITING and m.get("post_wake_mover") == BACK and "mover" not in m and m.get("wait_kind") == "item", m)
-check("3 …a backstop day is set (now plus cap_days), and the stored phase is waiting on an item", bool(m.get("ask_by")) and (m.get("phase"), m.get("waits_on")) == ("waiting", "item"), m)
+check("3 …a backstop day is set (now plus cap_days), and the stored phase is waiting on an item", bool(ab_(m)) and (m.get("phase"), m.get("waits_on")) == ("waiting", "item"), m)
 check("3 …History has one line saying what was set and how to send it back", len(log(9201)) == 1 and "after=" in log(9201)[0] and "clear_after" in log(9201)[0], log(9201))
 check("3 …the fix is recorded, and the wait-end finding is not sent (the message is the audit's retired)", any(SF.mark_tokens(m, SF.WAIT_END)) and not [x for x in sent if "· wait-end ·" in x[1]], (m.get(SF.MARK), sent))
 check("3 …one fyi message to the mover names the item and the way back", len([x for x in sent if x[0] == BACK]) == 1 and sent[0][2] is True and "clear_after" in sent[0][1] and "9201" in sent[0][1], sent)
@@ -222,7 +230,7 @@ check("3 link: an anchor wait, with the link added to the anchors scoped to the 
       and any(e["url"].endswith("/issues/5") and "g9213" in (e.get("items") or []) for e in json.loads((T / "store/anchors.json").read_text()).get("projects/alpha", [])), (mt(9213), (T / "store/anchors.json").read_text()))
 check("3 step proof: the step carries its proof and the item stays alive", list((mt(9214).get("step_proof") or {}).values()) == ["pr_merged other/repo#8"] and MODEL.derive(rd(9214)).state == MODEL.ALIVE, mt(9214))
 check("3 delivery: a step that is only `ship PR #9` gets its proof", list((mt(9215).get("step_proof") or {}).values()) == ["pr_released acme/widgets#9"], mt(9215))
-check("3 a stored event wait with no backstop gets one", bool(mt(9216).get("ask_by")) and mt(9216).get("wait_event") == "pr_merged other/repo#7" and len(log(9216)) == 1 and "backstop" in log(9216)[0], (mt(9216), log(9216)))
+check("3 a stored event wait with no backstop gets one", bool(ab_(mt(9216))) and mt(9216).get("wait_event") == "pr_merged other/repo#7" and len(log(9216)) == 1 and "backstop" in log(9216)[0], (mt(9216), log(9216)))
 check("3 each fix has a History line and a record", all(len(log(i)) == 1 and SF.mark_tokens(mt(i), SF.WAIT_END) for i in (9211, 9212, 9213, 9214, 9215, 9216)), [(i, log(i)) for i in (9211, 9212, 9213, 9214, 9215, 9216)])
 check("3 …the mover gets one message for all the items", len([x for x in sent if x[0] == BACK]) == 1 and all(str(i) in sent[0][1] for i in (9211, 9212, 9213, 9214, 9215, 9216)), sent)
 
@@ -306,15 +314,15 @@ item(9613, "home-other: build the thing")
 item(9614, "team-back: wait for the reply in https://github.com/acme/widgets/issues/9", wake="whenever")
 wipe()
 r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
-check("6 a stored ask_by that is no date is no backstop: the pass writes a real day and says so", ISO.match(str(mt(9611).get("ask_by"))) and len(log(9611)) == 1 and mt(9611)["ask_by"] in log(9611)[0], (mt(9611), log(9611)))
-check("6 …an item wait set beside a wake that is no date gets a real backstop day", mt(9612).get("after") == ["g9613"] and ISO.match(str(mt(9612).get("ask_by"))), mt(9612))
-check("6 …an anchor wait too", mt(9614).get("wait_kind") == "anchor" and ISO.match(str(mt(9614).get("ask_by"))), mt(9614))
+check("6 a stored ask_by that is no date is no backstop: the pass writes a real day and says so", ISO.match(str(ab_(mt(9611)))) and len(log(9611)) == 1 and ab_(mt(9611)) in log(9611)[0], (mt(9611), log(9611)))
+check("6 …an item wait set beside a wake that is no date gets a real backstop day", mt(9612).get("after") == ["g9613"] and ISO.match(str(ab_(mt(9612)))), mt(9612))
+check("6 …an anchor wait too", mt(9614).get("wait_kind") == "anchor" and ISO.match(str(ab_(mt(9614)))), mt(9614))
 check("6 …and none of them is left as a wait nothing can end", all(WATCH.can_end(mt(i)) for i in (9611, 9612, 9614)), [mt(i) for i in (9611, 9612, 9614)])
 item(9615, "x", needs=[], wait_kind="event", wait_event="pr_merged other/repo#7", post_wake_mover=BACK, wake="2099-01-01")
 d = rd(9615); d["metadata"].pop("state", None); (T / "store/g/9615.json").write_text(json.dumps(d))
 wipe()
 r = AR.filing_pass(now=now + 4 * HOUR, items=store_items(), anchors={}, env=env(**FIXING))
-check("6 a wake that is a date is the backstop as it stands (nothing to fix)", mt(9615).get("wake") == "2099-01-01" and not mt(9615).get("ask_by") and not log(9615), mt(9615))
+check("6 a wake that is a date is the backstop as it stands (nothing to fix)", wk_(mt(9615)) == "2099-01-01" and not ab_(mt(9615)) and not log(9615), mt(9615))
 
 for p in (T / "store/g").glob("*.json"): p.unlink()
 item(9621, "team-back: wait for the reply in https://github.com/acme/widgets/issues/21")
@@ -448,7 +456,7 @@ try:
     r = AR.filing_pass(now=now, items=store_items(), anchors={}, env=env(**FIXING))
 finally:
     WATCH.can_end = real_can_end
-check("7 a backstop that does not make the wait endable is refused: nothing written, no record of a fix", not mt(9731).get("ask_by") and not log(9731) and not SF.mark_tokens(mt(9731), SF.WAIT_END) and not r["wait_end"]["fixed"], (mt(9731), r.get("wait_end")))
+check("7 a backstop that does not make the wait endable is refused: nothing written, no record of a fix", not ab_(mt(9731)) and not log(9731) and not SF.mark_tokens(mt(9731), SF.WAIT_END) and not r["wait_end"]["fixed"], (mt(9731), r.get("wait_end")))
 
 # ================================================================ 8. a handled step is its whole text; a handled item line stays handled when its target closes; broad words of other lines
 def toks_of(i, items_open=lambda ref: ""):

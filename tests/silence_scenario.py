@@ -119,7 +119,7 @@ check("1 a wake with a wait_basis, a hold with a dated wake, an item behind an o
       not any(f["id"] in (bid(3), bid(5), bid(6), bid(7), bid(9)) for f in fs), fs)
 detail14 = next((f["detail"] for f in fs if f["id"] == bid(14)), "")
 check("1 a wake alone, ahead (item 14) or passed (item 4), is a reminder and leaves the item on agent: found, and the evidence says the wake only reminds",
-      {bid(4), bid(14)} <= set(got) and detail14.startswith("no write for 50 minutes and a wake that only reminds and does not park the item"), fs)
+      {bid(4), bid(14)} <= set(got) and detail14.startswith("no write for 50 minutes and a wake kept as a hand-off's backstop, which is no wait"), fs)
 check("1 the owner's item, a closed item and a state that is itself a wait: none found", not any(f["id"] in ("board#10", "board#11", "board#12") for f in fs), fs)
 check("1 the pass raises exactly these and no other", got == [bid(1), bid(13), bid(14), bid(4)], got)
 check("1 a finding is the daily run's `stale` finding by key (one finding to both)", all(AR.finding_key(f) == (f["id"], "stale", "") for f in fs))

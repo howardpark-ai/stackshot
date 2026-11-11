@@ -21,7 +21,7 @@ has a later `statusUpdatedAt`, so a turn starting restarts the count.
 The cold call is made at most once per item in `KEEP` seconds (it bounds a ping-pong between two sessions that each hand the item back).
 
 An item is looked at only when its work is due now (`not_due`): an item the board shows as waiting (a hold with a dated wake, an `after` link to an open item, a stored wait, a wake that carries a wait_basis) or that is the owner's
-or an outsider's move is left alone, whatever the mover's role, and any record the pass kept for it is dropped, so the clock starts when the item becomes due. A wake alone is a reminder and holds nothing off.
+or an outsider's move is left alone, whatever the mover's role, and any record the pass kept for it is dropped, so the clock starts when the item becomes due. A date alone is a wait until it (outside a hand-off), so the item reads as waiting and is left alone; only a wake kept as a hand-off's backstop leaves the item on agent and holds nothing off.
 
 A pause of the whole pass always ends on its own (a pause once outlasted its window and nothing woke idle builders): `[stall] paused_until`
 (an ISO-8601 time with an offset) holds the pass until then, and `enabled = false` holds it for at most `max_pause_hours` (4) from when the server first saw it; a paused_until further out than
@@ -67,7 +67,7 @@ RESTARTS = 3            # the mover's confirms that start an item's episode over
 
 def not_due(item: dict[str, Any], now: float, after_open: Callable[[dict[str, Any]], Any] | None = None) -> str:
     """Why the item's work is not due now ("" when it is, and the pass may look at it). The board's own phase decides what waits: an item the board shows as waiting (`model.shown_waiting`: a hold with a dated wake, an
-    `after` link to an item still open, a stored wait, a wake that carries a wait_basis, the states parked, blocked, outside and verifying) is left alone, and nothing else is. A wake alone is a reminder that leaves the
+    `after` link to an item still open, a stored wait, a wake that carries a wait_basis, the states parked, blocked, outside and verifying) is left alone, and nothing else is. A wake kept as a hand-off's backstop (no until) leaves the
     item on agent, so it does not hold the pass off; a wake that has passed is due as before. Not on an agent at all are an item in the owner's move (the states your-call and your-step, a need of `decision`) and one that
     waits on an outsider (a need of `external`): those are the owner's and the outsider's lanes on the board, never an agent's work. A doing item carries no expected time, so a quiet mover is due at once."""
     if item.get("status") != "open":
@@ -88,7 +88,7 @@ def not_due(item: dict[str, Any], now: float, after_open: Callable[[dict[str, An
 
 
 def due_at(item: dict[str, Any], now: float | None = None) -> float:
-    """When the item's work fell due: its wake once it has passed (0.0 when it has none, or it is still ahead, a reminder). The pass counts a mover's idle time from then, as it counts from the item's arrival, so
+    """When the item's work fell due: its wake once it has passed (0.0 when it has none, or it is still ahead). The pass counts a mover's idle time from then, as it counts from the item's arrival, so
     an item whose wake has just passed gets the minutes before its first step, not an instant one on the pane's age alone. With no `now` the wake is returned whenever it is set."""
     m = item.get("metadata") or {}
     wake = _wt.wake_epoch(_wt.wake_value(m)) if _wt.wake_value(m) else None      # a stored until is read as a wake is

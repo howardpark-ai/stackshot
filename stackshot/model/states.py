@@ -11,7 +11,7 @@ The seven words, as an older item stored them:
   your-step  step: one line (a summary; what the owner runs is in the lines of next that start with his name, step_commands.py), of the single thing only the owner does
   outside    needs holds external, party (who, free text) and chase (YYYY-MM-DD, the day to chase)
   blocked    after names an item, and supplies: one line, what that item's output gives this one
-  parked     on hold with a wake date (a wake alone is a reminder, never a park), and either the owner's recorded words for it (cap_ok) or a wait_basis
+  parked     on hold with a wake date (a date alone is a wait until it, outside a hand-off, and states no park), and either the owner's recorded words for it (cap_ok) or a wait_basis
   verifying  proof (one line: what proves it works) and end (YYYY-MM-DD, today to 30 days out, when the checking ends); needs names an agent session.
              The end date stands as the item's wait, like a wake (waiting.py reads it): no separate wake, no idle nudge before it
 
@@ -250,7 +250,7 @@ def problems(meta: dict[str, Any], state: str, today: dt.date, *, check_dates: b
         if not _wt.wake_value(meta):
             out.append("wake=YYYY-MM-DD")
         if not _wt.is_held({"status": "open", "metadata": meta}):
-            out.append("hold=true (a wake alone is a reminder, never a park)")
+            out.append("hold=true (the parked state stands on a hold: a date alone makes the item wait until then, outside a hand-off, and states no park)")
         if not (_wt.wake_value(meta) and _wt.cap_words(meta, "wake")):
             out.append("the owner's words for the wake (said=[...], which records cap_ok) or wait_basis=\"<what happens> YYYY-MM-DD\"")
     elif state == "verifying":

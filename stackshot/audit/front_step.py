@@ -185,7 +185,7 @@ def overdue(meta: dict[str, Any], step: Any, mover: str, today: dt.date, acted: 
 
 
 def held(text: Any, mover: str, is_front: Callable[[str], bool], same: Callable[[str, str], bool]) -> str:
-    """The name a step opens with when the write check refuses it, "" when it passes: the opener is a front agent (`is_front`), which gets no work notice and whose reminder wakes are refused, so nothing
+    """The name a step opens with when the write check refuses it, "" when it passes: the opener is a front agent (`is_front`), which gets no work notice and whose own wake or until dates (with no hold) are refused, so nothing
     wakes it for the step, and the item's mover is a session other than it (`same`). Passes: a step that names no one or the owner, a step of the item's own mover, an item with no mover or one moved by the
     owner or an outside party, and any opener that is not a front agent (a background agent can be woken)."""
     nm, mv = _steps.opener(text), str(mover or "").strip()

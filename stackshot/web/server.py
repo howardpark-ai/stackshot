@@ -137,6 +137,7 @@ from stackshot.model import close_repair as _cr  # noqa: E402  — the descripti
 from stackshot.waits import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
 from stackshot.waits import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
 from stackshot.waits import wait_end as _we  # noqa: E402  — a next line that waits in words for something nothing tells the item has happened, and the fix the filing pass makes of it (wait_end.py)
+from stackshot.waits import until_write as _uw  # noqa: E402  — the write side of the one `until` date of a wait: the old fields folded into it, a kind with no date (until_write.py)
 from stackshot.model import ask_leaves as _askl  # noqa: E402  — a wrong or moot ask leaves the owner's move on its own: the pure half (ask_leaves.py)
 from stackshot.model import note_read as _noteread  # noqa: E402  — what the owner's note on his step says: done, or a later time (note_read.py)
 from stackshot.waits import ladder as _ladder  # noqa: E402  — the one ladder a quiet mover's item climbs, behind [ladder] enabled; the pure half (ladder.py)
@@ -563,9 +564,58 @@ def _is_held(item: dict[str, Any]) -> bool:
     """On hold (its lane stays 'on agent' and a secondary property renders it as 'on hold'):
     an open item with metadata.hold, optionally metadata.wake. needs, due and next stay as they are.
     An item whose needs hold decision is never on hold, whatever its
-    stored flag says (render.is_held, the same rule): it waits on the owner's call, and the update tool drops such a flag on
-    the item's next write."""
+    stored flag says (render.is_held, the same rule for the flag): it waits on the owner's call, and the update tool drops such a flag on
+    the item's next write. The flag only: a wait on a date alone is parked too, as _is_parked reads it."""
     return _hold_flag(item) and not _waits_decision(item.get("metadata") or {})
+
+
+def _is_parked(item: dict[str, Any]) -> bool:
+    """What the board draws as parked: the renderers' own rule (render.is_held), so a session reads what the board shows: an open item on hold (the flag), or waiting on one date alone (an `until`
+    with no kind or the kind time), never one whose needs hold decision. `_is_held` above is the hold flag alone, for the logic that releases and sets holds."""
+    return _rmod.is_held(item)
+
+
+def _backstop_field(item_id: str, status: str) -> str:
+    """The working field a hand-off kept its date in ("wake" or "ask_by"), "" when the item a write has just saved stores its date as until (or none)."""
+    try:
+        m = _load(_norm_id(item_id, bare=_bare_id_ok(status))).get("metadata") or {}
+    except Exception:  # noqa: BLE001
+        return ""
+    if _wt.stored_until(m):
+        return ""
+    return "wake" if _model.clean(m.get("wake")) else "ask_by" if _model.clean(m.get("ask_by")) else ""
+
+
+def _wait_is_bare(m: dict[str, Any]) -> bool:
+    """A date with nothing else stated beside it: no hold, no kind, no basis, no after link (the date is then a wait on that date alone, outside a hand-off)."""
+    return not m.get("hold") and not str(m.get("wait_kind") or "").strip() and not _wt.basis_of(m) and not _wt.after_of(m)
+
+
+def _hands_on(gid: str, was: dict[str, Any], now_item: dict[str, Any], handed: Any, writer: str, failed: list[bool] | None = None) -> bool:
+    """Does this write hand the item on to a session: a hand-off line in next, or a change of the DERIVED mover (what the hand-off record reads, handoff.detect): a mover argument, needs naming a
+    session, a reopen with one. The date a bare wait carries is left out of both readings (an item with it reads as waiting and has no mover), so the question is the write's own: with the date
+    it gives (or already held) set aside, did the mover change to a session other than the writer? A hand-off to the owner is none here (his step with a date is a park of its own). A reading that fails counts as a hand-off (fail closed), and says so in `failed` when the caller passes a list."""
+    if handed:
+        return True
+    try:
+        def undated(it: dict[str, Any]) -> dict[str, Any]:
+            m = it.get("metadata") or {}
+            return {**it, "gid": gid, "metadata": {k: v for k, v in m.items() if k not in ("wake", "until", "ask_by")}} if _wait_is_bare(m) else {**it, "gid": gid}
+        to = _ho.detect(undated(was), undated(now_item), _session_label(writer) or writer, writer if _anc.is_id(writer) else "", _ho_derive, _ho_same)
+        return bool(to) and not _model.is_owner(to)
+    except Exception as e:  # noqa: BLE001  — the reading is an extra: a failure fails closed, the date stays the hand-off's backstop and the item stays active (a park that hides a hand-off costs more than a date left as a wake)
+        print(f"handoff: {gid} backstop not judged: {e.__class__.__name__}: {e}; the date stays a backstop and the item stays active", file=sys.stderr, flush=True)
+        if failed is not None:
+            failed.append(True)
+        return True
+
+
+def _date_parked(item: dict[str, Any], unfolded: bool = False) -> bool:
+    """A wait stored as one date (`until`, no kind or the kind time) is what the old hold with a wake was: the write's notes and
+    relays read it as put on hold / released from hold. `unfolded`: the write began by unfolding a stored until into the old
+    working fields (so the until is not in the item yet): True for that read of the item as it was."""
+    m = item.get("metadata") or {}
+    return bool((unfolded or _wt.stored_until(m)) and _uw.kind_of(m) in ("", "time") and item.get("status") == "open" and _rmod.needs_kind(item) != "call")      # one rule with the board's (_is_parked): an item whose needs hold his decision is never parked
 
 
 def _migrate_holds() -> list[str]:
@@ -996,7 +1046,7 @@ _NEEDS_FORM = (
     "open the item counts as waiting without a hold, and when the last one closes it wakes and the sessions in its needs (else its mover) are told; a dropped one releases it too, a superseded one is "
     "followed to its replacement; a loop is refused; after=\"none\" clears. after is for a real dependency (this item needs that one's output), never for the order a builder takes its items in. "
     "A hold (hold=true) names what it waits for (a wake, after items, a notice from an anchor scoped to the item, a recycle, or a wait_basis window the work itself needs); one with none is refused. "
-    "A wake without hold=true, on an item you keep moving, is a reminder: the item stays active, unless the wake carries a wait_basis (a wake past the cap takes one): then the item is listed as waiting until that wake. "
+    "A wake (or until) without hold=true is a wait: the item is listed as waiting until that date (a wake past the cap takes a wait_basis); in an update that hands the item to another session it is only the hand-off's backstop and the item stays active. "
     "An item waiting on {OWNER} is never on hold: it carries needs=decision with its ask, or after=<the item that carries the ask>. needs names "
     "only who can move now. An item that waits on {OWNER} and on a session at once: where his answer could change with the session's work, or "
     "its work with his answer, the session goes first and adds decision when it is done (or the decision is its own item, linked with after=); "
@@ -1674,7 +1724,7 @@ def _open_item_named(ref: str) -> str:
         return ""
 
 
-def _gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None) -> str:
+def _gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None", gid: str = "", needs: list[str] | None = None, hold: bool | None = None, desc_set: bool = True, strict: bool = False, next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None, until_wait: bool = False, date_given: bool = False, hold_given: bool = False) -> str:
     """The item model's write guards (model_guards.py) on the item as a create or update leaves it: refuse, with what is wrong and the fix, a write that
     leaves an alive item with no valid mover, a wait without its input, post-wake mover, reason or end, a second mover in needs, a decision with a hold, a placeholder, a next line with
     no name or one that reads as a wait, or an alarming word. `touched` = the fields the write sets (None: a create or a reopen, every field is judged): a guard on a field runs
@@ -1696,7 +1746,7 @@ def _gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None
                                  after_open=lambda i_: _after_open(i_.get("metadata") or {}),
                                  anchored=lambda i_: bool(gid and _scoped_anchors(project, gid)),
                                  needs=needs, hold=hold, one_mover=bool(_cfg.get("model", "one_mover", default=True)), next_text=next_text, windows_text=windows_text, creating=creating,
-                                 defers_text=defers_text, named_open=_open_item_named, canon=_gh.resolve)
+                                 defers_text=defers_text, named_open=_open_item_named, canon=_gh.resolve, until_wait=until_wait, date_given=date_given, hold_given=hold_given)
     except Exception as e:  # noqa: BLE001  — the guard is an extra: a failure in it writes as before
         print(f"model guards: {gid or 'a new item'} not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         if strict:
@@ -2145,7 +2195,7 @@ def _struct_progress(m0: dict[str, Any], meta: dict[str, Any]) -> bool:
     return never_held and not removal
 
 
-_CLOCK_FIELDS = ("wake", "ask_by")    # the dates a mover can push out to buy time: a wake (a park's or a reminder's) and a relay or event wait's ask-by
+_CLOCK_FIELDS = ("wake", "ask_by")    # the dates a mover can push out to buy time: a wake (a park's or a hand-off backstop's) and a relay or event wait's ask-by
 
 
 def _clock_epoch(field: str, value: Any) -> float | None:
@@ -2313,12 +2363,12 @@ def _front_keeper(who: str, project: str = "") -> tuple[bool, str]:
 
 # A front agent does not watch handed-off work itself: stackshot
 # refuses a sender's wake or check on a handed-off item, and its text stops teaching it. The result lands through stackshot when the mover closes the
-# item or hands it back to the front agent (_tell_owner_close, _tell_handback); a front agent that sets its own reminder wake on an alive item another
-# session moves is polling work it handed away. Narrowed in review: only a reminder wake on an ALIVE item is refused. A hold with a
+# item or hands it back to the front agent (_tell_owner_close, _tell_handback); a front agent that sets its own wake or until date on an alive item another
+# session moves is polling work it handed away. Narrowed in review: only a date with no hold on an ALIVE item is refused. A hold with a
 # wake on a waiting or parked item is the park's own timer, fired by the server, and a done `check` is the server-run push the rule itself names,
 # so neither is gated; ask_by stays anyone's too. Only a front agent is refused (a background agent, the owner and a sender the roles do
 # not know pass), the mover's own wake passes, re-sending the wake an item already carries is no setting, and a watch_reason naming why no push
-# exists lets a real exception through. A wake already stored survives a hand-off made later: deliberate (it fires as a reminder to the keeper).
+# exists lets a real exception through. A wake already stored survives a hand-off made later: deliberate (it fires once, as a notice to the keeper).
 _WATCH_REASON_MIN = 15
 _WATCH_RULE = ("a front agent does not watch handed-off work itself (no wake or poll it sets): the result lands through stackshot when the mover closes the item or hands it back to you")
 
@@ -2580,7 +2630,7 @@ def _watch_others(item: dict[str, Any], sender: str, handed: list[str]) -> list[
 
 
 def _gate_sender_watch(gid: str, item_now: dict[str, Any], sender: str, *, handed: list[str] | None = None, watch_reason: str = "") -> str:
-    """Refuse a front agent's own reminder wake on an alive item another session moves (see the block above). Called only when the call sets a wake that
+    """Refuse a front agent's own wake or until date (no hold) on an alive item another session moves (see the block above). Called only when the call sets a wake that
     differs from the one the item carried. `item_now` = the item as this call leaves it (so a hand-off made in the same call counts: the old mover is no
     longer the mover); `handed` = the sessions its next hands the work to. → the reason to record on the item ("" when none was needed); raises ToolError
     otherwise. A failure of the check itself passes the write (one stderr line)."""
@@ -2665,7 +2715,7 @@ def _gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = "
             mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: _after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
             if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _ho_same(mod.mover, sender):
                 return
-            stored_wake = str((item.get("metadata") or {}).get("wake") or "")
+            stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
             stored_next = str((item.get("metadata") or {}).get("next") or "")
         else:
@@ -4070,7 +4120,7 @@ _ASK_TEXT_PARAMS = ("subject", "description", "next", "options", "said", "work",
                     "wait_anchor", "post_wake_mover", "then")                                                 # a stored string a session names, accepted as written (found by a real update call with a hedge in it)
 _ASK_NONTEXT_PARAMS = (
     "item_id", "status", "priority", "outcome", "wait_kind",                                                 # a fixed word, or the item's own id
-    "due", "wake", "expected_by", "ask_by",                                                                  # a date or a time
+    "due", "wake", "until", "expected_by", "ask_by",                                                                  # a date or a time
     "needs", "mover", "contact", "sender", "project",                                                        # a kind, or a session, a front agent or a page: a string with words in it is refused or not stored (a test sends one through the real update)
     "anchors", "after", "superseded_by",                                                                     # a link or an item id: the same test
     "done", "dropped", "rank",                                                                               # step numbers; a retired field
@@ -4349,7 +4399,7 @@ def _parse_wake(text: str) -> str:
 
 def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
     """Every open item with a readable wake, on hold or not: (gid, path, item, the moment it falls due). A held item's wake
-    releases the hold; a wake on an item not on hold is a reminder, which the pass tells and drops."""
+    releases the hold; a wake an item carries with no hold and no until (a hand-off's backstop, or one stored before until) is only a notice: the pass tells and drops it."""
     out = []
     for gid, p in _item_files():
         try:
@@ -4380,7 +4430,7 @@ def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
 
 
 def _next_wake() -> dt.datetime | None:
-    """The earliest moment an open item's wake falls due (a hold's or a reminder's), or None when no open item has one."""
+    """The earliest moment an open item's wake falls due (a hold's or a backstop's), or None when no open item has one."""
     return min((at for *_, at in _wakes()), default=None)
 
 
@@ -4389,8 +4439,8 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
     open item): every open item with metadata.hold whose metadata.wake has
     come ([instance] timezone; a date-only wake comes at the start of its day) is released, its hold and wake dropped and
     both clocks moved, as _update moves them; it is back in the lane its needs give it (your call, on others, on agent).
-    A wake on an item not on hold is a reminder (items kept showing "on hold" while their work was
-    live, because a wake set as a reminder parked them): at its moment the sessions its notices go to (_notice_to: the sessions in its needs, else its mover) are told once
+    A wake on an item not on hold, with no until, is a notice (items kept showing "on hold" while their work was
+    live, because a wake set as a notice parked them): at its moment the sessions its notices go to (_notice_to: the sessions in its needs, else its mover) are told once
     and the wake goes; status, hold, needs and the state clock stay as they were (the item never left its lane).
     The server's own act, not a session's: it owes no page and tells no keeper; it tells the item's mover, one line through
     push.py (the message tool's delivery: a pane by name or uuid, a cse_… session, queued when not live), and a delivery that
@@ -4420,11 +4470,14 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 continue
             meta = it.get("metadata") or {}
             wake = _wt.wake_value(meta)
+            had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a reminder: its end releases the item like a hold's
+            if had_u:
+                meta.pop("wait_kind", None)   # the date has come: the wait is over, its date and its kind go together (a wait stored by the old fields keeps what it had: the stored items are migrated apart)
             meta.pop("wake", None); meta.pop("until", None)
             meta.pop("watch_reason", None)    # a front agent's reason for watching belonged to this wake
             meta.pop("wait_basis", None)      # a wait that stood on a real-world date: the wake is spent, so is its basis
             _state_end(meta, "parked")        # a park that stood on that wake is over with it
-            if not _hold_flag(it):          # a reminder: told once, the wake dropped, nothing else moves
+            if not (_hold_flag(it) or had_u):          # a notice: told once, the wake dropped, nothing else moves
                 it["metadata"] = meta
                 it["updated"] = time.time()  # the item's own clock; the state clock and the confirm stay (a filing edit, like a recycle done)
                 what = f"reminder (wake {wake})"
@@ -4462,7 +4515,7 @@ def _back_words(meta: dict[str, Any], sh: Callable[[str], str] = str) -> str:
 
 
 def _reminder_to(meta: dict[str, Any]) -> list[tuple[str, str]]:
-    """Who a reminder (a wake on an item not on hold) tells: the sessions its notices go to (_notice_to: the sessions named in its needs, else its mover, else its
+    """Who a notice (a wake on an item not on hold) tells: the sessions its notices go to (_notice_to: the sessions named in its needs, else its mover, else its
     `then`, else the project's builder, else its -main agent: never the creator). → [(session id, why)], each once."""
     return _notice_to(meta)
 
@@ -4473,7 +4526,7 @@ def _wake_notify(gid: str, it: dict[str, Any], what: str, out: dict[str, list[tu
     the sessions in its needs other than the mover, else the page's keeper). The mover itself, when it is the one, hears the
     short line as before; another session hears the item, its mover and what to do with it, and on a pilot project the line
     is a pilot notice (a routing-log line the keeper rules on) naming the mover. Still after an open item, the line
-    says so. `reminder`: a wake on an item not on hold, which never left its lane; it goes to the mover and
+    says so. `reminder`: a wake on an item not on hold (a hand-off's backstop, say), which never left its lane; it goes to the mover and
     the sessions in its needs (_reminder_to) and says the item is still active. With `out` (the wake pass) nothing is sent
     here: each session's rows are collected there, for one message per session (_wake_tell). → the session ids told."""
     meta = it.get("metadata") or {}
@@ -4501,7 +4554,7 @@ def _hold_queue_row(sid: str, row: "tuple[str, dict[str, Any], str, str, bool]")
 def _wake_tell(sid: str, rows: list[tuple[str, dict[str, Any], str, str, bool]], extra: tuple[str, str, list[str]] | None = None) -> None:
     """Tell one session about the items woken or reminded for it, rows = [(gid, item, what, why, reminder)]: one item alone in its
     line as before; several (the turn rule's fourth build) in one message, the count, then one line each,
-    then what to do. A reminder (a wake on an item not on hold) says the item is still active and asks to
+    then what to do. A notice (a wake on an item not on hold) says the item is still active and asks to
     close it, refresh its next or set another wake, where a woken item asks to refresh its ask. A pilot notice is recorded for
     each item that is not the session's own, the lines of one message sharing a `batch` id. A row whose project the router is live for,
     and whose recipient is that project's keeper, is not told: it is recorded for the router to rule (router_live.holds)."""
@@ -4590,7 +4643,7 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
         if it.get("status") != "open" or gid not in _after_of(meta):
             continue
         waiting_on.add(g)
-        if _watch.watches(it):         # a watched wait is the watchers', not today's release below
+        if _watch.watches(it) and not (_wt.stored_until(meta) and not _uw.kind_of(meta) and _after_of(meta)):         # a watched wait is the watchers', not today's release below (a date with an after link and no kind is a park on the closing, released below)
             if _watch_item_closed(g, it, gid, outcome, rep if rep_open else "", writer, wout, superseded_by):
                 released.append(g)
             continue
@@ -4607,7 +4660,10 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
                   + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
             print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
             continue
+        had_until = bool(_wt.stored_until(meta))
         meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
+        if had_until and _watch.stored_kind(meta) == "item":
+            meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
         _state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
         meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
         _hand_stored_then(g, it, meta)           # a `then` stored while the item waited (a decision answered on a held item) takes it now; the wake notice below reaches it through needs
@@ -4922,10 +4978,14 @@ def _anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched:
             it = _load(g)
         except Exception:
             continue
-        if it.get("status") != "open" or not _is_held(it) or _watch.watches(it) or at <= float(it.get("state_updated") or 0):      # a watched wait is the watchers' (_watch_anchor_notice below)
+        date_wait = bool(_wt.stored_until(it.get("metadata") or {})) and not str((it.get("metadata") or {}).get("wait_kind") or "").strip()      # a wait on the date alone (until, no kind): what a hold with a wake was, released by the notice
+        if it.get("status") != "open" or not (_is_held(it) or date_wait) or (_watch.watches(it) and not date_wait) or at <= float(it.get("state_updated") or 0):      # a watched wait is the watchers' (_watch_anchor_notice below)
             continue
         meta = it["metadata"]
+        had_until = bool(_wt.stored_until(meta))
         meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None); meta.pop("idle", None)
+        if had_until and _watch.stored_kind(meta) == "anchor":
+            meta.pop("wait_kind", None)           # the wait it stood on is over: its date and its kind go together
         _state_end(meta, "parked")
         it["updated"] = it["state_updated"] = time.time()
         what = f"woke: a notice from {url}, the anchor it waited on, {how}"
@@ -5145,6 +5205,9 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
             ask, opts = _watch_ask(gid, meta, what)
             _watch.turn_to_owner(meta, mod.then, ask, opts, what, now)      # he picks it up: the `then` that stands beside him survives the wake
             mover = OWNER
+        elif cause == "time" and not str(meta.get("wait_kind") or "").strip() and not str(meta.get("post_wake_mover") or "").strip():
+            _watch.end_date(meta, what, post, now)       # a wait on the date alone ends with the date: needs, the open after link and the mover stay as stored
+            mover = post
         else:
             _watch.turn_alive(meta, post, what, now)
             mover = post
@@ -7735,7 +7798,7 @@ def _wake_alone_on_agent(meta: dict[str, Any]) -> bool:
     """A wake with no hold on an item that is on agent: what the two wake notes (_wake_window_note, _wake_step_note) share. False for an item on hold or with no wake, one waiting on his decision
     or on an open `after`, one with needs=external, one whose wake carries a wait_basis and is still ahead (the board lists it as waiting until the wake: model.view), and one stored as outside, verifying or blocked
     (none of those is on agent)."""
-    if meta.get("hold") or not _wt.wake_value(meta) or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
+    if meta.get("hold") or _wt.stored_until(meta) or not _wt.wake_value(meta) or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
         return False
     return not ("external" in [str(x).lower() for x in _wt.needs_of(meta)] or str(meta.get("state") or "").lower() in ("outside", "verifying", "blocked"))
 
@@ -7743,23 +7806,24 @@ def _wake_alone_on_agent(meta: dict[str, Any]) -> bool:
 def _wake_window_note(meta: dict[str, Any]) -> str:
     """Work moving in real time is on agent, however long it takes; a wait-and-see window the work itself needs is waiting (parked). A note on the
     reply (never a refusal) when a write sets a wake without hold and the item's next, as it now stands (this call's lines and the stored ones), waits for that wake's day
-    (model_guards.reads_as_window): the item stays on agent with a wake alone, which is a reminder. Not for an item that is not on agent: one on hold, waiting on his decision, waiting
+    (model_guards.reads_as_window): a wake alone is a wait until that date, and the item is parked till then. Not for an item that is not on agent: one on hold, waiting on his decision, waiting
     on an open `after`, with needs=external, or stored as outside, verifying or blocked."""
     if not _wake_alone_on_agent(meta):
         return ""
     found = _mg.reads_as_window(meta.get("next"), _wt.wake_value(meta))
     if not found:
         return ""
-    return (f"\n(note: wake {meta['wake']} alone is a reminder, and this item's next waits for that date (\"{found}\"), so the item stays on agent while nobody works it. "
-            "If the work itself needs this window (a soak, a log or data collection, a trial week, a timer you started), park it with "
-            "update(hold=true, wake=\"<when the window ends>\", wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"); "
-            "if you are only checking back on work you keep moving, leave it as it is)")
+    return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's next waits for that date (\"{found}\"), so the item waits until then, listed as waiting. "
+            "To move the date: update(until=\"<when the window ends>\"); "
+            "if you keep moving the work and a step can run now, drop the date with until=\"none\")")
 
 
-def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only: bool = False) -> list[str]:
+def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only: bool = False, legacy_wake: bool = False) -> list[str]:
     """What makes the open next lines of an item wait (dated_wait.timed_wait_lines) when its wake stands alone on agent (_wake_alone_on_agent), the writer is its mover and every open line is the mover's
     (or names nobody) and reads as a wait for a time or an event; [] otherwise. `dated_only` keeps the wake's own hour or day and drops the outside event."""
     meta = item.get("metadata") or {}
+    if legacy_wake and _wt.stored_until(meta) and not str(meta.get("wait_kind") or "").strip():      # a wake an older write stored, folded into until by this write: it is read as the wake it was (a date this write sets is the wait)
+        meta = dict(meta); _uw.unfold(meta); item = {**item, "metadata": meta}
     if not _wake_alone_on_agent(meta) or not any(str(x or "").strip() for x in senders):
         return []
     mod = _model_of(item)
@@ -7770,7 +7834,7 @@ def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only:
 
 
 def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any, wake_in: str, senders: tuple[str, ...], reason: str) -> tuple[str, str]:
-    """The write's own correction of a wake that is the whole of a wait: (the wait_basis to park it with, the reply line), or ("", "") when the wake is a reminder on work in hand. It is a wake alone
+    """The write's own correction of a wake that is the whole of a wait: (the wait_basis to park it with, the reply line), or ("", "") when the date is no wait, as on work in hand. It is a wake alone
     (_wake_alone_on_agent) more than [waiting] dated_wait_min_hours ahead, set or kept by the item's mover, whose every open next line, as this write leaves it (`next_after`), is the mover's and
     reads as a wait for the wake's own hour or day (dated_wait.timed_wait_lines): nothing is left to do before it, so the item is stored waiting on a time from this write, as the park the note
     used to ask for (the caller sets hold=true with this basis and the usual gates read it). The basis is the call's wait_reason with the wake day; with none (a stored wake, a next written alone) the
@@ -7794,8 +7858,8 @@ def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any,
                 _gate_wait_basis({**item, "metadata": w}, text, w["wake"], held=True)
             except ToolError:
                 continue
-            return text, (f"\n(parked: wake {w['wake']} alone is a reminder, and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
-                          f"so the item is on hold until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
+            return text, (f"\n(parked: wake {w['wake']} alone is a wait until that date (outside a hand-off), and your only open next line{'s' if len(found) > 1 else ''} wait{'' if len(found) > 1 else 's'} for it (\"{found[0]}\"), "
+                          f"so the item waits until then, stored as waiting on a time (reason: {_clip_line(text, 120)}); History has a line. If a step can run now, write it as the action and pass clear_hold=true: the server then leaves this wake alone)")
     except Exception as e:  # noqa: BLE001  — the correction is an extra: a failure leaves the write as it was, with the note
         print(f"date-only wait: not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return "", ""
@@ -7837,7 +7901,7 @@ def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: An
 
 def _wake_park_line(wake: str, basis: str) -> str:
     """The History line of a park the server made (server_fixes.WAKE_PARK): what it did, the reason it kept, and how the mover sends it back."""
-    return (f"parked: wake {wake} alone was a reminder and the only open next line waits for it; on hold until then (reason: {_clip_line(basis, 70)}). "
+    return (f"parked: wake {wake} alone is a wait until that date (outside a hand-off) and the only open next line waits for it; the item waits until then (reason: {_clip_line(basis, 70)}). "
             "clear_hold=true sends it back and the server leaves that wake alone")
 
 
@@ -7949,8 +8013,8 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
         if gap is None:
             return no("the line or the wait changed")
         was = json.loads(json.dumps(item))
-        # a backstop day is a date (watchers.day_epoch): a stored ask_by or wake that is no date is no backstop, and the cap day takes its place
-        dated = [str(meta.get(k)) for k in ("ask_by", "wake") if _watch.day_epoch(meta.get(k)) is not None]
+        # a backstop day is a date (watchers.day_epoch): a stored until, ask_by or wake that is no date is no backstop, and the cap day takes its place
+        dated = [str(v) for v in (_wt.stored_until(meta), meta.get("ask_by"), meta.get("wake")) if _watch.day_epoch(v) is not None]
         has_back = bool(dated)
         back = dated[0] if dated else _we.backstop_day(now, _wt.cap_days(), ZONE)
         anchor_undo: "tuple[Any, Any] | None" = None
@@ -7971,7 +8035,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             meta["post_wake_mover"] = mover
             meta["wait_kind"] = kind
             if not has_back:
-                meta["ask_by"] = back
+                meta["until"] = back        # the one date the wait ends on (until_write.py); an item that stores its date as wake or ask_by keeps it as it is
             _state_end(meta)
 
         try:
@@ -8003,10 +8067,11 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 _step_proof_set(meta, _steps.view(meta), [{"step": int(plan["pos"]), "proof": str(plan["proof"])}])
                 what = f"step {plan['pos']} proof {plan['proof']}"
             elif op == "backstop":
-                meta["ask_by"] = back
+                if not has_back:
+                    meta["until"] = back
                 if not _watch.can_end(meta):
                     return no("a backstop day does not end this wait")
-                what = f"ask_by={back}"
+                what = f"until={back}"
             else:
                 meta["wait_anchor"] = str(plan.get("url") or "")
                 _anchor_wait_gate(was["metadata"], meta, gid)
@@ -8027,21 +8092,21 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
     return {"fixed": True, "what": what, "why": ""}
 
 
-def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...]) -> str:
+def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...], legacy_wake: bool = False) -> str:
     """A mover set a wake with no hold on a step that only waits, and the item sat on agent while nobody worked it. A note on the reply (never a refusal) when a write
     ends with a wake and no hold (set now or stored), the writer is the item's mover, and every open line of next is the mover's (or names nobody) and reads as a wait for a time or an event
     (model_guards.reads_as_timed_step: timed at the wake's own hour or day, or started by an outside event). Not when a line is an action to take now, when another party's step is in flight
     (a line that opens with another name, the owner included), when the wake is not alone (the cases _wake_alone_on_agent skips), or when the writer is not the mover. A wait for the wake's own
     hour or day more than an hour away is parked by the write itself (_date_only_wait), so it reaches this note only inside the hour."""
     meta = item.get("metadata") or {}
-    found = _wake_step_found(item, senders)
+    found = _wake_step_found(item, senders, legacy_wake=legacy_wake)
     if not found:
         return ""
-    return (f"\n(note: wake {meta['wake']} alone is a reminder, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
-            "so the item stays doing, with you as its mover, while nobody works it. A wait is parked: update(hold=true, wake=\"<when the wait ends>\", wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\"), "
-            "with wait_reason=<what the step waits on> when you set the wake"
+    return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
+            "so the item waits until then, listed as waiting. To move the date: update(until=\"<when the wait ends>\"), "
+            "with wait_reason=<what the step waits on> when you set the date"
             + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain hold: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and ask_by=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
-            + "; if the step can run now, write it as the action and leave it as it is)")
+            + "; if the step can run now, write it as the action and drop the date with until=\"none\")")
 
 
 # An item parked on a timed hold while his choice was open calls for 'needs your call', not 'on hold':
@@ -8086,7 +8151,7 @@ def _anchored_wait(gid: str, meta: dict[str, Any]) -> str:
                 f"parked it or the thread it waits on is anchored to it (anchors(project, add=[url], items=[{gid or 'its id'}])) and named in next")
     cap = _wt.cap_days()
     try:
-        far = _wake_at(meta.get("wake")) - _pages.zone_now() > dt.timedelta(days=cap + 1) and not _wt.cap_words(meta, "wake")
+        far = _wake_at(_wt.wake_value(meta)) - _pages.zone_now() > dt.timedelta(days=cap + 1) and not _wt.cap_words(meta, "wake")
     except ValueError:
         far = False
     return (f"on hold on an anchored thread with a wake more than {cap:g} days out: the wake is only a backstop, "
@@ -8136,7 +8201,7 @@ def _holds_unexplained() -> list[dict[str, Any]]:
         if _hold_held_by(gid, meta):
             continue
         owner = _holder(it)
-        rows.append({"gid": gid, "owner": _session_label(_session_id(owner)) if owner else "", "wake": str(meta.get("wake") or ""),
+        rows.append({"gid": gid, "owner": _session_label(_session_id(owner)) if owner else "", "wake": str(_wt.wake_value(meta) or ""),
                      "by": _rmod.hold_by(it), "at": _rmod.hold_at(it), "subject": str(it.get("subject") or "")})
     return sorted(rows, key=lambda r: (r["at"], r["gid"]))
 
@@ -8171,8 +8236,8 @@ def _model_of(item: dict[str, Any]) -> "_model.Model":
 
 def _reads_time_wait(item: dict[str, Any]) -> bool:
     """The model reads the open item as a wait on a time with no hold flag: a verifying item (its end date is its wait), or any item the model reads as a time wait (wait_kind=time). The snooze guard
-    (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake alone on an alive
-    item (a check-back reminder) is not a wait and reads False."""
+    (model_guards) asks such a wait for its reason like a hold's, so update takes a wait_basis for its wake at any length, as it does for a held item; a wake an alive item
+    carries as a hand-off's backstop (no until) is not a wait and reads False."""
     if item.get("status") != "open":
         return False
     try:
@@ -10150,7 +10215,7 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
 
 def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     m = item.get("metadata") or {}
-    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _is_held(item) else ''}] {item.get('subject')}"]
+    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _is_parked(item) else ''}] {item.get('subject')}"]
     if not brief:                            # step 4b: get leads with the mover (and then); the brief's item lines carry the `model:` line, which names it
         out.extend(_mover_lines(item))
     if item.get("description"):
@@ -10191,7 +10256,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             out.append("options:\n" + "\n".join("- " + ln for ln in _rmod.option_lines(item)))
     if not brief and _contact_label(item):   # the front agent the person talks to about the item (the brief, which loads into every session, leaves it out)
         out.append(f"contact: {_contact_label(item)}")
-    if _is_held(item) and _rmod.hold_set_of(item):   # who set the hold, and when
+    if _is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
         hs = _rmod.hold_set_of(item)
         out.append(f"hold: set by {_rmod.hold_by(item) or 'unknown'}"
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), ZONE))}" if _rmod.hold_at(item) else ""))
@@ -10352,7 +10417,7 @@ def stackshot_brief() -> str:
             it = json.load(f)
         _legacy_hold(it); _ip.read_through(it)
         if it.get("status") == "open":
-            it["gid"] = gid; (held if _is_held(it) else mine).append(_fmt(it, brief=True))
+            it["gid"] = gid; (held if _is_parked(it) else mine).append(_fmt(it, brief=True))
     hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
     return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
             + "\n\nFull board: " + _shared.BOARD_URL + " · any item by id: the get tool") + _nag()
@@ -10453,12 +10518,12 @@ _STALL_SHORT = f" A wrong `stall:` step is undone with update (mover, next, clea
 @mcp.tool(name="get", description=_lead("Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), "
                                          "`after:` (the items that must close first, each with its state), `observers:` and `contact:` (the front agent the person talks to about the item). `project:` is the item's top-level project; `(filed on <page>)` is the page it is filed on, the one update(project=) takes. "
                                          "It leads with `mover:` (who moves the item now) and `then:` (who takes it after "
-                                         "the answer or the wait); History says who created it. A `state:` line (with the fields that state carries) shows only for an item that stores a state; an item that stores none shows no state line and no derived one, and its `model:` line says alive or waiting and who moves it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)`: the item is stored as doing, but its wake is more than an hour away (`[waiting] dated_wait_min_hours`) and every open step is dated for that day or later, so it is listed as waiting until then; a wake alone, with a step not dated, shows no wait, except on a stored doing item that is on hold: with a wake more than that hour away it is listed as waiting until the wake (`on hold until its wake`), and on a stored doing item that is not on hold whose wake is still ahead and carries a wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item on hold keeps `on hold until its wake` as the reason, a basis or not; a wake with no wait_basis is a reminder and the item stays active). An item shows only its real dates (wake, due, ask by) and no expected time: nothing is sent when a date passes, so whoever reads it closes the item or moves it through update. `next:` holds the open steps (the first open step first), followed by a `named in next:` block with one line for each board#N the next names (up to 8, the item itself left out) and that item's live state, so nobody relays a stale status: `board#N: closed Tue Feb 3rd 2099 14:10 (done)`, `board#N: open, mover my-engineer`, `board#N: open, waiting after board#N`, `board#N: not found`; and once a step is done or dropped a `checklist:` block lists every step in order with its position, status, who marked it and when: the positions `update` takes in done=[…] and dropped=[…]. What a write recorded with `said` shows as one line each: `Acked-by:`, `Suggested-by:`, `Reported-by:` or `Done-by:` (a pasted result that proves a step, not his words) with the session, the time, checked or unchecked, and the quote. The item model is on docs/design. "
+                                         "the answer or the wait); History says who created it. A `state:` line (with the fields that state carries) shows only for an item that stores a state; an item that stores none shows no state line and no derived one, and its `model:` line says alive or waiting and who moves it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)`: the item is stored as doing, but its wake is more than an hour away (`[waiting] dated_wait_min_hours`) and every open step is dated for that day or later, so it is listed as waiting until then; a date alone (an until, or a wake sent as its old name) is a wait until it and the item is listed as waiting, except in a write that hands the item to another session, where the date is only that hand-off's backstop and is no wait; for a wake an item still carries with no until: on a stored doing item that is on hold, with a wake more than that hour away it is listed as waiting until the wake (`on hold until its wake`), and on a stored doing item that is not on hold whose wake is still ahead and carries a wait_basis: it is listed as waiting until the wake with the basis text as the reason (an item on hold keeps `on hold until its wake` as the reason, a basis or not; a wake with no wait_basis there is a backstop and the item stays active). An item shows only its real dates (wake, due, ask by) and no expected time: nothing is sent when a date passes, so whoever reads it closes the item or moves it through update. `next:` holds the open steps (the first open step first), followed by a `named in next:` block with one line for each board#N the next names (up to 8, the item itself left out) and that item's live state, so nobody relays a stale status: `board#N: closed Tue Feb 3rd 2099 14:10 (done)`, `board#N: open, mover my-engineer`, `board#N: open, waiting after board#N`, `board#N: not found`; and once a step is done or dropped a `checklist:` block lists every step in order with its position, status, who marked it and when: the positions `update` takes in done=[…] and dropped=[…]. What a write recorded with `said` shows as one line each: `Acked-by:`, `Suggested-by:`, `Reported-by:` or `Done-by:` (a pasted result that proves a step, not his words) with the session, the time, checked or unchecked, and the quote. The item model is on docs/design. "
                                          "item_id can also be a notice id, the six hex characters a message to a project returns (\"notice a1b2c3\"): get then shows the notice instead of an item, with its `sender:`, `sent:` and `project:`, a one-line `text:` excerpt, "
                                          "the router's `ruling:` (passed to whom, merged, held or dropped) with its `reason:`, its `rule:` (a rule in code, or the router's call) and who it was `ruled by:`, the `item:` it went onto and when it was `ruled:`; a repeat dropped by the rule in code also names the notice it repeats on a `repeat of:` line; "
                                          "a notice not ruled yet shows that it is still held for the router and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router gave up on shows `ruling: none, stuck` and its `reason:`); an id no routing log holds answers \"no notice <id>\"." + _STALL_FORM))
 def stackshot_get(item_id: Annotated[str, Field(description="An item id (board#N; a bare number N is read as board#N; <letter><n> for an older item), or a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\"), which shows the router's ruling of that notice.")]) -> str:
-    """Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), `after:` (the items that must close first, each with its state), and `observers:`. It leads with `mover:` (who moves the item now) and `then:` (who takes it after the answer or the wait); History says who created it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)` (stored as doing, but its wake is more than an hour away and every open step is dated for that day or later, or its wake carries a wait_basis and is still ahead; a wake alone, with no wait_basis, shows no wait), so it is listed as waiting until then. After `next:` a `named in next:` block gives each board#N the next names with its live state (closed with the time and outcome, open with its mover, waiting, or not found), so a status is never relayed from the words of next. The item model is on docs/design. item_id can also be a notice id (the six hex characters a message to a project returns): it then shows who sent the notice and when, its project, a one-line excerpt, the router's ruling with its reason, rule and item, when it was ruled, or that it is still held and when the router rules it."""
+    """Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), `after:` (the items that must close first, each with its state), and `observers:`. It leads with `mover:` (who moves the item now) and `then:` (who takes it after the answer or the wait); History says who created it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)` (stored as doing, but its wake is more than an hour away and every open step is dated for that day or later, or its wake carries a wait_basis and is still ahead; a wake kept as a hand-off's backstop, with no wait_basis, is no wait; a date alone is a wait until it), so it is listed as waiting until then. After `next:` a `named in next:` block gives each board#N the next names with its live state (closed with the time and outcome, open with its mover, waiting, or not found), so a status is never relayed from the words of next. The item model is on docs/design. item_id can also be a notice id (the six hex characters a message to a project returns): it then shows who sent the notice and when, its project, a one-line excerpt, the router's ruling with its reason, rule and item, when it was ruled, or that it is still held and when the router rules it."""
     _who()
     nid = _notice_asked(item_id)
     if nid:
@@ -10499,6 +10564,95 @@ def _owner_param(tool: str, owner: str) -> str:
     return (f"\n(note: owner is going away: it is accepted until {until:%Y-%m-%d} and refused after. "
             + ("Pass sender=<your own session> instead: the server records it as the item's creator. " if tool == "create" else "To hand the item to a session, set mover=<session>. ")
             + f"Say who moves the item with mover=, and who takes it after {OWNER}'s answer or step with then=. To name the front agent the item page leads with, use contact=<a front agent of the project>. The item model: {_MODEL_PAGE}.)")
+
+
+# The one `until` date of a wait (until_write.py). The old parameters wake, ask_by and hold are aliases of it: a write that passes one stores `until` (and no old field) and its reply names `until`.
+# They are accepted for 14 days after the release that stores `until`, then refused with a pointer to `until`: [model] wait_alias_until (YYYY-MM-DD, read at the call, so moving it needs no release)
+# is the last day they are accepted; the code's own default, until_write.ALIAS_UNTIL, is Wed Nov 25th 2026 (14 days after Wed Nov 11th 2026).
+def _wait_alias_until() -> dt.date:
+    """[model] wait_alias_until (YYYY-MM-DD, default the code's): the last day wake, ask_by and hold are still accepted as aliases of until. A value that is not a date reads as the default."""
+    v = str(_cfg.get("model", "wait_alias_until", default=_uw.ALIAS_UNTIL) or _uw.ALIAS_UNTIL).strip()
+    try:
+        return dt.date.fromisoformat(v)
+    except ValueError:
+        return dt.date.fromisoformat(_uw.ALIAS_UNTIL)
+
+
+def _wait_alias_check() -> None:
+    """At the server's start: one stderr warning when [model] wait_alias_until is missing or not a date, so the code's own default end of the alias window (until_write.ALIAS_UNTIL) never stands in silently."""
+    v = str(_cfg.get("model", "wait_alias_until", default="") or "").strip()
+    try:
+        dt.date.fromisoformat(v)
+    except ValueError:
+        print(f"config: [model] wait_alias_until is {'missing' if not v else 'not a date (' + v + ')'}: the old wait parameters (wake, ask_by, hold) stay accepted to the code's default, {_uw.ALIAS_UNTIL}", file=sys.stderr, flush=True)
+
+
+def _wait_alias_gate(used: list[str]) -> dt.date:
+    """The old wait parameters a call passed (`used`: wake, ask_by, hold) → the last day they are accepted; a ToolError naming `until` from the day after it."""
+    ends = _wait_alias_until()
+    if used and dt.datetime.now(_cfg.tz()).date() > ends:
+        raise ToolError(f"Refused: {', '.join(used)} {'is' if len(used) == 1 else 'are'} not a parameter any more (accepted until {ends:%Y-%m-%d}). The date a wait ends on is until=<YYYY-MM-DD, or YYYY-MM-DDTHH:MM> "
+                        "(with wait_kind beside it when the wait stands on more than the date); until=\"none\" drops it.")
+    return ends
+
+
+def _until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold: bool, wait_kind: str) -> tuple[str, str, bool, list[str], str]:
+    """The update tool's date parameters → (wake, ask_by, until_wait, the old parameters used, the date they gave). `until` goes through the write as the wake it is read as (the same gates:
+    the future, the cap, the renewal guard), or as the relay's ask_by when the wait is a relay's; the old wake, ask_by and hold(+wake) are read the same way and listed so that the reply names
+    `until`. `until_wait`: the date was given as until (a wait on the date alone: the snooze guard, which judges a hold's wake, does not apply). until=none drops the date."""
+    none = lambda v: not v.strip() or v.strip().lower() in _ASK_NONE      # noqa: E731
+    used = [n for n, v in (("wake", wake), ("ask_by", ask_by)) if v.strip() and not none(v)]
+    given = wake.strip() if used and "wake" in used else ask_by.strip() if used else ""
+    u = _model.clean(until)
+    if hold and (u or used):
+        used.append("hold")
+    kind = _model.clean(wait_kind).lower()
+    if not kind or kind in _ASK_NONE:
+        try:
+            kind = _watch.stored_kind((_load(_norm_id(item_id, bare=_bare_id_ok(status))).get("metadata") or {})) if not kind else ""
+        except Exception:  # noqa: BLE001  — an unknown item is _update's to refuse
+            kind = ""
+    slot = _uw.slot_of(kind)                                                  # the one working field the date of this kind stands in ("ask_by" for a relay or event wait, else "wake")
+    if not u:
+        if kind and not (wake.strip() and ask_by.strip()):                    # an old parameter on a kind of wait names the date for that kind: it goes where the stored date stands, so it replaces it
+            if slot == "ask_by" and wake.strip() and not none(wake):
+                return "", wake, False, used, given
+            if slot == "wake" and ask_by.strip() and not none(ask_by) and kind in ("anchor", "item"):
+                return ask_by, "", False, used, given
+        return wake, ask_by, False, used, given
+    if u.lower() not in _ASK_NONE:
+        try:
+            at = _wake_at(_parse_wake(u))
+        except ToolError:
+            raise ToolError(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {u!r})")
+        if at <= _pages.zone_now():
+            raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
+    if slot == "ask_by":
+        return "", u, True, used, given
+    return u, "", True, used, given
+
+
+def _fallback_wait_date(meta: dict[str, Any], next_text: Any, description: Any, due: Any) -> tuple[str, str, str]:
+    """The date for a wait that came with a kind and no date → (YYYY-MM-DD, how it was found, the reply line). Never raises: a failure reading the item's words or the items it waits after
+    leaves tomorrow (until_write.fallback_date)."""
+    today = _pages.zone_now().date()
+    texts: list[str] = []
+    try:
+        for ln in str(next_text or "").splitlines():
+            t = ln.strip().lstrip("-* ").strip()
+            if t and not _model.is_owner(_steps.opener(t) or ""):
+                texts.append(t.split(": ", 1)[1] if _steps.opener(t) and ": " in t else t)
+        texts += [ln.strip().lstrip("-* ").strip() for ln in str(description or "").splitlines()]
+    except Exception:  # noqa: BLE001  — the words only help to find a date
+        texts = []
+    other: list[str] = []
+    for g in _wt.after_of(meta):
+        try:
+            other.append(_wt.until_of((_load(g).get("metadata") or {})))
+        except Exception:  # noqa: BLE001  — an item that cannot be read gives no date
+            continue
+    d, how, said = _uw.fallback_date(texts, today, _watch.parse_date, _wt.cap_days(), str(due or meta.get("due") or ""), other)
+    return d, how, _uw.fallback_note(_uw.kind_of(meta), d, how, said)
 
 
 # phase 2: the rulebook's board section moved into the descriptions a session reads when it writes an
@@ -10581,10 +10735,10 @@ _CHECK_FORM = (
     "An update whose next hands the work to another "
     "session (a line of next in the form `<session>: <action>`, a list marker before the name at most: any session but the item's mover and you, not "
     "one already in needs; a name elsewhere, in a slug, a link or a sentence, hands nothing over) is refused unless the item carries a check "
-    "or a wake (a reminder of your own work at that date; the item stays active, never on hold); a write that leaves an existing hand-off as it was is not asked again. "
+    "or a wake (or until), the hand-off's backstop: with a hand-off the date is no wait, the item stays active in the new mover's lane; a write that leaves an existing hand-off as it was is not asked again. "
     "Right: update(item_id=\"board#N\", sender=\"my-x\", next=\"other-x: build the export\", check=\"pr_merged acme/widgets#12\"). "
     "A front agent is the exception: its hand-off needs neither (a check stays allowed to anyone), because a front agent does not watch handed-off work itself: "
-    "the result lands through stackshot when the mover closes the item or hands it back to you, so a front agent's own reminder wake on an alive item another session moves is refused (a done check, a park with its wake and ask_by stay allowed). "
+    "the result lands through stackshot when the mover closes the item or hands it back to you, so a front agent's own wake or until date (no hold) on an alive item another session moves is refused (a done check, a park with its wake and ask_by stay allowed). "
     "To watch anyway, pass watch_reason=<why no push reaches you> (at least 15 characters) on update, in the same call; it is recorded on the item. check=\"none\" clears it; "
     "a check alone owes no page. "
     "A check does not set the item's due time. "
@@ -10599,9 +10753,10 @@ _CAP_FORM = (
 _AGENT_DUE_FORM = (
     " Agent work carries no expected time: a create sets none, and the item shows how long its work has run. "
     "Doing is work in hand (a session building, running tests, reviewing, a release running); a wait on a date, a timer, another release or someone else's step is not doing: park it with "
-    "update(hold=true, wake=\"YYYY-MM-DD\" or \"YYYY-MM-DDTHH:MM\", wait_basis=\"<what it waits for, with its date YYYY-MM-DD>\"), or after=[\"board#N\"], or wait_kind=\"relay\" with wait_event, ask_by and needs=[\"external\"]. "
-    f"A doing item whose wake is more than {_wt.dated_wait_min_hours():g} hour(s) away (`[waiting] dated_wait_min_hours`) while every open step of its next is dated for that day or later is listed as waiting "
-    "(one undated step means it can act now; a wake alone shows no wait unless the item is on hold or the wake carries a wait_basis): date a step only when it really cannot run before then; the daily audit asks the item's mover why such a step cannot run now. "
+    "update(until=\"YYYY-MM-DD\" or \"YYYY-MM-DDTHH:MM\"), adding wait_basis=\"<what it waits for, with its date YYYY-MM-DD>\" when the date is past the cap, or after=[\"board#N\"], or wait_kind=\"relay\" with wait_event, ask_by and needs=[\"external\"]. "
+    "A bare date (until, or its old name wake) is a wait until then and the board lists the item as waiting; the exception is a write that hands the item to another session, where the date is only that hand-off's backstop and is no wait. "
+    f"A stored doing item whose wake (one it still carries from before until) is more than {_wt.dated_wait_min_hours():g} hour(s) away (`[waiting] dated_wait_min_hours`) while every open step of its next is dated for that day or later is listed as waiting too "
+    "(one undated step means it can act now): date a step only when it really cannot run before then; the daily audit asks the item's mover why such a step cannot run now. "
 )
 _MODEL_FORM = (
     " The item model (design: docs/design): an item is dead (closed), alive (someone in the perimeter is working: one mover) or waiting (nothing happens until something outside arrives). "
@@ -10613,7 +10768,7 @@ _MODEL_FORM = (
     "An event wait is how an item whose mover waits in the background for something the fleet does says so: "
     "update(wait_kind=\"event\", wait_event=\"pr_released <n>\" (this repository's pull request number), ask_by=<the day it comes back anyway, required>, post_wake_mover=<who takes it then>). "
     "Live for now: pr_released, pr_merged, box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day. "
-    "box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item parked on a date check-back for an offline machine says wait_event=\"box_online <machine>\" with the check-back day as ask_by instead; the machine must be one the fleet knows (an unknown name is refused with the known ones). "
+    "box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item waiting on a date for an offline machine says wait_event=\"box_online <machine>\" with that date as ask_by instead; the machine must be one the fleet knows (an unknown name is refused with the known ones). "
     "The backstop must be after now, and a day (ask_by=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already past: give tomorrow at the earliest, or a wake time later today. "
     "A wait for something that has already happened (a PR already merged or live, a machine already online) is refused; a recycle wait never asks for a recycle (it waits for the next one). "
     f"A step of his, or needs holding decision, makes him the mover: a write that names a session as mover beside it is refused (leave mover out, or mover={OWNER}, and put the session in then). "
@@ -10639,19 +10794,21 @@ _SELF_WAIT_FORM = (
     "(a reply, a build or test still running, a window the work itself needs, a resource that is down; a preference for a scheduled run is none). The check passes the write when the model is unavailable "
     "or slow. It does not apply to a wait on another item (after), on a decision or an outside party (needs decision or external), a park (hold with wait_basis), a stored wait (wait_kind), a hand-off to another session, "
     "or a step you leave as it was. wait_reason is not stored on the item. "
-    f"Right: update(item_id=\"board#N\", sender=\"my-x\", wake=\"<tomorrow or later, within {_wt.cap_days():g} days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"). "
+    f"Right: update(item_id=\"board#N\", sender=\"my-x\", until=\"<tomorrow or later, within {_wt.cap_days():g} days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"). "
 )
 
 
 _WAIT_FORM = (
-    " Every open item has a mover (the one party whose move it is now: a session, " + OWNER + ", an outside party, or the item it waits `after`). An open item "
+    " A wait is one stored date, until, with wait_kind beside it when it stands on more than the date. An item with an until is waiting; the server clears both when the wait ends. "
+    "wake, ask_by and hold with a wake are still accepted for now as other names of until. A wait_kind with no date is never refused: the server takes a date from the item's words, else a suggested one, else tomorrow, and says which. "
+    "Every open item has a mover (the one party whose move it is now: a session, " + OWNER + ", an outside party, or the item it waits `after`). An open item "
     "waits on its real dates only (wake, due, ask by): no expected time is derived for any item, and a parked item is held until its wake or its blocker closes, with no stale mark. A wake a session sets runs at most "
     f"{_wt.cap_days():g} days from the item's last move: a wake further out, an anchored thread's included, is refused without {OWNER}'s words "
     "(said=[Acked-by …] checked against a transcript, a message from those days; or his answer on the item, given since its last move: ask him to answer there). "
     "A due date is a deadline and is not refused. "
     "Parameter wait_basis: the reason a time wait's wake carries, one line with its date (wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"; a wait for a date outside the board, such as a vendor's reply date or a release freeze, reads \"<what happens> YYYY-MM-DD\"). "
     "Three wakes take it: a hold's wake (it parks the item, which reads as waiting, not on agent, until the wake), a stored verifying item's wake, and a wake past the cap (it lifts the cap for that wake alone; clear_wait_basis=true drops it). "
-    "A wake alone on an item you keep moving (a doing item) within the cap is a check-back: a basis for it is refused as not needed. "
+    "A bare date within the cap (until, or its old name wake) is a wait on its own, and a basis for it is refused as not needed unless the item is on hold (hold=true) or verifying; a date no longer leaves the item active as a reminder (outside a hand-off's backstop): set no date to keep an item moving. "
     "A hold with a wake and no basis, where the item's own next or its description says the work waits for that wake's day (\"collect the logs until 2099-03-02, then review\"), takes that line as its wait_basis (the reply says so); "
     "a basis needs a wake date (a hold with no date is refused) and names the date it waits for as YYYY-MM-DD on or after the wake day. "
     "A wait that can no longer end (a check whose pull request was closed unmerged) fails at once and tells the item's mover. "
@@ -10705,13 +10862,15 @@ _DONE_PARAM = Annotated[list[int | str] | int | str | None, Field(description="O
 
 _DROPPED_PARAM = Annotated[list[int | str] | int | str | None, Field(description="Open steps that are no longer wanted, named like done: dropped=[2]. A different action is a new line of next, not a reword.")]
 
-_WAKE_PARAM = Annotated[str, Field(description=("When the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, in the board timezone. Alone it is a reminder on an item you keep moving; with hold=true it parks the item for a window the work needs: hold=true, wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". A reminder wake on your own item also needs wait_reason (at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters); a park with wait_basis needs none, and a wake more than " + f"{_wt.cap_days():g}" + " days out needs a wait_basis. Moving a wake (or ask_by) later with the item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one does not count, and a wait_reason does not count)."))]
+_WAKE_PARAM = Annotated[str, Field(description=("The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, in the board timezone. Alone it is a wait: the item waits until that date (outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's backstop). A window the work needs: wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". A wait on your own item also needs wait_reason (at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters); a wait with wait_basis needs none, and a wake more than " + f"{_wt.cap_days():g}" + " days out needs a wait_basis. Moving a wake (or ask_by) later with the item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one does not count, and a wait_reason does not count)."))]
 
 _AFTER_PARAM = Annotated[list[str] | str | None, Field(description="Items this one waits on: after=[\"board#N\"], with ask_by=<YYYY-MM-DD> as the day it comes back if they are still open. The wait ends when they close.")]
 
-_ASK_BY_PARAM = Annotated[str, Field(description="The day a wait on another item, a relay or an event comes back to someone if it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by=\"2099-03-02\". Moving it later with nothing else changed is refused (see wake).")]
-_ASK_BY_PARAM_NEW = Annotated[str, Field(description="The day a wait on another item, a relay or an event comes back to someone if it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by=\"2099-03-02\".")]      # create: nothing is stored yet to move later, and create has no wake
+_ASK_BY_PARAM = Annotated[str, Field(description="The old name of until, accepted for now: the day a wait on another item, a relay or an event comes back to someone if it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by=\"2099-03-02\". Moving it later with nothing else changed is refused (see wake).")]
+_ASK_BY_PARAM_NEW = Annotated[str, Field(description="The old name of until, accepted for now: the day a wait on another item, a relay or an event comes back to someone if it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by=\"2099-03-02\".")]      # create: nothing is stored yet to move later, and create has no wake
 
+_UNTIL_PARAM = Annotated[str, Field(description="The one date a wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone. An item with an until is waiting (outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's backstop and the item stays active in the new mover's lane); wait_kind goes only beside it (none: it waits on the date alone). until=\"none\" drops it. It replaces wake, ask_by and hold with a wake, still accepted for now. Moving it later with nothing else changed is refused, as for wake.")]
+_UNTIL_PARAM_NEW = Annotated[str, Field(description="The one date the new item's wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone. wait_kind goes only beside it (none: the date alone). It replaces ask_by, still accepted for now.")]
 _OUTCOME_PARAM = Annotated[str, Field(description="How a close ended: done | dropped (won't do, no longer needed, or can't) | superseded (replaced by another item: reworded, merged or split; send superseded_by=<the replacing item's id>). Passed on update with status=completed, or on complete: outcome=\"done\", reason=\"Export shipped in PR 12\", outcome_text=\"- PR 12 merged\"; all three are required.")]
 
 _REASON_PARAM = Annotated[str, Field(description=f"One line, at most {_CLOSE_REASON_MAX} characters (longer is refused): the end state reached and why. Goes with outcome on a close.")]
@@ -10727,9 +10886,9 @@ _ASK_PARAM_NEW = Annotated[str, Field(description="The one line a needs=decision
 
 _OPTIONS_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=f"The alternatives of a decision, one per line: options=[{{\"label\": \"Approve\", \"line\": \"Approve the schema\", \"recommended\": true}}, {{\"label\": \"Decline\", \"line\": \"Wait a week\", \"recommended\": false}}] ({_rmod.OPTIONS_MIN}-{_rmod.OPTIONS_MAX} entries, exactly one recommended, each line at most {_rmod.OPTION_LINE_MAX} characters). A yes/no decision lists Approve and Decline. Name who acts in every option, label and line: a person or a session name, never I, you, we, us or me.")]
 
-_CHECK_PARAM = Annotated[str, Field(description="What closes the item once work handed to another session is done; the server runs it every minute: check=\"pr_merged acme/widgets#12\" (also item_closed <item id>, lane <session> <lane>, unit_active <unit>.service). A next line that hands the item to a session other than its mover and you needs a check or, instead, a wake of your own (a reminder); a front agent needs neither. check=\"none\" clears it.")]
+_CHECK_PARAM = Annotated[str, Field(description="What closes the item once work handed to another session is done; the server runs it every minute: check=\"pr_merged acme/widgets#12\" (also item_closed <item id>, lane <session> <lane>, unit_active <unit>.service). A next line that hands the item to a session other than its mover and you needs a check or, instead, a date (wake or until) as the hand-off's backstop: with a hand-off the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded; a front agent needs neither. check=\"none\" clears it.")]
 
-_HOLD_PARAM = Annotated[bool, Field(description="True parks the item until its wake, for a window the work itself needs: hold=true, wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". It reads as waiting, not on agent; clear_hold=true ends it.")]
+_HOLD_PARAM = Annotated[bool, Field(description="The old way to wait on a date, accepted for now (stored as until). True parks the item until its wake, for a window the work itself needs: hold=true, wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". It reads as waiting, not on agent; clear_hold=true ends it.")]
 _STEP_PROOF_FORM = (
     " A step can name the event that finishes it, and the server then ticks it done when the event happens: a pull request merged (pr_merged), or released, i.e. merged and live (pr_released: this repository's with main's tests passed, or a configured repository's). "
     "A step that is only `release PR #<n>`, `release #<n>` or `release <URL>` (or the same with `merge`), with at most a short parenthetical (`(in its turn)`) and a closing full stop, is ticked when that pull request is released, "
@@ -10775,7 +10934,7 @@ _STEP_PROOF_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(descripti
 _WAIT_KIND_PARAM = Annotated[str, Field(description="What a waiting item waits on: time | anchor | item | relay | event. A time wait is its wake; an item wait its after; an anchor wait its wait_anchor (on the project's anchors list first: add it with the anchors tool) and wait_event (a wake is the backstop); a relay wait its wait_event and ask_by; an event wait its wait_event (a fleet event) and a backstop day (ask_by or a wake). An anchor wait wakes the item on any new notice at its anchor that reaches the server and passes the project's keeper, not only on the awaited event, so it fits something quiet apart from that event (a PR, a thread, a file) and not a busy channel or DM; for a busy channel use a relay wait (it is put to someone on a day) or a time wait (check back on a date). \"none\" clears it.")]
 _WAIT_BASIS_PARAM = Annotated[str, Field(description=f"The reason a time wait's wake carries, one line that names its date: wait_basis=\"soak ends <that day, YYYY-MM-DD>\" (YYYY-MM-DD, on or after the wake day; a wake with no date is refused). Three wakes take it, each basis bound to the wake it was given for: a hold's wake (the park), a verifying item's wake, and a wake more than {_wt.cap_days():g} days out (it lifts the cap for that wake alone, up to {_wt.BASIS_MAX_WAKE_DAYS} days: a wake further out is refused whatever the basis). A hold with a wake and no basis takes the line of next or the description that says what the work waits for.")]
 
-_WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any new notice there that reaches the server and passes the project's keeper wakes the item; a wait_event naming a merge, close, landing or completion is not woken by a routine push or CI line on the fleet's own PR (only by one that says merged or closed). A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know; an item parked on a date check-back for an offline machine says wait_event=\"box_online <machine>\" with the check-back day as ask_by instead). \"none\" clears it.")]
+_WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any new notice there that reaches the server and passes the project's keeper wakes the item; a wait_event naming a merge, close, landing or completion is not woken by a routine push or CI line on the fleet's own PR (only by one that says merged or closed). A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know; an item waiting on a date for an offline machine says wait_event=\"box_online <machine>\" with that date as ask_by instead). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give.")]
@@ -10836,6 +10995,7 @@ def stackshot_create(
     wait_anchor: str = "",
     wait_event: _WAIT_EVENT_PARAM = "",
     ask_by: _ASK_BY_PARAM_NEW = "",
+    until: _UNTIL_PARAM_NEW = "",
     post_wake_mover: _POST_WAKE_PARAM = "",
     sender: str = "",
     draft: str = "",
@@ -10859,7 +11019,7 @@ def stackshot_create(
     _gate_self_wait("", owner, next_text=next, mover=mover, needs=needs, after=after, wait_kind=wait_kind, wait_reason=wait_reason, creating={"subject": subject, "project": project})   # before the item lock: it may ask a model
     _evwait_preread(wait_kind, wait_event)      # an event wait's facts (GitHub, git) are read before the item lock, not under it
     with _session_write():
-        return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes) + fix_note + note + _off_map_note(owner, project)
+        return _create(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes) + fix_note + note + _off_map_note(owner, project)
 
 
 def _create(
@@ -10893,9 +11053,10 @@ def _create(
     step_proof: list[dict[str, Any]] | str | None = None,
     contact: str = "",
     fixes: "list[tuple[str, str, str]] | None" = None,
+    until: str = "",
 ) -> str:
     """The create tool without its identity check (_who): the reply text of _create_item."""
-    return _create_item(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes)[1]
+    return _create_item(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes)[1]
 
 
 def _record_fixes(meta: dict[str, Any], fixes: "list[tuple[str, str, str]] | None") -> None:
@@ -10940,6 +11101,7 @@ def _create_item(
     contact: str = "",
     extra: dict[str, Any] | None = None,
     fixes: "list[tuple[str, str, str]] | None" = None,
+    until: str = "",
 ) -> tuple[str, str]:
     """Every gate and every write of the create tool, without its identity check (_who: the tool checks it, the client API's
     question write is proved by its machine token instead) -> (the new item's id, the tool's reply). The one place an item is
@@ -10982,8 +11144,24 @@ def _create_item(
     said_l = _gate_said(said, owner, owner)                    # the trailers: his words checked against the transcript; a failed check refuses the create
     chk = _parse_check(check) if check.strip() and check.strip().lower() not in _ASK_NONE else ""   # the done check: gated on its form; a create is never refused for a hand-off
     meta: dict[str, Any] = {"owner": owner, "project": project, **(extra or {})}     # extra = a script route's own marks (the terminal prompt's), written with the item
+    until_v = _model.clean(until)
+    if until_v.lower() in _ASK_NONE:
+        until_v = ""                   # a "none" on a create is nothing to clear
+    alias_used = ["ask_by"] if _model.clean(ask_by) and _model.clean(ask_by).lower() not in _ASK_NONE else []
+    alias_ends = _wait_alias_gate(alias_used)
+    if until_v:
+        try:
+            until_at = _wake_at(_parse_wake(until_v))
+        except ToolError:
+            raise ToolError(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {until_v!r})")
+        if until_at <= _pages.zone_now():
+            raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
+        if _uw.slot_of(_model.clean(wait_kind).lower()) != "ask_by":      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
+            _gate_cap({}, said_l, "until", _parse_wake(until_v), until_at.timestamp())
+    elif alias_used:
+        until_v = _model.clean(ask_by)          # ask_by is the old name of the date (an until beside it wins)
     model_set, _ = _gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
-                                     "ask_by": ask_by, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
+                                     "until": until_v, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
     if owner_name:
         meta["owner_name"] = owner_name
     contact_v = _gate_contact(contact, project, (owner,)) if contact.strip() else _contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
@@ -10997,6 +11175,13 @@ def _create_item(
     proof_note = _step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
     _gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
     meta.update(model_set)
+    wait_note = _uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else ""
+    if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
+        fb_d, _fb_how, fb_note = _fallback_wait_date(meta, next, description, due)
+        meta["until"] = fb_d
+        wait_note += fb_note
+    if _wt.stored_until(meta) and not _uw.kind_of(meta) and _wt.after_of(meta):
+        meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item
     evw_note = _evwait_gate({}, meta, creating=True)            # an event wait: its phrase in the canonical form, and refused when the event already happened
     then_note = _owner_then_default(None, meta, "open", _session_label(owner) or owner, "then" in model_set, mover.strip())      # D9: an item created for his call has the agent doing the work as its then (a builder that files its own decision item is its own then), not the front agent that relayed it
     draft_txt, _ = _gate_draft_args(draft, False)             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
@@ -11015,7 +11200,7 @@ def _create_item(
     _gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
     _gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
     asked += _options_note(meta) + _actor_note(meta)
-    desc_note = _gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True)    # the write guards of the item model, every field judged on a create
+    desc_note = _gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
     _anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
     if getattr(_SESSION_NEXT, "on", False) and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
             and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: _after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
@@ -11082,7 +11267,7 @@ def _create_item(
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + machine_note
+    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note
                  + then_note + _similar_note(gid, subject, str(meta.get("project") or "")) + told + _nag("" if by else owner))
 
 
@@ -11282,8 +11467,8 @@ _UPDATE_DESC = (
     "reword an open step: reword={\"2\": \"my-x: ship the export\"}; drop a step: dropped=[2]; "
     "status of your open step: work={\"text\": \"PR 83 up\", \"state\": \"in progress\"} "
     f"(at most {_work.TEXT_MAX} characters; state done ticks the step); "
-    "park for a work window: hold=true, wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\"; "
-     "a reminder wake on your own item: wake=\"<tomorrow or later, within " + f"{_wt.cap_days():g}" + " days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"; "
+    "park for a work window: hold=true, until=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\"; "
+     "a wait until a date on your own item: until=\"<tomorrow or later, within " + f"{_wt.cap_days():g}" + " days, YYYY-MM-DD>T04:00\", wait_reason=\"the nightly run finishes at 03:00\"; "
     "wait on another item: after=[\"board#N\"], ask_by=\"2099-03-02\"; "
     "description=\"- Goal: the export finishes in under a minute\\n- Problem: the nightly run takes 9 minutes\"; "
     "close: complete(item_id=\"board#N\", sender=\"my-x\", outcome=\"done\", reason=\"Export shipped in PR 12\", outcome_text=\"- PR 12 merged\"). "
@@ -11292,13 +11477,13 @@ _UPDATE_DESC = (
     f"His note on a step that only says he did it (\"ran it\"; \"run it\" is a request and ticks nothing) ticks the step, and one in which he says he will do it later (\"I'll do it tomorrow evening\") holds the item until then; any other note (a question, a negation, a deadline, more than that) goes to the session to judge. The ask's mockup rule above also holds on an update that sets the ask, description, next, needs or options or puts the item on needs=decision. options=[] (or \"none\", or clear_options=true) clears the options, which need no recommended one then (refused while the ask is an open question; a non-empty list still takes 2 to 6 entries, exactly one recommended). When {OWNER} answers by picking an option, the server clears the ask and the options itself and keeps his answer with the option's label and line. A client whose tool has no ask parameter refreshes the ask by writing the new line, in the ask's form, as the first line of next. When this work settles or changes a premise of another open "
     "item, update that one too, in the same turn. "
     "item_id: board#N; a bare number N is read as board#N, except in an update that closes the item. "
-    f"wake (YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {_cfg.tz_abbr()}; a full ISO time with seconds or a UTC offset is converted to that minute in {_cfg.tz_abbr()}, and the reply says so) alone is a reminder, never a hold, on an item you keep moving: the item stays active in its lane, and at that "
-    "moment the server tells its mover and the sessions in its needs once and drops the wake. Use it for a real check-back on your own work, not for a window the work itself waits through (that is a park, below). "
+    f"wake (YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, {_cfg.tz_abbr()}; a full ISO time with seconds or a UTC offset is converted to that minute in {_cfg.tz_abbr()}, and the reply says so) alone is a wait: the item waits until that date, listed as waiting, and at that "
+    "moment the server tells its mover and the sessions in its needs once and drops the date; in an update that hands the item to another session the date is no wait but the hand-off's backstop, and the item stays active. Work moving in real time is not parked. "
     "A doing item whose wake is over an hour away and whose every open step waits for a later date (\"after Mar 2\", \"until Mar 2\"; a deadline such as \"by Mar 2\" or \"due Mar 2\" is no wait) is listed as waiting, and the audit asks why the step cannot run now. "
-    "A front agent's reminder wake on an alive item another session moves is refused (the result lands through stackshot when the mover closes the item or hands it back to you; watch_reason=<why no push reaches you> lets a real exception through; a park's wake with hold=true is not a reminder and stays allowed). "
+    "A front agent's own wake or until date (no hold) on an alive item another session moves is refused (the result lands through stackshot when the mover closes the item or hands it back to you; watch_reason=<why no push reaches you> lets a real exception through; a park's wake with hold=true is a wait of its own and stays allowed). "
     "On hold = an open item parked until its next move is due: hold=true, always passed explicitly, with what it waits for; with a wake the "
     f"server releases it at that moment, tells the sessions in its needs (else its mover; refresh the ask then) and returns it to the lane its needs give it. Meanwhile it reads as parked (a waiting state), not as work moving on agent; needs and due stay as they are. "
-    f"An item whose needs hold decision is never on hold: a write to one drops its hold (its wake stays, a reminder). "
+    f"An item whose needs hold decision is never on hold: a write to one drops its hold (its date stays, and no date parks an item on his call). "
     f"{OWNER} parks on his word. A hold always names what it waits for: {OWNER}'s words, the items that must close first (after), a notice from an anchor scoped to the item, a pane recycle (recycle=true), or the end of a window the work itself needs; "
     "an unconditional or indefinite park is refused. Work moving in real time stays on agent however long it takes (a build, tests, a review, a release, a run in progress): do not park it. "
     "A session parks its own item when the work itself needs a wait-and-see window (a soak, a log or data collection window, a trial week, a timer it started): "
@@ -11315,7 +11500,7 @@ _UPDATE_DESC = (
     "unless the thread it waits on is anchored to it (anchors(project, add=[url], items=[its id])) and named in next: park that one with a backstop "
     "wake (at most [waiting] cap_days out unless his words are on the item), since the notice may never come; the server releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a "
     "notice from that anchor (never when it drops one; in a project nobody rules, when any notice from it arrives), and tells the sessions in its needs (else the project's builder, else its -main agent). "
-    f"clear_hold=true releases it now (its wake goes with it); wake=\"none\" (or clear_wake=true) drops the wake: a reminder simply goes, and a hold stays only when an after, an anchor or a recycle still holds it. "
+    f"clear_hold=true releases it now (its date goes with it); until=\"none\" (or clear_wake=true) drops the date: an item that waits on nothing else is active again, and a hold stays only when an after, an anchor or a recycle still holds it. "
     f"mover hands the item over: set mover=<session> (then=<who takes it after {OWNER}'s answer or step>) and the new mover is told; a front agent gets no hand-off notice, so an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead (the reply and History say so; send the same value again to keep it as sent; with no builder it is refused, except a mover set by a front agent of the item's project to another of its front agents; message the front agent for a check or answer only it can give); take over another session's item only when asked; a session about to be retired first hands over or completes its open items. "
     f"mover={OWNER} alone is refused on an item that is doing: it needs step=… or needs=decision with ask=… in the same write (the refusal says so). "
     f"An update that leaves an open item in a state that is {OWNER}'s (his step, or needs holding decision) and names no mover sets mover={OWNER} itself and moves the stored session mover into then "
@@ -11445,7 +11630,7 @@ def _gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fa
     """The wait_basis a session gives for the wake of a time wait (a hold's window, or a verifying item's wake: `held` is true for both; the basis is the end of a wait-and-see window the work itself needs, "<what the window collects> ends
     YYYY-MM-DD", at any length) or for a wake past the cap (the owner's rule that an agent-set park needs a
     real-world date): "<what happens> YYYY-MM-DD", for the item's wake `wake` (the one this call sets, else the stored one) → the text, cleaned. Refused
-    (the reasons keep it from becoming a way around the rule): a closed item, no wake date (a hold with no date is refused anyway), a wake alone (no hold, on an item that is no time wait)
+    (the reasons keep it from becoming a way around the rule): a closed item, no wake date (a hold with no date is refused anyway), a date alone (no hold, on an item that is no time wait)
     within [waiting] cap_days of now (not needed: the ordinary wake does it) or more than 365 days out, a text that is too short or too long, one with a
     date that is not on the calendar, or one with no date from the wake day to 30 days after it (waiting.basis_problem). It lifts the cap for that wake only (waiting.cap_words reads it bound to the wake); a later wake drops it; the board's head lists
     these waits once a week (render.Board)."""
@@ -11459,7 +11644,7 @@ def _gate_wait_basis(item: dict[str, Any], text: str, wake: str, held: bool = Fa
     days = (_wake_at(wake).timestamp() - time.time()) / 86400.0
     if not held and (not _wt.cap_needs_owner() or days <= cap):
         raise ToolError(f"Refused: wait_basis is not needed: this wake ({wake}) is {max(days, 0):.0f} days out, within the {cap:g} days a wait may run "
-                        "([waiting] cap_days). It is for the wake of a time wait (a hold, or a verifying or parked item), which carries a reason at any length, and for a wake past the cap; a wake alone on an item you keep moving is a check-back and needs none")
+                        "([waiting] cap_days). It is for the wake of a time wait (a hold, or a verifying or parked item), which carries a reason at any length, and for a wake past the cap; a date alone within the cap is a wait on its own and needs none")
     if days > _wt.BASIS_MAX_WAKE_DAYS:
         raise ToolError(f"Refused: wait_basis stands for a wake at most {_wt.BASIS_MAX_WAKE_DAYS} days from now, and this wake ({wake}) is {days:.0f} days out. "
                         "A wait that long is not a basis for the cap but a date to set again nearer the time")
@@ -11501,7 +11686,7 @@ def _cap_words_entry(gid: str, spec: dict[str, Any], item: dict[str, Any]) -> tu
     meta = item.get("metadata") or {}
     if item.get("status") != "open":
         raise ToolError(f"Refused: {_gh.shown(gid)} is not open; words are recorded for an open item's wake")
-    wake = str(meta.get("wake") or "")
+    wake = str(_wt.wake_value(meta) or "")
     if not wake:
         raise ToolError(f"Refused: {_gh.shown(gid)} has no wake date for his words to cover")
     entries = [a for a in meta.get("answers") or [] if isinstance(a, dict)]
@@ -12599,12 +12784,13 @@ def _update_unlocked(
     contact: str = "",
     reword: dict[Any, str] | str | None = None,
     fixes: "list[tuple[str, str, str]] | None" = None,
+    until_wait: bool = False,
 ) -> str:
     """The update tool; its description is _UPDATE_DESC (+ _WAIT_FORM). The caller checks the identity (_who): the update and
     complete tools do, the client API's recycle-due write is proved by its machine token instead."""
     if not _steps.reword_given(reword):
         reword = None             # {} and "{}" name no step: the call is as if it passed none
-    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
+    given = {k: v for k, v in locals().items() if k not in ("item_id", "sender", "wait_reason", "fixes", "until_wait") and v not in (None, "", False, 0)}      # what the call passes, before any default or rewrite below
     filing_only = bool(given) and set(given) <= _FILING_ONLY      # a bookkeeping write (a page rename's update(project=<new key>)): no work was done, so no agent is named for it
     subject, description, next, ask, reason, outcome_text = (_shown_ids(x) for x in (subject, description, next, ask, reason, outcome_text))   # g7 →
     next_drop = next.strip().lower() in _nl.NONE_WORDS   # next="none" (or clear, -) removes the sender's own lines, as "none" clears due, wake and needs; an empty next is "not passed"
@@ -12632,6 +12818,10 @@ def _update_unlocked(
         opts = []
     gid = _norm_id(item_id, bare=_bare_id_ok(status))
     item = _load(gid)
+    had_hold = bool((item.get("metadata") or {}).get("hold"))      # read before the unfold, which stands a basis or the kind time in as a hold
+    was_until = _uw.unfold_item(item)                    # a stored until stands as the old working fields for this write's gates (until_write.py); it is folded back just before the save
+    if was_until and clear_wake and _uw.kind_of(item["metadata"]) in ("", "time") and not had_hold:
+        clear_hold = True                                # the date of a wait on the date alone is the whole wait: dropping it ends the wait, the hold it stands as goes with it
     item_was = json.loads(json.dumps(item))             # the item as it stood, for the state checks (a re-park, a decision asked again, a stale next)
     meta = dict(item.get("metadata") or {})
     before = json.loads(json.dumps({k: meta.get(k) for k in ("next", "needs", "check", "after")}))   # what the mover is told of, as it stood
@@ -12671,6 +12861,8 @@ def _update_unlocked(
         raise ToolError("Refused: clear_after drops the after list; it does not go with a new one")
     if clear_after:
         meta.pop("after", None)
+        if _uw.kind_of(meta) == "item" and not wait_kind.strip() and not clear_wait and was_until and _uw.date_of(meta):
+            meta.pop("wait_kind", None)                  # the wait on the item ended with its link; the date it carried stays as a wait on the date alone
         _wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
         meta["after"] = _gate_after(after, gid)
@@ -12738,6 +12930,7 @@ def _update_unlocked(
     marks = _marks_given(done) or _marks_given(dropped) or rewording or work_tick >= 0      # a step checked, dropped or reworded is a change of next; so is the step a status done ticks
     state_change = bool((description and not reformat) or next_touch or marks or needs_set or clear_needs or status or due or clear_due or wake or clear_wake or hold or clear_hold or after_set or clear_after)   # _STATE_FIELDS (+ the hold and its wake, and after); the rest is filing
     was, was_held = item.get("status"), _is_held(item)
+    was_parked = was_held or _date_parked(item, was_until)      # (the relay line and the minute loop read a wait on a date as the park it replaces; the reply notes read the hold flag alone)
     outcome, reason, superseded_by = outcome.strip().lower(), reason.strip(), superseded_by.strip()
     closing, reopening = status == "completed" and was != "completed", status == "open" and was == "completed"
     outcome_text = outcome_text.strip()
@@ -12842,9 +13035,9 @@ def _update_unlocked(
     if clear_recycle or item.get("status") == "completed":   # cleared by hand, or completed: the field goes (a recycle clears it in _recycled)
         meta.pop("recycle", None); meta.pop("recycle_at", None)
     # Items kept showing "on hold" while their work was live, so everywhere:
-    # a wake alone is a reminder, never a hold. It is stored as given and the item stays in its lane; at the moment
-    # the wake pass tells the mover and the sessions in its needs once and drops it. Only hold=true parks (with a wake it
-    # parks until then, and the pass releases it), and an item whose needs hold decision is never on hold (_is_held). A stored
+    # a date with nothing beside it is a wait on that date alone (outside a hand-off it is folded into until below, and the item waits until then); in a write that hands the item on it stays the wake it was,
+    # the hand-off's backstop: the item stays in its lane, and at that moment the wake pass tells the mover and the sessions in its needs once and drops it (a notice, not a wait).
+    # hold=true parks with its wake (the pass releases it), and an item whose needs hold decision is never on hold (_is_held). A stored
     # item keeps the meaning it was written with: held + wake still releases at its wake.
     _record_fixes(meta, fixes)      # what the tool fixed in this call (server_fixes.py): the mark and a History line, or the mark taken off when the mover sent the value again
     wait_fixed = ""
@@ -12888,14 +13081,17 @@ def _update_unlocked(
         meta["hold"] = True
         if not (was_held and _rmod.hold_at(item)):   # who set it and when: the unexplained-holds report and the briefings read it; a hold already held keeps its stamp
             _hold_set(meta, _session_label(debtor) or debtor or "unknown")
+    time_kind = _watch.stored_kind(meta) == "time"       # read before the dates go: a stored until with no kind reads as a time wait only while the until stands
     if clear_wake:                # the wake goes; a hold stays only while something else holds it (the item rule below)
-        meta.pop("wake", None); meta.pop("until", None); _cap_ok_drop(meta, "wake")
+        meta.pop("wake", None); _cap_ok_drop(meta, "wake")
+        if _watch.stored_kind(meta) != "relay":      # a relay's until is its ask-by day, which clear_wake never dropped
+            meta.pop("until", None)
     if clear_hold:                # released now: the hold and its wake go together
         if meta.get("wake") and _sf.marked(meta, _sf.WAKE_PARK, str(meta["wake"])):      # the server parked this wake and the mover sends it back: the server leaves that wake alone from here
             _sf.unmark(meta, _sf.WAKE_PARK, str(meta["wake"])); _sf.decline(meta, _sf.WAKE_PARK, str(meta["wake"]))
-        if meta.pop("hold", None):
+        if meta.pop("hold", None) or (was_until and _uw.kind_of(meta) in ("", "time")):      # a hold, or a wait on the date alone (stored as until, with no hold of its own to drop)
             meta.pop("wake", None); meta.pop("until", None); _cap_ok_drop(meta, "wake")
-            if _watch.stored_kind(meta) == "time":      # the time wait the hold stood on (a park with a then stores one) goes with it: wait_kind, post_wake_mover and the watcher's stamps
+            if time_kind or (was_until and _uw.kind_of(meta) in ("", "time")):      # the time wait the hold stood on (a park with a then stores one) goes with it: wait_kind, post_wake_mover and the watcher's stamps
                 for k in (*_model.WAIT_GROUP, "chases", "watch"):
                     meta.pop(k, None)
         meta.pop("hold_set", None)
@@ -12903,7 +13099,7 @@ def _update_unlocked(
         meta.pop("hold", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("hold_set", None); meta.pop("cap_ok", None)
     if basis_ok:                  # the basis is bound to the wake it was given for; a different wake, no wake or a closed item drops it
         _basis_put(meta, basis_ok, str(meta.get("wake") or ""), _session_label(debtor) or debtor or "unknown")
-    elif clear_wait_basis or (isinstance(meta.get("wait_basis"), dict) and meta["wait_basis"].get("wake") != meta.get("wake")):
+    elif clear_wait_basis or (isinstance(meta.get("wait_basis"), dict) and meta["wait_basis"].get("wake") != _wt.wake_value(meta)):      # the basis stands for the date the wait ends on: the stored until, else the wake
         meta.pop("wait_basis", None)
     if _model_guards_on() and meta.get("hold") and meta.get("wake") and (hold or wake) and not basis_ok and not _wt.basis_of(meta) and not str(_wt.words_of(meta).get("quote") or "").strip():
         q_why, q_text, q_src = _owner_quote_on(item, said_l, _wt.cap_days())     # a hold with a wake is a time wait, which carries his words: record them, within the cap too
@@ -12911,7 +13107,7 @@ def _update_unlocked(
             _cap_ok_put(meta, "wake", str(meta["wake"]), q_why, quote=q_text, source=q_src)
     hold_pre = bool(meta.get("hold"))     # the hold as this write leaves it, before the old rule below drops it beside a decision (the model guards refuse that pair instead)
     dropped_hold = item.get("status") == "open" and bool(meta.get("hold")) and _waits_decision(meta)
-    if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its wake stays, a reminder)
+    if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its date stays, and no date parks an item on his call)
         meta.pop("hold", None); meta.pop("hold_set", None)
         _state_end(meta, "parked")    # the park it stood in is gone with the hold (needs is not something parked stands on: the hold would only be stripped again)
     # A hold names what it waits for, a wake, open after
@@ -12926,7 +13122,7 @@ def _update_unlocked(
                         f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop wake at most {_wt.cap_days():g} "
                         f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER} is never parked: needs=decision with its ask, "
                         "or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
-                        "item stays active, pass wake alone, without hold")
+                        "item stays active, set no date: a date with no hold is a wait until it (outside a hand-off)")
     # The done check: set or cleared by this write (a filing edit: no page owed), then the hand-off gate: a write
     # that hands the item to another session (a `<session>: <action>` line of next) leaves it with a check or a wake
     chk = " ".join(str(check or "").split())
@@ -12942,10 +13138,10 @@ def _update_unlocked(
         if handed and not meta.get("check") and not meta.get("wake") and not _front_sender(sender):     # a front agent's hand-off asks for neither: the mover's close lands the result, and its own wake or check is refused below
             raise ToolError(f"Refused: this update hands {_gh.shown(gid)} to {', '.join(handed)} (a line of next in the form `<session>: <action>`) and nothing "
                             f"would close the item once that work is done. Add check=<what closes it> ({_CHECK_HOW}): the server then closes it when the check passes, no session turn spent. "
-                            f"Only when no check fits, add wake=YYYY-MM-DD (or YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}) to be reminded of your own work at that date; the item stays active in its lane. "
+                            f"Only when no check fits, add a date, wake=YYYY-MM-DD (or until=, YYYY-MM-DDTHH:MM, {_cfg.tz_abbr()}), as the backstop of this hand-off: because the write hands the item on, the date is no wait, the item stays active in the new mover's lane and the hand-off is recorded (the same date with no hand-off is a wait, and the item waits until then). "
                             "(A front agent's hand-off is not asked for either: its mover's close or hand-back lands the result through stackshot.) "
-                            "Pass the same update again with the check, or with the wake alone if none fits. "
-                            "If this tool shows no check parameter, this session's cached tool list predates it: pass wake, or call the update through the "
+                            "Pass the same update again with the check, or with the date alone if none fits. "
+                            "If this tool shows no check parameter, this session's cached tool list predates it: pass the date, or call the update through the "
                             "MCP Portal's Code Mode (portal_codemode_execute with codemode.stackshot_update({item_id, sender, next, check})), which reads the live schema.")
     old_due = meta.get("due")
     for k, v in (("ask", ask), ("priority", priority), ("due", due), ("owner", owner), ("owner_name", owner_name), ("project", project)):
@@ -13012,6 +13208,22 @@ def _update_unlocked(
     _model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
     if "wait_kind" in model_drop:
         _wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
+        if was_until and not (wake or hold):
+            for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
+                meta.pop(k_, None)
+    wait_note = ""
+    gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in _ASK_NONE
+    if was_until and bool(wake) != gave_ask and item.get("status") == "open":      # one date given: the date the item held before (unfolded into the other working field) does not outlive it
+        meta.pop("ask_by" if wake else "wake", None)
+    if item.get("status") == "open" and "wait_kind" in model_set:
+        _uw.to_slot(meta)                                       # a date held for another kind moves to the field the new kind reads
+    if item.get("status") == "open" and "wait_kind" in model_set and _uw.needs_date(meta) and not meta.get("recycle") and not (meta.get("state") == "verifying" and meta.get("end")):
+        fb_d, _fb_how, fb_note = _fallback_wait_date(meta, next_after, description or item.get("description"), meta.get("due"))      # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
+        meta[_uw.slot_of(_uw.kind_of(meta))] = fb_d
+        if _uw.kind_of(meta) == "time":
+            meta["hold"] = True                                 # a wait on a time stands as a hold with its wake
+        until_wait = True
+        wait_note += fb_note
     _gate_ask_on_wait(gid, item, meta, was_needs, closing)           # a decision asked of the owner on an item that still waits: the clear_wait hint
     watch_note = _watch_on_write(gid, item_was, meta, model_set, model_drop, debtor, sender.strip())   # the wait's record, the arrival that was shown
     _gate_metadata(meta, creating=False)
@@ -13105,7 +13317,7 @@ def _update_unlocked(
         if not (filing_only or getattr(_REFORMAT, "on", False)):
             mover_note += _owner_then_default(item_was, meta, str(item.get("status") or ""), sender.strip(), "then" in model_set or "then" in model_drop, mover.strip())      # D9: then defaults to the agent doing the work, not to the front agent that relayed the ask
         wake_changed = bool(wake) and meta.get("wake") != (item_was.get("metadata") or {}).get("wake")      # re-sending the wake the item carries sets nothing
-        watch_ok = _gate_sender_watch(gid, item_now, sender.strip(), handed=handed, watch_reason=watch_reason) if wake_changed else ""   # a front agent's own reminder wake on an alive item another session moves
+        watch_ok = _gate_sender_watch(gid, item_now, sender.strip(), handed=handed, watch_reason=watch_reason) if wake_changed else ""   # a front agent's own wake or until date on an alive item another session moves
         if watch_ok:
             meta["watch_reason"] = watch_ok[:300]
         elif wake_changed or not meta.get("wake"):
@@ -13122,7 +13334,8 @@ def _update_unlocked(
             touched_m.add("cap_ok")                             # a wake records his words for it
         full_judgement = reopening or (_switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
         desc_note = _gate_model(item_now, None if full_judgement else touched_m, gid, needs=[x for x in _needs_of(meta) if x not in naming_added], hold=hold_pre, desc_set=bool(description.strip()),
-                               next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "")   # the write guards of the item model; his lines' Windows check judges only the lines this write sets
+                               next_text=next_judged if next_touch else None, windows_text=next_judged if next_touch else "", defers_text=next_judged if next_touch else "",
+                               until_wait=until_wait or (was_until and not (wake or hold or clear_wait_basis or str(wait_basis or "").strip())), date_given=bool(wake), hold_given=bool(hold))   # the write guards of the item model; his lines' Windows check judges only the lines this write sets; a wait on an until carries no snooze reason
         desc_note += mover_note
         _anchor_wait_gate(item_was.get("metadata") or {}, meta, gid)      # an anchor wait newly set or moved: its anchor must be on the project's list already (after the model guards)
         if next_touch or state_st or state_given.get("step") or needs_set or clear_needs or agent.strip():      # only a write that touches next, the state, needs or the step; any other keeps the note. After the model guards, so their more specific refusals (a command in his line) come first
@@ -13135,6 +13348,32 @@ def _update_unlocked(
         _gate_handoff(gid, item_was, item_now, debtor)     # step 2: a hand-off to a session with no pane is refused, the background agent named
         if getattr(_SESSION_NEXT, "on", False) and _model_guards_on() and steps_new is not None and not (filing_only or getattr(_REFORMAT, "on", False) or sender.strip().startswith("a script on ")):
             _gate_front_step(gid, item_now, steps_before, steps_new, sender.strip() or debtor)     # a new or reworded step that opens with a front agent on an item another session moves: nothing could wake it for the step
+    kept_legacy_wake = False
+    backstop = False                       # a bare date beside a hand-off, kept as the wake it was (below)
+    if item.get("status") == "open" and (was_until or wake or hold or ask_by.strip() or until_wait):
+        if _wt.after_of(meta) and not _uw.kind_of(meta) and not clear_after and (after_set or had_hold or bool(_after_open(meta))) and _uw.date_of(meta):
+            meta["wait_kind"] = "item"                   # a date beside an after link with no kind is that wait's backstop (as ask_by was); create does the same
+        kept_legacy_wake = bool(meta.get("wake")) and not until_wait and (bool(wake) or not was_until)      # the wake as the old parameter (or an older write) gave it keeps the legacy-wake note; a date passed as until never does
+        keep_hold = bool(meta.get("hold")) and bool(_wt.wake_value(meta)) and bool({"anchor", "recycle"} & set(_hold_held_by(gid, meta)))      # a hold that waits on an anchor scoped to the item or on a pane recycle keeps its flag and record (the anchor release, the backstop gate and the recycle read them); the date is its backstop
+        kept_hold_set = meta.get("hold_set")
+        read_failed: list[bool] = []
+        backstop = bool(_uw.date_of(meta)) and _wait_is_bare(meta) and _hands_on(gid, item_was, {**item, "metadata": meta}, handed, sender.strip() or debtor or "", read_failed)
+        if backstop and read_failed and was_until and _wait_is_bare(item_was.get("metadata") or {}):
+            backstop = False               # the reading failed on an item a bare until already parks: that wait is left untouched (not ended by a hand-off nobody could read), and the reply says so
+            wait_note += (f"\n(the hand-off reading failed, so the wait until {_uw.date_of(item_was.get('metadata') or {})} is kept as it was; if this write hands the item on, send it again)")
+        elif backstop and read_failed:
+            wait_note += "\n(the hand-off reading failed, so the date is kept as it was given: a backstop, no wait, and the item stays active)"
+        if backstop:
+            meta.pop("until", None)        # a write that hands the item on never parks it: a bare date beside the hand-off (a wake, an until or an ask_by) stays the date it was, the backstop of the hand-off, and the item stays alive in the new mover's lane (the hand-off record needs a mover)
+            kept_legacy_wake = False
+            if was_until and _wait_is_bare(item_was.get("metadata") or {}):
+                wait_note += (f"\n(the item was waiting until {_uw.date_of(item_was.get('metadata') or {})}: this hand-off ends that wait. The date stays as the hand-off's backstop, and the item is active in the new mover's lane)")
+        else:
+            _uw.fold(meta)                 # every gate above judged the wait in the words of the old fields; it is stored as the one date, until, and none of them
+        if keep_hold:
+            meta["hold"] = True
+            if kept_hold_set:
+                meta["hold_set"] = kept_hold_set
     item["metadata"] = meta
     item["updated"] = time.time()          # the item's own clock (the renderer used to trust the file's mtime, which a migration rewrites)
     if state_change:
@@ -13148,7 +13387,8 @@ def _update_unlocked(
     finally:
         _NO_SETTLE.on = was_no_settle
     now_held = _is_held(item)
-    if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_held != was_held:
+    now_parked = now_held or _date_parked(item)
+    if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_parked != was_parked:
         _WAKE_EVENT.set()         # the minute loop recomputes its next wake now, so a wake set a minute ahead still fires on time
     told = ""
     relayed = False               # this write already went to the project's keeper or router (_pilot_relay): one event makes one inbound there
@@ -13158,7 +13398,7 @@ def _update_unlocked(
         if not moved:
             _owed_mark(meta.get("project", ""), stew or debtor, gid)
         if stew:
-            what = (f"completed ({outcome}{' by ' + _gh.shown(superseded_by) if superseded_by else ''})" if closing else "reopened" if reopening else "completed" if status == "completed" else "put on hold" if now_held and not was_held else "released from hold" if clear_hold and was_held
+            what = (f"completed ({outcome}{' by ' + _gh.shown(superseded_by) if superseded_by else ''})" if closing else "reopened" if reopening else "completed" if status == "completed" else "put on hold" if now_parked and not was_parked else "released from hold" if clear_hold and was_parked
                     else "changed (" + ", ".join(k for k, v in (("description", description), ("next", next_touch), ("needs", needs_set or clear_needs), ("status", status), ("due", due or clear_due),
                                                                  ("hold", hold or clear_hold), ("wake", wake or clear_wake), ("after", after_set or clear_after)) if v) + ")")
             if not moved:
@@ -13237,10 +13477,10 @@ def _update_unlocked(
     machine_note = _machine_note(gid, item, keeper_was)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
     if dropped_hold:
         hint += (f"\n(note: {_gh.shown(gid)} waits on {OWNER}'s call (needs decision), so it is never on hold: the hold is dropped"
-                 + (f"; its wake {meta['wake']} stays as a reminder" if meta.get("wake") else "") + ")")
-    return (f"updated {_gh.shown(gid)}.\n" + _fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + _form_notes(description, next_judged, bool(hold or wake) and now_held, meta, gid,
+                 + (f"; its date {_wt.wake_value(meta)} stays, and no date parks an item on his call" if _wt.wake_value(meta) else "") + ")")
+    return (f"updated {_gh.shown(gid)}.\n" + _fmt(item) + hint + wait_fixed + work_note + steps_note + asked + watch_note + _form_notes(description, next_judged, bool(hold or wake) and now_parked, meta, gid,
                                                                  cmd=item.get("status") == "open" and bool(ask or next_judged or needs_set),
-                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(meta) if wake else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor)) if wake or next_touch else "") if item.get("status") == "open" else "")
+                                                                 ext="external" in _needs_kinds(meta) and "external" not in [str(x).lower() for x in was_needs]) + desc_note + stale_wait + wait_note + machine_note + (_doing_wait_note(meta, next_judged) if item.get("status") == "open" else "") + _retired_note(expected_by, expected_reason) + ((_wake_window_note(_uw.unfolded(meta) if kept_legacy_wake else meta) if wake and not backstop else "") or (_wake_step_note({**item, "gid": gid}, (sender, debtor), legacy_wake=kept_legacy_wake) if wake or next_touch else "") if item.get("status") == "open" else "")
             + named + told + _nag(debtor))
 
 
@@ -13311,6 +13551,7 @@ def stackshot_update(
     wait_anchor: str = "",
     wait_event: _WAIT_EVENT_PARAM = "",
     ask_by: _ASK_BY_PARAM = "",
+    until: _UNTIL_PARAM = "",
     post_wake_mover: _POST_WAKE_PARAM = "",
     clear_goal: bool = False,
     clear_mover: bool = False,
@@ -13348,6 +13589,8 @@ def stackshot_update(
             vals[f_], n_, fx_ = _fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent
             fix_note += n_; fixes += fx_
         mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
+    wake, ask_by, until_wait, alias_used, alias_date = _until_in(item_id, status, until, wake, ask_by, hold, wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
+    alias_ends = _wait_alias_gate(alias_used)
     _gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
     ask_pre = _ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
@@ -13356,9 +13599,11 @@ def stackshot_update(
                        hold, clear_hold, ask, recycle, clear_recycle, outcome, reason, superseded_by, options=options, agent=agent, observers=observers, after=after, work=work, said=said, check=check,
                        clear_options=clear_options, clear_ask=clear_ask, clear_after=clear_after, wait_basis=wait_basis, clear_wait_basis=clear_wait_basis,
                        expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
-                       goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover,
+                       goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
                        clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
                        done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes) + fix_note
+        if alias_used:
+            out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
         return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))
 
 
@@ -14504,7 +14749,7 @@ def _client_items(key: str) -> tuple[int, str, str]:
                     **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
                     "contact": _contact_label(dict(it, gid=gid)),
                     "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _rmod.confirmed_at(it, p),
-                    "updated": up, "held": _is_held(it) or bool(_after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
+                    "updated": up, "held": _is_parked(it) or bool(_after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
                     "roles": roles, **({"role": "agent"} if linked else {})})      # "agent": named in the item's needs (the session named in needs is its mover too, so the key no longer excludes it)
     return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
 
@@ -14788,10 +15033,10 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
             it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
         it["metadata"] = meta
         _save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
-              + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _is_held(it) else ""))
+              + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _is_held(it) or _date_parked(it) else ""))
         for sid, _why in _notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
             to = (sid, "") if sid == owner else (sid, _session_label(owner) or owner)
-            cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _is_held(it) else ""))
+            cleared.setdefault(to, []).append((gid, "freed" if freed else "held" if _is_held(it) or _date_parked(it) else ""))
         print(f"recycle: {gid} no longer waits ({kind} on {machine})", file=sys.stderr, flush=True)
     for (to, front), rows in cleared.items():
         ids = [_gh.shown(g) for g, _ in rows]      # the notice names each item as it is shown (board#N); the stderr tag keeps the raw ids
@@ -14880,7 +15125,7 @@ def _recycle_due(machine: str, item: str = "", pr: str = "") -> dict[str, Any]:
             if action == "set":
                 _update(g, recycle=True, sender=f"a script on {machine}")   # the script's write, not the owner's (the History names it)
                 it = _load(g)
-            done.append({"item": g, "action": action, "held": _is_held(it), "owner": _session_label(_holder(it)),
+            done.append({"item": g, "action": action, "held": _is_held(it) or _date_parked(it), "owner": _session_label(_holder(it)),
                          "needs": [_shown_ref(x) for x in _needs_sessions(it.get("metadata") or {})]})
     return {"items": done, "pr": pr}
 
@@ -15020,7 +15265,7 @@ def _merged_prs(head: str, limit: int = 3000, cwd: Path | None = None) -> dict[i
 
 def _released_skip(it: dict[str, Any], meta: dict[str, Any], mover: str) -> str:
     """Why an item that names the release is left alone ("" when it is not): on hold, or its needs name a decision or a session other than its mover."""
-    if _is_held(it) or _hold_flag(it):
+    if _is_held(it) or _hold_flag(it) or _date_parked(it):
         return "on hold"
     if _rmod.needs_kind(it) == "call":
         return f"its needs name a decision: it waits on {OWNER}"
@@ -16813,14 +17058,17 @@ def _decision_hand_over(meta: dict[str, Any], mover_in: str, then_in: str, parke
             meta.pop("mover", None)
         if _model.is_owner(then_in):
             meta.pop("then", None)
-        elif then and not _watch.stored_kind(meta):
+        elif then and not _uw.kind_of(meta):               # no wait stored as a kind (an until alone is a wait on the date, with no kind)
             if "external" in _needs_kinds(meta):
                 meta.pop("then", None)
             elif _after_open(meta):
                 pass
-            elif meta.get("hold") and meta.get("wake"):
+            elif (meta.get("hold") and meta.get("wake")) or _wt.stored_until(meta):
                 if _watch.enabled():      # a stored time wait is the watcher's (watchers.watches): its wake hands the item to the post-wake mover; the old wake pass would only put it back in its lane
-                    meta["wait_kind"], meta["post_wake_mover"] = "time", then
+                    if _wt.stored_until(meta):
+                        meta["post_wake_mover"] = then       # a wait on the date alone stores no kind (until is the whole of it)
+                    else:
+                        meta["wait_kind"], meta["post_wake_mover"] = "time", then
                     meta["watch"] = {**(meta["watch"] if isinstance(meta.get("watch"), dict) else {}), "set_at": now or time.time()}
                     meta.pop("then", None)
                 # [model] watchers = false: no watcher would wake it, so no time wait is stored. The old park stays with `then` on it, and the old wake pass hands the item over when the hold ends (_hand_stored_then)
@@ -16978,9 +17226,8 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
                 _hand_to_mover(meta, then)      # mover = then and named first in needs, as the decision path does (else _notice_to falls back to the page's keeper)
             if until:                       # a note that names a later time: on hold until then, as a park leaves it; his words are the ones behind the wake (they let it stand past the usual cap)
                 until = _parse_wake(until)
-                meta["hold"], meta["wake"] = True, until
+                meta["until"] = until           # the one date the wait ends on (until_write.py); no hold and no wake are stored
                 _cap_ok_put(meta, "wake", until, "a board note", quote=text, source=f"{OWNER}'s note on his step, {_rmod.when_words(dt.datetime.fromtimestamp(now, ZONE))}")
-                _hold_set(meta, f"{OWNER} (board)", now)
             item["state_updated"] = item["confirmed"] = now
         if kind == "decision" and not stepped:          # his call is in: off his queue at once; the sessions named in needs stay named
             mover_in, then_in = _model.norm_who(meta.get("mover")), _model.norm_who(meta.get("then"))      # as stored before the call: read now, for the hand-over below
@@ -16997,10 +17244,9 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             meta.pop("idle", None)
             if parked:                  # on hold until that day, as update(hold=true, wake=…) would leave it; "Owner acts now" leaves it on agent
                 _state_end(meta)        # a hold ends a stored state of any kind (it reads as derived: parked)
-                meta["hold"], meta["wake"] = True, parked
+                meta["until"] = parked          # the one date the wait ends on (until_write.py); no hold and no wake are stored
                 _cap_ok_put(meta, "wake", parked, "a board answer", quote=text or str(rec.get("choice_line") or ""),
                             source=f"{OWNER}'s answer on the board, {_rmod.when_words(dt.datetime.fromtimestamp(now, ZONE))}")   # "Park until <date>" is his own word for that date
-                _hold_set(meta, f"{OWNER} (board)", now)
             item["state_updated"] = item["confirmed"] = now
             effect = _watch_answer(item, meta, eff, now) if eff["do"] else ""     # arrived, not yet (the date he gave), drop
             if not eff["do"]:           # the watcher asks above move the item themselves (arrived, words, wait, drop); any other call is handed over here
@@ -18013,6 +18259,7 @@ def _start_background() -> list[str]:
     _stall_pause_check()                    # a pause of the stall pass read at the start begins its clock now (or keeps the one in <state>/stall_pause.json) and logs its end time
     for _n in _cfg.notes():                 # a setting missing from the one-file config that changes behaviour silently (the page rules off): a pause of the stall pass, with its end
         print(f"config: {_n}", file=sys.stderr, flush=True)
+    _wait_alias_check()                     # one warning when [model] wait_alias_until is missing: the code's default end of the alias window stands
     try:
         if _migrate_holds():                # status on_hold → open + metadata.hold, before the first publish and the runner
             _publish()

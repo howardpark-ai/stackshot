@@ -1,6 +1,6 @@
 """dated_wait.py — a doing item that is only waiting for a later day (an item that something holds up is marked waiting, not alive).
 
-A stored `doing` item carries no expected time, so a doing item that is really a wait is written one way: the item has a check-back wake some hours or a day away, and every open step of its
+A stored `doing` item carries no expected time, so a doing item that is really a wait is written one way: the item has a wake (one it still carries from before `until`) some hours or a day away, and every open step of its
 next is dated for that day or later ("Mon Mar 2nd after the 09:00 run", "after 2099-03-02"). Nothing can happen before then, so the board shows it as waiting on a time until the wake, without a write; the stored state stays doing.
 
 The rule, deterministic and conservative (a doubt keeps the item doing):
@@ -15,7 +15,7 @@ The rule, deterministic and conservative (a doubt keeps the item doing):
     the step above it, as the checklist draws it. A time of day in a step is not read: the day decides.
 
 A doing item whose wake stands on a stated real-world reason (metadata.wait_basis, read for that very wake: `waiting.basis_of`) and is still ahead is a wait whether or not it is on hold (`basis_wait`): the basis
-names what the item waits for, so the board lists it as waiting until the wake with that text as the reason, and nothing is read from its steps. A wake with no wait_basis is a plain reminder and the item stays active. Once the wake has passed
+names what the item waits for, so the board lists it as waiting until the wake with that text as the reason, and nothing is read from its steps. A wake with no wait_basis and no until is a backstop and the item stays active. Once the wake has passed
 the item reads as it is stored again.
 
 A doing item that is ON HOLD with a wake more than that hour ahead is the other case (`held_wait`): the hold is the park, the wake the day it ends, and nothing is read from its steps. A hold with no wake, or a
@@ -169,7 +169,7 @@ def basis_wait(item: dict[str, Any], now: float, after_open: Any = None) -> Date
 
 def timed_wait_lines(next_text: Any, wake: Any, today: dt.date, mover_is: Callable[[str], bool], dated_only: bool = False) -> list[str]:
     """What makes each open line of `next_text` wait, as model_guards.reads_as_timed_step words it, when EVERY open line is the mover's (`mover_is(opener)`; a line with no opener is) and reads as a wait for
-    the wake's own hour or day (with `dated_only` for nothing else, with it off an outside event too); [] when any line is an action to take now or another party's step: the wake is then a reminder on work in hand.
+    the wake's own hour or day (with `dated_only` for nothing else, with it off an outside event too); [] when any line is an action to take now or another party's step: the date is then no wait, as work in hand.
     The server's write (the correction and the note) and the ten-minute audit pass read an item through this one function."""
     found: list[str] = []
     for chunk in _steps.split(str(next_text or "")):

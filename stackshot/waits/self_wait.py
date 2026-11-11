@@ -1,6 +1,6 @@
 """self_wait.py — a wait a session sets on its own item must name what it waits on, and the work must not be doable now.
 
-An agent that moves an item can park its own work by setting a wake (a check-back) or by dating its own step ("apply it at Monday's run"). Written that way, ready work sits idle until
+An agent that moves an item can park its own work by setting a date (until, or its old name wake) or by dating its own step ("apply it at Monday's run"). Written that way, ready work sits idle until
 the date although nothing stops it. This module judges such a write, in two steps, and refuses when the wait is not a real one:
 
   1. A self-set wait is a write by the item's mover (or the creator of an item it moves) that sets a wake, or a line of next, opening with its own name, whose step is dated later than
@@ -261,7 +261,7 @@ def _allow_call(now: float, cap: int) -> bool:
 # ---------------------------------------------------------------------------------------------------------------- the call
 RUBRIC = """You judge one thing for a task board: can a step be done now?
 
-A software agent moves a work item. It has set a wait on its own step (a wake, a check-back, or a date written into the step) and gave a reason. Say whether the step could be done now, given that reason.
+A software agent moves a work item. It has set a wait on its own step (a date set with until or wake, or a date written into the step) and gave a reason. Say whether the step could be done now, given that reason.
 
 - A real blocker is something the step needs that does not exist yet and that the agent cannot make happen now: a reply it is waiting for, a build, release or test that is still running, a window the work itself needs (logs or data being collected, a trial period), a resource that is down or not yet available, a date set by someone else (an embargo, a meeting, a launch).
 - These are not blockers: a preference for a scheduled run or a quiet hour, the habit of doing the step at a certain time, "the next scheduled run" when the step can also be done by hand, a machine or service the reason says is available, no reason beyond the date itself, or work the agent could simply start.

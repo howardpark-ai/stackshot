@@ -202,7 +202,7 @@ WD = iso(30)
 NX_W = f"team-back: collect logs until {WD}, then review"
 m_plain = {"owner": U["home-front"], "mover": BACK, "needs": [BACK], "wake": WD, "next": NX_W, "project": "projects/alpha"}
 m_basis = dict(m_plain, wait_basis=basis(WD))
-check("11 control: a wake alone whose next waits for its day draws the window note", "alone is a reminder" in server._wake_window_note(m_plain) and server._wake_alone_on_agent(m_plain), server._wake_window_note(m_plain))
+check("11 control: a wake alone whose next waits for its day draws the window note", "alone is a wait until that date" in server._wake_window_note(m_plain) and server._wake_alone_on_agent(m_plain), server._wake_window_note(m_plain))
 check("11 a wake that carries a basis draws neither the window note nor the timed-step note: the item is listed as waiting, not on agent",
       server._wake_window_note(m_basis) == "" and not server._wake_alone_on_agent(m_basis) and server._wake_step_note(dict(it_of(1), metadata=m_basis), (BACK,)) == "", server._wake_window_note(m_basis))
 class _Clock:                    # the server's clock stopped at the wake itself
@@ -212,7 +212,7 @@ class _Clock:                    # the server's clock stopped at the wake itself
 real_time = server.time
 server.time = _Clock(W.wake_epoch(WD))
 try:
-    at_wake = (server._wake_alone_on_agent(m_basis), "alone is a reminder" in server._wake_window_note(m_basis))
+    at_wake = (server._wake_alone_on_agent(m_basis), "alone is a wait until that date" in server._wake_window_note(m_basis))
 finally:
     server.time = real_time
 check("11 …a wake exactly now is not waiting any more: the basis no longer exempts it, so the note rules apply again (alone, and the window note fires)", at_wake == (True, True), at_wake)

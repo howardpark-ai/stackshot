@@ -69,6 +69,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
@@ -171,7 +175,7 @@ refused("create: ...and a create for a machine online now is refused", lambda: s
 m10 = server._model_of({**rd(10), "gid": "a10"})
 check("model: the stored wait is waiting, with no mover, the event and its post-wake mover; the stall pass has no work to look at", m10.state == model.WAITING and m10.wait.event == "box_online box-b" and m10.wait.post_wake_mover == BACK
       and not m10.mover and S.not_due({**rd(10), "gid": "a10"}, now0) != "", (m10.state, m10.wait, S.not_due({**rd(10), "gid": "a10"}, now0)))
-check("display: the item page says what it waits on and the backstop word", itempage.wait_what(m10.wait) == "box-b coming online" and itempage.wait_end_label(m10.wait) == "backstop", itempage.wait_what(m10.wait))
+check("display: the item page says what it waits on and the until word (its backstop day is stored as until)", itempage.wait_what(m10.wait) == "box-b coming online" and itempage.wait_end_label(m10.wait) == "until", itempage.wait_what(m10.wait))
 
 # ================================================================ the wake
 for i in (20, 21, 22, 23):
