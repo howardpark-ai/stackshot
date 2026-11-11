@@ -136,7 +136,7 @@ dry = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 els
 check("2 a dry run writes no file and answers would_set for the items to rewrite, same or kept for the others", st_ == 200 and snapshot() == snap0 and [dry[i]["action"] for i in (1, 2, 3, 4, 5, 10)] == ["would_set"] * 6
       and [dry[i]["action"] for i in (6, 7, 9)] == ["same"] * 3 and dry[8]["action"] == "kept" and dry[11]["action"] == "refused" and "held False -> True" in dry[11]["why"], (st_, {i: dry[i]["action"] for i in dry}))
 check("2 …its before and after name the keys it changes, and the History line", dry[2]["before"]["hold"] is True and dry[2]["before"]["wake"] == day(4) and dry[2]["after"]["until"] == day(4) and dry[2]["after"]["hold"] is None
-      and "rewritten as until" in UM.history_of(dry[2]["after"]) and dry[2]["form"] == "hold + wake", dry[2])
+      and "rewritten as until" in UM.history_of(dry[2]) and dry[2]["form"] == "hold + wake", dry[2])
 check("2 …a bare wake says why it stays", "backstop" in dry[6]["why"], dry[6])
 
 # ---- 3. the write
@@ -261,7 +261,112 @@ st_, d_ = call(op="until", items=["g51"])
 check("8 …a rewrite needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and not server._watch.holding(), (st_, d_))
 CFGM["migration"] = False
 
+# ---- 9. a pass that dies after the server wrote a batch is undoable; an unrelated later History line does not stop an undo
+CFGM["migration"] = True
+import stackshot.core.config as _cfg_
+def fresh(ids):
+    for i in ids:
+        put(i, **CASES[i][1])
+class DyingApp(DirectApp):
+    """The server writes the batch; then the call fails (the process died before it recorded the answer)."""
+    def call(self, body):
+        out = super().call(body)
+        if body["op"] == "until" and not body.get("dry"):
+            raise RuntimeError("the connection dropped after the batch was written")
+        return out
+fresh(OPEN); snapC0 = snapshot()
+RUN2 = pathlib.Path(_scratch.mkdtemp(prefix="untilmig-run2-"))
+args = argparse.Namespace(sender=SENDER, run_dir=str(RUN2), undo="")
+try:
+    cli(UM.apply, app=DyingApp())
+    died = None
+except RuntimeError as ex:
+    died = str(ex)
+undo2 = sorted(RUN2.glob("*/undo.json"))
+rec2 = json.loads(undo2[0].read_text()) if undo2 else {"items": [], "pass_id": ""}
+check("9 the call failed after the server wrote the batch: six files are rewritten and every undo entry still has no result", died and sum(1 for k in snapshot() if snapshot()[k] != snapC0[k]) == 6 and [e["result"] for e in rec2["items"]] == [None] * 6, (died, [e["result"] for e in rec2["items"]]))
+check("9 a new apply finds nothing to rewrite and names the unfinished undo file", cli(UM.apply)[1] == {"rewritten": 0} and UM.unfinished(RUN2) == undo2, UM.unfinished(RUN2))
+rc9, out9 = cli(UM.undo, undo=str(undo2[0]))
+check("9 the undo of the crashed pass puts back all six (the entries are taken from the server's pass record)", rc9 == 0 and out9["results"] == {"set": 6} and snapshot().keys() == snapC0.keys() and all({k: v for k, v in mt(i).items()} == {k: v for k, v in json.loads(snapC0[f"{i}.json"])["metadata"].items()} for i in (1, 2, 3, 4, 5, 10)), (rc9, out9))
+fresh(OPEN)
+try:
+    cli(UM.apply, app=DyingApp())
+except RuntimeError:
+    pass
+undo3 = sorted(RUN2.glob("*/undo.json"))[-1]
+pid3 = json.loads(undo3.read_text())["pass_id"]
+(pathlib.Path(_cfg_.state("migration", f"{pid3}.json"))).unlink()          # the server's record is gone too: the planned entries stand
+rc9, out9 = cli(UM.undo, undo=str(undo3))
+check("9 …and with no pass record either, the planned entries (which hold no clock value) put back all six", rc9 == 0 and out9["results"] == {"set": 6} and all(wk(mt(i)) == wk(json.loads(snapC0[f"{i}.json"])["metadata"]) and "stall" not in mt(i) for i in (1, 2, 3, 4, 5, 10)), (rc9, out9))
+
+# an unrelated History line added after the pass does not make the undo answer kept; it stays, the pass's own line goes
+fresh(OPEN)
+rc, outA = cli(UM.apply)
+undoA = pathlib.Path(outA["undo"])
+for i in (1, 2):
+    d = raw(i); d["metadata"].setdefault("stall", {"log": []})["log"].append({"at": now0 + 5, "text": "a later, unrelated step"})
+    (T / f"store/g/{i}.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
+rcB, outB = cli(UM.undo, undo=str(undoA))
+check("9 an unrelated History line added after the pass does not stop the undo", outB["results"] == {"set": 6} and not outB["kept_because_a_later_save_changed_them"], outB)
+check("9 …the later line stays and the pass's own line is gone", [x["text"] for x in STALL.log_of(mt(1))] == ["a later, unrelated step"] and not STALL.log_of(mt(3)) and "stall" not in mt(3), mt(1).get("stall"))
+# a full log: the pass's line pushes the oldest out; the undo puts it back
+full = [{"at": now0 - 100 + n, "text": f"step {n}"} for n in range(8)]
+put(71, needs=[BACK], hold=True, wake=day(3), stall={"log": full})
+rc, outC = cli(UM.apply)
+check("9 a log of eight lines keeps eight lines after the pass, the oldest pushed out", [x["text"] for x in STALL.log_of(mt(71))][0] == "step 1" and len(STALL.log_of(mt(71))) == 8, mt(71).get("stall"))
+cli(UM.undo, undo=outC["undo"])
+check("9 …and the undo puts the log back as it was", STALL.log_of(mt(71)) == full and "until" not in mt(71), mt(71).get("stall"))
+
+# ---- 10. holds the route keeps, holds it refuses, and a writer that takes no lock
+put(81, needs=[BACK], hold=True, wake=day(3), hold_set={"at": now0 - DAY, "by": BACK}, recycle={"at": now0})
+put(82, needs=[BACK], hold=True, wake=day(3), hold_set={"at": now0 - DAY, "by": BACK})
+put(83, needs=[BACK], hold=True, wake=day(3), after=["g31"])
+put(84, needs=["external"], hold=True, wake=day(3), wait_kind="anchor", wait_anchor="https://example.com/y")
+put(85, needs=["external"], hold=True, wake=day(3))
+real_scoped = server._scoped_anchors
+server._scoped_anchors = lambda project, gid: ["https://example.com/watched"] if gid == "g82" else real_scoped(project, gid)
+try:
+    st_, d_ = call(op="until", items=[f"g{i}" for i in (81, 82, 83, 84, 85)])
+finally:
+    server._scoped_anchors = real_scoped
+r10 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
+check("10 a hold on a pane recycle keeps its flag and its stamp, and stores the date as until", r10[81]["action"] == "set" and mt(81).get("hold") is True and mt(81).get("hold_set") and mt(81).get("until") == day(3) and "wake" not in mt(81), (r10[81]["action"], r10[81].get("why"), wk(mt(81))))
+check("10 a hold on an anchor scoped to the item keeps its flag and its stamp too", r10[82]["action"] == "set" and mt(82).get("hold") is True and mt(82).get("hold_set") and mt(82).get("until") == day(3), (r10[82]["action"], r10[82].get("why"), wk(mt(82))))
+check("10 a hold beside an open after item, one with the kind anchor and one with needs external are left as they are or rewritten without a change of reading; none is half done",
+      all(r10[i]["action"] in ("refused", "set", "same", "kept") for i in (83, 84, 85)) and all(("wake" in mt(i)) != ("until" in mt(i)) for i in (83, 84, 85)), {i: (r10[i]["action"], r10[i].get("why"), wk(mt(i))) for i in (83, 84, 85)})
+check("10 a hold beside an open after item and a hold on needs external are refused (their reading would change) and left byte for byte", all(r10[i]["action"] == "refused" for i in (83, 84, 85)), {i: r10[i]["action"] for i in (83, 84, 85)})
+
+put(86, needs=[BACK], hold=True, wake=day(3)); b86 = bytes_of(86)
+orig_sw = server._stamp_write
+def sneaky(p, raw_, h0, edits):
+    d = json.loads(p.read_text()); d["metadata"]["noted_by_a_writer_without_the_lock"] = d["metadata"].get("noted_by_a_writer_without_the_lock", 0) + 1
+    p.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+    return orig_sw(p, raw_, h0, edits)
+server._stamp_write = sneaky
+try:
+    st_, d_ = call(op="until", items=["g86"])
+finally:
+    server._stamp_write = orig_sw
+check("10 a writer without the lock that changes the item between the read and the replace: answered moved, its write stands, the wait is not rewritten", d_["results"][0]["action"] == "moved" and mt(86).get("noted_by_a_writer_without_the_lock") == 1 and mt(86).get("wake") == day(3) and "until" not in mt(86), (d_["results"][0]["action"], wk(mt(86))))
+st_, d_ = call(op="until", items=["g86"])
+check("10 …and the next run rewrites it", d_["results"][0]["action"] == "set" and mt(86).get("until") == day(3), d_["results"][0]["action"])
+d0 = call(op="until", items=["g86"])[1]
+ent = {"item": "g86", "before": {"until": None, "wake": day(3), "hold": True}, "after": {"until": day(3), "wake": None, "hold": None}, "history": "x", "dropped": []}
+server._stamp_write = sneaky
+try:
+    st_, d_ = call(op="ununtil", items=[ent])
+finally:
+    server._stamp_write = orig_sw
+check("10 the undo answers moved the same way and leaves the other writer's change", d_["results"][0]["action"] == "moved" and mt(86).get("until") == day(3) and mt(86).get("noted_by_a_writer_without_the_lock") == 2, d_["results"][0]["action"])
+
+# ---- 11. the two History renderers print the same date for a backstop
+src = {f: pathlib.Path(os.path.join(STACK, f)).read_text() for f in ("stackshot/web/render.py", "stackshot/web/ui/render.py")}
+lines = {f: [l.strip() for l in t.splitlines() if "backstop" in l and "ev.append" in l] for f, t in src.items()}
+check("11 both renderers print the backstop and wake lines from wait_date_of (an old-form relay's ask_by logs the same line in both)", all(len(v) == 1 and v[0].startswith("w = wait_date_of(v);") for v in lines.values()) and
+      all(any(l.strip().startswith("w = wait_date_of(v);") and ("wake_set" in l or "wake {" in l) for l in t.splitlines()) for t in src.values()), lines)
+CFGM["migration"] = False
+
 import shutil
-shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True)
+shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
 print(f"ok: until migrate scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")
 sys.exit(1 if fails else 0)

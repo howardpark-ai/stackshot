@@ -51,18 +51,27 @@ def show(d: dict[str, Any]) -> str:
     return json.dumps(d, ensure_ascii=False, sort_keys=True)
 
 
-def history_of(side: dict[str, Any]) -> str:
-    log = ((side or {}).get("stall") or {}).get("log") or []
-    return str(log[-1].get("text")) if log and isinstance(log[-1], dict) else ""
+def refused_note(date: str) -> str:
+    return (f"a refused item keeps its old fields untouched (such as a hold beside an open after item or one held by needs external: anything that would read differently as until): they are still read as before; "
+            f"the next write that touches its wait stores it as until, and a person re-saves it with update(until=...) before {date}, when the old parameters wake, ask_by and hold stop being accepted in writes")
+
+
+def alias_date() -> str:
+    from stackshot.core import config as _cfg  # noqa: PLC0415
+    return str(_cfg.get("model", "wait_alias_until", default="2026-11-25") or "2026-11-25")
+
+
+def history_of(row: dict[str, Any]) -> str:
+    return str((row or {}).get("history") or "")
 
 
 def print_row(r: dict[str, Any]) -> None:
-    keys = [k for k in (r.get("after") or {}) if k != "stall"]
+    keys = list(r.get("after") or {})
     print(f"{r['item']}  {r.get('form') or '-'}  ->  {r.get('new') or '-'}   [{r['action']}]")
     print(f"    old: {show({k: (r.get('before') or {}).get(k) for k in keys})}")
     print(f"    new: {show({k: (r.get('after') or {}).get(k) for k in keys})}")
-    if history_of(r.get("after") or {}):
-        print(f"    History line: stackshot: {history_of(r['after'])}")
+    if history_of(r):
+        print(f"    History line: stackshot: {history_of(r)}")
     if r["action"] in ("refused", "kept"):
         print(f"    why: {r.get('why')}")
 
@@ -109,6 +118,8 @@ def dry_run(a: argparse.Namespace) -> int:
         refused = [r["item"] for r in rows if r["action"] == "refused"]
         listed = [r["item"] for r in rows if r["action"] == "kept"]
         print(f"items the pass refuses (they would read differently as until): {len(refused)}" + (f" {refused}" if refused else ""))
+        if refused:
+            print(f"  {refused_note(alias_date())}")
         print(f"items kept and listed for a person: {len(listed)}" + (f" {listed}" if listed else ""))
         print(f"items the pass would write: {by_result.get('set', 0)} of {len(rows)}")
         if a.json:
@@ -131,6 +142,8 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
     snap = SP.load_dir(store)
     cands = sorted((g for g, it in snap.items() if it.get("status") == "open" and any(k in (it.get("metadata") or {}) for k in ("wake", "ask_by"))), key=SP.num)
     say(f"{len(cands)} open items store a wake or an ask_by, of {len(snap)} items read from {store}")
+    for f in unfinished(run_dir):
+        say(f"an earlier pass did not finish recording: {f} has entries with no result; this run does not cover them. --undo {f} puts back what that pass wrote")
     plan: list[dict[str, Any]] = []
     for ch in SP.chunks(cands):
         st, d = app.call({"op": "until", "items": ch, "dry": True})
@@ -141,6 +154,8 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
     todo = [(g, r) for g, r in zip(cands, plan) if r.get("action") == "would_set"]
     refused = [r["item"] for r in plan if r.get("action") == "refused"]
     say(f"{len(todo)} of {len(cands)} would be rewritten; {sum(1 for r in plan if r.get('action') == 'same')} left as they are; {sum(1 for r in plan if r.get('action') == 'kept')} kept and listed; {len(refused)} refused" + (f" ({', '.join(refused)})" if refused else ""))
+    if refused:
+        say(refused_note(alias_date()))
     if not todo:
         print(json.dumps({"rewritten": 0}))
         return 1 if refused else 0
@@ -153,7 +168,7 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
     say(f"backup of {len(todo)} items written: {base / 'items'}")
     undo_path = base / "undo.json"
     undo = {"pass_id": pass_id, "by": a.sender, "when": dt.datetime.now(_cfg.tz()).strftime("%a %b %d %H:%M %Z"), "store": str(store), "backup": str(base / "items"),
-            "items": [{"item": g, "shown": r["item"], "before": r["before"], "after": r["after"], "sha256_before": r["sha256_before"], "result": None} for g, r in todo]}
+            "items": [{"item": g, "shown": r["item"], "before": r["before"], "after": r["after"], "history": r.get("history", ""), "dropped": r.get("dropped", []), "sha256_before": r["sha256_before"], "result": None} for g, r in todo]}
     SP.write_atomic(undo_path, undo)      # on disk, whole, before the first write
     say(f"undo file written: {undo_path}")
     entries = {e["item"]: e for e in undo["items"]}
@@ -169,22 +184,62 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
             e = entries[g]
             e["result"] = r["action"]
             if r["action"] in ("set", "same"):
-                e["before"], e["after"], e["sha256_before"] = r["before"], r["after"], r["sha256_before"]
+                e["before"], e["after"], e["history"], e["dropped"], e["sha256_before"] = r["before"], r["after"], r.get("history", ""), r.get("dropped", []), r["sha256_before"]
         SP.write_atomic(undo_path, undo)      # the real result of each item, kept as it comes
     print(json.dumps({"pass_id": pass_id, "undo": str(undo_path), "backup": str(base / "items"), "results": dict(counts), "refused_in_the_plan": refused,
                       "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"]}, indent=1))
     return 1 if counts.get("refused") or counts.get("batch refused") or refused else 0
 
 
+def resolve_unrecorded(rec: dict[str, Any]) -> int:
+    """An entry whose result is still None is one the run died on, between the server writing its batch and the script recording the answer. The server keeps every batch's real results in its pass record
+    (<state>/migration/<pass id>.json): for such an entry the record's action and keys are taken in place of the planned ones, in memory. An entry the record does not name (the run died before the server's
+    write, or no record is here) keeps its planned values, which the undo checks against the item as it stands: the item holds `before` (nothing to put back) or `after` (put back). → how many were resolved."""
+    pend = [e for e in rec["items"] if e.get("result") is None]
+    if not pend:
+        return 0
+    try:
+        from stackshot.core import config as _cfg
+        srv = json.loads(_cfg.state("migration", f"{rec.get('pass_id')}.json").read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001  — no record, or one that does not read: the planned values stand
+        say(f"{len(pend)} entries have no recorded result and the server's pass record could not be read ({e.__class__.__name__}): their planned values are used")
+        return 0
+    by_shown = {r.get("item"): r for r in srv.get("items") or [] if isinstance(r, dict)}
+    n = 0
+    for e in pend:
+        r = by_shown.get(e.get("shown"))
+        if not r or r.get("action") not in ("set", "same", "moved", "refused"):
+            continue
+        e["result"] = r["action"]
+        if r["action"] in ("set", "same"):
+            e["before"], e["after"], e["history"], e["dropped"] = r["before"], r["after"], r.get("history", e.get("history", "")), r.get("dropped", e.get("dropped", []))
+        n += 1
+    say(f"{len(pend)} entries had no recorded result: {n} taken from the server's pass record, {len(pend) - n} keep their planned values")
+    return n
+
+
+def unfinished(run_dir: Path) -> list[Path]:
+    """The undo files of earlier passes in the run directory that have an entry with no recorded result (a run that died): each is still undoable, and a new run does not cover its items."""
+    out: list[Path] = []
+    for f in sorted(run_dir.glob("*/undo.json")) if run_dir.is_dir() else []:
+        try:
+            if any(e.get("result") is None for e in json.loads(f.read_text(encoding="utf-8")).get("items", [])):
+                out.append(f)
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def undo(a: argparse.Namespace, app: Any = None) -> int:
     rec = json.loads(Path(a.undo).expanduser().read_text(encoding="utf-8"))
+    resolve_unrecorded(rec)
     todo = [e for e in rec["items"] if e.get("result") not in ("moved", "refused", "same")]
     say(f"{len(todo)} of {len(rec['items'])} entries to put back (pass {rec.get('pass_id')})")
     app = app or MM.LiveApplier(a.sender)
     counts: collections.Counter[str] = collections.Counter()
     kept: list[str] = []
     for ch in SP.chunks(todo):
-        st, d = app.call({"op": "ununtil", "items": [{"item": e["item"], "before": e["before"], "after": e["after"]} for e in ch]})
+        st, d = app.call({"op": "ununtil", "items": [{"item": e["item"], "before": e["before"], "after": e["after"], "history": e.get("history", ""), "dropped": e.get("dropped", [])} for e in ch]})
         if st != 200:
             say(f"a batch was refused as a whole: [{st}] {d.get('error') if isinstance(d, dict) else d}")
             counts["batch refused"] += len(ch)

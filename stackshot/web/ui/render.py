@@ -2495,9 +2495,9 @@ class Board:
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
                         ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")))
                 elif is_held(v) and is_held(prev) and wait_date_of(prev) != wait_date_of(v):
-                    w = wake_of(v); ev.append(("hold", _t("item.log.wake_set", when=e(self.when(w))) if w else _t("item.log.wake_cleared")))
+                    w = wait_date_of(v); ev.append(("hold", _t("item.log.wake_set", when=e(self.when(w))) if w else _t("item.log.wake_cleared")))
                 if not h_ and not ph and s_ != "completed" and ps == s_ and wait_date_of(prev) != wait_date_of(v):   # a date that is no wait (a backstop): set, moved or gone
-                    w = wake_of(v); ev.append(("hold", _t("item.log.backstop_set", when=e(self.when(w))) if w else _t("item.log.backstop_cleared")))
+                    w = wait_date_of(v); ev.append(("hold", _t("item.log.backstop_set", when=e(self.when(w))) if w else _t("item.log.backstop_cleared")))
                 if s_ != "completed" and after_of({"metadata": pm}) != after_of({"metadata": m}):   # what it waits on
                     af = after_of({"metadata": m}); ev.append(("hold", _t("item.log.after", ids="<b>" + e(", ".join(shown(g) for g in af)) + "</b>") if af else _t("item.log.after_cleared")))
                 if s_ != "completed" and (pm.get("state") != m.get("state") or any(pm.get(k) != m.get(k) for k in _states.CARRY_FIELDS)):   # where it stands, with what the state carries

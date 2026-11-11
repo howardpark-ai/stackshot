@@ -27,8 +27,10 @@ from stackshot.waits import until_write as _uw
 from stackshot.waits import waiting as _wt
 
 KEYS = ("until", "wait_kind", "wake", "ask_by", "hold", "hold_set")       # the wait keys the pass may change
-ENTRY_KEYS = frozenset((*KEYS, "stall"))                                   # what an undo entry may name (stall: the History line)
+ENTRY_KEYS = frozenset(KEYS)                                               # what an undo entry's before and after may name: the wait keys only (the History line is `history`, below)
+ENTRY_FIELDS = frozenset(("item", "before", "after", "history", "dropped"))      # an undo entry: the wait keys as they were and as the pass left them, the History line it added, the older lines that line pushed out of the log
 HISTORY_MAX = 240
+LOG_KEEP = 8                                                               # stall.note keeps this many lines of a log
 
 
 def clean(v: Any) -> str:
@@ -58,7 +60,8 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
         out.update(kept="an until and an old date field are both stored: left as it is", listed=True)
         return out
     if _uw.is_bare(meta):
-        out["kept"] = "a bare date is a backstop (a hand-off's, or one stored before until), not a wait: kept as it is"
+        bare = {"wake": "a bare wake", "ask_by": "a bare ask_by", "wake + ask_by": "a bare wake and ask_by"}.get(form, "a bare date")
+        out["kept"] = f"{bare} is a backstop (a hand-off's, or one stored before until), not a wait: kept as it is"
         return out
     work = copy.deepcopy(meta)
     if _wt.after_of(work) and not _uw.kind_of(work) and _uw.date_of(work):
@@ -96,8 +99,12 @@ def with_history(meta: dict[str, Any], plan: dict[str, Any], now: float) -> dict
     if not plan["edits"]:
         return plan
     probe = copy.deepcopy(meta)
-    _stall.note(probe, now, history_line(plan))
-    return {**plan, "edits": {**plan["edits"], "stall": probe["stall"]}}
+    old = _stall.log_of(probe)
+    line = history_line(plan)
+    _stall.note(probe, now, line)
+    kept = _stall.log_of(probe)
+    dropped = [x for x in old if x not in kept]            # the lines the new one pushed out of the log (the log keeps LOG_KEEP): an undo puts them back
+    return {**plan, "edits": {**plan["edits"], "stall": probe["stall"]}, "history": line, "dropped": dropped}
 
 
 def apply_edits(item: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
@@ -119,9 +126,10 @@ def snapshot(item: dict[str, Any], keys: list[str]) -> dict[str, Any]:
 
 
 def entry_for(item: dict[str, Any], plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The undo entry's two sides for exactly the keys the plan changes."""
-    keys = list(plan["edits"])
-    return {"before": snapshot(item, keys), "after": snapshot(apply_edits(item, plan), keys)}
+    """The undo entry for the plan: the wait keys it changes, as they were and as the pass leaves them (never the History log, which later writes add to), the History line it adds and the older
+    lines that pushed out. Nothing in it depends on the clock, so the entry planned by a dry run is the one the write makes."""
+    keys = [k for k in plan["edits"] if k != "stall"]
+    return {"before": snapshot(item, keys), "after": snapshot(apply_edits(item, plan), keys), "history": plan.get("history", ""), "dropped": plan.get("dropped", [])}
 
 
 def entry_problem(side: Any) -> str:
@@ -184,6 +192,22 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
         return S._migrate_refuse(shown, f"{e.__class__.__name__}: {str(e)[:200]}")
 
 
+def _log_without(meta: dict[str, Any], history: str, dropped: list[dict[str, Any]]) -> Any:
+    """The `stall` value an item has once the pass's History line is taken out of its log (the last line with that text) and the lines it pushed out are back at the front, as far as the log has room.
+    Other lines stay as they are; None (drop the key) when nothing is left of the log and the key holds nothing else."""
+    stall = meta.get("stall")
+    log = [x for x in _stall.log_of(meta)]
+    for i in range(len(log) - 1, -1, -1):
+        if log[i].get("text") == history:
+            del log[i]
+            break
+    log = (dropped + log)[-LOG_KEEP:]
+    rest = {k: v for k, v in (stall.items() if isinstance(stall, dict) else []) if k != "log"}
+    if not log and not rest:
+        return None
+    return {**rest, "log": log}
+
+
 def undo_one(S: Any, w: Any) -> dict[str, Any]:
     """Put one item's wait keys back: `w` = {item, before, after} (the keys as they were, and as the pass left them; None = absent). Under the item lock, if the item holds `after` for every key it names it gets
     `before` (None drops the key) → `set`; if it already holds `before` → `same`; anything else (a later save changed a key) → `kept`, untouched. Running it again is a no-op."""
@@ -194,9 +218,12 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
     except ToolError as e:
         return S._migrate_refuse(str(w.get("item") or "?"), str(e))
     shown = S._gh.shown(gid)
-    extra = [k for k in w if k not in S._STAMP_ENTRY]
+    extra = [k for k in w if k not in ENTRY_FIELDS]
     if extra:
-        return S._migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before and after only")
+        return S._migrate_refuse(shown, f"the undo names {', '.join(sorted(map(str, extra)))}: an entry holds item, before, after, history and dropped only")
+    history, dropped = w.get("history") or "", w.get("dropped") or []
+    if not isinstance(history, str) or not isinstance(dropped, list) or not all(isinstance(x, dict) for x in dropped):
+        return S._migrate_refuse(shown, "history is the line the pass added (text) and dropped a list of log lines")
     before, after = w.get("before"), w.get("after")
     for side in (before, after):
         why = entry_problem(side)
@@ -212,12 +239,15 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
                 return refusal
             h0 = S._stamp_sha(data)
             now = snapshot(raw, keys)
-            out = {"item": shown, "before": before, "after": after, "sha256_before": h0}
+            out = {"item": shown, "before": before, "after": after, "history": history, "dropped": dropped, "sha256_before": h0}
             if now == before:
                 return {**out, "action": "same", "why": "it already holds the keys it had"}
             if now != after:
                 return {**out, "action": "kept", "why": "it holds other values than the pass left (a later save changed them): left as it is", "now": now}
-            if not S._stamp_write(p, raw, h0, before):
+            edits = dict(before)
+            if history:
+                edits["stall"] = _log_without(raw["metadata"], history, dropped)
+            if not S._stamp_write(p, raw, h0, edits):
                 return {**out, "action": "moved", "why": "the item was written between the read and the replace: its write stands"}
         return {**out, "action": "set", "why": "the keys put back"}
     except Exception as e:  # noqa: BLE001
