@@ -291,6 +291,8 @@ def with_ran(scope):
     mm = json.loads(MAP.read_text()); mm["suites"]["a"]["py"]["mod.py"] = sorted({*mm["suites"]["a"]["py"]["mod.py"], scope}); P = T / f"map-{scope}.json"; P.write_text(json.dumps(mm)); return P
 for what, code, scope in (("an attribute __doc__", "def describe(fn):\n    return fn.__doc__", "describe"),
                           ("inspect.getdoc", "def describe(fn):\n    import inspect\n    return inspect.getdoc(fn)", "describe"),
+                          ("getattr(fn, '__doc__')", "def describe(fn):\n    return getattr(fn, '__doc__')", "describe"),
+                          ("an alias of getdoc", "from inspect import getdoc as gd\n\n\ndef describe(fn):\n    return gd(fn)", "describe"),
                           ("a registry's add_tool", "def register(srv, fn):\n    srv.add_tool(fn)", "register"),
                           ("mcp.tool()(fn) as a call", "def register(srv, fn):\n    return srv.tool()(fn)", "register")):
     git("checkout", "-q", "-B", f"t{len(ran)}", base); doc_reader(code)(); head = commit("docstring and a doc reader")
@@ -998,6 +1000,80 @@ if use_strace:
           c["pid"] != "0" and c["rc"] == 130 and c["secs"] < 7.5 and c["gone"] and not c["left"] and not c["after"] and not (K / "m.json").exists(), c)
 else:
     print("suitemap: the measured run's cancel is not checked here: strace is missing, or this run is already traced", file=sys.stderr)
+
+# ---- the docstring tripwire (Wed Nov 11th 2026). A docstring-only change of an undecorated function selects by name (tests/suitemap.py, *Docstrings*): that
+# is sound while nothing reaches a function by a variable name and reads its docstring, or registers it somewhere that builds a description from it. The
+# checkout is scanned for every form that does either; a use that is not on the allow list below fails here, so the author of the first one has to look at
+# whether the selection still reaches it, and then lists it with the reason.
+import ast
+DOC_REG = {"add_tool", "command", "add_api_route", "tool", "resource", "prompt", "from_function", "add_resource", "add_prompt"}
+def doc_forms(src):
+    """the docstring-reading and docstring-registering forms a Python source uses (names of forms, as the allow list spells them)"""
+    out = set()
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.Attribute) and n.attr in ("__doc__", "getdoc", "getmembers"):
+            out.add(n.attr)
+        elif isinstance(n, ast.Name) and n.id in ("getdoc", "getmembers", "pydoc", "doctest"):
+            out.add(n.id)
+        elif isinstance(n, ast.Import):
+            out |= {a.name.split(".")[0] for a in n.names if a.name.split(".")[0] in ("pydoc", "doctest")}
+        elif isinstance(n, ast.ImportFrom):
+            if (n.module or "").split(".")[0] in ("pydoc", "doctest"):
+                out.add(n.module.split(".")[0])
+            out |= {a.name for a in n.names if a.name in ("getdoc", "getmembers")}
+            if any(a.name == "*" for a in n.names):
+                out.add("import *")
+        elif isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Name) and f.id == "getattr" and any(isinstance(a, ast.Constant) and a.value == "__doc__" for a in n.args):
+                out.add("getattr __doc__")
+            if isinstance(f, ast.Attribute) and f.attr in DOC_REG:
+                out.add(f".{f.attr}(")
+            if isinstance(f, ast.Name) and f.id in DOC_REG - {"tool", "command", "resource", "prompt"}:
+                out.add(f"{f.id}(")
+    return out
+# (file, form): why the rule covers it. A module's own docstring (a bare `__doc__`, `client.__doc__`, `prj.__doc__`) is read by name and is not part of the rule.
+DOCUSE_ALLOW = {
+    ("stackshot/web/server.py", ".tool("): "the @mcp.tool decorators: a decorated function keeps the old rule (its docstring is a decorator's read)",
+    ("stackshot/web/server.py", ".resource("): "the @mcp.resource decorator: a decorated function keeps the old rule",
+    ("tests/audit_run_scenario.py", ".prompt("): "AR.prompt(...) is the audit's own function that builds a text, not a registry",
+    ("tests/release_queue_scenario.py", "import *"): "the release harness's own helpers; no function of the checkout is read through them by a docstring",
+    ("tests/release_scenario.py", "import *"): "the release harness's own helpers; no function of the checkout is read through them by a docstring",
+    ("tests/event_wait_scenario.py", "__doc__"): "client.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/locale_pages_scenario.py", "__doc__"): "i18n.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/model_scenario.py", "__doc__"): "server.stackshot_get.__doc__, a decorated tool: unchanged rule",
+    ("tests/project_record_scenario.py", "__doc__"): "prj.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/question_scenario.py", "__doc__"): "client.__doc__ (module) and server._pilot_charge.__doc__ (a function it names: the name rule selects it)",
+    ("tests/rebullet_scenario.py", "__doc__"): "rd_tool.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/released_scenario.py", "__doc__"): "client.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/retired_inputs_scenario.py", "__doc__"): "_client.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/step_proof_scenario.py", "__doc__"): "client.__doc__, a module docstring: read by name, unchanged rule",
+    ("tests/terminal_prompt_scenario.py", "__doc__"): "client.__doc__, a module docstring: read by name, unchanged rule",
+}
+def doc_uses(files):
+    """the (file, form) pairs in {path: source} that are not on the allow list"""
+    return sorted((f, x) for f, src in files.items() for x in doc_forms(src) if (f, x) not in DOCUSE_ALLOW)
+CK = os.path.dirname(SCR)
+scan = {}
+for top in ("stackshot", "tools", "tests"):
+    for root, _dirs, names_ in os.walk(os.path.join(CK, top)):
+        for nm_ in names_:
+            if nm_.endswith(".py"):
+                try: scan[os.path.relpath(os.path.join(root, nm_), CK)] = open(os.path.join(root, nm_), encoding="utf-8").read()
+                except (OSError, UnicodeDecodeError): pass
+new_uses = doc_uses({f: src for f, src in scan.items() if f.endswith(".py")})
+check("TRIPWIRE every use in the checkout (stackshot/, tools/, tests/) of a form that reads or registers a docstring is on the allow list: a new one "
+      "(" + ", ".join(f"{f}: {x}" for f, x in new_uses) + ") must be looked at: does suite selection (tests/suitemap.py, *Docstrings*) still reach a suite that "
+      "reads this function's docstring after a docstring-only change? Then add it to DOCUSE_ALLOW with a one-line reason", not new_uses, new_uses)
+check("TRIPWIRE the allow list names files and forms the scan sees today (no entry for a use that is gone)",
+      all(x in doc_forms(scan[f]) for f, x in DOCUSE_ALLOW if f in scan) and all(f in scan for f, _ in DOCUSE_ALLOW), [(f, x) for f, x in DOCUSE_ALLOW if f not in scan or x not in doc_forms(scan[f])])
+for what, code in (("getattr(x, '__doc__')", "d = getattr(m.f, '__doc__')"), ("x.__doc__", "d = fns[name].__doc__"), ("inspect.getdoc", "import inspect\nd = inspect.getdoc(f)"),
+                   ("an alias of getdoc", "from inspect import getdoc as gd\nd = gd(f)"), ("inspect.getmembers", "import inspect\nm = inspect.getmembers(mod)"),
+                   ("pydoc", "import pydoc\nt = pydoc.render_doc(f)"), ("doctest", "import doctest\ndoctest.testmod(mod)"), ("from X import *", "from mod import *"),
+                   ("add_tool", "srv.add_tool(f)"), (".command(", "app.command()(f)"), ("add_api_route", "app.add_api_route('/x', f)"), (".tool(", "mcp.tool()(f)")):
+    check(f"TRIPWIRE fires on a new use: {what} in a new suite", len(doc_uses({"tests/new_scenario.py": code})) == 1, doc_uses({"tests/new_scenario.py": code}))
+check("TRIPWIRE stays quiet on a listed use and on a bare module __doc__ (print(__doc__))",
+      doc_uses({"tests/question_scenario.py": "x = client.__doc__"}) == [] and doc_uses({"tests/new_scenario.py": "print(__doc__)"}) == [])
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

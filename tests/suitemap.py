@@ -127,7 +127,13 @@ another statement shares them), a change whose changed lines in that function ar
 A function whose docstring changed together with a line of its code or its def (a signature, a decorator), a decorated function (the decorator
 reads the docstring at import: an @mcp.tool's is the description a session reads), a method or a nested function (its name is no key a suite
 reads by: `obj.method`), a class, and the module's own docstring (read by name already: `client.__doc__`) are selected as before. So is a
-module that calls globals(). SUITEMAP_DOCSTRING_RULE=D1 (D2 by default; any other value is an error, checked when a command starts) gives
+module that calls globals(). Limits, kept honest: a changed line that is blank or starts with `#` inside an undecorated docstring selects nothing (the line loop skips it as
+a comment, as it always did); a suite that fetches a function by a variable name (getattr(module, name), inspect.getmembers,
+`from m import *`) and then reads its docstring is not reached by name: tests/suitemap_scenario.py scans stackshot/, tools/ and tests/ for
+every docstring-reading or docstring-registering form and fails on a use that is not on its short allow list, so the first one to appear is
+looked at by its author. The readers of a docstring in non-suite code that DOC_CALLS does not know (a registry applied inside a function by
+another name: click, typer, fastapi) are the same case.
+SUITEMAP_DOCSTRING_RULE=D1 (D2 by default; any other value is an error, checked when a command starts) gives
 the old rule everywhere: a docstring is part of the body. `audit` applies the same rule on both maps.
 
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
@@ -408,11 +414,13 @@ class ModNames:
         return out
 
     def doc_read(self, node):
-        """record the scope of a node that reads a docstring (`x.__doc__`, inspect.getdoc, a registry call: DOC_CALLS)"""
+        """record the scope of a node that reads a docstring (`x.__doc__`, getattr(x, "__doc__"), inspect.getdoc or an alias of it, a registry call: DOC_CALLS)"""
         hit = isinstance(node, ast.Attribute) and node.attr == "__doc__" and isinstance(node.ctx, ast.Load)
         if isinstance(node, ast.Call):
             f = dotted(node.func)
-            hit = (f is not None and f.split(".")[-1] in DOC_CALLS) or \
+            # a call by its last name, or by an alias made by `from inspect import getdoc as gd`; getattr(x, "__doc__")
+            hit = (f is not None and (f.split(".")[-1] in DOC_CALLS or self.froms.get(f.split(".")[0], ("", ""))[1] in DOC_CALLS)) or \
+                (f == "getattr" and len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and node.args[1].value == "__doc__") or \
                 (isinstance(node.func, ast.Call) and getattr(node.func.func, "attr", None) in DOC_REGISTER)
         if hit:
             self.docreads.add(self.scope(node))
