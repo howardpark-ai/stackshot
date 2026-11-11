@@ -5889,7 +5889,11 @@ def _minute_wake_catchup() -> None:
 def _minute_anchor_pass() -> None:
     """The anchor pass, in a tick of its own so that a failure in it does not stop the next one; published when it released something. The progress clock's merge pass (`_merge_progress_tick`) rides
     on it: it reads what the hub saw, as the anchor pass does, and a failure in either does not stop the other."""
-    released = _anchor_pass()
+    try:
+        released = _anchor_pass()
+    except Exception as e:  # noqa: BLE001  — the merge pass below is not stopped for it
+        released = []
+        print(f"anchor pass: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
         moved = _merge_progress_tick()
     except Exception as e:  # noqa: BLE001  — the clock is groundwork for the hand-up of a stuck item; the anchor pass is not stopped for it
@@ -15760,6 +15764,23 @@ def _anchor_repo(url: str) -> str:
     return _cfg.canon_repo(a[7:].split("#", 1)[0].split("@", 1)[0]) if a.startswith("github:") else ""
 
 
+def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
+    """The lines worth acting on: each parsed on its own (merge_log.normal), so a line of the wrong shape (a hand edit, a torn write that still parsed) is logged and skipped and the offset moves on
+    past it; and only those younger than `main_hours` plus two hours, on every pass. A merge from the backlog of a day of downtime stamps the item's progress at the time of the save, which would be a
+    clock reset for work that happened long ago: it is no progress now, so it is not stamped."""
+    out: list[dict[str, Any]] = []
+    floor = now - (_ladder_main_hours() + 2.0) * 3600.0
+    for row in rows:
+        try:
+            r = _mlog.normal(row)
+        except Exception as e:  # noqa: BLE001
+            print(f"merge progress: line skipped ({e.__class__.__name__}: {e}): {str(row)[:120]}", file=sys.stderr, flush=True)
+            continue
+        if r["ts"] >= floor:
+            out.append(r)
+    return out
+
+
 def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, Any], str, dict[str, str]]]:
     """For each merge line the open items on the stall ladder it is tied to: [(line, "owner/repo#n", {item id: why})]. The items are read once for all lines; one that cannot be read is logged and left out."""
     scoped = _released_anchors()
@@ -15790,7 +15811,7 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
         for ref in row.get("refs") or []:
             try:
                 g = _norm_id(str(ref))
-            except ToolError:
+            except Exception:      # an id that names no item (another machine's temporary id, a word that only looks like an id)
                 continue
             if g in texts and g not in body:
                 body.append(g)
@@ -15801,17 +15822,15 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
 
 def _merge_progress_tick(now: float | None = None) -> list[str]:
     """The pass: read the hub's merge log from where it stopped, and for each open item a merged pull request is tied to (merge_tie.tied) add the pull request to the item's `merged_seen` and save it,
-    which moves the item's progress clock (progress.moved). A line older than the hand-up interval and a few hours is skipped on the pass's first run and when the file was replaced by a shorter one
-    (the clock could not use it, and a replay would stamp items for merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
+    which moves the item's progress clock (progress.moved). On every pass a line that is malformed is logged and skipped, and one older than the hand-up interval plus two hours is skipped (`_merge_rows`: the
+    backlog of a day of downtime, or a shorter file read again from its start, would stamp items for merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
     or held is left alone. An item that cannot be read or saved is logged and skipped: the others are saved and the offset is stored, so one bad item does not abort the pass every minute. → the ids saved."""
     if _watch.holding():
         return []
     now = time.time() if now is None else now
     off = _merge_progress_offset()
-    fresh = off is None or off > _mlog.size()      # no offset yet, or the file is shorter than where the pass stopped (replaced or shrunk): read from its start, but only what the clock could use
-    rows, new = _mlog.read(off or 0)
-    if fresh:
-        rows = [r for r in rows if float(r.get("ts") or 0) >= now - (_ladder_main_hours() + 2.0) * 3600.0]
+    rows, new = _mlog.read(off or 0)      # an offset past the end of the file (replaced or shrunk) reads from its start
+    rows = _merge_rows(rows, now)
     if not rows:
         if new != off:
             _merge_progress_save(new)

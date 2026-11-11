@@ -19,7 +19,9 @@ from typing import Any
 
 from stackshot.core import config as _cfg
 
-BOARD_REF = re.compile(r"(?<![\w/#-])board#([1-9]\d*)\b", re.I)      # the board's own id form; a bare "#n" in a body is a pull request or an issue of the repository
+BOARD_REF = re.compile(r"(?<![\w/#-])board#([1-9]\d*)\b", re.I)      # the board's own id form, the fallback when model/ids.py cannot be imported; a bare "#n" in a body is a pull request or an issue of the repository
+_REF_OK = re.compile(r"[\w#-]{2,80}")      # what a stored ref may look like: an id as written (board#7, board-tmp-<machine>#3, g7), never free text
+_IDS: list[Any] = []      # model/ids.py, imported at the first body read (it brings fastmcp: the hub that never reads a merged pull request's body never pays for it)
 _GITHUB_PATH = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)", re.I)
 _ANCHOR = re.compile(r"^github:([\w.-]+/[\w.-]+)#(\d+)$", re.I)
 MAX_REFS = 10
@@ -29,11 +31,30 @@ def path() -> Path:
     return _cfg.state("merges.jsonl")
 
 
+def _ids() -> Any:
+    if not _IDS:
+        try:
+            from stackshot.model import ids as m  # noqa: PLC0415
+            _IDS.append(m)
+        except Exception:  # noqa: BLE001  — the body is read with the board's own form alone, never lost to an import
+            _IDS.append(None)
+    return _IDS[0]
+
+
 def refs(body: Any) -> list[str]:
-    """The board ids a pull request's body names, as "board#N" in the order written, each once (at most MAX_REFS)."""
+    """The item ids a pull request's body names as plain words, in the order written, each once (at most MAX_REFS), as written and lower-case: board#N, board-tmp-<machine>#N, a legacy gNN id, an item
+    page link (/items/<n> as board#<n>). Read as a session's message is (model/ids.py): code fences, inline code and quoted text are blanked first, an id with something glued on is no id, and the merge
+    queue's "group g7" forms are no item. The server resolves each with its own `_norm_id` and keeps those that name an open item."""
+    ids = _ids()
     out: list[str] = []
-    for m in BOARD_REF.finditer(str(body or "")):
-        ref = f"board#{m.group(1)}"
+    if ids is None:
+        found = [f"board#{m.group(1)}" for m in BOARD_REF.finditer(str(body or ""))]
+    else:
+        found = []
+        for m in ids._ITEM_REF.finditer(ids._without_mq_groups(ids._plain_text(str(body or "")))):
+            ref = (m.group(1) or m.group(2) or "").lower()
+            found.append(f"board#{ref}" if m.group(2) and ref.isdigit() else ref)
+    for ref in found:
         if ref not in out:
             out.append(ref)
     return out[:MAX_REFS]
@@ -61,7 +82,7 @@ def line_for(anchor: str, url: str, etype: Any, body_refs: Any, now: float) -> d
     repo, n = pull_of(anchor, url)
     if not repo or n <= 0:
         return None
-    return {"ts": round(float(now), 3), "repo": repo, "n": n, "refs": [str(r) for r in (body_refs or []) if BOARD_REF.fullmatch(str(r))][:MAX_REFS]}
+    return {"ts": round(float(now), 3), "repo": repo, "n": n, "refs": [str(r) for r in (body_refs or []) if _REF_OK.fullmatch(str(r))][:MAX_REFS]}
 
 
 def append(line: dict[str, Any]) -> None:
@@ -87,6 +108,16 @@ def size() -> int:
         return path().stat().st_size
     except OSError:
         return 0
+
+
+def normal(row: dict[str, Any]) -> dict[str, Any]:
+    """A line as the server uses it: {"ts": float, "repo": "owner/repo", "n": int > 0, "refs": [str]}. Raises ValueError or TypeError for a line of the wrong shape (a hand edit, a torn write that
+    still parsed): the caller skips it, logs it and moves on."""
+    repo, n, ts = str(row["repo"]).strip().lower(), int(row["n"]), float(row.get("ts") or 0)
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or n <= 0 or ts != ts or ts in (float("inf"), float("-inf")):
+        raise ValueError(f"not a merge line: repo={repo!r} n={n} ts={ts}")
+    rs = row.get("refs")
+    return {"ts": ts, "repo": repo, "n": n, "refs": [str(r) for r in rs if _REF_OK.fullmatch(str(r))][:MAX_REFS] if isinstance(rs, list) else []}
 
 
 def read(offset: int = 0) -> tuple[list[dict[str, Any]], int]:
