@@ -108,6 +108,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 
 # ---- 2. the server's note
 from stackshot.web import server
+from stackshot.projects import project_registry as _projects_registry
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
 server._publish = lambda: None
 def create(project, owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, sender=owner, **{"next": f"{owner}: carry on", **kw})
@@ -175,20 +176,20 @@ import time as _t, inspect
 t0 = _t.time(); RJ = T / "state/roles.json"
 _rep = []; _orig_replace = os.replace
 os.replace = lambda a, b: (_rep.append((str(a), str(b))), _orig_replace(a, b))[1]
-w1 = server._roles_sync(now=t0); os.replace = _orig_replace
+w1 = _projects_registry._roles_sync(now=t0); os.replace = _orig_replace
 j = json.loads(RJ.read_text())
-check("roles.json: written to the state dir with a UTC Z stamp and every role, as file_roles has them", w1 and server.ROLES == RJ and j["sessions"] == FR and j["sessions"]["harbor-ops"]["role"] == "front" and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", j["generated"]), j)
+check("roles.json: written to the state dir with a UTC Z stamp and every role, as file_roles has them", w1 and _projects_registry.ROLES == RJ and j["sessions"] == FR and j["sessions"]["harbor-ops"]["role"] == "front" and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", j["generated"]), j)
 check("roles.json: atomically, a temp file beside it replaced onto it, none left behind",
       [x for x in _rep if x[1] == str(RJ)] == [(str(T / "state/.roles.json.tmp"), str(RJ))] and not (T / "state/.roles.json.tmp").exists(), _rep)
-check("roles.json: unchanged and fresh → not rewritten", server._roles_sync(now=t0 + 60) is False and json.loads(RJ.read_text()) == j)
+check("roles.json: unchanged and fresh → not rewritten", _projects_registry._roles_sync(now=t0 + 60) is False and json.loads(RJ.read_text()) == j)
 page("projects/side.md", "type: project\ntitle: Side\ndisplay-name: home-side\nagents:\n  home-side-main: talks\n  home-side-docs: writes\n  background:\n    falcon-anchors: also sweeps here\n    home-other: runs the side jobs\nstatus: active")
 p.cmd_registry(quiet=True)
-check("roles.json: rewritten when the registry's roles change", server._roles_sync(now=t0 + 120) is True
+check("roles.json: rewritten when the registry's roles change", _projects_registry._roles_sync(now=t0 + 120) is True
       and json.loads(RJ.read_text())["sessions"].get("home-side-docs") == {"role": "front", "project": "projects/side"}, RJ.read_text()[:300])
 g1 = json.loads(RJ.read_text())["generated"]
-check("roles.json: no rewrite before 30 min with nothing changed", server._roles_sync(now=t0 + 120 + 29 * 60) is False and json.loads(RJ.read_text())["generated"] == g1)
+check("roles.json: no rewrite before 30 min with nothing changed", _projects_registry._roles_sync(now=t0 + 120 + 29 * 60) is False and json.loads(RJ.read_text())["generated"] == g1)
 check("roles.json: refreshed with a new stamp at 30 min though nothing changed (a reader calls a file over an hour old stale)",
-      server._roles_sync(now=t0 + 120 + 31 * 60) is True and json.loads(RJ.read_text())["generated"] != g1)
+      _projects_registry._roles_sync(now=t0 + 120 + 31 * 60) is True and json.loads(RJ.read_text())["generated"] != g1)
 _stale = json.loads(RJ.read_text()); _stale["generated"] = "2026-01-01T00:00:00Z"; RJ.write_text(json.dumps(_stale))
 server._roles_sync_safe()
 check("roles.json: a stale file is refreshed by the pass the runner runs every minute (with the board held too)", json.loads(RJ.read_text())["generated"] > "2026-01-02"

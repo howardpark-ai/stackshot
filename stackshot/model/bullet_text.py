@@ -12,6 +12,7 @@ Used by server.py's description and next gates, by the cold call's close (cold_c
   goal_of       the sentence a description's first bullet gives after its `Goal:` label (the label is case-sensitive and sits right after the dash), None when the first bullet does not open that way
   clip_bullet   one bullet shortened to `line_max` visible characters at a word boundary that lies outside any link and any naked URL, then an ellipsis
   bullets       a text as `- ` bullets, split on lines only, each clipped, at most `max_lines` of them (the last says how many more there were)
+  _clip_line    free text as one line of a notice: whitespace collapsed, cut at a word before a limit with an ellipsis
 
 Every pattern here is linear in the line's length (no nested quantifier over the same characters, the open-ended parts are bounded, and whitespace that two neighbours could
 match is matched possessively), so a 40,000-character line of brackets, angle marks or spaces costs milliseconds, not seconds."""
@@ -194,3 +195,12 @@ def bullets(text: str, max_lines: int = 8, line_max: int = 120) -> str:
         more = len(lines) - (max_lines - 1)
         lines = lines[: max_lines - 1] + [f"- …and {more} more"]
     return "\n".join(clip_bullet(ln, line_max) for ln in lines)
+
+
+def _clip_line(text: str, limit: int = 600) -> str:
+    """Free text as one line of a notice: whitespace collapsed, cut at a word before `limit` with an ellipsis."""
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(t) <= limit:
+        return t
+    cut = t[:limit].rsplit(" ", 1)[0] if " " in t[:limit] else t[:limit]
+    return cut.rstrip(" ,;:") + " …"

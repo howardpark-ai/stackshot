@@ -60,9 +60,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 from stackshot.core import config as _cfg
-from stackshot.web import i18n, i18n_catalog, search, shared
+from stackshot.web import i18n, i18n_catalog, search
 from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 server._publish = lambda: None
@@ -311,7 +312,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         return c.post(path, content=raw if raw is not None else json.dumps(body), headers=headers, follow_redirects=False)
 
     # -- no folder configured: the pages are English, with no marker and no switch
-    set_dir(None); reset_warned(); shared._board_home_drop()
+    set_dir(None); reset_warned(); _web_board_home._board_home_drop()
     for who in (MINA, NOOR, None):
         h = get("/", who)
         check(f"no locale folder ({who or 'visitor'}): the home is English, <html lang=\"en\">, no marker, no switch, no script table override",
@@ -342,7 +343,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     post({"lang": "en"})
 
     # -- the test locale loaded: the switch, the language of the pages
-    write_ko(test_locale()); set_dir(LOC); reset_warned(); shared._board_home_drop()
+    write_ko(test_locale()); set_dir(LOC); reset_warned(); _web_board_home._board_home_drop()
     en_home = get("/", NOOR).text
     check("English person, locale loaded: <html lang=\"en\">, the home in English with no marker, the switch drawn with EN pressed", '<html lang="en">' in en_home and "[x:" not in en_home and 'id="ssi"' not in en_home
           and 'data-lang="en"' in lang_toggle(en_home) and re.search(r'data-lang="en"[^>]*aria-pressed="true"', lang_toggle(en_home)) and re.search(r'data-lang="ko"[^>]*aria-pressed="false"', lang_toggle(en_home)), lang_toggle(en_home))
@@ -382,20 +383,20 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     proj_ko = get("/projects/alpha", MINA).text
     check("a project page: the same, and nothing breaks on a page that is not converted yet", '<html lang="ko">' in proj_ko and MARK("Summary") in proj_ko and "Alpha" in proj_ko, (proj_ko.count("ALPHA"), proj_ko[:200]))
     # the kept draws
-    shared._board_home_drop(); get("/", NOOR); get("/", MINA)
-    kept_en, kept_ko = server._BOARD_HOME["html"], shared._BOARD_HOME_OTHER.get("ko", {}).get("html")
+    _web_board_home._board_home_drop(); get("/", NOOR); get("/", MINA)
+    kept_en, kept_ko = _web_board_home._BOARD_HOME["html"], _web_board_home._BOARD_HOME_OTHER.get("ko", {}).get("html")
     check("the home keeps one draw per language: English in the English slot, the test locale in its own", kept_en and "[x:" not in kept_en and kept_ko and MARK("Your move") in kept_ko and kept_ko != kept_en)
     check("…the kept English draw is what the English person is served", "[x:" not in kept_en and re.search(r"Your move", kept_en) is not None and get("/", NOOR).text == kept_en, None)
-    shared._board_home_drop()
-    check("a drop clears every language's draw", server._BOARD_HOME["at"] == 0.0 and all(s["at"] == 0.0 for s in shared._BOARD_HOME_OTHER.values()))
+    _web_board_home._board_home_drop()
+    check("a drop clears every language's draw", _web_board_home._BOARD_HOME["at"] == 0.0 and all(s["at"] == 0.0 for s in _web_board_home._BOARD_HOME_OTHER.values()))
     st_en = get("/render-stamp", NOOR); st_ko = get("/render-stamp", MINA)
     check("the render stamp answers for the person's own draw (JSON, a ts)", st_en.status_code in (200, 503) and st_ko.status_code in (200, 503) and (st_ko.status_code == 503 or isinstance(st_ko.json().get("ts"), int)), (st_en.status_code, st_ko.text))
     r = post({"lang": "en"})
     back = get("/", MINA).text
     check("a round trip: back to English, <html lang=\"en\">, no marker, the switch still drawn", '<html lang="en">' in back and "[x:" not in back and 'id="panel-lang"' in back and 'id="ssi"' not in back)
-    get("/", NOOR); held_at = server._BOARD_HOME["at"]; held_html = server._BOARD_HOME["html"]
+    get("/", NOOR); held_at = _web_board_home._BOARD_HOME["at"]; held_html = _web_board_home._BOARD_HOME["html"]
     post({"lang": "ko"}); post({"lang": "en"})
-    check("a save of the language leaves the kept draws alone (a toggle is not a write to the board)", held_at > 0 and server._BOARD_HOME["at"] == held_at and server._BOARD_HOME["html"] is held_html)
+    check("a save of the language leaves the kept draws alone (a toggle is not a write to the board)", held_at > 0 and _web_board_home._BOARD_HOME["at"] == held_at and _web_board_home._BOARD_HOME["html"] is held_html)
     # the file goes away: the switch goes with it, the person's choice stays stored and reads English
     post({"lang": "ko"}); (LOC / "ko.json").unlink(); reset_warned()
     with quiet_err():

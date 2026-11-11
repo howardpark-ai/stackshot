@@ -9,7 +9,7 @@ names nobody, and the Projects page drew it as a running agent. Three small piec
   sweep(renames)     settles the pending entry of every old name in the project record, in whichever project holds it (the session may have moved to another project in the same step):
                      dropped when the new name is registered somewhere (a page lists it, or a project's pending map holds it), renamed to the new name in place when it is registered
                      nowhere (so the page line it owes is not lost), skipped for 10 minutes after its `at` (a new session may be registered before sala lists it; the next sweep takes it).
-                     Every entry it touches is logged to the server log, with the fields it held. Run on every roles build (server._roles_sync), where sala is read once anyway.
+                     Every entry it touches is logged to the server log, with the fields it held. Run on every roles build (projects/project_registry.py, _roles_sync), where sala is read once anyway.
   the roles file     carries `renamed_to` on such a name (anchors.session_roles), and the Projects page leaves a name with `renamed_to` out (ui/render.py agent_live).
 
 The old name stops drawing. The new name draws only when a page lists it or a project's pending map holds it: an old name that is dropped has the new name registered already, and one

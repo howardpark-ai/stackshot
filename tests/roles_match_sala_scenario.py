@@ -75,6 +75,7 @@ from stackshot.projects import pages as p
 from stackshot.anchors import anchors as A
 from stackshot.fleet import clients as C
 from stackshot.web import server
+from stackshot.projects import project_registry as _projects_registry
 p.cmd_registry(quiet=True); R = json.loads((T / "store/projects.json").read_text())["pages"]
 check("(setup) the fixture registry lists the pages and their statuses", R["projects/fin"].get("status") == "done" and R["ops/multi-new"].get("hub") == "projects/act", {k: (v.get("status"), v.get("session")) for k, v in R.items()})
 
@@ -152,21 +153,21 @@ os.environ["STACKSHOT_SALA"] = str(FAKE)
 # the server's roles.json: live on every entry, sala read once per build, a change in who is listed rewrites it
 RJ = T / "state/roles.json"; t1 = time.time()
 sala("ok", ["home-act", "home-served-main"]); c0 = calls()
-check("roles.json: written, with live on every entry; sala was read exactly once for the build", server._roles_sync(now=t1) is True and calls() == c0 + 1, (calls() - c0))
+check("roles.json: written, with live on every entry; sala was read exactly once for the build", _projects_registry._roles_sync(now=t1) is True and calls() == c0 + 1, (calls() - c0))
 j = json.loads(RJ.read_text()); S = j["sessions"]
 check("roles.json: …each entry holds role, project and live; the live ones are the names sala lists", all({"role", "project", "live"} <= set(e) for e in S.values()) and {n for n, e in S.items() if e["live"]} == {"home-act", "home-served-main"},
       {n: e for n, e in S.items()})
 check("roles.json: …entries minus live are what file_roles gives (nothing dropped); the finished page's keeper is retired", {n: {k: v for k, v in e.items() if k != "live"} for n, e in S.items()} == A.file_roles(R) and S["home-fin"].get("retired") is True,
       S.get("home-fin"))
-check("roles.json: …unchanged and fresh → not rewritten", server._roles_sync(now=t1 + 60) is False)
+check("roles.json: …unchanged and fresh → not rewritten", _projects_registry._roles_sync(now=t1 + 60) is False)
 sala("ok", ["home-act", "home-served-main", "home-served-bg"])
-check("roles.json: …a session starting in sala rewrites it (live flips)", server._roles_sync(now=t1 + 80) is True and json.loads(RJ.read_text())["sessions"]["home-served-bg"]["live"] is True)
+check("roles.json: …a session starting in sala rewrites it (live flips)", _projects_registry._roles_sync(now=t1 + 80) is True and json.loads(RJ.read_text())["sessions"]["home-served-bg"]["live"] is True)
 sala("fail", [])
-check("roles.json: …sala unreadable → the file is rewritten without the field on any entry (not false for everyone), every other key kept", server._roles_sync(now=t1 + 100) is True
+check("roles.json: …sala unreadable → the file is rewritten without the field on any entry (not false for everyone), every other key kept", _projects_registry._roles_sync(now=t1 + 100) is True
       and all("live" not in e for e in json.loads(RJ.read_text())["sessions"].values()) and set(json.loads(RJ.read_text())["sessions"]) == set(S), json.loads(RJ.read_text())["sessions"].get("home-act"))
 
 # the readers in the hub repo take an entry by .get("role"), .get("project"), .get("retired"); an extra key changes none of them
-S = json.loads((sala("ok", ["home-act"]), server._roles_sync(now=t1 + 120), RJ.read_text())[2])["sessions"]
+S = json.loads((sala("ok", ["home-act"]), _projects_registry._roles_sync(now=t1 + 120), RJ.read_text())[2])["sessions"]
 check("readers: an entry with `live` still has role, project and (where it applies) retired as strings/booleans of the same shape",
       all(isinstance(e["role"], str) and isinstance(e["project"], str) and set(e) <= {"role", "project", "retired", "page_owed", "live"} for e in S.values()), S)
 

@@ -26,7 +26,8 @@ an owner pointing at a finished transcript. This module is the one lookup that t
 The file is read again only when it changes (inode, mtime, size). A file that stops reading (torn, mid-rewrite) is served from its last good
 read for up to STALE seconds (30 minutes, counted from the first failed read), then dropped; a file that is missing, or reads but is another schema, is not stood in for. With no
 registry every lookup is None, so nothing downstream changes from what it did before the registry existed. Never raises.
-Stdlib only; config.py (and clients.py for the directory) are its imports, the same as anchors.py and fleet.py."""
+The helpers at the end tell a session's name for a reference (`_session_label`) and read the heartbeat index by transcript id or by permanent id (`_sessions_index`, `_Index`).
+Stdlib only; config.py, fleet.py and liveness.py (and clients.py for the directory) are its imports, the same as anchors.py."""
 from __future__ import annotations
 
 import json
@@ -36,6 +37,9 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from stackshot.fleet import fleet as _fleet
+from stackshot.fleet import liveness as _lv
 
 SCHEMA = 1
 FILE = "session-registry.json"
@@ -336,3 +340,50 @@ def expand_flag(keys: Any) -> set[str]:
 def all_names() -> dict[str, str]:
     """permanent id → current name of every row (retired ones too: an old item still names its owner)."""
     return {i: _text(r.get("name")) for i, r in load().rows.items() if _text(r.get("name"))}
+
+
+def _session_label(value: str) -> str:
+    """The human name for a session reference: the name the fleet tool's registry gives the session now (a stored permanent id, an old transcript id or
+    an old name all read as the name in use), else the heartbeat name, else the value itself."""
+    v = str(value or "")
+    n = display_name(v) if v else None
+    if n:
+        return n
+    x = _sessions_index().get(v) or {}
+    return str(x.get("name") or v)
+
+
+class _Index(dict):
+    """The heartbeat index (transcript UUID → row) that also answers for a permanent session id: a lookup (get, [], in) by an id the registry
+    holds finds the row of that session's present transcript (the running one, else the latest seen), its name the registry's. Iteration
+    (items, values, keys) is the heartbeat's own and lists each session once, by transcript."""
+    def _via(self, k: Any) -> dict[str, Any] | None:
+        if not isinstance(k, str) or not is_perm_id(k):
+            return None
+        best = None
+        for t in transcripts(k):
+            r = dict.get(self, t)
+            if r is not None and (best is None or (_lv.running(r), str(r.get("seen", ""))) >= (_lv.running(best), str(best.get("seen", "")))):
+                best = r
+        if best is None:
+            return None
+        return {**best, "name": display_name(k) or best.get("name")}
+    def __missing__(self, k: Any) -> dict[str, Any]:
+        r = self._via(k)
+        if r is None:
+            raise KeyError(k)
+        return r
+    def get(self, k: Any, default: Any = None) -> Any:
+        return dict.get(self, k) if dict.__contains__(self, k) else (self._via(k) or default)
+    def __contains__(self, k: Any) -> bool:
+        return dict.__contains__(self, k) or self._via(k) is not None
+
+
+def _sessions_index() -> dict[str, dict[str, Any]]:
+    """transcript UUID → {name, url, seen, machine} from every machine's live heartbeat (fleet.py; out of git). A permanent session
+    id looks up the same way (see _Index)."""
+    out = _Index()
+    for L in _fleet.letters():
+        for k, v in _fleet.read(L, "sessions").items():
+            if isinstance(v, dict) and not dict.__contains__(out, k): out[k] = {"machine": L, **v}
+    return out

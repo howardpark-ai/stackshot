@@ -29,18 +29,29 @@ The read path, in one place:
     pageless(x)     the view of a project the record says has no page, else None
     apply(reg)      the page registry with the entries laid over it (title, type, name → session/role, status, hub, agents, scope), page lines where an entry has no field
 
-Stdlib only; config.py is its one import at load (projects.py is imported inside the functions that need it, since it imports this module)."""
+The registry as the server reads it, and the two files it keeps (the helpers that more than one part of the server reads):
+
+    _registry(name)       a registry file of the store ([registries]); `projects` has the record's entries laid over the pages' lines
+    _roles_sync()         <state>/roles.json, every session's role, rewritten when the roles changed or the file is ROLES_EVERY old (`_roles_sync_safe` also keeps projects.json)
+    _projects_sync()      <state>/projects.json, the project record's published file
+
+Stdlib only; config.py, readonly.py and store.py (core/) are its imports at load (projects.py, anchors.py and renamed_agents.py are imported inside the functions that need them, since they import this module)."""
 from __future__ import annotations
 
 import copy
+import datetime as dt
 import json
 import os
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.core import readonly as _ro
+from stackshot.core import store as _store
 
 SCHEMA = 1
 SECTION = "projects"                  # the top-level field of project-record.json that holds the entries
@@ -349,3 +360,93 @@ def moved(section: Any, old_key: str, new_key: str, oid: str, nid: str | None = 
         if was not in fk:
             fk.append(was)
         e["former_keys"] = fk
+
+
+# ---------------------------------------------------------------------------- the registry as the server reads it, and the files it publishes
+# A registry file of the store ([registries]), read by the project areas and the client API; `projects` has the project record's entries laid over the pages' lines.
+def _registry(name: str) -> dict[str, Any]:
+    from stackshot.projects import projects as _prj      # projects.py imports this module
+    r = _cfg.CFG["registries"][name]
+    try:
+        with open(_store.STORE / f"{name}.json", encoding="utf-8") as f:
+            data = json.load(f)
+        data = data[r["key"]] if r.get("key") else data
+        return _prj.with_record(data) if name == "projects" else data      # the project record's entries first, the page lines for the rest
+    except Exception:
+        return {}
+
+
+# every session's role, as a file the server keeps (<state>/roles.json) and the client API serves (`roles`), so a box's
+# hooks can tell a front agent without parsing the registry. Written at start, after each registry rebuild (publish, the
+# create gate's rebuild) and from the runner's fleet pass (every 60 s), when the roles changed or the file is ROLES_EVERY old: a
+# reader treats a file over an hour old as stale, so a live server keeps it fresh even when nothing changes.
+ROLES = _cfg.state("roles.json")
+ROLES_EVERY = 30 * 60
+_ROLES_LOCK = threading.Lock()
+
+
+def _roles_sync(now: float | None = None) -> bool:
+    """Rewrite roles.json ({"generated": <UTC ISO Z>, "sessions": anchors.file_roles()}) atomically when the roles changed or
+    the file is ROLES_EVERY old. file_roles is session_roles with the pane-named keeper of an active one-session project as
+    "front"; the server's own gates keep session_roles. Each entry also says whether sala lists the name as a session (`"live"`, one
+    `sala sessions --json` read per build: anchors.sala_live; the field is left out when sala cannot be read), and a change in who is listed rewrites the file. An empty registry (none yet, or unreadable) writes nothing: a stale file is the reader's cue,
+    an empty one would say nobody is front. → True when written."""
+    from stackshot.anchors import anchors as _anc        # anchors.py imports this module
+    from stackshot.fleet import renamed_agents as _renamed      # renamed_agents.py imports projects.py
+    now = time.time() if now is None else now
+    reg = _anc.registry()
+    if not reg:
+        return False
+    rows = _anc.sala_rows()                                # sala is read once per build; `live` on every entry, or on none when sala cannot be read
+    renames = _renamed.renames_of(rows)                    # old name → new name of the sessions sala renamed: an alias reads live, but names nobody
+    try:
+        _renamed.sweep(renames, reg, now)                  # a pending agent under an old name is no agent: dropped (the new name is registered) or renamed (it is not), before the roles read it
+    except ValueError:                                     # a damaged id file: nothing is dropped, and the roles are built from the record as it stands
+        pass
+    except Exception as e:  # noqa: BLE001 — a record write that failed (a full disk, a lock file): the next tick sweeps again; the roles are rebuilt now all the same
+        print(f"renamed agents: the sweep failed ({e!r}); roles.json is built from the record as it stands", file=sys.stderr, flush=True)
+    live = None if rows is None else set().union(*_anc.sessions_of(rows))
+    sessions = _anc.file_roles(reg, live, renames)
+    ids = _anc.role_ids(sessions)          # step B: beside each name its permanent id where the registry resolves it (an extra top-level key; the keys of `sessions` stay names)
+    with _ROLES_LOCK:
+        try:
+            old = json.loads(ROLES.read_text(encoding="utf-8"))
+            age = now - dt.datetime.fromisoformat(str(old["generated"]).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            old, age = {}, float("inf")
+        if old.get("sessions") == sessions and (old.get("ids") or {}) == ids and 0 <= age < ROLES_EVERY:
+            return False
+        gen = dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ROLES.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ROLES.with_name(".roles.json.tmp")
+        tmp.write_text(json.dumps({"generated": gen, "sessions": sessions, **({"ids": ids} if ids else {})}, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, ROLES)
+    return True
+
+
+def _roles_sync_safe(now: float | None = None) -> None:
+    if _ro.is_read_only():                  # roles.json and projects.json are files the standby does not write
+        return
+    try:
+        _roles_sync(now)
+    except Exception as e:
+        print(f"roles.json: {e}", file=sys.stderr, flush=True)
+    _projects_sync_safe(now)                # phase A: projects.json beside it, on the same calls (start, publish, the create gate's rebuild, the 20-s pass)
+
+
+# phase A: the project record's published file, <state>/projects.json ({schema, generated, projects: {<id>: {id, key, keeper,
+# agents}}, by_key}), kept as roles.json is: rewritten when a record changed and at least every projects.EVERY (3 min) seconds, so a
+# reader treats a file over 10 minutes old as stale. Ids are minted in <store>/project-record.json (projects.py), once and for good.
+PROJECTS = _cfg.state("projects.json")
+
+
+def _projects_sync(now: float | None = None, force: bool = False) -> bool:
+    from stackshot.projects import projects as _prj      # projects.py imports this module
+    return _prj.sync(now=now, force=force, path=PROJECTS)
+
+
+def _projects_sync_safe(now: float | None = None, force: bool = False) -> None:
+    try:
+        _projects_sync(now, force)
+    except Exception as e:
+        print(f"projects.json: {e}", file=sys.stderr, flush=True)

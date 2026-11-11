@@ -3,7 +3,7 @@
 helpers they read: how a page is written (`_page_how`), a session's stored reference and its shown name (`_session_id`, `_store_ref`, `_same_sess`, `_shown_ref`, `_shown_needs`, `_role_name`) and the ledger's one lock (`_OWED_LOCK`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the page and project
-modules, the registry readers (`field_gates.py`), the session helpers (`shared.py`) and the pure pieces (`common.py`). server.py imports each name its writes, its tools and the suites read back from here, so
+modules, the registry readers (`field_gates.py`), the session helpers (`fleet/sessions_registry.py`) and the instance settings and text clipping (`core/instance.py`, `model/bullet_text.py`). server.py imports each name its writes, its tools and the suites read back from here, so
 `server._owed_mark`, `server._refuse_if_owing`, `server._nag` and the others stay the names they use. `_refuse_if_owing` has no caller here: the writes in server.py call it, and a suite that stubs it
 (`server._refuse_if_owing = ...`) stubs it where they look it up. `_page_ts` is called here by `_owed_settle` and by the client API's page-ts answer in server.py: the suites that put a page's time in place of the real one for
 the debts set it on this module (`server._pdebts._page_ts`), and the one that stubs the client API's answer sets it on `server`. `_HERE` is the checkout's root, read only in the two messages that name the `pages.py clear` command;
@@ -32,7 +32,7 @@ from stackshot.projects import projects as _prj
 from stackshot.router import page_debt as _page_debt
 from stackshot.web import render as _rmod
 from stackshot.web.field_gates import _registry_hits
-from stackshot.web.shared import _session_label, _sessions_index
+from stackshot.fleet.sessions_registry import _session_label, _sessions_index
 
 _HERE = _paths.ROOT
 

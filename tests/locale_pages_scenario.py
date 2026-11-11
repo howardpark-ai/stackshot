@@ -60,7 +60,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 from stackshot.core import config as _cfg
-from stackshot.web import i18n, search, server, shared
+from stackshot.web import i18n, search, server
 from stackshot.web import runners as R
 from stackshot.web.runners import RunnersError
 from stackshot.web import search as WS

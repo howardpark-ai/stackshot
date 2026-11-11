@@ -36,6 +36,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.core import instance as _core_instance
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 from fastmcp import Client
 L = lambda gid: f"[{gid}](https://board.example.org/items/{gid})"
@@ -64,8 +65,8 @@ check("an id-like string glued to a word, a hyphen, a path or a version is left 
 check("a token that names no item stays plain (priority p1, an unknown s99)", lk("p1 s99 a1") == f"p1 s99 {L('a1')}", lk("p1 s99 a1"))
 check("a JSON reply is left as it is", lk('{"id": "a1"}') == '{"id": "a1"}' and lk('[{"gid": "a1"}]') == '[{"gid": "a1"}]')
 check("a reply that only starts with a bracket is still linked", lk("[nag] a1 owes") == f"[nag] {L('a1')} owes", lk("[nag] a1 owes"))
-_bu = server._shared.BOARD_URL; server._shared.BOARD_URL = ""
-check("no board_url configured: the text unchanged", lk("a1") == "a1"); server._shared.BOARD_URL = _bu
+_bu = _core_instance.BOARD_URL; _core_instance.BOARD_URL = ""
+check("no board_url configured: the text unchanged", lk("a1") == "a1"); _core_instance.BOARD_URL = _bu
 
 # ---- one call of each tool, through the MCP client
 err, out = run("get", item_id="a2")

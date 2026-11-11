@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.core import instance as _core_instance
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -3028,7 +3029,7 @@ check("auto-name: …the owner handed it over itself, so only the message went o
 res = server._message("work-osprey-x", f"again about {h1}", "work-osprey-main"); time.sleep(0.3)
 check("auto-name: never twice", needs46(h1) == ["work-osprey-x"] and "(named" not in res, (needs46(h1), res))
 h2, h3 = mk46(), mk46(); n0 = len(wait_push(0))
-res = server._message("work-osprey-x", f"two of them: {server._shared.BOARD_URL}/items/{h2} and {h3.upper()}, plus p1 which is no item", "home-beta"); p = wait_push(n0 + 3)
+res = server._message("work-osprey-x", f"two of them: {_core_instance.BOARD_URL}/items/{h2} and {h3.upper()}, plus p1 which is no item", "home-beta"); p = wait_push(n0 + 3)
 check("auto-name: an item page link and an upper-case id count, an id that names no item is skipped, each item is named",
       needs46(h2) == ["work-osprey-x"] and needs46(h3) == ["work-osprey-x"] and res.count("(named work-osprey-x") == 2, (needs46(h2), needs46(h3), res))
 ow = [m for m in p[n0:] if m[0] == "work-osprey-bld"]
@@ -3055,10 +3056,10 @@ check("plain id: an id in backticks names nothing (inline code, a test name in c
 _m = _missed([f'3 checks: "{q1}: a close by another session…", "{q1}: a reopen…"', f"“{q1} done”", f"‘{q1} done’", f"the '{q1}' check"], [])
 check("plain id: an id inside quotes names nothing (\" “ ” ‘ ’, a '…' pair), the quoted test name of the first misfire included", not _m, _m)
 _m = _missed([f"e.g. 1 {q1}@1791800000 so", f'e.g. "1 {q1}@1791800000", so', f"{q1}/x", f"{q1}/{q2}", f"{q1}_scenario", f"{q1}x", f"{q1}0", f"x{q1}", f"~{q1}",
-              f"{server._shared.BOARD_URL}/items/{q1}_x", f"{server._shared.BOARD_URL}/items/{q1}@1"], [])
+              f"{_core_instance.BOARD_URL}/items/{q1}_x", f"{_core_instance.BOARD_URL}/items/{q1}@1"], [])
 check("plain id: an id with something glued on names nothing (@epoch, /, _, a letter or digit after it; anything but a space or ( [ before it)", not _m, _m)
-_real = [f"hand-off of {q1}", f"{q1}: do X", f"({q1})", f"{q1}.", f"[{q1}]({server._shared.BOARD_URL}/items/{q1})", f"{q1}'s build is yours", f"{q1}, {q1}; {q1}!",
-         f"**{q1}**", f"see {server._shared.BOARD_URL}/items/{q1} for it", f"line one\n{q1}\nline three", f"{q1.upper()} is yours", f"{q1}—the build"]
+_real = [f"hand-off of {q1}", f"{q1}: do X", f"({q1})", f"{q1}.", f"[{q1}]({_core_instance.BOARD_URL}/items/{q1})", f"{q1}'s build is yours", f"{q1}, {q1}; {q1}!",
+         f"**{q1}**", f"see {_core_instance.BOARD_URL}/items/{q1} for it", f"line one\n{q1}\nline three", f"{q1.upper()} is yours", f"{q1}—the build"]
 check("plain id: the real handover forms still name (hand-off of, id: do X, (id), id., a markdown link, a possessive, a page link)", not _missed(_real, [q1]), _missed(_real, [q1]))
 n0 = len(wait_push(0))
 res = server._message("work-osprey-x", f"the test `{q1}_scenario` failed; e.g. \"1 {q1}@1791800000\"; see {q1}/x and \"{q1}: a close by …\"", "work-osprey-main"); wait_push(n0 + 1); time.sleep(0.3)

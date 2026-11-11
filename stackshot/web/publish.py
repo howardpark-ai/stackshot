@@ -9,6 +9,7 @@ flush       (CLI) publish, then verify board-data is committed and pushed — th
 
 CLI:  publish.py publish | flush | bump [--host <fleet-name>] | brief | render [full|brief]
 The server imports this and calls publish() after every write (debounced), on its timer and when the fleet state changes.
+_publish()  the debounced call the server makes after a write (with `_publish_now`, `_publish_if_idle`, the timer `_PUB_TIMER` and its lock); a burst of writes publishes once, a few seconds after the first.
 """
 from __future__ import annotations
 import os as _os, sys as _sys
@@ -20,10 +21,13 @@ import fcntl
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.projects import pages as _pages  # noqa: E402
+from stackshot.projects import project_registry as _preg  # noqa: E402  — roles.json and projects.json follow a publish
+from stackshot.web.board_home import _board_home_drop  # noqa: E402  — a publish drops the board's kept home
 from stackshot.core import readonly as _ro  # noqa: E402  — a warm standby copy renders in memory only (server._ro_board), never here
 from stackshot.fleet import versions as _ver  # noqa: E402
 from stackshot.web.render import render, render_all  # noqa: E402
@@ -95,6 +99,58 @@ def bump(host: str = "") -> str:
 
 def brief() -> str:
     return render(str(DATA), "brief")
+
+
+# ---------------------------------------------------------------------------- the debounced publish the server makes after a write
+# The timer and the lock `_publish` and `_publish_if_idle` share live here; a suite that needs a live or a missing timer sets `_PUB_TIMER` on this module, and one that stubs the publish the Runners panel asks for sets
+# `_publish` here too. Server.py calls the same names through its own imports.
+_PUB_LOCK = threading.Lock()
+_PUB_TIMER: threading.Timer | None = None
+
+
+def _publish_debounce() -> float:
+    return float(_cfg.get("publish", "debounce_seconds", default=5))
+
+
+def _publish_every() -> float:
+    return float(_cfg.get("publish", "every_minutes", default=10)) * 60   # default as in the example
+
+
+def _publish_now(force_versions: bool = False, host: str = "") -> str:
+    if _ro.is_read_only():                  # a standby copy renders in memory when asked (_ro_board), and publishes nothing
+        return "(read-only standby: nothing published)"
+    try:
+        return publish(force_versions=force_versions, host=host)
+    except Exception as e:  # never let a publish failure surface as a tool error
+        return f"(publish failed: {e})"
+    finally:
+        _preg._roles_sync_safe()            # the publish rebuilt the registry; roles.json follows it
+
+
+def _publish() -> None:
+    """Debounced: a burst of writes in one turn publishes once, ~5 s after the first."""
+    global _PUB_TIMER
+    _board_home_drop()                         # the home is drawn per request: a write is on it at the next read, not at the publish
+    if _ro.is_read_only():                  # no timer is started on a standby copy
+        return
+    with _PUB_LOCK:
+        if _PUB_TIMER is not None and _PUB_TIMER.is_alive():
+            return
+        _PUB_TIMER = threading.Timer(_publish_debounce(), _publish_now)
+        _PUB_TIMER.daemon = True
+        _PUB_TIMER.start()
+
+
+def _publish_if_idle() -> bool:
+    """For the Runners panel (runners.ON_CHANGE): True when a publish was scheduled; False while the debounce timer's publish is still running (it stays alive through
+    the whole _publish_now, git push included, and _publish returns silently then, so a request made in that time would be lost): the panel asks again a few seconds later."""
+    if _ro.is_read_only():
+        return True
+    with _PUB_LOCK:
+        if _PUB_TIMER is not None and _PUB_TIMER.is_alive():
+            return False
+    _publish()
+    return True
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ def git(*a): subprocess.run(["git", "-C", str(T / "store"), *a], check=True, cap
 git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "user.name", "t"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import uvicorn; from stackshot.web import server; from stackshot.web import render
+import uvicorn; from stackshot.web import server; from stackshot.web import render; from stackshot.web import board_home
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda *a, **k: None
@@ -79,7 +79,7 @@ def redraw(bump=None):
     """make the server draw its home again, a second later than the page in the browser (the page's stamp is whole seconds), after `bump()` changed something"""
     time.sleep(1.1)
     if bump: bump()
-    with server._BOARD_HOME_LOCK: server._BOARD_HOME["html"] = None; server._BOARD_HOME["at"] = 0; server._BOARD_HOME["failed"] = 0
+    with server._BOARD_HOME_LOCK: board_home._BOARD_HOME["html"] = None; board_home._BOARD_HOME["at"] = 0; board_home._BOARD_HOME["failed"] = 0
     assert server._board_home()           # drawn now, so the stamp the page polls is the new one
 ROW = "li#task-a-{} form.hanswer"
 def home(pg, i):

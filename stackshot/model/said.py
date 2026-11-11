@@ -24,7 +24,8 @@ decision are needed: it carries no Acked-by, Suggested-by or Reported-by tag. Th
 proof of his steps ticked on the item within a day after its date.
 
 Pure helpers with no config and no store, shared by the server (the gate and the reply), the GitHub mirror (the trailer lines
-of a comment) and the renderer (the History's tags): the caller passes the transcript root, the marker and the prefixes it read."""
+of a comment) and the renderer (the History's tags): the caller passes the transcript root, the marker and the prefixes it read.
+The one exception is `_owner_words`, which tells whether an item shows the owner's own words: it reads the owner's name from core/instance.py and nothing else."""
 from __future__ import annotations
 
 import datetime as _dt
@@ -32,6 +33,8 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+
+from stackshot.core.instance import OWNER
 
 TAGS = ("Acked-by", "Suggested-by", "Reported-by")      # his words: the only tags any check of his words or decision reads
 ACTED = "acted"                     # the kind of an entry that proves he did his steps (a queued message of his, origin human), never his words
@@ -459,3 +462,29 @@ def recorded_words(entries: list[dict[str, Any]]) -> str:
     if not tags:
         return ""
     return (tags[0] if len(tags) == 1 else ", ".join(tags[:-1]) + " and " + tags[-1]) + " recorded"
+
+
+# A close with the owner's own words on the item was told to a
+# front agent mover in one line, and no other close was; that close is a row on his For you list (foryou.py),
+# and the same words make an item watched there (_foryou_watched). The front agent mover is told of any close by another
+# session, his words or not, in its own marked line (_tell_owner_close), beside that row. His words are on it when (1) a `said` entry is (metadata.said: his sentences
+# cut from his own message, checked against his transcript), or (2) the description or the close's reason quotes him: his name and a colon
+# before an opening quote mark, or his name, a comma and a weekday. The second is the loosest and deliberately
+# narrow. A board answer alone does not count: answering a decision picks an option, it does not ask to hear of the close.
+_OWNER_QUOTED = re.compile(rf"\b{re.escape(OWNER)}\b[^:\n]{{0,40}}:\s*[\"“]|\b{re.escape(OWNER)}, (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b")
+
+
+def _owner_words(item: dict[str, Any]) -> str:
+    """What shows the owner's own words (the owner's) are on the item, in the order of how certain it is: "a said entry", "quoted in
+    the text"; "" when none (see _OWNER_QUOTED). A board answer alone is not his words about the close: answering a decision is
+    picking an option, not asking to hear of the close."""
+    meta = item.get("metadata") or {}
+    if any(e["quote"] and e["tag"] in TAGS for e in entries_of(meta)):     # unchecked counts on purpose: a quote attached with Acked-by is still his words on record
+        return "a said entry"
+    if item.get("status") == "completed" and str(meta.get("outcome_text") or "").strip():      # a close keeps the description (the item's background, which may quote him for any reason): what the close wrote is its outcome text and its reason
+        text = f"{meta.get('outcome_text')}\n{meta.get('reason') or ''}"
+    else:
+        text = f"{item.get('description') or ''}\n{meta.get('reason') or ''}"
+    if _OWNER_QUOTED.search(text):
+        return "quoted in the text"
+    return ""

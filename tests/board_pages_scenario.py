@@ -70,6 +70,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld
 from stackshot.web import server; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web import board_home as _web_board_home
 from stackshot.web import ui as ui_pkg
 from stackshot.web.ui import render as r2, search as s2, runners as n2
 from starlette.testclient import TestClient
@@ -506,25 +507,25 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         check("a failed draw: one attempt for five requests, each served the last good copy (200)", _Boom.calls == 1 and all(x.status_code == 200 and x.text == good for x in rs), (_Boom.calls, [x.status_code for x in rs]))
         server._board_home_drop(); get("/")
         check("a drop (a write) during the back-off does not draw again", _Boom.calls == 1, _Boom.calls)
-        server._BOARD_HOME["failed"] -= server._BOARD_FAIL_BACKOFF_S + 1; get("/")
+        _web_board_home._BOARD_HOME["failed"] -= server._BOARD_FAIL_BACKOFF_S + 1; get("/")
         check("...after the back-off one more attempt is made (and a failure starts it again)", _Boom.calls == 2 and get("/").status_code == 200 and _Boom.calls == 2, _Boom.calls)
-        server._BOARD_HOME.update(html=None, at=0.0, failed=0.0); _Boom.calls = 0
+        _web_board_home._BOARD_HOME.update(html=None, at=0.0, failed=0.0); _Boom.calls = 0
         rs = [get("/") for _ in range(4)]
         check("a failed draw with no good copy: one attempt, then the plain 503 for each request", _Boom.calls == 1 and all(x.status_code == 503 for x in rs), (_Boom.calls, [x.status_code for x in rs]))
-        r2.Board = real_board; server._BOARD_HOME["failed"] = 0.0
+        r2.Board = real_board; _web_board_home._BOARD_HOME["failed"] = 0.0
         check("...and once the draw works again the page is served", get("/").status_code == 200)
     finally:
-        r2.Board = real_board; server._BOARD_FAIL_BACKOFF_S = real_backoff; server._BOARD_HOME["failed"] = 0.0
+        r2.Board = real_board; server._BOARD_FAIL_BACKOFF_S = real_backoff; _web_board_home._BOARD_HOME["failed"] = 0.0
 
     # a slow draw that then fails backs off from the moment it failed, not from the moment it started
     class _SlowBoom:
         raised = 0.0
         def __init__(self, *a, **k): time.sleep(0.2); _SlowBoom.raised = time.time(); raise RuntimeError("slow draw failed (test)")
     try:
-        r2.Board = _SlowBoom; server._BOARD_HOME.update(html=None, at=0.0, failed=0.0); get("/"); t_after = time.time()
-        check("a slow failing draw records the time it failed (between the raise and the return), not the time it started", _SlowBoom.raised > 0 and _SlowBoom.raised <= server._BOARD_HOME["failed"] <= t_after, (_SlowBoom.raised, server._BOARD_HOME["failed"], t_after))
+        r2.Board = _SlowBoom; _web_board_home._BOARD_HOME.update(html=None, at=0.0, failed=0.0); get("/"); t_after = time.time()
+        check("a slow failing draw records the time it failed (between the raise and the return), not the time it started", _SlowBoom.raised > 0 and _SlowBoom.raised <= _web_board_home._BOARD_HOME["failed"] <= t_after, (_SlowBoom.raised, _web_board_home._BOARD_HOME["failed"], t_after))
     finally:
-        r2.Board = real_board; server._BOARD_HOME.update(html=None, at=0.0, failed=0.0)
+        r2.Board = real_board; _web_board_home._BOARD_HOME.update(html=None, at=0.0, failed=0.0)
 
     # /render-stamp never waits for a draw and never answers 0; an expired or absent copy is drawn once in the background, so an open page sees the new stamp at its next poll
     import threading
@@ -541,16 +542,16 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         def html(self): gate.wait(10); return self.b.html()
     try:
         # after a restart (nothing held): 503 at once, one background draw, then the stamp
-        server._BOARD_HOME.update(html=None, at=0.0, drawn=0, failed=0.0); r2.Board = _Count; _Count.calls = 0
+        _web_board_home._BOARD_HOME.update(html=None, at=0.0, drawn=0, failed=0.0); r2.Board = _Count; _Count.calls = 0
         t0 = time.time(); r = get("/render-stamp")
         check("render-stamp with nothing held: 503 JSON without a ts, uncached, answered at once", r.status_code == 503 and "ts" not in r.json() and r.headers.get("cache-control") == "no-store" and time.time() - t0 < 5, (r.status_code, r.text))
         check("...and it started one background draw, so the next poll has a stamp (no 'unreachable' until someone loads the home)", settle() and _Count.calls == 1, _Count.calls)
         r = get("/render-stamp"); ts0 = r.json().get("ts")
         check("render-stamp after that draw: the page's own stamp, a positive number, and no new draw", r.status_code == 200 and isinstance(ts0, int) and ts0 > 1.7e9 and _Count.calls == 1
-              and f'<meta name="stackshot-rendered" content="{ts0}">' in server._BOARD_HOME["html"], (r.text, _Count.calls))
+              and f'<meta name="stackshot-rendered" content="{ts0}">' in _web_board_home._BOARD_HOME["html"], (r.text, _Count.calls))
         # a write: the poll answers with the held stamp at once, the next sees the new one
         old = ts0 - 100
-        server._BOARD_HOME["html"] = server._BOARD_HOME["html"].replace(f'content="{ts0}"', f'content="{old}"', 1)
+        _web_board_home._BOARD_HOME["html"] = _web_board_home._BOARD_HOME["html"].replace(f'content="{ts0}"', f'content="{old}"', 1)
         server._board_home_drop(); n1 = _Count.calls
         r = get("/render-stamp")
         check("render-stamp after a write (a drop): the held stamp at once, never 0", r.status_code == 200 and r.json() == {"ts": old}, r.text)
@@ -567,7 +568,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         dl = time.time() + 10
         while _Count.calls == n4 and time.time() < dl: time.sleep(0.02)
         server._board_home_drop(); gate.set()
-        check("a drop while a draw runs: the draw ends, its copy is held, and it is not marked fresh (at stays 0)", settle() and _Count.calls == n4 + 1 and server._BOARD_HOME["html"] is not None and server._BOARD_HOME["at"] == 0.0, (_Count.calls, n4, server._BOARD_HOME["at"]))
+        check("a drop while a draw runs: the draw ends, its copy is held, and it is not marked fresh (at stays 0)", settle() and _Count.calls == n4 + 1 and _web_board_home._BOARD_HOME["html"] is not None and _web_board_home._BOARD_HOME["at"] == 0.0, (_Count.calls, n4, _web_board_home._BOARD_HOME["at"]))
         r2.Board = _Count
         # the lock held elsewhere (a draw by a page request): the poll does not wait for it and starts nothing
         server._board_home_drop(); n3 = _Count.calls; r2.Board = _Count
@@ -577,21 +578,21 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
             check("render-stamp while a draw holds the lock: answered at once, no second draw", r.status_code == 200 and time.time() - t0 < 5 and _Count.calls == n3, (r.status_code, _Count.calls, n3))
         finally:
             server._BOARD_HOME_LOCK.release()
-        server._BOARD_HOME["at"] = time.time()
+        _web_board_home._BOARD_HOME["at"] = time.time()
         # a failing draw: polls within the back-off start no more than the one attempt
-        server._board_home_drop(); server._BOARD_HOME["failed"] = 0.0; r2.Board = _Boom; _Boom.calls = 0
+        server._board_home_drop(); _web_board_home._BOARD_HOME["failed"] = 0.0; r2.Board = _Boom; _Boom.calls = 0
         for _ in range(5): get("/render-stamp"); settle()
         check("polls after a failed draw: one attempt in all (the back-off holds), the held stamp still answered", _Boom.calls == 1 and get("/render-stamp").status_code == 200, _Boom.calls)
-        r2.Board = _Count; server._BOARD_HOME["failed"] = 0.0; server._BOARD_HOME["at"] = time.time()
+        r2.Board = _Count; _web_board_home._BOARD_HOME["failed"] = 0.0; _web_board_home._BOARD_HOME["at"] = time.time()
         # a page with no stamp of its own, and one with no usable time (held and not expired, so nothing redraws it)
-        server._BOARD_HOME.update(html="<!doctype html><title>no stamp</title>", drawn=1790000000, at=time.time())
+        _web_board_home._BOARD_HOME.update(html="<!doctype html><title>no stamp</title>", drawn=1790000000, at=time.time())
         r = get("/render-stamp")
         check("render-stamp for a page with no stamp of its own: the time it was drawn", r.status_code == 200 and r.json() == {"ts": 1790000000}, r.text)
-        server._BOARD_HOME.update(html="<!doctype html><title>no stamp</title>", drawn=0, at=time.time())
+        _web_board_home._BOARD_HOME.update(html="<!doctype html><title>no stamp</title>", drawn=0, at=time.time())
         r = get("/render-stamp")
         check("render-stamp with no usable time at all: 503, never ts 0", r.status_code == 503 and "ts" not in r.json(), r.text)
     finally:
-        gate.set(); settle(); r2.Board = real_board; server._board_home_drop(); server._BOARD_HOME.update(html=None, drawn=0, failed=0.0)
+        gate.set(); settle(); r2.Board = real_board; server._board_home_drop(); _web_board_home._BOARD_HOME.update(html=None, drawn=0, failed=0.0)
 
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

@@ -4,7 +4,7 @@ the description (short `- ` bullets, `_gate_description`, and its opening goal, 
 `_description_limits`, `_next_line_max`, `_bullets_on`, `_fit`) and the thread-local that marks a session's own write (`_SESSION_NEXT`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the store's
-path, the registry (`shared.py`) and the pure text modules. server.py imports each name its writes, its tools and the suites read back from here, so `server._gate_description`, `server._fit`,
+path, the registry (`projects/project_registry.py`) and the pure text modules. server.py imports each name its writes, its tools and the suites read back from here, so `server._gate_description`, `server._fit`,
 `server._SESSION_NEXT` and the others stay the names they use. `_SESSION_NEXT` is set (`.on`) by the create and update tools' own calls in server.py and read here; it is never rebound, so the name on `server` and the one
 here are one object. No suite sets a name on `server` that code here reads."""
 from __future__ import annotations
@@ -29,8 +29,9 @@ from stackshot.projects import pages as _pages
 from stackshot.projects import projects as _prj
 from stackshot.web import render as _rmod
 from stackshot.core import store as _store
-from stackshot.web.common import OWNER, _clip_line
-from stackshot.web.shared import _registry, _roles_sync_safe
+from stackshot.core.instance import OWNER
+from stackshot.model.bullet_text import _clip_line
+from stackshot.projects.project_registry import _registry, _roles_sync_safe
 
 _SESSION_NEXT = threading.local()  # `.on` around the create and update tools' own calls: only a session's write is judged by the write checks of Next (N1, N3, N6; next_rules.py); a script's, the router's and the server's own writes (_update and _create called inside the server) are not
 

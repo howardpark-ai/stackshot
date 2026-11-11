@@ -20,7 +20,8 @@ from stackshot.model import steps as _steps
 from stackshot.model.needs import _needs_kinds
 from stackshot.waits import watchers as _watch
 from stackshot.web import render as _rmod
-from stackshot.web.common import OWNER, _clip_line
+from stackshot.core.instance import OWNER
+from stackshot.model.bullet_text import _clip_line
 
 _OPT_FORM = (f'options=[{{"label": "<a short name>", "line": "<one sentence, at most {_rmod.OPTION_LINE_MAX} characters>", "recommended": true}}, '
              f'{{"label": …, "line": …, "recommended": false}}, …] ({_rmod.OPTIONS_MIN}–{_rmod.OPTIONS_MAX} entries, exactly one recommended)')
