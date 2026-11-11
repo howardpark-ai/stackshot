@@ -78,17 +78,19 @@ def read_backstop() -> set[str]:
 
 def write_backstop(ids: set[str]) -> None:
     """Keep the told ids, written whole through a temporary file and renamed over the old one (a reader never sees half). A file that cannot be written is logged and never stops the backstop: the cost is one repeat message after a restart."""
-    p = _audit.state_dir() / BACKSTOP_FILE
-    tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+    tmp: Path | None = None
     try:
+        p = _audit.state_dir() / BACKSTOP_FILE      # inside the try: the folder is made on first use, and that can fail too
+        tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps(sorted(ids)), encoding="utf-8")
         os.replace(tmp, p)
     except OSError as e:
         print(f"silence: backstop record not kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
+        if tmp is not None:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 def minutes(secs: float) -> str:

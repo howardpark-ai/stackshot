@@ -232,6 +232,20 @@ try:
     hidden.add("a1")
     server._silence_backstop(now=now + 6 * H, items=b5)
     check("5 missed again after having a finding, it is told again", len(told) == n + 1, len(told))
+    # a state folder that cannot be made or read must not keep the message back: the record is only a convenience
+    hidden.clear()
+    server._silence_backstop(now=now + 8 * H, items=b5)
+    hidden.add("a1")
+    real_state_dir, n2, raised = SL._audit.state_dir, len(told), None
+    def broken_state_dir(): raise OSError("state folder cannot be made")
+    SL._audit.state_dir = broken_state_dir
+    try:
+        server._silence_backstop(now=now + 10 * H, items=b5)
+    except Exception as e:  # noqa: BLE001
+        raised = e
+    finally:
+        SL._audit.state_dir = real_state_dir
+    check("5 a state folder that raises still lets the message go out, and the backstop does not raise", raised is None and len(told) == n2 + 1, (raised, len(told), n2))
     server._inbox_flag_send = real_flag
 finally:
     SL.silent = real_silent

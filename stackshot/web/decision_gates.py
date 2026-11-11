@@ -347,7 +347,11 @@ _BARE_PRONOUN_RX = re.compile(_PRONOUN_HEAD + r"(you|your|yours|yourself|i|me|my
 # "I/O" are not hits, and an all-caps "US" (the abbreviation) is not the pronoun.
 _OPT_PRONOUN_RX = re.compile(_PRONOUN_HEAD + r"(you|your|yours|yourself|i|me|my|mine|myself|we|our|ours|ourselves|us)" + _PRONOUN_TAIL, re.I)
 # A capital I that is the Roman numeral one ("Phase I", "Type I", "Part I and II", "II, I") is not the pronoun.
-_ROMAN_NOUN_RX = re.compile(r"\b(?:phase|part|stage|tier|level|section|chapter|volume|vol|appendix|annex|wave|round|batch|milestone|grade|category|schedule|exhibit|option|type|class|group|war)\s+$", re.I)
+_ROMAN_NOUNS = r"(?:phase|part|stage|tier|level|section|chapter|volume|vol|appendix|annex|wave|round|batch|milestone|grade|category|schedule|exhibit|option|type|class|group|war)"
+_ROMAN_NOUN_RX = re.compile(r"\b" + _ROMAN_NOUNS + r"\s+$", re.I)
+# After a numbering noun the I is the numeral only where it ends the clause: at the end of the text, before punctuation, or before a numeral-style continuation ("Type I and Type II", "Phase I or 2").
+# "the option I prefer", "the batch I wrote" start a relative clause: there the I is the pronoun.
+_ROMAN_END_RX = re.compile(r"\s*(?:$|[,;:.!?)\]/&\u2013\u2014-]|(?:and|or|to|vs\.?|through)\s+(?:" + _ROMAN_NOUNS + r"\s+)?(?:[IVX]+|\d+)\b)", re.I)
 _ROMAN_SEP = r"\s*(?:[,/&-]|and|or|to)\s*"
 _ROMAN_AFTER_RX = re.compile(r"\s*(?:[,/&-]|and\b|or\b|to\b)\s*(?:II|III|IV|V)\b")
 _ROMAN_BEFORE_RX = re.compile(r"\b(?:II|III|IV)" + _ROMAN_SEP + r"$")
@@ -355,8 +359,8 @@ _ACTOR_EXAMPLE = "\u201c{who} unpublishes\u201d instead of \u201cI unpublish\u20
 
 
 def _roman_one(text: str, start: int, end: int) -> bool:
-    """Is the capital I at text[start:end] the Roman numeral one: right after a numbering noun (Phase I, Type I), or next to another numeral in a list (I and II, II or I)?"""
-    return bool(_ROMAN_NOUN_RX.search(text[:start]) or _ROMAN_AFTER_RX.match(text, end) or _ROMAN_BEFORE_RX.search(text[:start]))
+    """Is the capital I at text[start:end] the Roman numeral one: right after a numbering noun and ending the clause (Phase I, Type I; not "the option I prefer"), or next to another numeral in a list (I and II, II or I)?"""
+    return bool((_ROMAN_NOUN_RX.search(text[:start]) and _ROMAN_END_RX.match(text, end)) or _ROMAN_AFTER_RX.match(text, end) or _ROMAN_BEFORE_RX.search(text[:start]))
 
 
 def _bare_pronoun(text: str, rx: re.Pattern[str] = _BARE_PRONOUN_RX) -> str:

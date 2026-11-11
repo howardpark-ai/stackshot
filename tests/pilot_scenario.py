@@ -1633,9 +1633,11 @@ for word in ["I", "I'm", "I'll", "I've", "me", "my", "mine", "myself", "we", "we
 for line in ["The session redrafts it", "Pat usage report", "Run the mine-sweeper", "Deploy to US-EAST", "Deploy to the US market", "Mirrors the I/O path, i.e. now", "Because the user said so",
              'Pat replies "you can go ahead" to it', "Pat says \u201cwe agree\u201d", "Pat runs `my_script`", "Pat unpublishes it", "The ours-of-it-sweeper runs", "Focus on status"]:
     check(f"actor: \"{line}\" is no hit", actor_hits("Pat unpublishes", line) == "" and actor_hits(line, "Pat acts") == "", (line, actor_hits("Pat unpublishes", line)))
-for line in ["Ship it in Phase I", "Pat finishes Part I and II", "Pat covers Type I, II and III", "Pat does Option I first", "Pat starts with II or I", "Pat reads Stage I."]:
+for line in ["Ship it in Phase I", "Pat finishes Part I and II", "Pat covers Type I, II and III", "Pat does Option I, then II", "Pat compares Type I and Type II", "Pat starts with II or I", "Pat reads Stage I."]:
     check(f"actor: the Roman numeral in \"{line}\" is no hit", actor_hits("Pat unpublishes", line) == "" and actor_hits(line, "Pat acts") == "", (line, actor_hits("Pat unpublishes", line)))
-for line in ["Pat unpublishes, then I approve", "Pat does Phase 1 and I review", "Pat does X and I review", "Pat ships it, I decide later"]:
+for line in ["Pat unpublishes, then I approve", "Pat does Phase 1 and I review", "Pat does X and I review", "Pat ships it, I decide later",
+             "Pat takes the option I prefer", "Pat reruns the batch I wrote", "Pat joins the class I teach", "Pat repeats the round I set up", "Pat reads the phase I mentioned", "Pat lifts the level I chose",
+             "Pat checks the part I split off", "Pat leaves the type I named", "Pat opens the group I made", "Pat moves the schedule I drafted", "Pat does Phase I and then I review"]:
     check(f"actor: \"{line}\" still notes the pronoun I", "says \u201cI\u201d" in actor_hits("Pat unpublishes", line), (line, actor_hits("Pat unpublishes", line)))
 check("actor: a pronoun inside curly single quotes reads like one inside straight ones (both skipped as a quoted word)",
       actor_hits("Pat unpublishes", "Pat says 'you can go' to it") == "" and actor_hits("Pat unpublishes", "Pat says \u2018you can go\u2019 to it") == ""
