@@ -89,8 +89,13 @@ def append(line: dict[str, Any]) -> None:
     """Add one line (one write of a line shorter than a pipe's buffer, so two processes never interleave one)."""
     p = path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "ab") as f:
-        f.write((json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
+    row = (json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8")
+    with open(p, "ab+") as f:      # appends always land at the end; the read is only to see the last byte
+        if f.seek(0, 2) > 0:      # a file that does not end with a newline (a torn write, a hand edit): this line starts on a line of its own, never glued to the last
+            f.seek(-1, 2)
+            if f.read(1) != b"\n":
+                row = b"\n" + row
+        f.write(row)
 
 
 def note(anchor: str, url: str, etype: Any, body_refs: Any, now: float) -> bool:
@@ -122,7 +127,7 @@ def normal(row: dict[str, Any]) -> dict[str, Any]:
 
 def read(offset: int = 0) -> tuple[list[dict[str, Any]], int]:
     """The lines from byte `offset` on, and the offset after the last whole line read. A file that is shorter than `offset` (replaced) is read from its start; a missing one reads as nothing.
-    A line that is not a JSON object is skipped."""
+    A line that is not a JSON object, or cannot be parsed, is skipped and the rest are read."""
     try:
         with open(path(), "rb") as f:
             size = f.seek(0, 2)
@@ -137,7 +142,7 @@ def read(offset: int = 0) -> tuple[list[dict[str, Any]], int]:
     for raw in data[:cut].splitlines():
         try:
             d = json.loads(raw)
-        except ValueError:
+        except (ValueError, RecursionError):      # not JSON (ValueError, which a bad byte or an oversized number also is), or nested too deep to parse: that line alone is skipped
             continue
         if isinstance(d, dict) and d.get("repo") and d.get("n"):
             rows.append(d)

@@ -561,5 +561,27 @@ check("14 merge_log.read: a line the hub is still writing (no newline yet) is no
       part_rows == [] and part_off == _o and [r["n"] for r in whole_rows] == [62] and whole_off == ML.path().stat().st_size, (part_rows, part_off, whole_rows, whole_off))
 check("14 merge_log.read: an offset past the end (a replaced, shorter file) reads from the start; no file reads as nothing", ML.read(10 ** 9)[0][0]["n"] == 52 and (ML.path().rename(ML.path().with_suffix(".gone")), ML.read(5))[1] == ([], 5), None)
 
+# a line that cannot be parsed costs only itself: deep nesting (RecursionError), an oversized number and a bad byte (ValueError) are skipped, the lines around them are read
+ML.path().unlink(missing_ok=True)
+deep_line = b"[" * 200000
+big_num = b'{"repo": "acme/widgets", "n": ' + b"9" * 6000 + b"}"
+ML.append({"ts": 1, "repo": "acme/widgets", "n": 71, "refs": []})
+with open(ML.path(), "ab") as f_: f_.write(deep_line + b"\n" + big_num + b"\n" + b'\xff\xfe{"repo": "acme/widgets", "n": 99}\n')
+ML.append({"ts": 2, "repo": "acme/widgets", "n": 72, "refs": []})
+bad_rows, bad_off = ML.read(0)
+check("14 merge_log.read: a line nested too deep to parse, an oversized number and a bad byte are each skipped, and the lines around them are still read",
+      [r["n"] for r in bad_rows] == [71, 72] and bad_off == ML.path().stat().st_size, (bad_rows, bad_off))
+
+# append starts on a line of its own when the file does not end with a newline, so two rows never glue together
+ML.path().unlink(missing_ok=True)
+ML.path().write_bytes(b'{"ts": 1, "repo": "acme/widgets", "n": 81, "refs": []}')      # no newline at the end (a torn write, a hand edit)
+ML.append({"ts": 2, "repo": "acme/widgets", "n": 82, "refs": []})
+glued_rows, _ = ML.read(0)
+check("14 merge_log.append: a file that does not end with a newline gets one before the new row, so both rows read apart", [r["n"] for r in glued_rows] == [81, 82], glued_rows)
+ML.append({"ts": 3, "repo": "acme/widgets", "n": 83, "refs": []})
+raw_ = ML.path().read_bytes()
+check("14 merge_log.append: a file that already ends with a newline gets no blank line; a first row in a new file starts with none",
+      b"\n\n" not in raw_ and raw_.count(b"\n") == 3 and raw_.endswith(b"\n") and (ML.path().unlink(), ML.append({"ts": 4, "repo": "acme/widgets", "n": 84, "refs": []}), ML.path().read_bytes().startswith(b"{"))[2], raw_)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
