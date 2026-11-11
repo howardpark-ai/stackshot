@@ -88,8 +88,12 @@ def legacy_raise(g_, named=()):
     (T / f"store/a/{g_}.json").write_text(json.dumps(it_))
 legacy_raise(3); legacy_raise(6); legacy_raise(7, named=(U["home-owner"],))
 opts3 = rd(3)["metadata"]["options"]
-r = server._answer("a3", opts3[0]["label"], "", "")
+import contextlib, io as _io
+server._WAKE_EVENT.clear(); err3 = _io.StringIO()
+with contextlib.redirect_stderr(err3):
+    r = server._answer("a3", opts3[0]["label"], "", "")
 it3 = rd(3); m3 = it3["metadata"]
+check("Park until …: the minute loop is woken, and the log line says it was parked until the day", server._WAKE_EVENT.is_set() and f"parked until {park}" in err3.getvalue(), err3.getvalue()[-300:])
 check("Park until …: his decision is in and the server parks it: waiting until the option's day (the one until date), decision out of needs, the ask and the idle record gone, the state clock moved",
       r == "decision" and m3.get("until") == park and "hold" not in m3 and "wake" not in m3 and "needs" not in m3 and "ask" not in m3 and "idle" not in m3 and it3["state_updated"] >= now0, m3)
 check("the answer record carries the park the server set", m3["answers"][-1].get("choice") == opts3[0]["label"] and m3["answers"][-1].get("parked") == park, m3.get("answers"))

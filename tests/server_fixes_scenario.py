@@ -78,7 +78,7 @@ def stamped(i): return (mt(i).get("phase"), mt(i).get("waits_on"))
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w2 = local_day(now0 + 2 * DAY)
 PARK = "(parked: wake"
-SN_HEAD = "alone is a reminder, and this item's only open next line"
+SN_HEAD = "alone is a wait until that date, and this item's only open next line"
 TIMED = f"{BACK}: at 08:00 run the nightly check and report"
 
 from stackshot.waits import server_fixes as SF; from stackshot.tools import board_report as BR

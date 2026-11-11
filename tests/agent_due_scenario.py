@@ -203,13 +203,13 @@ out, err = doing_next(97, "waiting on the 09:00 timer")
 check("wait note: 'waiting on the 09:00 timer' on a doing item gets the note or is refused first by the guard", out.count(NOTE_HEAD) == 1 or "reads as a wait" in err, (out, err))
 
 # ================================================================ 6c. a wake alone whose next waits for that date gets a note; a window the work needs is parked
-WN_HEAD = "alone is a reminder, and this item's next waits for that date"
+WN_HEAD = "alone is a wait until that date, and this item's next waits for that date"
 w2 = time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + 2 * DAY))
 def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
 item(120, needs=[BACK], next=f"team-back: collect logs until {w2}, then review")
 out = bupd(120, wake=w2)
 check("window note: a wake alone on an item whose next says 'collect logs until <the wake day>, then review' is stored, and the reply carries one note", wk_(mt(120)) == w2 and "hold" not in mt(120) and out.count(WN_HEAD) == 1, out)
-check("window note: …it names the wake, says the item stays on agent, and gives the park form", f"wake {w2} alone" in out and "stays on agent" in out and 'hold=true, wake="<when the window ends>", wait_basis="<what the window collects> ends <YYYY-MM-DD>"' in out, out)
+check("window note: …it names the wake, says the item waits until then, and gives the reason form", f"wake {w2} alone" in out and "the item waits until then, listed as waiting" in out and 'wake="<when the window ends>", wait_basis="<what the window collects> ends <YYYY-MM-DD>"' in out and "clear_wake=true" in out, out)
 item(121, needs=[BACK])
 out = bupd(121, next="team-back: merge the PR once the reviewer approves", wake=w2)
 check("window note: a wake alone with an unrelated next gets no note, and the wake is stored", WN_HEAD not in out and wk_(mt(121)) == w2, out)
@@ -266,7 +266,7 @@ check("window text: update's description names the park for a window the work ne
       and "or an item not on agent (on hold" in _ud and "needs=external" in _ud, None)
 
 # ================================================================ 6d. a wake alone whose mover's only open steps are timed or start on an event gets a note
-SN_HEAD = "alone is a reminder, and this item's only open next line"
+SN_HEAD = "alone is a wait until that date, and this item's only open next line"
 import datetime as _dtm
 _today_local = _dtm.datetime.fromtimestamp(now0 + ZONE_OFFSET, _dtm.timezone.utc).date()
 w_tomorrow = (_today_local + _dtm.timedelta(days=1)).isoformat()
@@ -279,8 +279,8 @@ check("step park: a step timed at the wake's own hour is parked by the write (on
       and mt(140).get("phase") == "waiting" and mt(140).get("waits_on") == "time", (out, mt(140)))
 item(141, needs=[BACK], next="")
 out = bupd(141, next=EVENT, wake=f"{w2}T10:00")
-check("step note: a step that starts on an outside event ('when the next vendor release lands, check …') draws one note, and the item stays doing with the mover (the park is for a wait on a date)", out.count(SN_HEAD) == 1 and "stays doing, with you as its mover" in out
-      and 'hold=true, wake="<when the wait ends>", wait_basis="<what it waits on, with its date YYYY-MM-DD>"' in out and "wait_reason" in out and "hold" not in mt(141), out)
+check("step note: a step that starts on an outside event ('when the next vendor release lands, check …') draws one note, and the item waits until the date (the reason is the wait_basis)", out.count(SN_HEAD) == 1 and "the item waits until then, listed as waiting" in out
+      and 'wake="<when the wait ends>", wait_basis="<what it waits on, with its date YYYY-MM-DD>"' in out and "wait_reason" in out and "clear_wake=true" in out and "hold" not in mt(141), out)
 item(142, needs=[BACK], next=EVENT, wake=f"{w2}T10:00")
 out = bupd(142, priority="p2")
 check("step note: a write that touches neither next nor the wake stays quiet", SN_HEAD not in out, out)

@@ -200,7 +200,7 @@ refused("create refuses a bad check", lambda: server._create(subject="[home] bad
 # ---- 2. the gate: a hand-off is a line of next in the form "<session>: <action>", a list marker before the name at most
 refused("next handing the work to a background agent, no check, no wake: refused, naming the session, the form and the fix",
         lambda: server._update("a2", next="team-back: merge the PR", sender="home-owner"), "hands a2 to team-back", "a line of next in the form `<session>: <action>`", "check=<what closes it>", FORMS, "wake=YYYY-MM-DD",
-        "Only when no check fits, add wake=", "the item stays active in its lane", "If this tool shows no check parameter", "codemode.stackshot_update({item_id, sender, next, check})")
+        "Only when no check fits, add a date, wake=YYYY-MM-DD", "the item stays active in the new mover's lane", "as the backstop of this hand-off", "the date is no wait", "If this tool shows no check parameter", "codemode.stackshot_update({item_id, sender, next, check})")
 try: server._update("a2", next="team-back: merge the PR", sender="home-owner"); _hand = ""
 except server.ToolError as e: _hand = str(e)
 check("the hand-off refusal steers to check first, the wake only when no check fits, and never mentions a hold or a park (Fri Oct 16th 2026)",
@@ -218,10 +218,10 @@ try:
     server._update("a3", next="home-stew: rule on it", sender="home-owner"); e_h = ""
 except server.ToolError as e:
     e_h = str(e)
-check("the hand-off refusal offers the wake as a reminder that leaves the item active, and never says hold",
-      "wake=YYYY-MM-DD" in e_h and "to be reminded of your own work at that date" in e_h and "the item stays active in its lane" in e_h and "hold" not in e_h.lower(), e_h)
+check("the hand-off refusal offers the date as the hand-off's backstop that leaves the item active in the new mover's lane, and never says hold",
+      "wake=YYYY-MM-DD" in e_h and "as the backstop of this hand-off" in e_h and "the date is no wait" in e_h and "the item stays active in the new mover's lane" in e_h and "hold" not in e_h.lower(), e_h)
 server._update("a3", next="home-stew: rule on it", wake="2099-01-01", sender="home-owner")
-check("…accepted with a wake, which is stored as the one until date (no old field, no hold)", rd(3)["metadata"].get("until") == "2099-01-01" and "wake" not in rd(3)["metadata"]
+check("…accepted with a wake, which parks nothing: it stays the hand-off's backstop (a wake, no until, no hold) and the item stays active", rd(3)["metadata"].get("wake") == "2099-01-01" and "until" not in rd(3)["metadata"]
       and "hold" not in rd(3)["metadata"], rd(3)["metadata"])
 server._update("a3", wake="none", sender="home-owner")
 check("wake=\"none\" drops the reminder, nothing else", "wake" not in rd(3)["metadata"] and "hold" not in rd(3)["metadata"] and rd(3)["metadata"].get("next") == "home-stew: rule on it", rd(3)["metadata"])
@@ -608,7 +608,7 @@ for i in (73, 74): item(i, status="completed", outcome="dropped", reason="out of
 # ---- 7. the descriptions say so
 cd = str(getattr(server.stackshot_create, "description", "") or "")
 check("the create and update descriptions carry the check field and the gate", all("check: what closes this item once the work handed to another session is done" in d and "pr_merged <owner>/<repo>#<n>" in d
-      and "is refused unless the item carries a check or a wake" in d for d in (server._UPDATE_DESC, cd or server._CHECK_FORM)), (len(cd), server._UPDATE_DESC[-300:]))
+      and "is refused unless the item carries a check or a wake" in d and "the hand-off's backstop" in d for d in (server._UPDATE_DESC, cd or server._CHECK_FORM)), (len(cd), server._UPDATE_DESC[-300:]))
 check("the close form still sits inside the first 2048 characters of the update description", 0 < server._lead(server._UPDATE_DESC).find("drops outcome, outcome_text, reason and superseded_by.") < 2048 - 40)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

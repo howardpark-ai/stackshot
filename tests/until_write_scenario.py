@@ -186,7 +186,7 @@ check("3 the watchers' end_wait clears until with the kind group", "until" not i
 from stackshot.model import model_guards as MG
 timed_next = f"{BACK}: collect the logs until {w(2)}, then review them"
 note = server._wake_window_note({"wake": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"})
-check("4 the window note prints the date the wait stands for (the legacy wake)", w(2) in note and "alone is a reminder" in note, note)
+check("4 the window note prints the date the wait stands for (the legacy wake)", w(2) in note and "alone is a wait until that date" in note, note)
 check("4 …and the same date stored as until with a kind is the wait, not a reminder: no note", server._wake_window_note({"until": w(2), "wait_kind": "time", "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == "", None)
 check("4 …and a kind-less until is a wait too: no reminder note for any stored until", server._wake_window_note({"until": w(2), "next": timed_next, "needs": [BACK], "project": "projects/alpha"}) == ""
       and not server._wake_alone_on_agent({"until": w(2), "needs": [BACK]}), None)
@@ -268,6 +268,81 @@ check("5.7 update(until) beside a stored open after link stores the kind item", 
 item(63, needs=[BACK], after=["a98"])
 bupd(63, until=w(5))
 check("5.7 ...a stored link that is already closed stays a date alone", mt(63).get("wait_kind", "") in ("", "time") and W.stored_until(mt(63)) == w(5), mt(63))
+
+# 5.8 a time wait stated as one (wait_kind=time) and written as until carries the basis or his words, as a hold's wake does; a bare date carries wait_reason as a reminder's wake did
+item(64, needs=[BACK])
+refused("5.8 until with wait_kind=time and no basis is refused for its reason, as a hold's wake is", lambda: bupd(64, until=w(3), wait_kind="time"), "no reason")
+item(65, needs=[BACK])
+refused("5.8 hold=true with until and no basis is refused for its reason too", lambda: bupd(65, until=w(3), hold=True), "no reason")
+out65 = bupd(65, until=w(3), hold=True, wait_basis=f"the vendor ships {w(3)}")
+check("5.8 ...with the basis it stands, stored as until with its basis", W.stored_until(mt(65)) == w(3) and W.basis_of(mt(65)), mt(65))
+item(66, needs=[BACK])
+bupd(66, until=w(3))
+check("5.8 a bare date still needs only wait_reason (the wait on a date alone), no basis", W.stored_until(mt(66)) == w(3) and not W.basis_of(mt(66)), mt(66))
+
+# 5.9 a create is capped as an update's wake is
+cap9 = W.cap_days()
+far9 = local_day(now0 + (cap9 + 20) * DAY)
+try:
+    server._create_item(subject="[home] created far out", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the date", needs=[BACK], until=far9, request_id="uw-create-cap-1"); e9 = ""
+except Exception as e_:
+    e9 = str(e_)
+check("5.9 create with an until past the cap is refused as an update's wake is", "a wait runs at most" in e9 and "until" in e9, e9[:400])
+g9, out9 = server._create_item(subject="[home] created inside the cap", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the date", needs=[BACK], until=w(3), request_id="uw-create-cap-2")
+check("5.9 ...an until inside the cap is stored", W.stored_until(mof(g9)) == w(3), mof(g9))
+g9b, out9b = server._create_item(subject="[home] relay far out", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", until=far9, request_id="uw-create-cap-3")
+check("5.9 ...a relay's ask-by day is no wake: the cap does not judge it, as on an update", W.stored_until(mof(g9b)) == far9, mof(g9b))
+
+# 5.10 a decision beside an until is never parked: the tag, the brief and the session items listing read it the one way the board does (_is_parked)
+item(67, needs=["decision", BACK], until=w(3), ask="Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date")
+item(68, needs=[BACK], until=w(3))
+f67, f68 = server._fmt(dict(rd(67), gid="a67")).splitlines()[0], server._fmt(dict(rd(68), gid="a68")).splitlines()[0]
+check("5.10 tag: a decision with an until is not on hold, a date-only wait is", "on hold" not in f67 and "on hold" in f68, (f67, f68))
+st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
+held10 = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
+check("5.10 listing: a decision with an until is held False, a date-only wait True", held10.get("a67") is False and held10.get("a68") is True, held10)
+(T / "board.md").write_text("", encoding="utf-8")
+brief10 = server.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nOn hold (")
+check("5.10 brief: a decision with an until is among the active items, a date-only wait among the parked", "a67 [open" in act10 and "a67 [open" not in hold10 and "a68 [open" in hold10 and "a68 [open" not in act10, (act10[-300:], hold10[:300]))
+check("5.10 all three read the one rule: _is_parked is render.is_held", server._is_parked(rd(68)) and not server._is_parked(rd(67)) and server._is_parked(rd(68)) == server._rmod.is_held(rd(68)) and server._is_parked(rd(67)) == server._rmod.is_held(rd(67)), None)
+
+# 5.11 the alias window's own end is read from the config: a missing [model] wait_alias_until is said once at the start
+import contextlib, io as _io
+was_model = dict(server._cfg.CFG.get("model") or {})
+try:
+    server._cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)
+    buf11 = _io.StringIO()
+    with contextlib.redirect_stderr(buf11):
+        server._wait_alias_check()
+    miss11 = buf11.getvalue()
+    server._cfg.CFG["model"]["wait_alias_until"] = "2030-01-01"
+    buf11b = _io.StringIO()
+    with contextlib.redirect_stderr(buf11b):
+        server._wait_alias_check()
+    server._cfg.CFG["model"]["wait_alias_until"] = "soon"
+    buf11c = _io.StringIO()
+    with contextlib.redirect_stderr(buf11c):
+        server._wait_alias_check()
+finally:
+    server._cfg.CFG["model"] = was_model
+check("5.11 a missing [model] wait_alias_until is warned once, naming the default it stands on", "wait_alias_until is missing" in miss11 and UW.ALIAS_UNTIL in miss11 and miss11.count("config:") == 1, miss11)
+check("5.11 ...a date there is silent, and a value that is not a date is warned too", buf11b.getvalue() == "" and "not a date (soon)" in buf11c.getvalue(), (buf11b.getvalue(), buf11c.getvalue()))
+
+# 5.12 the keeper's relay names a date-only wait as the park it replaces, and the minute loop is woken by it
+rel12 = []
+real_charge, real_relay, real_owes = server._pilot_charge, server._pilot_relay, server._writer_owes
+server._pilot_charge = lambda project, who: ("home-stew", "name")
+server._writer_owes = lambda: False
+server._pilot_relay = lambda project, gid, item, what, debtor, stew, role, tail="": (rel12.append(what), "told")[1]
+try:
+    item(69, needs=[BACK]); server._WAKE_EVENT.clear()
+    bupd(69, until=w(3))
+    woke12 = server._WAKE_EVENT.is_set()
+    bupd(69, clear_hold=True)
+finally:
+    server._pilot_charge, server._pilot_relay, server._writer_owes = real_charge, real_relay, real_owes
+check("5.12 a write that sets a date-only wait tells the keeper 'put on hold', and one that clears it 'released from hold'", len(rel12) == 2 and rel12[0] == "put on hold" and rel12[1] == "released from hold", rel12)
+check("5.12 ...and the minute loop is woken by the write that parks it", woke12, None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": until write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

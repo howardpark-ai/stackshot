@@ -1381,9 +1381,9 @@ check("migration: a second run finds nothing", server._migrate_holds() == [])
 # and at its moment the owner and the sessions in its needs are told once and the wake goes. An item that needs decision is never on hold.
 for i in (30, 25, 34, 31, 35, 36, 37): item(i, "projects/beta", B)
 server._WAKE_EVENT.clear()
-res = server._update("a30", wake=D(2), next="work-osprey: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
-check("reminder: a wake alone is stored and is no hold; the hand-off it carries passes; the reply shows the item open",
-      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "work-osprey: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
+res = server._update("a30", wake=D(2), next="home-beta: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
+check("reminder: a wake alone is stored as the wait on that date and is no hold; its own step passes; the reply shows the item waiting",
+      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "home-beta: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
 check("reminder: it wakes the minute loop and is on its list", server._WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
 check("reminder: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
@@ -1391,8 +1391,8 @@ _wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)
 check("reminder: the item page shows the date in the sidebar's Wake row, and says waiting", bool(_wk30) and _wk30.group(1) == b_.when(render.wake_of(rd("a30"))) and "tag t-wait" in ip_, (_wk30.group(1) if _wk30 else None, ip_[ip_.find("istat"):][:300]))
 _b30 = server.stackshot_brief().partition("\n\nOn hold (")
 check("reminder: the brief lists it among the parked, not the active items", "a30 [open" in _b30[2] and "a30 [open" not in _b30[0], _b30[0][-300:])
-check("reminder: the update description says a wake alone is a reminder, never that it implies a hold",
-      "alone is a reminder, never a hold" in server._UPDATE_DESC and "a wake implies" not in server._UPDATE_DESC and "implies hold" not in server._UPDATE_DESC)
+check("reminder: the update description says a wake alone is a wait until that date, never that it implies a hold",
+      "alone is a wait: the item waits until that date" in server._UPDATE_DESC and "a wake implies" not in server._UPDATE_DESC and "implies hold" not in server._UPDATE_DESC)
 pj = json.load(open(T / "store/projects.json")); pj["pages"]["projects/zz"] = {**page("Zz", "work-zz"), "agents": {"work-zz-bg": "builds"}, "back_agents": {"work-zz-bg": "builds"}}; (T / "store/projects.json").write_text(json.dumps(pj))
 # a session in needs: a background agent (a page's keeper is retired and refused); it has a pane in the heartbeat, or the hand-off's send-time guard (handoff suite) refuses it
 ZZB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -1407,7 +1407,7 @@ led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0))
 woke = server._wake_pass(); r_wk1, r_wk2 = rd("a30"), rd("a25"); p = wait_push(n0 + 2)
 check("reminder pass: both items are told their date came; the date and kind are gone, next and status as they were",
       sorted(woke) == ["a25", "a30"] and all(x["status"] == "open" and "until" not in x["metadata"] and "wait_kind" not in x["metadata"] and "hold" not in x["metadata"] for x in (r_wk1, r_wk2))
-      and r_wk1["metadata"].get("next") == "work-osprey: review the draft", (woke, r_wk1, r_wk2))
+      and r_wk1["metadata"].get("next") == "home-beta: review the draft", (woke, r_wk1, r_wk2))
 _rem_b = next((m for m in p[n0:] if m[0] == B), ["", ""]); _rem_s = [m for m in p[n0:] if m[0] == ZZB]
 check("reminder pass: the mover of a30 is told its one line, and a25's mover (the session its needs name) its own once, nobody else",
       len(p) == n0 + 2 and _rem_b[1].startswith(f"[stackshot] a30 is yours now: its until {D(-1)} came.")
