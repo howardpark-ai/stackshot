@@ -88,6 +88,7 @@ for e in stripped["pages"].values():
     for f in ("id", "key", "agent_records"): e.pop(f, None)
 (T / "store/projects.json").write_text(json.dumps(stripped))
 from stackshot.web import server; from stackshot.model import ids as _model_ids
+from stackshot.projects import project_registry as _projects_registry
 server._publish = lambda: None
 check("start-time backfill: stamps every page with its existing id (none minted afresh), once", server._prj.stamp_registry() is True
       and {k: e["id"] for k, e in reg().items()} == ids0 and server._prj.stamp_registry() is False, {k: e.get("id") for k, e in reg().items()})
@@ -126,7 +127,7 @@ def pj(): return json.loads(PJ.read_text())
 t0 = time.time()
 real_replace, replaced = os.replace, []
 os.replace = lambda a, b: (replaced.append((str(a), str(b), pathlib.Path(a).exists())), real_replace(a, b))[1]
-try: w1 = server._projects_sync(now=t0)
+try: w1 = _projects_registry._projects_sync(now=t0)
 finally: os.replace = real_replace
 J = pj()
 check("projects.json: written on the first call, atomically (a tmp file replaced onto it)", w1 is True and any(b == str(PJ) and ex and a.endswith(".tmp") for a, b, ex in replaced), replaced)
@@ -139,34 +140,34 @@ check("projects.json: by_key maps every page key to its id", J["by_key"] == {k: 
 check("projects.json: the agents are the records (front, role, mandate_line)", J["projects"][A_ID]["agents"] == ag and J["projects"][A_ID]["keeper"] == "home-sparrow" and J["projects"][B_ID]["agents"] == {})
 check("projects.json: the same content as the lookup", all(prj.ref(i) == r for i, r in J["projects"].items()))
 mt = PJ.stat().st_mtime_ns
-check("fresh and unchanged: not rewritten (150 s later)", server._projects_sync(now=t0 + 150) is False and PJ.stat().st_mtime_ns == mt and pj()["generated"] == J["generated"])
+check("fresh and unchanged: not rewritten (150 s later)", _projects_registry._projects_sync(now=t0 + 150) is False and PJ.stat().st_mtime_ns == mt and pj()["generated"] == J["generated"])
 from stackshot.core import runner as _runner_mod
 SLOW_ROUND = 20.0       # a round of the minute set that takes this long (a slow tick ahead of the registry sync) still must not push a rewrite past the 5-minute promise
 check("the refresh interval, with the fleet watch's 20-s pass and with the runner's one-minute pace and a slow round of 20 s, keeps the file no older than 5 minutes",
       prj.EVERY + 20 <= 300 and prj.EVERY + _runner_mod.PACE + SLOW_ROUND <= 300, (prj.EVERY, _runner_mod.PACE, SLOW_ROUND))
-check("unchanged but older than the interval: rewritten with a new stamp and the same records", server._projects_sync(now=t0 + prj.EVERY + 1) is True
+check("unchanged but older than the interval: rewritten with a new stamp and the same records", _projects_registry._projects_sync(now=t0 + prj.EVERY + 1) is True
       and pj()["generated"] > J["generated"] and pj()["projects"] == J["projects"] and pj()["by_key"] == J["by_key"], (pj()["generated"], J["generated"]))
 PJ.write_text(json.dumps({**pj(), "generated": "2999-01-01T00:00:00Z"}))
-check("a stamp in the future (a clock set back) counts as stale: rewritten", server._projects_sync(now=t0 + 400) is True and pj()["generated"] < "2999", pj()["generated"])
+check("a stamp in the future (a clock set back) counts as stale: rewritten", _projects_registry._projects_sync(now=t0 + 400) is True and pj()["generated"] < "2999", pj()["generated"])
 PJ.write_text("not json")
-check("a file that is unreadable is written again", server._projects_sync(now=t0 + 401) is True and pj()["schema"] == 1)
+check("a file that is unreadable is written again", _projects_registry._projects_sync(now=t0 + 401) is True and pj()["schema"] == 1)
 # a change in a page is a rewrite at once
 page("projects/alpha.md", ALPHA.replace("  background:", "  home-sparrow-review: reviews the work\n  background:")); p.cmd_registry(quiet=True)
 g = pj()["generated"]
-check("a record that changed (a page gained an agent) is rewritten at once, however fresh the file", server._projects_sync(now=t0 + 402) is True and "home-sparrow-review" in pj()["projects"][A_ID]["agents"]
+check("a record that changed (a page gained an agent) is rewritten at once, however fresh the file", _projects_registry._projects_sync(now=t0 + 402) is True and "home-sparrow-review" in pj()["projects"][A_ID]["agents"]
       and pj()["projects"][A_ID]["agents"]["home-sparrow-review"] == {"front": True, "role": "review", "mandate_line": "reviews the work"}, pj()["projects"][A_ID]["agents"])
 check("…and the id of that project did not change", pj()["projects"][A_ID]["key"] == "projects/alpha" and pj()["by_key"]["projects/alpha"] == A_ID)
-page("projects/alpha.md", ALPHA); p.cmd_registry(quiet=True); server._projects_sync(now=t0 + 403)
+page("projects/alpha.md", ALPHA); p.cmd_registry(quiet=True); _projects_registry._projects_sync(now=t0 + 403)
 (T / "store/projects.json").rename(T / "store/projects.hold")
-check("an empty registry writes nothing (a stale file is the reader's cue, an empty one would say there are no projects)", server._projects_sync(now=t0 + 9999) is False and pj()["projects"], pj()["generated"])
+check("an empty registry writes nothing (a stale file is the reader's cue, an empty one would say there are no projects)", _projects_registry._projects_sync(now=t0 + 9999) is False and pj()["projects"], pj()["generated"])
 (T / "store/projects.hold").rename(T / "store/projects.json")
 (T / "state/projects.json").unlink()
 server._roles_sync_safe()
 check("the roles pass (start, publish, the create gate, the fleet watch's 20-s tick) writes projects.json too", PJ.exists() and set(pj()["projects"]) == set(ids0.values())
-      and "_projects_sync_safe(now)" in open(f"{STACK}/stackshot/web/shared.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
+      and "_projects_sync_safe(now)" in open(f"{STACK}/stackshot/projects/project_registry.py").read().split("def _roles_sync_safe")[1].split("def _projects_sync")[0])
 os.chmod(T / "state", 0o500)      # an unwritable state dir is logged, never raised: the board does not stop for it
 try:
-    err_real, sys.stderr = sys.stderr, io.StringIO(); server._projects_sync_safe(now=time.time() + 5000, force=True); logged = sys.stderr.getvalue()
+    err_real, sys.stderr = sys.stderr, io.StringIO(); _projects_registry._projects_sync_safe(now=time.time() + 5000, force=True); logged = sys.stderr.getvalue()
 finally: sys.stderr = err_real; os.chmod(T / "state", 0o700)
 check("a write that fails is logged, not raised", "projects.json:" in logged or os.geteuid() == 0, logged)
 
@@ -245,7 +246,7 @@ st, out = post(A_ID, "home-sparrow-triage", "home-sparrow", mandate="sorts every
 check("a listed agent said again with another mandate is the 409 (retire it or rename it first); the record keeps the old line", st == 409 and agents_of(A_ID)["home-sparrow-triage"]["mandate_line"] == "sorts the incoming", (st, out))
 # a page edit after the agent was listed is not read: the record is the authority, and the next mirror write restores the page
 (T / "brain/projects/alpha.md").write_text((T / "brain/projects/alpha.md").read_text().replace("home-sparrow-triage: sorts the incoming", "home-sparrow-triage: edited on the page")); p.cmd_registry(quiet=True)
-server._projects_sync(now=time.time() + 100)
+_projects_registry._projects_sync(now=time.time() + 100)
 check("a page edit to a mirrored line is not read: the record's mandate stays", agents_of(A_ID)["home-sparrow-triage"]["mandate_line"] == "sorts the incoming", agents_of(A_ID))
 st, out = post(A_ID, "home-sparrow-after", "home-sparrow-triage", role="after", mandate="a listed front agent")
 check("…and the next write to the project's agents block restores the page's line from the record", st == 200 and "home-sparrow-after" in agents_of(A_ID) and "home-sparrow-triage: sorts the incoming" in (T / "brain/projects/alpha.md").read_text()
@@ -371,7 +372,7 @@ check("a damaged id file: add_pending, rename and prune raise too, and write not
 st, out = post(A_ID, "home-sparrow-zz", "home-sparrow")
 check("a damaged id file: post project-agent is not accepted (nothing recorded), the server stays up", st in (400, 403, 500, 503) and REC.read_bytes() == good[: len(good) // 2], (st, out))
 check("a damaged id file: the lookup still answers from the registry's own copy of the ids (key and id)", prj.ref("projects/alpha")["id"] == A_ID and prj.ref(A_ID)["key"] == "projects/alpha" and prj.to_key(B_ID) == "projects/beta")
-check("a damaged id file: the published file is still written, with the same ids", server._projects_sync(now=time.time() + 5000, force=True) is True and pj()["by_key"]["projects/alpha"] == A_ID and set(pj()["projects"]) == set(ids_now.values()))
+check("a damaged id file: the published file is still written, with the same ids", _projects_registry._projects_sync(now=time.time() + 5000, force=True) is True and pj()["by_key"]["projects/alpha"] == A_ID and set(pj()["projects"]) == set(ids_now.values()))
 p.cmd_registry(quiet=True)
 check("a damaged id file: the registry rebuild keeps every id the old registry carried (the second copy survives) and mints none", {k: e["id"] for k, e in reg().items()} == ids_now and REC.read_bytes() == good[: len(good) // 2])
 err_real, sys.stderr = sys.stderr, io.StringIO()
@@ -401,7 +402,7 @@ check("rename: returns the id, which now stands for the new key; the old key no 
 check("rename: after the page move the registry lists the new key under the OLD id, and the new key got no fresh id", reg()["projects/beta2"]["id"] == B_ID and "projects/beta" not in reg()
       and sum(1 for k in idfile()["ids"].values() if k == "projects/beta2") == 1, reg().get("projects/beta2"))
 check("rename: the old id resolves to the new key, by lookup, and in the published file", prj.ref(B_ID)["key"] == "projects/beta2" and prj.ref("projects/beta2")["id"] == B_ID
-      and (server._projects_sync(now=time.time() + 6000, force=True), pj()["projects"][B_ID]["key"])[1] == "projects/beta2" and pj()["by_key"]["projects/beta2"] == B_ID and "projects/beta" not in pj()["by_key"])
+      and (_projects_registry._projects_sync(now=time.time() + 6000, force=True), pj()["projects"][B_ID]["key"])[1] == "projects/beta2" and pj()["by_key"]["projects/beta2"] == B_ID and "projects/beta" not in pj()["by_key"])
 prj.add_pending(B_ID, "home-beta-p", {"front": True, "role": "p", "mandate_line": "m"}, by="x"); rid = prj.rename("projects/beta2", "projects/beta3")
 (T / "brain/projects/beta2.md").rename(T / "brain/projects/beta3.md"); p.cmd_registry(quiet=True)
 check("rename: the id's pending agents travel with it", rid == B_ID and "home-beta-p" in prj.ref(B_ID)["agents"] and prj.ref(B_ID)["key"] == "projects/beta3", prj.ref(B_ID))
@@ -484,7 +485,7 @@ check("no temp file is left in the store after all of this", not leftovers, left
 seen_tmp = []
 real_replace2 = os.replace
 os.replace = lambda a, b: (seen_tmp.append((str(a), str(b))), real_replace2(a, b))[1]
-try: prj.ensure_ids(["projects/one-more"]); p.cmd_registry(quiet=True); prj.stamp_registry(); server._projects_sync(force=True)
+try: prj.ensure_ids(["projects/one-more"]); p.cmd_registry(quiet=True); prj.stamp_registry(); _projects_registry._projects_sync(force=True)
 finally: os.replace = real_replace2
 check("every write of the id file, the registry and projects.json stages its temp file in the state dir, never in the store", seen_tmp and all(a.startswith(f"{tmp}/state/tmp/") for a, b in seen_tmp)
       and {b for a, b in seen_tmp} >= {str(REC), str(T / "store/projects.json"), str(PJ)}, seen_tmp)

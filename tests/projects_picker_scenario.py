@@ -96,6 +96,7 @@ ID = re.compile(r"^prj_[0-9a-f]{8}$")
 from stackshot.projects import pages as p; from stackshot.projects import projects as prj
 p.cmd_registry(quiet=True)
 from stackshot.web import server
+from stackshot.projects import project_registry as _projects_registry
 server._publish = lambda: None
 def reg(): return json.loads((T / "store/projects.json").read_text())["pages"]
 def idfile(): return json.loads((T / "store/project-record.json").read_text())
@@ -436,7 +437,7 @@ check("project-agent: the keeper's session id lists an agent on a hidden project
 check("project-agent: the agent is in the published file with no page line owed, and the registry file the pages wrote does not hold it", "page_owed" not in pj()["projects"][rec("ops/tool")["id"]]["agents"]["ops-tool-main"] and "agents" not in reg()["ops/tool"])
 pverbs.agent_add = real_add
 page("ops/tool.md", "type: project\ntitle: A tool box\ndisplay-name: ops-tool\nagents:\n  ops-tool-other: a page edit"); p.cmd_registry(quiet=True)
-server._projects_sync(now=NOW + 1, force=True)
+_projects_registry._projects_sync(now=NOW + 1, force=True)
 check("project-agent: …a page edit made after the project has its entry is not read: the record's agents stay (the entry wins), the page's own line is not an agent", list(rec("ops/tool")["agents"]) == ["ops-tool-main"] and rec("ops/tool")["listed_by"] == "agents", rec("ops/tool")["agents"])
 
 # ---- 6c. post project-agent-mandate: the keeper or a front agent changes a listed agent's mandate line; the record first, the page from it, and the page cannot undo it
@@ -1272,7 +1273,7 @@ check("retired: every row of get projects carries retired (false) and status; a 
       and rows["projects/live-active"]["status"] == "active" and rows["projects/live-nostatus"]["status"] == "", [(r["key"], r["status"]) for r in d["projects"]][:6])
 st, ctype, body = server._client_get("project", {"key": "projects/ark"}); one = json.loads(body)
 check("retired: get project still answers for a retired project, with retired true and its status", st == 200 and one["retired"] is True and one["status"] == "archived" and one["listed"] is False, (st, body[:200]))
-server._projects_sync(now=NOW + 2, force=True)
+_projects_registry._projects_sync(now=NOW + 2, force=True)
 check("retired: the published file carries both fields", pj()["projects"][R["ark"]["id"]]["retired"] is True and pj()["projects"][R["live-active"]["id"]]["status"] == "active")
 # re-list refused
 marks_before = dict(idfile()["marks"].get(R["ark"]["id"]) or {})

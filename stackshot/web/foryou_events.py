@@ -2,7 +2,7 @@
 makes (`_foryou_on_save`, `_foryou_make`), the Landed list's record beside it (`_landed_on_save`) and the due-date pass (`_foryou_tick`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The list's rows are foryou.py's, its one Slack hook foryou_slack.py's; what a change of an item makes of them is here, and
-what it reads of server.py (a session's name, an item's page, the owner's words, whether an item waits on his decision, the debounced publish) is in shared.py. server.py imports the names the saves, the tick
+what it reads of server.py (a session's name, an item's page, the owner's words, whether an item waits on his decision, the debounced publish) is in the modules of the areas that own them (fleet/sessions_registry.py, model/ids.py, model/said.py, web/publish.py). server.py imports the names the saves, the tick
 and the close fallback call back from here, so `server._foryou_on_save`, `server._foryou_tick` and the others stay the names the suites use; `_FORYOU_LAST` and `_FORYOU_FAILED` are mutated in place, never rebound,
 so the name on `server` and the one here are one object. A suite that stubs the publish for the due-date pass sets it on this module (`server._fyev._publish = ...`), the one place `_foryou_tick` looks it up."""
 from __future__ import annotations
@@ -20,9 +20,12 @@ from stackshot.web import foryou as _fy
 from stackshot.web import foryou_slack as _fyslack
 from stackshot.web import landed as _ld
 from stackshot.web import render as _rmod
-from stackshot.web.common import _clip_line
+from stackshot.model.bullet_text import _clip_line
 from stackshot.web.foryou_slack import _foryou_slack
-from stackshot.web.shared import _item_url, _owner_words, _publish, _session_label
+from stackshot.fleet.sessions_registry import _session_label
+from stackshot.model.ids import _item_url
+from stackshot.model.said import _owner_words
+from stackshot.web.publish import _publish
 from stackshot.core.store import _item_files
 from stackshot.web.store import _load
 

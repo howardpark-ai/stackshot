@@ -61,6 +61,7 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 server._publish = lambda: None
@@ -209,7 +210,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         check(f"saved: root {n} page is the default page with only the sections moved (nothing else differs)", norm(a[0]) == norm(b[0]) and {k: norm(v) for k, v in a[1].items()} == {k: norm(v) for k, v in b[1].items()}, n)
     check("saved: the home's shell and block fingerprints are the default page's (the in-place update keeps working)", all(
         re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', ordered["home"]).group(1) == re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', base["home"]).group(1) for k in ("shell", "blocks")))
-    check("saved: the kept draw of the root home is still in the default order (the order is put in per person on the way out)", sections(server._BOARD_HOME["html"])[0] == DEFAULT)
+    check("saved: the kept draw of the root home is still in the default order (the order is put in per person on the way out)", sections(_web_board_home._BOARD_HOME["html"])[0] == DEFAULT)
     c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA]); rr = c.get("/")
     check("saved: Content-Length matches the body served", int(rr.headers["content-length"]) == len(rr.content), (rr.headers["content-length"], len(rr.content)))
     check("another signed-in person gets the default order", sections(get("/", NOOR).text)[0] == DEFAULT)

@@ -17,7 +17,7 @@ from fastmcp.server.middleware import Middleware as _MW
 from stackshot.core import call_log as _calls
 from stackshot.core import readonly as _ro
 from stackshot.core import retired_inputs as _retired
-from stackshot.web.common import OWNER
+from stackshot.core.instance import OWNER
 
 REFUSAL_LOG_MAX = 300      # characters of a refusal's reason kept in the log line
 

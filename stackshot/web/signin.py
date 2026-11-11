@@ -21,7 +21,7 @@ from starlette.responses import PlainTextResponse
 from stackshot import paths as _paths
 from stackshot.core import config as _cfg
 from stackshot.web import render as _rmod
-from stackshot.web.common import NAME
+from stackshot.core.instance import NAME
 
 
 def _auth_mode() -> str:

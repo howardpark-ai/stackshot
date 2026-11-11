@@ -162,7 +162,9 @@ from stackshot.web import runners as _runners  # noqa: E402  — the Runners pag
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
 # every other setting is read where it is used, so a reload (SIGHUP) is live at once.
-from stackshot.web.common import NAME, OWNER, _clip_line  # noqa: E402  — pieces shared with the server's other modules (common.py); NAME and OWNER are read from [instance] once, at this import
+from stackshot.core import instance as _inst  # noqa: E402  — the owner's name, the instance's name and the board's URL, read from [instance] once, at this import (core/instance.py); `_inst.BOARD_URL` is read and set on that module, never here
+from stackshot.core.instance import NAME, OWNER  # noqa: E402  — NAME and OWNER: the one read of [instance] (core/instance.py)
+from stackshot.model.bullet_text import _clip_line  # noqa: E402  — free text as one line of a notice (model/bullet_text.py)
 from stackshot.model.ids import _GID, _ITEM_KEY, _ITEM_PATH, _ITEM_REF, _bare_id_ok, _item_gid, _norm_id, _plain_text, _without_mq_groups  # noqa: E402  — item ids and where they are read (model/ids.py)
 from stackshot.model.needs import _NEEDS_KINDS, _after_of, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
 OPERATOR = str(_cfg.get("fleet", "operator_label") or "operator session")
@@ -835,13 +837,13 @@ def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
         print(f"owner: {old} is now {new}; its mover {_session_label(owner)} is a front agent, not told (the old id still resolves)", file=sys.stderr, flush=True)
         return
     _tell_woken(new, _session_id(owner) if owner else "", f"[stackshot] {_gh.shown(old)} is now {_gh.shown(new)} (the item took its issue number; "
-                f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {_shared.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
+                f"{_gh.shown(old)} still names it): {item.get('subject') or ''} → {_inst.BOARD_URL}/items/{_gh.href_id(new)}", tag="owner")
 
 
 _gh.on_rekey = _rekeyed
 
 
-# _clip_line is common.py's (imported with OWNER, near the top of this module).
+# _clip_line is model/bullet_text.py's, OWNER and NAME core/instance.py's (imported near the top of this module).
 
 
 def _github_comment(gid: str, c: dict[str, Any]) -> bool:
@@ -3875,8 +3877,12 @@ from stackshot.projects import projects as _prj  # noqa: E402  — the project r
 from stackshot.projects import project_archive as _archive  # noqa: E402  — a project whose last agent is retired, with no open item, is archived (project_archive.py)
 from stackshot.fleet import session_ids as _sid  # noqa: E402  — the migration to permanent session ids: applied from here at start, under the item lock
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
-from stackshot.web import shared as _shared  # noqa: E402  — the helpers more than one area reads: a session's name, an item's page and the board's URL (`_shared.BOARD_URL`), the owner's words, the debounced publish (and its timer, `_shared._PUB_TIMER`), the roles and projects files, the board home's drop (shared.py)
-from stackshot.web.shared import ROLES, _BOARD_GEN_LOCK, _BOARD_HOME, _board_home_drop, _board_home_slot, _item_url, _owner_words, _projects_sync, _projects_sync_safe, _publish, _publish_every, _publish_if_idle, _publish_now, _registry, _roles_sync, _roles_sync_safe, _session_label, _sessions_index  # noqa: E402,F401  — kept on this module as well: the writes, the tools and the suites call `server.<name>` (shared.py)
+from stackshot.fleet.sessions_registry import _session_label, _sessions_index  # noqa: E402  — a session's name for any reference to it, and the heartbeat index by transcript id or permanent id (fleet/sessions_registry.py)
+from stackshot.model.ids import _item_url  # noqa: E402  — an item's page on the board (model/ids.py)
+from stackshot.model.said import _owner_words  # noqa: E402  — what shows the owner's own words are on an item (model/said.py)
+from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_safe  # noqa: E402  — a registry file of the store, and roles.json with projects.json beside it (projects/project_registry.py)
+from stackshot.web.publish import _publish, _publish_every, _publish_if_idle, _publish_now  # noqa: E402  — the debounced publish, its pace and its idle test; the timer is `stackshot.web.publish._PUB_TIMER` (web/publish.py)
+from stackshot.web.board_home import _BOARD_GEN_LOCK, _board_home_drop, _board_home_slot  # noqa: E402  — the kept home of the board's root, its drop and its slots (web/board_home.py)
 from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
 from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `_save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
 from stackshot.web import project_form as _pform  # noqa: E402,F401  — the New session form's calls that make and list projects and register their agents, with the one lock they share and the page store they write through; a suite sets `PAGE_IO` on this module (project_form.py)
@@ -6329,7 +6335,7 @@ def _inbox_flag_tick(now: float | None = None) -> list[str]:
     return told
 
 
-# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are foryou_events.py's; its names are imported at `_shared` above.
+# The For you list's rows (whether he watches an item, the row a save makes, the Landed record, the due-date pass) are foryou_events.py's; its names are imported from the owners above.
 
 
 # ----------------------------------------------------------------------------- pane liveness and the park fallback
@@ -7435,7 +7441,7 @@ mcp = FastMCP(
     "stackshot",
     icons=[_Icon(src=_ICON, mime_type="image/svg+xml")],
     instructions=(
-        f"{NAME} — {OWNER}'s task board (web UI: {_shared.BOARD_URL}). Items are HUMAN-LEVEL: a deliverable a session owns, a decision or "
+        f"{NAME} — {OWNER}'s task board (web UI: {_inst.BOARD_URL}). Items are HUMAN-LEVEL: a deliverable a session owns, a decision or "
         f"input {OWNER} must give, a blocker on someone outside, a handoff — never a working step. Subject starts with "
         f"{_cfg.CFG['subject']['prefixes']}. Description = the item's background: what the item is + where it lives + what done means, as short `- ` bullets (one fact each, at most "
         f"{_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters; parallel bullets under one parent, indented two spaces; the server refuses prose), live state only, never steps or commands for {OWNER} (those go in step). metadata.project = the item's gbrain page, projects/<slug> or infra/<slug> for a machine/service item (required; a bare slug is accepted and stored as the full key). sender = your "
@@ -7489,7 +7495,7 @@ def _link_ids(text: str) -> str:
     """Tool text → the same, each item id that names an item in the store written as it is shown, linked to its page:
     [board#N](<board_url>/items/<n>) for g7 or board#N, [board-tmp-<machine>#3](<board_url>/items/board-tmp-<machine>-3) for a
     temporary id (l3), [s5](<board_url>/items/s5) for a letter id (a session copied the store id g7 to the owner)."""
-    if not text or not _shared.BOARD_URL:
+    if not text or not _inst.BOARD_URL:
         return text
     if text.lstrip()[:1] in "{[":
         try:
@@ -7514,7 +7520,7 @@ def _link_ids(text: str) -> str:
 def _unlink_ids(text: str) -> str:
     """The reverse, for what a write stores: [s1](<board_url>/items/s1) → s1, so a reply copied back into a subject,
     description, next or reason keeps the store plain (the board links ids itself)."""
-    base = _shared.BOARD_URL.rstrip("/")
+    base = _inst.BOARD_URL.rstrip("/")
     if not base or "](" not in text:
         return text
     text = re.sub(r"\[([a-z][1-9]\d*)\]\(" + re.escape(base) + r"/items/\1\)", r"\1", text)
@@ -9077,7 +9083,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         gs = [g for g, w, _l, _t in to_remind if w == sid]
         text = next(t for g, w, _l, t in to_remind if g == gs[0]) if len(gs) == 1 else _ho.message(
             lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {_handoff_minutes():g} min:",
-            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → {_shared.BOARD_URL}")
+            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → {_inst.BOARD_URL}")
         try:
             _tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
         except Exception as e:  # noqa: BLE001
@@ -9086,7 +9092,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
         gids = ",".join(g for w, g, _l in to_new if w == who)
         if _front_keeper(who, "")[0]:
             continue                                 # a front agent is never pushed to unmarked: the board shows it
-        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{_shared.BOARD_URL}")
+        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_notice_link(gids) if len(lines) == 1 else f"{_inst.BOARD_URL}")
         _tell_woken(gids, _session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
                     tag="handoff")
     for who, lines in _ho.batch(to_sender).items():
@@ -9895,7 +9901,7 @@ def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, 
             head = (f"{_FOR_OWNER}\n[stackshot] {len(items)} items have not moved (no step done or dropped, no state change, no merge; a status line, a note or a reply does not count), "
                     "or have had no write from live background movers, and the ladder asks no one else:")
             tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. "
-                    f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait) or write to it if it is silent; each comes again in {every} while it stays as it is. → {_shared.BOARD_URL}")
+                    f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait) or write to it if it is silent; each comes again in {every} while it stays as it is. → {_inst.BOARD_URL}")
             text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
         _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
         return
@@ -9907,7 +9913,7 @@ def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, 
     else:
         head = f"{_FOR_OWNER}\n[stackshot] {len(items)} items have had no write from their background movers, and those sessions are live, so the ladder asks no one else:"
         tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. {stop}"
-                f"→ {_shared.BOARD_URL}")
+                f"→ {_inst.BOARD_URL}")
         text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
     _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
 
@@ -10145,7 +10151,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
     for who, ls in _ho.batch(lines).items():
         gids = ",".join(g for w, g, _l in lines if w == who)
         tail = (f" Work it, hand it on (update sender=<you>) or close it. If nothing is written to it and your pane has no turn running for {minutes:g} more minutes, a fresh session is asked who takes it. → "
-                + (_notice_link(gids) if len(ls) == 1 else f"{_shared.BOARD_URL}"))
+                + (_notice_link(gids) if len(ls) == 1 else f"{_inst.BOARD_URL}"))
         _tell_woken(gids, _session_id(who) or who,
                     _ho.message(ls, f"[stackshot] you have had no turn running for {minutes:g} minutes and this is still yours:",
                                 f"[stackshot] you have had no turn running for {minutes:g} minutes and these {{n}} items are still yours:", tail), tag="stall")
@@ -10379,7 +10385,7 @@ _BRIEF_DESC = (
     "\"What is outstanding?\" brief() shows the board at a glance: counts, the Machines panel, the receivers and the project index (every open item: your move, on agents, waiting), then every open item in full as get shows it (its mover, its open next steps, its `model:` line and, once a step is done or dropped, its `checklist:`), the items on hold after them. "
     "For a doing item the board lists as waiting (see `model:` in get) the `model:` line ends with `· the board lists it as waiting until <time> (<why>)`. "
     "A `state:` line shows only for an item that stores a state. An item's `project:` line reads as in get. A line at the top says what changed in stackshot for 7 days after a release that changes a tool. The item model: docs/design. "
-    f"The full board is at {_shared.BOARD_URL} (markdown: board.md next to it)."
+    f"The full board is at {_inst.BOARD_URL} (markdown: board.md next to it)."
 )
 
 
@@ -10416,7 +10422,7 @@ def stackshot_brief() -> str:
             it["gid"] = gid; (held if _is_parked(it) else mine).append(_fmt(it, brief=True))
     hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
     return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
-            + "\n\nFull board: " + _shared.BOARD_URL + " · any item by id: the get tool") + _nag()
+            + "\n\nFull board: " + _inst.BOARD_URL + " · any item by id: the get tool") + _nag()
 
 
 # ----------------------------------------------------------------------------- a notice's ruling (get with a notice id)
@@ -11263,7 +11269,7 @@ def _create_item(
         why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
         told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
                  f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_shared.BOARD_URL}) now.\n" + _fmt(item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note
+    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_inst.BOARD_URL}) now.\n" + _fmt(item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note
                  + then_note + _similar_note(gid, subject, str(meta.get("project") or "")) + told + _nag("" if by else owner))
 
 

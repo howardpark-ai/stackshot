@@ -3,7 +3,7 @@ and the ids named in a free text: the matchers that blank what is not plain text
 and `_plain_text`), and the matcher of an id written as a plain word (`_ID_FORM`, `_ID_END`, `_ITEM_REF`).
 
 A domain module: it takes text and ids in and gives ids and text out, with no store and no clock (what asks the store whether an item exists stays with the store's readers: `_shown_ids` in web/store.py,
-`_item_refs` in server.py; what reads the board's URL stays with it: `_item_url` in web/shared.py)."""
+`_item_refs` in server.py). `_item_url` reads the board's URL, which core/instance.py holds."""
 from __future__ import annotations
 
 import re
@@ -11,6 +11,7 @@ import re
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import call_log as _calls
+from stackshot.core import instance as _inst
 from stackshot.github import ghsync as _gh
 
 _GID = re.compile(r"^([a-z])#?(\d+)$")
@@ -86,3 +87,10 @@ def _plain_text(text: str) -> str:
     into \\0, so what stays keeps its place and nothing reads as glued to a space)."""
     blank = lambda m: re.sub(r"[^\n]", "\0", m.group(0))
     return _QUOTED.sub(blank, _CODE_SPAN.sub(blank, _CODE_FENCE.sub(blank, str(text or ""))))
+
+
+def _item_url(gid: str) -> str:
+    """An item's page: <board_url>/items/<gid>, an issue-numbered one's at /items/<n>, a temporary id's at
+    /items/board-tmp-<machine>-<n> (ghsync.href_id)."""
+    base = _inst.BOARD_URL.rstrip("/")
+    return f"{base}/items/{_gh.href_id(gid)}" if base else ""

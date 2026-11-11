@@ -74,6 +74,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr; from stackshot.anchors import anchors as A; from stackshot.fleet import inbox; from stackshot.fleet import push
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.web import server
+from stackshot.projects import project_registry as _projects_registry
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
@@ -329,7 +330,7 @@ check("sessions index: a lookup by sala id finds the pane's row with the registr
 
 # ---- 7. roles.json and the mirror
 RJ = T / "state/roles.json"
-server._roles_sync(now=time.time())
+_projects_registry._roles_sync(now=time.time())
 j = json.loads(RJ.read_text())
 check("roles.json: `sessions` is keyed by name as before; `ids` is the extra key with the sala id of each name the registry resolves",
       "home-sparrow-main" in j["sessions"] and j["ids"].get("home-sparrow-main") == S["main"] and j["ids"].get("site-builder") == S["eng"] and "home-sparrow" in j["ids"] and set(j) == {"generated", "sessions", "ids"}, j)
@@ -461,7 +462,7 @@ check("pages clear: with no registry here, roles.json's `ids` tells the caller's
 LEDGER.write_text(json.dumps({"projects/alpha": {S["docs"]: E()}}), encoding="utf-8")
 rc, out = clear("alpha")
 check("pages clear: …and does not clear another session's", rc == 3 and S["docs"] in led().get("projects/alpha", {}), (rc, out))
-put_registry(); server._roles_sync(now=time.time() + 10000)
+put_registry(); _projects_registry._roles_sync(now=time.time() + 10000)
 LEDGER.write_text("{}", encoding="utf-8")
 it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["main"]; server._save(mig["name"], it)      # as the migration left it, for section 9
 

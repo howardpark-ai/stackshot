@@ -69,6 +69,7 @@ from stackshot.projects import pages as p; from stackshot.anchors import anchors
 from stackshot.fleet import clients as C
 C._links_dir = lambda: T / "links"               # a configured fleet store: the reader may run the fake sala
 from stackshot.web import server
+from stackshot.projects import project_registry as _projects_registry
 from stackshot.web.ui import render as ui_render
 p.cmd_registry(quiet=True)
 text = lambda h: re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", h))
@@ -110,12 +111,12 @@ check("(bug) the old name reads live in roles.json, and the Projects page draws 
 
 # ---- 4a. sala unreadable: nothing is dropped
 sala(SALA_ROWS, mode="fail"); before = (T / "store/project-record.json").read_bytes()
-server._roles_sync(now=time.time())
+_projects_registry._roles_sync(now=time.time())
 check("4: sala unreadable → no old name is known, the record is untouched", (T / "store/project-record.json").read_bytes() == before and "renamed_to" not in RJ.read_text(), pending())
 sala(SALA_ROWS)
 
 # ---- 2/3/4/5. one roles build
-check("(setup) the roles build writes roles.json", server._roles_sync(now=time.time()) is True)
+check("(setup) the roles build writes roles.json", _projects_registry._roles_sync(now=time.time()) is True)
 S = json.loads(RJ.read_text())["sessions"]
 check("2: a rename inside a project: the old name's pending entry is gone from the record, the project's other pending agents stay", pending("projects/ren") == {"home-ren-extra", "home-ren-reused"}, pending("projects/ren"))
 check("3: a move between projects: the old project's pending entry for the old name is gone, the new project's own pending entry stays", pending("projects/src") == set() and pending("projects/dst") == {"home-dst-moved"}, (pending("projects/src"), pending("projects/dst")))
@@ -132,11 +133,11 @@ check("2/3/5: the old names are nowhere in the Projects page's table or its page
 check("2: …and the new names are", all(n in table for n in ("home-ren-main", "home-dst-moved", "home-stale-main")), table[:500])
 check("2: the archived project is untouched (its agent is still there for the page that lists it)", "home-arch-main" in whole)
 c0 = (T / "store/project-record.json").read_bytes()
-check("2: a second build changes nothing in the record", (server._roles_sync(now=time.time() + 1), (T / "store/project-record.json").read_bytes() == c0)[1])
+check("2: a second build changes nothing in the record", (_projects_registry._roles_sync(now=time.time() + 1), (T / "store/project-record.json").read_bytes() == c0)[1])
 
 # ---- an alias of a session that moves out of an archived project: still never drawn
 add("projects/arch", "home-arch-old", False)
-sala(SALA_ROWS[:-1] + [["home-arch-main", ["home-arch-old"]]]); server._roles_sync(now=time.time() + 2)
+sala(SALA_ROWS[:-1] + [["home-arch-main", ["home-arch-old"]]]); _projects_registry._roles_sync(now=time.time() + 2)
 check("2: …an old name pending in an archived project goes too, and is not drawn there", "home-arch-old" not in pending("projects/arch") and "home-arch-old" not in text(board().projects_html()), pending("projects/arch"))
 
 # ---- 2b. a new name registered nowhere: renamed in place; a young entry: skipped; every change logged
@@ -157,7 +158,7 @@ check("2b: …an entry registered under ten minutes ago is skipped (still pendin
 check("2b: every drop and rename is logged with the old and new name, the verb and the entry's fields; the skipped one is not", len(LOG) == 2
       and any("'home-ren-orph-old' -> 'home-ren-orph-new'" in l and "renamed" in l and "mandate_line='the mandate of home-ren-orph-old'" in l and "by='fleet-web'" in l and "at='2026-11-01T00:00:00Z'" in l and "front=True" in l and "role='orph'" in l for l in LOG)
       and any("'home-ren-old2' -> 'home-ren-main'" in l and "dropped" in l for l in LOG) and not any("young" in l for l in LOG), LOG)
-server._roles_sync(now=t0 + 5)
+_projects_registry._roles_sync(now=t0 + 5)
 check("2b: the renamed entry draws on the Projects page under the new name and the old one does not", shown("projects/ren", "home-ren-orph-new") and not shown("projects/ren", "home-ren-orph-old"))
 LOG2 = []; RA.sweep(RA.renames_of(A.sala_rows()), A.registry(), t0 + 300, LOG2.append)
 check("2b: the same entry at five minutes is still skipped", "home-src-young" in pending("projects/src") and not LOG2, (pending("projects/src"), LOG2))
@@ -165,7 +166,7 @@ RA.sweep(RA.renames_of(A.sala_rows()), A.registry(), t0 + 700, LOG2.append)
 check("2b: …and at over ten minutes the next sweep takes it", "home-src-young" not in pending("projects/src") and len(LOG2) == 1 and "'home-src-young' -> 'home-src-main'" in LOG2[0], (pending("projects/src"), LOG2))
 mk("projects/ren", "home-ren-old3", "2026-11-01T00:00:00Z"); alias("home-ren-main", "home-ren-old3"); sala(ROWS)
 errbuf = io.StringIO()
-with contextlib.redirect_stderr(errbuf): server._roles_sync(now=t0 + 710)
+with contextlib.redirect_stderr(errbuf): _projects_registry._roles_sync(now=t0 + 710)
 check("2b: the roles build logs a drop on the server's standard error", "renamed agent 'home-ren-old3' -> 'home-ren-main'" in errbuf.getvalue() and "home-ren-old3" not in pending("projects/ren"), errbuf.getvalue())
 mk("projects/ren", "home-ren-two-a", "2026-11-01T00:00:00Z"); mk("projects/src", "home-src-two-b", "2026-11-01T00:00:00Z"); ROWS.append(["home-two-new", ["home-ren-two-a", "home-src-two-b"]]); sala(ROWS)
 RA.sweep(RA.renames_of(A.sala_rows()), A.registry(), t0 + 720, LOG2.append)
@@ -185,12 +186,12 @@ RJ.unlink(missing_ok=True); rec_before = (T / "store/project-record.json").read_
 def bad_write(d): raise OSError(28, "No space left on device")
 prj._write = bad_write; errbuf = io.StringIO()
 try:
-    with contextlib.redirect_stderr(errbuf): wrote = server._roles_sync(now=t0 + 800)
+    with contextlib.redirect_stderr(errbuf): wrote = _projects_registry._roles_sync(now=t0 + 800)
 finally: prj._write = real_write
 check("2d: the record write raises OSError: roles.json is still rebuilt (written, with the new session in it), the failure is logged, the record is untouched",
       wrote is True and RJ.exists() and "home-ren-wfail-new" not in json.loads(RJ.read_text())["sessions"] and "home-ren-main" in json.loads(RJ.read_text())["sessions"]
       and "sweep failed" in errbuf.getvalue() and "No space left" in errbuf.getvalue() and (T / "store/project-record.json").read_bytes() == rec_before, (wrote, errbuf.getvalue()))
-server._roles_sync(now=t0 + 860)
+_projects_registry._roles_sync(now=t0 + 860)
 check("2d: …and the next tick, with the write working again, settles the entry", "home-ren-wfail-old" not in pending("projects/ren") and "home-ren-wfail-new" in pending("projects/ren"), pending("projects/ren"))
 
 # ---- 6. the repair tool

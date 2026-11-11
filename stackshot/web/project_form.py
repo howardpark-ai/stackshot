@@ -24,7 +24,7 @@ from stackshot.projects import project_registry as _pr
 from stackshot.projects import project_verbs as _verbs
 from stackshot.projects import projects as _prj
 from stackshot.router import page_debt as _page_debt
-from stackshot.web.shared import _projects_sync_safe, _registry
+from stackshot.projects.project_registry import _projects_sync_safe, _registry
 
 
 _AGENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")

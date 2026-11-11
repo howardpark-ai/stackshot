@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 
 from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 server._publish = lambda: None
@@ -197,7 +198,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("closed: the panel itself is still in the page (a hover still peeks it open, the button shows it)", all('<aside id="panel"' in h and 'id="panel-edge"' in h and 'id="panel-scrim"' in h and 'id="panel-open"' in h for h in shut.values()))
     check("closed: the home's shell and block fingerprints are the open page's (the in-place update keeps working)", all(
         re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', shut["home"]).group(1) == re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', base["home"]).group(1) for k in ("shell", "blocks")))
-    check("closed: the kept draw of the home is still open (the state is put in per person on the way out)", state(server._BOARD_HOME["html"]) == "open")
+    check("closed: the kept draw of the home is still open (the state is put in per person on the way out)", state(_web_board_home._BOARD_HOME["html"]) == "open")
     c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA]); rr = c.get("/")
     check("closed: Content-Length matches the body served", int(rr.headers["content-length"]) == len(rr.content), (rr.headers["content-length"], len(rr.content)))
     check("another signed-in person still gets it open, on every page", all(state(get(p, NOOR).text) == "open" for _, p in PAGES))
@@ -240,16 +241,16 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     post({"open": True})
 
     # the kept home draw: a toggle leaves it (the draw does not depend on the state); the order save still drops it as before
-    get("/"); kept_gen, kept_at, kept_html = server._BOARD_HOME["gen"], server._BOARD_HOME["at"], server._BOARD_HOME["html"]
+    get("/"); kept_gen, kept_at, kept_html = _web_board_home._BOARD_HOME["gen"], _web_board_home._BOARD_HOME["at"], _web_board_home._BOARD_HOME["html"]
     check("the kept home draw exists after a read", kept_html is not None and kept_at > 0)
     post({"open": False}); post({"open": True}); post({"open": False}); post({"open": True})
-    check("toggling the panel (four saves) leaves the kept home draw: same generation, same time, same page", server._BOARD_HOME["gen"] == kept_gen and server._BOARD_HOME["at"] == kept_at and server._BOARD_HOME["html"] is kept_html,
-          (server._BOARD_HOME["gen"], kept_gen))
+    check("toggling the panel (four saves) leaves the kept home draw: same generation, same time, same page", _web_board_home._BOARD_HOME["gen"] == kept_gen and _web_board_home._BOARD_HOME["at"] == kept_at and _web_board_home._BOARD_HOME["html"] is kept_html,
+          (_web_board_home._BOARD_HOME["gen"], kept_gen))
     post({"open": False})
-    check("...and the next read serves the stored state from that same draw", state(get("/").text) == "closed" and server._BOARD_HOME["html"] is kept_html and state(kept_html) == "open")
+    check("...and the next read serves the stored state from that same draw", state(get("/").text) == "closed" and _web_board_home._BOARD_HOME["html"] is kept_html and state(kept_html) == "open")
     post({"open": True})
     post({"order": ["runners", "machines"]}, path="/prefs/panel-order")
-    check("(control) the order save still drops it", server._BOARD_HOME["gen"] == kept_gen + 1 and server._BOARD_HOME["at"] == 0.0, server._BOARD_HOME["gen"])
+    check("(control) the order save still drops it", _web_board_home._BOARD_HOME["gen"] == kept_gen + 1 and _web_board_home._BOARD_HOME["at"] == 0.0, _web_board_home._BOARD_HOME["gen"])
     post({"reset": True}, path="/prefs/panel-order")
     # an open save that is a no-op answers 200 even where the file cannot be written
     os.replace = failing_replace
