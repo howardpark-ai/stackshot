@@ -6,7 +6,9 @@ unchanged. Fixture data (English stand-in names) in a temporary store, the push 
      quiet session and asking it to decide; the fleet's builder is told nothing; the History line says who was asked; the item stays with its mover and is not on the owner's list; later passes send nothing
   2  a project with a builder is unchanged: its builder is the first choice, and when the quiet session is that builder itself the last rung still asks the fleet's builder (unmarked, `fleet recovery:`), not the -main agent
   3  a front-only project whose quiet mover is its -main agent itself, and one with no -main agent to name: the fleet's builder is asked, as before
-  4  the choice on its own (server._recovery_target) for each shape, a front-only test that raises keeps the fleet's builder (one line on stderr)
+  4  the choice on its own (server._recovery_target: the recipient, its kind, whether the project is builderless) for each shape, a front-only test that raises keeps the fleet's builder (one line on stderr)
+  5  what the request says: the target is computed once per request; the hand-off record (`recovery_by`), its event, `get`'s line, the journal note and the History line name who was actually asked; "what
+     the ladder tried" never claims a builder for a front-only project, whether its -main agent or the fleet's builder is asked, in the stall ladder and the hand-off ladder alike; a project with a builder keeps its old words
 
     tests/run-suite front_only_ladder        -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -71,7 +73,9 @@ server._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = server._save
 INV_BAD = []; INV_SAVES = [0]
+NOTES = []
 def _save_inv(gid, item, *a, **kw):
+    NOTES.append((gid, kw.get("note", "")))
     out = _real_save(gid, item, *a, **kw)
     INV_SAVES[0] += 1
     if H.stale(item, H.mover_of(item, lambda it: server._ho_derive({**it, "gid": gid})), server._ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
@@ -172,18 +176,71 @@ check("3 a front-only project whose quiet mover is its -main agent: nobody is ab
       len(FLEET_ONLY("a4")) == 1 and FLEET_ONLY("a4")[0][1].startswith("[stackshot] fleet recovery: a4 ") and not MAIN_ONLY("a4") and bool(ho(4).get("recovery_at")), (pushes_to("home-fleet", "a4"), MAIN_ONLY("a4"), ho(4)))
 close(4)
 
+CALLS = []
+_real_tgt = server._recovery_target
+def _counting(project, quiet):
+    out = _real_tgt(project, quiet); CALLS.append((project, quiet, out)); return out
+def rec(to, frm="home-send", **kw):
+    """A hand-off record made by the machinery an hour ago (delivered, not taken), for an item that is written to disk with it."""
+    return H.new_record(to, U[to], frm, now0 - 3600, **{"delivered_at": now0 - 3500, **kw})
+# ================================================================ 5. what the request says: who was actually asked, what was tried, computed once
+def ev_texts(i): return [e["text"] for e in ho(i).get("events", [])]
+def msgs(gid, who): return [p[1] for p in pushes_to(who, gid)]
+# (a) the -main agent was asked: every line that names the recipient says so, not the fleet's builder
+item(10, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
+CALLS.clear(); server._recovery_target = _counting
+stk(T1); stk(T2)
+server._recovery_target = _real_tgt
+check("5 the target is computed once per request (the record, the wording of `tried` and the send follow the one answer)", len([c for c in CALLS if c[0] == "projects/beta" and c[1] == "home-peer3"]) == 1 and len(CALLS) == 1, CALLS)
+check("5 …the hand-off record says who was asked, and its event line names the -main agent, not the fleet's builder", ho(10).get("recovery_by") == "the project's -main agent"
+      and any("the project's -main agent was asked" in t for t in ev_texts(10)) and not any("fleet's builder" in t for t in ev_texts(10)), (ho(10), ev_texts(10)))
+check("5 …`get` reads it the same way (the hand-off line)", any("the project's -main agent was asked to recover it" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)) and not any("fleet" in l for l in H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x)), H.words({**rd(10), "gid": "a10"}, T2, None, lambda x: x))
+check("5 …the journal note of the History write names the -main agent", any(g == "a10" and "the project's -main agent was asked" in n for g, n in NOTES) and not any(g == "a10" and "fleet" in n and "recovery" not in n for g, n in NOTES), [n for g, n in NOTES if g == "a10"])
+check("5 …and what was tried says there was no builder (a stall record: the notice again and a fresh session's call)", any("What the ladder tried: the stall pass sent the notice again and asked a fresh session who takes it." in t for t in msgs("a10", "home-beta-front"))
+      and not any("project's builder" in t for t in msgs("a10", "home-beta-front")), msgs("a10", "home-beta-front"))
+_it10 = rd(10); H.touch(_it10, "home-peer3", U["home-peer3"], T2 + 60, server._ho_same)
+check("5 …the mover writing ends the request and the record forgets who was asked", not (_it10["metadata"]["handoff"].get("recovery_at") or _it10["metadata"]["handoff"].get("recovery_by")), _it10["metadata"]["handoff"])
+close(10)
+
+# (b) a front-only project whose quiet mover is its -main agent: the fleet's builder is asked, and no builder was tried (there is none)
+item(11, project="projects/beta", mover="home-beta-front"); cli_row("home-beta-front", "idle", IDLE0)
+stk(T1); stk(T2)
+check("5 a quiet -main agent: the fleet's builder is asked, the record and the History line say so", ho(11).get("recovery_by") == "the fleet's builder" and any("the fleet's builder was asked" in t for t in ev_texts(11)) and bool(ho(11).get("recovery_at")), (ho(11), ev_texts(11)))
+check("5 …and the request does not say the project's builder was tried: the project has none", len(FLEET_ONLY("a11")) == 1 and "What the ladder tried: the stall pass sent the notice again and asked a fresh session who takes it." in FLEET_ONLY("a11")[0][1]
+      and "project's builder" not in FLEET_ONLY("a11")[0][1] and not any("project's builder" in x["text"] for x in log_of(11)), (FLEET_ONLY("a11"), log_of(11)))
+close(11)
+
+# (c) the hand-off ladder (a record that is no stall record): the same, in the hand-off ladder's words
+item(12, project="projects/beta", mover="home-beta-front", handoff=rec("home-beta-front"))
+server._handoff_recover("a12", "home-beta-front did not take it"); drain()
+check("5 the hand-off ladder, a quiet -main agent: the fleet's builder is asked and what was tried leaves out the project's builder", len(FLEET_ONLY("a12")) == 1 and "What the ladder tried: the hand-off ladder tried a fresh session's call and the sender." in FLEET_ONLY("a12")[0][1]
+      and "project's builder" not in FLEET_ONLY("a12")[0][1], FLEET_ONLY("a12"))
+close(12)
+item(13, project="projects/beta", mover="home-peer3", handoff=rec("home-peer3"))
+server._handoff_recover("a13", "home-peer3 did not take it"); drain()
+check("5 the hand-off ladder, a quiet session of a front-only project: its -main agent is asked, in its words, and what was tried leaves out the project's builder", len(MAIN_ONLY("a13")) == 1 and "the hand-off ladder tried a fresh session's call and the sender." in MAIN_ONLY("a13")[0][1]
+      and "project's builder" not in MAIN_ONLY("a13")[0][1] and ho(13).get("recovery_by") == "the project's -main agent", (MAIN_ONLY("a13"), ho(13)))
+close(13)
+
+# (d) a project with a builder keeps the old words everywhere
+item(14, mover="team-back"); cli_row("team-back", "idle", IDLE0)
+stk(T1); stk(T2)
+check("5 a project with a builder: the fleet's builder, `recovery_by` the same, and what was tried still names the project's builder", ho(14).get("recovery_by") == "the fleet's builder" and len(FLEET_ONLY("a14")) == 1
+      and "asked a fresh session who takes it and tried the project's builder." in FLEET_ONLY("a14")[0][1], (ho(14), FLEET_ONLY("a14")))
+close(14)
+
 # ================================================================ 4. the choice on its own
 tgt = server._recovery_target
-check("4 a front-only project with a -main agent -> (that agent, main)", tgt("projects/beta", "home-peer3") == ("home-beta-front", "main"), tgt("projects/beta", "home-peer3"))
-check("4 …the quiet session is that agent (by name or by id) -> the fleet's builder", tgt("projects/beta", "home-beta-front") == ("home-fleet", "fleet") and tgt("projects/beta", U["home-beta-front"]) == ("home-fleet", "fleet"), (tgt("projects/beta", "home-beta-front"), tgt("projects/beta", U["home-beta-front"])))
-check("4 a project with a builder -> the fleet's builder, whoever is quiet", tgt("projects/alpha", "home-peer") == ("home-fleet", "fleet") and tgt("projects/alpha", "team-back") == ("home-fleet", "fleet"), tgt("projects/alpha", "home-peer"))
-check("4 a project nobody lists (front-only, no -main agent to name) and an empty project -> the fleet's builder", tgt("projects/nowhere", "home-peer") == ("home-fleet", "fleet") and tgt("", "home-peer") == ("home-fleet", "fleet"), (tgt("projects/nowhere", "home-peer"), tgt("", "home-peer")))
+check("4 a front-only project with a -main agent -> (that agent, main)", tgt("projects/beta", "home-peer3") == ("home-beta-front", "main", True), tgt("projects/beta", "home-peer3"))
+check("4 …the quiet session is that agent (by name or by id) -> the fleet's builder", tgt("projects/beta", "home-beta-front") == ("home-fleet", "fleet", True) and tgt("projects/beta", U["home-beta-front"]) == ("home-fleet", "fleet", True), (tgt("projects/beta", "home-beta-front"), tgt("projects/beta", U["home-beta-front"])))
+check("4 a project with a builder -> the fleet's builder, whoever is quiet", tgt("projects/alpha", "home-peer") == ("home-fleet", "fleet", False) and tgt("projects/alpha", "team-back") == ("home-fleet", "fleet", False), tgt("projects/alpha", "home-peer"))
+check("4 a project nobody lists (front-only, no -main agent to name: builderless) and an empty project (no read made: not builderless) -> the fleet's builder", tgt("projects/nowhere", "home-peer") == ("home-fleet", "fleet", True) and tgt("", "home-peer") == ("home-fleet", "fleet", False), (tgt("projects/nowhere", "home-peer"), tgt("", "home-peer")))
 _real_fo = server._anc.front_only
 server._anc.front_only = lambda *a, **k: 1 / 0
 import io, contextlib
 with contextlib.redirect_stderr(io.StringIO()) as eb: boom = tgt("projects/beta", "home-peer3")
 server._anc.front_only = _real_fo
-check("4 a front-only test that raises keeps the fleet's builder and says so on stderr", boom == ("home-fleet", "fleet") and "front-only test of projects/beta failed" in eb.getvalue(), (boom, eb.getvalue()))
+check("4 a front-only test that raises keeps the fleet's builder and says so on stderr", boom == ("home-fleet", "fleet", False) and "front-only test of projects/beta failed" in eb.getvalue(), (boom, eb.getvalue()))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

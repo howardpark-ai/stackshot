@@ -16,7 +16,7 @@ An alive item has one mover. When a write changes the effective mover (model.der
   attempts       pushes tried (one retry, then the fallback of section 5); queued: a push that waits (the machine is away, a reboot pause): neither delivered nor failed
   tried          the sessions this item has already been handed to on the way down section 5; origin: the first sender (the last fallback is a return to it)
   cold           {at, state: running | done | failed, answer}: the cold call of section 5 has been asked about this item
-  recovery_at    when the ladder, with nobody left to hand the item to, asked the fleet's builder to recover the session (recovery_reason says why): once per record, so a pass that sees it again sends nothing; the
+  recovery_at    when the ladder, with nobody left to hand the item to, asked the fleet's builder (a front-only project's -main agent: `recovery_by` says who, in words, the fleet's builder when absent) to recover the session (recovery_reason says why): once per record, so a pass that sees it again sends nothing; the
                  mover writing to the item, or the record ending (the item handed on), starts a new episode
   events         the last few lines about what the server did with it ({at, text}), shown on the item
 
@@ -58,6 +58,7 @@ GONE_DAYS = 14.0               # a gone mover is looked for on items written wit
 COLD_STALE = 600.0             # seconds after which a cold call that never reported is read as failed
 SERVER = "stackshot"           # the label of the server's own moves
 COLD = "cold-call"             # the label of the cold call's writes
+FLEET_ASKED = "the fleet's builder"      # who a recovery request is asked of unless the server names another (`recovery_by`)
 
 
 def clean(v: Any) -> str:
@@ -160,6 +161,7 @@ def touch(item: dict[str, Any], name: str, wid: str, now: float, same: Callable[
     if r.get("recovery_at"):   # the fleet's builder was asked to recover the session, and now its mover has written to the item: the session is alive, so the request is over (taken or not)
         r.pop("recovery_at", None)
         r.pop("recovery_reason", None)
+        r.pop("recovery_by", None)
         _add_event(r, now, f"{clean(name) or clean(wid)} wrote to it: the recovery request is over")
     if not started(before, item):
         return False
@@ -585,15 +587,16 @@ def _record_for(item: dict[str, Any], who: str, now: float, same: Callable[[Any,
     return r
 
 
-def mark_recovery(item: dict[str, Any], step: Step, now: float, same: Callable[[Any, Any], bool] = default_same, label: Callable[[str], str] = str) -> dict[str, Any] | None:
-    """Execute a `recover`: the record (made when the item had none, for a gone mover) says the fleet's builder was asked, with the reason. Once per record: a record that carries the request
+def mark_recovery(item: dict[str, Any], step: Step, now: float, same: Callable[[Any, Any], bool] = default_same, label: Callable[[str], str] = str, asked: str = FLEET_ASKED) -> dict[str, Any] | None:
+    """Execute a `recover`: the record (made when the item had none, for a gone mover) says who was asked (`asked`, in words: the fleet's builder, or a front-only project's -main agent, as the server chose), with the reason. Once per record: a record that carries the request
     already is left as it is and None comes back, so the caller sends nothing (the episode is the record's life; the mover's write or the item's hand-on ends it). → the record, or None."""
     r = _record_for(item, step.frm, now, same, label)
     if r.get("recovery_at"):
         return None
     r["recovery_at"] = now
     r["recovery_reason"] = clean(step.why)[:300]
-    _add_event(r, now, f"nobody could take it, the fleet's builder was asked: {step.why}")
+    r["recovery_by"] = clean(asked) or FLEET_ASKED
+    _add_event(r, now, f"nobody could take it, {r['recovery_by']} was asked: {step.why}")
     return r
 
 
@@ -683,7 +686,7 @@ def words(item: dict[str, Any], now: float, tz: dt.tzinfo | None = None, label: 
       handed to X, taken 14:05
       returned to Y: X did not take it in 10 min
       handed to Z (X did not take it in 10 min), not yet taken (since 14:12)
-      nobody could take it, the fleet's builder was asked to recover it (X is gone; the project lists no builder)
+      nobody could take it, the fleet's builder was asked to recover it (X is gone; the project lists no builder)   (or the project's -main agent, for a front-only project: `recovery_by`)
     then the server's own lines about it (a failed push, a move), newest last."""
     r = record_of(item)
     if not r or item.get("status") != "open":
@@ -693,7 +696,7 @@ def words(item: dict[str, Any], now: float, tz: dt.tzinfo | None = None, label: 
     reason = clean(r.get("reason"))
     out: list[str] = []
     if r.get("recovery_at"):
-        out.append(f"handoff: nobody could take it, the fleet's builder was asked to recover it ({clean(r.get('recovery_reason')) or 'no reason recorded'})")
+        out.append(f"handoff: nobody could take it, {clean(r.get('recovery_by')) or FLEET_ASKED} was asked to recover it ({clean(r.get('recovery_reason')) or 'no reason recorded'})")
     elif r.get("via") == "return":
         tail = f"taken {_hhmm(float(r['taken_at']), now, tz)}" if r.get("taken_at") else f"not yet taken (since {since})"
         out.append(f"handoff: returned to {to}: {reason or 'it was not taken'}, {tail}")
