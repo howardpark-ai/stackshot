@@ -53,7 +53,18 @@ write("mod.py", '''
         return LIMIT + 1
 
     def g():
+        deep()
         return "g"
+
+    def deep():
+        """the helper's docstring"""
+        return 1
+
+    def documented():
+        """the text a suite reads"""
+        return 0
+
+    def inline(): """an inline docstring"""; return 2
 
     def typed(x: ANN) -> ANN:
         return x
@@ -112,7 +123,7 @@ write("tests/a_scenario.py", '''
     import os, sys
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, ROOT)
     import mod
-    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't'
+    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2
     assert open(os.path.join(ROOT, "data.txt")).read()
 ''')
 write("tests/b_scenario.py", '''
@@ -124,11 +135,12 @@ write("tests/b_scenario.py", '''
     assert subprocess.run(["sh", os.path.join(ROOT, "helper.sh")], capture_output=True).returncode == 0
     os._exit(0)
 ''')
-# z only imports mod: it is reached by a change with effects at import, by nothing else
+# z only imports mod and reads one docstring: it is reached by a change with effects at import, by nothing else (and by an edit of that docstring)
 write("tests/z_scenario.py", '''
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import mod
+    assert mod.documented.__doc__
 ''')
 write("tests/c_scenario.py", '''
     import os
@@ -242,6 +254,62 @@ out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the too
 check("a decorated function's docstring is module level (a decorator reads it at import)", out == "all", (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's new docstring"), "static docstring")
 check("a docstring under a decorator that only wraps (@staticmethod) is the function's own body", out.split() == ["a", "c"], (out, err))
+# ---- Docstrings (Wed Nov 11th 2026): the docstring of an undecorated module-level function is not code; deep() is run by b (through g), named by nobody;
+# documented() is never run, and z reads its __doc__; the K.s case above and the decorated one are the rule's other side
+out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new docstring"), "undecorated docstring")
+check("DOC1 a docstring-only change of an undecorated function reaches the text reader alone, not the suite that ran it (b, through g)", out.split() == ["c"] and "1 docstring(s) alone" in err, (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new\n    docstring over\n    two lines"), "undecorated multi-line docstring")
+check("DOC2 a docstring that grows to several lines is the same: the text reader alone", out.split() == ["c"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new docstring"), "undecorated docstring, old rule")
+out_d1 = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip(), env={"SUITEMAP_DOCSTRING_RULE": "D1"}).stdout.split()
+check("DOC3 SUITEMAP_DOCSTRING_RULE=D1 gives the old answer for the same change (b ran deep)", out_d1 == ["b", "c"], out_d1)
+out, err, _ = sel_after(lambda: sub("mod.py", "the text a suite reads", "the text a suite reads, changed"), "docstring read by a suite")
+check("DOC4 a docstring a suite reads (z: mod.documented.__doc__) reaches that suite by the name, though no suite ran the body", out.split() == ["c", "z"], (out, err))
+out_d1 = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip(), env={"SUITEMAP_DOCSTRING_RULE": "D1"}).stdout.split()
+check("DOC5 ...which the old rule missed (it chose the text reader alone: nothing ran documented())", out_d1 == ["c"], out_d1)
+def doc_and_code():
+    sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "    return 1\n\ndef documented", "    return 11\n\ndef documented")
+out, err, _ = sel_after(doc_and_code, "docstring and code")
+check("DOC6 a docstring and a line of the function's code in one change select as before: the suites that ran it (b)", out.split() == ["b", "c"], (out, err))
+def doc_and_sig():
+    sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "def deep():", "def deep(x=0):")
+out, err, _ = sel_after(doc_and_sig, "docstring and signature")
+check("DOC7 a docstring and the def line together select as before (b ran it)", out.split() == ["b", "c"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "an inline docstring", "a new inline docstring"), "inline docstring")
+check("DOC8 a docstring that shares its line with the def and with a statement is body, not docstring: selected as before (the def line is a line of the body's, so every suite that imported the module ran it)",
+      out == "all" and "docstring(s) alone" not in err, (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's other docstring"), "method docstring, again")
+check("DOC9 a method's docstring is selected as before (a method has no name a suite reads by): a", out.split() == ["a", "c"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the tool's other description"), "decorated docstring, again")
+check("DOC10 a decorated function's docstring is still the decorator's read: every suite that ran the file", out == "all", (out, err))
+# the readers no suite shows by name: a synthetic map where a ran a function that reads __doc__ (or registers a function), as if the base had it
+def doc_reader(code):
+    def edit():
+        sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "def documented():", code + "\n\ndef documented():")
+    return edit
+def with_ran(scope):
+    mm = json.loads(MAP.read_text()); mm["suites"]["a"]["py"]["mod.py"] = sorted({*mm["suites"]["a"]["py"]["mod.py"], scope}); P = T / f"map-{scope}.json"; P.write_text(json.dumps(mm)); return P
+for what, code, scope in (("an attribute __doc__", "def describe(fn):\n    return fn.__doc__", "describe"),
+                          ("inspect.getdoc", "def describe(fn):\n    import inspect\n    return inspect.getdoc(fn)", "describe"),
+                          ("getattr(fn, '__doc__')", "def describe(fn):\n    return getattr(fn, '__doc__')", "describe"),
+                          ("an alias of getdoc", "from inspect import getdoc as gd\n\n\ndef describe(fn):\n    return gd(fn)", "describe"),
+                          ("a registry's add_tool", "def register(srv, fn):\n    srv.add_tool(fn)", "register"),
+                          ("mcp.tool()(fn) as a call", "def register(srv, fn):\n    return srv.tool()(fn)", "register")):
+    git("checkout", "-q", "-B", f"t{len(ran)}", base); doc_reader(code)(); head = commit("docstring and a doc reader")
+    r = tool("select", "--map", str(with_ran(scope)), "--to", head); r0 = tool("select", "--map", str(MAP), "--to", head)
+    check(f"DOC11 a docstring-only change reaches the suite that ran code reading a docstring ({what}); with no suite running it, the text reader alone",
+          r.stdout.split() == ["a", "c"] and r0.stdout.split() == ["c"], (r.stdout, r.stderr[-300:], r0.stdout))
+# a suite that reads names wide (getattr(mod, <variable>)) is not a reader of one docstring by that: w1 and w2 (which reads a docstring) are not chosen, w3 names deep()
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+for nm, extra in (("w1", ""), ("w2", "\nprint(mod.f.__doc__)"), ("w3", "\nmod.deep()")):
+    write(f"tests/{nm}_scenario.py", "import sys\nimport mod\ngetattr(mod, sys.argv[0])" + extra + "\n")
+wide_head = commit("wide readers")
+r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = (s.Names(sys.argv[1]),); "
+                    "print(' '.join(sorted(s.doc_readers(N, {('mod', 'deep')}))))", wide_head], capture_output=True, text=True, env=ENV, cwd=str(R))
+check("DOC13 a suite that reads names wide is not chosen for a docstring by that (w1, w2), a suite that names the function is (w3)",
+      r.stdout.split() == ["w3"], (r.stdout, r.stderr[-600:]))
+r = tool("list", env={"SUITEMAP_DOCSTRING_RULE": "x"})
+check("DOC12 a value that is not a rule is an error at once", r.returncode != 0 and "SUITEMAP_DOCSTRING_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")
@@ -932,6 +1000,130 @@ if use_strace:
           c["pid"] != "0" and c["rc"] == 130 and c["secs"] < 7.5 and c["gone"] and not c["left"] and not c["after"] and not (K / "m.json").exists(), c)
 else:
     print("suitemap: the measured run's cancel is not checked here: strace is missing, or this run is already traced", file=sys.stderr)
+
+# ---- the docstring tripwire (Wed Nov 11th 2026). A docstring-only change of an undecorated function selects by name (tests/suitemap.py, *Docstrings*): that
+# is sound while nothing reaches a function by a variable name and reads its docstring, or registers it somewhere that builds a description from it. The
+# checkout's Python (every .py file and every script with a python shebang, under the root) is scanned for the common forms that do either; the number of
+# uses of each form in each file is pinned below, so a new use, in a file that already has one or not, fails this scenario until its author has looked at
+# whether the selection still reaches it and then pins it with the reason. The tripwire selects nothing: it only makes a new use fail here.
+# Not covered, and said so in tests/suitemap.py: vars(fn)["__doc__"], operator.attrgetter("__doc__"), an eval or exec string, and a registry applied by
+# another call shape (typer or click `command()(f)` applied through a variable, a framework we do not use today).
+import ast, collections
+DOC_REG = {"add_tool", "command", "add_api_route", "tool", "resource", "prompt", "from_function", "add_resource", "add_prompt"}
+DOC_NAMES = ("getdoc", "getmembers", "get_docstring", "render_doc")
+def doc_forms(src):
+    """the docstring-reading and docstring-registering forms a Python source uses, each with the number of its uses"""
+    out = collections.Counter()
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.Attribute) and n.attr in ("__doc__",) + DOC_NAMES:
+            out[n.attr] += 1
+        elif isinstance(n, ast.Name) and n.id in DOC_NAMES + ("pydoc", "doctest"):
+            out[n.id] += 1
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.split(".")[0] in ("pydoc", "doctest"):
+                    out[a.name.split(".")[0]] += 1
+        elif isinstance(n, ast.ImportFrom):
+            if (n.module or "").split(".")[0] in ("pydoc", "doctest"):
+                out[n.module.split(".")[0]] += 1
+            for a in n.names:
+                if a.name in DOC_NAMES:
+                    out[a.name] += 1
+                if a.name == "*":
+                    out["import *"] += 1
+                if a.name in DOC_REG:
+                    out[f"import {a.name}"] += 1
+        elif isinstance(n, ast.Call):
+            f = n.func
+            if isinstance(f, ast.Name) and f.id == "getattr" and any(isinstance(a, ast.Constant) and a.value == "__doc__" for a in n.args):
+                out["getattr __doc__"] += 1
+            if isinstance(f, ast.Name) and f.id == "help":
+                out["help("] += 1
+            if isinstance(f, ast.Attribute) and f.attr in DOC_REG:
+                out[f".{f.attr}("] += 1
+            if isinstance(f, ast.Name) and f.id in DOC_REG - {"tool", "command", "resource", "prompt"}:
+                out[f"{f.id}("] += 1
+            if isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id in DOC_REG:
+                out[f"{f.func.id}()("] += 1
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            for d in n.decorator_list:
+                if isinstance(d, ast.Attribute) and d.attr in DOC_REG:
+                    out[f"@.{d.attr}"] += 1
+                elif isinstance(d, ast.Name) and d.id in DOC_REG - {"command", "resource", "prompt"}:
+                    out[f"@{d.id}"] += 1
+    return out
+# (file, form): (number of uses, why the rule covers them). A module's own docstring (`client.__doc__`, `prj.__doc__`) is read by name and is not part of the rule.
+DOCUSE_ALLOW = {
+    ("stackshot/web/server.py", ".tool("): (12, "the @mcp.tool(...) decorators: a decorated function keeps the old rule (its docstring is a decorator's read)"),
+    ("stackshot/web/server.py", ".resource("): (1, "the @mcp.resource decorator: a decorated function keeps the old rule"),
+    ("tests/audit_run_scenario.py", ".prompt("): (3, "AR.prompt(...) is the audit's own function that builds a text, not a registry"),
+    ("tests/release_queue_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
+    ("tests/release_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
+    ("tests/event_wait_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
+    ("tests/locale_pages_scenario.py", "__doc__"): (1, "i18n.__doc__, a module docstring: read by name, unchanged rule"),
+    ("tests/model_scenario.py", "__doc__"): (1, "server.stackshot_get.__doc__, a decorated tool: unchanged rule"),
+    ("tests/project_record_scenario.py", "__doc__"): (1, "prj.__doc__, a module docstring: read by name, unchanged rule"),
+    ("tests/question_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and server._pilot_charge.__doc__ (a function it names: the name rule selects the suite)"),
+    ("tests/rebullet_scenario.py", "__doc__"): (1, "rd_tool.__doc__, a module docstring: read by name, unchanged rule"),
+    ("tests/released_scenario.py", "__doc__"): (5, "client.__doc__ five times, a module docstring: read by name, unchanged rule"),
+    ("tests/retired_inputs_scenario.py", "__doc__"): (1, "_client.__doc__, a module docstring: read by name, unchanged rule"),
+    ("tests/step_proof_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
+    ("tests/terminal_prompt_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and server._terminal_prompt.__doc__ (a function it names: the name rule selects the suite)"),
+}
+def doc_uses(files):
+    """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""
+    out = []
+    for f, src in sorted(files.items()):
+        found = doc_forms(src)
+        for x in sorted(set(found) | {x for (g, x) in DOCUSE_ALLOW if g == f}):
+            pinned = DOCUSE_ALLOW.get((f, x), (0, ""))[0]
+            if found.get(x, 0) != pinned:
+                out.append((f, x, found.get(x, 0), pinned))
+    return out
+CK = os.path.dirname(SCR)
+scan, scan_bad = {}, []
+for dp_, dirs_, names_ in os.walk(CK):
+    dirs_[:] = sorted(d_ for d_ in dirs_ if not d_.startswith(".") and d_ not in ("__pycache__", "node_modules"))
+    for nm_ in sorted(names_):
+        fp_ = os.path.join(dp_, nm_)
+        try:
+            with open(fp_, "rb") as fh_:
+                head_ = fh_.read(200)
+            if nm_.endswith(".py") or (head_.startswith(b"#!") and b"python" in head_.split(b"\n")[0]):
+                scan[os.path.relpath(fp_, CK)] = open(fp_, encoding="utf-8").read()
+                doc_forms(scan[os.path.relpath(fp_, CK)])
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+            scan_bad.append(os.path.relpath(fp_, CK))
+drift = doc_uses(scan)
+check("TRIPWIRE every Python file of the checkout can be read and parsed (an unreadable one is a use nobody looked at)", not scan_bad, scan_bad)
+check("TRIPWIRE the use of every form that reads or registers a docstring is the pinned number on the allow list (DOCUSE_ALLOW): a changed count "
+      "(" + "; ".join(f"{f}: {x} used {n}x, pinned {k}" for f, x, n, k in drift) + ") is a new or a removed use: look at the new use, does suite selection "
+      "(tests/suitemap.py, *Docstrings*) still reach a suite that reads that function's docstring after a docstring-only change? Then pin the new count with a one-line reason",
+      not drift, drift)
+check("TRIPWIRE every allow list entry names a file the scan reads", all(f in scan for f, _ in DOCUSE_ALLOW), [f for f, _ in DOCUSE_ALLOW if f not in scan])
+for what, code, form in (("getattr(x, '__doc__')", "d = getattr(m.f, '__doc__')", "getattr __doc__"), ("x.__doc__", "d = fns[name].__doc__", "__doc__"),
+                         ("inspect.getdoc", "import inspect\nd = inspect.getdoc(f)", "getdoc"), ("an alias of getdoc", "from inspect import getdoc as gd\nd = gd(f)", "getdoc"),
+                         ("inspect.getmembers", "import inspect\nm = inspect.getmembers(mod)", "getmembers"),
+                         ("help(getattr(m, n))", "help(getattr(m, n))", "help("), ("ast.get_docstring", "import ast\nd = ast.get_docstring(node)", "get_docstring"),
+                         ("from ast import get_docstring", "from ast import get_docstring\nd = get_docstring(node)", "get_docstring"),
+                         ("pydoc.render_doc", "import pydoc\nt = pydoc.render_doc(f)", "render_doc"), ("import pydoc", "import pydoc\nt = pydoc.render_doc(f)", "pydoc"),
+                         ("doctest", "import doctest\ndoctest.testmod(mod)", "doctest"), ("from X import *", "from mod import *", "import *"),
+                         ("add_tool", "srv.add_tool(f)", ".add_tool("), ("a bare add_tool", "from srv import add_tool\nadd_tool(f)", "add_tool("),
+                         (".command(", "app.command()(f)", ".command("), ("add_api_route", "app.add_api_route('/x', f)", ".add_api_route("),
+                         (".tool(", "mcp.tool()(f)", ".tool("), ("a bare tool()(f)", "from reg import tool\ntool()(f)", "tool()("),
+                         ("from reg import tool", "from reg import tool\ntool(f)", "import tool"), ("@mcp.tool without parentheses", "@mcp.tool\ndef f(x):\n    return 1", "@.tool"),
+                         ("@tool without parentheses", "@tool\ndef f(x):\n    return 1", "@tool")):
+    flagged = [x for _f, x, _n, _k in doc_uses({"tests/new_scenario.py": code})]
+    check(f"TRIPWIRE fires on a new use: {what} in a new suite", form in flagged, flagged)
+real_q = "tests/question_scenario.py"
+check("TRIPWIRE a new use in a file that already has an entry for that form fails (getattr(m, n).__doc__ appended to question_scenario.py)",
+      doc_uses({real_q: scan[real_q]}) == [] and doc_uses({real_q: scan[real_q] + "\ndef zz(m, n): return getattr(m, n).__doc__\n"}) == [(real_q, "__doc__", 3, 2)],
+      doc_uses({real_q: scan[real_q] + "\ndef zz(m, n): return getattr(m, n).__doc__\n"}))
+check("TRIPWIRE a removed use fails too, so the pinned count is never stale (one client.__doc__ taken out of question_scenario.py)",
+      doc_uses({real_q: scan[real_q].replace("help_text = client.__doc__", "help_text = ''", 1)}) == [(real_q, "__doc__", 1, 2)],
+      doc_uses({real_q: scan[real_q].replace("help_text = client.__doc__", "help_text = ''", 1)}))
+check("TRIPWIRE stays quiet on the listed uses and on a bare module __doc__ (print(__doc__))",
+      doc_uses({f: scan[f] for f, _ in DOCUSE_ALLOW}) == [] and doc_uses({"tests/new_scenario.py": "print(__doc__)"}) == [])
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
