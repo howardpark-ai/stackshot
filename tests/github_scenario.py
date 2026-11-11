@@ -1231,7 +1231,7 @@ e9 = said_of(g_t)[-1]
 check("relayed: session=home-front (a pane name) resolves to that pane's transcript uuid, the message is found there (under the second configured root): checked, the front session stored, the sender as by",
       e9["checked"] and e9["session"] == FRONT and e9["by"] == OWNER and e9["ts"] == calendar.timegm((2026, 6, 16, 9, 57, 0)), e9)
 server._cfg.CFG["client"]["session_view"] = "https://sala.example.org/#s={name}"   # session names link to the fleet tool's view while they have a live pane
-check("…the page's tag names and links the front session to its view, like other session names (no [fleet] tool_name: the title names none)", f'<span class="smeta">{OWN} in <a href="https://sala.example.org/#s=home-front" target="_blank" rel="noopener" title="open this session&#x27;s view">home-front</a> · Tue Jun 16th {9 + ZONE_HOURS:02d}:57 · checked against the transcript</span>' in page(g_t),
+check("…the page's tag names and links the front session to its view, like other session names (no [fleet] tool_name: the title names none)", f'<span class="smeta">{OWN} in <a href="https://sala.example.org/#s=home-front" target="_blank" rel="noopener" title="open this session\'s view">home-front</a> · Tue Jun 16th {9 + ZONE_HOURS:02d}:57 · checked against the transcript</span>' in page(g_t),
       re.findall(r'<details class="said" id="said-9".*?</details>', page(g_t)))
 server._cfg.CFG["client"]["session_view"] = ""
 # the item page draws no Discuss button (a link to the fleet tool's side conversation), with a fleet tool's address configured or not

@@ -2668,7 +2668,7 @@ mb.sess["name:cloudy"] = {"id": "cse_01Q", "kind": "cloud", "name": "cloudy", "u
 check("sala link: a cloud session, an unknown name and a gone one stay plain (escaped) text, a class kept on a span",
       mb.sess_html("cloudy") == "cloudy" and mb.sess_html("no-such<s>") == "no-such&lt;s&gt;" and mb.sess_html("work-osprey-main", label="a/work-osprey-main", cls="iown") == '<span class="iown">a/work-osprey-main</span>')
 render._cfg.CFG["fleet"]["tool_name"] = ""
-check("sala link: with no [fleet] tool_name the link's title names no tool", 'title="open this session&#x27;s view"' in mb.sess_html("we ird&<x>'\""), mb.sess_html("we ird&<x>'\""))
+check("sala link: with no [fleet] tool_name the link's title names no tool", "title=\"open this session's view\"" in mb.sess_html("we ird&<x>'\""), mb.sess_html("we ird&<x>'\""))
 render._cfg.CFG["fleet"]["tool_name"] = "sala"
 sala_on(False)
 check("sala link: with [client] session_view unset no name links", mb.sess_href("work-osprey") == "" and mb.sess_html("work-osprey") == "work-osprey")

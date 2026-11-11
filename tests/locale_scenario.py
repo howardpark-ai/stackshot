@@ -442,7 +442,10 @@ for lg in ("en", "ko"):
     runs[lg] = json.loads(sp.stdout) if sp.returncode == 0 and sp.stdout.strip() else sp.stderr[-400:]
 ok_runs = all(isinstance(v, dict) for v in runs.values())
 check("ui.render imported first under a non-English request language: every module-level value is what an English import gives", ok_runs and runs["ko"] == runs["en"], runs if not ok_runs else [k for k in runs["en"] if runs["en"][k] != runs["ko"].get(k)][:5])
-check("…in particular the lists' state and lane words, and no marker of the test language anywhere in the module", ok_runs and runs["ko"].get("STATE_WORDS", {}).get("doing") == "On agent" and runs["ko"].get("LANE_WORDS", {}).get("call") == "Your move" and "[x:" not in json.dumps(runs["ko"]), ok_runs and runs["ko"].get("STATE_WORDS"))
+_ko = runs["ko"] if ok_runs else {}
+_lane_words = {k: r2._ui.WORDS.get(v) for k, v in _ko.get("_LANE_KINDS", {}).items()}      # the lists' words per lane and state, from the module's own tables
+_state_words = {k: r2._ui.WORDS.get(v) for k, v in _ko.get("_STATE_KINDS", {}).items()}
+check("…in particular the lists' state and lane words are the English ones, and no marker of the test language anywhere in the module", ok_runs and _state_words.get("doing") == "On agent" and _lane_words.get("call") == "Your move" and "[x:" not in json.dumps(_ko), _state_words)
 
 # ---- 8. the item page: every interface word of it reads through the string table (stage 2)
 # item-page fixture begin
@@ -647,12 +650,11 @@ def _ipx_pat(v):
     """A catalog text as a regex over the marked page: its fixed pieces in order, a field standing for anything (a marker nested inside it included)."""
     return re.compile(r"\[x:" + ".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)) + r"\]", re.S)
 # keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
-IPX_DIRECT = {"item.change.asked", "item.change.back_to_work", "item.change.background", "item.change.by", "item.change.gave_step", "item.change.handed", "item.change.next_changed", "item.change.plain",
+IPX_DIRECT = {
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news",
-              "answer.sent.askedback", "answer.sent.askedback_home", "answer.sent.closed", "answer.sent.closednote", "answer.sent.comment", "answer.sent.decision", "answer.sent.done", "answer.sent.done_by", "answer.sent.empty",
-              "answer.sent.nomover", "answer.sent.nostep", "answer.sent.nostep_home", "answer.sent.stale", "answer.sent.stale_home", "answer.sent.stalenote", "answer.sent.stalenote_home", "answer.sent.stepreply", "answer.sent.stepreply_by", "answer.sent.toolong",
               "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
               "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more"}
+check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
 seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
 check("every string of the item page's areas shows in the test locale on some fixture page, but the ones the direct calls below cover", set(IPX_NEW) - seen <= IPX_DIRECT, sorted(set(IPX_NEW) - seen - IPX_DIRECT))
 
@@ -727,11 +729,6 @@ with i18n.use("ko"):
               ipg.wait_what(W("relay", event="the contract"), party="Acme"), ipg.wait_what(W("relay"), party="Acme"), ipg.wait_what(W("relay")), ipg.wait_what(W("relay", event="the contract from Acme"), party="Acme"),
               ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday")]
     d_end = [ipg.wait_end_label(W("time")), ipg.wait_end_label(W("relay")), ipg.wait_end_label(W("anchor")), ipg.wait_end_label(W("item", until="2099-01-01"))]
-    CH = ipg.change
-    d_chg = [ipg.plain_change(c) for c in ([CH("needs_named"), CH("asked")], [CH("handed", who="alpha-helper"), CH("needs_named")], [CH("back_to_work")], [CH("gave_step")], [CH("next_changed")], [CH("background")],
-                                           [CH("text", text="completed: done")], "completed: done", [CH("gave_step"), CH("next_changed"), CH("background")], [CH("asked"), CH("asked")],
-                                           [CH("handed", who="no one", text="mover: a to no one")], [CH("needs_named")], [])]
-    d_last = [ipg.last_change("alpha-main", [CH("gave_step")]), ipg.last_change("", [CH("gave_step")]), ipg.last_change("alpha-main", []), ipg.last_change("a<b", [CH("text", text="x<y")], esc=html.escape)]
     d_age = [r2.age_words(600), r2.age_words(3 * 3600), r2.age_words(3 * 86400)]
     d_tip = [r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}}), r2.stale_tip({"_age": 3 * 3600, "metadata": {}})]
     try:
@@ -743,12 +740,6 @@ with i18n.use("ko"):
 check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
       _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday"], d_wait)
 check("wait_end_label in the test locale", d_end == [_m("wait.end.until"), _m("wait.end.ask_by"), _m("wait.end.backstop"), _m("wait.end.until")], d_end)
-check("plain_change in the test locale: each kind of change reads from its own whole-line text, a change with no line of its own stays as written, the first two are joined", d_chg == [
-      _m("item.change.asked"), _m("item.change.handed", who="alpha-helper"), _m("item.change.back_to_work"), _m("item.change.gave_step"), _m("item.change.next_changed"), _m("item.change.background"),
-      "completed: done", "completed: done", _m("item.change.gave_step") + ", " + _m("item.change.next_changed"), _m("item.change.asked"), "mover: a to no one", "", ""], d_chg)
-check("last_change in the test locale: ' by <who>: <what>' and ': <what>' are one text each, the what in the table's words; no entry, nothing; the words go through esc",
-      d_last == [_m("item.change.by", who="alpha-main", what=_m("item.change.gave_step")), _m("item.change.plain", what=_m("item.change.gave_step")), "",
-                 _m("item.change.by", who="a&lt;b", what="x&lt;y")], d_last)
 check("age_words and stale_tip in the test locale", d_age == [_m("more.age_min", n=10), _m("more.age_hour", n=3), _m("more.age_day", n=3)]
       and d_tip == [_m("more.stale_tip_call", age=_m("more.age_hour", n=3)), _m("more.stale_tip", age=_m("more.age_hour", n=3))], (d_age, d_tip))
 check("link_label in the test locale: a mockup page, a releases page and a session link read from the table", d_link == [_m("link.mockup"), _m("link.releases", repo="r"), _m("link.session")], d_link)
@@ -785,7 +776,7 @@ with i18n.use("ko"):
     d_wa = [bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")), bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor"), full=True)]
     bdx.scoped_urls = lambda gid: []; d_wa.append(bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")))
     del bdx.scoped_urls
-    d_sent = {k_: (bdx.sent_msg(k_), bdx.sent_msg(k_, home=True)) for k_ in bdx._SENT}
+    d_sent = {k_: bdx.sent_msg(k_) for k_ in bdx._SENT}; d_home = json.loads(html.unescape(re.search(r'data-notes="([^"]*)"', bdx.sent_notes_html()).group(1)))
     d_sent_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
 _d0, _d3, _d5 = bdx.now.date(), bdx.now.date() - DT(days=3), bdx.now.date() + DT(days=5)
 check("due_badge in the test locale: today, overdue and ahead each read from their own template, the weekday from the table; no date, no badge",
@@ -799,34 +790,39 @@ check("_when in the test locale: an unreadable anchor (its tip with the reason),
 _t3 = bdx.now - DT(hours=3)
 check("stamp in the test locale: a stamp that only marks the start of a silence says 'no change since <time>' in its tip", f'data-tip="{html.escape(_m("item.when.no_change_since", when=f"{_t3:%Y-%m-%d %H:%M} {_cfg.tz_abbr(_t3)}"), quote=True)}"' in d_stamp, d_stamp)
 check("sess_html in the test locale: the link's title names the fleet tool when one is set, else says 'this session's view'",
-      f'title="{MARK("open this session in Fleety")}"' in d_s1 and f'title="{html.escape(_m("link.session_view"), quote=True)}"' in d_s2, (d_s1, d_s2))
+      f'title="{MARK("open this session in Fleety")}"' in d_s1 and f'title="{r2.esc_dq(_m("link.session_view"))}"' in d_s2 and "&#x27;" not in d_s2, (d_s1, d_s2))      # the apostrophe is written as one, the form esc_dq gives a plain-English attribute
 check("…and the fleet and client config the test touched is put back", fl_.get("tool_name") == tool_old and ("tool_name" in fl_) == had_tool and cl_.get("mockup_hosts") == cfg_old)
 check("mockup_link in the test locale: the chip and its tip read from the table", f'title="{MARK(EN["link.mockup_tip"])}"' in d_mk and f'>{MARK(EN["link.mockup_chip"])}</a>' in d_mk, d_mk)
 check("wait_anchor_html in the test locale: more than three anchors say '+N more' (not when all are listed), none recorded says so",
       _m("wait.more", n=2) in d_wa[0] and _m("wait.more", n=2) not in d_wa[1] and _m("wait.anchor_none") in d_wa[2] and _m("wait.anchor_none") not in d_wa[0], d_wa)
 _S = r2.Board._SENT; _K = {k_: v_[1] for k_, v_ in r2.Board._SENT_KEYS.items()}; _KH = {k_: v_[2] for k_, v_ in r2.Board._SENT_KEYS.items() if len(v_) > 2}
-e_sent = {k_: (bdx.sent_msg(k_), bdx.sent_msg(k_, home=True)) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
-check("sent_msg in English is _SENT's wording, code by code: the item page's, and with home the home page's own where the code has one; who takes it names them; a code that is none is empty",
-      e_sent == {k_: (v_[1], v_[2] if len(v_) > 2 else v_[1]) for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", ""), (e_sent, e_by))
-check("sent_msg in the test locale: every code reads from its own key (the home page's where it has one), who takes it is named in the table's wording, and every code has a key",
-      set(_K) == set(_S) and d_sent == {k_: (MARK(EN[_K[k_]]), MARK(EN[_KH.get(k_, _K[k_])])) for k_ in _S}
+e_sent = {k_: bdx.sent_msg(k_) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
+check("sent_msg in English is _SENT's item-page wording, code by code; who takes it names them; a code that is none is empty",
+      e_sent == {k_: v_[1] for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", ""), (e_sent, e_by))
+check("sent_msg in the test locale: every code reads from its own key, who takes it is named in the table's wording, and every code has a key",
+      set(_K) == set(_S) and d_sent == {k_: MARK(EN[_K[k_]]) for k_ in _S}
       and d_sent_by == (_m("js.sent_done", who="alpha-main"), _m("sent.stepreply_by", who="alpha-main"), ""), (d_sent, d_sent_by))
-d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "chg": ipg.last_change("alpha-main", [ipg.change("gave_step")]), "plain": ipg.plain_change([ipg.change("handed", who="alpha-helper"), ipg.change("next_changed")]), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
-check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "chg": " by alpha-main: gave you a step", "plain": "handed to alpha-helper, changed what comes next", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
-
-# the History's entries carry what kind of change each line is, as structured data (what plain_change and last_change read), in every path that builds an entry
-_chg_codes = set(); _chg_ok = True; _chg_bad = []
-for i_ in IPX_IDS:
-    ents_, _more = bdx.item_log(bdx.item(f"a{i_}"))
-    for en_ in ents_:
-        cs_ = en_.get("changes")
-        ok_ = isinstance(cs_, list) and len(cs_) >= 1 and all(isinstance(c_, tuple) and len(c_) == 2 and isinstance(c_[0], str) and isinstance(c_[1], dict) for c_ in cs_)
-        if not ok_: _chg_ok = False; _chg_bad.append((i_, en_.get("what"), cs_))
-        else: _chg_codes |= {c_[0] for c_ in cs_}
-check("every History entry of every fixture item carries its changes as [(kind, fields)]", _chg_ok, _chg_bad[:3])
-check("…the kinds a line can have all occur, and a line with no kind of its own is a 'text' change that keeps its plain words", set(ipg.CHANGE_CODES) | {"text"} <= _chg_codes and _chg_codes <= set(ipg.CHANGE_CODES) | set(ipg.DROPPED_CODES) | {"text"}, sorted(_chg_codes))
-_h250 = [en_ for en_ in bdx.item_log(bdx.item("a250"))[0] if any(c_[0] == "handed" for c_ in en_["changes"])]
-check("…a handover's change names who it was handed to, as the plain words read it", bool(_h250) and any(ipg.plain_change(en_["changes"]).startswith("handed to alpha-main") for en_ in _h250), [en_["changes"] for en_ in _h250])
+check("the home page's notices (sent_notes_html) in the test locale: every code with the home page's own key reads from it, the rest from the item page's, each with its class",
+      d_home == {k_: [r2.Board._SENT_KEYS[k_][0], MARK(EN[_KH.get(k_, _K[k_])])] for k_ in _S}, d_home)
+# the English wording of eight keys no other test pins, through the real render path with representative fields (the test locale's checks above prove only that each key is read, not what it says)
+_wd_en = lambda d: f"{d:%m-%d} {d:%a}"
+bdx._sess_obj = lambda r: {"name": "cloud-x", "machine": "c"}; en_mc = bdx.mover_row({"gid": "a1", "metadata": {}}); del bdx._sess_obj
+bdx.anchor_since = None; en_poll = bdx._when({"mode": "poll"}); bdx.anchor_since = since_old
+bdx.scoped_urls = lambda gid: [f"https://example.com/{i}" for i in range(5)]
+en_more = bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")); en_more_full = bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor"), full=True)
+bdx.scoped_urls = lambda gid: []; en_none = bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")); del bdx.scoped_urls
+en_work = bdx.work_html({"gid": "a1", "metadata": {"work": [{"text": "oil the hinges", "agent": "alpha-main", "state": "defined", "ts": 0}]}})
+check("English wording, pinned: due today and due in N days (the date with its weekday)", bdx.due_badge(_dueof(0)) == r2.badge(f"Due today ({_wd_en(_d0)})", "due") and bdx.due_badge(_dueof(5)) == r2.badge(f"Due in 5 d ({_wd_en(_d5)})", "due"), (bdx.due_badge(_dueof(0)), bdx.due_badge(_dueof(5))))
+check("English wording, pinned: a cloud session's row says 'cloud', the legacy Work field is named 'Work', a polled anchor says ' · poll'",
+      '<span class="dim">· cloud</span>' in en_mc[1] and '<dt>Work <span class="count">1</span></dt>' in en_work and en_poll == "quiet · poll", (en_mc, en_work, en_poll))
+_a = lambda i, label: f'<a href="https://example.com/{i}" target="_blank" rel="noopener">{label}</a>'
+check("English wording, pinned: five anchors say '+2 more' after the first three (the whole fragment), all five listed say no more, none recorded says exactly 'an anchor (none recorded)'",
+      en_more == ", ".join(_a(i, f"example.com ({i + 1})") for i in range(3)) + ' <span class="dim">+2 more</span>'
+      and en_more_full == ", ".join(_a(i, f"https://example.com/{i}") for i in range(5)) and en_none == "an anchor (none recorded)", (en_more, en_more_full, en_none))
+check("English wording, pinned: the answer script's 'Nothing sent: {why}' (the table every page head carries, and the script asking for it)",
+      '"js.answer.nothing_sent": "Nothing sent: {why}"' in r2._SST_HEAD and "SST('js.answer.nothing_sent'" in r2._ANSWER_JS)
+d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
+check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
 
 # the "rendered ... ago" line is one template: English keeps its words and its order, a language can put the age anywhere, and the words around it are what the narrow page leaves off
 _rl = lambda: r2._rendered_line("<b>S</b>", tip="T"); _st = r2._stale_s()
@@ -835,18 +831,29 @@ write_ko(test_locale(**{"home.rendered_line": "{age} was drawn"})); set_dir(LOC)
 with i18n.use("ko"): rl_ko = _rl()
 write_ko(test_locale(**{"home.rendered_line": "{age}"})); set_dir(LOC); reset_warned()
 with i18n.use("ko"): rl_bare = _rl()
+write_ko(test_locale(**{"home.rendered_line": "{age} was drawn, {age}"})); set_dir(LOC); reset_warned()
+with i18n.use("ko"): rl_twice = _rl()
+write_ko(test_locale(**{"home.rendered_line": "drawn lately"})); set_dir(LOC); reset_warned()
+with i18n.use("ko"): rl_none = _rl()
 write_ko(test_locale()); set_dir(LOC); reset_warned()
-check("the rendered line in English: 'rendered ' before the age, byte for byte what it always was",
+check("the rendered line in English: 'rendered' before the age, byte for byte what it always was",
       rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_en)
 check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
 check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_bare)
-check("…and the age is never a word of any translation (the template's own marker stays out of the page)", "\x00" not in rl_en + rl_ko + rl_bare)
+_span = f'<span id="rendered" data-stale="{_st}" title="T"><b>S</b></span>'
+check("…REGRESSION: a template with the age twice draws the age's span once, at the first place; the second place is empty and no marker leaks into its words (the old code let the marker into the second span)",
+      rl_twice == f'<p class="rline">{_span}<span class="rw"> was drawn, </span></p>' and rl_twice.count('id="rendered"') == 1, rl_twice)
+check("…characterization (the old code gave the same): a template with no age at all draws the age's span once, words first and the span after (it carries the stale colour, the title and the tick)",
+      rl_none == f'<p class="rline"><span class="rw">drawn lately</span>{_span}</p>', rl_none)
+check("…and the age is never a word of any translation (the template's own marker stays out of the page)", "\x00" not in rl_en + rl_ko + rl_bare + rl_twice + rl_none)
 
 # every key the stage added to the table is asked for somewhere (a literal key in the source, or a dict of keys the source reads): none is dead
 _all_keys = list(EN); _block = _all_keys[_all_keys.index("item.unknown") + 1:]
 _src_all = "\n".join(pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/ui/render.py", "stackshot/web/ui/kit.py", "stackshot/web/home.py", "stackshot/web/itempage.py"))
 _unused = [k for k in _block if k not in used and not re.search(r"""['"]""" + re.escape(k) + r"""['"]""", _src_all)]
-check("every key the string table gained after item.unknown is asked for by the source", len(_block) >= 30 and not _unused, _unused)
+_STAGE_PREFIXES = ("item.log.", "item.when.", "js.answer.", "home.rendered_line", "home.command", "link.mockup_", "link.session_", "item.due_", "item.no_agent", "item.cloud", "item.work", "wait.")      # the groups that stage added: each one must still be found after item.unknown, so the scan cannot go quiet by finding no block
+_missing_prefix = [pf for pf in _STAGE_PREFIXES if not any(k.startswith(pf) for k in _block)]
+check("every key the string table gained after item.unknown is asked for by the source", not _missing_prefix and not _unused, (_missing_prefix, _unused))
 
 # a translated value goes into an attribute escaped: a value with a double quote (and a tag in it) must not break the attribute or open an element
 from html.parser import HTMLParser

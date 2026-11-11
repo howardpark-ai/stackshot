@@ -1,7 +1,7 @@
 """itempage.py — the words of the item page on the item model (the design: docs/design, section 8).
 
 The item page (render.py, Board.item_html) says an item in the model's terms: the goal as the title, one state line (state · since; the wait block: waiting on · watched by · until · then;
-done · date · outcome; the mover is the sidebar's first row) with the latest change beside it, the ask when the owner is the mover, Next as numbered lines each naming its mover, the wait and its chases.
+done · date · outcome; the mover is the sidebar's first row), the ask when the owner is the mover, Next as numbered lines each naming its mover, the wait and its chases.
 This module is the pure half: plain text in, plain text out, no HTML, no Board and no server import (it reads model.py, watchers.py, handoff.py and model_guards.py for the one
 copy of the model's words). The renderer escapes and links what comes out. Nothing here is stored: every sentence is generated from fields the item already has.
 """
@@ -213,7 +213,7 @@ def step_block(item: dict[str, Any]) -> "StepBlock | None":
     return StepBlock(text, blocks)
 
 
-# ---------------------------------------------------------------------------------------------------------------- clipping markdown and the state line's latest change
+# ---------------------------------------------------------------------------------------------------------------- clipping markdown
 _SPAN = re.compile(r"\[[^\]\n]*\]\([^)\s]*\)|`[^`\n]+`|\*\*[^*\n]+\*\*|(?<![\w*])\*[^*\s][^*\n]*\*(?![\w*])|(?<![\w_])_[^_\s][^_\n]*_(?![\w_])|https?://\S+")
 _LINK = re.compile(r"\[([^\]\n]*)\]\([^)\s]*\)$")
 
@@ -247,51 +247,6 @@ def clip_md(text: Any, n: int = CLIP) -> str:
             break
         cut = cut[:i].rstrip()
     return cut.rstrip(" ,;:-—–(\"“") + "…"
-
-
-UPDATED_CLIP = 80                  # the longest the latest change is on the state line: one short line
-
-
-LAST_CLAUSES = 2                   # how many changes of one History entry the state line shows
-CHANGE_CODES = ("asked", "handed", "back_to_work", "gave_step", "next_changed", "background")      # the kinds of change that have a line of their own: each is the catalog key item.change.<code>
-DROPPED_CODES = ("needs_named",)   # a change the hand-over already says: left out of the plain words when the entry says "handed" (the list of whom it waits on follows from whom it is handed to)
-
-
-def change(code: str, **fields: Any) -> tuple[str, dict[str, Any]]:
-    """One change of a History entry as the log records it: its kind (a CHANGE_CODES entry, `needs_named`, or `text` for a change with no line of its own) and the fields its line takes
-    (`handed`: who; `text`: the change as the entry's plain text)."""
-    return (code, fields)
-
-
-def plain_change(changes: Any) -> str:
-    """A History entry's changes in plain words for the owner, before they are clipped (the History keeps the full text). `changes` is what Board.item_log records on each entry
-    (`changes`: [(code, fields)], see change()), each read from its own whole-line catalog text (item.change.<code>: "handed to {who}", "asked for your decision", ...), so a language words
-    it as a whole; a plain string stands for one `text` change. A `text` change (anything the log has no line for) stays as written, `needs_named` goes when a hand-over is in the entry,
-    a kind twice is said once, a `handed` with no one named stays as the entry's text. The first LAST_CLAUSES are joined with ", "; "" when no change is left to show."""
-    if isinstance(changes, str):
-        changes = [change("text", text=changes)]
-    recs = [c for c in (changes or []) if isinstance(c, (tuple, list)) and len(c) == 2 and isinstance(c[1], dict)]
-    handed = any(c == "handed" and clean(f.get("who")) not in ("", "no one") for c, f in recs)
-    out: list[str] = []
-    for code, f in recs:
-        if code in DROPPED_CODES and handed:
-            continue
-        if code in CHANGE_CODES and not (code == "handed" and clean(f.get("who")) in ("", "no one")):
-            line = _t("item.change." + code, **{k: clean(v) for k, v in f.items()})
-        else:
-            line = clean(f.get("text"))                      # anything the log has no line for: as written
-        if line and line not in out:
-            out.append(line)
-    return ", ".join(out[:LAST_CLAUSES])
-
-
-def last_change(who: Any, changes: Any, esc: Callable[[str], str] = str) -> str:
-    """The latest History entry as the tail of the state line's "updated <age>": ` by <who>: <what>`, `what` in plain words (plain_change of the entry's `changes`) and cut to UPDATED_CLIP
-    characters on a word with no closing stop, all of it through `esc` (plain text to HTML). "" when the entry has no change; no ` by` when it has no `who`."""
-    t = clip(plain_change(changes), UPDATED_CLIP).rstrip(".:")
-    if not clean(t):
-        return ""
-    return _t("item.change.by", who=esc(clean(who)), what=esc(t)) if clean(who) else _t("item.change.plain", what=esc(t))
 
 
 # ---------------------------------------------------------------------------------------------------------------- the History's plain text

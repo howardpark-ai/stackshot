@@ -128,7 +128,6 @@ page = lambda g, **kw: bd.item_html(g, **kw)
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 istate = lambda h: html.unescape(re.sub(r"<[^>]+>", "", (re.search(r'<p class="istate">(.*?)</p>', h, re.S) or [0, ""])[1]))
 istat = lambda h: html.unescape(re.sub(r"<[^>]+>", "", (re.search(r'<div class="istat">(.*?)</div>', h, re.S) or [0, ""])[1]))        # the state line and what sits beside it
-upd = lambda h: (lambda t: t[t.find("updated"):] if "updated" in t else "")(istat(h))                                                           # …from "updated" on: the latest change
 side = lambda h: h[h.find('<aside class="iside"'):h.find("</aside>")]
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -162,29 +161,7 @@ check("the line under the title never names the project, on an alive, a waiting 
 check("both layouts read the same markup: the sidebar sits before the main column in the source, the line under the title only in the main column, and the phone's order keeps the sidebar out of that line",
       p7.index('<aside class="iside"') < p7.index('<div class="istat">') and p7.index("</h1>") < p7.index('<div class="istat">') and ".iside{order:1}" in p7)
 
-# ---- 2. the latest change in plain words (itempage.plain_change, last_change) and the page without a Where it stands section
-PC = itempage.plain_change
-CH = itempage.change
-check("plain words: a hand-over, a next edit and a background edit, each from its own line; the names of whom it waits on go when the hand-over says it",
-      PC([CH("needs_named"), CH("handed", who="heron-engineer"), CH("next_changed")]) == "handed to heron-engineer, changed what comes next"
-      and PC([CH("handed", who="B"), CH("next_changed"), CH("background")]) == "handed to B, changed what comes next" and PC([CH("background")]) == "updated the background", PC([CH("handed", who="B"), CH("next_changed"), CH("background")]))
-check("plain words: asked for his decision, and a step for him, each one line; a kind twice is said once",
-      PC([CH("asked"), CH("next_changed")]) == "asked for your decision, changed what comes next" and PC([CH("asked")]) == "asked for your decision"
-      and PC([CH("gave_step"), CH("next_changed")]) == "gave you a step, changed what comes next" and PC([CH("next_changed"), CH("next_changed")]) == "changed what comes next", PC([CH("asked"), CH("next_changed")]))
-check("plain words: needs <session> goes when a hand-over is there, not otherwise; taking it back to work is one line; a change with no line of its own stays as written",
-      PC([CH("needs_named"), CH("handed", who="B"), CH("next_changed")]) == "handed to B, changed what comes next"
-      and PC([CH("text", text="needs: ops-x")]) == "needs: ops-x" and PC([CH("back_to_work"), CH("next_changed")]) == "took it back to work, changed what comes next"
-      and PC([CH("text", text="model: opus; state: doing")]) == "model: opus; state: doing", None)
-check("plain words: a plain string is one change as written; only the first two changes show; a hand-over to no one stays as the entry's text; nothing is ''",
-      PC("completed: done as asked") == "completed: done as asked" and PC("created as “[home] x”") == "created as “[home] x”" and PC("") == "" and PC([]) == "" and PC(None) == ""
-      and PC([CH("next_changed"), CH("background"), CH("asked")]) == "changed what comes next, updated the background"
-      and PC([CH("handed", who="no one"), CH("text", text="mover: A → no one")]) == "mover: A → no one" and PC([CH("handed", who="")]) == "", None)
-check("plain words: a semicolon inside a change's text is not a break of its own (the text is one change, as the log wrote it)",
-      PC([CH("text", text="next: …queued behind #7; then the IDs into the instance config")]) == "next: …queued behind #7; then the IDs into the instance config", None)
-long_what = ("x" * 40 + " ") * 6
-check("a long change is clipped on a word and ends in an ellipsis; a missing who or what is left out; the text is escaped",
-      len(itempage.last_change("Oliver", long_what, str)) <= 110 and itempage.last_change("Oliver", long_what, str).endswith("…")
-      and itempage.last_change("Oliver", "", str) == "" and itempage.last_change("", "did it.", str) == ": did it" and itempage.last_change("<u>a</u>", "<b>x</b>", html.escape) == " by &lt;u&gt;a&lt;/u&gt;: &lt;b&gt;x&lt;/b&gt;", itempage.last_change("Oliver", long_what, str))
+# ---- 2. the page without a Where it stands section
 check("no page carries a Where it stands section, its fold key or its style", all("Where it stands" not in p_ and "iwhere" not in p_ and 'data-fold="item.where"' not in p_ for p_ in (p1, p7, page("a2"), page("a23"), page("a5"))))
 
 # ---- 3. the ask and the answer box: only while the owner is the mover
@@ -333,7 +310,7 @@ check("clip cuts at a word or sentence end, never leaves a quote or bracket open
       and "“" not in c2 and "(" not in c2 and c2.endswith("…") and len(c2) <= 40, (c1, c2))
 check("a short text passes whole and a word is never cut in two", itempage.clip("a short line", 160) == "a short line" and itempage.clip("alpha beta gamma delta", 14) in ("alpha beta…", "alpha beta"), itempage.clip("alpha beta gamma delta", 14))
 p15 = page("a15", answer=BOX)
-check("item data is escaped everywhere: the goal, subject, next, sub step, author and the latest change carry no live tag",
+check("item data is escaped everywhere: the goal, subject, next, sub step and author carry no live tag",
       "<script>alert" not in p15 and "<script>x<" not in p15 and "<img src=x" not in p15 and "<u>" not in p15 and "<i>sub" not in p15 and "<b>bold" not in p15 and "&lt;script&gt;" in p15 and "&lt;img src=x onerror=alert(1)&gt; &amp; more" in p15
       and "Goal &lt;b&gt;bold&lt;/b&gt; &amp; &lt;script&gt;x&lt;/script&gt;" in p15.split('<div class="ilayout">')[0] and "&lt;i&gt;sub&lt;/i&gt;" in p15, re.findall(r"<h1>.*?</h1>", p15))
 check("…and a revision's author is escaped on the History line", "<b>&lt;u&gt;who&lt;/u&gt;</b> · <span class=\"t\">" in p15 and "created as “[home] &lt;script&gt;" in p15, p15[p15.find('id="history"'):][:400])
@@ -364,7 +341,7 @@ check("your-step, his move: the step form is under the state line and shows the 
       and "<code>uv run tools/x.py --go</code>" in w23[w23.find('<div class="iask istep">'):][:800] and w23.count("uv run tools/x.py --go") == 1, w23[w23.find('<div class="istat">'):][:900])
 check("…and a mover who is not Oliver keeps no Your step block", 'class="iask istep"' not in w24 and 'class="iask istep"' not in page("a10"), None)
 
-# ---- 14. review of the state line's latest change: a hostile step, mover and author; italics in clip_md; the comment box's words
+# ---- 14. review of the state line: a hostile step, mover and author; italics in clip_md; the comment box's words
 w25, w26, w28 = page("a25"), page("a26"), page("a28")
 top = lambda h: h[h.find('<div class="istat">'):h.find("<h2>Next</h2>")]      # the state line, the step form under it and the ask: everything above Next
 check("a hostile step and mover label are escaped above Next and in the sidebar's Mover row",
