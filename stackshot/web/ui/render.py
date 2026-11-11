@@ -24,7 +24,7 @@ from stackshot.waits import waiting as _wt   # what an item waits on and whose m
 from stackshot.anchors import receiver_health as _rh   # when a receiver's last check is too old to call it healthy (receiver_health.py)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
 from stackshot.model import draft as _draft   # an item's draft: the verbatim text the owner pastes elsewhere, drawn in a block with a Copy button (draft.py)
-from stackshot.web import itempage as _ip   # the item page's words on the item model: since, the latest change, next lines
+from stackshot.web import itempage as _ip   # the item page's words on the item model: since, next lines
 from stackshot.model import step_commands as _sc   # the step of a your-step item: numbered list, commands to copy (step_commands.py)
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.model import owner_steps as _os   # the step the server makes on the checklist for his your-step or decision (owner_steps.py)
@@ -992,7 +992,10 @@ def _site_title(title: str, src: str, h1: bool = False) -> str:
 _AGE_AT = "\x00age\x00"      # where the template of the rendered line puts the age (never in a translation)
 def _rendered_line(stamp_html: str, tip: str | None = None) -> str:
     tip = _t("home.rendered_tip", every=f"{_every_m():g}", stale=_stale_s() // 60) if tip is None else tip
-    pre, _sep, post = _t("home.rendered_line", age=_AGE_AT).partition(_AGE_AT)      # one template, so a language can put the age first ("3m ago updated"); the words around the age are what the narrow page leaves off (.rw)
+    parts = _t("home.rendered_line", age=_AGE_AT).split(_AGE_AT)      # one template, so a language can put the age first ("3m ago updated"); the words around the age are what the narrow page leaves off (.rw)
+    # The age is drawn once, at the template's first {age}: a second {age} draws nothing (its place is empty, the marker never reaches the page); a template with none (a language may leave a field out) puts
+    # the age span after its words, since the span carries the stale colour, the title text and the tick.
+    pre, post = parts[0], "".join(parts[1:])
     rw = lambda x: f'<span class="rw">{esc(x)}</span>' if x else ""
     return f'<p class="rline">{rw(pre)}<span id="rendered" data-stale="{_stale_s()}" title="{esc(tip)}">{stamp_html}</span>{rw(post)}</p>'
 # The age on a page that is not home (home's tick does the same for the whole page): the stamp's text redrawn every 30 s from its data-ts and the old class set past data-stale. A page without the line does nothing.
@@ -2411,19 +2414,11 @@ class Board:
         reopened; priority; project; subject, next, ask and description edits; a confirm with nothing else changed. One entry per revision (the item page): its author
         (`written_by`, which every save records since step 1; an older revision names none), then everything the revision changed; a comment he wrote on GitHub is an entry of its own.
         merge=False gives one entry per change instead (item_events).
-        → ([{ts, kind, html, who, what (the entry as plain text), changes ([(kind, fields)] of its lines, itempage.change: what plain_change reads), comment (True: it belongs under Comments)}], n_more)."""
+        → ([{ts, kind, html, who, what (the entry as plain text), comment (True: it belongs under Comments)}], n_more)."""
         e = esc
-        def coded(x, code, **f):       # an event with the kind of change it is in the 6th place (itempage.change): the plain words of the latest change are read from it, never from the line's English
-            return (x[0], x[1], x[2] if len(x) > 2 else None, x[3] if len(x) > 3 else "", x[4] if len(x) > 4 else "", _ip.change(code, **f))
-        def rec(x):                    # an event as one change record of its entry
-            pl = _ip.plain(x[1])
-            if len(x) > 5 and x[5]:
-                code, f = x[5]
-                return _ip.change(code, **f) if code in _ip.CHANGE_CODES else _ip.change(code, text=pl)
-            return _ip.change("text", text=pl)
         def fev(field, text):          # a text field's change: its bullet and, in the 4th place, the fold with its text
-            b_, f_ = self.hist_field(r, field, text); x = ("edit", b_, None, f_)
-            return coded(x, {"next": "next_changed", "description": "background"}[field]) if field in ("next", "description") else x
+            b_, f_ = self.hist_field(r, field, text)
+            return ("edit", b_, None, f_)
         def owner(v):          # the creator's name (creator_name, also the sidebar's Creator row); "nobody" when the version names none
             return self.creator_name(r, v) or _t("item.log.nobody")
         def mover_of(v):       # step 4b: who moves the item in this version, as the model reads its fields ("" for a closed or a waiting item)
@@ -2469,9 +2464,8 @@ class Board:
                         po = options_of(prev) if a == "call" else []    # the options leave the page with the decision and stay here
                         pk = ask_of(prev) if a == "call" else ""        # and so does the ask, its Decide part (the raw line if misshaped)
                         pk = ((parse_ask(pk) or {}).get("decide") or pk) if pk else ""
-                        lc = "gave_step" if m.get("state") == "your-step" else "asked" if b == "call" else "back_to_work" if b == "" else None      # whose move it became, in the plain words of the latest change
                         mv = ("needs", _t("item.log.moved_to", lane=f"<b>{e(list_word(m.get('state'), b))}</b>"))
-                        ev.append(coded(mv, lc) if lc else mv)
+                        ev.append(mv)
                         if pk: ev.append(("needs", _t("item.log.ask_was", ask=e(_ip.clip(pk, 160))), None, f'<details class="ehold"><summary class="more">{_t("item.log.whole_ask")}</summary><div class="body md">{md_block(ask_of(prev))}</div></details>'))
                         dec = self.decision_made(prev, v)                # his answer written with this change, when it is one
                         kept = {"metadata": {"options": (dec or {}).get("options")}}
@@ -2486,7 +2480,7 @@ class Board:
                                 ev.append(("needs", _t("item.log.opt_rec" if o["recommended"] else "item.log.opt", label=f'<b>{e(_ol.listed(o["label"], i))}</b>', line=e(o["line"])) + (_t("item.log.opt_picked", picked=f'<b>{_t("item.log.picked")}</b>') if taken else ""), None, "", "osub"))
                             if dec and not dec.get("choice"): ev.append(("needs", _t("item.log.no_pick")))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
-                        ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(coded(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")), "needs_named"))
+                        ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", _t("item.log.needs", names="<b>" + e(", ".join(ns)) + "</b>") if ns else _t("item.log.needs_none")))
                 elif is_held(v) and is_held(prev) and wake_of(prev) != wake_of(v):
                     w = wake_of(v); ev.append(("hold", _t("item.log.wake_set", when=e(self.when(w))) if w else _t("item.log.wake_cleared")))
                 if not h_ and not ph and s_ != "completed" and ps == s_ and wake_of(prev) != wake_of(v):   # a reminder: set, moved or gone
@@ -2496,7 +2490,6 @@ class Board:
                 if s_ != "completed" and (pm.get("state") != m.get("state") or any(pm.get(k) != m.get(k) for k in _states.CARRY_FIELDS)):   # where it stands, with what the state carries
                     ev.append(("hold", (_t("item.log.state_moved", old=e(pm['state']), new=f"<b>{e(m['state'])}</b>") if pm.get("state") in (*_states.STATES, *_states.LEGACY_STATES) and pm.get("state") != m.get("state") else _t("item.log.state", new=f"<b>{e(m['state'])}</b>")) + "".join(_t("item.log.state_carry", label=k, value=e(_ip.clip(m[k], 300))) for k in _states.CARRY.get(m["state"], ()) if m.get(k)) if m.get("state") in _states.STATES
                                else _t("item.log.state_cleared", old=e(list_word(pm.get('state')) or pm.get('state')))))
-                    if m.get("state") not in _states.STATES: ev[-1] = coded(ev[-1], "back_to_work")
                 if s_ != "completed" and (pm.get("draft") or "") != (m.get("draft") or ""):   # the draft's own line its text is on the item
                     ev.append(("edit", _t("item.log.draft_cleared") if not m.get("draft") else _t("item.log.draft_edited") if pm.get("draft") else _t("item.log.draft_set")))
                 if s_ != "completed" and pm.get("rank") != m.get("rank"):   # the builder's queue order
@@ -2508,12 +2501,11 @@ class Board:
                 if s_ != "completed" and ps == "open":      # a mover change, in the model's words; a close or a reopening says its own line
                     mv_a, mv_b = mover_of(prev), mover_of(v)
                     if mv_a and mv_b and mv_a != mv_b and not same_ref(mv_a, mv_b):      # a hold or a wait takes the mover away: its own line says that
-                        ev.append(coded(("mover", _t("item.log.mover", old=e(mover_show(mv_a)), new=f"<b>{e(mover_show(mv_b))}</b>")), "handed", who=mover_show(mv_b)))
+                        ev.append(("mover", _t("item.log.mover", old=e(mover_show(mv_a)), new=f"<b>{e(mover_show(mv_b))}</b>")))
                 ho_ = _hov.fresh(pm, m) if s_ != "completed" else {}       # a finished step handed the item on, or could not: its own line (handover.py)
                 if ho_:
                     ev.append(("mover", (_t("item.log.handover_moved_from", old=e(mover_show(mover_of(prev))), to=f"<b>{e(mover_show(mover_of(v)))}</b>") if mover_of(prev) else _t("item.log.handover_moved", to=f"<b>{e(mover_show(mover_of(v)))}</b>")) if ho_.get("kind") == _hov.MOVED
                                else _t("item.log.handover_kept", who=e(self.mover_name(ho_.get('to') or '')), to=f"<b>{e(mover_show(mover_of(v)) if mover_of(v) != 'no one' else _t('item.log.its_mover'))}</b>")))
-                    if ho_.get("kind") == _hov.MOVED and mover_of(v): ev[-1] = coded(ev[-1], "handed", who=mover_show(mover_of(v)))
                 a, b = due(prev), due(v)
                 if a != b:
                     ev.append(("due", _t("item.log.due_set", when=f"<b>{e(self.when(b))}</b>") if not a else _t("item.log.due_cleared", old=e(self.when(a))) if not b
@@ -2568,13 +2560,13 @@ class Board:
             who = " ".join(str(v.get("written_by") or "").split())          # the revision's author (model.py: every save records it); older revisions carry none
             chg = [x for x in ev if x[0] != "comment"]
             if not merge:                                                    # one entry per change, as before (item_events)
-                out += [(vi, j, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": x[0], "html": x[1], "who": who, "what": _ip.plain(x[1]), "changes": [rec(x)], "comment": x[0] == "comment"}) for j, x in enumerate(ev)]
+                out += [(vi, j, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": x[0], "html": x[1], "who": who, "what": _ip.plain(x[1]), "comment": x[0] == "comment"}) for j, x in enumerate(ev)]
             else:
                 if chg:                                                      # one entry per revision: its author and time on the header line, one bullet per change (a text field's text in a fold)
                     h = self.hist_bullets([(x[1], x[3] if len(x) > 3 else "", x[4] if len(x) > 4 else "") for x in chg])
-                    out.append((vi, 0, {"ts": ts, "kind": next((k_ for k_ in ("completed", "reopened", "answer", "created", "said") if any(x[0] == k_ for x in chg)), chg[0][0]), "html": h, "who": who, "what": "; ".join(_ip.plain(x[1]) for x in chg), "changes": [rec(x) for x in chg], "comment": False}))
+                    out.append((vi, 0, {"ts": ts, "kind": next((k_ for k_ in ("completed", "reopened", "answer", "created", "said") if any(x[0] == k_ for x in chg)), chg[0][0]), "html": h, "who": who, "what": "; ".join(_ip.plain(x[1]) for x in chg), "comment": False}))
                 for j, x in enumerate(c for c in ev if c[0] == "comment"):   # his comment written on GitHub: its own line, at the comment's own time
-                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "changes": [rec(x)], "comment": True}))
+                    out.append((vi, j + 1, {"ts": (x[2] if len(x) > 2 and x[2] else ts), "kind": "comment", "html": self.hist_bullets([(x[1], "")]), "who": _OWNER, "what": _ip.plain(x[1]), "comment": True}))
             prev = v
         for g in groups.values():          # one line per step: a closed step says it was closed, the status updates written on it folded under; an open step's updates are one line too, at its newest update
             n = len(g["ups"])
@@ -2585,10 +2577,9 @@ class Board:
                      f'<details class="ehold"><summary class="more">{nstat}</summary><div class="body"><ul class="estat">{fold}</ul></div></details>')]
             ent = {"ts": g["last"], "ts_from": g["first"], "kind": "work", "html": self.hist_bullets(body), "who": g.get("who", ""),
                    "what": (_t("item.log.step_mark", mark=step_word(g["mark"]), line=g["step"]) if g["closed"] else _t("item.log.step_open", line=g["step"])) + f'; {nstat}: ' + "; ".join(te["text"] for _w, te in g["ups"]), "comment": False}
-            ent["changes"] = [_ip.change("text", text=ent["what"])]
             host = next((x[2] for x in out if merge and g["closed"] and x[0] == g["vi"] and x[1] == 0), None)      # the write that closed the step is one entry: its step line first, its other changes (a new next) after it
             if host is not None:
-                host["html"], host["ts_from"], host["what"], host["changes"] = ent["html"] + host["html"], g["first"], ent["what"] + "; " + host["what"], ent["changes"] + host["changes"]
+                host["html"], host["ts_from"], host["what"] = ent["html"] + host["html"], g["first"], ent["what"] + "; " + host["what"]
             else:
                 out.append((g["vi"], 0.5, ent))
         out.sort(key=lambda x: (-x[0], x[1]))

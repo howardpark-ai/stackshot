@@ -5,7 +5,7 @@ One flat dict, `CATALOG`, of dotted key -> `str.format` template. The areas:
     state.*    the state words (Your move, On agent, ...), also the home page's headings and count cards
     panel.*    the side panel: its chrome, its sections and their cards, the audit card, the language switch
     home.*     the home page: count cards, lists, rows, waits, the answer and copy boxes, the connection notice
-    item.*     the item page: its state line, checklist, ask, sidebar, folds and the History's lines (item.log.*, item.change.*)
+    item.*     the item page: its state line, checklist, ask, sidebar, folds and the History's lines (item.log.*)
     wait.*     the item page's wait block (what it waits on, who watches, the chases) and the words that describe a wait
     answer.*   the item page's answer and comment boxes
     watch.*    the item page's For you control
@@ -652,15 +652,7 @@ CATALOG: dict[str, str] = {
     "item.log.status_one": "{n} status update",
     "item.log.status_many": "{n} status updates",
 
-    # ------------------------------------------------------------------ item page: the latest change in plain words, and the words that describe a wait
-    "item.change.asked": "asked for your decision",
-    "item.change.handed": "handed to {who}",
-    "item.change.back_to_work": "took it back to work",
-    "item.change.gave_step": "gave you a step",
-    "item.change.next_changed": "changed what comes next",
-    "item.change.background": "updated the background",
-    "item.change.by": " by {who}: {what}",
-    "item.change.plain": ": {what}",
+    # ------------------------------------------------------------------ item page: the words that describe a wait
     "wait.a_date": "a date",
     "wait.what.close_of": "the close of {items}",
     "wait.what.an_item": "an item",

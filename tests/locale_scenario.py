@@ -649,10 +649,9 @@ def _ipx_pat(v):
 # keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
 IPX_DIRECT = {"item.change.asked", "item.change.back_to_work", "item.change.background", "item.change.by", "item.change.gave_step", "item.change.handed", "item.change.next_changed", "item.change.plain",
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news",
-              "answer.sent.askedback", "answer.sent.askedback_home", "answer.sent.closed", "answer.sent.closednote", "answer.sent.comment", "answer.sent.decision", "answer.sent.done", "answer.sent.done_by", "answer.sent.empty",
-              "answer.sent.nomover", "answer.sent.nostep", "answer.sent.nostep_home", "answer.sent.stale", "answer.sent.stale_home", "answer.sent.stalenote", "answer.sent.stalenote_home", "answer.sent.stepreply", "answer.sent.stepreply_by", "answer.sent.toolong",
               "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
               "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more"}
+check("every name in the direct-call list is a key of the table's item-page areas (a stale name cannot hide in it)", IPX_DIRECT <= set(IPX_NEW), sorted(IPX_DIRECT - set(IPX_NEW)))
 seen = {k for k in IPX_NEW if _ipx_pat(EN[k]).search(IPX_KO_ALL) or _ipx_pat(EN[k]).search(IPX_KO_U)}
 check("every string of the item page's areas shows in the test locale on some fixture page, but the ones the direct calls below cover", set(IPX_NEW) - seen <= IPX_DIRECT, sorted(set(IPX_NEW) - seen - IPX_DIRECT))
 
@@ -835,12 +834,21 @@ write_ko(test_locale(**{"home.rendered_line": "{age} was drawn"})); set_dir(LOC)
 with i18n.use("ko"): rl_ko = _rl()
 write_ko(test_locale(**{"home.rendered_line": "{age}"})); set_dir(LOC); reset_warned()
 with i18n.use("ko"): rl_bare = _rl()
+write_ko(test_locale(**{"home.rendered_line": "{age} was drawn, {age}"})); set_dir(LOC); reset_warned()
+with i18n.use("ko"): rl_twice = _rl()
+write_ko(test_locale(**{"home.rendered_line": "drawn lately"})); set_dir(LOC); reset_warned()
+with i18n.use("ko"): rl_none = _rl()
 write_ko(test_locale()); set_dir(LOC); reset_warned()
-check("the rendered line in English: 'rendered ' before the age, byte for byte what it always was",
+check("the rendered line in English: 'rendered' before the age, byte for byte what it always was",
       rl_en == f'<p class="rline"><span class="rw">rendered </span><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_en)
 check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
 check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_bare)
-check("…and the age is never a word of any translation (the template's own marker stays out of the page)", "\x00" not in rl_en + rl_ko + rl_bare)
+_span = f'<span id="rendered" data-stale="{_st}" title="T"><b>S</b></span>'
+check("…a template with the age twice draws the age's span once, at the first place; the second place is empty and no marker leaks into its words",
+      rl_twice == f'<p class="rline">{_span}<span class="rw"> was drawn, </span></p>' and rl_twice.count('id="rendered"') == 1, rl_twice)
+check("…a template with no age at all still draws the age's span once (it carries the stale colour, the title and the tick), after the template's words",
+      rl_none == f'<p class="rline"><span class="rw">drawn lately</span>{_span}</p>', rl_none)
+check("…and the age is never a word of any translation (the template's own marker stays out of the page)", "\x00" not in rl_en + rl_ko + rl_bare + rl_twice + rl_none)
 
 # every key the stage added to the table is asked for somewhere (a literal key in the source, or a dict of keys the source reads): none is dead
 _all_keys = list(EN); _block = _all_keys[_all_keys.index("item.unknown") + 1:]
