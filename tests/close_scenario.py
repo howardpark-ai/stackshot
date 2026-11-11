@@ -134,7 +134,7 @@ check("item page: the state line says how it ended (item model, step 3): superse
       '<p class="istate"><span class="tag t-superseded">Superseded</span> ' in p2 and ' by <a href="/items/a3">a3</a>' in p2.split('<p class="istate">')[1].split("</p>")[0] and re.search(r'<p class="ireason">merged into (?:<a [^>]*>)?a3', p2) is not None,
       re.findall(r'<div class="istat">.*?</div>', p2))
 sec2 = p2[p2.find('<div class="istat">'):p2.find('<details class="fold"')]       # the state line and the reason under it, up to the first section (there is no Where it stands any more)
-check("item page: …and the latest change beside it does not say the close again: the reason only once (under the state line)",
+check("item page: …the close is not said twice: the reason shows only once (under the state line)",
       sec2.count("merged into") == 1 and "Where it stands" not in p2 and "iwhere" not in p2, sec2[:300])
 check("item page: an old completed item with no outcome says so under its state line", '<p class="ireason">no outcome recorded</p>' in bd.item_html("a9"))
 check("item page: a completed item shows its checklist as the record (a superseded close marked its open step dropped), and no ask", "<h2>Next</h2>" in p2 and p2.count('class="cl-open"') == 0 and p2.count('class="cl-dropped"') == 1 and 'class="iask"' not in p2, p2[:300])

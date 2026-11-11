@@ -128,7 +128,6 @@ page = lambda g, **kw: bd.item_html(g, **kw)
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 istate = lambda h: html.unescape(re.sub(r"<[^>]+>", "", (re.search(r'<p class="istate">(.*?)</p>', h, re.S) or [0, ""])[1]))
 istat = lambda h: html.unescape(re.sub(r"<[^>]+>", "", (re.search(r'<div class="istat">(.*?)</div>', h, re.S) or [0, ""])[1]))        # the state line and what sits beside it
-upd = lambda h: (lambda t: t[t.find("updated"):] if "updated" in t else "")(istat(h))                                                           # …from "updated" on: the latest change
 side = lambda h: h[h.find('<aside class="iside"'):h.find("</aside>")]
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -311,7 +310,7 @@ check("clip cuts at a word or sentence end, never leaves a quote or bracket open
       and "“" not in c2 and "(" not in c2 and c2.endswith("…") and len(c2) <= 40, (c1, c2))
 check("a short text passes whole and a word is never cut in two", itempage.clip("a short line", 160) == "a short line" and itempage.clip("alpha beta gamma delta", 14) in ("alpha beta…", "alpha beta"), itempage.clip("alpha beta gamma delta", 14))
 p15 = page("a15", answer=BOX)
-check("item data is escaped everywhere: the goal, subject, next, sub step, author and the latest change carry no live tag",
+check("item data is escaped everywhere: the goal, subject, next, sub step and author carry no live tag",
       "<script>alert" not in p15 and "<script>x<" not in p15 and "<img src=x" not in p15 and "<u>" not in p15 and "<i>sub" not in p15 and "<b>bold" not in p15 and "&lt;script&gt;" in p15 and "&lt;img src=x onerror=alert(1)&gt; &amp; more" in p15
       and "Goal &lt;b&gt;bold&lt;/b&gt; &amp; &lt;script&gt;x&lt;/script&gt;" in p15.split('<div class="ilayout">')[0] and "&lt;i&gt;sub&lt;/i&gt;" in p15, re.findall(r"<h1>.*?</h1>", p15))
 check("…and a revision's author is escaped on the History line", "<b>&lt;u&gt;who&lt;/u&gt;</b> · <span class=\"t\">" in p15 and "created as “[home] &lt;script&gt;" in p15, p15[p15.find('id="history"'):][:400])
@@ -342,7 +341,7 @@ check("your-step, his move: the step form is under the state line and shows the 
       and "<code>uv run tools/x.py --go</code>" in w23[w23.find('<div class="iask istep">'):][:800] and w23.count("uv run tools/x.py --go") == 1, w23[w23.find('<div class="istat">'):][:900])
 check("…and a mover who is not Oliver keeps no Your step block", 'class="iask istep"' not in w24 and 'class="iask istep"' not in page("a10"), None)
 
-# ---- 14. review of the state line's latest change: a hostile step, mover and author; italics in clip_md; the comment box's words
+# ---- 14. review of the state line: a hostile step, mover and author; italics in clip_md; the comment box's words
 w25, w26, w28 = page("a25"), page("a26"), page("a28")
 top = lambda h: h[h.find('<div class="istat">'):h.find("<h2>Next</h2>")]      # the state line, the step form under it and the ask: everything above Next
 check("a hostile step and mover label are escaped above Next and in the sidebar's Mover row",

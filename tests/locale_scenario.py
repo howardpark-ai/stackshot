@@ -815,8 +815,10 @@ en_work = bdx.work_html({"gid": "a1", "metadata": {"work": [{"text": "oil the hi
 check("English wording, pinned: due today and due in N days (the date with its weekday)", bdx.due_badge(_dueof(0)) == r2.badge(f"Due today ({_wd_en(_d0)})", "due") and bdx.due_badge(_dueof(5)) == r2.badge(f"Due in 5 d ({_wd_en(_d5)})", "due"), (bdx.due_badge(_dueof(0)), bdx.due_badge(_dueof(5))))
 check("English wording, pinned: a cloud session's row says 'cloud', the legacy Work field is named 'Work', a polled anchor says ' · poll'",
       '<span class="dim">· cloud</span>' in en_mc[1] and '<dt>Work <span class="count">1</span></dt>' in en_work and en_poll == "quiet · poll", (en_mc, en_work, en_poll))
-check("English wording, pinned: five anchors say '+2 more' (not when all are listed), none recorded says 'an anchor (none recorded)'",
-      '<span class="dim">+2 more</span>' in en_more and "more</span>" not in en_more_full and "an anchor (none recorded)" in en_none and "an anchor (none recorded)" not in en_more, (en_more, en_more_full, en_none))
+_a = lambda i, label: f'<a href="https://example.com/{i}" target="_blank" rel="noopener">{label}</a>'
+check("English wording, pinned: five anchors say '+2 more' after the first three (the whole fragment), all five listed say no more, none recorded says exactly 'an anchor (none recorded)'",
+      en_more == ", ".join(_a(i, f"example.com ({i + 1})") for i in range(3)) + ' <span class="dim">+2 more</span>'
+      and en_more_full == ", ".join(_a(i, f"https://example.com/{i}") for i in range(5)) and en_none == "an anchor (none recorded)", (en_more, en_more_full, en_none))
 check("English wording, pinned: the answer script's 'Nothing sent: {why}' (the table every page head carries, and the script asking for it)",
       '"js.answer.nothing_sent": "Nothing sent: {why}"' in r2._SST_HEAD and "SST('js.answer.nothing_sent'" in r2._ANSWER_JS)
 d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
