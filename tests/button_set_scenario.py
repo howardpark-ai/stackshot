@@ -5,7 +5,7 @@ Covers:
     (a plain `.b`) and the main (`.b.main`, the composer's Send, one per form and nothing else); the round reload button being the one exception; no old .abtn or .a-btn class is left;
   * the mapping: Send in a comment box, a decision's answer box and a step's box; the answer options are cards (a radio input each, no button), the recommended one carrying the "recommended" badge;
     Clear, Clear all and Undo; seen and mark all seen; Watch, Mute and Default with the pressed one .on and aria-pressed; Copy (a command block, the draft, the home row's draft) keeping its .copy hook;
-    the panel button, the theme switch and the search submit as .ico buttons; the newer-board banner's Reload with the warn edge; Audit now as a text link (a button without the .b class);
+    the panel button, the theme switch and the search submit as .ico buttons; the newer-board banner's Reload as a solid accent button; Audit now as a text link (a button without the .b class);
   * the colours, computed (WCAG 2.x) from the real tokens of the stylesheet in both themes: the orange link and the main button's label on its fill at 4.5:1 or more (tests/orange_scenario.py holds the orange's own values and the scan for any other), the secondary's outline at 3:1 or more on the page
     and the card, its text at 4.5:1 or more and at full strength (--fg, not the muted --mut), the disabled main still visible, the status blue kept for running and live;
   * the stylesheet: the secondary look (outline, no fill, full-strength text, 13 px, 32 px tall, 8 px corners), the light hover and pressed fills, the .on, .warn and .ico modifiers, the focus-visible ring, the busy look,
@@ -204,6 +204,26 @@ for theme, t in THEMES.items():
 check("a busy main button keeps its fill and label (the busy fill of the secondary would hide the white label), and the focus ring is the accent",
       all(x in css for x in (".b.main.busy,.b.main[aria-busy=true],form[aria-busy] .b.main{background:var(--acc)", "color:var(--on-acc);opacity:.75}")) and ".b:focus-visible{outline:2px solid var(--acc);outline-offset:2px}" in css, None)
 check("the old blue is left only as the status token --run (and the tags' own --t-agent): no page rule reads it as --acc", "--acc:#2f6fdd" not in css and "--acc:#7fb0ff" not in css and css.count("--run:#2f6fdd") == 1 and css.count("--run:#7fb0ff") == 2 and "#eef3fc" not in css and "#1c2534" not in css, None)
+# ---- 6. the connection strip (the newer-board notice with its Reload button): a calm panel strip, the button the solid accent
+strip = rule(".conn") or ""
+check("the strip is a --card panel with a 1 px --line bottom border only, no accent or warn color mixed into its background or edge",
+      "background:var(--card)" in strip and "border-bottom:1px solid var(--line)" in strip and "border:0" in strip and "color-mix" not in strip and "--warn" not in strip and "--acc" not in strip, strip)
+reload_rule = rule(".conn .b.warn") or ""
+check("the strip's Reload is a solid --acc fill with the --on-acc label, no border, 8 px corners, weight 600, padding 4px 12px",
+      all(x in reload_rule for x in ("background:var(--acc)", "color:var(--on-acc)", "border:0", "border-radius:8px", "font-weight:600", "padding:4px 12px")), reload_rule)
+check("the strip's Reload keeps the shared keyboard focus ring (no outline rule of its own) and shifts its fill toward --fg under the pointer and when pressed (darker in light, lighter in dark), keeping its label color",
+      "outline" not in reload_rule and ".b:focus-visible{outline:2px solid var(--acc);outline-offset:2px}" in css
+      and "@media(hover:hover){.conn .b.warn:hover:not(:disabled){background:color-mix(in srgb,var(--fg) 14%,var(--acc));color:var(--on-acc)}}" in css
+      and ".conn .b.warn:active:not(:disabled){background:color-mix(in srgb,var(--fg) 24%,var(--acc));color:var(--on-acc)}" in css, reload_rule)
+new_rule = rule(".conn.new") or ""
+check("the unreachable and signed-out states carry the warn color on their text (one rule, .conn.down and .conn.out); the Reload state (.conn.new) carries none", re.search(r"\.conn\.down,\.conn\.out\{color:var\(--warn\)\}", css) is not None
+      and "--warn" not in new_rule and not re.search(r"\.conn\.new[^{]*\{[^}]*--warn", css) and "--warn" not in strip, (new_rule, strip))
+for theme, t in THEMES.items():
+    r = ratio(t["--warn"], t["--card"]); check(f"{theme}: the warn text of the unreachable and signed-out strips (--warn on --card) is {r:.2f}:1 (4.5 needed)", r >= 4.5, r)
+    r = ratio(t["--fg"], t["--card"]); check(f"{theme}: the strip's text (--fg) on its --card fill is {r:.2f}:1 (4.5 needed)", r >= 4.5, r)
+    r = ratio(t["--on-acc"], t["--acc"]); check(f"{theme}: the strip's Reload label (--on-acc) on its --acc fill is {r:.2f}:1 (4.5 needed)", r >= 4.5, r)
+    for nm, pct in (("hover", 14), ("pressed", 24)):
+        r = ratio(t["--on-acc"], mix(t["--fg"], t["--acc"], pct)); check(f"{theme}: the strip's Reload label on its {nm} fill is {r:.2f}:1 (4.5 needed)", r >= 4.5, r)
 
 if fails: print(f"FAILED: button set scenario, {len(ran)} checks, {len(fails)} failed"); sys.exit(1)
 print(f"ok: button set scenario, {len(ran)} checks")
