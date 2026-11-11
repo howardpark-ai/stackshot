@@ -7,8 +7,11 @@ local port from fixture data (no live store, no network) and measures the five c
   - the label "Queued for release" is shown in full where the cards' column is wide enough and as "Queued" where it is not, by the column's width (a container query on the
     cards' nav), not the window's; the column, the cards' size and the wording are the same with the panel closed as with it pinned (a closed panel's column is capped to the pinned one's);
   - the fifth card is Closed: the items closed in the last 14 days, the number alone on the top line and, on the label line right after the word "Closed", the count of closes not cleared yet
-    as green text "N new" ("N" alone where the card is narrow; nothing at 0), also 60 px tall, with the count inside the card and not cut, in four cases (3 new of 40 closed, 12 new of 123,
+    as green text "N new" (where the label line is too narrow for it, beside the number instead, the word never dropped; nothing at 0), also 60 px tall, with the count inside the card and not cut, in four cases (3 new of 40 closed, 12 new of 123,
     123 new of 130, none new), at 1280, 800 and 390 px and in a 120 px card;
+  - the word "new" is never dropped: at 360, 480, 640, 768, 960, 1024, 1280 and 1440 px windows in 100, 110 and 125% zoom (the window's CSS width is the width over the zoom), the panel open and closed, with a closed count and a
+    new count of one to four digits each way, and again with a long invented stand-in for the word (the catalog's home.new_word), the Closed card shows the word whole (not display:none, not clipped, nothing over it), the badge inside the card
+    and clear of the number and the label, every card 60 px tall; HCARD_ONLY_NEWWORD=1 runs this part alone;
   - nothing runs past the screen's width;
   - the header and panel layout of every page (home, an item, a project, Projects, Closed, Search, runners), at 1280, 1010, 1000 and 390 px (1010: with a classic scrollbar a pinned panel's column is under 680 px and a closed one's over it), with the panel pinned and closed, without and with a classic
     15 px scrollbar (a taller page in a browser that keeps its scrollbars): the cards' column, every card's width and the third card's wording are the same pinned and closed; the title (the h1) of every page
@@ -88,10 +91,15 @@ def fixture(n_closed, n_new):
         (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[work] A finished piece of work number {i}", "description": "- done", "status": "completed", "updated": ts, "state_updated": ts, "confirmed": ts,
                                                          "metadata": {"owner": A, "project": "projects/alpha", "outcome": "done", "reason": f"piece {i} shipped"}}))
         if i <= n_new: ld.record(f"a{i}", ts, "done", "alpha-main", "projects/alpha")
+    for i in range(n_closed + 1, n_new + 1):        # more closes not cleared than closed in 14 days: older closes (the record keeps them 60 days; the New section reads their items from the store)
+        ts = now - 20 * 86400 - i * 900
+        (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[work] An older piece of work number {i}", "description": "- done", "status": "completed", "updated": ts, "state_updated": ts, "confirmed": ts,
+                                                         "metadata": {"owner": A, "project": "projects/alpha", "outcome": "done", "reason": f"piece {i} shipped"}}))
+        ld.record(f"a{i}", ts, "done", "alpha-main", "projects/alpha")
     server._board_home_drop()
 MEASURE = """() => {
   const nav = document.querySelector('nav#counts'), cs = [...nav.querySelectorAll('a.hcard')];
-  const shown = (e) => { const r = document.createRange(), more = e.querySelector('.more'), cut = more && more.getBoundingClientRect().width <= 1; r.selectNodeContents(e); if (cut) r.setEndBefore(more); return [...r.getClientRects()].filter(q => q.width > 0); };    // the text on show: the short form leaves the clipped rest out
+  const shown = (e) => { const r = document.createRange(), more = e.querySelector('.more'), cut = more && more.getBoundingClientRect().width <= 1; r.selectNodeContents(e); const nw = e.querySelector('i.hnew'); if (cut) r.setEndBefore(more); if (nw && getComputedStyle(nw).position === 'absolute') r.setEndBefore(nw); return [...r.getClientRects()].filter(q => q.width > 0); };    // the text on show: the short form leaves the clipped rest out
   const natural = (e) => { const c = e.cloneNode(true), m = c.querySelector('.more'); if (m) m.removeAttribute('class'); c.style.cssText = 'position:absolute;visibility:hidden;width:auto;white-space:nowrap;overflow:visible'; e.parentNode.appendChild(c); const w = c.getBoundingClientRect().width; c.remove(); return w; };
   return {navw: Math.round(nav.getBoundingClientRect().width * 10) / 10, sw: document.documentElement.scrollWidth, vw: document.documentElement.clientWidth,
     cards: cs.map(a => { const r = a.getBoundingClientRect(), sp = a.querySelector('span'), more = sp.querySelector('.more'), lines = new Set(shown(sp).map(q => Math.round(q.top))),
@@ -99,10 +107,10 @@ MEASURE = """() => {
         tn = [...sp.childNodes].find(x => x.nodeType === 3), lr = document.createRange(); if (tn) lr.selectNodeContents(tn);
       return {label: [...sp.childNodes].filter(x => !(x.nodeType === 1 && x.matches('i.hnew'))).map(x => x.textContent).join('').trim(), num: a.querySelector('b').textContent, bfs: getComputedStyle(a.querySelector('b')).fontSize, h: r.height, top: Math.round(r.top), left: r.left, right: r.right, lines: lines.size, nat: Math.round(natural(sp) * 10) / 10, room: Math.round((sp.clientWidth) * 10) / 10,
               cut: sp.scrollWidth > sp.clientWidth + 0.5, short: more ? more.getBoundingClientRect().width <= 1 : null,
-              inNum: !!a.querySelector('b i'), cw: r.width - 2 * parseFloat(getComputedStyle(a).borderLeftWidth) - 2 * parseFloat(getComputedStyle(a).paddingLeft), badge: bd ? {text: bd.textContent, word: em.width > 1, left: br.left, right: br.right, top: br.top, bottom: br.bottom, cut: br.right > spr.right + 0.5, color: getComputedStyle(bd).color, border: getComputedStyle(bd).borderTopWidth, lblRight: tn ? lr.getBoundingClientRect().right : null, lblTop: tn ? lr.getBoundingClientRect().top : null, lblBottom: tn ? lr.getBoundingClientRect().bottom : null, numRight: b.right, numTop: b.top, numBottom: b.bottom} : null}; })};
+              inNum: !!a.querySelector('b i'), cw: r.width - 2 * parseFloat(getComputedStyle(a).borderLeftWidth) - 2 * parseFloat(getComputedStyle(a).paddingLeft), badge: bd ? {text: bd.textContent, word: em.width > 1, left: br.left, right: br.right, top: br.top, bottom: br.bottom, cut: br.right > r.right - 1 || br.left < r.left || br.top < r.top || br.bottom > r.bottom || em.width <= 1, color: getComputedStyle(bd).color, border: getComputedStyle(bd).borderTopWidth, lblRight: tn ? lr.getBoundingClientRect().right : null, lblTop: tn ? lr.getBoundingClientRect().top : null, lblBottom: tn ? lr.getBoundingClientRect().bottom : null, numRight: b.right, numTop: b.top, numBottom: b.bottom} : null}; })};
 }"""
 SHORT_PX = 680     # the column width (the cards' nav) under which the card says "Queued": the same number as the container query in ui/render.py
-WORD_PX = (79, 85, 92, 98)  # the card's content width up to which the count says "3" and not "3 new", by the count's digits (one, two, three, four or more): the same numbers as the container queries in ui/render.py
+WORD_PX = (79, 85, 92, 98)  # the card's content width up to which the count "3 new" moves up beside the number, by the count's digits (one, two, three, four or more): the same numbers as the container queries in ui/render.py
 def png_px(path, pts):
     """The (r, g, b) of the screenshot's pixels at pts [(x, y)] (an 8-bit PNG as Chromium writes it; no image library on the box)."""
     d = open(path, "rb").read(); pos = 8; idat = b""
@@ -131,7 +139,7 @@ try:
     try: br = p.chromium.launch(args=["--enable-features=OverlayScrollbar"])       # overlay scrollbars (a phone, a Mac), hidden here: with the flag a scrollbar-gutter reserves nothing, as there (headless Chromium's hidden scrollbars alone still reserve it)
     except Exception as e:
         print("no browser (once per machine: uvx playwright@1.63.0 install chromium):", str(e)[:160]); srv.should_exit = True; sys.exit(2)
-    for case, n_closed, n_new in CASES:
+    for case, n_closed, n_new in (() if os.environ.get("HCARD_ONLY_NEWWORD") else CASES):
         fixture(n_closed, n_new)
         for w in (1280, 800, 390):
             for scheme in ("light", "dark"):
@@ -157,14 +165,67 @@ try:
                     check(f"{tag}: the last card is Closed with the 14-day count {n_closed}", cl["label"] == "Closed" and cl["num"] == str(n_closed), cl)
                     if n_new:
                         inner = cl["cw"]                                          # the card's content width, which the container queries measure
-                        word = inner > WORD_PX[min(len(str(n_new)), 4) - 1]
-                        check(f"{tag}: the count reads {'%d new' % n_new if word else str(n_new)} in green text on the label line, right after Closed (same line, to its right), the number line above holds the number alone, inside the card and not cut (content {inner:.0f} px)",
-                              bd and not cl["inNum"] and bd["text"] == f"{n_new} new" and bd["word"] == word and bd["left"] >= bd["lblRight"] - 0.5 and bd["top"] >= bd["numBottom"] - 1 and abs(bd["top"] - bd["lblTop"]) <= 3
-                              and bd["right"] <= cl["right"] - 1 and not bd["cut"] and bd["border"] == "0px" and bd["color"] != "rgba(0, 0, 0, 0)", cl)
+                        up = inner <= WORD_PX[min(len(str(n_new)), 4) - 1]          # the label line is too narrow for the count: it sits on the number line, beside the number
+                        check(f"{tag}: the count reads '{n_new} new' in green text, whole, the word with it, inside the card and not cut, {'beside the number (the label line is too narrow)' if up else 'on the label line, right after Closed'} (content {inner:.0f} px)",
+                              bd and not cl["inNum"] and bd["text"] == f"{n_new} new" and bd["word"] and not bd["cut"] and bd["right"] <= cl["right"] - 1 and bd["left"] >= cl["left"] and bd["border"] == "0px" and bd["color"] != "rgba(0, 0, 0, 0)"
+                              and ((bd["left"] >= bd["numRight"] - 0.5 and bd["bottom"] <= bd["numBottom"] + 3 and bd["top"] >= cl["top"]) if up else
+                                   (bd["left"] >= bd["lblRight"] - 0.5 and bd["top"] >= bd["numBottom"] - 1 and abs(bd["top"] - bd["lblTop"]) <= 3)), cl)
                     else:
                         check(f"{tag}: no badge when no close is new", bd is None, cl)
                     print(f"  {tag}: column {m['navw']} px, card {cl['right'] - cl['left']:.0f} px (content {cl['cw']:.0f}), line {cl['nat']} px, heights {hs}, rows at {sorted({c['top'] for c in cs})}, queued {'Queued' if q['short'] else 'Queued for release'}, closed {cl['num']} ({cl['bfs']}) count {bd and bd['text']} (word {bd and bd['word']})")
                     shot(pg, f"hcards-{case}-{w}-{scheme}-panel-{panel}"); ctx.close()
+    # the word "new" is never dropped, whatever the width: the Closed card, the count "N new" (in the word the page says it with, the catalog's home.new_word; a long invented stand-in too, as a longer translation would be), at eight window widths
+    # (360 to 1440 px) in three browser zooms (a window of w px at zoom z has w / z CSS px and z device pixels to the CSS pixel), the panel open and closed, a closed count and a new count of one to four digits: the word is shown (not
+    # display:none, not clipped away, nothing covering it), the whole badge is inside the card and clear of the number and the label, and every card is 60 px tall with its label on one line
+    from stackshot.web import i18n as ui_i18n
+    NEW_WORD0 = ui_i18n.EN["home.new_word"]
+    NEWWORD = """() => {
+      const R = e => e.getBoundingClientRect(), cards = [...document.querySelectorAll('#counts a.hcard')], cl = cards[4], r = R(cl), i = cl.querySelector('i.hnew');
+      const base = {heights: cards.map(a => R(a).height), n: cards.length, vw: document.documentElement.clientWidth, sw: document.documentElement.scrollWidth};
+      if (!i) return {...base, hnew: false};
+      const em = i.querySelector('em'), ci = getComputedStyle(i), ce = getComputedStyle(em), ri = R(i), re = R(em), b = cl.querySelector('b'), rb = R(b), sp = cl.querySelector('span'), tn = [...sp.childNodes].find(x => x.nodeType === 3);
+      const lr = document.createRange(); lr.selectNodeContents(tn); const l = lr.getBoundingClientRect(), hit = el => el === em || el === i || i.contains(el);
+      const hide = [...document.querySelectorAll('#panel, #panel-scrim, #panel-edge')].map(e => [e, e.style.visibility]); hide.forEach(x => x[0].style.visibility = 'hidden');    // an open drawer covers the card: look through it
+      const probe = [[re.left + 1, re.top + re.height / 2], [re.left + re.width / 2, re.top + re.height / 2], [re.right - 1, re.top + re.height / 2]].map(p => hit(document.elementFromPoint(p[0], p[1]))); hide.forEach(x => x[0].style.visibility = x[1]);
+      const meet = (p, q) => p.left < q.right - 0.5 && q.left < p.right - 0.5 && p.top < q.bottom - 0.5 && q.top < p.bottom - 0.5;
+      return {...base, hnew: true, text: i.textContent, word: em.textContent.trim(), display: ci.display, visibility: ci.visibility, opacity: ci.opacity, eDisplay: ce.display, eVisibility: ce.visibility, eClip: ce.clipPath, eW: re.width, eH: re.height,
+              up: ci.position === 'absolute', inside: ri.left >= r.left && ri.right <= r.right - 1 && ri.top >= r.top && ri.bottom <= r.bottom, inView: ri.left >= 0 && ri.right <= base.vw, probe: probe,
+              clearOfNumber: !meet(ri, rb), clearOfLabel: !meet(ri, l), labelLines: Math.round(l.height / 14) , labelCut: sp.scrollWidth > sp.clientWidth + 0.5, numCut: rb.right > r.right - 1 || rb.left < r.left, fs: ci.fontSize, bfs: getComputedStyle(b).fontSize,
+              side: ci.position === 'absolute' ? (ri.left >= rb.right - 0.5 ? 'beside the number' : 'overlaps') : (ri.left >= l.right - 0.5 && Math.abs(ri.top - l.top) <= 3 ? 'on the label line' : 'misplaced')};
+    }"""
+    ZOOMS = (1.0, 1.1, 1.25); NW_WIDTHS = (360, 480, 640, 768, 960, 1024, 1280, 1440)
+    NW_CASES = ((40, 2), (5, 3), (42, 12), (123, 123), (1234, 1234), (1234, 3), (7, 1234))          # (closed in 14 days, closes not cleared yet): one to four digits each way
+    LONG_STANDIN = "fresh and unread"          # an invented English stand-in for a longer word (16 characters, as a longer translation of "new" might be)
+    nw_seen = {}
+    for word, cases in (("new", NW_CASES), (LONG_STANDIN, ((5, 3), (123, 123), (1234, 1234), (1234, 3)))):
+        ui_i18n.EN["home.new_word"] = " " + word          # the catalog's word, in this run
+        for n_closed, n_new in cases:
+            fixture(n_closed, n_new)
+            for w in NW_WIDTHS:
+                for z in ZOOMS:
+                    for panel in ("open", "closed"):
+                        cssw = round(w / z); tag = f"new word '{word}' {n_closed} closed / {n_new} new, window {w} px at {round(z * 100)}% ({cssw} css px), panel {panel}"
+                        ctx = br.new_context(viewport={"width": cssw, "height": 900}, device_scale_factor=z)
+                        ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+                        pg = ctx.new_page(); pg.goto(BOARD + "/"); settle(pg, 150)
+                        if cssw >= 800:
+                            if panel == "closed": pg.click("#panel-open"); pg.mouse.move(cssw // 2, 500); settle(pg, 400)
+                        elif panel == "open": pg.click("#panel-open"); settle(pg, 350)
+                        m = pg.evaluate(NEWWORD); nw_seen[tag] = m
+                        want = {"text": m["text"] == f"{n_new} {word}", "word": m["word"] == word, "shown": m["display"] != "none" and m["visibility"] == "visible" and m["opacity"] == "1", "em shown": m["eDisplay"] != "none" and m["eVisibility"] == "visible" and m["eClip"] == "none",
+                                "em size": m["eW"] > 1 and m["eH"] > 1, "nothing covers or clips it": all(m["probe"]), "inside the card": m["inside"], "inside the screen": m["inView"], "clear of the number": m["clearOfNumber"], "clear of the label": m["clearOfLabel"],
+                                "number whole": not m["numCut"], "label whole": not m["labelCut"], "place": m["side"] in ("beside the number", "on the label line"), "one label line": m["labelLines"] <= 1} if m["hnew"] else {"badge drawn": False}
+                        check(f"{tag}: the word is shown, whole, inside the card ({m.get('side')}), clear of the number and the label", all(want.values()), ([k for k, v in want.items() if not v], m.get("fs"), m.get("bfs"), m.get("probe")))
+                        check(f"{tag}: five cards, every one 60 px tall, nothing past the screen", m["n"] == 5 and all(abs(h - 60) < 0.01 for h in m["heights"]) and m["sw"] <= m["vw"], (m["heights"], m["sw"], m["vw"]))
+                        if SHOTS and word == "new" and (n_closed, n_new) == (40, 2) and w == 960 and z == 1.1 and panel == "closed":
+                            pg.locator("header.top").screenshot(path=str(pathlib.Path(SHOTS) / "closed-card-960-110.png"))
+                        ctx.close()
+    ui_i18n.EN["home.new_word"] = NEW_WORD0
+    n_up = sum(1 for m in nw_seen.values() if m.get("side") == "beside the number"); n_line = sum(1 for m in nw_seen.values() if m.get("side") == "on the label line")
+    check("the matrix reaches both arrangements: the count beside the number where the label line is too narrow and on the label line where it fits", n_up > 0 and n_line > 0, (n_up, n_line))
+    print(f"  new word matrix: {len(nw_seen)} windows, {n_up} with the count beside the number, {n_line} on the label line")
+    if os.environ.get("HCARD_ONLY_NEWWORD"):      # a quick run of this part alone
+        print(f"{len(ran) - len(fails)}/{len(ran)} checks passed"); srv.should_exit = True; sys.exit(1 if fails else 0)
     # the page the Closed card links to: titled Closed, with New (the badge's count) and Last 14 days (the big number); the old Landed address lands on it
     fixture(40, 3)
     for w in (1280, 390):
