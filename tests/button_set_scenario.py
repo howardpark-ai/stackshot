@@ -51,7 +51,7 @@ item(5, "[home] closed one", status="completed", su=now - 2 * H, outcome="done",
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web.ui import render, search
-from stackshot.web import landed as ld; from stackshot.web import foryou as fy
+from stackshot.web import landed as ld; from stackshot.web import foryou as fy; from stackshot.web import i18n_catalog
 bd = render.Board(f"{tmp}/store")
 BOX = {"action": "/items/a1/answer", "token": "TOKEN", "sent": ""}
 for k, (g, w) in enumerate((("a50", "older row"), ("a51", "newer row"))):
@@ -167,7 +167,7 @@ check("red (--p1) is in no button rule", not re.search(r"\.b[.:\[][^{]*\{[^}]*--
 # ---- 4. the busy labels
 AJ = render._ANSWER_JS; LJ = render._LANDED_JS
 check("the answer form: the pressed Send reads Sending… and is aria-busy, the form is busy, and a failure puts the label and the state back",
-      "s.textContent='Sending\\u2026'" in AJ and "s.name==='act'" in AJ and "s.setAttribute('aria-busy','true')" in AJ and "F.setAttribute('aria-busy','true')" in AJ and "S.innerHTML=L" in AJ and "S.removeAttribute('aria-busy')" in AJ, None)
+      "s.textContent=SST('js.answer.sending')" in AJ and i18n_catalog.CATALOG["js.answer.sending"] == "Sending\u2026" and "s.name==='act'" in AJ and "s.setAttribute('aria-busy','true')" in AJ and "F.setAttribute('aria-busy','true')" in AJ and "S.innerHTML=L" in AJ and "S.removeAttribute('aria-busy')" in AJ, None)
 check("Landed: only Clear all reads Clearing… (a row's Clear and Undo keep their label); all are aria-busy while the request runs; the label comes back when it ends",
       "if(all)b.textContent=SST('js.closed.clearing')" in LJ and LJ.count("js.closed.clearing") == 1 and "if(!undo)b.textContent" not in LJ and "b.setAttribute('aria-busy','true')" in LJ and "b.removeAttribute('aria-busy');b.textContent=lab" in LJ and LJ.count("rest()") >= 2, None)
 check("Landed rows: Clear and Undo share one fixed width so the swap never moves the text, and the swapped-in button has no colour fade",

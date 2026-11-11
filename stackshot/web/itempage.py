@@ -252,60 +252,43 @@ def clip_md(text: Any, n: int = CLIP) -> str:
 UPDATED_CLIP = 80                  # the longest the latest change is on the state line: one short line
 
 
-_MOVER_CLAUSE = re.compile(r"^mover: .+ → (?P<to>.+)$")
-_DROPPED_CLAUSE = re.compile(r"^(?:model|expected_by)\b|^state: doing$")
-_NEEDS_CLAUSE = re.compile(r"^needs: (?!(?:decision|external)\b)", re.I)
-_CLEARED_CLAUSE = re.compile(r"^state cleared \(was .+\)$")
-_KEPT_CLAUSE = re.compile(r"^(?:completed|woke|named)\b")
-LAST_CLAUSES = 2                   # how many clauses of one History entry the state line shows
-# A clause starts after "; " and a label the History writes (Board.item_log): `next: …`, `needs: …`, `next and ask edited`, `state cleared (…)`, `completed …`. A semicolon inside a
-# field's value ("next: a; then b") is not followed by a label, so it never makes a clause.
-_CLAUSE_START = re.compile(
-    r";\s+(?=(?:(?:needs|after|rank|state|mover|model|due|priority|project|subject|observers|confirmed|wake|woke|goal|then|expected_by|step|party|chase|supplies|proof|end|work"
-    r"|wait basis|whose move|the ask was|the options were|his words recorded)\s*:"
-    r"|(?:next|ask|options|description)\b(?:\s*:|,| and | edited| cleared)"
-    r"|(?:state|rank|due|after|step) (?:cleared|set to|moved|edited)\b|draft (?:set|edited|cleared)\b|refiled from\b|reminder (?:set|cleared)\b|wake (?:set|cleared)\b"
-    r"|waits for a pane recycle|no longer waits|put on hold|back from hold|reopened\b|completed\b|created\b|confirmed\b|state [a-z-]+ →))", re.I)
+LAST_CLAUSES = 2                   # how many changes of one History entry the state line shows
+CHANGE_CODES = ("asked", "handed", "back_to_work", "gave_step", "next_changed", "background")      # the kinds of change that have a line of their own: each is the catalog key item.change.<code>
+DROPPED_CODES = ("needs_named",)   # a change the hand-over already says: left out of the plain words when the entry says "handed" (the list of whom it waits on follows from whom it is handed to)
 
 
-def plain_change(what: Any) -> str:
-    """A History entry (`a; b; c`, the clauses the log writes) in plain words for the owner, before it is clipped (the History keeps the full text); it splits only where "; " is followed by a label the History writes, so a semicolon inside a field's value stays in that clause: `mover: A → B` is "handed to B"; `needs: decision`
-    together with `state: your-call` is "asked for your decision"; `state: your-step` is "gave you a step"; a clause that opens `next` (`next edited`, `next and ask edited`, `next: …`) is "changed what
-    comes next"; `description …` is "updated the background"; `model: …`, `expected_by: …` and `state: doing` are dropped, and so is `needs: <session>` when a `mover:` clause is in the entry (the hand-over says it); `state cleared (was …)` is "took it back to work"; `completed …`, `woke: …` and `named …` and any clause not listed stay as written. The
-    first LAST_CLAUSES clauses are joined with ", ". The text itself when no clause is left to show."""
-    t = clean(what)
-    clauses = [c.strip() for c in _CLAUSE_START.split(t) if c.strip()]
-    if not clauses:
-        return t
-    asked = "needs: decision" in [c.lower() for c in clauses] and "state: your-call" in clauses
-    moved = any(_MOVER_CLAUSE.match(c) for c in clauses)
+def change(code: str, **fields: Any) -> tuple[str, dict[str, Any]]:
+    """One change of a History entry as the log records it: its kind (a CHANGE_CODES entry, `needs_named`, or `text` for a change with no line of its own) and the fields its line takes
+    (`handed`: who; `text`: the change as the entry's plain text)."""
+    return (code, fields)
+
+
+def plain_change(changes: Any) -> str:
+    """A History entry's changes in plain words for the owner, before they are clipped (the History keeps the full text). `changes` is what Board.item_log records on each entry
+    (`changes`: [(code, fields)], see change()), each read from its own whole-line catalog text (item.change.<code>: "handed to {who}", "asked for your decision", ...), so a language words
+    it as a whole; a plain string stands for one `text` change. A `text` change (anything the log has no line for) stays as written, `needs_named` goes when a hand-over is in the entry,
+    a kind twice is said once, a `handed` with no one named stays as the entry's text. The first LAST_CLAUSES are joined with ", "; "" when no change is left to show."""
+    if isinstance(changes, str):
+        changes = [change("text", text=changes)]
+    recs = [c for c in (changes or []) if isinstance(c, (tuple, list)) and len(c) == 2 and isinstance(c[1], dict)]
+    handed = any(c == "handed" and clean(f.get("who")) not in ("", "no one") for c, f in recs)
     out: list[str] = []
-    for c in clauses:
-        m = _MOVER_CLAUSE.match(c)
-        if _DROPPED_CLAUSE.match(c) or (moved and _NEEDS_CLAUSE.match(c) and not asked):
+    for code, f in recs:
+        if code in DROPPED_CODES and handed:
             continue
-        if asked and c.lower() in ("needs: decision", "state: your-call"):
-            if _t("item.change.asked") not in out:
-                out.append(_t("item.change.asked"))
-        elif m and clean(m.group("to")) not in ("", "no one"):
-            out.append(_t("item.change.handed", who=clean(m.group("to"))))
-        elif _CLEARED_CLAUSE.match(c):
-            out.append(_t("item.change.back_to_work"))
-        elif c == "state: your-step":
-            out.append(_t("item.change.gave_step"))
-        elif re.match(r"^next\b", c) and not _KEPT_CLAUSE.match(c):
-            out.append(_t("item.change.next_changed"))
-        elif re.match(r"^description\b", c):
-            out.append(_t("item.change.background"))
+        if code in CHANGE_CODES and not (code == "handed" and clean(f.get("who")) in ("", "no one")):
+            line = _t("item.change." + code, **{k: clean(v) for k, v in f.items()})
         else:
-            out.append(c)                                   # completed …, woke: …, named … and anything unrecognised: as written
-    return ", ".join(out[:LAST_CLAUSES]) if out else t
+            line = clean(f.get("text"))                      # anything the log has no line for: as written
+        if line and line not in out:
+            out.append(line)
+    return ", ".join(out[:LAST_CLAUSES])
 
 
-def last_change(who: Any, what: Any, esc: Callable[[str], str] = str) -> str:
-    """The latest History entry as the tail of the state line's "updated <age>": ` by <who>: <what>`, `what` in plain words (plain_change) and cut to UPDATED_CLIP characters on a word
-    with no closing stop, all of it through `esc` (plain text to HTML). "" when the entry has no `what`; no ` by` when it has no `who`."""
-    t = clip(plain_change(what), UPDATED_CLIP).rstrip(".:")
+def last_change(who: Any, changes: Any, esc: Callable[[str], str] = str) -> str:
+    """The latest History entry as the tail of the state line's "updated <age>": ` by <who>: <what>`, `what` in plain words (plain_change of the entry's `changes`) and cut to UPDATED_CLIP
+    characters on a word with no closing stop, all of it through `esc` (plain text to HTML). "" when the entry has no change; no ` by` when it has no `who`."""
+    t = clip(plain_change(changes), UPDATED_CLIP).rstrip(".:")
     if not clean(t):
         return ""
     return _t("item.change.by", who=esc(clean(who)), what=esc(t)) if clean(who) else _t("item.change.plain", what=esc(t))

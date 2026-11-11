@@ -164,23 +164,23 @@ check("both layouts read the same markup: the sidebar sits before the main colum
 
 # ---- 2. the latest change in plain words (itempage.plain_change, last_change) and the page without a Where it stands section
 PC = itempage.plain_change
-check("plain words: a hand-over, a next edit and a description edit", PC("needs: heron-engineer; mover: falcon-redesign → heron-engineer; next edited") == "handed to heron-engineer, changed what comes next"
-      and PC("mover: A → B; next edited; description edited") == "handed to B, changed what comes next" and PC("description edited 2×, 11:50–11:53") == "updated the background", PC("mover: A → B; next edited; description edited"))
-check("plain words: needs decision with state your-call is one asked-for-your-decision, in the place of the first", PC("needs: decision; state: your-call; next and ask edited") == "asked for your decision, changed what comes next"
-      and PC("state: your-call; needs: decision") == "asked for your decision" and PC("needs: decision") == "needs: decision" and PC("state: your-call") == "state: your-call", PC("needs: decision; state: your-call; next and ask edited"))
-check("plain words: your-step is a step for you; model and expected_by clauses are dropped", PC("state: your-step; step edited") == "gave you a step, step edited" and PC("model: opus; expected_by: 2026-10-29; next edited") == "changed what comes next"
-      and PC("state: doing; expected_by: 2026-10-29; mover: Oliver → ops-x") == "handed to ops-x" and PC("expected_by: 2026-10-29") == "expected_by: 2026-10-29", None)
-check("plain words: needs <session> goes when a mover clause is there (the hand-over says it), not otherwise and not for a decision; state: doing goes; a cleared state is taking it back to work; nothing left shows the full text",
-      PC("needs: a, b; mover: A → B; next edited") == "handed to B, changed what comes next" and PC("needs: ops-x") == "needs: ops-x" and PC("needs: decision; mover: A → B") == "needs: decision, handed to B"
-      and PC("state cleared (was doing)") == "took it back to work" and PC("state cleared (was your-step); next edited") == "took it back to work, changed what comes next" and PC("state: doing") == "state: doing" and PC("model: opus; state: doing") == "model: opus; state: doing", None)
-check("plain words: completed, woke, named and anything unrecognised stay as written; only the first two clauses show; a hand-over to no one stays as written",
-      PC("state cleared") == "state cleared" and PC("completed: done as asked") == "completed: done as asked" and PC("woke: the PR merged") == "woke: the PR merged" and PC("named x") == "named x"
-      and PC("next edited; description edited; state: your-step") == "changed what comes next, updated the background" and PC("mover: A → no one") == "mover: A → no one" and PC("created as “[home] x”") == "created as “[home] x”" and PC("") == "", None)
-check("plain words: a semicolon inside a field's value is no clause: a clause starts only at '; ' and a label the History writes",
-      PC("next: …queued behind #7; then the IDs into the instance config") == "changed what comes next"
-      and PC("next: a; b; needs: x") == "changed what comes next, needs: x" and PC("needs: x; next: a; b; c") == "needs: x, changed what comes next"
-      and PC("state: your-step; step: do a; then b; next edited") == "gave you a step, step: do a; then b" and PC("description: a; b; next edited") == "updated the background, changed what comes next"
-      and PC("next edited; description edited; state: your-step") == "changed what comes next, updated the background", PC("next: a; b; needs: x"))
+CH = itempage.change
+check("plain words: a hand-over, a next edit and a background edit, each from its own line; the names of whom it waits on go when the hand-over says it",
+      PC([CH("needs_named"), CH("handed", who="heron-engineer"), CH("next_changed")]) == "handed to heron-engineer, changed what comes next"
+      and PC([CH("handed", who="B"), CH("next_changed"), CH("background")]) == "handed to B, changed what comes next" and PC([CH("background")]) == "updated the background", PC([CH("handed", who="B"), CH("next_changed"), CH("background")]))
+check("plain words: asked for his decision, and a step for him, each one line; a kind twice is said once",
+      PC([CH("asked"), CH("next_changed")]) == "asked for your decision, changed what comes next" and PC([CH("asked")]) == "asked for your decision"
+      and PC([CH("gave_step"), CH("next_changed")]) == "gave you a step, changed what comes next" and PC([CH("next_changed"), CH("next_changed")]) == "changed what comes next", PC([CH("asked"), CH("next_changed")]))
+check("plain words: needs <session> goes when a hand-over is there, not otherwise; taking it back to work is one line; a change with no line of its own stays as written",
+      PC([CH("needs_named"), CH("handed", who="B"), CH("next_changed")]) == "handed to B, changed what comes next"
+      and PC([CH("text", text="needs: ops-x")]) == "needs: ops-x" and PC([CH("back_to_work"), CH("next_changed")]) == "took it back to work, changed what comes next"
+      and PC([CH("text", text="model: opus; state: doing")]) == "model: opus; state: doing", None)
+check("plain words: a plain string is one change as written; only the first two changes show; a hand-over to no one stays as the entry's text; nothing is ''",
+      PC("completed: done as asked") == "completed: done as asked" and PC("created as “[home] x”") == "created as “[home] x”" and PC("") == "" and PC([]) == "" and PC(None) == ""
+      and PC([CH("next_changed"), CH("background"), CH("asked")]) == "changed what comes next, updated the background"
+      and PC([CH("handed", who="no one"), CH("text", text="mover: A → no one")]) == "mover: A → no one" and PC([CH("handed", who="")]) == "", None)
+check("plain words: a semicolon inside a change's text is not a break of its own (the text is one change, as the log wrote it)",
+      PC([CH("text", text="next: …queued behind #7; then the IDs into the instance config")]) == "next: …queued behind #7; then the IDs into the instance config", None)
 long_what = ("x" * 40 + " ") * 6
 check("a long change is clipped on a word and ends in an ellipsis; a missing who or what is left out; the text is escaped",
       len(itempage.last_change("Oliver", long_what, str)) <= 110 and itempage.last_change("Oliver", long_what, str).endswith("…")
