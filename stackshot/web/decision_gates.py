@@ -1,6 +1,6 @@
 """decision_gates.py: what the ask and the options of a needs=decision item may say. The write gates that refuse an ask naming alternatives while no options are listed, an open
 question with no options, a mockup linked outside the ask, several decisions in one ask, and the owner's own action put as a decision, and the two notes a write's reply may end with
-(the Recommend part that names no option, an option or ask that says "you" without naming who acts).
+(the Recommend part that names no option; an option label or line that says I, you, we, us or me, and an ask line that says I, you or me, without naming who acts).
 
 Each is a pure function of the item's metadata (and the description) that raises ToolError with the refusal, or returns the note; none reads the store or changes anything. server.py
 imports every name from here and keeps it on its own module as well, so the writes and the tests reach them as `server.<name>`. `_gate_options`, the shape of options=[...], stays in
@@ -335,30 +335,47 @@ def _options_note(meta: dict[str, Any]) -> str:
     return f"\n(note: the ask's Recommend part does not name the recommended option, \u201c{rec}\u201d; name it there so the two agree.)"
 
 
-# Option labels and the ask line name who acts (the owner, a session's name, a role), never a bare "you" or "I" (an option
-# such as "A: flag, you approve" can be read as the session approving).
-# A note in the reply, never a refusal. English only; text inside quotes or backticks is skipped.
+# Option labels, option lines and the ask line name who acts (the owner, a session's name, a role), never a bare "you" or "I" (an option
+# such as "A: flag, you approve" can be read as the session approving). An option's label and line also say neither "we" nor "us".
+# A note in the reply, never a refusal. English only; text inside double quotes or backticks is skipped (a person's quoted words).
 _QUOTED_RX = re.compile(r"`[^`]*`|\"[^\"]*\"|\u201c[^\u201d]*\u201d")
-_BARE_PRONOUN_RX = re.compile(r"(?<![\w'\u2019/.-])(you|your|yours|yourself|i|me|my|mine|myself)(?:['\u2019](?:ll|re|ve|d|m))?(?![\w/'\u2019-])(?!\.\w)", re.I)
+_PRONOUN_TAIL = r"(?:['\u2019](?:ll|re|ve|d|m))?(?![\w/'\u2019-])(?!\.\w)"
+_PRONOUN_HEAD = r"(?<![\w'\u2019/.-])"
+_BARE_PRONOUN_RX = re.compile(_PRONOUN_HEAD + r"(you|your|yours|yourself|i|me|my|mine|myself)" + _PRONOUN_TAIL, re.I)
+# For an option's label and line: the same words plus we/our/ours/us (and ourselves). A whole word only: "usage", "mine-sweeper", "US-EAST" and
+# "I/O" are not hits, and an all-caps "US" (the abbreviation) is not the pronoun.
+_OPT_PRONOUN_RX = re.compile(_PRONOUN_HEAD + r"(you|your|yours|yourself|i|me|my|mine|myself|we|our|ours|ourselves|us)" + _PRONOUN_TAIL, re.I)
+_ACTOR_EXAMPLE = "\u201c{who} unpublishes\u201d instead of \u201cI unpublish\u201d"
 
 
-def _bare_pronoun(text: str) -> str:
-    """The first bare you/your/I/I'll/me/my in `text` (quoted and backticked spans skipped), else ""."""
-    m = _BARE_PRONOUN_RX.search(_QUOTED_RX.sub(" ", text))
-    return m.group(0) if m else ""
+def _bare_pronoun(text: str, rx: re.Pattern[str] = _BARE_PRONOUN_RX) -> str:
+    """The first bare you/your/I/I'll/me/my in `text` (quoted and backticked spans skipped), else "". `rx` widens the word list (see _OPT_PRONOUN_RX)."""
+    for m in rx.finditer(_QUOTED_RX.sub(" ", text)):
+        if m.group(0) == "US":      # the abbreviation, not the pronoun
+            continue
+        return m.group(0)
+    return ""
 
 
 def _actor_note(meta: dict[str, Any], options: bool = True, ask: bool = True) -> str:
-    """Reply notes when an option label or the ask line says you/I/me/my without naming who acts, else ""; at most three lines."""
+    """Reply notes when an option's label or line, or the ask line, says you/I/me/my (an option also we/our/us) without naming who acts, else "";
+    one note per option (its label first, else its line), at most three of them, and the ask line's note always besides."""
     out: list[str] = []
+    ask_out: list[str] = []
+    eg = _ACTOR_EXAMPLE.format(who=OWNER)
     if options:
-        for o in meta.get("options") or []:
-            label = str(o.get("label") or "") if isinstance(o, dict) else ""
-            w = _bare_pronoun(label)
+        for n, o in enumerate(meta.get("options") or [], 1):
+            if not isinstance(o, dict):
+                continue
+            label, line = str(o.get("label") or ""), str(o.get("line") or "")
+            w, part = _bare_pronoun(label, _OPT_PRONOUN_RX), "option"
+            if not w:
+                w, part = _bare_pronoun(line, _OPT_PRONOUN_RX), "the line of option"
             if w:
-                out.append(f'\n(note: option \u201c{label}\u201d says \u201c{w}\u201d: name who acts, e.g. {OWNER}.)')
+                name = f"\u201c{label}\u201d" if label else str(n)      # an empty label: the option's place
+                out.append(f'\n(note: {part} {name} says \u201c{w}\u201d: name who acts, e.g. {eg}.)')
     if ask:
         w = _bare_pronoun(str(meta.get("ask") or ""))
         if w:
-            out.append(f'\n(note: the ask line says \u201c{w}\u201d: name who acts, e.g. {OWNER}.)')
-    return "".join(out[:3])
+            ask_out.append(f'\n(note: the ask line says \u201c{w}\u201d: name who acts, e.g. {eg}.)')
+    return "".join(out[:3] + ask_out)
