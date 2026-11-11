@@ -1268,18 +1268,11 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
     return key, proj, list(builder), hub
 
 
-def _project_builders(project: str) -> list[str]:
-    """The project's builder as the front-mover rule reads it: its hand-off builder, else its first background agent; [] when it has neither (a project with only front agents)."""
-    if not project:
-        return []
-    return _handoff_builder(project) or _hub_sessions(project)[2][:1]
-
-
 def _builderless_answer_to(meta: dict[str, Any], project: str) -> str:
-    """Who takes an item of a project with no builder when the owner's step is answered and the item stores no `then` (builderless.answer_target): the session its next open step names, else its
-    contact; "" when the project has a builder, neither names a session, or a read fails (the caller then keeps the project's keeper, as before)."""
+    """Who takes an item of a front-only project (anchors.front_only) when the owner's step is answered and the item stores no `then` (builderless.answer_target): the session its next open step names, else its
+    contact; "" when the project has a background agent, neither names a session, or a read fails (the caller then keeps the project's keeper, as before)."""
     try:
-        if not project or _project_builders(project):
+        if not project or not _anc.front_only(project):
             return ""
         nm = _anc.names()
         def usable(who: str) -> bool:      # a front agent of this item's project, as mover= may name one (a step line does no more)
@@ -1292,14 +1285,14 @@ def _builderless_answer_to(meta: dict[str, Any], project: str) -> str:
 
 
 def _front_pair_ok(sender: str, key: str, project: str) -> bool:
-    """May `sender` hand an item of `project` to the front agent `key` (builderless.pair_allowed): both are live front agents of the project the item is filed under (one page), and the project has no builder. A project with no agents map has no front agent to name."""
+    """May `sender` hand an item of `project` to the front agent `key` (builderless.pair_allowed): both are live front agents of the project the item is filed under (one page), and the project is front-only (anchors.front_only). A project with no agents map has no front agent to name."""
     try:
         s = str(sender or "").strip()
         if not s:
             return False
         nm = _anc.names()
         roles, skey = _role_of(s, nm)
-        return _bl.pair_allowed(roles.get(skey) if skey else None, roles.get(key), _project_builders(project), project)
+        return _bl.pair_allowed(roles.get(skey) if skey else None, roles.get(key), _anc.front_only(project), project)
     except Exception:  # noqa: BLE001  — the relaxation is an extra: a failed read keeps the refusal
         return False
 
