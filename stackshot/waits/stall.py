@@ -15,7 +15,7 @@ has a later `statusUpdatedAt`, so a turn starting restarts the count.
     step 1  -> `cold`     one `claude -p` call (the hand-off's cold call) names who takes it, or closes the item; it never asks the owner (an ask_owner, none or unusable answer is not written,
                           and the item goes on to the builder at once). An answer that names the session already moving the item keeps it there (`kept`): the mover is told once, the builder is not asked,
                           the owner is not asked, and the pass leaves the item alone for `KEEP` (spent)
-    step 2  -> `builder`  the project's builder; none able, the last rung: ONE message to the fleet's builder naming the item and the quiet session, asking it to take the fix through its usual path (the
+    step 2  -> `builder`  the project's builder; none able, the last rung: ONE message to the fleet's builder (the project's -main agent for a front-only project: no background agent on its map) naming the item and the quiet session, asking it to take the fix through its usual path (the
                           hand-off record carries the request, so the pass sends it once per record, and a History line says so). The item stays with its mover; it does not go to the owner
 
 The cold call is made at most once per item in `KEEP` seconds (it bounds a ping-pong between two sessions that each hand the item back).
@@ -37,7 +37,7 @@ server's start and a reload show it too (config.stall_notes).
 What an agent does when the pass takes a wrong step on an item (a notice it should not have sent, a hand-off or a close it should not have made, a recovery request it should not have made):
 
 1. Undo the step on the item, with `update`. What can be undone: a hand-off or a close (`cold`, `builder`): set `mover` and `next` back (a closed item: `status=open` with a new `next`); a recovery request
-   (`recover`: a message to the fleet's builder, the item untouched): nothing on the item to undo; the line in `metadata.stall.log` stays as the record. What cannot be undone: the
+   (`recover`: a message to the fleet's builder, or a front-only project's -main agent, the item untouched): nothing on the item to undo; the line in `metadata.stall.log` stays as the record. What cannot be undone: the
    notice already sent (`resend`), the recovery message and the cold call's text; all are harmless and need nothing.
 2. Fix the cause through a normal PR to stackshot (hand it to example-engineer): the step was wrong because `not_due`, `action` or the registry signal read the item wrong, and that is code.
 3. If wrong steps reach the owner before the fix lands, ask the owner for a pause that ends by itself: he answers on a board item, and `pause_item` names it. An agent never sets `enabled = false` on its

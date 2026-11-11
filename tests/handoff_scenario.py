@@ -136,6 +136,7 @@ def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
 set_cfg()
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the last rung of the ladder asks it, once, to recover a session nobody could hand the item to
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
+def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 server._COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 COLD_MSGS = []
 def cold(answer, status="ok"):
@@ -531,7 +532,7 @@ tick(d45 + 11 * MIN, 45); drain()
 check("5 return: the project has no background agent and the cold call is off: the item goes back to its sender (the last fallback)", ho(45).get("to") == "home-send" and ho(45).get("via") == "return" and mt(45)["needs"][0] == "home-send", (ho(45), mt(45)))
 d45b = ho(45).get("delivered_at"); check("5 return: …told to the sender as an item that came back", isinstance(d45b, float) and len(pushes_to("home-send", "a45")) == 1 and "came to you" in pushes_to("home-send", "a45")[0][1], pushes())
 tick(d45b + 11 * MIN, 45); drain()
-check("5 recovery: …and when the sender does not take it either, the fleet's builder is asked once (no ping-pong)", bool(ho(45).get("recovery_at")) and ho(45).get("to") == "home-send" and len(recovery_pushes("a45")) == 1, (ho(45), recovery_pushes("a45")))
+check("5 recovery: …and when the sender does not take it either, the project's -main agent (beta lists no background agent) is asked once (no ping-pong)", bool(ho(45).get("recovery_at")) and ho(45).get("to") == "home-send" and len(main_recovery_pushes("a45")) == 1, (ho(45), main_recovery_pushes("a45")))
 item(47, project="projects/beta", owner=U["home-beta-front"], needs=["decision"], ask=ASK, next=f"{OWN}: decide")
 hand(47, "home-peer", sender="home-beta-front", clear_needs=True); drain()
 check("5 return: (setup) a hand-off whose sender is a front agent is recorded", ho(47).get("from") == "home-beta-front", ho(47))
@@ -554,7 +555,7 @@ check("5 gone: …the brief counts the items with no record, as `mover gone: n`,
 set_cfg(cold_call=False)
 item(53, project="projects/beta", owner=U["home-beta-front"], needs=["home-dead"], next="home-dead: do the thing", handoff=rec("home-dead"))
 tick(None, 53); drain()
-check("5 gone: …with no builder and no cold call, the fleet's builder is asked, and the reason says the project lists none", bool(ho(53).get("recovery_at")) and "no builder" in ho(53).get("recovery_reason", "") and "is gone" in ho(53).get("recovery_reason", "") and len(recovery_pushes("a53")) == 1, (ho(53), recovery_pushes("a53")))
+check("5 gone: …with no builder and no cold call, the project's -main agent is asked, and the reason says the project lists none", bool(ho(53).get("recovery_at")) and "no builder" in ho(53).get("recovery_reason", "") and "is gone" in ho(53).get("recovery_reason", "") and len(main_recovery_pushes("a53")) == 1, (ho(53), main_recovery_pushes("a53")))
 set_cfg()
 # the cold call's message and the answer parser, pure
 check("5 cold: the answer parser takes the JSON out of prose and a fence, and only the three actions", CC.parse("sure:\n```json\n{\"action\": \"close\", \"outcome\": \"done\"}\n```")["action"] == "close" and CC.parse("{\"action\": \"delete\"}") is None and CC.parse("") is None, None)
@@ -1398,15 +1399,15 @@ check("18 C gone: the cold call is asked at once and nothing is sent to the gone
       "a1802" in done and len(COLD_MSGS) == 1 and not pushes_to("home-dead", "a1802") and mt(1802)["mover"] == "team-back" and ho(1802).get("via") == "redirect" and not recovery_pushes("a1802"), (done, mt(1802), pushes()))
 close_(1802)
 
-# D. nobody to take it: the last rung asks the fleet's builder once; the item stays with its mover; the owner is not asked
+# D. nobody to take it: the last rung asks the project's -main agent once (the fleet's builder when the project has a builder); the item stays with its mover; the owner is not asked
 set_cfg(cold_call=False); COLD_MSGS.clear()
 item(1803, project="projects/beta", mover="home-peer2", handoff=rec("home-peer2")); cli_row("home-peer2", "idle", IDLE17)
 hot(N0, 1803); stk(N0 + 31 * MIN)
-check("18 D: ask, then look: two notices and no recovery request yet", len(notices("home-peer2", 1803)) == 2 and not recovery_pushes("a1803"), pushes_to("home-peer2"))
+check("18 D: ask, then look: two notices and no recovery request yet", len(notices("home-peer2", 1803)) == 2 and not main_recovery_pushes("a1803"), pushes_to("home-peer2"))
 done = stk(N0 + 41 * MIN + 1)
-check("18 D last: the cold call is off, the project lists no builder: ONE message asks the fleet's builder to recover it; the item stays with its mover and is not put to the owner",
-      "a1803" in done and len(recovery_pushes("a1803")) == 1 and mt(1803)["mover"] == "home-peer2" and ho(1803).get("recovery_at") and "decision" not in (mt(1803).get("needs") or []) and not mt(1803).get("ask"), (done, recovery_pushes("a1803"), mt(1803)))
-check("18 D last: …and later passes send nothing more", stk(N0 + 3 * 3600) == [] and hot(N0 + 3 * 3600, 1803) == [] and len(recovery_pushes("a1803")) == 1, recovery_pushes("a1803"))
+check("18 D last: the cold call is off, the project lists no builder: ONE message asks its -main agent to decide; the item stays with its mover and is not put to the owner",
+      "a1803" in done and len(main_recovery_pushes("a1803")) == 1 and mt(1803)["mover"] == "home-peer2" and ho(1803).get("recovery_at") and "decision" not in (mt(1803).get("needs") or []) and not mt(1803).get("ask"), (done, main_recovery_pushes("a1803"), mt(1803)))
+check("18 D last: …and later passes send nothing more", stk(N0 + 3 * 3600) == [] and hot(N0 + 3 * 3600, 1803) == [] and len(main_recovery_pushes("a1803")) == 1, main_recovery_pushes("a1803"))
 close_(1803); set_cfg()
 
 # E. two failed pushes: the ask cannot reach the mover, the ladder starts at the cold call

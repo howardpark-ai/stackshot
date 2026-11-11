@@ -678,6 +678,16 @@ def recipient(who: str, project: str, env: Env, mover: str = "") -> tuple[str, b
     return page_key(project), False
 
 
+def chase_to(env: Env, project: str, mover: str, first_to: str = "") -> tuple[str, bool]:
+    """(who is told to chase `mover`'s unmoved finding or item of `project`, whether that message is marked `[for <owner>]`): `Env.chase_of` (a front-only project's -main agent, else its builder), except that
+    the one told is never the one that did not answer: when it is the mover, or the session the finding first went to (`first_to`, else where the mover's finding goes), the project's page key takes it, unmarked,
+    where the router rules it. Level 1 of a finding and the unmoved digest both use it, so a -main agent is never told to chase itself."""
+    b, bfront = env.chase_of(project)
+    if str(project or "").strip() and _norm_name(b) in {_norm_name(mover), _norm_name(recipient(first_to or mover, project, env, mover)[0])}:
+        return page_key(project), False
+    return b, bfront
+
+
 def finding_key(f: dict[str, Any]) -> tuple[str, str, str]:
     """What makes two findings the same finding: the item, the check and, for the two reports whose category holds several checks (`next rules`: the rule, `board checks`: the kind), which one."""
     cat = str(f.get("category") or "")
@@ -794,12 +804,13 @@ def par_target(f: dict[str, Any], env: Env) -> tuple[str, bool]:
     return _cfg.audit_main(), True
 
 
-def page_agent_groups(res: dict[str, Any], env: Env) -> dict[str, dict[str, Any]]:
-    """The page agent lines by the agent they go to: {to: {"front", "lines", "pages"}}. A page whose own -main agent and fallbacks are none that sala knows goes to the audit's -main agent (`par_target`)."""
-    groups: dict[str, dict[str, Any]] = {}
+def page_agent_groups(res: dict[str, Any], env: Env) -> dict[tuple[str, bool], dict[str, Any]]:
+    """The page agent lines by the agent they go to and whether the message is marked for the owner: {(to, front): {"front", "lines", "pages"}}, as `deliver_findings` keys its groups (the one agent can be reached both
+    ways: a line that names a background session, and a line that falls to the audit's -main agent when that agent is the same session). A page whose own -main agent and fallbacks are none that sala knows goes to the audit's -main agent (`par_target`)."""
+    groups: dict[tuple[str, bool], dict[str, Any]] = {}
     for f in res.get("findings") or []:
         to, front = par_target(f, env)
-        g = groups.setdefault(to, {"front": front, "lines": [], "pages": set(), "gaps": 0})
+        g = groups.setdefault((to, front), {"front": front, "lines": [], "pages": set(), "gaps": 0})
         g["lines"].append(par_line(f))
         g["gaps"] += f.get("line") in ("no agents map", "no front agent", "other project's session", "session off the map")      # a project with items and no agent, or a session its map has no line for (tools/page_agent_report.py `agentless`, `offmap`), not a name sala has lost
         g["pages"].add(f["page"])
@@ -834,10 +845,9 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
     sent: list[dict[str, Any]] = []
     sending_from = env.clock()
     reached_fs: list[dict[str, Any]] = []
-    groups: dict[str, dict[str, Any]] = {}
-    esc: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    groups: dict[tuple[str, bool], dict[str, Any]] = {}     # (recipient, whether its message is marked for the owner), as `esc` and the digest: one session can be a front agent for one project and the mover of another's item
+    esc: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its message is marked for the owner): one session can be a front agent for one project and a builder for another, and gets one message of each kind
     up: dict[str, list[tuple[dict[str, Any], str]]] = {}
-    esc_front: set[str] = set()       # the recipients of `esc` that are front agents: their message is marked for the owner
     for f in [f for f in fresh if f.get("escalate") == 2]:       # still unanswered after the builder was told: the project's -main agent hears of a finding that went to a builder, once (marked for the owner, as every message to it)
         proj = str(f.get("project") or "")
         to0, front0 = recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")
@@ -855,28 +865,24 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             reached_fs += [f for f, _ln in ls]
     for f in [f for f in fresh if f.get("escalate") == 1]:       # a finding that stayed unanswered through its reminders goes to the project's builder, as the daily run's unmoved flag does, and to no one else
         proj = str(f.get("project") or "")
-        b, bfront = env.chase_of(proj)       # a front-only project's -main agent (marked for the owner), else its builder
-        if proj and _norm_name(b) in {_norm_name(f.get("mover")), _norm_name(recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")[0])}:
-            b, bfront = page_key(proj), False       # the one told is the one that did not answer: the page key, where the router rules it, never the mover itself
-        elif not proj and not b:
+        b, bfront = chase_to(env, proj, f.get("mover") or "", f.get("to") or "")       # a front-only project's -main agent (marked for the owner), else its builder; the page key when that is the mover itself
+        if not proj and not b:
             continue
-        if bfront:
-            esc_front.add(b)
-        esc.setdefault(b, []).append((f, f"{f['id']} · unmoved after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
+        esc.setdefault((b, bfront), []).append((f, f"{f['id']} · unmoved after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
     fresh = [f for f in fresh if not f.get("escalate")]
-    for to, ls in sorted(esc.items()):
-        ok, said = _send(env, to, compose([ln for _f, ln in ls], f"[stackshot] {label}: {len(ls)} finding(s) its mover did not answer after repeated messages; chase the mover (job).", to in esc_front))
+    for (to, front), ls in sorted(esc.items()):
+        ok, said = _send(env, to, compose([ln for _f, ln in ls], f"[stackshot] {label}: {len(ls)} finding(s) its mover did not answer after repeated messages; chase the mover (job).", front))
         sent.append({"to": to, "lines": len(ls), "delivered": ok, "said": _clip(said, 120), "kind": "unmoved"})
         if ok:
             for f, _ln in ls: f["lvl"] = 1       # kept on the record: only a builder send made with the level kept is followed by the message to -main (split_sent)
             reached_fs += [f for f, _ln in ls]
     for f in fresh:
         to, front = recipient(f.get("to") or f.get("mover") or "", f["project"], env, f.get("mover") or "")
-        g = groups.setdefault(to, {"front": front, "lines": [], "by": [], "fs": []})
+        g = groups.setdefault((to, front), {"front": front, "lines": [], "by": [], "fs": []})
         g["lines"].append(line_of(f))
         g["by"].append((f["project"], line_of(f)))
         g["fs"].append(f)
-    for to, g in sorted(groups.items()):
+    for (to, _front), g in sorted(groups.items()):
         text = compose(g["lines"], f"[stackshot] {label}: {len(g['lines'])} item(s) for you (id · check · evidence · what fixes it).", g["front"])
         ok, said = _send(env, to, text)
         sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120)})
@@ -1387,24 +1393,20 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Board audit {label}")
     sending_from = max(sending_from, t0)
     # the unmoved digest lists an item once: the run that first finds it unmoved chases it to the builder, and only a delivered digest counts as a chase; the record's `stuck` and the summary keep naming it until it is written
-    jobs: dict[str, list[tuple[dict[str, Any], str]]] = {}
-    job_front: set[str] = set()       # the recipients of `jobs` that are front agents (a front-only project's -main): their digest is marked for the owner
+    jobs: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its digest is marked for the owner: a front-only project's -main agent); as `esc`, keyed by both
     for s in stuck:
         if s["chased"]:
             continue
-        to_s, front_s = env.chase_of(s["project"])
-        if front_s:
-            job_front.add(to_s)
-        jobs.setdefault(to_s, []).append((s, f"{s['id']} · unmoved since {s['first_flagged']} · {s['category']} · {s['detail']} · {s['mover'] or 'its mover'} writes it, or says what holds it"))
-    for to, ls in sorted(jobs.items()):
-        ok, said = _send(env, to, compose([ln for _s, ln in ls], f"[stackshot] Board audit {label}: {len(ls)} flagged item(s) still unmoved since an earlier run; chase the mover (job).", to in job_front))
+        jobs.setdefault(chase_to(env, s["project"], s["mover"]), []).append((s, f"{s['id']} · unmoved since {s['first_flagged']} · {s['category']} · {s['detail']} · {s['mover'] or 'its mover'} writes it, or says what holds it"))
+    for (to, front), ls in sorted(jobs.items()):
+        ok, said = _send(env, to, compose([ln for _s, ln in ls], f"[stackshot] Board audit {label}: {len(ls)} flagged item(s) still unmoved since an earlier run; chase the mover (job).", front))
         sent.append({"to": to, "lines": len(ls), "delivered": ok, "said": _clip(said, 120), "kind": "unmoved"})
         if ok:
             for st, _ln in ls:
                 st["chased"] = True
 
     # the page agent lines: one message per agent, listing its pages' leftovers (a front agent's starts with [for <owner>]); it asks the agent to fix the line or retire the name, so it is no fyi
-    for to, g in sorted(page_agent_groups(pa, env).items()):
+    for (to, _front), g in sorted(page_agent_groups(pa, env).items()):
         head = (f"[stackshot] Page agent lines {label}: {len(g['lines'])} line(s) on {len(g['pages'])} page(s) name a session sala no longer knows (page · line · name · what fixes it); fix the line or retire the name."
                 if not g["gaps"] else
                 f"[stackshot] Page agent lines {label}: {len(g['lines'])} line(s) on {len(g['pages'])} page(s) need a fix (page · line · name · what fixes it): a session sala no longer knows, a project with items and no agents map, or a session working on a project whose agents map has no line for it; each line says the fix.")
@@ -1417,7 +1419,7 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     registry_told: list[str] = []
     if _cfg.registry_audit_send() and not rg.get("unrouted"):
         told_today = {m.get("to") for h in hist if h.get("date") == date for m in (h.get("messages") or []) if m.get("kind") == "registry" and m.get("delivered")}
-        for to, g in sorted(page_agent_groups(rg, env).items()):
+        for (to, _front), g in sorted(page_agent_groups(rg, env).items()):
             if to in told_today:
                 registry_told.append(to)
                 continue

@@ -162,13 +162,13 @@ check("a page with many such sessions has one line: four named, the rest counted
 # ---- 4. the same line through the audit's delivery
 env = AR.Env(roles={MAIN: {"role": "front"}, BUILD: {"role": "background"}}, registry=lambda: REG, sessions=sess(), fallback=lambda p: MAIN, builder=lambda p: BUILD)
 groups = AR.page_agent_groups(res, env)
-check("the lines are grouped for the agent the page falls to, a front agent: marked", list(groups) == [MAIN] and groups[MAIN]["front"] is True, {k: v["front"] for k, v in groups.items()})
+check("the lines are grouped for the agent the page falls to, a front agent: marked", list(groups) == [(MAIN, True)] and groups[(MAIN, True)]["front"] is True, {k: v["front"] for k, v in groups.items()})
 check("…the group carries both kinds for the moved page and counts as a gap, so the header says what is wrong",
-      any("projects/example-three · session off the map · " in ln for ln in groups[MAIN]["lines"]) and any("projects/example-three · no agents map · " in ln for ln in groups[MAIN]["lines"]) and groups[MAIN]["gaps"] >= 3, groups[MAIN]["lines"])
+      any("projects/example-three · session off the map · " in ln for ln in groups[(MAIN, True)]["lines"]) and any("projects/example-three · no agents map · " in ln for ln in groups[(MAIN, True)]["lines"]) and groups[(MAIN, True)]["gaps"] >= 3, groups[(MAIN, True)]["lines"])
 sent = []
 env.deliver = lambda to, text, fyi=False: (sent.append((to, text, fyi)) or (True, "[200] ok"))
 head = "[stackshot] Page agent lines test: need a fix"
-text = AR.compose(groups[MAIN]["lines"], head, groups[MAIN]["front"])
+text = AR.compose(groups[(MAIN, True)]["lines"], head, groups[(MAIN, True)]["front"])
 check("the message to the -main agent starts with the owner's mark on line 1 (the rule for a front agent)", text.splitlines()[0] == f"[for {OWNER}]" and "session off the map" in text, text.splitlines()[:3])
 out = []
 AR.run(dry=True, now=time.time(), items={t_["gid"]: t_ for t_ in A.items()}, anchors={}, env=env, rubric="", out=out.append)
