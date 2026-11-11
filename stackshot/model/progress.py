@@ -7,7 +7,9 @@ Why a clock of its own. `activity` (activity.py) answers "has anyone written to 
 wrong for a stuck one, since a busy mover that answers "no change" every hour keeps it fresh. `progress` moves only for what is movement:
 
   counts   a step marked done or dropped, a state change (the item's status, its phase, the kind of its wait, its mover, its state or its needs), a pull request merged for the item
-           (the "merged <ref>" entry of `metadata.released_told` the server adds when the merge settles the item), the item being created
+           (the "merged <ref>" entry of `metadata.released_told` the server adds when the merge settles the item; and a key of `metadata.merged_seen`, which the server adds when the anchor
+           hub saw a pull request tied to the item merge: scoped to it by an anchor, its body naming the item, or the item's own words naming it; `server._merge_progress_tick`, the hub's
+           merge log), the item being created
   does not a status line (`work`), a note, a reply, a message, a bare confirm, a new or reworded step, a description edit; and a save that is no one's write about the work (an audit's, a migration's,
            the server's own bookkeeping) moves the clock only by a status or phase change (a wake, a close), never by a step mark, a merge note, a mover, a state or needs
 
@@ -21,6 +23,7 @@ FIELD = "progress"
 DONE, DROPPED = "done", "dropped"
 MERGED = "merged "          # the prefix of an entry of `metadata.released_told` for a merge (a bare ref there is a release)
 TOLD = "released_told"
+SEEN = "merged_seen"        # metadata: the keys ("owner/repo#n") of the pull requests the hub saw merge that are tied to the item (the server's merge pass); a separate list from `released_told`, whose entries tell the mover and settle a step
 
 
 def _meta(item: dict[str, Any] | None) -> dict[str, Any]:
@@ -49,9 +52,14 @@ def marks(item: dict[str, Any] | None) -> frozenset[tuple[str, str]]:
 
 
 def merges(item: dict[str, Any] | None) -> frozenset[str]:
-    """The pull requests the server recorded as merged for the item."""
-    told = _meta(item).get(TOLD)
-    return frozenset(str(x) for x in (told if isinstance(told, list) else []) if str(x).startswith(MERGED))
+    """The pull requests the server recorded as merged for the item: the "merged <ref>" entries of `released_told` (a merge that settled a step) and the keys of `merged_seen` (a merge the hub saw
+    that is tied to the item), as "merged <ref>" both, so a pull request in both lists is one."""
+    m = _meta(item)
+    told = m.get(TOLD)
+    seen = m.get(SEEN)
+    out = {str(x) for x in (told if isinstance(told, list) else []) if str(x).startswith(MERGED)}
+    out |= {MERGED + str(x) for x in (seen if isinstance(seen, list) else []) if str(x)}
+    return frozenset(out)
 
 
 def state_of(item: dict[str, Any] | None, phase: bool = True, who: bool = True) -> tuple[str, ...]:
