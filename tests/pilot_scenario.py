@@ -1448,8 +1448,8 @@ check("decision + hold flag: the board shows it in your call, never parked; the 
 check("decision + hold flag: the server's views agree (get, the brief's lanes)", not server._is_held(rd("a35")) and "a35 [open]" in server.stackshot_brief().partition("\n\nOn hold (")[0]
       and "on hold" not in server._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
 res = server._update("a35", next="prepping the options", sender="home-beta"); m_ = rd("a35")["metadata"]
-check("decision + hold flag: any write drops the hold, keeps the wake as a reminder, and says so",
-      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its wake " + D(4) + " stays as a reminder" in res, res)
+check("decision + hold flag: any write drops the hold, keeps its date, and says so",
+      "hold" not in m_ and wk_(m_) == D(4) and m_.get("needs") == ["decision"] and "is never on hold: the hold is dropped; its date " + D(4) + " stays, and no date parks an item on his call" in res, res)
 res = server._update("a35", hold=True, wake=D(5), sender="home-beta"); m_ = rd("a35")["metadata"]
 check("decision: hold=true on it parks nothing (the hold is dropped, the wake a reminder), never refused", "hold" not in m_ and wk_(m_) == D(5) and "the hold is dropped" in res, res)
 for i in (30, 25, 34, 31, 35, 36, 37): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: later checks count the open items

@@ -182,8 +182,13 @@ def fallback_note(kind: str, date: str, how: str, said: str) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the old parameters, as aliases
-def alias_note(used: list[str], until: str, ends: dt.date) -> str:
-    """The short reply line that names `until` when a write passed an old parameter (wake, ask_by, hold), with the last day it is accepted."""
+def alias_note(used: list[str], until: str, ends: dt.date, kept_as: str = "") -> str:
+    """The short reply line that names `until` when a write passed an old parameter (wake, ask_by, hold), with the last day it is accepted. `kept_as`: the working field a hand-off kept the date in
+    (its backstop, a wake or an ask_by: the write handed the item on, so the date is no wait and `until` is not stored); the line then says where the date is stored."""
     names = " and ".join(used)
-    return (f"\n(note: {names} {'is' if len(used) == 1 else 'are'} now written as until: the date is stored as until={until or '<date>'} and no old field. "
-            f"Pass until=<date> instead; {names} {'is' if len(used) == 1 else 'are'} accepted until {ends:%Y-%m-%d} and refused after)")
+    verb = "is" if len(used) == 1 else "are"
+    if kept_as:
+        return (f"\n(note: {names} {verb} an old parameter: this write hands the item on, so the date is stored as {kept_as}={until or '<date>'}, the hand-off's backstop, and is no wait. "
+                f"Pass until=<date> instead; {names} {verb} accepted until {ends:%Y-%m-%d} and refused after)")
+    return (f"\n(note: {names} {verb} now written as until: the date is stored as until={until or '<date>'} and no old field. "
+            f"Pass until=<date> instead; {names} {verb} accepted until {ends:%Y-%m-%d} and refused after)")

@@ -79,7 +79,7 @@ def refused(name, f, *want):
 item(1, needs=[BACK])
 out = bupd(1, wake=w(2))
 check("1 wake alone is stored as until, with no old field, and the reply names until", W.stored_until(mt(1)) == w(2) and no_old(mt(1)) and "wake is now written as until" in out and f"until={w(2)}" in out, (out[-400:], mt(1)))
-check("1 …the reply says when the old parameter stops being accepted", UW.ALIAS_UNTIL in out and "refused after" in out, out[-400:])
+check("1 …the reply says when the old parameter stops being accepted", server._wait_alias_until().isoformat() in out and "refused after" in out, out[-400:])
 item(2, needs=[BACK])
 out = bupd(2, wait_kind="relay", wait_event="the vendor's reply", ask_by=w(3))
 check("1 ask_by on a relay wait is stored as until (the relay's ask-by day), the kind beside it", W.stored_until(mt(2)) == w(3) and mt(2).get("wait_kind") == "relay" and no_old(mt(2)) and "ask_by is now written as until" in out, (out[-400:], mt(2)))
@@ -123,7 +123,17 @@ try:
     check("1 …and until still works", bupd(6, until=w(2)) and W.stored_until(mt(6)) == w(2), mt(6))
 finally:
     server._wait_alias_until = real_gate
-check("1 the window is a config value read at use: [model] wait_alias_until, the code's default when unset", server._wait_alias_until() == dt.date.fromisoformat(UW.ALIAS_UNTIL), None)
+_held_open = server._cfg.CFG.setdefault("model", {}).pop("wait_alias_until", None)      # the suites hold the window open (tests/_instance.py); the code's own default is read with the key unset
+try:
+    check("1 the window is a config value read at use: [model] wait_alias_until, the code's default when unset", server._wait_alias_until() == dt.date.fromisoformat(UW.ALIAS_UNTIL), None)
+finally:
+    if _held_open is not None:
+        server._cfg.CFG["model"]["wait_alias_until"] = _held_open
+import pathlib as _pl
+_example = (_pl.Path(__file__).resolve().parent.parent / "stackshot.example.toml").read_text(encoding="utf-8")
+check("1 stackshot.example.toml lists wait_alias_until with the code's date, next to owner_param_until (so a start from it warns of nothing)",
+      f'wait_alias_until = "{UW.ALIAS_UNTIL}"' in _example and _example.index("owner_param_until =") < _example.index("wait_alias_until ="), UW.ALIAS_UNTIL)
+check("1 …and the suites' own start holds the window open (a fixed date in the example fails no suite after it)", _held_open is None or str(_held_open) >= "2099", _held_open)
 
 # ================================================================ 2. a kind with no date takes a date
 item(10, needs=[BACK], next=f"{BACK}: the vendor replies until {w(2)}")
@@ -347,6 +357,17 @@ finally:
     server._pilot_charge, server._pilot_relay, server._writer_owes = real_charge, real_relay, real_owes
 check("5.12 a write that sets a date-only wait tells the keeper 'put on hold', and one that clears it 'released from hold'", len(rel12) == 2 and rel12[0] == "put on hold" and rel12[1] == "released from hold", rel12)
 check("5.12 ...and the minute loop is woken by the write that parks it", woke12, None)
+
+# 5.13 the words that teach the date carry the hand-off exception, and none calls a date a reminder or recommends the aliases the window ends
+until_desc = server._UNTIL_PARAM.__metadata__[0].description
+check("5.13 the until parameter's own text says that in a hand-off the date is only the backstop and parks nothing", "outside a hand-off" in until_desc and "backstop" in until_desc and "stays active" in until_desc, until_desc[:400])
+upd_desc = server._UPDATE_DESC
+check("5.13 the update description calls a date a reminder nowhere (a decision's dropped hold, the drop of a date) and drops a date with until=none",
+      "its wake stays, a reminder" not in upd_desc and "a reminder simply goes" not in upd_desc and "(its date stays" in upd_desc and 'until="none"' in upd_desc, None)
+import pathlib as pathlib_
+docs13 = {n_: (pathlib_.Path(__file__).resolve().parent.parent / "docs" / n_).read_text(encoding="utf-8") for n_ in ("handoffs.md", "waiting-and-doing.md")}
+check("5.13 docs/handoffs.md no longer calls the wake a reminder that parks only with hold=true, and says a hand-off write ends a park", "a wake parks an item only with an explicit" not in docs13["handoffs.md"] and "ends that wait" in docs13["handoffs.md"] and "backstop" in docs13["handoffs.md"], None)
+check("5.13 docs/waiting-and-doing.md's paragraph carries the hand-off exception", "outside a hand-off" in docs13["waiting-and-doing.md"] and "backstop" in docs13["waiting-and-doing.md"], None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": until write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
