@@ -243,7 +243,7 @@ def check(name, cond, got=None):
 def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
-from stackshot.web import server; from stackshot.web import render; from stackshot.github import ghsync as G
+from stackshot.web import server; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
@@ -310,9 +310,9 @@ check("the map: each new id's issue, each old id as an alias", m["issues"] == {"
       and m["aliases"] == {"a1": "g1", "a3": "g2", "a5": "g3", "s12": "g4", "s21": "g5"} and m["repo"] == "o/r", m)
 check("the files moved to g/<n>.json with the new id", rd("g", 1)["id"] == "1" and rd("g", 1)["subject"] == "[home] item a1" and rd("g", 4)["id"] == "4", rd("g", 1))
 check("the after list that named a1 now names g1", rd("g", 4)["metadata"]["after"] == ["g1"], rd("g", 4)["metadata"])
-check("_norm_id: the old id, the board form, the hash form and g<n> all name the moved item", server._norm_id("a1") == "g1" and server._norm_id("board#2") == "g2"
-      and server._norm_id("#3") == "g3" and server._norm_id("G4") == "g4" and server._norm_id("a2") == "a2", [server._norm_id(x) for x in ("a1", "board#2", "#3", "G4", "a2")])
-refused("a bad id names the board#<n> form", lambda: server._norm_id("board5"), "board#<n>")
+check("_norm_id: the old id, the board form, the hash form and g<n> all name the moved item", _model_ids._norm_id("a1") == "g1" and _model_ids._norm_id("board#2") == "g2"
+      and _model_ids._norm_id("#3") == "g3" and _model_ids._norm_id("G4") == "g4" and _model_ids._norm_id("a2") == "a2", [_model_ids._norm_id(x) for x in ("a1", "board#2", "#3", "G4", "a2")])
+refused("a bad id names the board#<n> form", lambda: _model_ids._norm_id("board5"), "board#<n>")
 check("_path resolves an old id kept in a field", server._path("a1") == STORE / "g/1.json" and server._path("a2") == STORE / "a/2.json", server._path("a1"))
 check("get by the old id answers with the item, shown as board#1", server.stackshot_get("a1").startswith("board#1 [open] [home] item a1"), server.stackshot_get("a1"))
 check("the board renders the moved items", ui_render.Board(str(STORE)).item("g1")["subject"] == "[home] item a1" and "[home] item a1" in ui_render.Board(str(STORE)).item_html("g1"))
@@ -768,7 +768,7 @@ with TestClient(server.mcp.http_app()) as c:
     r5 = c.get("/items/board-tmp-boxa-1/", follow_redirects=False); r6 = c.get("/items/board-tmp-other-1", follow_redirects=False)
 check("while temporary, the tools take board-tmp-boxa#1, board-tmp-boxa-1 and l1 alike, and update by board-tmp-boxa#1 reached it",
       all(server.stackshot_get(x).startswith("board-tmp-boxa#1 [open] [home] during an outage") for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1"))
-      and all(server._norm_id(x) == "l1" for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")) and rd("l", 1)["description"] == D("edited while down"),
+      and all(_model_ids._norm_id(x) == "l1" for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")) and rd("l", 1)["description"] == D("edited while down"),
       [server.stackshot_get(x)[:50] for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")])
 check("the issue link: a temporary item (no issue yet) shows none on its page, with sync on", G.enabled() and r1.status_code == 200 and ghl(r1.text) == [], ghl(r1.text))
 check("while temporary, /items/board-tmp-boxa-1 serves the item; /items/l1 and the trailing-slash form → 301 there; another machine's prefix is 404",
@@ -812,7 +812,7 @@ check("l2 followed as the issue after, and its after list now names g<n>", (STOR
 with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/l1", follow_redirects=False); r2 = c.get(f"/items/g{n1}"); r3 = c.get("/items/board-tmp-boxa-1", follow_redirects=False)
 check("lookups by l1, board-tmp-boxa#1 and board-tmp-boxa-1 resolve to the item: _norm_id, get (shown board#<n>), and /items/l1 and /items/board-tmp-boxa-1 → 301 to its page /items/<n>",
-      all(server._norm_id(x) == f"g{n1}" and server.stackshot_get(x).startswith(f"board#{n1} [open] [home] during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
+      all(_model_ids._norm_id(x) == f"g{n1}" and server.stackshot_get(x).startswith(f"board#{n1} [open] [home] during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
       and server._path("l1") == STORE / f"g/{n1}.json"
       and r1.status_code == 301 and r1.headers["location"] == f"/items/{n1}" and r3.status_code == 301 and r3.headers["location"] == f"/items/{n1}" and r2.status_code == 200,
       (r1.status_code, r1.headers.get("location"), r3.status_code, r3.headers.get("location"), r2.status_code))
@@ -1362,7 +1362,7 @@ check("_shown_ids: the other stored forms stay as they are (s<n>, l<n>, board#<n
 out = server._create(subject=f"[home] follow up {gk}", description=f"- Waits on {gk}\n- Not `{gk}`, nor g999\n- Finished when it works", project="projects/alpha",
                      owner="home-here", next=f"ping {gk} owner", ask="", needs="decision", options=[{"label": f"After {gk}", "line": f"Wait for {gk} to close", "recommended": True},
                                                                                          {"label": "Now", "line": "Go now", "recommended": False}])
-gw = server._norm_id(re.search(r"created (\S+)", out).group(1)); dw = rd(gw[0], gw[1:])
+gw = _model_ids._norm_id(re.search(r"created (\S+)", out).group(1)); dw = rd(gw[0], gw[1:])
 check("create: g<n> in subject, description, next and the options is stored as board#<n>; code and an unknown id stay",
       dw["subject"] == f"[home] follow up {nk}" and dw["description"] == f"- Waits on {nk}\n- Not `{gk}`, nor g999\n- Finished when it works"
       and dw["metadata"]["next"] == f"ping {nk} owner" and dw["metadata"]["options"][0]["label"] == f"After {nk}" and dw["metadata"]["options"][0]["line"] == f"Wait for {nk} to close", dw)

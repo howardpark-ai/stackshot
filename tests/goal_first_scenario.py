@@ -41,7 +41,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import bullet_text as BT
+from stackshot.web import server; from stackshot.model import bullet_text as BT; from stackshot.model import ids as _model_ids
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = lambda: None
 
@@ -53,7 +53,7 @@ def create(desc=GOOD, **kw):
     if not kw.get("next") and "ask" not in kw:
         kw["next"] = f"{MAIN}: carry on"
     r = server.stackshot_create(subject=kw.pop("subject", "[home] Make the nightly run finish by 06:00"), description=desc, project=STK, owner=MAIN, **kw)
-    return r, server._norm_id(r.split()[1])
+    return r, _model_ids._norm_id(r.split()[1])
 def update(gid, **kw): return server.stackshot_update(gid, sender=MAIN, **kw)
 def stored(gid): return json.loads((T / "store" / gid[0] / f"{gid[1:]}.json").read_text(encoding="utf-8"))
 def legacy(i, desc="- A thing\n- It lives here\n- Done when done"):
@@ -151,7 +151,7 @@ st, ans = server._client_post(me, "question", {"project": "example", "ask": "Dec
                                                "text": "The nightly run failed twice on the same step.\nCut the retry to three, or keep five and wait?", "sender": "q-script",
                                                "options": [{"label": "Cut", "line": "Cut the retry to three and go on.", "recommended": True}, {"label": "Keep", "line": "Keep five retries and wait.", "recommended": False}],
                                                "subject": "[home] Cut the nightly retry?", "request_id": "goal-q-1"})
-check("the question route files its item whatever its first bullet says", st == 200 and ans.get("item") and not stored(server._norm_id(ans["item"]))["description"].startswith("- Goal:"), (st, ans))
+check("the question route files its item whatever its first bullet says", st == 200 and ans.get("item") and not stored(_model_ids._norm_id(ans["item"]))["description"].startswith("- Goal:"), (st, ans))
 with server._session_write():
     out = server._create_item(subject="[home] filed by a script label", description="- No label here\n- Second", project=STK, owner=MAIN, next=f"{MAIN}: carry on", by="a script (a script on box-1)")[1]
 check("an item a script label files is filed whatever its first bullet, even inside a session write", out.startswith("created"), out)

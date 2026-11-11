@@ -1,6 +1,5 @@
 """shared.py: the helpers of the server that more than one area reads and that keep a little state of their own, which common.py (the pure pieces) has no place for: a session's name (`_session_label`
-and the heartbeat index it falls back to), an item's page (`_item_url`, with the board's URL), what shows the owner's own words on an item (`_owner_words`, `_OWNER_QUOTED`), whether an item waits on his
-decision (`_waits_decision`), the debounced publish (`_publish`, `_publish_now`, `_publish_if_idle`, with the timer and the lock they share), the roles and projects files the publish rebuilds, the registry
+and the heartbeat index it falls back to), an item's page (`_item_url`, with the board's URL), what shows the owner's own words on an item (`_owner_words`, `_OWNER_QUOTED`), the debounced publish (`_publish`, `_publish_now`, `_publish_if_idle`, with the timer and the lock they share), the roles and projects files the publish rebuilds, the registry
 files of the store (`_registry`), and the drop of the board's kept home (`_board_home_drop`, with the cache's dict and its generation lock).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). A module of an area cannot import server.py, and server.py runs as `__main__`, so what the areas share lives here, below
@@ -31,7 +30,7 @@ from stackshot.model import said as _said
 from stackshot.projects import projects as _prj
 from stackshot.web import publish as _pub
 from stackshot.web import store as _store
-from stackshot.web.common import OWNER, _needs_of
+from stackshot.web.common import OWNER
 
 # Read once, at import: [instance] board_url is among the settings config.RESTART_ONLY keeps for the run.
 BOARD_URL = str(_cfg.get("instance", "board_url") or "")
@@ -68,12 +67,6 @@ def _owner_words(item: dict[str, Any]) -> str:
     if _OWNER_QUOTED.search(text):
         return "quoted in the text"
     return ""
-
-
-def _waits_decision(meta: dict[str, Any]) -> bool:
-    """Its needs hold decision: the item is in the owner's queue, never on hold (render.is_held
-    reads the lane the same way, needs_kind "call")."""
-    return any(x.lower() == "decision" for x in _needs_of(meta))
 
 
 def _session_label(value: str) -> str:

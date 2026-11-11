@@ -24,13 +24,13 @@ from stackshot import paths as _paths
 from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.fleet import sessions_registry as _sr
+from stackshot.model.needs import _NEEDS_KINDS
 from stackshot.projects import brains as _brains
 from stackshot.projects import pages as _pages
 from stackshot.projects import project_registry as _pr
 from stackshot.projects import projects as _prj
 from stackshot.router import page_debt as _page_debt
 from stackshot.web import render as _rmod
-from stackshot.web.common import _NEEDS_KINDS
 from stackshot.web.field_gates import _registry_hits
 from stackshot.web.shared import _session_label, _sessions_index
 

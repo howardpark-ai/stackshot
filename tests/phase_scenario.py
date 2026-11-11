@@ -56,7 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw
+from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -158,7 +158,7 @@ check("2 …model.view reads a closed item as dead with the phase stored or not"
 # ---- 3. a create and an update store it, as the fields change
 def created(out):
     m = re.search(r"created ([a-z]\d+)", out); assert m, out
-    return server._norm_id(m.group(1))
+    return _model_ids._norm_id(m.group(1))
 def uptd(gid, **kw): return server._update(gid, sender="home-front", **kw)
 out = server._create(subject="[home] phase create alive", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK])
 gid = created(out)

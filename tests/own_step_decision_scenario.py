@@ -48,7 +48,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server
+from stackshot.web import server; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 O = server.OWNER
 DESC = "- Goal: The release of the fruit sorter\n- It lives in the sorter repo\n- Done when the release is out"
@@ -168,13 +168,13 @@ out, e = create(needs="", ask="", options=None, then="", mover="home-kiwi-engine
 check("a plain item for the updates", out and not e, e); g = gid_of(out)
 out, e = update(g, needs=["decision"], ask=ask("have you done the two repo settings steps"), options=YESNO)
 check("update refused: have you done …", says_step(e) and "take decision out of needs" in e, e or out)
-check("…nothing written: the item has no decision", "decision" not in (server._load(server._norm_id(g))["metadata"].get("needs") or []), server._load(server._norm_id(g))["metadata"])
+check("…nothing written: the item has no decision", "decision" not in (server._load(_model_ids._norm_id(g))["metadata"].get("needs") or []), server._load(_model_ids._norm_id(g))["metadata"])
 out, e = update(g, needs=["decision"], ask=ask("whether to turn on the two repo settings for the sorter"), options=YESNO, next=f"home-kiwi-engineer: prepare the sorter release\n{O}: turn on the two repo settings for the sorter")
 check("update refused: Yes/No options over his single next line that the Decide part names", "Yes/No over" in e and says_step(e), e or out)
 out, e = update(g, needs=["decision"], ask=ask("install the apps and delete the test repo?"), options=YESNO, next=f"home-kiwi-engineer: prepare the sorter release\n{TWO_OWN}")
 check("update refused: Decide: <his actions>? with Yes/No over his next lines", says_step(e) and "take decision out of needs" in e, e or out)
 out, e = update(g, step="Turn on the two repo settings for the sorter", next=f"home-kiwi-engineer: prepare the sorter release\n{O}: turn on the two repo settings for the sorter")
-meta = server._load(server._norm_id(g))["metadata"]
+meta = server._load(_model_ids._norm_id(g))["metadata"]
 check("update accepted: step=<his action> (stores your-step)", out and not e and meta.get("state") == "your-step", e or meta)
 out2, e2 = create(needs="", ask="", options=None, then="", mover="home-kiwi-engineer", next="home-kiwi-engineer: prepare the sync")
 g2 = gid_of(out2)
@@ -189,10 +189,10 @@ out3, e3 = create(needs="", ask="", options=None, then="", mover="home-kiwi-engi
 g3 = gid_of(out3)
 out, e = update(g3, needs=["decision"], ask=ask("ship the release tonight?"), options=YESNO)
 check("update accepted: a Yes/No decision", out and not e, e)
-nx = server._load(server._norm_id(g3))["metadata"].get("next") or ""
+nx = server._load(_model_ids._norm_id(g3))["metadata"].get("next") or ""
 out, e = update(g3, next=f"{nx}\n{O}: review the release notes")
 check("…a write that only adds his own unrelated next line leaves the decision standing", out and not e, e)
-nx = server._load(server._norm_id(g3))["metadata"].get("next") or ""
+nx = server._load(_model_ids._norm_id(g3))["metadata"].get("next") or ""
 out, e = update(g3, next=f"{nx}\n{O}: ship the release tonight")
 check("…a write that adds the very action the ask confirms is refused", says_step(e), e or out)
 

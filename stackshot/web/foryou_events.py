@@ -14,6 +14,7 @@ from typing import Any
 
 from stackshot.github import ghsync as _gh
 from stackshot.model import model as _model
+from stackshot.model.needs import _waits_decision
 from stackshot.waits import waiting as _wt
 from stackshot.web import foryou as _fy
 from stackshot.web import foryou_slack as _fyslack
@@ -21,7 +22,7 @@ from stackshot.web import landed as _ld
 from stackshot.web import render as _rmod
 from stackshot.web.common import _clip_line
 from stackshot.web.foryou_slack import _foryou_slack
-from stackshot.web.shared import _item_url, _owner_words, _publish, _session_label, _waits_decision
+from stackshot.web.shared import _item_url, _owner_words, _publish, _session_label
 from stackshot.web.store import _item_files, _load
 
 

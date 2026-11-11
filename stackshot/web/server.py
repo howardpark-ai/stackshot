@@ -161,7 +161,9 @@ from stackshot.web import runners as _runners  # noqa: E402  — the Runners pag
 from stackshot.web import search as _search  # noqa: E402  — the board's search: an FTS5 index over items, history, project pages and session names, rebuilt on write (search.py)
 # Settings read once here are the ones config.RESTART_ONLY keeps for the run (written into the tool descriptions at start);
 # every other setting is read where it is used, so a reload (SIGHUP) is live at once.
-from stackshot.web.common import NAME, OWNER, _CODE_FENCE, _CODE_SPAN, _NEEDS_KINDS, _canon_needs, _clip_line, _needs_kinds, _needs_list, _needs_of, _needs_store, _without_mq_groups  # noqa: E402  — pieces shared with the server's other modules (common.py); NAME and OWNER are read from [instance] once, at this import
+from stackshot.web.common import NAME, OWNER, _clip_line  # noqa: E402  — pieces shared with the server's other modules (common.py); NAME and OWNER are read from [instance] once, at this import
+from stackshot.model.ids import _GID, _ITEM_KEY, _ITEM_PATH, _ITEM_REF, _bare_id_ok, _item_gid, _norm_id, _plain_text, _without_mq_groups  # noqa: E402  — item ids and where they are read (model/ids.py)
+from stackshot.model.needs import _NEEDS_KINDS, _after_of, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _observers_of, _waits_decision  # noqa: E402  — needs, after and observers (model/needs.py)
 OPERATOR = str(_cfg.get("fleet", "operator_label") or "operator session")
 _FOR_OWNER = f"[for {OWNER}]"   # the mark a message to a front agent carries on its first line ("[for <owner>]" on the owner's instance)
 # Tool text that names the owner's names and the shell the owner runs steps in: built here once from [instance] owner_aliases and [steps] owner_shell / bash_host / shell_name.
@@ -234,7 +236,6 @@ if _ro.is_read_only():
 else:
     (_store.STORE / LETTER).mkdir(parents=True, exist_ok=True)
     REQUESTS.parent.mkdir(parents=True, exist_ok=True)
-_GID = re.compile(r"^([a-z])#?(\d+)$")
 
 
 # ----------------------------------------------------------------------------- store (the one store, every letter)
@@ -259,28 +260,7 @@ def _next_id() -> str:
     return f"{LETTER}{nxt}"
 
 
-def _bare_id_ok(status: str | None) -> bool:
-    """An update reads a bare item number unless it closes the item (status=completed): a close takes the same shown id the complete tool does."""
-    return str(status or "").strip().lower() != "completed"
-
-
-def _norm_id(item_id: str | int, bare: bool = False) -> str:
-    """An id as a session writes it → the store's: a store id, c1; board#N and #7 → the issue-numbered item (ghsync.norm);
-    board-tmp-<machine>#3 and board-tmp-<machine>-3 → l3, the temporary id of an item created while GitHub was down or the hour's writes were spent; a
-    migrated or re-keyed item's old id → its id now (the alias map). `bare=True` (the id of get, confirm and an update that does not close, the item a call is about) also reads a plain number N
-    as board#N and notes the correction; anywhere else (complete, an update with status=completed, after, items, a link) a bare number stays a bad id, since a close or a link is not undone by a resend."""
-    s = str(item_id).strip().lower()
-    g = _gh.norm(s)
-    if not g and bare and re.fullmatch(r"[0-9]+", s):            # a bare number is the issue number of a board item: board#N (ASCII digits only: int() takes them all)
-        g = _gh.norm(f"board#{int(s)}")
-        if g:
-            _calls.fixed("item-id", f"item {s} read as {_gh.shown(g)}")
-    if not g:
-        m = _GID.match(s)
-        if not m:
-            raise ToolError(f"bad item id {item_id!r} — ids read board#<n> (a temporary one {_gh.local_prefix()}#<n>), or <letter><n> for an older item")
-        g = f"{m.group(1)}{m.group(2)}"
-    return _gh.resolve(g)
+# _norm_id, _bare_id_ok and _GID (an id as a session writes it → the store's) are model/ids.py's.
 
 
 # ----------------------------------------------------------------------------- needs, observers and after
@@ -292,17 +272,8 @@ def _norm_id(item_id: str | int, bare: bool = False) -> str:
 # never messaged (only its own turn-end check asks it). metadata.observers: sessions that hear only a close or a reopen.
 # metadata.after: items of any project that must close first; while one is open the item is parked without a hold,
 # and the last close wakes it. The stored list is canonical: decision, external, then the sessions as given.
-# _NEEDS_KINDS, _needs_list, _needs_of, _needs_kinds, _canon_needs and _needs_store are common.py's (imported with OWNER, near the top of this module).
-
-
-def _needs_sessions(meta: dict[str, Any]) -> list[str]:
-    """The session names in an item's needs (whatever is not decision or external)."""
-    return [x for x in _needs_of(meta) if x.lower() not in _NEEDS_KINDS]
-
-
-def _after_of(meta: dict[str, Any]) -> list[str]:
-    v = meta.get("after")
-    return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+# _NEEDS_KINDS, _needs_list, _needs_of, _needs_kinds, _canon_needs, _needs_store, _needs_sessions, _waits_decision, _after_of and _observers_of are model/needs.py's (imported near the top of this module).
+# _after_open stays here: it reads each `after` item from the store.
 
 
 def _after_open(meta: dict[str, Any]) -> list[str]:
@@ -316,11 +287,6 @@ def _after_open(meta: dict[str, Any]) -> list[str]:
         except Exception:
             continue
     return out
-
-
-def _observers_of(meta: dict[str, Any]) -> list[str]:
-    v = meta.get("observers")
-    return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
 
 
 # _legacy_needs and _legacy_hold, the two forms _load reads an old file through, are store.py's.
@@ -3351,26 +3317,7 @@ def _tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool
 # A background agent whose mandate never works items (the maintainer that merges and deploys, the daily audit) is listed in
 # stackshot.toml [pilot] never_named and is never named at either moment, so a release request that cites an item in passing
 # leaves that item alone; such an agent can still be named by hand (needs=). Read at each naming, so a reload applies it.
-# Only an id written as a plain word names the receiver (after misfires on items the receiver was not working:
-# a test name quoted in a brief, "a close by …", and the token "1 g7@1700000000" in a format example). Not a plain word: an
-# id in backticks (inline code or a fenced block), an id inside quotes (" " “ ” ‘ ’, or a '…' pair), an id with something glued
-# on (an @, /, _, letter or digit right after it; anything before it but a space or an opening ( [ { < * , ; · — –). Sentence
-# punctuation right after it still counts (. , ; : ) ] } ! ? … * · — – and a possessive 's), and so does a markdown link,
-# [board#N](…/items/<n>). A bare mention in prose still names (the same day, a sala handover's "Context: board#N carried …"):
-# the text's shape cannot tell a passing mention from a handover, so a message that cites an item only for context writes the
-# id in backticks.
-_ID_FORM = r"(board#\d+|board-tmp-[a-z0-9-]+[#-]\d+|[a-z]\d+)"
-_ID_END = r"(?=$|[\s.,;:!?)\]}*…·—–]|['’]s(?!\w))"
-_ITEM_REF = re.compile(r"(?<![^\s(\[{<*,;·—–])" + _ID_FORM + _ID_END + r"|/items/(board-tmp-[a-z0-9-]+-\d+|[a-z]?\d+)" + _ID_END, re.I | re.M)
-# _CODE_FENCE, _CODE_SPAN, _MQ_GROUP and _without_mq_groups are common.py's (the matchers that blank code and merge-queue group numbers before an id is read).
-_QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”|‘[^’\n]*’|(?<![\w'’])'(?=\S)(?:[^'\n]|'(?=\w))*?(?<=\S)'(?!\w)")
-
-
-def _plain_text(text: str) -> str:
-    """A message with its code (fenced blocks, inline spans) and quoted spans blanked out (each character but a newline turned
-    into \\0, so what stays keeps its place and nothing reads as glued to a space)."""
-    blank = lambda m: re.sub(r"[^\n]", "\0", m.group(0))
-    return _QUOTED.sub(blank, _CODE_SPAN.sub(blank, _CODE_FENCE.sub(blank, str(text or ""))))
+# _ID_FORM, _ID_END and _ITEM_REF (an id written as a plain word) and _QUOTED and _plain_text (the text with its code and quotes blanked) are model/ids.py's.
 
 
 def _item_refs(text: str) -> list[str]:
@@ -3899,7 +3846,7 @@ from stackshot.projects import project_archive as _archive  # noqa: E402  — a 
 from stackshot.fleet import session_ids as _sid  # noqa: E402  — the migration to permanent session ids: applied from here at start, under the item lock
 from stackshot.fleet import sessions_registry as _sr  # noqa: E402  — the permanent session id: any reference to a session (id, name, alias, transcript id) → one id, or None
 from stackshot.web import shared as _shared  # noqa: E402  — the helpers more than one area reads: a session's name, an item's page and the board's URL (`_shared.BOARD_URL`), the owner's words, the debounced publish (and its timer, `_shared._PUB_TIMER`), the roles and projects files, the board home's drop (shared.py)
-from stackshot.web.shared import ROLES, _BOARD_GEN_LOCK, _BOARD_HOME, _board_home_drop, _board_home_slot, _item_url, _owner_words, _projects_sync, _projects_sync_safe, _publish, _publish_every, _publish_if_idle, _publish_now, _registry, _roles_sync, _roles_sync_safe, _session_label, _sessions_index, _waits_decision  # noqa: E402,F401  — kept on this module as well: the writes, the tools and the suites call `server.<name>` (shared.py)
+from stackshot.web.shared import ROLES, _BOARD_GEN_LOCK, _BOARD_HOME, _board_home_drop, _board_home_slot, _item_url, _owner_words, _projects_sync, _projects_sync_safe, _publish, _publish_every, _publish_if_idle, _publish_now, _registry, _roles_sync, _roles_sync_safe, _session_label, _sessions_index  # noqa: E402,F401  — kept on this module as well: the writes, the tools and the suites call `server.<name>` (shared.py)
 from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
 from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `_save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
 from stackshot.web import project_form as _pform  # noqa: E402,F401  — the New session form's calls that make and list projects and register their agents, with the one lock they share and the page store they write through; a suite sets `PAGE_IO` on this module (project_form.py)
@@ -16696,15 +16643,12 @@ from stackshot.web.answers import (  # noqa: E402,F401
     _ANSWER_ESCALATE_S,
     _ANSWER_LOCK,
     _ANSWER_TEXT_MAX,
-    _ITEM_KEY,
-    _ITEM_PATH,
     _answer_note,
     _answer_same_origin,
     _answer_token,
     _answer_words,
     _answers_load,
     _answers_save,
-    _item_gid,
     _option_forms,
     _split_letter,
 )

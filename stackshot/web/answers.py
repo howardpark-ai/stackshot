@@ -1,9 +1,9 @@
-"""answers.py: the helpers of the board's answer form: an item's address (`_ITEM_KEY`, `_ITEM_PATH`, `_item_gid`), the form's limits and lock (`_ANSWER_TEXT_MAX`, `_ANSWER_BODY_MAX`, `_ANSWER_ESCALATE_S`, `_ANSWER_LOCK`), its token and its
+"""answers.py: the helpers of the board's answer form: the form's limits and lock (`_ANSWER_TEXT_MAX`, `_ANSWER_BODY_MAX`, `_ANSWER_ESCALATE_S`, `_ANSWER_LOCK`), its token and its
 same-origin check (`_answer_token`, `_origin_of`, `_answer_same_origin`), the lettered options of a pick (`_split_letter`, `_option_forms`), an answer's words and its stored note (`_choice_words`, `_answer_words`, `_answer_note`) and the file the
 pending answers are kept in (`_answers_path`, `_answers_load`, `_answers_save`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the renderer, the option labels, the item
-states, the GitHub id switch, the shared helpers (`shared.py`) and the sign-in key (`signin.py`). server.py imports each name its answer routes, its tick and the suites read back from here, so `server._answer_words`, `server._answers_load` and
+states, the shared helpers (`shared.py`) and the sign-in key (`signin.py`). server.py imports each name its answer routes, its tick and the suites read back from here, so `server._answer_words`, `server._answers_load` and
 the others stay the names they use. `_ANSWER_LOCK` is taken only by the functions that stay in server.py (`_answer_ack`, `_answer` and `_answer_tick`), nothing here takes it: the suite that puts a spy in its place (`server._ANSWER_LOCK = ...`) sets
 it on `server`, which is where those functions look it up."""
 from __future__ import annotations
@@ -18,25 +18,11 @@ from typing import Any
 from starlette.requests import Request
 
 from stackshot.core import config as _cfg
-from stackshot.github import ghsync as _gh
 from stackshot.model import option_labels as _option_labels
 from stackshot.model import states as _states
 from stackshot.web import render as _rmod
 from stackshot.web import shared as _shared
 from stackshot.web.signin import _ui_key
-
-
-_ITEM_KEY = r"([a-z][0-9]+|[1-9][0-9]*|board-tmp-[a-z0-9-]*[a-z0-9]-[1-9][0-9]*)"
-_ITEM_PATH = re.compile(r"items/" + _ITEM_KEY + r"(\.html|/)?")   # /items/<gid>: a lowercase letter and digits,
-                                                                 # an issue-numbered item's bare number (/items/<n> is board#N), or a
-                                                                 # temporary id's board-tmp-<machine>-<n>
-
-
-def _item_gid(raw: str) -> str:
-    """The id part of an /items/<…> address → the store's id now, "" when it names no item form: a temporary id's address →
-    l<n> (another machine's prefix is no item), /items/<n> → g<n>, a migrated or re-keyed item's old id → its id now."""
-    g = (_gh.norm(raw) if raw.startswith("board-tmp-") else _gh.norm("board#" + raw) if raw.isdigit() else raw)
-    return _gh.resolve(g) if g else ""
 
 
 # ----------------------------------------------------------------------------- the owner answers an item from its page
