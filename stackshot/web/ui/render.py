@@ -1887,9 +1887,9 @@ class Board:
         body = inner if inner is not None else esc(name if label is None else label)
         u = self.sess_href(name); c = f' class="{esc(cls)}"' if cls else ""
         tool = _cfg.fleet_tool(); lt = title or (_t("link.session_in", tool=tool) if tool else _t("link.session_view"))
-        if u: return (f'<a{c} href="{esc(u)}" target="_blank" rel="noopener" title="{esc(lt)}">'
+        if u: return (f'<a{c} href="{esc(u)}" target="_blank" rel="noopener" title="{esc_dq(lt)}">'
                       f'{body}{" ↗" if arrow else ""}</a>')
-        t = f' title="{esc(title)}"' if title else ""
+        t = f' title="{esc_dq(title)}"' if title else ""
         return f'<span{c}{t}>{body}</span>' if cls or title else body
     def _mention_rx(self):
         """The one regex Board.mentions runs, built on first use and kept for the Board's life (a Board is one load): _MSKIP,
@@ -2595,14 +2595,14 @@ class Board:
                   "nomover": ("warn", "sent.nomover"),
                   "nostep": ("warn", "sent.nostep", "sent.nostep_home")}
     _SENT = {k: (v[0], *[_i18n.EN[x] for x in v[1:]]) for k, v in _SENT_KEYS.items()}      # the English view of the table above (what the tests read)
-    def sent_msg(self, code, taken_by="", home=False) -> str:
-        """The notice of a ?sent= code (a key of _SENT_KEYS) in the request's language, as plain text (not escaped): the item page's wording, or with `home` the home page's own where the code has one.
+    def sent_msg(self, code, taken_by="") -> str:
+        """The notice of a ?sent= code (a key of _SENT_KEYS) in the request's language, as plain text (not escaped): the item page's wording (the home page's own, where a code has one, is read by sent_notes_html).
         After Done or a note on the step, `taken_by` (who moves the item now) names them. "" for a code that is none."""
         v = self._SENT_KEYS.get(code)
         if not v: return ""
         if taken_by and code == "done": return _t("js.sent_done", who=taken_by)
         if taken_by and code == "stepreply": return _t("sent.stepreply_by", who=taken_by)
-        return _t(v[-1] if home else v[1])
+        return _t(v[1])
     def answer_html(self, r, answer, comment_only=False) -> str:
         """the answer box under the Ask of an open item, for a signed-in viewer (`answer` = {"action", "token"} from
         the server; None draws nothing). While it needs his decision: one card per stored option (_cards_html: the label and the whole text of the option, the recommended one marked by its badge;
@@ -2674,7 +2674,7 @@ class Board:
         k = str((answer or {}).get("sent") or "")
         if k not in self._SENT: return ""
         cls = self._SENT[k][0]
-        msg = self.sent_msg(k, taken_by)      # the item page's wording (the home page's own is sent_msg(home=True))
+        msg = self.sent_msg(k, taken_by)
         return f'<p class="isent {cls}" role="status">{esc(msg)}</p>'
     def contact_name(self, r, contact=None) -> str:
         """The item's contact as the side column's first row names it: `contact` as the server derived it (an open item's live contact, server._contact_label), else the stored metadata.contact as the session's name now; "" when none."""

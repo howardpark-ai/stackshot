@@ -776,7 +776,7 @@ with i18n.use("ko"):
     d_wa = [bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")), bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor"), full=True)]
     bdx.scoped_urls = lambda gid: []; d_wa.append(bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")))
     del bdx.scoped_urls
-    d_sent = {k_: (bdx.sent_msg(k_), bdx.sent_msg(k_, home=True)) for k_ in bdx._SENT}
+    d_sent = {k_: bdx.sent_msg(k_) for k_ in bdx._SENT}; d_home = json.loads(html.unescape(re.search(r'data-notes="([^"]*)"', bdx.sent_notes_html()).group(1)))
     d_sent_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
 _d0, _d3, _d5 = bdx.now.date(), bdx.now.date() - DT(days=3), bdx.now.date() + DT(days=5)
 check("due_badge in the test locale: today, overdue and ahead each read from their own template, the weekday from the table; no date, no badge",
@@ -790,18 +790,35 @@ check("_when in the test locale: an unreadable anchor (its tip with the reason),
 _t3 = bdx.now - DT(hours=3)
 check("stamp in the test locale: a stamp that only marks the start of a silence says 'no change since <time>' in its tip", f'data-tip="{html.escape(_m("item.when.no_change_since", when=f"{_t3:%Y-%m-%d %H:%M} {_cfg.tz_abbr(_t3)}"), quote=True)}"' in d_stamp, d_stamp)
 check("sess_html in the test locale: the link's title names the fleet tool when one is set, else says 'this session's view'",
-      f'title="{MARK("open this session in Fleety")}"' in d_s1 and f'title="{html.escape(_m("link.session_view"), quote=True)}"' in d_s2, (d_s1, d_s2))
+      f'title="{MARK("open this session in Fleety")}"' in d_s1 and f'title="{r2.esc_dq(_m("link.session_view"))}"' in d_s2 and "&#x27;" not in d_s2, (d_s1, d_s2))      # the apostrophe is written as one, the form esc_dq gives a plain-English attribute
 check("…and the fleet and client config the test touched is put back", fl_.get("tool_name") == tool_old and ("tool_name" in fl_) == had_tool and cl_.get("mockup_hosts") == cfg_old)
 check("mockup_link in the test locale: the chip and its tip read from the table", f'title="{MARK(EN["link.mockup_tip"])}"' in d_mk and f'>{MARK(EN["link.mockup_chip"])}</a>' in d_mk, d_mk)
 check("wait_anchor_html in the test locale: more than three anchors say '+N more' (not when all are listed), none recorded says so",
       _m("wait.more", n=2) in d_wa[0] and _m("wait.more", n=2) not in d_wa[1] and _m("wait.anchor_none") in d_wa[2] and _m("wait.anchor_none") not in d_wa[0], d_wa)
 _S = r2.Board._SENT; _K = {k_: v_[1] for k_, v_ in r2.Board._SENT_KEYS.items()}; _KH = {k_: v_[2] for k_, v_ in r2.Board._SENT_KEYS.items() if len(v_) > 2}
-e_sent = {k_: (bdx.sent_msg(k_), bdx.sent_msg(k_, home=True)) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
-check("sent_msg in English is _SENT's wording, code by code: the item page's, and with home the home page's own where the code has one; who takes it names them; a code that is none is empty",
-      e_sent == {k_: (v_[1], v_[2] if len(v_) > 2 else v_[1]) for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", ""), (e_sent, e_by))
-check("sent_msg in the test locale: every code reads from its own key (the home page's where it has one), who takes it is named in the table's wording, and every code has a key",
-      set(_K) == set(_S) and d_sent == {k_: (MARK(EN[_K[k_]]), MARK(EN[_KH.get(k_, _K[k_])])) for k_ in _S}
+e_sent = {k_: bdx.sent_msg(k_) for k_ in _S}; e_by = (bdx.sent_msg("done", "alpha-main"), bdx.sent_msg("stepreply", "alpha-main"), bdx.sent_msg("nope"))
+check("sent_msg in English is _SENT's item-page wording, code by code; who takes it names them; a code that is none is empty",
+      e_sent == {k_: v_[1] for k_, v_ in _S.items()} and e_by == ("Done: alpha-main takes it from here.", "Sent: alpha-main has your note and decides whether the step is done.", ""), (e_sent, e_by))
+check("sent_msg in the test locale: every code reads from its own key, who takes it is named in the table's wording, and every code has a key",
+      set(_K) == set(_S) and d_sent == {k_: MARK(EN[_K[k_]]) for k_ in _S}
       and d_sent_by == (_m("js.sent_done", who="alpha-main"), _m("sent.stepreply_by", who="alpha-main"), ""), (d_sent, d_sent_by))
+check("the home page's notices (sent_notes_html) in the test locale: every code with the home page's own key reads from it, the rest from the item page's, each with its class",
+      d_home == {k_: [r2.Board._SENT_KEYS[k_][0], MARK(EN[_KH.get(k_, _K[k_])])] for k_ in _S}, d_home)
+# the English wording of eight keys no other test pins, through the real render path with representative fields (the test locale's checks above prove only that each key is read, not what it says)
+_wd_en = lambda d: f"{d:%m-%d} {d:%a}"
+bdx._sess_obj = lambda r: {"name": "cloud-x", "machine": "c"}; en_mc = bdx.mover_row({"gid": "a1", "metadata": {}}); del bdx._sess_obj
+bdx.anchor_since = None; en_poll = bdx._when({"mode": "poll"}); bdx.anchor_since = since_old
+bdx.scoped_urls = lambda gid: [f"https://example.com/{i}" for i in range(5)]
+en_more = bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")); en_more_full = bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor"), full=True)
+bdx.scoped_urls = lambda gid: []; en_none = bdx.wait_anchor_html({"gid": "a1", "metadata": {}}, W("anchor")); del bdx.scoped_urls
+en_work = bdx.work_html({"gid": "a1", "metadata": {"work": [{"text": "oil the hinges", "agent": "alpha-main", "state": "defined", "ts": 0}]}})
+check("English wording, pinned: due today and due in N days (the date with its weekday)", bdx.due_badge(_dueof(0)) == r2.badge(f"Due today ({_wd_en(_d0)})", "due") and bdx.due_badge(_dueof(5)) == r2.badge(f"Due in 5 d ({_wd_en(_d5)})", "due"), (bdx.due_badge(_dueof(0)), bdx.due_badge(_dueof(5))))
+check("English wording, pinned: a cloud session's row says 'cloud', the legacy Work field is named 'Work', a polled anchor says ' · poll'",
+      '<span class="dim">· cloud</span>' in en_mc[1] and '<dt>Work <span class="count">1</span></dt>' in en_work and en_poll == "quiet · poll", (en_mc, en_work, en_poll))
+check("English wording, pinned: five anchors say '+2 more' (not when all are listed), none recorded says 'an anchor (none recorded)'",
+      '<span class="dim">+2 more</span>' in en_more and "more</span>" not in en_more_full and "an anchor (none recorded)" in en_none and "an anchor (none recorded)" not in en_more, (en_more, en_more_full, en_none))
+check("English wording, pinned: the answer script's 'Nothing sent: {why}' (the table every page head carries, and the script asking for it)",
+      '"js.answer.nothing_sent": "Nothing sent: {why}"' in r2._SST_HEAD and "SST('js.answer.nothing_sent'" in r2._ANSWER_JS)
 d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
 check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
 
