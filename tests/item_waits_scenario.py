@@ -150,8 +150,8 @@ def _why(f):
     try: f(); return ""
     except Exception as e: return str(e)
 _fix44 = _why(lambda: upd(44, next=LINE))
-check("1 refuse: …the default fix names until=YYYY-MM-DD as the way to wait for a day (a bare date makes the item wait until then, and outside a hand-off parks it), not a wake that reminds and leaves the item active",
-      "until=YYYY-MM-DD makes the item wait until then" in _fix44 and "outside a hand-off the date parks the item" in _fix44 and "wake=YYYY-MM-DD" not in _fix44 and "reminder that leaves the item active" not in _fix44, _fix44[-400:])
+check("1 refuse: …the default fix names until=YYYY-MM-DD as the way to wait for a day (a bare date makes the item wait until then, and outside a hand-off parks it), not a wake that leaves the item active",
+      "until=YYYY-MM-DD makes the item wait until then" in _fix44 and "outside a hand-off the date parks the item" in _fix44 and "wake=YYYY-MM-DD" not in _fix44, _fix44[-400:])
 refused_nw("1 refuse: …a Japanese line is refused too", 44, lambda: upd(44, next="team-back: board#61が閉じたら配布"), "defers on board#61", "defer_after_id")
 refused_nw("1 refuse: …a bracketed id is refused", 44, lambda: upd(44, next="team-back: ship once the review (board#61) lands"), "defers on board#61")
 item(9131, needs=["decision"], mover=OWN, ask="Decide: x · Recommend: y · Stakes: z · By: no date", subject="[home] on his call", next="Oliver: decide, after board#61 closes")

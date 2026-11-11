@@ -6,7 +6,7 @@ optional fields (goal; mover and then; wait_kind with wait_anchor, wait_event an
   * model.derive: dead | alive | waiting for every state an item can still store (fixture data here: no call sets or clears a state any more, tests/retired_inputs_scenario.py) (your-call and your-step → alive, the owner the mover; doing → alive, the agent; queued → alive, the
     builder; outside → waiting on an anchor event or the owner's relay; blocked → waiting on an item's close; parked and verifying → waiting on a time; completed →
     dead), for an item with no stored state (states.derive's reading), and the effective mover, `then` and post-wake mover: what is stored (marked explicit) or section 3's
-    defaults (marked as such); a wake on an alive item is the mover's check-back; a clash between fields is listed, not hidden.
+    defaults (marked as such); a wake on an alive item is the mover's backstop; a clash between fields is listed, not hidden.
   * The `model:` line of get and the brief, and `goal:`; `derived: …` names what the item does not store.
   * The fields through create and update (and get): stored as given, "none" and the clear_ flags drop them, a bad kind or date is refused with nothing written, they are
     filing edits (no clock moves), a close drops the mover and the wait and keeps the goal.
@@ -155,7 +155,7 @@ check("explicit: …a relay with no post_wake_mover: the owner (section 4: the a
 m_ = D(needs=[BACK], wait_kind="nonsense", wake=FUT)
 check("explicit: a wait_kind that is no kind is ignored", m_.state == "alive" and not m_.conflicts, m_)
 m_ = D(state="doing", expected_by=day(2), needs=[BACK], wake=FUT)
-check("alive + a wake: the wake is the mover's check-back, the item stays alive", m_.state == "alive" and m_.checkback == FUT and m_.wait is None and not m_.conflicts, m_)
+check("alive + a wake: the wake is the mover's backstop, the item stays alive", m_.state == "alive" and m_.checkback == FUT and m_.wait is None and not m_.conflicts, m_)
 m_ = D(needs=[BACK], hold=True, wake=FUT, mover=OTHER)
 check("mover on a waiting item: the one who picks it up when the wait ends, no conflict; the item's own mover stays empty while it waits", m_.state == "waiting" and m_.wait.mover == OTHER and m_.wait.mover_explicit and m_.picker == OTHER and m_.mover == "" and not m_.conflicts, m_)
 m_ = D(state="doing", expected_by=day(2), needs=[BACK], ask_by=day(3), post_wake_mover=OTHER)

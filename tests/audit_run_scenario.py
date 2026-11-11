@@ -901,7 +901,7 @@ f25p = build(parked(32, "Oliver: review the tab", post_wake_mover="beta-main"), 
              parked(70, "ops-other: do the second part", post_wake_mover="home-agent"),                                  # parked, wake ahead, a session's step beside a named post-wake mover
              item(17, wrote=now - H, state="parked", needs=["home-agent"], hold=True, next="Oliver: review the tab"),      # on hold with no wake at all
              parked_at(49, "Oliver: review the tab", PAST, post_wake_mover="home-agent"),                                # control: the wake has come, the same step is a finding
-             doing(18, 1, nxt=f"Oliver: sign off after {LATER}", wake=WAKE),                                              # alive, a check-back wake ahead, his step dated for after it
+             doing(18, 1, nxt=f"Oliver: sign off after {LATER}", wake=WAKE),                                              # alive, a backstop wake ahead, his step dated for after it
              doing(10, 1, nxt="Oliver: sign off", wake=WAKE))                                                           # control: the same step with no date is a finding
 rec = fil(f25p)
 check("a parked or held item with a wake ahead (or none) is no stuck-elsewhere finding, whoever the post-wake mover is and whichever step is first", not {f"board#{BID_22}", f"board#{BID_60}", f"board#{BID_07}"} & set(ids(rec, "stuck-elsewhere")), rec["findings"])

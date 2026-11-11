@@ -100,7 +100,7 @@ check("1 park: a front agent parks an item team-back moves (hold=true with its w
 upd(17, FRONT, wake=day(6), wait_basis=BASIS)
 check("1 park: …and moves the park's wake later, the item being waiting, not alive", wk_(mt(17)) == day(6) and "watch_reason" not in mt(17), mt(17))
 upd(17, FRONT, clear_hold=True)
-check("1 park: …released, the item is alive again and a reminder wake on it is refused as before", "hold" not in mt(17), mt(17))
+check("1 park: …released, the item is alive again and a front agent's own wake on it is refused as before", "hold" not in mt(17), mt(17))
 refused_nw("1 park: …(the wake went with the hold)", 17, lambda: upd(17, FRONT, wake=FUT), RULE)
 
 # ================================================================ the mover's own wake and check pass; Oliver as the mover

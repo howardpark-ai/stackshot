@@ -1,6 +1,6 @@
 """Scenario test for the machine anchor (machine_anchor.py, server._machine_anchor_poll, _machine_note, the anchors tool's `machine:<name>`) — fixture data, no live store, no network, no server socket.
 
-An item that needs a machine of the fleet used to sit on a date check-back after the machine was back; only a `box_online <machine>` event wait turned an item. A machine anchor is the standing form: the
+An item that needs a machine of the fleet used to sit on a dated backstop after the machine was back; only a `box_online <machine>` event wait turned an item. A machine anchor is the standing form: the
 anchors tool takes `machine:<name>`, and the mover of each item the anchor counts for is told, once, each time that machine checks in again. Covered:
 
   * the pure half: the spelling (`machine:<name>`, any case), the store (add, scope union, remove, prune of closed items, what counts for an item), whole-word names in a step, the words of both lines.

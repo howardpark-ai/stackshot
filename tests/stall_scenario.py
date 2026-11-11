@@ -529,9 +529,9 @@ check("16 not due: pure: not_due says why, and nothing for an item whose work is
       S.not_due(rd(70), N) == "the board shows it waiting (time)" and S.not_due(rd(73), N) == "the board shows it waiting (time)" and S.not_due(rd(76), N) == "waiting on the owner"
       and S.not_due(rd(77), N) == "the board shows it waiting (relay)" and S.not_due(rd(75), N, lambda it: ["a74"]) == "the board shows it waiting (item)" and S.not_due(rd(75), N, lambda it: []) == ""
       and S.not_due(rd(70), N + 7200) == "", [S.not_due(rd(i), N) for i in (70, 73, 75, 76, 77)])
-# a wake alone is a reminder: the board shows the item on agent, so the pass looks at it (it used to hold the pass off, and an item sat on agent for a day)
+# a wake alone is a backstop: the board shows the item on agent, so the pass looks at it (it used to hold the pass off, and an item sat on agent for a day)
 item(79, mover="home-front", wake=WAKE16)
-check("16 not due: a bare wake ahead is a reminder, not a wait: not_due says nothing, and due_at counts nothing from a wake that has not passed",
+check("16 not due: a bare wake ahead is a backstop, not a wait: not_due says nothing, and due_at counts nothing from a wake that has not passed",
       S.not_due(rd(79), N) == "" and S.due_at(rd(79), N) == 0.0 and S.due_at(rd(79), N + 7200) > 0.0 and S.due_at(rd(79)) > 0.0, (S.not_due(rd(79), N), S.due_at(rd(79), N)))
 done = stk(N + 1900)
 check("16 not due: ...and the pass steps that item with the wake still ahead (a front mover: its History line)", "a79" in done and len(log_of(79)) == 1, (done, log_of(79)))

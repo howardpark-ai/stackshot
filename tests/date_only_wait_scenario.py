@@ -83,7 +83,7 @@ check("1 the write parks it: one parked line, no note", out.count(PARK) == 1 and
 check("1 the parked note says the item waits until the date (outside a hand-off), never that the date is a reminder", "alone is a wait until that date (outside a hand-off)" in out and "so the item waits until then" in out and "reminder" not in out.split(PARK, 1)[1].split("\n", 1)[0], out)
 import json as _j
 rec1 = _j.dumps(m1.get("server_fixes") or m1.get("fixes") or m1)
-check("1 the History line the server keeps for the park says the same", "alone is a wait until that date (outside a hand-off)" in rec1 and "alone was a reminder" not in rec1, rec1[:400])
+check("1 the History line the server keeps for the park says the same", "alone is a wait until that date (outside a hand-off)" in rec1, rec1[:400])
 check("1 …on hold with the wake as given and a wait_basis made of the reason and the wake day", hd_(m1) is True and wk_(m1) == f"{w2}T08:00"
       and m1["wait_basis"]["text"] == f"the nightly job writes the report at 08:00 (wake {w2})" and m1["wait_basis"]["wake"] == f"{w2}T08:00", m1)
 check("1 …stored as waiting on a time from this write, and the board reads it so", stamped(1) == ("waiting", "time") and MODEL.view({**rd(1), "gid": "a1"}, MODEL.derive({**rd(1), "gid": "a1"}), time.time()).state == "waiting", (stamped(1), m1))
@@ -128,12 +128,12 @@ def stays(name, i, **kw):
     check(name, PARK not in out and _WT.stored_until(m) and "wake" not in m and "hold" not in m and stamped(i) == ("waiting", "time"), (out[-400:], m))
     return out
 item(10, needs=[BACK], next="")
-stays("2 an action to take now with a wake is a reminder: no hold, stored alive", 10, next=f"{BACK}: fix the retry loop and check the log", wake=f"{w2}T08:00")
+stays("2 an action to take now with a wake is a backstop: no hold, stored alive", 10, next=f"{BACK}: fix the retry loop and check the log", wake=f"{w2}T08:00")
 item(11, needs=[BACK], next="")
 stays("2 a timed line beside an action to take now: the action is work in hand", 11, next=f"{TIMED}\n{BACK}: file the report now", wake=f"{w2}T08:00")
 soon = dt.datetime.fromtimestamp(now0 + ZONE_OFFSET + 30 * 60, dt.timezone.utc)
 item(12, needs=[BACK], next="")
-stays("2 a wake within the hour is a reminder even when the step is timed at it", 12, next=f"{BACK}: at {soon:%H:%M} run the check", wake=soon.strftime("%Y-%m-%dT%H:%M"))
+stays("2 a wake within the hour is a backstop even when the step is timed at it", 12, next=f"{BACK}: at {soon:%H:%M} run the check", wake=soon.strftime("%Y-%m-%dT%H:%M"))
 item(13, needs=[BACK], next="")
 out = stays("2 a step started by an outside event keeps its note and is not parked (the park is for a wait on a date)", 13, next=f"{BACK}: when the next vendor release lands, check the fleet reaches it", wake=f"{w2}T10:00")
 check("2 …the note (a wake passed as the old parameter keeps it)", out.count(SN_HEAD) == 1, out)

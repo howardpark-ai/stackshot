@@ -959,14 +959,14 @@ check("the live refresh asks whether an answer form holds a pick or a note befor
 plain_g = [re.sub(r"<[^>]+>", "", x) for x in e_a]
 check("the search text of that answer has the option lines plain, one each", "the options were:" in plain_g and "Ship (recommended): Ship it now." in plain_g and "Wait: Hold it until the review. · picked" in plain_g, plain_g)
 
-# the reminder line: a wake alone on an open item is a reminder, never a hold
+# the backstop line: a wake alone on an open item is a backstop, never a hold
 item(73, owner=B, project="projects/beta", subject="[home] reminder item", age=5 * H_, next="beta-main: look again")
 git("add", "-A"); git("commit", "-q", "-m", "reminder 1")
 rev14(73, 3 * H_, subject="[home] reminder item", wake=_day(4), next="beta-main: look again")
 rev14(73, 1 * H_, subject="[home] reminder item", next="beta-main: look again")
 ev73 = [x for _t, k, x in Bd().item_events(Bd().item("a73"))[0]]
-check("History: a wake set on an open item reads 'reminder set to <day>' and clearing it reads 'reminder cleared', and neither is a hold", any(x.startswith("reminder set to ") for x in ev73)
-      and "reminder cleared" in ev73 and not any("on hold" in x or "wake set" in x for x in ev73), ev73)
+check("History: a wake set on an open item reads 'backstop set to <day>' and clearing it reads 'backstop cleared', and neither is a hold", any(x.startswith("backstop set to ") for x in ev73)
+      and "backstop cleared" in ev73 and not any("on hold" in x or "wake set" in x for x in ev73), ev73)
 
 # the heading over the box: an item he does not decide gets a comment box, not 'Your answer'
 pg_c = Bd().item_html("a4", answer=BOX13, watch=None)

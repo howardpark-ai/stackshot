@@ -5,7 +5,7 @@ An open item that stores `until` is waiting; one that stores none is alive (or w
 holds that every reader takes it, and that an item without one reads as it always did.
 
   1  the accessor: stored until (with and without a kind), the legacy wake and ask_by per kind, garbage kinds, no date at all; date-only = the start of that day, THH:MM = that minute; past and future
-  2  model.derive / view / stamp / words: waiting iff until; kind time when none; a kind keeps its own; the legacy readings are untouched (a wake on an alive item is still a check-back);
+  2  model.derive / view / stamp / words: waiting iff until; kind time when none; a kind keeps its own; the legacy readings are untouched (a wake on an alive item is still a backstop);
      check_fields judges a given `until`; the wait fields that must clear when a wait ends list `until`
   3  watchers: stored_kind, time_epoch, backstop_epoch, can_end, next_moment, due and watches for an until-only item and for the kinds anchor, item, relay and event with an `until` backstop;
      the backoff after a failed turn; end_wait / turn_alive clear `until` with the kind group; a relay's "not yet" puts the new date back where the old one stood
@@ -96,7 +96,7 @@ for name, meta in (("a date-only until", {"until": day(3)}), ("a THH:MM until", 
 check("derive: an until that has passed is a wait that is due", derive(item(until=day(-1))).wait.due and not derive(item(until=day(2))).wait.due and derive(item(until=at(0, "00:00"))).wait.due)
 check("derive: an until in the near future by the minute is not due yet", not derive(item(until=at(1, "00:00")), t=ep(at(1, "00:00")) - 60).wait.due and derive(item(until=at(1, "00:00")), t=ep(at(1, "00:00")) + 1).wait.due)
 alive = derive(item(wake=day(2), needs=[BACK]))
-check("derive: no until, no kind: still alive, and a wake on it is still the mover's check-back", alive.state == M.ALIVE and alive.checkback == day(2), alive)
+check("derive: no until, no kind: still alive, and a wake on it is still the mover's backstop", alive.state == M.ALIVE and alive.checkback == day(2), alive)
 check("derive: no date and no kind: alive", derive(item(needs=[BACK])).state == M.ALIVE)
 check("derive: a legacy hold and wake is the wait it was (no until: by_until false, the wake as its end)",
       (lambda w: w.kind == "time" and w.until == day(4) and not w.by_until)(derive(item(state="parked", hold=True, wake=day(4), needs=[BACK], wait_basis={"text": "x", "wake": day(4)})).wait))

@@ -102,7 +102,7 @@ rules = build(
     item(11, status="completed", wrote=now - 40 * H, state="doing", needs=["home-agent"], next="home-agent: done", outcome="done"),   # closed
     item(12, wrote=now - M, state="parked", needs=["home-agent"], hold=True, wake=local_str(now + 3 * H), next="home-agent: later", cap_ok=True),   # a state that is itself a wait
     quiet(13, 50, mover="home-nobody-else"),                                                            # a session mover: found like a1
-    quiet(14, 50, wake=local_str(now + 5 * H)),                                                         # a wake ahead and nothing else is a reminder: the board shows it on agent, so it is found
+    quiet(14, 50, wake=local_str(now + 5 * H)),                                                         # a wake ahead and nothing else is a backstop: the board shows it on agent, so it is found
 )
 rules["a3"]["metadata"]["wait_basis"] = {"text": "the vendor answers on that day", "wake": rules["a3"]["metadata"]["wake"], "by": "home-agent", "at": now}
 rules["a12"]["activity"] = now - 3 * H
@@ -118,7 +118,7 @@ check("1 the limit is 45 minutes: 40 is not found, and a bare confirm two minute
 check("1 a wake with a wait_basis, a hold with a dated wake, an item behind an open one, a stored wait, an untaken hand-off: none found (the board shows each waiting, or the hand-off audit has it)",
       not any(f["id"] in (bid(3), bid(5), bid(6), bid(7), bid(9)) for f in fs), fs)
 detail14 = next((f["detail"] for f in fs if f["id"] == bid(14)), "")
-check("1 a wake alone, ahead (item 14) or passed (item 4), is a reminder and leaves the item on agent: found, and the evidence says the wake only reminds",
+check("1 a wake alone, ahead (item 14) or passed (item 4), is a backstop and leaves the item on agent: found, and the evidence says the wake is only a backstop",
       {bid(4), bid(14)} <= set(got) and detail14.startswith("no write for 50 minutes and a wake kept as a hand-off's backstop, which is no wait"), fs)
 check("1 the owner's item, a closed item and a state that is itself a wait: none found", not any(f["id"] in ("board#10", "board#11", "board#12") for f in fs), fs)
 check("1 the pass raises exactly these and no other", got == [bid(1), bid(13), bid(14), bid(4)], got)
