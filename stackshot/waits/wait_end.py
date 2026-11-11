@@ -32,6 +32,7 @@ from stackshot.waits import server_fixes as _sf
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
 from stackshot.waits import watchers as _watch
+from stackshot.waits import waiting as _wt
 
 ITEM, PR, BOX, URL, STORED, DELIVERY, EVENT = "item", "pr", "box", "url", "stored", "delivery", "event"
 KINDS = (ITEM, PR, BOX, URL, STORED, DELIVERY, EVENT)
@@ -398,7 +399,7 @@ def event_gap_stored(meta: dict[str, Any]) -> Gap | None:
     if _ew.live(spec):
         return None
     cls = {_ew.JOB_RUN: "a scheduled job's run"}.get(spec.kind, spec.kind)
-    day = meta.get("ask_by") or meta.get("wake") or ""
+    day = _wt.stored_until(meta) or meta.get("ask_by") or meta.get("wake") or ""
     return Gap(EVENT, 0, _clip(phrase, 90), spec.kind, f"the item waits on {cls} ({_clip(phrase, 60)!r}) and no event type tells the server when it ends; it can only come back on its backstop {day}".rstrip(), {}, token(EVENT, spec.kind, phrase), cls)
 
 

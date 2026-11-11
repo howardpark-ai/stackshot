@@ -100,8 +100,8 @@ def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: A
     """Why the item is silent ("" when it is not): "no write for N minutes and no date of its own", the daily run's stale wording with the time in minutes."""
     if _ac._no_session(mover) or after_open(item):
         return ""
-    overdue = bool(meta.get("wake")) and _overdue(item, meta, mover, now)      # a wake covers what it is for, not a step that is already overdue and names no date of its own
-    if _states.of(item, after_open)[0] != "doing" or _wt.is_held(item) or (meta.get("wake") and not overdue):
+    overdue = bool(_wt.wake_value(meta)) and _overdue(item, meta, mover, now)      # a wake covers what it is for, not a step that is already overdue and names no date of its own
+    if _states.of(item, after_open)[0] != "doing" or _wt.is_held(item) or (_wt.wake_value(meta) and not overdue):
         return ""
     if _ho.awaiting_session(item):
         return ""                                # an untaken hand-off is the hand-off audit's alone

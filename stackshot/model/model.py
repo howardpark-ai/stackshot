@@ -17,6 +17,8 @@ optional and all in the item's metadata:
   wait_anchor       the anchor (URL) an anchor wait watches
   wait_event        the event expected: of the anchor (anchor wait), the party or event the owner relays (relay wait), or the fleet event an event wait watches for (event_waits.py)
   ask_by            YYYY-MM-DD, the day a relay wait turns into a question to the owner
+  until             YYYY-MM-DD or YYYY-MM-DDTHH:MM, the one date a wait ends on (read as a wake is read): an open item that stores one is waiting, wait_kind or not (no kind = a wait on the date
+                    alone, kind time); with a kind it is the date the wait comes back anyway (the backstop), for a relay the day it turns into a question. Read first, the legacy wake and ask_by after
   post_wake_mover   the old name of a waiting item's `mover`; while it is stored (not yet moved into `mover`) it wins over a stored `mover`
   (the wait's other inputs are fields an item already had: wake for a time, after for an item; for an anchor or an item wait a wake is its backstop)
   phase             alive | waiting, what the board SHOWS the open item as, written by every save of an open item (server._phase_stamp, the one place) and kept true as the clock moves by the
@@ -43,7 +45,7 @@ from stackshot.waits import waiting as _wt
 DEAD, ALIVE, WAITING = "dead", "alive", "waiting"
 PHASES = (ALIVE, WAITING)       # what an open item stores as `phase` (a closed item is dead and stores none)
 WAIT_KINDS = ("time", "anchor", "item", "relay", "event")
-WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")      # what a clear of the wait drops (the wake and after have flags of their own)
+WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "until")      # what a clear of the wait drops (the wake and after have flags of their own)
 MODEL_FIELDS = ("goal", "mover", "then", *WAIT_GROUP)
 DROP_ON_CLOSE = ("mover", "then", *WAIT_GROUP)            # a closed item has no mover and waits on nothing; its goal stays as the record
 LINE_MAX = 300
@@ -96,6 +98,7 @@ class Wait:
     after: tuple[str, ...] = ()
     mover: str = ""            # who picks the item up when the wait ends (Model.picker): the stored post_wake_mover (the old name) if any, else the stored mover, else the default
     mover_explicit: bool = False
+    by_until: bool = False     # the date above is the item's stored `until` (not a wake or an ask_by)
     due: bool = False
     basis: str = ""            # a time wait's reason: a real outside date (wait_basis text) …
     owner_words: bool = False  # … or the owner's recorded words (cap_ok)
@@ -233,8 +236,9 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     today, derived = _states.of(item, after_open)
     kind_set = _first(m, "wait_kind").lower()
     kind_set = kind_set if kind_set in WAIT_KINDS else ""
+    su = _wt.stored_until(m)                                   # a stored until is a wait on its own: with no kind, on the date alone
     conflicts: list[str] = []
-    waiting = bool(kind_set) or today in WAITING_STATES
+    waiting = bool(kind_set) or bool(su) or today in WAITING_STATES
     if kind_set and today in ALIVE_STATES and not (kind_set == "event" and derived):      # an event wait on an item with no stored state is the way to store one (the state it would read as is the wait's own)
         conflicts.append(f"wait_kind={kind_set} on an item whose state is {today}, which is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a hold ends a stored work-in-hand state)")
     if not waiting:
@@ -253,6 +257,8 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     # waiting
     if kind_set:
         kind, explicit = kind_set, True
+    elif su:
+        kind, explicit = "time", False
     elif today == "outside":
         kind, explicit = ("anchor" if (_first(m, "wait_anchor") or (anchored(item) if anchored else False)) else "relay"), False
     elif today == "blocked":
@@ -264,16 +270,22 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     due = False
     if kind == "time":
         end = clean(m.get("end")) if today == "verifying" else ""
-        if wake:
+        if su:
+            until, ep = su, _wt.wake_epoch(su)
+        elif wake:
             until, ep = wake, _wt.wake_epoch(wake)
         else:
             until, ep = end, (_wt.due_epoch(end) if end else None)      # a verifying item's end date is its wait, like a wake
         due = _epoch_passed(ep, now)
     elif kind == "relay":
-        until = ask_by
-        due = _epoch_passed(_wt.due_epoch(ask_by) if ask_by else None, now)
+        if su:
+            until = su
+            due = _epoch_passed(_wt.wake_epoch(su), now)
+        else:
+            until = ask_by
+            due = _epoch_passed(_wt.due_epoch(ask_by) if ask_by else None, now)
     else:
-        backstop = wake
+        backstop = su or wake
         if kind == "item":
             due = not (after_open(item) if after_open else _wt.after_of(m)) and bool(_wt.after_of(m))
     mv_d, _ = _defaults(m, today)
@@ -287,8 +299,8 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     wait = Wait(kind=kind, kind_explicit=explicit, until=until, backstop=backstop,
                 anchor=_first(m, "wait_anchor") if kind == "anchor" else "",
                 event=(_first(m, "wait_event") or (clean(m.get("party")) if today == "outside" else "")) if kind in ("anchor", "relay") else (_first(m, "wait_event") if kind == "event" else ""),
-                after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), due=due,
-                basis=_wt.basis_of(m) if kind == "time" else "", owner_words=bool(kind == "time" and wake and isinstance(m.get("cap_ok"), dict) and m["cap_ok"].get("wake") == wake))
+                after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), by_until=bool(su), due=due,
+                basis=_wt.basis_of(m) if kind == "time" else "", owner_words=bool(kind == "time" and (su or wake) and isinstance(m.get("cap_ok"), dict) and m["cap_ok"].get("wake") == (su or wake)))
     return Model(WAITING, today, derived, "", False, then_s, bool(then_s), "", wait, tuple(conflicts))
 
 
@@ -338,10 +350,11 @@ def _alive_of(item: dict[str, Any], mod: Model) -> Model:
 def _wait_of(item: dict[str, Any], mod: Model, kind: str) -> Model:
     """A waiting reading of the stored kind for an item the fields read as alive and not as a view-only wait (a stored wait the clock has outdated since the last restamp): the wake it stands on, and the mover as the post-wake mover."""
     m = item.get("metadata") or {}
-    wake = clean(m.get("wake"))
+    su = _wt.stored_until(m)
+    wake = su or clean(m.get("wake"))
     picker_s = norm_who(m.get("post_wake_mover")) or pick_who(m.get("mover"))
     picker = picker_s or mod.mover
-    wait = Wait(kind=kind, kind_explicit=False, until=wake if kind == "time" else "", backstop=wake if kind != "time" else "",
+    wait = Wait(kind=kind, kind_explicit=False, until=wake if kind == "time" else "", backstop=wake if kind != "time" else "", by_until=bool(su),
                 anchor=_first(m, "wait_anchor") if kind == "anchor" else "", event=_first(m, "wait_event") if kind in ("anchor", "relay", "event") else "",
                 after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), due=False,
                 basis=_wt.basis_of(m) if kind == "time" else "")
@@ -424,17 +437,18 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     w = mod.wait
     if w is None:
         return "model: waiting"
+    back = lambda legacy: f"until {w.backstop}" if w.by_until else legacy      # a stored `until` reads "until", the legacy wake or ask_by as it always did
     if w.kind == "time":
-        what = "a time (" + (f"wake {w.until}" if w.until else "no wake set") + ")"
+        what = "a time (" + ((f"until {w.until}" if w.by_until else f"wake {w.until}") if w.until else "no wake set") + ")"
     elif w.kind == "anchor":
         bits = [x for x in (w.anchor or "wait_anchor not set", w.event) if x]      # an anchor scoped to the item stands for it: "no anchor stored" said the item had none when the project's anchors held its anchor
-        what = "an anchor (" + ": ".join(bits) + (f"; backstop wake {w.backstop}" if w.backstop else "") + ")"
+        what = "an anchor (" + ": ".join(bits) + ("; " + back(f"backstop wake {w.backstop}") if w.backstop else "") + ")"
     elif w.kind == "item":
-        what = "the close of " + (", ".join(shown(x) for x in w.after) or "no item stored") + (f" (backstop wake {w.backstop})" if w.backstop else "")
+        what = "the close of " + (", ".join(shown(x) for x in w.after) or "no item stored") + (" (" + back(f"backstop wake {w.backstop}") + ")" if w.backstop else "")
     elif w.kind == "event":
-        what = "a fleet event (" + (w.event or "wait_event not set") + (f"; backstop {w.backstop}" if w.backstop else "") + ")"
+        what = "a fleet event (" + (w.event or "wait_event not set") + ("; " + back(f"backstop {w.backstop}") if w.backstop else "") + ")"
     else:
-        bits = [x for x in (w.event, f"ask by {w.until}" if w.until else "no ask-by date") if x]
+        bits = [x for x in (w.event, (f"until {w.until}" if w.by_until else f"ask by {w.until}") if w.until else "no ask-by date") if x]
         what = f"news only {owner_display()} relays ({'; '.join(bits)})"
     return f"model: waiting on {what} · mover {who(w.mover)}" + (f" (then {who(mod.then)})" if mod.then else "") + tail
 
@@ -450,6 +464,9 @@ def check_fields(values: dict[str, Any]) -> list[str]:
     k = clean(values.get("wait_kind")).lower()
     if k and k not in WAIT_KINDS:
         out.append(f"wait_kind is one of {' | '.join(WAIT_KINDS)} (got {k!r})")
+    u = clean(values.get("until"))
+    if u and _wt.wake_epoch(u) is None:
+        out.append(f"until is YYYY-MM-DD or YYYY-MM-DDTHH:MM, a real date (got {u!r})")
     a = clean(values.get("ask_by"))
     if a:
         try:

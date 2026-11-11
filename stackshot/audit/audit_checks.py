@@ -148,14 +148,15 @@ def check_stale(item: dict[str, Any], meta: dict[str, Any], mover: str, after_op
         return ""
     if _states.of(item, after_open)[0] != "doing":
         return ""
-    wake = _wt.wake_epoch(meta.get("wake")) if meta.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(meta)) if _wt.wake_value(meta) else None
     if _wt.is_held(item) and (wake is None or wake > now):
         return ""
     if wake is not None:
         if wake > now:
             return ""
         if last < wake:
-            return f"past its wake ({_stamp(wake)}) with no write since (last write {_stamp(last) if last else 'unknown'})"
+            what = "until" if _wt.stored_until(meta) else "wake"      # an item that stores an `until` read it first; one that stores none reads as it always did
+            return f"past its {what} ({_stamp(wake)}) with no write since (last write {_stamp(last) if last else 'unknown'})"
         return ""
     return ""
 
@@ -194,7 +195,7 @@ def check_stuck_elsewhere(item: dict[str, Any], meta: dict[str, Any], mover: str
     if not nm or _mg.not_actor(nm):
         return None
     now = time.time() if now is None else now
-    wake = _wt.wake_epoch(meta.get("wake")) if meta.get("wake") else None
+    wake = _wt.wake_epoch(_wt.wake_value(meta)) if _wt.wake_value(meta) else None
     if _wt.is_held(item) and (wake is None or wake > now):
         return None                             # parked or held, its wake ahead (or none): the first step is what the wake leads to
     if wake is not None and wake > now and _model.is_owner(nm):
@@ -616,7 +617,7 @@ def proof_cannot_stage(meta: dict[str, Any], mover: str, wait: Any) -> str:
         if basis:
             return f"a real-world date: {_clip(basis, 80)}"
         cap = meta.get("cap_ok")
-        if meta.get("wake") and isinstance(cap, dict) and cap.get("wake") == meta.get("wake"):
+        if _wt.wake_value(meta) and isinstance(cap, dict) and cap.get("wake") == _wt.wake_value(meta):
             return f"a date {_cfg.owner()} gave in his own words"
     if _release_pending(meta):
         return "its release has not happened yet (a step waits for it)"

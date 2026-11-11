@@ -1662,7 +1662,7 @@ def _gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dic
         if clears.get(flag):
             clash = [k for k in fields if k in setv]
             if clash:
-                raise ToolError(f"Refused: clear_{flag} drops {', '.join(fields)}; it does not go with a new {', '.join(clash)}")
+                raise ToolError(f"Refused: clear_{flag} drops {', '.join(k for k in fields if k != 'until')}; it does not go with a new {', '.join(clash)}")      # `until` is no write field yet: the refusal names the five a caller can pass
             drop.update(fields)
     if "wait_kind" in setv:
         setv["wait_kind"] = setv["wait_kind"].lower()
@@ -2691,14 +2691,14 @@ def _gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = "
             if clear_after:
                 meta.pop("after", None)
             if clear_wait:
-                for k in ("wait_kind", "wait_anchor", "wait_event"):
+                for k in ("wait_kind", "wait_anchor", "wait_event", "until"):
                     meta.pop(k, None)
             if clear_hold:
                 meta.pop("hold", None)
             if wake.strip() and not clear_wake:
                 meta["wake"] = wake.strip()
             if clear_wake:
-                meta.pop("wake", None)
+                meta.pop("wake", None); meta.pop("until", None)
             if state.strip():
                 meta["state"] = state.strip()
             mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: _after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
@@ -4428,10 +4428,10 @@ def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             if ep is not None:
                 out.append((gid, p, it, dt.datetime.fromtimestamp(ep, _pages.zone_now().tzinfo)))
             continue
-        if not meta.get("wake"):
+        if not _wt.wake_value(meta):
             continue
         try:
-            out.append((gid, p, it, _wake_at(meta["wake"])))
+            out.append((gid, p, it, _wake_at(_wt.wake_value(meta))))
         except ValueError:
             continue                        # a wake the gate would have refused (a hand edit): left for a person to see
     return out
@@ -4477,7 +4477,8 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
             if _watch.watches(it) or not due(at) or _old_wait_off():       # a watched wait is the watchers', above; after the switchover (fallback off) the old pass stands down
                 continue
             meta = it.get("metadata") or {}
-            wake = meta.pop("wake")
+            wake = _wt.wake_value(meta)
+            meta.pop("wake", None); meta.pop("until", None)
             meta.pop("watch_reason", None)    # a front agent's reason for watching belonged to this wake
             meta.pop("wait_basis", None)      # a wait that stood on a real-world date: the wake is spent, so is its basis
             _state_end(meta, "parked")        # a park that stood on that wake is over with it
@@ -4664,7 +4665,7 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
                   + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
             print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
             continue
-        meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("wait_basis", None)
+        meta.pop("after", None); meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None)
         _state_end(meta, "blocked", "parked")     # the item it waited on is closed: the wait is over
         meta.pop("wait_failed", None); meta.pop("waiting", None)   # released: nothing is waited on, so no failed wait stays, and a `waiting` record an earlier version wrote goes too (the wake notice below is the one the keeper gets)
         _hand_stored_then(g, it, meta)           # a `then` stored while the item waited (a decision answered on a held item) takes it now; the wake notice below reaches it through needs
@@ -4982,7 +4983,7 @@ def _anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched:
         if it.get("status") != "open" or not _is_held(it) or _watch.watches(it) or at <= float(it.get("state_updated") or 0):      # a watched wait is the watchers' (_watch_anchor_notice below)
             continue
         meta = it["metadata"]
-        meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("wait_basis", None); meta.pop("idle", None)
+        meta.pop("hold", None); meta.pop("hold_set", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("wait_basis", None); meta.pop("idle", None)
         _state_end(meta, "parked")
         it["updated"] = it["state_updated"] = time.time()
         what = f"woke: a notice from {url}, the anchor it waited on, {how}"
@@ -5174,7 +5175,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
         date = (dt.datetime.fromtimestamp(until, ZONE).strftime("%Y-%m-%d") if until else "")
         url = str(meta.get("wait_anchor") or "")
         if cause == "time":
-            what = detail.get("what") or (_watch.what_time(str(meta.get("wake"))) if meta.get("wake") else f"its end date {meta.get('end')} came")
+            what = detail.get("what") or (_watch.what_until(_wt.stored_until(meta)) if _wt.stored_until(meta) else _watch.what_time(str(meta.get("wake"))) if meta.get("wake") else f"its end date {meta.get('end')} came")
         elif cause == "item":
             what = detail.get("what") or f"every item it waited on has closed ({', '.join(_gh.shown(g) for g in _after_of(meta))})"
         elif cause == "anchor":
@@ -5188,7 +5189,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
         elif cause == "backstop":
             what = _watch.what_item_backstop(date, [_gh.shown(g) for g in _after_open(meta)])
         else:
-            what = f"its ask-by day {meta.get('ask_by')} came"
+            what = f"its ask-by day {_watch.relay_day(meta)} came"
         chased = _watch.chased_out(meta)
         ask_him = cause == "relay" or (cause == "backstop" and chased)
         if ask_him:
@@ -5196,7 +5197,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
             ask = _watch.drop_ask(meta) if chased else _watch.relay_ask(meta)
             opts = _watch.drop_options() if chased else _watch.relay_options()
             _watch.remember(meta, asked, now)
-            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if chased else f"{_watch.subject_of(meta)} is due: its ask-by day {meta.get('ask_by')} came", now)
+            _watch.turn_to_owner(meta, mod.then if _model.is_owner(post) else post, ask, opts, what if chased else f"{_watch.subject_of(meta)} is due: its ask-by day {_watch.relay_day(meta)} came", now)
             mover = OWNER
         elif _model.is_owner(post):
             ask, opts = _watch_ask(gid, meta, what)
@@ -5866,7 +5867,7 @@ def _watch_on_write(gid: str, item_was: dict[str, Any], meta: dict[str, Any], mo
             meta["watch"] = w
             if not w:
                 meta.pop("watch")
-    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "post_wake_mover")):
+    elif any(meta.get(k) != old.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "wake", "until", "post_wake_mover")):
         w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
         w["set_at"] = time.time()
         meta["watch"] = w
@@ -7671,7 +7672,7 @@ def _wake_alone_on_agent(meta: dict[str, Any]) -> bool:
     """A wake with no hold on an item that is on agent: what the two wake notes (_wake_window_note, _wake_step_note) share. False for an item on hold or with no wake, one waiting on his decision
     or on an open `after`, one with needs=external, one whose wake carries a wait_basis and is still ahead (the board lists it as waiting until the wake: model.view), and one stored as outside, verifying or blocked
     (none of those is on agent)."""
-    if meta.get("hold") or not meta.get("wake") or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(meta.get("wake")) or 0.0) > time.time()):
+    if meta.get("hold") or not _wt.wake_value(meta) or _waits_decision(meta) or _after_open(meta) or (_wt.basis_of(meta) and (_wt.wake_epoch(_wt.wake_value(meta)) or 0.0) > time.time()):
         return False
     return not ("external" in [str(x).lower() for x in _wt.needs_of(meta)] or str(meta.get("state") or "").lower() in ("outside", "verifying", "blocked"))
 
@@ -7683,7 +7684,7 @@ def _wake_window_note(meta: dict[str, Any]) -> str:
     on an open `after`, with needs=external, or stored as outside, verifying or blocked."""
     if not _wake_alone_on_agent(meta):
         return ""
-    found = _mg.reads_as_window(meta.get("next"), meta.get("wake"))
+    found = _mg.reads_as_window(meta.get("next"), _wt.wake_value(meta))
     if not found:
         return ""
     return (f"\n(note: wake {meta['wake']} alone is a reminder, and this item's next waits for that date (\"{found}\"), so the item stays on agent while nobody works it. "
@@ -7701,7 +7702,7 @@ def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only:
     mod = _model_of(item)
     if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not any(_ho_same(mod.mover, x) for x in senders):
         return []
-    return _dw.timed_wait_lines(meta.get("next"), meta.get("wake"), _pages.zone_now().date(),
+    return _dw.timed_wait_lines(meta.get("next"), _wt.wake_value(meta), _pages.zone_now().date(),
                                 lambda who: _ho_same(mod.mover, who) or _session_label(mod.mover).casefold() == who.casefold(), dated_only)
 
 
@@ -7744,12 +7745,12 @@ def _fix_loose_reason(item: dict[str, Any], meta: dict[str, Any], next_after: An
     would not pass. → (the wait_basis, (the reply note, the wake, the History line)), ("", ("", "", "")) when there is none."""
     none = ("", ("", "", ""))
     try:
-        if _waits_decision(meta) or _wt.basis_of(meta) or str(_wt.words_of(meta).get("quote") or "").strip() or not (wake_in or meta.get("wake")):
+        if _waits_decision(meta) or _wt.basis_of(meta) or str(_wt.words_of(meta).get("quote") or "").strip() or not (wake_in or _wt.wake_value(meta)):
             return none
         mod = _model_of(item)
         if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover):      # an item the owner moves (or in any owner state) is his: the hold stays refused as before
             return none
-        wk = _parse_wake(wake_in) if wake_in else str(meta.get("wake") or "")
+        wk = _parse_wake(wake_in) if wake_in else str(_wt.wake_value(meta) or "")
         where, line = "", ""
         for where_, text in (("next", next_after), ("description", description)):
             line = _mg.window_line(text, wk)
@@ -7785,12 +7786,12 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
     with _ITEM_LOCK:
         item = _load(gid)
         meta = item.get("metadata")
-        if not isinstance(meta, dict) or item.get("status") != "open" or not meta.get("wake") or meta.get("hold"):
+        if not isinstance(meta, dict) or item.get("status") != "open" or not _wt.wake_value(meta) or meta.get("hold"):
             return {"parked": False, "why": "not an open item with a wake and no hold"}
         mod = _model_of(item)
         if not mod.mover or _model.is_owner(mod.mover) or _waits_decision(meta):
             return {"parked": False, "why": f"{OWNER} moves it"}
-        wake = str(meta["wake"])
+        wake = str(_wt.wake_value(meta))
         if _sf.declined(meta, _sf.WAKE_PARK, wake):
             return {"parked": False, "why": "the mover sent this wake back"}
         basis, _note = _date_only_wait(item, meta, meta.get("next"), "", (mod.mover,), "")
@@ -9969,7 +9970,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     out.extend(_model_lines(item, brief))                   # dead, alive or waiting, with the mover and the wait
     if not brief:
         out.extend(_handoff_lines(item))                    # step 2: handed to X, not yet taken | taken | returned
-    for k in ("project", "needs", "ask", "priority", "due", "wake"):       # the creator is no line here (the History says "created by"); the mover leads the model line
+    for k in ("project", "needs", "ask", "priority", "due", "wake", "until"):       # the creator is no line here (the History says "created by"); the mover leads the model line
         if k == "needs":                     # the list
             needs = _needs_of(m)
             if needs:
@@ -9993,11 +9994,11 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), ZONE))}" if _rmod.hold_at(item) else ""))
     if item.get("status") == "open" and _wt.basis_of(m):   # a wake past the cap that stands on a real-world date, and who said so
         wb = m["wait_basis"]
-        out.append(f"wait basis: {_wt.basis_of(m)} (lifts the {_wt.cap_days():g}-day cap for the wake {m['wake']} only; set by {wb.get('by') or 'unknown'}"
+        out.append(f"wait basis: {_wt.basis_of(m)} (lifts the {_wt.cap_days():g}-day cap for the wake {_wt.wake_value(m)} only; set by {wb.get('by') or 'unknown'}"
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(float(wb['at']), ZONE))}" if isinstance(wb.get("at"), (int, float)) else "") + ")")
     if item.get("status") == "open" and _wt.words_of(m):   # his words behind the wake, quoted, and where they came from
         ww = _wt.words_of(m)
-        out.append(f"{OWNER}'s words behind the wake {m['wake']}: “{_clip_line(ww['quote'], 300)}”" + (f" ({ww['source']})" if ww["source"] else ""))
+        out.append(f"{OWNER}'s words behind the wake {_wt.wake_value(m)}: “{_clip_line(ww['quote'], 300)}”" + (f" ({ww['source']})" if ww["source"] else ""))
     if _after_of(m):                         # what must close first, each with its state
         states = []
         for g in _after_of(m):
@@ -10097,7 +10098,7 @@ def _world_waits_text() -> str:
             if it.get("status") != "open" or not _watch.stored_kind(m):
                 continue
             if _watch.stored_kind(m) == "relay":
-                rows.append((_model.clean(m.get("ask_by")) or "9999", _watch.world_line(_gh.shown(gid), str(it.get("subject") or ""), m)))
+                rows.append((_model.clean(_watch.relay_day(m)) or "9999", _watch.world_line(_gh.shown(gid), str(it.get("subject") or ""), m)))
             if not _watch.can_end(m):
                 stuck.append(_gh.shown(gid))
         except Exception:  # noqa: BLE001
@@ -12685,18 +12686,18 @@ def _update_unlocked(
         if not (was_held and _rmod.hold_at(item)):   # who set it and when: the unexplained-holds report and the briefings read it; a hold already held keeps its stamp
             _hold_set(meta, _session_label(debtor) or debtor or "unknown")
     if clear_wake:                # the wake goes; a hold stays only while something else holds it (the item rule below)
-        meta.pop("wake", None); _cap_ok_drop(meta, "wake")
+        meta.pop("wake", None); meta.pop("until", None); _cap_ok_drop(meta, "wake")
     if clear_hold:                # released now: the hold and its wake go together
         if meta.get("wake") and _sf.marked(meta, _sf.WAKE_PARK, str(meta["wake"])):      # the server parked this wake and the mover sends it back: the server leaves that wake alone from here
             _sf.unmark(meta, _sf.WAKE_PARK, str(meta["wake"])); _sf.decline(meta, _sf.WAKE_PARK, str(meta["wake"]))
         if meta.pop("hold", None):
-            meta.pop("wake", None); _cap_ok_drop(meta, "wake")
+            meta.pop("wake", None); meta.pop("until", None); _cap_ok_drop(meta, "wake")
             if _watch.stored_kind(meta) == "time":      # the time wait the hold stood on (a park with a then stores one) goes with it: wait_kind, post_wake_mover and the watcher's stamps
                 for k in (*_model.WAIT_GROUP, "chases", "watch"):
                     meta.pop(k, None)
         meta.pop("hold_set", None)
     if item.get("status") == "completed":   # completed: nothing is held or due any more
-        meta.pop("hold", None); meta.pop("wake", None); meta.pop("hold_set", None); meta.pop("cap_ok", None)
+        meta.pop("hold", None); meta.pop("wake", None); meta.pop("until", None); meta.pop("hold_set", None); meta.pop("cap_ok", None)
     if basis_ok:                  # the basis is bound to the wake it was given for; a different wake, no wake or a closed item drops it
         _basis_put(meta, basis_ok, str(meta.get("wake") or ""), _session_label(debtor) or debtor or "unknown")
     elif clear_wait_basis or (isinstance(meta.get("wait_basis"), dict) and meta["wait_basis"].get("wake") != meta.get("wake")):

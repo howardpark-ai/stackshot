@@ -1499,7 +1499,7 @@ def wake_park_pass(findings: list[dict[str, Any]], items: dict[str, dict[str, An
         if not gid:
             continue
         meta = (items.get(gid) or {}).get("metadata") or {}
-        if _sf.declined(meta, _sf.WAKE_PARK, str(meta.get("wake") or "")):
+        if _sf.declined(meta, _sf.WAKE_PARK, str(_wt.wake_value(meta) or "")):
             done.add(str(f["id"]))
             rep["declined"].append(f["id"])
             continue
