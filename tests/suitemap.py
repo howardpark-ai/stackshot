@@ -111,6 +111,24 @@ to break a fixture suite: no code change, set it in tests.yml's selection step. 
 fixture suites, the map lists the real path for every suite that opened it, so the old behaviour (every suite that read the file) holds by
 itself. `audit` applies the same rule on both maps.
 
+Docstrings (Wed Nov 11th 2026). A docstring is a line of the function's body, so editing only the docstring of a function every suite calls
+selected every suite that ran it (136 of 207 for one edit of waiting.mover_of), though the text can be seen only by code that reads it. Now,
+for a MODULE-LEVEL function with no decorator, or only PURE_DECORATORS, whose docstring is alone on its lines (nothing of the def or of
+another statement shares them), a change whose changed lines in that function are all docstring lines is not a change of its body:
+  * the file's own text readers still run (rule 6: the `whole` of the map: inspect.getsource, a test that greps the file);
+  * the suites whose own file names the function (`server.f.__doc__`, `from m import f`, getattr(module, <not a literal>)) run, found as
+    the suites that read the name (see *names*), and the registrations at module level that read it (a call such as mcp.tool()(f) is an
+    effect that takes the file whole);
+  * every suite that ran code which reads a docstring itself (an attribute `__doc__`, getdoc, get_docstring, render_doc, help) or hands a
+    function to a registry that builds a description from it (add_tool, from_function, add_resource, add_prompt, mcp.tool(...)(fn)): DOC_CALLS;
+    the checkout has none today, so this adds nothing now;
+  * not the suites that only ran the body, and not the callers of the function.
+A function whose docstring changed together with a line of its code or its def (a signature, a decorator), a decorated function (the decorator
+reads the docstring at import: an @mcp.tool's is the description a session reads), a method or a nested function (its name is no key a suite
+reads by: `obj.method`), a class, and the module's own docstring (read by name already: `client.__doc__`) are selected as before. So is a
+module that calls globals(). SUITEMAP_DOCSTRING_RULE=D1 (D2 by default; any other value is an error, checked when a command starts) gives
+the old rule everywhere: a docstring is part of the body. `audit` applies the same rule on both maps.
+
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
 `shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
@@ -141,6 +159,15 @@ def example_rule():
     v = os.environ.get("SUITEMAP_EXAMPLE_RULE", "A2").strip().upper()
     if v not in ("A1", "A2"):
         raise SystemExit(f"suitemap: SUITEMAP_EXAMPLE_RULE={os.environ.get('SUITEMAP_EXAMPLE_RULE')!r} is not a rule: the allowed values are A1 and A2")
+    return v
+
+
+def docstring_rule():
+    """D2 (default): a change confined to the docstring of a module-level function with no decorator that reads it selects by name, not by
+    what ran the function; D1: a docstring is part of the function's body, as before (see *Docstrings*)"""
+    v = os.environ.get("SUITEMAP_DOCSTRING_RULE", "D2").strip().upper()
+    if v not in ("D1", "D2"):
+        raise SystemExit(f"suitemap: SUITEMAP_DOCSTRING_RULE={os.environ.get('SUITEMAP_DOCSTRING_RULE')!r} is not a rule: the allowed values are D1 and D2")
     return v
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
@@ -174,13 +201,16 @@ def scopes(src):
     name of the innermost function whose body holds the line, '<main>' in the body of a top-level `if __name__ ==
     "__main__":` (only a suite that runs the file as a program runs it), '' at module level (imports, constants, class
     bodies, def lines); header[line] = (qualname, decorated) for a function's decorator, def and signature lines; ddoc holds
-    the docstring lines of functions with a decorator that may read them (any but PURE_DECORATORS)."""
+    the docstring lines of functions with a decorator that may read them (any but PURE_DECORATORS); pdoc maps the docstring
+    lines of a module-level function with no such decorator (none, or only PURE_DECORATORS) to the function's name, when
+    the docstring is alone on its lines (see *Docstrings* above)."""
     try:
         tree = ast.parse(src)
     except (SyntaxError, ValueError):
         return None
     n = src.count("\n") + 2
-    body_of, header, ddoc = [""] * (n + 1), {}, set()
+    body_of, header, ddoc, pdoc = [""] * (n + 1), {}, set(), {}
+    text = src.split("\n")
 
     def walk(node, prefix, top):
         for ch in ast.iter_child_nodes(node):
@@ -198,15 +228,21 @@ def scopes(src):
                 for ln in range(min([d.lineno for d in ch.decorator_list] + [ch.lineno]), b0.lineno):
                     header[ln] = (q, bool(ch.decorator_list))
                 # a decorator that only wraps (@staticmethod, @functools.wraps) never reads the docstring: it stays the body's
-                if any(dotted(d.func if isinstance(d, ast.Call) else d) not in PURE_DECORATORS for d in ch.decorator_list) \
-                        and isinstance(b0, ast.Expr) and isinstance(b0.value, ast.Constant) and isinstance(b0.value.value, str):
+                is_doc = isinstance(b0, ast.Expr) and isinstance(b0.value, ast.Constant) and isinstance(b0.value.value, str)
+                if is_doc and any(dotted(d.func if isinstance(d, ast.Call) else d) not in PURE_DECORATORS for d in ch.decorator_list):
                     ddoc.update(range(b0.lineno, (b0.end_lineno or b0.lineno) + 1))
+                elif is_doc and not prefix:
+                    # a module-level function's docstring on lines of its own: nothing before it on its first line (the def's
+                    # tail, a `;`), no statement after it on its last
+                    first = text[b0.lineno - 1].encode()[: b0.col_offset] if 0 < b0.lineno <= len(text) else b"x"
+                    if first.strip() == b"" and (len(ch.body) == 1 or ch.body[1].lineno > (b0.end_lineno or b0.lineno)):
+                        pdoc.update({ln: ch.name for ln in range(b0.lineno, (b0.end_lineno or b0.lineno) + 1)})
                 walk(ch, f"{q}.<locals>.", False)
             else:
                 walk(ch, prefix, False)
 
     walk(tree, "", True)
-    return body_of, header, ddoc, tree
+    return body_of, header, ddoc, tree, pdoc
 
 
 # ---------------------------------------------------------------- names
@@ -252,6 +288,10 @@ PURE_DECORATORS = {"functools.wraps", "wraps", "functools.lru_cache", "lru_cache
 # A decorator on one of the module's own objects (@mcp.tool, @mcp.custom_route) registers the function there: its name,
 # signature and description are read by whoever calls it (it ran the body: measured) and by whatever lists the registry.
 # Listing is a call of one of these, on any object (a suite lists tools through its MCP client): the key (*, <enumerate>).
+# Code that reads a function's docstring, or hands the function to a registry that does (a tool server builds its description from it): a
+# docstring-only change reaches every suite that ran such code (see *Docstrings*). None of it exists in the checkout's own code today.
+DOC_CALLS = {"getdoc", "get_docstring", "render_doc", "help", "add_tool", "from_function", "add_resource", "add_prompt"}
+DOC_REGISTER = {"tool", "resource", "prompt"}   # mcp.tool(...)(fn) called as a function, not as a decorator
 ENUMERATE = "<enumerate>"
 ENUMERATE_ATTRS = {"list_tools", "get_tools", "_list_tools", "list_resources", "get_resources", "list_prompts", "get_prompts",
                    "list_resource_templates", "_tool_manager", "http_app", "routes"}
@@ -288,10 +328,11 @@ class ModNames:
         self.stmts = []                             # (first, last, kind, names, keys read by the statement at import)
         self.functions, self.classes = set(), set()
         self.effect_targets = {}                    # first line of an effect-mod statement → the modules it sets state in
-        self.text, self.ddoc, self.body_of = [], set(), []
+        self.text, self.ddoc, self.pdoc, self.body_of = [], set(), {}, []
+        self.docreads = set()                       # scopes that read a docstring, or hand a function to a registry that does
         if not self.ok:
             return
-        self.body_of, _, self.ddoc, tree = sc
+        self.body_of, _, self.ddoc, tree, self.pdoc = sc
         self.text = src.split("\n")
         self.aliases, self.froms = {}, {}
         pkg = self.mod if path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
@@ -365,7 +406,18 @@ class ModNames:
                 out.add(("~", mod, tuple(rest)))  # server._cfg.CFG: Names follows _cfg through server's own imports
         return out
 
+    def doc_read(self, node):
+        """record the scope of a node that reads a docstring (`x.__doc__`, inspect.getdoc, a registry call: DOC_CALLS)"""
+        hit = isinstance(node, ast.Attribute) and node.attr == "__doc__" and isinstance(node.ctx, ast.Load)
+        if isinstance(node, ast.Call):
+            f = dotted(node.func)
+            hit = (f is not None and f.split(".")[-1] in DOC_CALLS) or \
+                (isinstance(node.func, ast.Call) and getattr(node.func.func, "attr", None) in DOC_REGISTER)
+        if hit:
+            self.docreads.add(self.scope(node))
+
     def read(self, node):
+        self.doc_read(node)
         sc = None
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             sc, ks = self.scope(node), self.keys(node)
@@ -1070,11 +1122,11 @@ def shadowable():
 
 
 def py_change(names, S, a, b, old, new):
-    """(fns, bound, own, whole) for one changed Python file: the (file, scope) pairs whose bodies changed, the (module,
+    """(fns, bound, own, whole, docs) for one changed Python file: the (file, scope) pairs whose bodies changed, the (module,
     name) keys whose module-level binding changed, the (file, name) defs and classes among them (what they run counts),
-    and the files to take whole (a module-level change with effects, a file that does not parse, an added, deleted or
-    renamed file: whoever ran it)"""
-    fns, bound, own, whole = set(), set(), set(), set()
+    the files to take whole (a module-level change with effects, a file that does not parse, an added, deleted or
+    renamed file: whoever ran it), and the (module, name) keys of the functions whose docstring alone changed"""
+    fns, bound, own, whole, docs = set(), set(), set(), set(), set()
     ol, nl = changed_lines(a, b, old, new)
     if not old or not new or old != new:
         whole |= {p for p in (old, new) if p}
@@ -1091,6 +1143,9 @@ def py_change(names, S, a, b, old, new):
             if not t or t.startswith("#"):
                 continue
             sc = mn.body_of[ln] if ln < len(mn.body_of) else ""
+            if ln in mn.pdoc and not dyn and docstring_rule() == "D2":
+                docs.add((p, mn.pdoc[ln], mn.mod))   # the docstring of an undecorated function: not code (see *Docstrings*)
+                continue
             if ln in mn.ddoc:
                 # a decorated function's docstring: its decorator reads it at import, so it counts as the def statement's
                 st = mn.stmt_at(ln)
@@ -1117,7 +1172,20 @@ def py_change(names, S, a, b, old, new):
                 continue
             bound |= {n if isinstance(n, tuple) else (mn.mod, n) for n in bnames}
             own |= {(p, n) for n in bnames if isinstance(n, str) and n in mn.functions | mn.classes}
-    return fns, bound, own, whole
+    # a function whose code or def line changed too is selected as before: only a function whose changed lines are all docstring
+    # keeps the name rule. The code that reads a docstring is reached either way
+    docs = {(p, fn, mod) for p, fn, mod in docs if (p, fn) not in fns and (mod, fn) not in bound}
+    if docs:
+        for N in names:
+            for f, m in N.files.items():
+                if SUITE_RE.match(f):
+                    continue   # a suite that reads a docstring names the function: the name rule has it
+                for sc in m.docreads:
+                    if sc:
+                        fns.add((f, sc))
+                    else:
+                        whole.add(f)
+    return fns, bound, own, whole, {(mod, fn) for _, fn, mod in docs}
 
 
 def quiet_import(N, S, path, mod):
@@ -1347,15 +1415,22 @@ def selection(m, a, b, pathspec=()):
             hit |= {s for s, e in S.items() if any(p in e.get("whole", ()) for p in (old, new) if p)}
             if names is None:
                 names = (Names(a), Names(b))
-            fns, bound, own, whole = py_change(names, S, a, b, old, new)
+            fns, bound, own, whole, docs = py_change(names, S, a, b, old, new)
             reached = 0
+            ranfiles = {p for e in S.values() for p in e.get("py", {})}
             if bound:
-                keys, w = reach(names, bound, {p for e in S.values() for p in e.get("py", {})})
+                keys, w = reach(names, bound, ranfiles)
                 whole |= w
                 sc, direct = readers(names, keys)
                 fns |= sc
                 hit |= direct
                 reached = len(keys)
+            if docs:
+                # a docstring alone: the suites whose own file names the function (or a binding that holds it), and a module-level
+                # registration that reads it; not the callers' scopes, not what ran the body (the code that reads a docstring is in fns)
+                keys, w = reach(names, docs, ranfiles)
+                whole |= w
+                hit |= readers(names, keys)[1]
             for s, e in S.items():
                 py = e.get("py", {})
                 if any(p in py for p in whole) or any(q in py.get(p, ()) for p, q in fns) \
@@ -1372,7 +1447,8 @@ def selection(m, a, b, pathspec=()):
                     if top in shadow:
                         return "all", why + [(f, f"a new module named {top!r}, like one the suites import")]
             why.append((f, (f"whole ({', '.join(sorted(whole))})" if whole else
-                            f"{len(fns)} function(s), {len(bound)} name(s) bound, {reached} reached") + f" → {len(hit)} suite(s)"))
+                            f"{len(fns)} function(s), {len(bound)} name(s) bound, {reached} reached"
+                            + (f", {len(docs)} docstring(s) alone" if docs else "")) + f" → {len(hit)} suite(s)"))
         else:
             if not m.get("strace"):
                 return "all", why + [(f, "the map has no file measurement (no strace)")]
@@ -1493,6 +1569,7 @@ def main():
     p = sub.add_parser("audit"); p.add_argument("--old", required=True); p.add_argument("--new", required=True); p.add_argument("--to", required=True)
     args = ap.parse_args()
     example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
+    docstring_rule()
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0

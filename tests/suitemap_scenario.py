@@ -53,7 +53,18 @@ write("mod.py", '''
         return LIMIT + 1
 
     def g():
+        deep()
         return "g"
+
+    def deep():
+        """the helper's docstring"""
+        return 1
+
+    def documented():
+        """the text a suite reads"""
+        return 0
+
+    def inline(): """an inline docstring"""; return 2
 
     def typed(x: ANN) -> ANN:
         return x
@@ -112,7 +123,7 @@ write("tests/a_scenario.py", '''
     import os, sys
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, ROOT)
     import mod
-    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't'
+    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2
     assert open(os.path.join(ROOT, "data.txt")).read()
 ''')
 write("tests/b_scenario.py", '''
@@ -124,11 +135,12 @@ write("tests/b_scenario.py", '''
     assert subprocess.run(["sh", os.path.join(ROOT, "helper.sh")], capture_output=True).returncode == 0
     os._exit(0)
 ''')
-# z only imports mod: it is reached by a change with effects at import, by nothing else
+# z only imports mod and reads one docstring: it is reached by a change with effects at import, by nothing else (and by an edit of that docstring)
 write("tests/z_scenario.py", '''
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import mod
+    assert mod.documented.__doc__
 ''')
 write("tests/c_scenario.py", '''
     import os
@@ -242,6 +254,51 @@ out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the too
 check("a decorated function's docstring is module level (a decorator reads it at import)", out == "all", (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's new docstring"), "static docstring")
 check("a docstring under a decorator that only wraps (@staticmethod) is the function's own body", out.split() == ["a", "c"], (out, err))
+# ---- Docstrings (Wed Nov 11th 2026): the docstring of an undecorated module-level function is not code; deep() is run by b (through g), named by nobody;
+# documented() is never run, and z reads its __doc__; the K.s case above and the decorated one are the rule's other side
+out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new docstring"), "undecorated docstring")
+check("DOC1 a docstring-only change of an undecorated function reaches the text reader alone, not the suite that ran it (b, through g)", out.split() == ["c"] and "1 docstring(s) alone" in err, (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new\n    docstring over\n    two lines"), "undecorated multi-line docstring")
+check("DOC2 a docstring that grows to several lines is the same: the text reader alone", out.split() == ["c"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new docstring"), "undecorated docstring, old rule")
+out_d1 = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip(), env={"SUITEMAP_DOCSTRING_RULE": "D1"}).stdout.split()
+check("DOC3 SUITEMAP_DOCSTRING_RULE=D1 gives the old answer for the same change (b ran deep)", out_d1 == ["b", "c"], out_d1)
+out, err, _ = sel_after(lambda: sub("mod.py", "the text a suite reads", "the text a suite reads, changed"), "docstring read by a suite")
+check("DOC4 a docstring a suite reads (z: mod.documented.__doc__) reaches that suite by the name, though no suite ran the body", out.split() == ["c", "z"], (out, err))
+out_d1 = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip(), env={"SUITEMAP_DOCSTRING_RULE": "D1"}).stdout.split()
+check("DOC5 …which the old rule missed (it chose the text reader alone: nothing ran documented())", out_d1 == ["c"], out_d1)
+def doc_and_code():
+    sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "    return 1\n\ndef documented", "    return 11\n\ndef documented")
+out, err, _ = sel_after(doc_and_code, "docstring and code")
+check("DOC6 a docstring and a line of the function's code in one change select as before: the suites that ran it (b)", out.split() == ["b", "c"], (out, err))
+def doc_and_sig():
+    sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "def deep():", "def deep(x=0):")
+out, err, _ = sel_after(doc_and_sig, "docstring and signature")
+check("DOC7 a docstring and the def line together select as before (b ran it)", out.split() == ["b", "c"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "an inline docstring", "a new inline docstring"), "inline docstring")
+check("DOC8 a docstring that shares its line with the def and with a statement is body, not docstring: selected as before (the def line is a line of the body's, so every suite that imported the module ran it)",
+      out == "all" and "docstring(s) alone" not in err, (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's other docstring"), "method docstring, again")
+check("DOC9 a method's docstring is selected as before (a method has no name a suite reads by): a", out.split() == ["a", "c"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the tool's other description"), "decorated docstring, again")
+check("DOC10 a decorated function's docstring is still the decorator's read: every suite that ran the file", out == "all", (out, err))
+# the readers no suite shows by name: a synthetic map where a ran a function that reads __doc__ (or registers a function), as if the base had it
+def doc_reader(code):
+    def edit():
+        sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "def documented():", code + "\n\ndef documented():")
+    return edit
+def with_ran(scope):
+    mm = json.loads(MAP.read_text()); mm["suites"]["a"]["py"]["mod.py"] = sorted({*mm["suites"]["a"]["py"]["mod.py"], scope}); P = T / f"map-{scope}.json"; P.write_text(json.dumps(mm)); return P
+for what, code, scope in (("an attribute __doc__", "def describe(fn):\n    return fn.__doc__", "describe"),
+                          ("inspect.getdoc", "def describe(fn):\n    import inspect\n    return inspect.getdoc(fn)", "describe"),
+                          ("a registry's add_tool", "def register(srv, fn):\n    srv.add_tool(fn)", "register"),
+                          ("mcp.tool()(fn) as a call", "def register(srv, fn):\n    return srv.tool()(fn)", "register")):
+    git("checkout", "-q", "-B", f"t{len(ran)}", base); doc_reader(code)(); head = commit("docstring and a doc reader")
+    r = tool("select", "--map", str(with_ran(scope)), "--to", head); r0 = tool("select", "--map", str(MAP), "--to", head)
+    check(f"DOC11 a docstring-only change reaches the suite that ran code reading a docstring ({what}); with no suite running it, the text reader alone",
+          r.stdout.split() == ["a", "c"] and r0.stdout.split() == ["c"], (r.stdout, r.stderr[-300:], r0.stdout))
+r = tool("list", env={"SUITEMAP_DOCSTRING_RULE": "x"})
+check("DOC12 a value that is not a rule is an error at once", r.returncode != 0 and "SUITEMAP_DOCSTRING_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")
