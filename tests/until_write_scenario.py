@@ -369,5 +369,19 @@ docs13 = {n_: (pathlib_.Path(__file__).resolve().parent.parent / "docs" / n_).re
 check("5.13 docs/handoffs.md no longer calls the wake a reminder that parks only with hold=true, and says a hand-off write ends a park", "a wake parks an item only with an explicit" not in docs13["handoffs.md"] and "ends that wait" in docs13["handoffs.md"] and "backstop" in docs13["handoffs.md"], None)
 check("5.13 docs/waiting-and-doing.md's paragraph carries the hand-off exception", "outside a hand-off" in docs13["waiting-and-doing.md"] and "backstop" in docs13["waiting-and-doing.md"], None)
 
+# 5.14 no refusal text, state hint or comment teaches the date as a reminder that leaves the item active
+import pathlib as _pl14
+root14 = _pl14.Path(__file__).resolve().parent.parent
+from stackshot.model import model_guards as _mg14, states as _st14
+defer14 = _pl14.Path(_mg14.__file__).read_text(encoding="utf-8")
+check("5.14 the next_defers refusal says a bare date makes the item wait until then (outside a hand-off it parks), not that it is a reminder that leaves the item active",
+      "is a reminder that leaves the item active" not in defer14 and "until=YYYY-MM-DD makes the item wait until then (outside a hand-off the date parks the item" in defer14, None)
+states14 = _pl14.Path(_st14.__file__).read_text(encoding="utf-8")
+check("5.14 the parked state's missing-field hint no longer says a wake alone is never a park", "a wake alone is a reminder, never a park" not in states14 and "a date alone makes the item wait until then, outside a hand-off" in states14, None)
+stale14 = [str(f.relative_to(root14)) for f in (root14 / "stackshot").rglob("*.py")
+           if any(x in f.read_text(encoding="utf-8") for x in ("a wake alone is a reminder", "A wake alone is a reminder", "is a reminder that leaves the item active", "check-back reminder, and the item stays alive"))]
+check("5.14 no stackshot source still says a wake alone is a reminder (the comments and docstrings too)", not stale14, stale14)
+check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": until write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

@@ -274,8 +274,9 @@ def reads_as_wait(text: Any) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------------------- a wake alone whose next waits for that date
-# "Work moving in real time is on agent, however long it takes. A wait-and-see window the work itself needs is waiting (parked)." A wake without hold is a reminder and leaves the item on agent;
-# when the item's next says the work waits for the wake's own date, the window is a park. A note on the reply, never a refusal.
+# "Work moving in real time is on agent, however long it takes. A wait-and-see window the work itself needs is waiting (parked)." A bare date is a wait until it outside a hand-off (the board lists the
+# item as waiting); a wake the item still carries as one (a hand-off's backstop, or one stored before `until`) leaves it on agent, and when the item's next says the work waits for that date, the window
+# is a park. A note on the reply, never a refusal.
 _WINDOW_WORDS = r"(?:after|once|wait(?:s|ing|ed)?|until|till|collect(?:s|ing|ed)?|soak(?:s|ing|ed)?|then\s+review)"
 _DURATION = r"for\s+\d+\s+(?:more\s+)?(?:hours?|days?|weeks?|nights?)"
 _DAY_NAMES = ("mon(?:day)?", "tue(?:s(?:day)?)?", "wed(?:nesday)?", "thu(?:r(?:s(?:day)?)?)?", "fri(?:day)?", "sat(?:urday)?", "sun(?:day)?")
@@ -932,7 +933,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                     add("next_defers", head + f"Set the wait: after=[{quoted}] with ask_by=YYYY-MM-DD, the day it comes back to someone if {'they are' if many else 'it is'} still open "
                                        f"(the item then waits for it and its post-wake mover, post_wake_mover=<session> or else the mover, is told when the last one closes"
                                        + ("" if creating else f"; add supplies=<one line: what {'their' if many else 'its'} output gives this item> to say what it takes from {it_}") + "). "
-                                       f"When it only needs a look on a day and not another item's close, wake=YYYY-MM-DD is a reminder that leaves the item active. " + plain_)
+                                       f"When it only needs a look on a day and not another item's close, until=YYYY-MM-DD makes the item wait until then (outside a hand-off the date parks the item, and the board lists it as waiting). " + plain_)
         if mod is not None and mod.state == _model.ALIVE:
             hits, broad = wait_lines(nxt)
             hits = [h for h in hits if h[0] not in defer_lines]      # a line the new guard refuses is not refused twice
@@ -1016,8 +1017,8 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             if not (w.basis or (quote and has_wait_words(quote))):
                 add("snooze", f"{what} waits on a time (wake {wake}) with no reason: a time wait carries {H}'s words (his answer on the item, or said=[{{tag: Acked-by, quote, msg}}] with a quote that "
                               f"parks, waits, says until or names a date) or a real outside date (wait_basis=\"<what happens> YYYY-MM-DD\"). With neither, a park has no reason: when the work itself needs this window (a soak, "
-                              "a log or data collection, a trial week, a timer you started), add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's wake takes it too, with no hold; a hold's wake does at any length); to only check back on work you keep moving, leave hold off "
-                              "and the wake alone is your check-back reminder, and the item stays alive (a front agent's reminder wake on work another session moves is refused: that result lands through stackshot).")
+                              "a log or data collection, a trial week, a timer you started), add wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\" (a verifying item's wake takes it too, with no hold; a hold's wake does at any length); to only check back on work you keep moving, set no date: "
+                              "a date with no hold is a wait until it (outside a hand-off) and the item reads as waiting (a front agent's own date on work another session moves is refused: that result lands through stackshot).")
         if w.kind in ("anchor", "item", "relay", "event"):
             end = clean(m.get("ask_by")) or (w.backstop if w.kind != "relay" else "") or (w.until if w.kind == "relay" else "")
             if not end:

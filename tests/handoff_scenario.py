@@ -1002,6 +1002,24 @@ check("15.1e an item waiting on his decision with an until is parked by neither 
 for n_, kw_ in ((158, {"until": FUT}), (159, {"until": FUT, "wait_kind": "time"}), (160, {"until": FUT, "wait_kind": "relay"}), (161, {"hold": True, "wake": FUT}), (162, {})):
     item(n_, mover="home-front", **kw_)
     check(f"15.1e a{n_} {sorted(kw_)}: _date_parked is _is_parked for an item with no hold flag, and neither parks a decision", (server._date_parked(rd(n_)) == server._is_parked(rd(n_))) or bool(mt(n_).get("hold")), mt(n_))
+# 15.1f the backstop reading fails closed: when handoff.detect raises inside _hands_on, the date stays the hand-off's backstop (the item stays active) and the failure is logged
+import contextlib as _cl
+_real_detect = server._ho.detect
+def _raising_detect(*a, **k):
+    if sys._getframe(1).f_code.co_name == "_hands_on":
+        raise RuntimeError("forced")
+    return _real_detect(*a, **k)
+_err = _io.StringIO()
+server._ho.detect = _raising_detect
+try:
+    with _cl.redirect_stderr(_err):
+        direct_ = server._hands_on("a149", rd(150), rd(150), None, "home-send")
+        item(149); upd(149, "home-send", next="home-send: do the thing now", wake=FUT)      # a write that hands nothing on: the reading fails, so the date is kept as the backstop and the item is not parked
+finally:
+    server._ho.detect = _real_detect
+check("15.1f a reading that fails counts as a hand-off (fail closed)", direct_ is True, direct_)
+check("15.1f …the failure is logged, naming that the date stays a backstop", "backstop not judged: RuntimeError: forced" in _err.getvalue() and "the item stays active" in _err.getvalue(), _err.getvalue()[-300:])
+check("15.1f …and a write whose reading fails keeps its date as the wake and leaves the item active", mt(149).get("wake") == FUT and not mt(149).get("until") and not server._is_parked(rd(149)), mt(149))
 upd(90, "home-peer2", mover="home-peer2", next="home-peer2: carry on")
 check("15 session: the mover writing itself in as the mover takes it, the record stays its own", ho(90).get("to") == "home-peer2" and not stale_now(90), ho(90))
 # 15.2 a session makes ITSELF the mover over a record to someone else: the old record ends (no record for a self-naming)

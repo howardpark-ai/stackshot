@@ -209,7 +209,7 @@ check("2 post-wake mover: …a relay's default is the owner, who always passes",
 
 # ================================================================ 3. a time wait carries his words or a real date
 item(68, needs=[BACK])
-refused_nw("3 snooze: a hold with a wake and no reason is refused, saying what counts", 68, lambda: upd(68, hold=True, wake=day(3)), "waits on a time (wake", "no reason", "wait_basis=", "Acked-by", "check-back")
+refused_nw("3 snooze: a hold with a wake and no reason is refused, saying what counts", 68, lambda: upd(68, hold=True, wake=day(3)), "waits on a time (wake", "no reason", "wait_basis=", "Acked-by", "set no date")
 upd(68, hold=True, wake=day(3), wait_basis=f"vendor visit booked for {day(4)}")
 check("3 snooze: …a real date (wait_basis) stands for it, at any length (the cap is not what asks)", mt(68)["wait_basis"]["text"].startswith("vendor visit") and hd_(mt(68)) is True, mt(68))
 item(69, needs=[BACK], answers=[{"ts": time.time(), "kind": "comment", "text": "park it until next week, nothing to do now", "via": "board"}])

@@ -10,8 +10,8 @@ and a bare confirm do not move it, so the pass's message cannot reset the clock 
   uncovered(items, now, env, skip)      the backstop: items on an agent, silent for 2 hours, that have no finding (a defect of the pass; the server checks hourly and tells the builder)
 
 An item is silent when it is open, on an agent as the board shows it (`on_agent`: a session is its mover, its state is not the owner's move, and the board's own phase, `model.shown_waiting`, is not waiting) and has had no activity for `LIMIT`
-seconds. What the board shows as waiting is left alone (a hold with a dated wake, an open `after` item, a stored wait: a release, a CI run or any other event, a relay, an outside party, a wake that carries a wait_basis); a wake without
-one is a reminder and leaves the item on agent, so it is checked like any other. An item with a hand-off to a back agent that nobody took yet is left alone too (the hand-off audit's: it clocks that hand-off, so one item never climbs two ladders at once); a hand-off to a front agent is checked here, because that audit never clocks one. An item whose record the board's model cannot read is on an agent as the board lists it, and is checked with a finding that says so. The dates pass finds the same `stale` finding on an item whose wake has passed; each pass counts the other's sends, so one message goes out per episode. The count starts at the later of the item's last activity and
+seconds. What the board shows as waiting is left alone (a hold with a dated wake, an open `after` item, a stored wait: a release, a CI run or any other event, a relay, an outside party, a wake that carries a wait_basis); a wake kept
+as a hand-off's backstop (no until, no basis) leaves the item on agent, so it is checked like any other. An item with a hand-off to a back agent that nobody took yet is left alone too (the hand-off audit's: it clocks that hand-off, so one item never climbs two ladders at once); a hand-off to a front agent is checked here, because that audit never clocks one. An item whose record the board's model cannot read is on an agent as the board lists it, and is checked with a finding that says so. The dates pass finds the same `stale` finding on an item whose wake has passed; each pass counts the other's sends, so one message goes out per episode. The count starts at the later of the item's last activity and
 the moment it left a hold, a wait or an after link (those releases carry no writer, so the activity clock does not move for them). Silence is judged per item, never per pane: the mover's pane being busy (a builder directing subagents is nearly always busy) says nothing about one item,
 so the pass does not read the pane and a busy pane hides no silent item. What counts as activity on the item is the clock's (a write, a message, an event on an anchor, a pull request's review or CI
 run); a subagent's work that writes nothing to the item is not activity, so a builder keeps a long job visible by writing it onto the item (a step status, an update). One signal is read beyond the
@@ -111,7 +111,7 @@ def reading(item: dict[str, Any], mover: str, after_open: Any, now: float) -> st
 
 def on_agent(item: dict[str, Any], mover: str, after_open: Any, now: float) -> bool:
     """Is the open item on an agent as the board shows it? Its mover is a session, its state is not the owner's move, and the board does not show it waiting (`model.shown_waiting`, the board's own phase): a wake
-    alone is a reminder and leaves an item on agent, while a wake with a wait_basis, a hold with a dated wake, an open `after` link and a stored wait (a release, a CI run, an event, a relay, an outside party) are
+    kept as a hand-off's backstop leaves an item on agent, while a stored until (a date alone too), a wake with a wait_basis, a hold with a dated wake, an open `after` link and a stored wait (a release, a CI run, an event, a relay, an outside party) are
     waits. The scope of the silence rule and of the backstop (`uncovered`) alike. An item the model cannot read is on an agent here too, as the board lists it (`reading`)."""
     return bool(reading(item, mover, after_open, now))
 
@@ -131,7 +131,7 @@ def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: A
             return f"no write for {minutes(now - last)} and a record the board's model cannot read (write the item so its fields read)"
         what = "no date of its own"
         if _wt.wake_value(meta):      # a stored until counts as a wake
-            # a wake alone is a reminder and the board shows the item on agent; it covers neither the silence nor a step that is already overdue and names no date of its own
+            # a wake kept as a hand-off's backstop is no wait and the board shows the item on agent; it covers neither the silence nor a step that is already overdue and names no date of its own
             wake = _wt.wake_epoch(_wt.wake_value(meta))
             if wake is not None and wake <= now:      # a passed wake, with a wait_basis or without (the dates pass words the same case "past its wake"): holding with that wake would not help, a new date or a wait would
                 what = "a wake that has passed (write the item, set a new date or a wait, or reword the step)"

@@ -594,7 +594,7 @@ def _wait_is_bare(m: dict[str, Any]) -> bool:
 def _hands_on(gid: str, was: dict[str, Any], now_item: dict[str, Any], handed: Any, writer: str) -> bool:
     """Does this write hand the item on to a session: a hand-off line in next, or a change of the DERIVED mover (what the hand-off record reads, handoff.detect): a mover argument, needs naming a
     session, a reopen with one. The date a bare wait carries is left out of both readings (an item with it reads as waiting and has no mover), so the question is the write's own: with the date
-    it gives (or already held) set aside, did the mover change to a session other than the writer? A hand-off to the owner is none here (his step with a date is a park of its own)."""
+    it gives (or already held) set aside, did the mover change to a session other than the writer? A hand-off to the owner is none here (his step with a date is a park of its own). A reading that fails counts as a hand-off (fail closed)."""
     if handed:
         return True
     try:
@@ -603,9 +603,9 @@ def _hands_on(gid: str, was: dict[str, Any], now_item: dict[str, Any], handed: A
             return {**it, "gid": gid, "metadata": {k: v for k, v in m.items() if k not in ("wake", "until", "ask_by")}} if _wait_is_bare(m) else {**it, "gid": gid}
         to = _ho.detect(undated(was), undated(now_item), _session_label(writer) or writer, writer if _anc.is_id(writer) else "", _ho_derive, _ho_same)
         return bool(to) and not _model.is_owner(to)
-    except Exception as e:  # noqa: BLE001  — the reading is an extra: a failure leaves the date a wait, as it is without it
-        print(f"handoff: {gid} backstop not judged: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
+    except Exception as e:  # noqa: BLE001  — the reading is an extra: a failure fails closed, the date stays the hand-off's backstop and the item stays active (a park that hides a hand-off costs more than a date left as a wake)
+        print(f"handoff: {gid} backstop not judged: {e.__class__.__name__}: {e}; the date stays a backstop and the item stays active", file=sys.stderr, flush=True)
+        return True
 
 
 def _date_parked(item: dict[str, Any], unfolded: bool = False) -> bool:
@@ -13016,9 +13016,9 @@ def _update_unlocked(
     if clear_recycle or item.get("status") == "completed":   # cleared by hand, or completed: the field goes (a recycle clears it in _recycled)
         meta.pop("recycle", None); meta.pop("recycle_at", None)
     # Items kept showing "on hold" while their work was live, so everywhere:
-    # a wake alone is a reminder, never a hold. It is stored as given and the item stays in its lane; at the moment
-    # the wake pass tells the mover and the sessions in its needs once and drops it. Only hold=true parks (with a wake it
-    # parks until then, and the pass releases it), and an item whose needs hold decision is never on hold (_is_held). A stored
+    # a date with nothing beside it is a wait on that date alone (outside a hand-off it is folded into until below, and the item waits until then); in a write that hands the item on it stays the wake it was,
+    # the hand-off's backstop: the item stays in its lane, and at that moment the wake pass tells the mover and the sessions in its needs once and drops it (a wake the item carries is a reminder).
+    # hold=true parks with its wake (the pass releases it), and an item whose needs hold decision is never on hold (_is_held). A stored
     # item keeps the meaning it was written with: held + wake still releases at its wake.
     _record_fixes(meta, fixes)      # what the tool fixed in this call (server_fixes.py): the mark and a History line, or the mark taken off when the mover sent the value again
     wait_fixed = ""
@@ -13088,7 +13088,7 @@ def _update_unlocked(
             _cap_ok_put(meta, "wake", str(meta["wake"]), q_why, quote=q_text, source=q_src)
     hold_pre = bool(meta.get("hold"))     # the hold as this write leaves it, before the old rule below drops it beside a decision (the model guards refuse that pair instead)
     dropped_hold = item.get("status") == "open" and bool(meta.get("hold")) and _waits_decision(meta)
-    if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its wake stays, a reminder)
+    if dropped_hold:              # an item waiting on the owner's call is never on hold: any write drops a stored flag (its date stays, and no date parks an item on his call)
         meta.pop("hold", None); meta.pop("hold_set", None)
         _state_end(meta, "parked")    # the park it stood in is gone with the hold (needs is not something parked stands on: the hold would only be stripped again)
     # A hold names what it waits for, a wake, open after
@@ -13103,7 +13103,7 @@ def _update_unlocked(
                         f"a notice from an anchor scoped to it (`anchors(project, add=[url], items=[\"{_gh.shown(gid)}\"])`, with a backstop wake at most {_wt.cap_days():g} "
                         f"days out), or a pane recycle (recycle=true). An item waiting on {OWNER} is never parked: needs=decision with its ask, "
                         "or after=[<the item that carries the ask>], which releases it when that item closes. To check back on work you keep moving while the "
-                        "item stays active, pass wake alone, without hold")
+                        "item stays active, set no date: a date with no hold is a wait until it (outside a hand-off)")
     # The done check: set or cleared by this write (a filing edit: no page owed), then the hand-off gate: a write
     # that hands the item to another session (a `<session>: <action>` line of next) leaves it with a check or a wake
     chk = " ".join(str(check or "").split())
