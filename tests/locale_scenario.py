@@ -647,7 +647,7 @@ def _ipx_pat(v):
     """A catalog text as a regex over the marked page: its fixed pieces in order, a field standing for anything (a marker nested inside it included)."""
     return re.compile(r"\[x:" + ".{0,600}?".join(re.escape(x) for x in re.split(r"\{[^}]*\}", v)) + r"\]", re.S)
 # keys no item-page render reaches (the home page or a direct call uses them): the direct calls below mark them
-IPX_DIRECT = {"item.change.asked", "item.change.back_to_work", "item.change.background", "item.change.by", "item.change.gave_step", "item.change.handed", "item.change.next_changed", "item.change.plain",
+IPX_DIRECT = {
               "link.mockup", "more.age_hour", "more.age_min", "wait.what.an_item", "wait.what.anchor_event", "wait.what.close_of", "wait.what.news_from", "wait.what.outside_news",
               "item.cloud", "item.due_overdue", "item.due_today", "item.when.poll", "item.when.quiet", "item.when.unreadable", "item.when.unreadable_tip", "item.work",
               "link.mockup_chip", "link.mockup_tip", "link.session_in", "link.session_view", "wait.more"}
@@ -726,11 +726,6 @@ with i18n.use("ko"):
               ipg.wait_what(W("relay", event="the contract"), party="Acme"), ipg.wait_what(W("relay"), party="Acme"), ipg.wait_what(W("relay")), ipg.wait_what(W("relay", event="the contract from Acme"), party="Acme"),
               ipg.wait_what(W("time")), ipg.wait_what(W("time"), words="the shop's holiday")]
     d_end = [ipg.wait_end_label(W("time")), ipg.wait_end_label(W("relay")), ipg.wait_end_label(W("anchor")), ipg.wait_end_label(W("item", until="2099-01-01"))]
-    CH = ipg.change
-    d_chg = [ipg.plain_change(c) for c in ([CH("needs_named"), CH("asked")], [CH("handed", who="alpha-helper"), CH("needs_named")], [CH("back_to_work")], [CH("gave_step")], [CH("next_changed")], [CH("background")],
-                                           [CH("text", text="completed: done")], "completed: done", [CH("gave_step"), CH("next_changed"), CH("background")], [CH("asked"), CH("asked")],
-                                           [CH("handed", who="no one", text="mover: a to no one")], [CH("needs_named")], [])]
-    d_last = [ipg.last_change("alpha-main", [CH("gave_step")]), ipg.last_change("", [CH("gave_step")]), ipg.last_change("alpha-main", []), ipg.last_change("a<b", [CH("text", text="x<y")], esc=html.escape)]
     d_age = [r2.age_words(600), r2.age_words(3 * 3600), r2.age_words(3 * 86400)]
     d_tip = [r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}}), r2.stale_tip({"_age": 3 * 3600, "metadata": {}})]
     try:
@@ -742,12 +737,6 @@ with i18n.use("ko"):
 check("wait_what in the test locale: every kind, with and without its parts", d_wait == [_m("wait.what.close_of", items="a1, a2"), _m("wait.what.close_of", items=_m("wait.what.an_item")), _m("wait.what.anchor_event"), "the review lands", _m("wait.what.fleet_event"),
       _m("wait.what.event_from", event="the contract", party="Acme"), _m("wait.what.news_from", party="Acme"), _m("wait.what.outside_news"), "the contract from Acme", _m("wait.a_date"), "the shop's holiday"], d_wait)
 check("wait_end_label in the test locale", d_end == [_m("wait.end.until"), _m("wait.end.ask_by"), _m("wait.end.backstop"), _m("wait.end.until")], d_end)
-check("plain_change in the test locale: each kind of change reads from its own whole-line text, a change with no line of its own stays as written, the first two are joined", d_chg == [
-      _m("item.change.asked"), _m("item.change.handed", who="alpha-helper"), _m("item.change.back_to_work"), _m("item.change.gave_step"), _m("item.change.next_changed"), _m("item.change.background"),
-      "completed: done", "completed: done", _m("item.change.gave_step") + ", " + _m("item.change.next_changed"), _m("item.change.asked"), "mover: a to no one", "", ""], d_chg)
-check("last_change in the test locale: ' by <who>: <what>' and ': <what>' are one text each, the what in the table's words; no entry, nothing; the words go through esc",
-      d_last == [_m("item.change.by", who="alpha-main", what=_m("item.change.gave_step")), _m("item.change.plain", what=_m("item.change.gave_step")), "",
-                 _m("item.change.by", who="a&lt;b", what="x&lt;y")], d_last)
 check("age_words and stale_tip in the test locale", d_age == [_m("more.age_min", n=10), _m("more.age_hour", n=3), _m("more.age_day", n=3)]
       and d_tip == [_m("more.stale_tip_call", age=_m("more.age_hour", n=3)), _m("more.stale_tip", age=_m("more.age_hour", n=3))], (d_age, d_tip))
 check("link_label in the test locale: a mockup page, a releases page and a session link read from the table", d_link == [_m("link.mockup"), _m("link.releases", repo="r"), _m("link.session")], d_link)
@@ -810,22 +799,8 @@ check("sent_msg in English is _SENT's wording, code by code: the item page's, an
 check("sent_msg in the test locale: every code reads from its own key (the home page's where it has one), who takes it is named in the table's wording, and every code has a key",
       set(_K) == set(_S) and d_sent == {k_: (MARK(EN[_K[k_]]), MARK(EN[_KH.get(k_, _K[k_])])) for k_ in _S}
       and d_sent_by == (_m("js.sent_done", who="alpha-main"), _m("sent.stepreply_by", who="alpha-main"), ""), (d_sent, d_sent_by))
-d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "chg": ipg.last_change("alpha-main", [ipg.change("gave_step")]), "plain": ipg.plain_change([ipg.change("handed", who="alpha-helper"), ipg.change("next_changed")]), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
-check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "chg": " by alpha-main: gave you a step", "plain": "handed to alpha-helper, changed what comes next", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
-
-# the History's entries carry what kind of change each line is, as structured data (what plain_change and last_change read), in every path that builds an entry
-_chg_codes = set(); _chg_ok = True; _chg_bad = []
-for i_ in IPX_IDS:
-    ents_, _more = bdx.item_log(bdx.item(f"a{i_}"))
-    for en_ in ents_:
-        cs_ = en_.get("changes")
-        ok_ = isinstance(cs_, list) and len(cs_) >= 1 and all(isinstance(c_, tuple) and len(c_) == 2 and isinstance(c_[0], str) and isinstance(c_[1], dict) for c_ in cs_)
-        if not ok_: _chg_ok = False; _chg_bad.append((i_, en_.get("what"), cs_))
-        else: _chg_codes |= {c_[0] for c_ in cs_}
-check("every History entry of every fixture item carries its changes as [(kind, fields)]", _chg_ok, _chg_bad[:3])
-check("…the kinds a line can have all occur, and a line with no kind of its own is a 'text' change that keeps its plain words", set(ipg.CHANGE_CODES) | {"text"} <= _chg_codes and _chg_codes <= set(ipg.CHANGE_CODES) | set(ipg.DROPPED_CODES) | {"text"}, sorted(_chg_codes))
-_h250 = [en_ for en_ in bdx.item_log(bdx.item("a250"))[0] if any(c_[0] == "handed" for c_ in en_["changes"])]
-check("…a handover's change names who it was handed to, as the plain words read it", bool(_h250) and any(ipg.plain_change(en_["changes"]).startswith("handed to alpha-main") for en_ in _h250), [en_["changes"] for en_ in _h250])
+d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
+check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
 
 # the "rendered ... ago" line is one template: English keeps its words and its order, a language can put the age anywhere, and the words around it are what the narrow page leaves off
 _rl = lambda: r2._rendered_line("<b>S</b>", tip="T"); _st = r2._stale_s()
