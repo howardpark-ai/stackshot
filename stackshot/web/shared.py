@@ -29,7 +29,7 @@ from stackshot.github import ghsync as _gh
 from stackshot.model import said as _said
 from stackshot.projects import projects as _prj
 from stackshot.web import publish as _pub
-from stackshot.web import store as _store
+from stackshot.core import store as _store
 from stackshot.web.common import OWNER
 
 # Read once, at import: [instance] board_url is among the settings config.RESTART_ONLY keeps for the run.

@@ -1,10 +1,11 @@
-"""store.py: the one store, read by id: where it is (`STORE`, [paths] store), every item file in it, the file of one item, an item as `_load` reads it (an old stored form read as the current one),
+"""store.py: the reads of one item by id: the file of one item (`_path`, a moved item's old id read as its id now), an item as `_load` reads it (an old stored form read as the current one),
 and the text of a write with a bare store id (g7) written as the item's shown id (board#N).
 
-server.py is being split into one module per area (CONTRIBUTING.md, Layout). This is the store's reading half: `_save`, the one writer, stays in server.py because it calls the hand-off, the
-For you list, the landed list and the search, which are server.py's still (a module here cannot import server.py). A suite that points the server at a copy of the store sets `server._store.STORE`,
-the one place `STORE` is read from: the server's own reads of it (`_store.STORE`) and the readers here see the same value. server.py imports each function back, so `server._load`, `server._path`,
-`server._item_files`, `server._shown_ids`, `server._legacy_hold` and `server._legacy_needs` stay the names the writes, the tools and the tests use."""
+The store's path (`STORE`), the list of its item files, the next item id and the write of an item file are core/store.py's (the owner of `STORE`; a suite that points the server at a copy of the
+store sets it there). What is left here stays above core/ because it reads through github/ghsync (a moved item's old id) and model/ (the project a stored item is read through, the stored forms of
+needs and hold), and core/ imports neither. `_save`, the one writer, stays in server.py because it calls the hand-off, the For you list, the landed list and the search, which are server.py's still
+(a module here cannot import server.py). server.py imports each function back, so `server._load`, `server._path`, `server._shown_ids`, `server._legacy_hold` and `server._legacy_needs` stay the
+names the writes, the tools and the tests use."""
 from __future__ import annotations
 
 import json
@@ -14,34 +15,19 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from stackshot.core import config as _cfg
+from stackshot.core import store as _cstore
 from stackshot.github import ghsync as _gh
 from stackshot.model import item_project as _ip
 from stackshot.model.ids import _CODE_FENCE, _CODE_SPAN, _without_mq_groups
 from stackshot.model.needs import _canon_needs, _needs_list, _needs_of, _needs_store
 
-STORE = _cfg.path("paths", "store")
-
-
-def _item_files() -> list[tuple[str, Path]]:
-    """Every item file in the store as (gid, path), across all letter dirs."""
-    out = []
-    for d in sorted(STORE.iterdir()):
-        if not (d.is_dir() and len(d.name) == 1 and d.name.isalpha()):
-            continue
-        for p in d.glob("*.json"):
-            if p.name.startswith(".") or not p.stem.isdigit():
-                continue
-            out.append((f"{d.name}{p.stem}", p))
-    return sorted(out, key=lambda t: (t[0][0], int(t[0][1:])))
-
 
 def _path(gid: str) -> Path:
-    p = STORE / gid[0] / f"{gid[1:]}.json"
+    p = _cstore.STORE / gid[0] / f"{gid[1:]}.json"
     if not p.exists():                       # an old id kept in a field (after, superseded_by) after its item moved
         alt = _gh.resolve(gid)
         if alt != gid:
-            return STORE / alt[0] / f"{alt[1:]}.json"
+            return _cstore.STORE / alt[0] / f"{alt[1:]}.json"
     return p
 
 

@@ -14,7 +14,7 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.github import ghsync as _gh
 from stackshot.model import item_project as _ip
-from stackshot.web.store import _item_files
+from stackshot.core.store import _item_files
 
 
 # A create's reply lists the existing items closest to the new one (a create once duplicated an open item): a note, never a block.
