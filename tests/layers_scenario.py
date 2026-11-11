@@ -1,6 +1,6 @@
 """Scenario test for the layers of the package (Tue Nov 10th 2026) — the import graph of stackshot/ read with the ast module, no import is executed, no server, no network.
 
-The server structure plan (CONTRIBUTING.md, *Layout and dependencies*) has four layers and imports that point down only:
+The package has four layers (CONTRIBUTING.md, *Layout and dependencies*) and imports that point down only:
 
     surface   web/
     service   service/                                                             (not yet existing; sits between the surface and the domain)
@@ -16,7 +16,7 @@ those inside a function body too, and `__import__("stackshot....")` or `importli
   * on an import of audit/, tools/, the command line or a root module from core/, the domain packages or service/ (beyond paths.py);
   * on an import of anything but the bare package in paths.py itself, which every layer may import.
 ALLOWED_TODAY is the measured list of what points the wrong way today, keyed by the importing file and the module it imports, each with its count of imported names (`from a import b, c` counts two) and the
-work of the plan that removes it; an entry whose import is gone must be deleted (or its count lowered), so the list only shrinks. The packages named in
+structure change that removes it; an entry whose import is gone must be deleted (or its count lowered), so the list only shrinks. The packages named in
 CONTRIBUTING.md's first principle must be exactly the ones in LAYERS and UNLAYERED below.
 A literal relative `import_module(".render", "stackshot.web")` is resolved against its literal package argument.
 Not seen: an import whose argument is not a literal string (a name, a format), a relative import_module whose package is not a literal, and a name reached by
@@ -41,13 +41,13 @@ LAYER = {area: name for name, areas in LAYERS for area in areas}
 UNLAYERED = ("audit", "tools")          # reports and tools that read the package; with the command line they sit outside the layers
 ROOT_OK = ("stackshot", "stackshot.paths")      # the root modules a layer below the surface may import: the package itself and paths.py
 
-# What points the wrong way today (measured Tue Nov 10th 2026): (importing file, module it imports) → (how many imported names, the work of the server
-# structure plan that removes it). The two in core/config.py and the one in projects/project_restore.py are lazy imports inside a function; model/ask_read's is at module level.
+# What points the wrong way today (measured Tue Nov 10th 2026): (importing file, module it imports) → (how many imported names, the structure change
+# that removes it). The two in core/config.py and the one in projects/project_restore.py are lazy imports inside a function; model/ask_read's is at module level.
 ALLOWED_TODAY = {
-    ("stackshot/core/config.py", "stackshot.github.ghsync"): (1, "work 5 (passes): stall_item_answers, which reads an item through github/ghsync, leaves core/ with the stall pass for service/stall.py"),
-    ("stackshot/core/config.py", "stackshot.waits.stall"): (2, "work 5 (passes): stall_auth and stall_notes, which call waits/stall, leave core/ with the stall pass for service/stall.py"),
-    ("stackshot/model/ask_read.py", "stackshot.web.render"): (1, "work 6 (domain moves): the ask's parser (web/render.parse_ask) moves under model/ with the ask rules"),
-    ("stackshot/projects/project_restore.py", "stackshot.web.whatschanged"): (1, "work 6 (domain moves): the day wording (web/whatschanged.day_words) moves down to core/ beside the clock"),
+    ("stackshot/core/config.py", "stackshot.github.ghsync"): (1, "the passes move to service/: stall_item_answers, which reads an item through github/ghsync, leaves core/ with the stall pass for service/stall.py"),
+    ("stackshot/core/config.py", "stackshot.waits.stall"): (2, "the passes move to service/: stall_auth and stall_notes, which call waits/stall, leave core/ with the stall pass for service/stall.py"),
+    ("stackshot/model/ask_read.py", "stackshot.web.render"): (1, "the domain moves: the ask's parser (web/render.parse_ask) moves under model/ with the ask rules"),
+    ("stackshot/projects/project_restore.py", "stackshot.web.whatschanged"): (1, "the domain moves: the day wording (web/whatschanged.day_words) moves down to core/ beside the clock"),
 }
 
 
