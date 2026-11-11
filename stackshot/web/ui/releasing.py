@@ -42,7 +42,7 @@ def _run(argv: list[str]) -> str:
 def release_units() -> set[int]:
     """The pull request numbers whose release unit is running now: active (started and running) or activating."""
     try:
-        out = _run(["systemctl", "--user", "list-units", "--plain", "--no-legend", "--no-pager", "--state=active,activating", "stackshot-release-*.service"])
+        out = _run(["systemctl", "--user", "list-units", "--plain", "--no-legend", "--no-pager", "--state=active,activating", "stackshot-release-*.service"])      # i18n: skip  (a systemd unit glob)
     except (OSError, subprocess.SubprocessError):
         return set()
     return {int(n) for n in _UNIT_RX.findall(str(out or ""))}

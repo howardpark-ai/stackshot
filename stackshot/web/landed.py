@@ -65,9 +65,9 @@ def _load(strict: bool = False) -> dict[str, dict[str, Any]]:
         bad = p.with_name(f"{p.name}.bad-{int(time.time())}")
         try:
             os.replace(p, bad)
-            kept = f"moved to {bad.name}"
+            kept = f"moved to {bad.name}"      # i18n: skip  (a stderr log line)
         except OSError as e:
-            kept = f"could not be moved aside ({e.__class__.__name__})"
+            kept = f"could not be moved aside ({e.__class__.__name__})"      # i18n: skip  (a stderr log line)
         print(f"landed: {p} does not parse; {kept}; starting an empty list", file=sys.stderr, flush=True)
         return {}
     out: dict[str, dict[str, Any]] = {}

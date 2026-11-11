@@ -40,7 +40,7 @@ from typing import Any
 
 from stackshot.core import config as _cfg
 
-KINDS = ("closed", "reopened", "decision", "check_failed", "due")
+KINDS = ("closed", "reopened", "decision", "check_failed", "due")      # i18n: skip  (the kind ids)
 MODES = ("watch", "mute")
 MAX_ROWS = 200                 # the list keeps this many rows; the oldest go first
 KEYS_DAYS = 30                 # a key is remembered this long after its row was made
@@ -48,7 +48,7 @@ _LOCK = threading.RLock()
 
 
 def path() -> Path:
-    return _cfg.state("for-you.json")
+    return _cfg.state("for-you.json")      # i18n: skip  (a file name)
 
 
 def _empty() -> dict[str, Any]:
@@ -77,9 +77,9 @@ def _move_aside(p: Path, text: str, why: str) -> dict[str, Any]:
         bad = p.with_name(f"{p.name}.bad-{int(now)}-{n}")
     try:
         os.replace(p, bad)
-        kept = f"moved to {bad.name}"
+        kept = f"moved to {bad.name}"      # i18n: skip  (a stderr log line)
     except OSError as e:
-        kept = f"could not be moved aside ({e.__class__.__name__}: {e})"
+        kept = f"could not be moved aside ({e.__class__.__name__}: {e})"      # i18n: skip  (a stderr log line)
     out = _empty()
     out["seq"] = _salvage_seq(text) or int(now)
     print(f"for-you: {p} {why}; {kept}; starting an empty list (ids go on from {out['seq']})", file=sys.stderr, flush=True)
@@ -97,15 +97,15 @@ def _load() -> dict[str, Any]:
     except FileNotFoundError:
         return _empty()
     except UnicodeDecodeError:
-        return _move_aside(p, p.read_bytes().decode("utf-8", "replace"), "is not UTF-8 text")
+        return _move_aside(p, p.read_bytes().decode("utf-8", "replace"), "is not UTF-8 text")      # i18n: skip  (a stderr log reason)
     except OSError:
         return _empty()
     try:
         d = json.loads(text)
     except ValueError:
-        return _move_aside(p, text, "does not parse")
+        return _move_aside(p, text, "does not parse")      # i18n: skip  (a stderr log reason)
     if not isinstance(d, dict):
-        return _move_aside(p, text, "is not a JSON object")
+        return _move_aside(p, text, "is not a JSON object")      # i18n: skip  (a stderr log reason)
     out = _empty()
     raw = [r for r in d.get("rows") or [] if isinstance(r, dict) and r.get("id") is not None]
     out["rows"] = [r for r in raw if r.get("kind") in KINDS]       # a retired kind (release_failed) goes; `seq` below still counts its id

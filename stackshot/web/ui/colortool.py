@@ -42,6 +42,8 @@ MOUNT = "#panel-colors"                   # the side panel's mount for the butto
 SHIPPED = {"bg": "#161617", "card": "#1f1f21", "line": "#2c2c2e", "fg": "#ececea", "mut": "#a3a29d", "link": "#f0a06a", "ibd": "#929190", "solid": "#f0a06a", "onsolid": "#1f1f21",
            "labbg": "#3a2619", "labfg": "#f0a06a", "labbd": "#3a2619", "disbg": "#2a2a2c", "disfg": "#a3a29d", "ifill": "#2b2b2f"}
 # the three lines of the shared file that name the app (cfg.text): the saved list's sign-in line, the small note at the end of the panel, and the example hex of the "six digits" hint
+# These are the English words and stay so (the module imports nothing of the string table, and a request's language cannot reach a constant). The same words are the string table's keys js.colors.signin, .note and .pv_* (tests/locale_pages_scenario.py
+# checks they are equal), which the page scripts read with SST: LOCALIZE below puts the person's language in before the tool starts. The rest of the panel's words are the shared file's own, pinned verbatim by another app, with no table.
 TEXT = {"signIn": "Sign in to the board to use saved combinations.",
         "note": "Dark theme only. The look you apply is kept in this browser; saved combinations are shared with the fleet tool's web page.",
         "example": SHIPPED["link"]}
@@ -74,9 +76,11 @@ html.ct-wl .b.main{--fg:#000}
 
 # the preview strip: the shipped classes, so the buttons and labels are the real ones
 # (the preview badge writes its classes as "rec badge", the same .badge.rec rule, so that tests counting the page's own class="badge rec" count only the real ones)
-PREVIEW = ('<button type="button" class="b main" tabindex="-1">Send</button><button type="button" class="b main" tabindex="-1" disabled>Send</button>'
-           '<button type="button" class="b" tabindex="-1">Cancel</button><button type="button" class="b" tabindex="-1" disabled>Undo</button>'
-           '<span class="tag t-you">Your move</span><span class="rec badge">recommended</span><a>A link</a>')
+PREVIEW_T = ('<button type="button" class="b main" tabindex="-1">{send}</button><button type="button" class="b main" tabindex="-1" disabled>{send}</button>'
+             '<button type="button" class="b" tabindex="-1">{cancel}</button><button type="button" class="b" tabindex="-1" disabled>{undo}</button>'
+             '<span class="tag t-you">{your_move}</span><span class="rec badge">{recommended}</span><a>{link}</a>')      # the strip with its six words as {fields}
+PV_WORDS = {"send": "Send", "cancel": "Cancel", "undo": "Undo", "your_move": "Your move", "recommended": "recommended", "link": "A link"}      # the strip's English words, js.colors.pv_<name>
+PREVIEW = PREVIEW_T.format(**PV_WORDS)
 
 
 def _js(value) -> str:
@@ -86,5 +90,11 @@ def _js(value) -> str:
 CFG_JS = ("window.stackshotColors={storageKey:" + _js(KEY) + ",shipped:" + _js(SHIPPED) + ",vars:" + _js(CFG_VARS) + ",css:" + _js(CSS) + ",mount:" + _js(MOUNT)
           + ",api:" + _js(API) + ",preview:" + _js(PREVIEW) + ",text:" + _js(TEXT) + ",onApply:" + ON_APPLY + "};")
 
-HEAD = "<script>" + LIB + "</script><script>" + CFG_JS + "ColorTool.applyStored(window.stackshotColors);</script>"      # appended to render._APP_HEAD: in the head of every page after the theme script, before the first paint
+# The person's language, when the page carries one (window.SSI is empty on an English page, which then runs none of this and keeps the settings above as they are): the three lines and the strip's six words
+# read from the page's table with SST (js.colors.*), put into the settings before the tool starts.
+LOCALIZE = (r"if(window.SSI&&window.SST&&Object.keys(window.SSI).length){(function(c){var e=function(s){return String(s).replace(/[&<>\"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]})};"
+            r"c.text={signIn:SST('js.colors.signin'),note:SST('js.colors.note'),example:c.text.example};var L={};"
+            r"['send','cancel','undo','your_move','recommended','link'].forEach(function(k){L[k]=e(SST('js.colors.pv_'+k))});"
+            r"c.preview=" + _js(PREVIEW_T) + r".replace(/\{(\w+)\}/g,function(m,x){return L[x]==null?m:L[x]})})(window.stackshotColors)}")
+HEAD = "<script>" + LIB + "</script><script>" + CFG_JS + LOCALIZE + "ColorTool.applyStored(window.stackshotColors);</script>"      # appended to render._APP_HEAD: in the head of every page after the theme script, before the first paint
 BODY = "<script>ColorTool.init(window.stackshotColors);</script>"                                                      # appended to render._FAB_PAIR: at the end of every page's body

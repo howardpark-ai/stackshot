@@ -151,7 +151,7 @@ SIZES = (12, 13, 15, 17, 22)                         # tags · who line, age and
 _SIZE_OF = {10: 12, 11: 12, 12: 12, 13: 13, 14: 15, 15: 15, 16: 15, 18: 17, 20: 22, 22: 22, 24: 22}
 _KEEP = re.compile(r"(?:#panel(?:-edge|-open|-scrim)?|\.pc|\.matrix|\.mnote|\.audit|\.phead|\.ptitle|\.mh)(?![\w-])")      # the side panel and its cards: changed on their own
 _RULE = re.compile(r"((?:\s*/\*.*?\*/)*)([^{}]+)\{([^{}]*)\}", re.S)       # group 1: the comments in front of the rule, which are not part of its selector
-_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"      # i18n: skip  (a font stack)
 
 
 def _snap(n: float) -> int:
