@@ -251,5 +251,23 @@ item(59, needs=[BACK], hold=True, after=["a53"], wake=w(5), wait_basis={"text": 
 bupd(59, wake=w(4))
 check("5.5 a legacy hold + after given wake= stores the item wait with the date as its backstop", mt(59).get("wait_kind") == "item" and W.stored_until(mt(59)) == w(4) and mt(59).get("after") == ["a53"], mt(59))
 
+# 5.6 a session reads a wait on a date alone as parked, as the board draws it (get's tag, the session items listing); a decision item is never parked
+item(60, needs=[BACK], until=w(3))
+item(61, needs=["decision"], until=w(3))
+fm60, fm61 = server._fmt(dict(rd(60), gid="a60")).splitlines()[0], server._fmt(dict(rd(61), gid="a61")).splitlines()[0]
+check("5.6 get tags a wait on a date alone as on hold, and never a decision item", "on hold" in fm60 and "on hold" not in fm61, (fm60, fm61))
+st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
+held_ = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
+check("5.6 the session items listing says held for it, as the board draws it", held_.get("a60") is True, held_)
+check("5.6 _is_parked is the renderers' rule: a date-only wait, a hold flag and never a decision item", server._is_parked(rd(60)) and not server._is_parked(rd(61)) and server._is_parked(dict(rd(60), metadata={"hold": True, "needs": [BACK]})), None)
+
+# 5.7 until given to an item that already stores an open after link (no kind, no hold, no after in this write) is that link's backstop, as create stores it
+item(62, needs=[BACK], after=["a53"])
+bupd(62, until=w(5))
+check("5.7 update(until) beside a stored open after link stores the kind item", mt(62).get("wait_kind") == "item" and W.stored_until(mt(62)) == w(5) and mt(62).get("after") == ["a53"], mt(62))
+item(63, needs=[BACK], after=["a98"])
+bupd(63, until=w(5))
+check("5.7 ...a stored link that is already closed stays a date alone", mt(63).get("wait_kind", "") in ("", "time") and W.stored_until(mt(63)) == w(5), mt(63))
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": until write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

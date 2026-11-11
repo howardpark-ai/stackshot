@@ -44,7 +44,7 @@ def slot_of(kind: str) -> str:
 
 def unfold(meta: dict[str, Any]) -> bool:
     """Turn a stored `until` into the old working fields, in place, for one update's gates: the date is the relay's ask_by, the backstop wake of an anchor, item or event wait, or the
-    wake of a wait on the date alone (kind time or none), which also stands as a hold when the item states a reason for it (a wait_basis) or stores the kind time, as a park with a reason does; a bare date is a wake alone, a reminder's. `until` itself goes from the working copy; `fold` puts it back.
+    wake of a wait on the date alone (kind time or none), which also stands as a hold when the item states a reason for it (a wait_basis) or stores the kind time, as a park with a reason does; a bare date is a wait on that date alone. `until` itself goes from the working copy; `fold` puts it back.
     → True when the item stored an `until` (the caller folds it again after the write)."""
     u = _wt.stored_until(meta)
     if not u:
@@ -59,7 +59,7 @@ def unfold(meta: dict[str, Any]) -> bool:
     else:
         meta["wake"] = u
         if str(meta.get("wait_kind") or "").strip().lower() == "time" or _wt.basis_of(meta):
-            meta["hold"] = True            # a park with a reason of its own (a basis) or a stored kind time is judged as the hold it was; a bare date is a reminder's wake, as the old wake was
+            meta["hold"] = True            # a park with a reason of its own (a basis) or a stored kind time is judged as the hold it was; a bare date is a wait on that date alone, never a hold
     return True
 
 

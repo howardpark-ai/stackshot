@@ -616,9 +616,15 @@ def _is_held(item: dict[str, Any]) -> bool:
     """On hold (its lane stays 'on agent' and a secondary property renders it as 'on hold'):
     an open item with metadata.hold, optionally metadata.wake. needs, due and next stay as they are.
     An item whose needs hold decision is never on hold, whatever its
-    stored flag says (render.is_held, the same rule): it waits on the owner's call, and the update tool drops such a flag on
-    the item's next write."""
+    stored flag says (render.is_held, the same rule for the flag): it waits on the owner's call, and the update tool drops such a flag on
+    the item's next write. The flag only: a wait on a date alone is parked too, as _is_parked reads it."""
     return _hold_flag(item) and not _waits_decision(item.get("metadata") or {})
+
+
+def _is_parked(item: dict[str, Any]) -> bool:
+    """What the board draws as parked: the renderers' own rule (render.is_held), so a session reads what the board shows: an open item on hold (the flag), or waiting on one date alone (an `until`
+    with no kind or the kind time), never one whose needs hold decision. `_is_held` above is the hold flag alone, for the logic that releases and sets holds."""
+    return _rmod.is_held(item)
 
 
 def _date_parked(item: dict[str, Any], unfolded: bool = False) -> bool:
@@ -10046,7 +10052,7 @@ def _next_names_lines(item: dict[str, Any]) -> list[str]:
 
 def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     m = item.get("metadata") or {}
-    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _is_held(item) else ''}] {item.get('subject')}"]
+    out = [f"{_gh.shown(item.get('gid') or item['id'])} [{item.get('status')}{' · on hold' if _is_parked(item) else ''}] {item.get('subject')}"]
     if not brief:                            # step 4b: get leads with the mover (and then); the brief's item lines carry the `model:` line, which names it
         out.extend(_mover_lines(item))
     if item.get("description"):
@@ -10087,7 +10093,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             out.append("options:\n" + "\n".join("- " + ln for ln in _rmod.option_lines(item)))
     if not brief and _contact_label(item):   # the front agent the person talks to about the item (the brief, which loads into every session, leaves it out)
         out.append(f"contact: {_contact_label(item)}")
-    if _is_held(item) and _rmod.hold_set_of(item):   # who set the hold, and when
+    if _is_parked(item) and _rmod.hold_set_of(item):   # who set the hold, and when
         hs = _rmod.hold_set_of(item)
         out.append(f"hold: set by {_rmod.hold_by(item) or 'unknown'}"
                    + (f" {_rmod.when_words(dt.datetime.fromtimestamp(_rmod.hold_at(item), ZONE))}" if _rmod.hold_at(item) else ""))
@@ -10248,8 +10254,7 @@ def stackshot_brief() -> str:
             it = json.load(f)
         _legacy_hold(it); _ip.read_through(it)
         if it.get("status") == "open":
-            parked = _is_held(it) or (_date_parked(it) and not _waits_decision(it.get("metadata") or {}))      # a wait on a date alone is parked, as the board draws it
-            it["gid"] = gid; (held if parked else mine).append(_fmt(it, brief=True))
+            it["gid"] = gid; (held if _is_parked(it) else mine).append(_fmt(it, brief=True))
     hold = ("\n\nOn hold (" + str(len(held)) + "), on the agent side but out of the queue until they wake or are released:\n\n" + "\n\n".join(held)) if held else ""
     return (head + "\n\n---\n" + "All open items in full (" + str(len(mine)) + " active" + (f", {len(held)} on hold below" if held else "") + "):\n\n" + ("\n\n".join(mine) if mine else "(none)") + hold
             + "\n\nFull board: " + _shared.BOARD_URL + " · any item by id: the get tool") + _nag()
@@ -13170,7 +13175,7 @@ def _update_unlocked(
             _gate_front_step(gid, item_now, steps_before, steps_new, sender.strip() or debtor)     # a new or reworded step that opens with a front agent on an item another session moves: nothing could wake it for the step
     kept_legacy_wake = False
     if item.get("status") == "open" and (was_until or wake or hold or ask_by.strip() or until_wait):
-        if _wt.after_of(meta) and not _uw.kind_of(meta) and not clear_after and (after_set or had_hold) and _uw.date_of(meta):
+        if _wt.after_of(meta) and not _uw.kind_of(meta) and not clear_after and (after_set or had_hold or bool(_after_open(meta))) and _uw.date_of(meta):
             meta["wait_kind"] = "item"                   # a date beside an after link with no kind is that wait's backstop (as ask_by was); create does the same
         kept_legacy_wake = bool(meta.get("wake")) and not until_wait and (bool(wake) or not was_until)      # the wake as the old parameter (or an older write) gave it keeps the reminder note; a date passed as until never does
         keep_hold = bool(meta.get("hold")) and bool(_wt.wake_value(meta)) and bool({"anchor", "recycle"} & set(_hold_held_by(gid, meta)))      # a hold that waits on an anchor scoped to the item or on a pane recycle keeps its flag and record (the anchor release, the backstop gate and the recycle read them); the date is its backstop
@@ -14555,7 +14560,7 @@ def _client_items(key: str) -> tuple[int, str, str]:
                     **({"state": st_, "state_fields": _states.carry_of(it)} if not st_derived else {}),      # only an item that stores a state carries it: the word an item reads as is not sent
                     "contact": _contact_label(dict(it, gid=gid)),
                     "next": str(m.get("next") or ""), "state_updated": su, "confirmed": _rmod.confirmed_at(it, p),
-                    "updated": up, "held": _is_held(it) or bool(_after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
+                    "updated": up, "held": _is_parked(it) or bool(_after_open(m)) or _basis_wait_of(dict(it, gid=gid)), "list": _item_list(dict(it, gid=gid)), **_wait_fields(gid, it, ctx),
                     "roles": roles, **({"role": "agent"} if linked else {})})      # "agent": named in the item's needs (the session named in needs is its mover too, so the key no longer excludes it)
     return 200, "application/json", json.dumps({"items": out}, ensure_ascii=False)
 

@@ -1181,7 +1181,7 @@ check("hold (owner wait): the matcher stays narrow", [server._waits_on_owner(t) 
 for i in (74, 75, 76): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: the sections below count the held items
 server._WAKE_EVENT.clear()
 res = server._update("a3", hold=True, wake=D(2), sender="home-beta")
-check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open] "), res)
+check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open · on hold] "), res)
 check("hold: hold=true wakes the minute loop", server._WAKE_EVENT.is_set())
 check("hold: the hold is a state change (the writer owes the page)", "a3" in json.dumps(server._owed_load().get("projects/beta", {})), server._owed_load())
 res = server._update("a3", wake=D(3), sender="home-beta")
@@ -1210,7 +1210,7 @@ e = refusal(lambda: server._update("a5", clear_hold=True, wake=D(3), sender="hom
 check("hold: clear_hold with a wake refused, nothing saved", e == "Refused: clear_hold releases the item and drops its wake; it does not go with hold or wake" and held_("a5") and wk_(rd("a5")["metadata"]) == D(2), e)
 res = server._update("a5", status="open", sender="home-beta")
 check("hold: status=open on a held item keeps the hold and the wake, and the reply says how to release it",
-      held_("a5") and wk_(rd("a5")["metadata"]) == D(2) and res.startswith("updated a5.\na5 [open] "), res)
+      held_("a5") and wk_(rd("a5")["metadata"]) == D(2) and res.startswith("updated a5.\na5 [open · on hold] "), res)
 res = server._update("a5", next="ask Kim for A or B", sender="home-beta")
 check("hold: other edits on a waiting item carry no hint", HINT not in res and held_("a5"), res)
 res = server._update("a5", clear_hold=True, sender="home-beta"); m5 = rd("a5")["metadata"]
@@ -1383,7 +1383,7 @@ for i in (30, 25, 34, 31, 35, 36, 37): item(i, "projects/beta", B)
 server._WAKE_EVENT.clear()
 res = server._update("a30", wake=D(2), next="work-osprey: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
 check("reminder: a wake alone is stored and is no hold; the hand-off it carries passes; the reply shows the item open",
-      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "work-osprey: review the draft" and res.startswith("updated a30.\na30 [open] ") and f"until: {D(2)}" in res, res)
+      wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "work-osprey: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
 check("reminder: it wakes the minute loop and is on its list", server._WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
 check("reminder: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
@@ -2889,7 +2889,7 @@ check("after: a superseded prerequisite is followed to its replacement", rd(a1_)
 server._update(a1_, hold=True, wake=D(9), sender="home-beta")
 n0 = len(wait_push(0)); res = server.stackshot_complete(a4_, sender="home-beta", outcome="dropped", reason="not needed either", description="- Goal: Dropped"); p = wait_push(n0 + 1)
 check("after: the last one closing releases the item, after, hold and wake together; the reply and the owner's line say it was dropped", "after" not in rd(a1_)["metadata"] and not held_(a1_) and "wake" not in rd(a1_)["metadata"]
-      and f"({a1_} waited on {a4_} and is released" in res and any(m[0] == B and m[1].startswith(f"[stackshot] {a1_} woke: {a4_}, the last item it waited on, was dropped by home-beta: back in its lane") for m in p[n0:]), (res, p[n0:]))
+      and f"({a1_} waited on {a4_} and is released" in res and any(m[0] == B and m[1].startswith(f"[stackshot] {a1_} is yours now: {a4_}, the last item it waited on, was dropped by home-beta") for m in p[n0:]), (res, p[n0:]))
 check("after: back in the queue", a1_ in [r["gid"] for r in ui_render.Board(str(T / "store")).agent])
 check("after: a done close releases with 'closed (done)'", True)
 a5_, a6_ = mk2(), mk2(); n0 = len(wait_push(0)); server._update(a5_, after=[a6_], needs=["work-osprey-x"], sender="home-beta"); wait_push(n0 + 1)   # its "now needs you" line lands before the next count
