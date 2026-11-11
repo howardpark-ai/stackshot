@@ -5,7 +5,7 @@ status busy | idle and when it changed); the clocks are given to the pass as `no
 
   1  the ladder: the notice again at 10 minutes of no turn, the cold call 10 minutes after that, then the project's builder (a cold call that gave nothing falls to it at once)
   2  the cold call off: the second step is the builder
-  3  nobody can take it (a project with no builder): the last rung, ONE message to the fleet's builder per episode with a History line, the item left with its mover and not on the owner's list;
+  3  nobody can take it (a project with no builder, so front-only): the last rung, ONE message to the project's -main agent per episode (the fleet's builder when the quiet mover is the -main agent itself, test 14) with a History line, the item left with its mover and not on the owner's list;
      a second pass sends nothing; an item that moves (its mover writes) starts a new episode that may ask again
   4  a front agent's item is covered but never sent a notice (step 1 is a History line, the recovery request is not pushed to it); the cold call's answer is written to the item
   4b the stall ladder's cold call never asks Oliver: an ask_owner, a none or an unusable answer is not written and the item goes on to the builder at once (a History line and a journal
@@ -125,6 +125,7 @@ def set_stall(**kw):
 set_cfg(); set_stall()
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder: the ladders' last rung asks it, once per episode, to recover a quiet session
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
+def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
 server._stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
 COLD_MSGS = []
@@ -186,40 +187,40 @@ close(2); set_cfg()
 # ================================================================ 3. nobody can take it: the last rung, one message to the fleet's builder per episode
 set_cfg(cold_call=False)
 item(3, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
-check("3 recovery: step 1", "a3" in stk(T1) and not recovery_pushes("a3"), log_of(3))
+check("3 recovery: step 1", "a3" in stk(T1) and not main_recovery_pushes("a3"), log_of(3))
 done = stk(T2)
 m3 = mt(3)
 check("3 recovery: no builder in the project and the cold call off: nobody can take it: the mover is unchanged and the item is not returned to a sender, and the record carries the request",
       "a3" in done and bool(ho(3).get("recovery_at")) and ho(3).get("stall") is True and ho(3).get("to") == "home-peer3" and m3.get("mover") == "home-peer3" and "stuck" not in ho(3) and "stuck_reason" not in ho(3), (done, ho(3), log_of(3)))
-check("3 recovery: …a History line says which session is quiet, who was asked and what was tried", "home-peer3 is quiet" in log_of(3)[-1]["text"] and "home-fleet was asked to recover it" in log_of(3)[-1]["text"] and "tried:" in log_of(3)[-1]["text"], log_of(3))
-rp = recovery_pushes("a3")
-check("3 recovery: …exactly one message went to the fleet's builder, first line `[stackshot] fleet recovery: <item>`, naming the quiet session and asking it to take the fix; it owes no reply and is not for the owner",
-      len(rp) == 1 and rp[0][1].startswith("[stackshot] fleet recovery: a3 ") and "home-peer3" in rp[0][1] and "usual path" in rp[0][1] and "no reply is owed" in rp[0][1], rp)
+check("3 recovery: …a History line says which session is quiet, who was asked and what was tried", "home-peer3 is quiet" in log_of(3)[-1]["text"] and "home-beta-front was asked to recover it" in log_of(3)[-1]["text"] and "tried:" in log_of(3)[-1]["text"], log_of(3))
+rp = main_recovery_pushes("a3")
+check("3 recovery: …exactly one message went to the project's -main agent (beta lists no background agent, so there is no builder to ask), marked for the owner on its first line, then `[stackshot] <item> …`, naming the quiet session and asking it to decide; it owes no reply; the fleet's builder was not asked",
+      len(rp) == 1 and rp[0][1].startswith(f"[for {OWN}]\n[stackshot] a3 ") and "home-peer3" in rp[0][1] and "decide" in rp[0][1] and "no reply is owed" in rp[0][1] and not recovery_pushes("a3"), rp)
 check("3 recovery: …nothing went to the quiet session or the project's front, and the item is not on the owner's list: no decision in needs, no ask, no options, no idle raise, and the model keeps its session as the mover",
       len(pushes_to("home-peer3", "a3")) == 1 and "decision" not in (m3.get("needs") or []) and not m3.get("ask") and not m3.get("options") and not (m3.get("idle") or {}).get("raised")
       and not server._model_of({**rd(3), "gid": "a3"}).owner_moves, (pushes_to("home-peer3", "a3"), m3))
 T3 = T2 + 21.0
-check("3 recovery: a second pass sends nothing, and neither do later ones: still one message, no raise, the entry carries no stuck mark", stk(T3) == [] and stk(T3 + 5 * 3600) == [] and len(recovery_pushes("a3")) == 1 and "decision" not in (mt(3).get("needs") or []), (recovery_pushes("a3"), mt(3)))
+check("3 recovery: a second pass sends nothing, and neither do later ones: still one message, no raise, the entry carries no stuck mark", stk(T3) == [] and stk(T3 + 5 * 3600) == [] and len(main_recovery_pushes("a3")) == 1 and "decision" not in (mt(3).get("needs") or []), (main_recovery_pushes("a3"), mt(3)))
 # the guard is the record's, not the pass's memory: with the pass's entry for the item lost (a file wiped, a restart that lost it) the ladder walks its steps again from the top and must not ask a second time
 _st = server._stall_load(); _st.pop("a3", None); server._stall_save(_st)
 X3 = T3 + 3 * 3600
 walked = stk(X3) + stk(X3 + 11 * MIN) + stk(X3 + 22 * MIN) + stk(X3 + 33 * MIN)
-check("3 recovery: …and the request is once per record, not per pass: with the pass's own entry wiped the ladder walks again and still sends no second message", len(recovery_pushes("a3")) == 1 and bool(ho(3).get("recovery_at"))
-      and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 1, (walked, recovery_pushes("a3"), log_of(3)))
+check("3 recovery: …and the request is once per record, not per pass: with the pass's own entry wiped the ladder walks again and still sends no second message", len(main_recovery_pushes("a3")) == 1 and bool(ho(3).get("recovery_at"))
+      and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 1, (walked, main_recovery_pushes("a3"), log_of(3)))
 check("3 recovery: …the journal-side brief and the board list no stuck line for it", "stuck" not in server._handoff_brief().lower() and all("stuck" not in ln for ln in H.brief_lines({"a3": rd(3)}, time.time())), server._handoff_brief()[-300:])
 # the mover writing to the item ends the episode: the ladder starts over, and a later episode may ask again (one message for each)
 server._update("a3", sender="home-peer3", next="home-peer3: back at it")
 floor3 = rd(3)["updated"]
-check("3 episode: the mover's own write ends the episode: the request is cleared from the record", not ho(3).get("recovery_at") and not ho(3).get("recovery_reason") and len(recovery_pushes("a3")) == 1, ho(3))
+check("3 episode: the mover's own write ends the episode: the request is cleared from the record", not ho(3).get("recovery_at") and not ho(3).get("recovery_reason") and len(main_recovery_pushes("a3")) == 1, ho(3))
 at3 = max(floor3, ho(3).get("at") or 0)      # the stall record's own stamp (a pass at a time ahead of the clock made it) counts as the item reaching its mover
-check("3 episode: …the ladder starts over from the write: nothing for 10 minutes, then step 1 again with no new message", stk(at3 + 5 * MIN) == [] and "a3" in stk(at3 + 10 * MIN + 5) and len(recovery_pushes("a3")) == 1, (ho(3), log_of(3)))
+check("3 episode: …the ladder starts over from the write: nothing for 10 minutes, then step 1 again with no new message", stk(at3 + 5 * MIN) == [] and "a3" in stk(at3 + 10 * MIN + 5) and len(main_recovery_pushes("a3")) == 1, (ho(3), log_of(3)))
 done = stk(at3 + 20 * MIN + 10)
-check("3 episode: …and at the last rung the new episode asks once more: two messages in all, one for each episode, and a second History line", "a3" in done and len(recovery_pushes("a3")) == 2 and bool(ho(3).get("recovery_at"))
-      and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 2, (done, recovery_pushes("a3"), log_of(3)))
-check("3 episode: …and that one is not repeated either", stk(at3 + 20 * MIN + 40) == [] and stk(at3 + 6 * 3600) == [] and len(recovery_pushes("a3")) == 2, recovery_pushes("a3"))
+check("3 episode: …and at the last rung the new episode asks once more: two messages in all, one for each episode, and a second History line", "a3" in done and len(main_recovery_pushes("a3")) == 2 and bool(ho(3).get("recovery_at"))
+      and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 2, (done, main_recovery_pushes("a3"), log_of(3)))
+check("3 episode: …and that one is not repeated either", stk(at3 + 20 * MIN + 40) == [] and stk(at3 + 6 * 3600) == [] and len(main_recovery_pushes("a3")) == 2, main_recovery_pushes("a3"))
 # an item that moves to another session (not by its mover's write) ends the record too: the new mover's ladder is its own
 server._save("a3", {**rd(3), "metadata": {**mt(3), "mover": "home-peer2", "next": "home-peer2: take over"}})
-check("3 episode: …a server save that moves the item on ends the record as handed on: no request is carried to the new mover", not ho(3).get("recovery_at") and ho(3).get("to") == "home-peer2" and len(recovery_pushes("a3")) == 2, (ho(3), mt(3).get("handoff_history")))
+check("3 episode: …a server save that moves the item on ends the record as handed on: no request is carried to the new mover", not ho(3).get("recovery_at") and ho(3).get("to") == "home-peer2" and len(main_recovery_pushes("a3")) == 2, (ho(3), mt(3).get("handoff_history")))
 close(3); set_cfg()
 
 # ================================================================ 4. a front agent's item is covered
@@ -271,14 +272,14 @@ two_steps(93)
 check("4b no ask: a stall cold call that names a live session still hands the item to it, written as the cold call", mt(93).get("mover") == "home-docs" and rd(93).get("written_by") == "cold-call"
       and (ho(93).get("cold") or {}).get("state") == "done" and not any("named no taker" in x["text"] for x in log_of(93)), (mt(93), ho(93), log_of(93)))
 close(93)
-# the ladder's last rung: no builder in the project, so the fleet's builder is asked (the stall cold call asked the owner nothing before it, and the last rung asks him nothing either)
+# the ladder's last rung: no builder in the project, so its -main agent is asked (the stall cold call asked the owner nothing before it, and the last rung asks him nothing either)
 cold(ASK_ANS)
 item(94, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
 stk(T1); stk(T2)
-check("4b no ask: …with no builder in the project the cold call's ask_owner is still not written: the ladder's last rung asks the fleet's builder once and the owner nothing",
-      ho(94).get("recovery_at") and len(recovery_pushes("a94")) == 1 and "decision" not in (mt(94).get("needs") or []) and not mt(94).get("ask"), (mt(94), ho(94), recovery_pushes("a94")))
+check("4b no ask: …with no builder in the project the cold call's ask_owner is still not written: the ladder's last rung asks the -main agent once and the owner nothing",
+      ho(94).get("recovery_at") and len(main_recovery_pushes("a94")) == 1 and "decision" not in (mt(94).get("needs") or []) and not mt(94).get("ask"), (mt(94), ho(94), main_recovery_pushes("a94")))
 stk(T2 + 21)
-check("4b no ask: …and a later pass raises nothing and asks nobody again", "decision" not in (mt(94).get("needs") or []) and not mt(94).get("options") and len(recovery_pushes("a94")) == 1 and rd(94).get("written_by") != "cold-call", (mt(94), ho(94)))
+check("4b no ask: …and a later pass raises nothing and asks nobody again", "decision" not in (mt(94).get("needs") or []) and not mt(94).get("options") and len(main_recovery_pushes("a94")) == 1 and rd(94).get("written_by") != "cold-call", (mt(94), ho(94)))
 close(94)
 # the ordinary hand-off cold call is unchanged: ask_owner still asks him
 item(95, mover="home-peer2", handoff={**H.new_record("home-peer2", U["home-peer2"], "home-send", B + 30, delivered_at=B + 40), "cold": {"at": T1, "state": "running"}})
@@ -480,13 +481,13 @@ server._STALL_LAST[0] = 0.0
 check("14 restart: step 1 is in the file (the episode, its stamps, when the pass first ran)", json.loads(snap)["a61"]["step"] == 1 and json.loads(snap)["a61"]["last"] == T1 and json.loads(snap)["_pass"]["since"] == B, snap[:400])
 check("14 restart: …a pass that knows only the file does not send step 1 again (5 minutes on), and takes step 2 at its time", stk(T1 + 5 * MIN) == [] and len(log_of(61)) == 1 and "a61" in stk(T1 + 10 * MIN + 1) and mt(61).get("mover") == "team-back", (log_of(61), mt(61)))
 close(61); set_cfg()
-# a front agent's item: the recovery request goes to the fleet's builder, never to the front agent
+# a front agent's item (the project's -main agent itself is quiet, nobody is above it): the recovery request goes to the fleet's builder, never to the front agent
 set_cfg(cold_call=False)
 item(62, project="projects/beta", mover="home-beta-front"); cli_row("home-beta-front", "idle", IDLE0)
 stk(T1); n_push62 = len(pushes()); done = stk(T2)
-check("14 front recovery: nobody can take a front agent's item (no builder): the fleet's builder is asked once, the owner nothing, and no front agent or page keeper is pushed",
+check("14 front recovery: nobody can take a front agent's item (no builder, and it is the -main agent itself): the fleet's builder is asked once, the owner nothing, and no front agent or page keeper is pushed",
       "a62" in done and ho(62).get("recovery_at") and "decision" not in (mt(62).get("needs") or []) and len(recovery_pushes("a62")) == 1 and len(pushes()) == n_push62 + 1
-      and not pushes_to("home-beta-front") and not pushes_to("home-beta-stew"), (done, ho(62), pushes()[n_push62:]))
+      and not pushes_to("home-beta-front", "a62") and not pushes_to("home-beta-stew"), (done, ho(62), pushes()[n_push62:]))
 check("14 front recovery: …and the next pass sends nothing", stk(T2 + 21) == [] and len(pushes()) == n_push62 + 1, pushes()[n_push62:])
 close(62); set_cfg()
 
@@ -1027,15 +1028,15 @@ cli_row("home-peer2", "idle", T1 + 36 * MIN)
 check("22 B: …the turn ends: the look sends the notice again at once", "a84" in stk(T1 + 37 * MIN) and len(stall_notices("home-peer2", 84)) == 2, pushes_to("home-peer2", "a84"))
 close(84)
 
-# C. the last rung: no builder and no cold call, ONE message to the fleet's builder; the item stays with its mover, not on the owner's list
+# C. the last rung: no builder and no cold call, ONE message to the project's -main agent; the item stays with its mover, not on the owner's list
 set_cfg(cold_call=False)
 item(85, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
 stk(T1); stk(T1 + 31 * MIN)
-check("22 C: ask and look sent, no recovery request yet", len(stall_notices("home-peer3", 85)) == 2 and not recovery_pushes("a85"), pushes_to("home-peer3", "a85"))
+check("22 C: ask and look sent, no recovery request yet", len(stall_notices("home-peer3", 85)) == 2 and not main_recovery_pushes("a85"), pushes_to("home-peer3", "a85"))
 done = stk(T1 + 41 * MIN + 1)
-check("22 C last: cold call off, the project lists no builder: ONE message asks the fleet's builder; the mover keeps the item and it is not on the owner's list",
-      "a85" in done and len(recovery_pushes("a85")) == 1 and bool(ho(85).get("recovery_at")) and mt(85).get("mover") == "home-peer3" and "decision" not in (mt(85).get("needs") or []) and not mt(85).get("ask"), (done, ho(85), mt(85)))
-check("22 C last: …and nothing more later", stk(T1 + 5 * 3600) == [] and len(recovery_pushes("a85")) == 1, recovery_pushes("a85"))
+check("22 C last: cold call off, the project lists no builder: ONE message asks its -main agent; the mover keeps the item and it is not on the owner's list",
+      "a85" in done and len(main_recovery_pushes("a85")) == 1 and bool(ho(85).get("recovery_at")) and mt(85).get("mover") == "home-peer3" and "decision" not in (mt(85).get("needs") or []) and not mt(85).get("ask"), (done, ho(85), mt(85)))
+check("22 C last: …and nothing more later", stk(T1 + 5 * 3600) == [] and len(main_recovery_pushes("a85")) == 1, main_recovery_pushes("a85"))
 close(85); set_cfg()
 
 # D. an untaken hand-off to a session is the hand-off audit's: silence does not start it, so one item never has two ladders

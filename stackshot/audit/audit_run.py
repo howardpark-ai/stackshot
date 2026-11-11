@@ -678,6 +678,16 @@ def recipient(who: str, project: str, env: Env, mover: str = "") -> tuple[str, b
     return page_key(project), False
 
 
+def chase_to(env: Env, project: str, mover: str, first_to: str = "") -> tuple[str, bool]:
+    """(who is told to chase `mover`'s unmoved finding or item of `project`, whether that message is marked `[for <owner>]`): `Env.chase_of` (a front-only project's -main agent, else its builder), except that
+    the one told is never the one that did not answer: when it is the mover, or the session the finding first went to (`first_to`, else where the mover's finding goes), the project's page key takes it, unmarked,
+    where the router rules it. Level 1 of a finding and the unmoved digest both use it, so a -main agent is never told to chase itself."""
+    b, bfront = env.chase_of(project)
+    if str(project or "").strip() and _norm_name(b) in {_norm_name(mover), _norm_name(recipient(first_to or mover, project, env, mover)[0])}:
+        return page_key(project), False
+    return b, bfront
+
+
 def finding_key(f: dict[str, Any]) -> tuple[str, str, str]:
     """What makes two findings the same finding: the item, the check and, for the two reports whose category holds several checks (`next rules`: the rule, `board checks`: the kind), which one."""
     cat = str(f.get("category") or "")
@@ -835,9 +845,8 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
     sending_from = env.clock()
     reached_fs: list[dict[str, Any]] = []
     groups: dict[str, dict[str, Any]] = {}
-    esc: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    esc: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its message is marked for the owner): one session can be a front agent for one project and a builder for another, and gets one message of each kind
     up: dict[str, list[tuple[dict[str, Any], str]]] = {}
-    esc_front: set[str] = set()       # the recipients of `esc` that are front agents: their message is marked for the owner
     for f in [f for f in fresh if f.get("escalate") == 2]:       # still unanswered after the builder was told: the project's -main agent hears of a finding that went to a builder, once (marked for the owner, as every message to it)
         proj = str(f.get("project") or "")
         to0, front0 = recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")
@@ -855,17 +864,13 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             reached_fs += [f for f, _ln in ls]
     for f in [f for f in fresh if f.get("escalate") == 1]:       # a finding that stayed unanswered through its reminders goes to the project's builder, as the daily run's unmoved flag does, and to no one else
         proj = str(f.get("project") or "")
-        b, bfront = env.chase_of(proj)       # a front-only project's -main agent (marked for the owner), else its builder
-        if proj and _norm_name(b) in {_norm_name(f.get("mover")), _norm_name(recipient(f.get("to") or f.get("mover") or "", proj, env, f.get("mover") or "")[0])}:
-            b, bfront = page_key(proj), False       # the one told is the one that did not answer: the page key, where the router rules it, never the mover itself
-        elif not proj and not b:
+        b, bfront = chase_to(env, proj, f.get("mover") or "", f.get("to") or "")       # a front-only project's -main agent (marked for the owner), else its builder; the page key when that is the mover itself
+        if not proj and not b:
             continue
-        if bfront:
-            esc_front.add(b)
-        esc.setdefault(b, []).append((f, f"{f['id']} · unmoved after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
+        esc.setdefault((b, bfront), []).append((f, f"{f['id']} · unmoved after {f.get('tries', 1) - 1} messages · {f['category']} · {_clip(f['detail'], 200)} · {f.get('mover') or 'its mover'} writes it, or says what holds it"))
     fresh = [f for f in fresh if not f.get("escalate")]
-    for to, ls in sorted(esc.items()):
-        ok, said = _send(env, to, compose([ln for _f, ln in ls], f"[stackshot] {label}: {len(ls)} finding(s) its mover did not answer after repeated messages; chase the mover (job).", to in esc_front))
+    for (to, front), ls in sorted(esc.items()):
+        ok, said = _send(env, to, compose([ln for _f, ln in ls], f"[stackshot] {label}: {len(ls)} finding(s) its mover did not answer after repeated messages; chase the mover (job).", front))
         sent.append({"to": to, "lines": len(ls), "delivered": ok, "said": _clip(said, 120), "kind": "unmoved"})
         if ok:
             for f, _ln in ls: f["lvl"] = 1       # kept on the record: only a builder send made with the level kept is followed by the message to -main (split_sent)
@@ -1387,17 +1392,13 @@ def _run(*, dry: bool, now: float, t0: float, items: dict[str, dict[str, Any]] |
     sent, reached_fs, sending_from = deliver_findings(env, fresh, f"Board audit {label}")
     sending_from = max(sending_from, t0)
     # the unmoved digest lists an item once: the run that first finds it unmoved chases it to the builder, and only a delivered digest counts as a chase; the record's `stuck` and the summary keep naming it until it is written
-    jobs: dict[str, list[tuple[dict[str, Any], str]]] = {}
-    job_front: set[str] = set()       # the recipients of `jobs` that are front agents (a front-only project's -main): their digest is marked for the owner
+    jobs: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its digest is marked for the owner: a front-only project's -main agent); as `esc`, keyed by both
     for s in stuck:
         if s["chased"]:
             continue
-        to_s, front_s = env.chase_of(s["project"])
-        if front_s:
-            job_front.add(to_s)
-        jobs.setdefault(to_s, []).append((s, f"{s['id']} · unmoved since {s['first_flagged']} · {s['category']} · {s['detail']} · {s['mover'] or 'its mover'} writes it, or says what holds it"))
-    for to, ls in sorted(jobs.items()):
-        ok, said = _send(env, to, compose([ln for _s, ln in ls], f"[stackshot] Board audit {label}: {len(ls)} flagged item(s) still unmoved since an earlier run; chase the mover (job).", to in job_front))
+        jobs.setdefault(chase_to(env, s["project"], s["mover"]), []).append((s, f"{s['id']} · unmoved since {s['first_flagged']} · {s['category']} · {s['detail']} · {s['mover'] or 'its mover'} writes it, or says what holds it"))
+    for (to, front), ls in sorted(jobs.items()):
+        ok, said = _send(env, to, compose([ln for _s, ln in ls], f"[stackshot] Board audit {label}: {len(ls)} flagged item(s) still unmoved since an earlier run; chase the mover (job).", front))
         sent.append({"to": to, "lines": len(ls), "delivered": ok, "said": _clip(said, 120), "kind": "unmoved"})
         if ok:
             for st, _ln in ls:

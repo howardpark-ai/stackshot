@@ -102,6 +102,7 @@ def drain():
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
+def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
@@ -235,11 +236,11 @@ close(10)
 clear_records(); set_cfg(cold_call=False)
 put(14, project="projects/beta", mover="home-peer3", act=60); cli_row("home-peer3", "idle", IDLE_SINCE)
 silence_pass([14]); stk(now0 + 31 * MIN)
-check("4 last: ask and look sent, no recovery request yet", len(look_notices("home-peer3", 14)) == 1 and not recovery_pushes("a14"), pushes_to("home-peer3", "a14"))
+check("4 last: ask and look sent, no recovery request yet", len(look_notices("home-peer3", 14)) == 1 and not main_recovery_pushes("a14"), pushes_to("home-peer3", "a14"))
 done = stk(now0 + 41 * MIN + 1)
-check("4 last: cold call off and no builder: ONE message asks the fleet's builder; the mover keeps the item; it is not on the owner's list",
-      "a14" in done and len(recovery_pushes("a14")) == 1 and bool(ho(14).get("recovery_at")) and mt(14).get("mover") == "home-peer3" and "decision" not in (mt(14).get("needs") or []) and not mt(14).get("ask"), (done, ho(14), mt(14)))
-check("4 last: …and nothing more later", stk(now0 + 5 * H) == [] and len(recovery_pushes("a14")) == 1, recovery_pushes("a14"))
+check("4 last: cold call off and no builder: ONE message asks the project's -main agent (no background agent to build); the mover keeps the item; it is not on the owner's list",
+      "a14" in done and len(main_recovery_pushes("a14")) == 1 and bool(ho(14).get("recovery_at")) and mt(14).get("mover") == "home-peer3" and "decision" not in (mt(14).get("needs") or []) and not mt(14).get("ask"), (done, ho(14), mt(14)))
+check("4 last: …and nothing more later", stk(now0 + 5 * H) == [] and len(main_recovery_pushes("a14")) == 1, main_recovery_pushes("a14"))
 close(14); set_cfg()
 
 # ================================================================ 5. activity ends it; a bare confirm and the ladder's notes do not
