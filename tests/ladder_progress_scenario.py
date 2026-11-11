@@ -366,5 +366,200 @@ lines = [x["text"] for x in log_of(195)]
 check("13 the mover is the -main agent: nobody is sent anything, and the History line says so (not 'no -main agent'), once in the interval", "a195" in done and len(pushes()) == n_push and len([x for x in lines if "is the project's -main agent" in x]) == 1 and not any("has no -main agent" in x for x in lines), (done, done2, lines))
 close(195)
 
+# ================================================================ 14. a pull request merged for the item is progress, whether or not it settles a step: the hub's merge log (anchors/merge_log.py), tied to items by merge_tie
+from stackshot.anchors import merge_log as ML; from stackshot.model import merge_tie as MT
+from stackshot.anchors.anchorhub import core as HUB
+W_ = "https://github.com/acme/widgets"
+def shown(i): return f"board#{i}"
+def handed(i): return [p for p in pushes_to("home-front", f'a{i} "[home] item {i}"') if "queued behind" in p[1]]      # the notices that name the item as the one not moving (alone, or one of several that came due together), not as what another is queued behind
+def merge_pass(now):
+    """One merge pass at `now`, the saves stamped at it; the board id board#<n> is the fixture item a<n> for the pass (the fixtures are a<n>: [github] issues_letter), and the other sections' ids are left as they were."""
+    gh_ = server._cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
+    try: return server._merge_progress_tick(now)
+    finally:
+        CLK.t = None
+        if had is None: gh_.pop("issues_letter", None)
+        else: gh_["issues_letter"] = had
+check("14 merge_log.refs: the board ids a body names, once each, in order; a bare #n, owner/repo#n and board-ish words are not", ML.refs("Closes " + shown(9301) + " and " + shown(9302) + ", " + shown(9301) + " again; see #5, acme/widgets#6, a board #9303") == [shown(9301), shown(9302)] and ML.refs(None) == []
+      and len(ML.refs(" ".join(f"board#{n}" for n in range(1, 30)))) == ML.MAX_REFS, ML.refs("Closes " + shown(9301) + " and " + shown(9302) + ", " + shown(9301) + " again; see #5, acme/widgets#6, a board #9303"))
+check("14 merge_log.pull_of: the anchor's own id, else the link of the event (a pull request page or a comment on it); a release or a bare repository has none",
+      ML.pull_of("github:Acme/Widgets#21") == ("acme/widgets", 21) and ML.pull_of("github:acme/widgets@notifications", f"{W_}/pull/22#issuecomment-5") == ("acme/widgets", 22)
+      and ML.pull_of("github:acme/widgets@releases", "https://github.com/acme/widgets/releases/tag/v1") == ("", 0) and ML.pull_of("slack:C1") == ("", 0), None)
+check("14 merge_log.line_for: only a merge (the type among a burst's, joined with +) of a pull request makes a line", ML.line_for("github:acme/widgets#21", "", "pr_merged", [shown(9203)], 5.0) == {"ts": 5.0, "repo": "acme/widgets", "n": 21, "refs": [shown(9203)]}
+      and ML.line_for("github:acme/widgets#21", "", "comment+pr_merged", [], 5.0)["n"] == 21 and ML.line_for("github:acme/widgets#21", "", "pr_closed", [], 5.0) is None and ML.line_for("github:acme/widgets#21", "", "", [], 5.0) is None
+      and ML.line_for("github:acme/widgets@releases", "", "pr_merged", [], 5.0) is None, None)
+check("14 merge_tie.names: a URL names the pull request in any repository; #n, PR n and PR #n only for a repository the item speaks of without a URL; a prefix of a longer number or another repository's #n does not",
+      MT.names(f"see {W_}/pull/21/files", "acme/widgets#21") and not MT.names(f"see {W_}/pull/210", "acme/widgets#21") and MT.names("PR #21 and more", "acme/widgets#21", ["acme/widgets"]) and MT.names("done in PR 21", "acme/widgets#21", ["acme/widgets"])
+      and MT.names("#21 landed", "acme/widgets#21", ["acme/widgets"]) and not MT.names("#21 landed", "acme/widgets#21", ["other/repo"]) and not MT.names(shown(9221) + " and acme/widgets#21", "acme/widgets#21", ["acme/widgets"])
+      and not MT.names("#210", "acme/widgets#21", ["acme/widgets"]), None)
+check("14 progress.merges: a key of merged_seen counts as a merge recorded (one with the same pull request in released_told is one); progress.moved sees it newly added",
+      PG.merges(with_meta(merged_seen=["a/b#1"], released_told=["merged a/b#1", "a/b#2"])) == frozenset({"merged a/b#1"}) and PG.moved(base, with_meta(merged_seen=["a/b#1"])) == ["merged"]
+      and not PG.moved(with_meta(merged_seen=["a/b#1"]), with_meta(merged_seen=["a/b#1"])) and not PG.moved(base, with_meta(merged_seen=["a/b#1"]), False), None)
+
+# the log, the anchors and the items. The items would all go up at +30 minutes; a merge tied to one at +20 minutes moves its clock to then.
+def line(n, refs=(), at=20 * MIN): return {"ts": now0 + at, "repo": "acme/widgets", "n": n, "refs": list(refs)}
+anchors_ = {"projects/alpha": [{"url": f"{W_}/pull/21", "items": ["a200"]}, {"url": f"{W_}/pull/22"}, {"url": f"{W_}/pull/30", "items": ["a205"]}, {"url": f"{W_}/pull/32", "items": ["a207"]}, {"url": f"{W_}/pull/28", "items": ["a212", "a213"]}]}
+(T / "store/anchors.json").write_text(json.dumps(anchors_))
+def fixture(i, **meta): put(i, act=30, mover="home-peer", **meta); prog(i, now0 - 3 * H - 30 * MIN)
+for i in (200, 201, 202, 203, 204, 205, 207, 211): fixture(i)
+fixture(206, project="projects/beta")      # an item of another project: its bare "#25" may be another repository's
+d_ = rd(204); d_["description"] = f"- Waits on {W_}/pull/23\n- Done when it lands"; (T / "store/a/204.json").write_text(json.dumps(d_))
+d_ = rd(205); d_["metadata"]["steps"] = [step("home-peer: land PR #24 and check it", "open")]; (T / "store/a/205.json").write_text(json.dumps(d_))
+d_ = rd(206); d_["metadata"]["steps"] = [step("home-peer: land PR #25 and check it", "open")]; (T / "store/a/206.json").write_text(json.dumps(d_))      # the number alone, in a project that holds no anchor in that repository and with none of its own: not tied
+d_ = rd(211); d_["metadata"]["steps"] = [step("home-peer: land PR #26 and check it", "open")]; (T / "store/a/211.json").write_text(json.dumps(d_))      # the number alone, in the project that holds anchors in that repository: tied
+fixture(212, hold=True, wake=iso(now0 + 5 * H), phase="waiting", waits_on="time")      # held and waiting for a dated wake, with an anchor on the merged pull request: not on the stall ladder
+fixture(213); waits_after(213, "a203"); prog(213, now0 - 3 * H - 30 * MIN)             # ordered after an open item, the same anchor: not on the stall ladder
+fixture(208, project="projects/alpha"); close(208)                                   # a closed item named by the body: left alone
+for ln in (line(21), line(22), line(23), line(24), line(25), line(26), line(28), line(99), line(31, [shown(201), shown(208), shown(9299)]), line(40, [shown(201)])):
+    ML.append(ln)
+saved = merge_pass(now0 + 21 * MIN)
+check("14 the pass saves exactly the items a merge is tied to: anchored (a200), the body naming it (a201, also by a merge no anchor holds), its own words (a204 by URL, a205 by number with a pull request of its repository anchored, a211 by number in the project that holds the repository's anchors)",
+      sorted(saved) == ["a200", "a201", "a204", "a205", "a211"], saved)
+check("14 …each moved its clock to the save (progress = the pass's time), recorded the key in merged_seen, and said why in the History", all(rd(i)["progress"] == now0 + 21 * MIN and rd(i)["updated"] == now0 + 21 * MIN for i in (200, 201, 204, 205, 211))
+      and mt(200).get("merged_seen") == ["acme/widgets#21"] and sorted(mt(201).get("merged_seen")) == ["acme/widgets#31", "acme/widgets#40"] and mt(204).get("merged_seen") == ["acme/widgets#23"] and mt(205).get("merged_seen") == ["acme/widgets#24"]
+      and any("an anchor of the item names it" in x["text"] for x in log_of(200)) and any("description names the item" in x["text"] for x in log_of(201)) and any("own words name it" in x["text"] for x in log_of(204)),
+      ([rd(i).get("progress") for i in (200, 201, 204, 205)], [mt(i).get("merged_seen") for i in (200, 201, 204, 205)], log_of(201)))
+check("14 a project-wide anchor's merge (a202's project holds #22 for nobody), an unrelated merge (#99), a bare number in an item of another project (a206: its PR number may be another repository's), a closed item named by the body (a208) and an anchored item the board shows held (a212) or ordered after an open item (a213) move nothing: the clock stays and nothing is written",
+      all(rd(i)["progress"] == now0 - 3 * H - 30 * MIN and "merged_seen" not in mt(i) for i in (202, 203, 206, 207, 208, 212, 213)) and rd(208).get("status") == "completed" and rd(202)["updated"] == now0 - 30 * MIN, [rd(i).get("progress") for i in (202, 203, 206, 207, 208)])
+check("14 the pass keeps where it stopped: a second pass reads no line again and saves nothing", merge_pass(now0 + 22 * MIN) == [] and ML.read(server._merge_progress_offset())[0] == [], server._merge_progress_offset())
+check("14 …and a line a pass sees again (the offset lost) is not saved twice: the item holds the key already", (server._merge_progress_save(0), merge_pass(now0 + 23 * MIN))[1] == [] and mt(200).get("merged_seen") == ["acme/widgets#21"] and rd(200)["progress"] == now0 + 21 * MIN, mt(200))
+done = stk(now0 + 31 * MIN); stk(now0 + 2 * H); stk(now0 + 21 * MIN + 4 * H - 60)
+check("14 the hand-up: the items the merge tied are not handed up at +30 minutes, 2 hours or 4 hours less a minute after it; the items it did not tie (a207: anchored to another pull request) went up at +30 minutes, once",
+      not any(handed(i) for i in (200, 201, 204, 205, 211)) and all(len(handed(i)) == 1 for i in (202, 203, 207)) and sorted(done) == ["a202", "a203", "a206", "a207"], (done, [len(handed(i)) for i in (200, 201, 202, 203, 204, 205, 206, 207)]))
+done = stk(now0 + 21 * MIN + 4 * H)
+check("14 …and 4 hours after the merge they are, once each, with no merge in between", sorted(done) == ["a200", "a201", "a204", "a205", "a211"] and all(len(handed(i)) == 1 for i in (200, 201, 204, 205, 211)), (done, pushes_to("home-front", "a200")))
+close(200, 201, 202, 203, 204, 205, 206, 207, 211, 212, 213)
+
+# the first pass on a state directory with no offset reads only lines the clock could use (main_hours and 2 hours back); the offset file is then written
+(T / "state/merge-progress.json").unlink(missing_ok=True)
+fixture(209, project="projects/alpha"); fixture(210, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/50", "items": ["a209"]}, {"url": f"{W_}/pull/51", "items": ["a210"]}]}))
+ML.append({"ts": now0 - 7 * H, "repo": "acme/widgets", "n": 50, "refs": []}); ML.append({"ts": now0 - 1 * H, "repo": "acme/widgets", "n": 51, "refs": []})
+saved = merge_pass(now0)
+check("14 the first pass: a merge older than main_hours + 2 hours is skipped (a209), a recent one counts (a210); the offset is kept", saved == ["a210"] and "merged_seen" not in mt(209) and server._merge_progress_offset() == ML.read(0)[1], (saved, server._merge_progress_offset()))
+close(209, 210)
+
+# a shorter or replaced merges.jsonl (the offset is past its end): read from the start with the first run's time filter, never a full replay
+fixture(214, project="projects/alpha"); fixture(215, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/52", "items": ["a214"]}, {"url": f"{W_}/pull/53", "items": ["a215"]}]}))
+off_before = server._merge_progress_offset()
+ML.path().write_text(json.dumps({"ts": now0 - 7 * H, "repo": "acme/widgets", "n": 52, "refs": []}) + "\n" + json.dumps({"ts": now0 - 1 * H, "repo": "acme/widgets", "n": 53, "refs": []}) + "\n", encoding="utf-8")
+saved = merge_pass(now0)
+check("14 the file replaced by a shorter one (offset past its end): read from the start, only the lines the clock could use (a merge 7 hours old is skipped, one an hour old counts), the offset is the new end",
+      off_before > ML.size() and saved == ["a215"] and "merged_seen" not in mt(214) and server._merge_progress_offset() == ML.size(), (off_before, ML.size(), saved, server._merge_progress_offset()))
+close(214, 215)
+
+# one item that cannot be read or saved does not abort the pass: the others are saved, the failure is logged, the offset is stored
+for i in (216, 217, 218): fixture(i, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/54", "items": ["a216", "a217", "a218"]}]}))
+ML.append(line(54, at=-60))
+_real_save, _real_load = server._save, server._load
+def _bad_save(gid, *a, **kw):
+    if gid == "a216": raise OSError("disk full")
+    return _real_save(gid, *a, **kw)
+def _bad_load(gid, *a, **kw):
+    if gid == "a218" and _bad_load.on: raise OSError("unreadable")
+    return _real_load(gid, *a, **kw)
+_bad_load.on = False
+server._save, server._load = _bad_save, _bad_load
+import io as _io, contextlib as _cl
+errs = _io.StringIO()
+try:
+    _bad_load.on = True
+    with _cl.redirect_stderr(errs): saved = merge_pass(now0)
+finally:
+    server._save, server._load = _real_save, _real_load
+check("14 an item whose save fails (a216) or whose read fails (a218) is logged and skipped; the other (a217) is saved, and the offset is stored so the pass does not repeat",
+      saved == ["a217"] and "merged_seen" not in mt(216) and "merged_seen" not in mt(218) and mt(217).get("merged_seen") == ["acme/widgets#54"] and "a216 not saved" in errs.getvalue() and server._merge_progress_offset() == ML.size(),
+      (saved, errs.getvalue()[-300:], server._merge_progress_offset(), ML.size()))
+close(216, 217, 218)
+
+# a malformed line between two good ones is logged and skipped, and the offset moves past it (it never stops the pass)
+for i in (219, 220): fixture(i, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/70", "items": ["a219"]}, {"url": f"{W_}/pull/71", "items": ["a220"]}]}))
+ML.append(line(70, at=-120))
+with open(ML.path(), "a", encoding="utf-8") as f_:
+    f_.write(json.dumps({"ts": "yesterday", "repo": "acme/widgets", "n": 5, "refs": []}) + "\n")      # a ts that is no number
+    f_.write(json.dumps({"ts": now0, "repo": "acme/widgets", "n": "x", "refs": []}) + "\n")            # a pull request number that is none
+    f_.write(json.dumps({"ts": now0, "repo": "not a repo", "n": 5, "refs": []}) + "\n")                # a repository that is none
+    f_.write('{"ts": 1, "repo": "acme/wid\n')                                                           # a torn line that is no JSON at all
+ML.append(line(71, at=-60))
+errs = _io.StringIO()
+with _cl.redirect_stderr(errs): saved = merge_pass(now0)
+check("14 a bad line (a ts or a pull request number that is none, a repository that is none, a torn line) between two good ones is logged and skipped: both good ones are saved and the offset moves to the end",
+      sorted(saved) == ["a219", "a220"] and errs.getvalue().count("line skipped") == 3 and server._merge_progress_offset() == ML.size(), (saved, errs.getvalue()[-400:], server._merge_progress_offset(), ML.size()))
+check("14 …and the pass after it reads nothing again (the offset is past the bad lines)", merge_pass(now0 + 60) == [] and server._merge_progress_offset() == ML.size(), None)
+close(219, 220)
+
+# the backlog of a downtime: on every pass (not only the first), a merge older than main_hours + 2 hours is no progress now, and is not stamped
+for i in (221, 222): fixture(i, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/72", "items": ["a221"]}, {"url": f"{W_}/pull/73", "items": ["a222"]}]}))
+ML.append(line(72, at=-30 * H)); ML.append(line(73, at=-60))
+saved = merge_pass(now0)
+check("14 a backlog line from 30 hours ago (the server was down) is not stamped on a pass that is not the first, a recent one is; the offset moves past both",
+      saved == ["a222"] and "merged_seen" not in mt(221) and rd(221)["progress"] == now0 - 3 * H - 30 * MIN and server._merge_progress_offset() == ML.size(), (saved, server._merge_progress_offset(), ML.size()))
+close(221, 222)
+
+# which ids a body names: board#N, a temporary id, a legacy letter-and-number id and an item link, as a message's ids are read (code, quotes, glued ids and the queue's groups are not)
+TMP_ = "board" + "-tmp-box" + chr(35)      # a temporary id and an item link, built from pieces so no id-shaped or link-shaped text sits in the source
+HOST_ = "https" + ":" + "//host" + "/items/"
+body_ = "Closes " + shown(9301) + ", " + TMP_ + "4 and g12. In code `" + shown(9302) + "`, fenced:\n```\n" + shown(9303) + "\n```\nquoted \"" + shown(9304) + "\", x_" + shown(9305) + ", group g7, [" + shown(9306) + "]" + "(" + HOST_ + "9306) and " + HOST_ + "9307"
+check("14 merge_log.refs reads a body as a message's ids are read (model/ids.py): board#N, a temporary id, a legacy gNN id and an item link count; fenced code, inline code, quoted text, an id with something glued on and a merge queue's group number do not",
+      ML.refs(body_) == [shown(9301), TMP_ + "4", "g12", shown(9306), shown(9307)], ML.refs(body_))
+fixture(230, project="projects/alpha"); fixture(231, project="projects/alpha")
+(T / "store/anchors.json").write_text("{}")
+ML.append(line(74, ["board" + "-tmp-nobox" + chr(35) + "9", "zz", "a230"], at=-60))
+saved = merge_pass(now0)
+check("14 the server resolves a stored ref as it resolves any id (a legacy letter-and-number id, a000-style, names a230); a ref that names no item (another machine's temporary id, a word) is skipped and does not stop the pass",
+      saved == ["a230"] and mt(230).get("merged_seen") == ["acme/widgets#74"] and "merged_seen" not in mt(231), saved)
+
+# a failure in the anchor pass does not stop the merge pass (the minute tick runs both)
+fixture(232, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/75", "items": ["a232"]}]}))
+ML.append({"ts": time.time(), "repo": "acme/widgets", "n": 75, "refs": []})
+_real_anchor_pass = server._anchor_pass
+def _broken_anchor_pass(): raise RuntimeError("anchor pass broke")
+server._anchor_pass = _broken_anchor_pass
+errs = _io.StringIO()
+try:
+    with _cl.redirect_stderr(errs): server._minute_anchor_pass()
+finally:
+    server._anchor_pass = _real_anchor_pass
+check("14 _minute_anchor_pass: an anchor pass that raises is logged and the merge pass still runs (the item the merge is tied to is saved)",
+      "anchor pass: RuntimeError: anchor pass broke" in errs.getvalue() and mt(232).get("merged_seen") == ["acme/widgets#75"], (errs.getvalue()[-300:], mt(232)))
+close(230, 231, 232)
+
+# merge_tie: a bare number ties only an item of a project that holds an anchor in the repository, or with a pull request of it anchored; a URL ties anywhere
+pg_ = MT.repo_pages({"projects/alpha": [{"url": f"{W_}/pull/1"}, {"url": "https://example.org/x"}], "projects/beta": [{"url": "https://github.com/other/repo/pull/2"}, "junk"]}, lambda u: "acme/widgets" if "acme/widgets" in u else "other/repo" if "other/repo" in u else "")
+check("14 merge_tie.repo_pages: the pages that hold an anchor in each repository (any scope), others and malformed entries left out", pg_ == {"acme/widgets": {"projects/alpha"}, "other/repo": {"projects/beta"}}, pg_)
+tx_ = {"i1": "see #7", "i2": "see #7", "i3": "see #7", "i4": f"see {W_}/pull/7"}
+tied_ = MT.tied("acme/widgets#7", [], {"i3": {"acme/widgets#99"}}, tx_, {"i1": "projects/alpha", "i2": "projects/beta", "i3": "projects/beta", "i4": "projects/beta"}, pg_)
+check("14 merge_tie.tied: the item of the repository's project (i1) and the one with a pull request of it anchored (i3) tie by a bare number, the item of another project (i2) does not, a URL ties it anywhere (i4)",
+      tied_ == {"i1": "words", "i3": "words", "i4": "words"}, tied_)
+
+# the hub: Hub.emit writes the line for a merge, before any lane, and for nothing else
+hub_ = HUB.Hub(); hub_.deliver = lambda anchor, session, text: None; hub_.write_status = lambda: None; hub_.persist = lambda: "saved"
+hub_.bindings = {"github:acme/widgets#60": {"home-peer"}, "github:acme/widgets@notifications": {"home-peer"}}
+off_ = ML.read(0)[1]
+def hub_event(anchor, etype, url, refs=None, text="merged it"):
+    summary = {"title": "widgets#60", "who": "someone", "text": text, "url": url, "ts": "2026-11-12T00:00:00Z", "etype": etype}
+    if refs is not None: summary["meta"] = {"refs": refs}
+    hub_.event(anchor, summary, kind="github-state")
+hub_event("github:acme/widgets#60", "pr_closed", f"{W_}/pull/60")
+hub_event("github:acme/widgets#60", "ci_passed", f"{W_}/pull/60")
+check("14 the hub: a closed pull request and a CI result write no line", ML.read(off_)[0] == [], ML.read(off_)[0])
+hub_event("github:acme/widgets#60", "pr_merged", f"{W_}/pull/60", [shown(201)])
+hub_event("github:acme/widgets@notifications", "comment+pr_merged", f"{W_}/pull/61#issuecomment-9", [], "merged on #61")
+rows_, _o = ML.read(off_)
+check("14 the hub: a merge writes one line (the anchored pull request, with the board ids its body names; a thread of a repository's notifications, by its link), whatever lane its notice takes",
+      [(r["repo"], r["n"], r["refs"]) for r in rows_] == [("acme/widgets", 60, [shown(201)]), ("acme/widgets", 61, [])], rows_)
+with open(ML.path(), "ab") as f_: f_.write(b'{"ts": 1, "repo": "acme/widgets", "n": 62, "refs": []}')      # a line the hub is still writing: no newline yet
+part_rows, part_off = ML.read(_o)
+with open(ML.path(), "ab") as f_: f_.write(b"\n")
+whole_rows, whole_off = ML.read(_o)
+check("14 merge_log.read: a line the hub is still writing (no newline yet) is not read, and is read whole next time; the offset moves past whole lines only",
+      part_rows == [] and part_off == _o and [r["n"] for r in whole_rows] == [62] and whole_off == ML.path().stat().st_size, (part_rows, part_off, whole_rows, whole_off))
+check("14 merge_log.read: an offset past the end (a replaced, shorter file) reads from the start; no file reads as nothing", ML.read(10 ** 9)[0][0]["n"] == 52 and (ML.path().rename(ML.path().with_suffix(".gone")), ML.read(5))[1] == ([], 5), None)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
