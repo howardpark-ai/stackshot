@@ -384,6 +384,15 @@ def shown_pair(mod: Model) -> tuple[str, str]:
     return (mod.state, "") if mod.state in PHASES else ("", "")
 
 
+def shown_waiting(item: dict[str, Any], now: float | None = None, after_open: Callable[[dict[str, Any]], Any] | None = None) -> bool:
+    """Does the board show this item as waiting? True exactly when the phase the board draws for an open item (`view` of `derive`, the stored pair first) is waiting; an item the board shows alive ("on agent",
+    or the owner's move) and a closed one are not. The one test the passes that look for a quiet item (the silence pass, the stall pass's `not_due`) use to leave a waiting item alone, so that what they skip is
+    what the board shows as waiting and nothing else: a wake alone is a reminder and leaves the item on agent, a wake with a wait_basis is a wait. Raises what `derive` raises for an item it cannot read."""
+    if item.get("status") != "open":
+        return False
+    return view(item, derive(item, now, after_open), now, after_open).state == WAITING
+
+
 def stored_phase(item: dict[str, Any]) -> str:
     """The phase an OPEN item stores, "" when it stores none (or a value that is not a phase, or the item is closed: a closed item is dead and stores neither phase nor wait)."""
     if item.get("status") != "open":
