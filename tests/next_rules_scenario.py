@@ -72,6 +72,10 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 for p_ in (T / "store/a").glob("*.json"):       # as a session's write leaves them: each line remembers who wrote it (next_by), so a session's next replaces its own lines
     j_ = json.loads(p_.read_text()); m_ = j_["metadata"]
     if m_.get("next", "").startswith("home-agent:"):
@@ -230,7 +234,7 @@ _w3 = (_dt3.date.today() + _dt3.timedelta(days=3)).isoformat()
 refused("N6 hold (a): a hold that drops the last step is refused with the parked-item text: a parked item needs a step, the one its wake leads to", lambda: upd(58, hold=True, wake=_w3, wait_basis=f"the vendor ships the part {_w3}", dropped=[1]),
         "no open step in next", "a parked item needs a step too", "the one its wake leads to", "look again", i=58)
 r = upd(58, hold=True, wake=_w3, wait_basis=f"the vendor ships the part {_w3}", next=f"home-agent: look again at the vendor part on {_w3}", dropped=[1])
-check("N6 hold (a): a hold that carries a wake step in the same call passes: the old step is dropped, the wake step is open, the item is held", mt(58).get("hold") and st(58) == [("dropped", "home-agent: build it"), OPEN(f"home-agent: look again at the vendor part on {_w3}")], (r, st(58)))
+check("N6 hold (a): a hold that carries a wake step in the same call passes: the old step is dropped, the wake step is open, the item is held", hd_(mt(58)) and st(58) == [("dropped", "home-agent: build it"), OPEN(f"home-agent: look again at the vendor part on {_w3}")], (r, st(58)))
 refused("N6 (a): an item that is not held gets the ordinary text, with no mention of parking", lambda: upd(59, next="none", dropped=[1]), "no open step in next", "an open item always has an open step", i=59)
 r = upd(41, priority="p2")
 check("N6: an item that had no open step before is not refused for an unrelated write (the hold restriction: only a write that takes the last open step off is refused)", mt(41).get("priority") == "p2", (r, mt(41)))
@@ -336,9 +340,9 @@ check("internal: his answer ticks his step without a refusal, with the session's
 import datetime as _dt
 _w = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
 r = upd(48, hold=True, wake=_w, wait_basis=f"the vendor ships the part {_w}")
-check("a hold through the tool keeps the step it had (an item on hold has the step its wake leads to)", mt(48).get("hold") and st(48) == [OPEN("home-agent: build it")], (r, st(48)))
+check("a hold through the tool keeps the step it had (an item on hold has the step its wake leads to)", hd_(mt(48)) and st(48) == [OPEN("home-agent: build it")], (r, st(48)))
 server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
-check("the wake pass over the held item raises no refusal and leaves its step", not mt(48).get("hold") and st(48) == [OPEN("home-agent: build it")], (mt(48), st(48)))
+check("the wake pass over the held item raises no refusal and leaves its step", not hd_(mt(48)) and st(48) == [OPEN("home-agent: build it")], (mt(48), st(48)))
 check("the router never calls the two tools (they write through the server's own functions)",
       not re.search(r"\bstackshot_(update|create)\(", pathlib.Path(STACK, "stackshot/router/router.py").read_text() + pathlib.Path(STACK, "stackshot/router/router_live.py").read_text()), None)
 

@@ -463,7 +463,7 @@ def made(subject, **kw):
     g = re.search(r"created (\S+)", out).group(1); G.drain(GH, STORE, say=lambda s: None); return g, G.issue_of(g, STORE)
 # the confirmed pin: an item woken without a `confirmed` field gets one, and nothing goes to GitHub
 g_pin, n_pin = made("[home] held without a confirm"); server._update(g_pin, hold=True, wake="2099-01-01", sender="home-here")
-f_pin = STORE / g_pin[0] / f"{g_pin[1:]}.json"; j = json.loads(f_pin.read_text()); j.pop("confirmed", None); j["metadata"]["wake"] = "2020-01-01"; f_pin.write_text(json.dumps(j))
+f_pin = STORE / g_pin[0] / f"{g_pin[1:]}.json"; j = json.loads(f_pin.read_text()); j.pop("confirmed", None); j["metadata"]["until"] = "2020-01-01"; f_pin.write_text(json.dumps(j))
 log0 = len(F.log); server._wake_pass(); G.drain(GH, STORE, say=lambda s: None)
 check("a wake that also pins `confirmed` (a re-confirm) is stored and sends nothing", "confirmed" in rd(g_pin[0], int(g_pin[1:])) and rd(g_pin[0], int(g_pin[1:]))["metadata"].get("hold") is None
       and len(F.log) == log0 and not comments(n_pin), (len(F.log) - log0, comments(n_pin)))
@@ -845,10 +845,10 @@ mk = lambda subject, **kw: G.norm(made(subject, **kw)[0])   # the reply says boa
 # a wake: an item on hold whose wake has come
 g_wk = mk("[home] held until a wake"); server._update(g_wk, hold=True, wake="2099-01-01", sender="home-here")
 f_wk = STORE / g_wk[0] / f"{g_wk[1:]}.json"; j = json.loads(f_wk.read_text())      # the wake come, and a session in needs (the notice with a link)
-j["metadata"].update(wake="2020-01-01", needs=["home-other"], mover="home-here"); f_wk.write_text(json.dumps(j))
+j["metadata"].update(until="2020-01-01", needs=["home-other"], mover="home-here"); f_wk.write_text(json.dumps(j))
 told.clear(); server._wake_pass(); G.drain(GH, STORE, say=lambda s: None)
-check("a wake notice names the item board#<n>, links its item page (never the card anchor #task-g-<n>), and keeps g<n> for the stderr tag",
-      any(t[0] == g_wk and t[2].startswith(f"[stackshot] board#{num(g_wk)} woke (wake 2020-01-01), ") and re.search(re.escape(f"→ https://board.example.org/items/{num(g_wk)}") + r"( · notice [0-9a-f]{6})?$", t[2])
+check("a wake notice (a time wait ending) names the item board#<n>, links its item page (never the card anchor #task-g-<n>), and keeps g<n> for the stderr tag",
+      any(t[0] == g_wk and t[2].startswith(f"[stackshot] board#{num(g_wk)} is yours now: its until 2020-01-01 came. ") and re.search(re.escape(f"→ https://board.example.org/items/{num(g_wk)}") + r"( · notice [0-9a-f]{6})?$", t[2])
           and not re.search(rf"(?<![\w/-]){g_wk}\b", t[2]) for t in told), told)
 # an after-release: the last item it waited on closes
 g_first = mk("[home] closes first"); g_aft = mk("[home] waits on the first", after=g_first, mover="home-other")

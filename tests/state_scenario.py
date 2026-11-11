@@ -62,6 +62,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -211,7 +215,7 @@ park_lab = f"Park until {day(5)}"      # a raise stored before the park option w
 opts_ = [{"label": park_lab, "line": f"On hold with a wake on {day(5)}.", "recommended": True, "wake": day(5)}, {"label": "Not needed", "line": "No longer wanted.", "recommended": False}]
 item(59, needs=["decision", BACK], ask=ASK, options=opts_, state="your-call")
 server._answer("a59", park_lab, "", "")
-check("answer: …a park he picks from the options leaves no stored state, only the hold and the wake", "state" not in mt(59) and mt(59).get("hold") is True and mt(59).get("wake"), mt(59))
+check("answer: …a park he picks from the options leaves no stored state, only the hold and the wake", "state" not in mt(59) and hd_(mt(59)) is True and wk_(mt(59)), mt(59))
 upd(59, next="home-front: waiting it out")
 check("answer: …and a plain write on it works", mt(59)["next"] == "home-front: waiting it out", mt(59))
 
@@ -224,9 +228,10 @@ upd(130, next="home-front: carry on")
 check("hold: …and a plain write afterwards is not refused", mt(130)["next"].split("\n")[0] == "home-front: carry on", mt(130))
 item(38, needs=[BACK], state="doing", expected_by=hrs(2))
 out = upd(38, hold=True, wake=day(3), wait_basis=f"paper delivery confirmed {day(4)}")      # a time wait carries a reason: a real date
-check("hold: hold=true on a doing item drops the stored state and says why", "state" not in mt(38) and "expected_by" not in mt(38) and mt(38).get("hold") is True
+check("hold: hold=true on a doing item drops the stored state and says why", "state" not in mt(38) and "expected_by" not in mt(38) and hd_(mt(38)) is True
       and "stored state doing dropped: a hold ends it; the item reads parked" in out, (mt(38), out[-300:]))
-check("hold: …it reads parked from its fields and shows no state word", states.of({**rd(38), "gid": "a38"})[0] == "parked" and "state: " not in server._fmt({**rd(38), "gid": "a38"}), None)
+check("hold: …it reads as waiting on a time from its until (the hold and the wake are stored as that one date) and shows no state word",
+      server._model.derive({**rd(38), "gid": "a38"}).state == "waiting" and _WT.stored_until(mt(38)) and "state: " not in server._fmt({**rd(38), "gid": "a38"}), None)
 item(132, needs=[BACK], hold=True, wake=day(30), wait_basis={"text": f"Printer order confirmed {day(35)}", "wake": day(30), "by": "x", "at": now0}, state="parked")
 upd(132, hold=True)
 check("hold: hold=true again on a parked item keeps its state", mt(132)["state"] == "parked", mt(132))
@@ -235,7 +240,7 @@ upd(133, wake=day(3))
 check("hold: a wake alone is a reminder: it does not drop a stored state", mt(133)["state"] == "doing", mt(133))
 item(39, needs=["decision", BACK], ask=ASK, options=[{"label": f"Park until {day(5)}", "line": "On hold.", "recommended": True, "wake": day(5)}, {"label": "Not needed", "line": "No.", "recommended": False}], state="doing", expected_by=hrs(2))
 server._answer("a39", f"Park until {day(5)}", "", "")
-check("answer: a park he picks ends a stored state of any kind (doing here), not only your-call", "state" not in mt(39) and "expected_by" not in mt(39) and mt(39).get("hold") is True, mt(39))
+check("answer: a park he picks ends a stored state of any kind (doing here), not only your-call", "state" not in mt(39) and "expected_by" not in mt(39) and hd_(mt(39)) is True, mt(39))
 # ================================================================ the derived state
 item(63, needs=["decision", BACK], ask=ASK, state="doing", expected_by=hrs(2))        # a stored state that is not the section's: the brief says it
 D = lambda i, letter="a": states.of(rd(i, letter), lambda it: server._after_open(it.get("metadata") or {}))

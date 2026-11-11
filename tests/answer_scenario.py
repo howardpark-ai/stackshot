@@ -168,6 +168,10 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
@@ -634,13 +638,13 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r_u45 = server.stackshot_update("a45", hold=True, wake=_when, wait_reason="Oliver said he will do the step tomorrow evening", sender="home-agent")
     i45 = rd("a", 45); m45 = i45["metadata"]
     check("following the notice (update hold=true, wake, wait_reason) is accepted: the item is on hold with that wake, the same mover, and no step handed back to him",
-          r_u45.startswith("updated a45") and m45.get("hold") is True and m45.get("wake") == _when and m45.get("mover") == "home-agent" and "step" not in m45 and m45.get("state") != "your-step"
+          r_u45.startswith("updated a45") and hd_(m45) is True and wk_(m45) == _when and m45.get("mover") == "home-agent" and "step" not in m45 and m45.get("state") != "your-step"
           and server._model.derive(i45).state == "waiting" and not server._model.is_owner(server._model.derive(i45).mover), (r_u45, m45))
     check("the wake stands on his note: it is recorded as the words behind the hold (cap_ok quote)", "after the trip" in str((m45.get("cap_ok") or {}).get("quote")), m45.get("cap_ok"))
     # a note the server reads ("tomorrow evening"): it puts the item on hold itself, with his words behind the wake, and the notice says so instead of asking the mover to judge
     told.clear(); r_s47 = post("/items/a47/answer", {"token": tok("a47"), "act": "send", "text": "I will do this tomorrow evening", "back": "/#task-a-47"}); m47 = rd("a", 47)["metadata"]; n47 = {t[1]: t[2] for t in told}[AGENT]
     check("a note the server reads as a later time: the item is on hold until then (the wake as YYYY-MM-DDTHH:MM, his words behind it), with the then-mover, and the notice says what was done, not to judge the note",
-          m47.get("hold") is True and m47.get("wake") == _when and (m47.get("cap_ok") or {}).get("quote") == "I will do this tomorrow evening" and m47.get("mover") == "home-agent"
+          hd_(m47) is True and wk_(m47) == _when and (m47.get("cap_ok") or {}).get("quote") == "I will do this tomorrow evening" and m47.get("mover") == "home-agent"
           and "put the item on hold until" in n47 and "Judge the note" not in n47 and [a["kind"] for a in m47["answers"]] == ["step-reply"], (m47, n47))
     # a wake past the cap: his note, given since the item's last move, is the words that let it stand
     told.clear(); post("/items/a46/answer", {"token": tok("a46"), "act": "send", "text": "after the trip, next month", "back": "/#task-a-46"})
@@ -648,7 +652,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r_u46 = server.stackshot_update("a46", hold=True, wake=_far, wait_reason="Oliver said he will do the step after the trip", sender="home-agent")
     i46 = rd("a", 46); m46 = i46["metadata"]
     check("a note that names a time beyond the usual wait cap: the same update is accepted on his note's words, and the item waits until then",
-          r_u46.startswith("updated a46") and m46.get("hold") is True and m46.get("wake") == _far and "after the trip" in str((m46.get("cap_ok") or {}).get("quote")) and server._model.derive(i46).state == "waiting", (r_u46[:300], m46))
+          r_u46.startswith("updated a46") and hd_(m46) is True and wk_(m46) == _far and "after the trip" in str((m46.get("cap_ok") or {}).get("quote")) and server._model.derive(i46).state == "waiting", (r_u46[:300], m46))
     r_s41b = post("/items/a41/answer", {"token": tok("a41"), "act": "send", "text": "again"})
     check("Send with a note twice: the second finds no step any more, so it is a comment (the board item's rule), the first note stays", r_s41b.headers["location"] == "/items/a41?sent=comment" and [a["kind"] for a in rd("a", 41)["metadata"]["answers"]] == ["step-reply", "comment"])
     r_s42 = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": ""}); r_s42c = post("/items/a42/answer", {"token": tok("a42"), "act": "send", "text": "late note"})
@@ -836,9 +840,9 @@ check("F1, a60 followed to the end of its after: home-agent moves it (mover, fir
       b(60).state == "alive" and b(60).mover == "home-agent" and not b(60).conflicts and rd("a", 60)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 60)["metadata"]
       and any(t[0] == "a60" and t[1] == AGENT for t in told), (rd("a", 60)["metadata"], b(60), told))
 told.clear()
-check("F2, a pick that carries a wake with a then: it is parked (hold and wake), the mover Oliver and the then are gone, the time wait's post-wake mover is the then (stamped), no model conflict",
-      server._answer("a61", "Park", "", "") == "decision" and rd("a", 61)["metadata"].get("hold") is True and rd("a", 61)["metadata"].get("wake") == "2099-01-01" and "mover" not in rd("a", 61)["metadata"]
-      and "then" not in rd("a", 61)["metadata"] and rd("a", 61)["metadata"].get("post_wake_mover") == "home-agent" and rd("a", 61)["metadata"].get("wait_kind") == "time"
+check("F2, a pick that carries a wake with a then: it waits on its until, the mover Oliver and the then are gone, the time wait's post-wake mover is the then (stamped), no model conflict",
+      server._answer("a61", "Park", "", "") == "decision" and hd_(rd("a", 61)["metadata"]) is True and wk_(rd("a", 61)["metadata"]) == "2099-01-01" and "mover" not in rd("a", 61)["metadata"]
+      and "then" not in rd("a", 61)["metadata"] and rd("a", 61)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 61)["metadata"]
       and rd("a", 61)["metadata"].get("watch", {}).get("set_at")
       and b(61).state == "waiting" and b(61).wait.post_wake_mover == "home-agent" and not b(61).conflicts, (rd("a", 61)["metadata"], b(61)))
 _out = {}
@@ -849,7 +853,7 @@ check("F2, through the wake: the item turns alive with home-agent as its mover, 
 told.clear()
 check("a park on an item that also waits after an open item: no time wait is stored (the wake would drop the after), then stays for the release of the after, no conflict",
       server._answer("a63", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 63)["metadata"] and "post_wake_mover" not in rd("a", 63)["metadata"] and rd("a", 63)["metadata"].get("then") == "home-agent"
-      and rd("a", 63)["metadata"].get("after") == ["a67"] and rd("a", 63)["metadata"].get("hold") is True and not b(63).conflicts, (rd("a", 63)["metadata"], b(63)))
+      and rd("a", 63)["metadata"].get("after") == ["a67"] and hd_(rd("a", 63)["metadata"]) is True and not b(63).conflicts, (rd("a", 63)["metadata"], b(63)))
 _p67 = json.loads((T / "store/a/67.json").read_text()); _p67["status"] = "completed"; _p67["outcome"] = "done"; (T / "store/a/67.json").write_text(json.dumps(_p67))
 told.clear(); server._release_after("a67", "done", "", "home-here")
 check("...a63 followed to the end of its after: the hold and wake go with it, home-agent moves it (mover, first in needs), then cleared, no conflict, and home-agent is told",
@@ -859,8 +863,8 @@ told.clear()
 check("a park on an item that also has external in needs: no time wait is stored, then is dropped, the item reads waiting with no conflict",
       server._answer("a64", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 64)["metadata"] and "post_wake_mover" not in rd("a", 64)["metadata"] and "then" not in rd("a", 64)["metadata"]
       and "external" in rd("a", 64)["metadata"].get("needs", []) and not b(64).conflicts, (rd("a", 64)["metadata"], b(64)))
-check("a park with a then stored its time wait; update clear_hold=true releases it and drops the wait's fields with it (wait_kind, post_wake_mover, watch), no refusal, no conflict",
-      server._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("wait_kind") == "time"
+check("a park with a then stored its post-wake mover; update clear_hold=true releases it and drops the wait's fields with it (wait_kind, post_wake_mover, watch), no refusal, no conflict",
+      server._answer("a65", "Park", "", "") == "decision" and rd("a", 65)["metadata"].get("post_wake_mover") == "home-agent" and "wait_kind" not in rd("a", 65)["metadata"]
       and (server._update("a65", clear_hold=True, sender="home-agent") or True) and not any(k in rd("a", 65)["metadata"] for k in ("hold", "wake", "wait_kind", "post_wake_mover", "watch", "then"))
       and b(65).state == "alive" and not b(65).conflicts, (rd("a", 65)["metadata"], b(65)))
 told.clear()
@@ -903,7 +907,7 @@ check("D1, Yes: a stored then that is no live session (home-ghost) takes nothing
       and b(80).mover == "home-here" and b(80).state == "alive" and not b(80).conflicts and [t[1] for t in told if t[0] == "a80"] == [OWNER], (rd("a", 80)["metadata"], b(80), told))
 told.clear()
 check("D1, Park: a dead then is not stored as post_wake_mover: parked (hold and wake), then and mover Oliver gone, no wait_kind, no post_wake_mover, no conflict",
-      server._answer("a81", "Park", "", "") == "decision" and rd("a", 81)["metadata"].get("hold") is True and rd("a", 81)["metadata"].get("wake") == "2099-01-01"
+      server._answer("a81", "Park", "", "") == "decision" and hd_(rd("a", 81)["metadata"]) is True and wk_(rd("a", 81)["metadata"]) == "2099-01-01"
       and not any(k in rd("a", 81)["metadata"] for k in ("then", "mover", "wait_kind", "post_wake_mover")) and "home-ghost" not in json.dumps(rd("a", 81)["metadata"]) and not b(81).conflicts, (rd("a", 81)["metadata"], b(81)))
 check("D1, a then that is live is still handed: a50's hand-over unchanged (mover home-agent), so the shared test lets a live session through",
       rd("a", 50)["metadata"].get("mover") == "home-agent" and server._then_live("home-agent", {"project": "projects/alpha"}) and not server._then_live("home-ghost", {"project": "projects/alpha"}))
@@ -922,9 +926,9 @@ server._watch.enabled = lambda: False       # D3: [model] watchers = false
 try:
     told.clear()
     check("D3, watchers off: a park with a then stores no time wait: the old park stays (hold, wake), then stays, mover Oliver gone, no wait fields, no conflict",
-          server._answer("a85", "Park", "", "") == "decision" and rd("a", 85)["metadata"].get("hold") is True and rd("a", 85)["metadata"].get("wake") == "2099-01-01"
+          server._answer("a85", "Park", "", "") == "decision" and hd_(rd("a", 85)["metadata"]) is True and wk_(rd("a", 85)["metadata"]) == "2099-01-01"
           and rd("a", 85)["metadata"].get("then") == "home-agent" and not any(k in rd("a", 85)["metadata"] for k in ("mover", "wait_kind", "post_wake_mover", "watch")) and not b(85).conflicts, (rd("a", 85)["metadata"], b(85)))
-    _p85 = rd("a", 85); _p85["metadata"]["wake"] = "2020-01-01"; (T / "store/a/85.json").write_text(json.dumps(_p85))
+    _p85 = rd("a", 85); _p85["metadata"]["until"] = "2020-01-01"; (T / "store/a/85.json").write_text(json.dumps(_p85))
     told.clear()
     server._wake_pass()
     check("D3, the old wake pass ends the hold and hands the stored then: alive, home-agent moves it (mover, first in needs), no wait fields left, then cleared, no conflict, home-agent told",

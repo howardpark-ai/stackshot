@@ -846,14 +846,14 @@ def _wait_text(w: "_model.Wait") -> str:
 
 
 def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str] | None" = None, gid: str = "", after_open: Callable[[dict[str, Any]], Any] | None = None,
-          anchored: Callable[[dict[str, Any]], Any] | None = None, needs: list[str] | None = None, hold: bool | None = None, one_mover: bool = True,
+          anchored: Callable[[dict[str, Any]], Any] | None = None, needs: list[str] | None = None, hold: bool | None = None, one_mover: bool = True, until_wait: bool = False,
           next_text: str | None = None, windows_text: str | None = None, creating: bool = False, defers_text: str | None = None,
           named_open: Callable[[str], str] | None = None, canon: Callable[[str], str] | None = None) -> tuple[list[Problem], list[str]]:
     """(what the item, as the write leaves it, has wrong, the broad wait words its next uses). `item` is the open item after the write (a dict with status, subject, metadata);
     `touched` the fields the write sets (None: all of them: a create, a report); `needs` and `hold` override what the metadata says (the server's own naming of the writer in
     needs is not a mover the writer made; a hold the old rule drops silently is still a hold the write set). `next_text`: the lines of next the write itself set, when next is kept by writer and the write left
     other sessions' lines in place: the text guards on next judge these, not lines another session wrote and this write did not touch (None: all of next). `windows_text`: the same for the Windows-command guard on his next lines, which
-    never rejudges a stored line: an update passes the lines it sets ("" when it leaves next alone, whatever else it judges whole), a create or the report None (all of next). `creating`: the write is a create, whose refusals offer only the fixes a create can make (it takes no state and no clear_mover). `defers_text`, `named_open`, `canon`: the next_defers guard. `defers_text` = the lines of next the write sets ("" when it leaves next alone: a stored line is never rejudged; None, a create or the report, judges all of next);
+    never rejudges a stored line: an update passes the lines it sets ("" when it leaves next alone, whatever else it judges whole), a create or the report None (all of next). `until_wait`: the wait stands on a stored `until` (a wait on the date alone carries no snooze reason: that guard judges a hold's wake). `creating`: the write is a create, whose refusals offer only the fixes a create can make (it takes no state and no clear_mover). `defers_text`, `named_open`, `canon`: the next_defers guard. `defers_text` = the lines of next the write sets ("" when it leaves next alone: a stored line is never rejudged; None, a create or the report, judges all of next);
     `named_open("board#N")` → the store id of that item when it exists and is open, else "" (the guard is off without it); `canon(id)` → an id as `after` stores it. A closed item is never judged."""
     if item.get("status") == "completed":
         return [], []
@@ -1008,7 +1008,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
             who = f"its post-wake mover, {ctx.label(w.mover)}, {why}" if w.mover else "it names no post-wake mover (no session in needs, and no project builder or -main agent)"
             add("post_wake", f"{what}'s wait: {who}. Set post_wake_mover=<{H}, a live session or the project's background agent> "
                              f"(when it is unset, the first session in needs, else the project's builder or -main agent, takes it)." + drop_hint)
-        wake = clean(m.get("wake"))
+        wake = "" if until_wait or _wt.stored_until(m) else clean(m.get("wake"))
         if w.kind == "time" and wake:
             quote = str(_wt.words_of(m).get("quote") or "")
             if not (w.basis or (quote and has_wait_words(quote))):

@@ -152,6 +152,7 @@ server.CLI_SESSIONS = T / "cli"
 OWN = model.owner_display()
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
+CHK = "unit_active watchtest.service"      # a hand-off by a session that is not a front agent needs a check or a wake: the check (a wake is a date the item waits on, and a waiting item has no mover to record a hand-off to)
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 def upd(i, sender, **kw): return server._update(f"a{i}", sender=sender, **kw)
 def tick(at, *ids):
@@ -159,7 +160,7 @@ def tick(at, *ids):
     return server._handoff_tick(now=at, only=[f"a{i}" for i in ids] or None)
 def hand(i, to, sender="home-send", **kw):
     """sender hands item a<i> to `to`: mover=<to> (needs names only a background agent or the owner), and the next line names it."""
-    return upd(i, sender, mover=to, next=f"{to}: do the thing", **({} if server._front_sender(sender) else {"wake": FUT}), **kw)       # a next line naming another session needs a check or a wake (the done-check rule); a front agent's hand-off asks for neither and may not set them
+    return upd(i, sender, mover=to, next=f"{to}: do the thing", **({} if server._front_sender(sender) else {"check": CHK}), **kw)       # a next line naming another session needs a check or a wake (the done-check rule); a front agent's hand-off asks for neither and may not set them
 def start(i, sender, **kw):
     """sender starts work on a<i>: the one write that shows it without closing the item (a work line in progress)."""
     return upd(i, sender, work={"text": "doing it", "state": "in progress"}, **kw)
@@ -666,7 +667,7 @@ check("11 cold race: its mover took the item while the call ran: the answer is d
       rd(100).get("written_by") == "home-peer" and mt(100).get("mover") == "home-peer" and mt(100).get("needs") in (None, []) and ho(100).get("taken_at") and "answer was dropped" in err.getvalue()
       and "took it meanwhile" in err.getvalue(), (mt(100), err.getvalue()[-300:]))
 d_f = gamma(101)
-cold_during(ANS, lambda: upd(101, "home-send", mover="home-peer2", next="home-peer2: do it", wake=FUT))
+cold_during(ANS, lambda: upd(101, "home-send", mover="home-peer2", next="home-peer2: do it", check=CHK))
 err = io.StringIO()
 with contextlib.redirect_stderr(err):
     tick(d_f + 11 * MIN, 101); drain()
@@ -945,7 +946,7 @@ def hist(i): return [h.get("to") for h in (mt(i).get("handoff_history") or [])]
 # 15.1 a session's hand-off, then a hand-on by another session
 item(90); hand(90, "home-peer"); drain()
 check("15 session: a hand-off records the mover", ho(90).get("to") == "home-peer" and not stale_now(90), ho(90))
-upd(90, "home-send", mover="home-peer2", next="home-peer2: do the thing", wake=FUT); drain()
+upd(90, "home-send", mover="home-peer2", next="home-peer2: do the thing", check=CHK); drain()
 check("15 session: handed on to another session: the record names it and the first goes to the history", ho(90).get("to") == "home-peer2" and hist(90)[-1] == "home-peer" and not stale_now(90), (ho(90), hist(90)))
 upd(90, "home-peer2", mover="home-peer2", next="home-peer2: carry on")
 check("15 session: the mover writing itself in as the mover takes it, the record stays its own", ho(90).get("to") == "home-peer2" and not stale_now(90), ho(90))
@@ -978,7 +979,7 @@ item(115); hand(115, "home-peer"); drain()
 server.stackshot_complete(f"a{115}", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="home-send"); drain()
 check("15 close: another session's close ends the open record into the history (\"the item closed\"): a closed item has no mover and no open record",
       rd(115)["status"] == "completed" and "handoff" not in mt(115) and mt(115)["handoff_history"][-1].get("ended") == "the item closed" and not stale_now(115), (rd(115)["status"], mt(115)))
-upd(95, "home-send", status="open", mover="team-back", next="team-back: look again", wake=FUT); drain()
+upd(95, "home-send", status="open", mover="team-back", next="team-back: look again", check=CHK); drain()
 check("15 reopen: reopened with a new mover, the record names it", rd(95)["status"] == "open" and ho(95).get("to") == "team-back" and not stale_now(95), (rd(95)["status"], mt(95)))
 # 15.7 the owner's board answer, a script's save and the server's own save (no session wrote)
 item(96); hand(96, "home-peer"); drain()

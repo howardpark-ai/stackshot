@@ -294,6 +294,7 @@ def recycle_due(r, open_after):
     recycle-wanted (the fleet tool's watchdog, which adds its per-machine filters) and the board's "Pane recycle pending" line use it,
     so the two never disagree about which items wait."""
     if r.get("status") != "open" or not waits_recycle(r): return False
+    if _wt.stored_until(r.get("metadata") or {}) and _wt.kind_of(r.get("metadata") or {}) in ("time", "item"): return False      # parked on a date or on an open item (the one until, no hold beside it): held for something else too
     return not is_held(r) or held_only_for_recycle(r, open_after)
 WHOSE ={"call": "your call", "relay": "on others", "": "on agent"}   # whose move, in words: needs_kind → the board's names
 # The ask line: what a needs=decision item asks of him, in one line of four

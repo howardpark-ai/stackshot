@@ -221,8 +221,8 @@ except server.ToolError as e:
 check("the hand-off refusal offers the wake as a reminder that leaves the item active, and never says hold",
       "wake=YYYY-MM-DD" in e_h and "to be reminded of your own work at that date" in e_h and "the item stays active in its lane" in e_h and "hold" not in e_h.lower(), e_h)
 server._update("a3", next="home-stew: rule on it", wake="2099-01-01", sender="home-owner")
-check("…accepted with a wake, a reminder: the item is not on hold", rd(3)["metadata"].get("wake") == "2099-01-01" and "hold" not in rd(3)["metadata"]
-      and not server._is_held(rd(3)), rd(3)["metadata"])
+check("…accepted with a wake, which is stored as the one until date (no old field, no hold)", rd(3)["metadata"].get("until") == "2099-01-01" and "wake" not in rd(3)["metadata"]
+      and "hold" not in rd(3)["metadata"], rd(3)["metadata"])
 server._update("a3", wake="none", sender="home-owner")
 check("wake=\"none\" drops the reminder, nothing else", "wake" not in rd(3)["metadata"] and "hold" not in rd(3)["metadata"] and rd(3)["metadata"].get("next") == "home-stew: rule on it", rd(3)["metadata"])
 server._update("a4", needs=["team-back"], sender="home-owner")

@@ -90,17 +90,17 @@ legacy_raise(3); legacy_raise(6); legacy_raise(7, named=(U["home-owner"],))
 opts3 = rd(3)["metadata"]["options"]
 r = server._answer("a3", opts3[0]["label"], "", "")
 it3 = rd(3); m3 = it3["metadata"]
-check("Park until …: his decision is in and the server parks it: on hold with the option's day as the wake, decision out of needs, the ask and the idle record gone, the state clock moved",
-      r == "decision" and m3.get("hold") is True and m3.get("wake") == park and "needs" not in m3 and "ask" not in m3 and "idle" not in m3 and it3["state_updated"] >= now0, m3)
+check("Park until …: his decision is in and the server parks it: waiting until the option's day (the one until date), decision out of needs, the ask and the idle record gone, the state clock moved",
+      r == "decision" and m3.get("until") == park and "hold" not in m3 and "wake" not in m3 and "needs" not in m3 and "ask" not in m3 and "idle" not in m3 and it3["state_updated"] >= now0, m3)
 check("the answer record carries the park the server set", m3["answers"][-1].get("choice") == opts3[0]["label"] and m3["answers"][-1].get("parked") == park, m3.get("answers"))
-check("the hold he set from the board is recorded with the board as its setter and the time",
-      set(m3.get("hold_set", {})) == {"at", "by"} and m3["hold_set"]["by"].endswith("(board)") and abs(m3["hold_set"]["at"] - m3["answers"][-1]["ts"]) < 1, m3.get("hold_set"))
+check("the park he set from the board stores no hold record and no old field: the one until date is the whole wait",
+      "hold_set" not in m3 and "hold" not in m3 and "wake" not in m3, m3)
 check("a park is acted on by the server itself: no answer escalation waits on it", "a3" not in server._answers_load(), server._answers_load())
-check("get shows it on hold with the wake", "· on hold]" in server.stackshot_get("a3") and f"wake: {park}" in server.stackshot_get("a3"), server.stackshot_get("a3"))
+check("get shows it waiting until the day", f"until: {park}" in server.stackshot_get("a3") and "waiting on a time" in server.stackshot_get("a3"), server.stackshot_get("a3"))
 later = (server._pages.zone_now() + server.dt.timedelta(days=10)).strftime("%Y-%m-%d")
 r = server._answer("a6", rd(6)["metadata"]["options"][0]["label"], f"not before {later}, Pat is away", "")
 m6 = rd(6)["metadata"]
-check("Park until … with a day written in the box: that day is the wake, his note kept", r == "decision" and m6.get("hold") is True and m6.get("wake") == later
+check("Park until … with a day written in the box: that day is the wake, his note kept", r == "decision" and m6.get("until") == later and "hold" not in m6
       and m6["answers"][-1].get("text") == f"not before {later}, Pat is away" and m6["answers"][-1].get("parked") == later, m6)
 check("…and the park is his own word for that wake: recorded as such (cap_ok), so the wake stands past the cap", m6.get("cap_ok", {}).get("wake") == later and m6["cap_ok"]["by"] == "a board answer"
       and server._wt.cap_words(m6, "wake"), m6)
@@ -123,5 +123,5 @@ it1 = rd(1); it1["metadata"]["idle"] = {"poked": clock[0] - 600, "to": "home-ste
 server._update("a1", clear_needs=True, ask="none", next="home-owner: picked up again", sender="home-owner")
 check("a state change drops metadata.idle", "idle" not in rd(1)["metadata"], rd(1)["metadata"])
 server._update("a6", hold=True, wake="2099-01-02", sender="home-stew")
-check("a keeper parks an item it does not own with sender=", rd(6)["metadata"].get("hold") is True and "idle" not in rd(6)["metadata"], rd(6)["metadata"])
+check("a keeper parks an item it does not own with sender=", rd(6)["metadata"].get("until") == "2099-01-02" and "idle" not in rd(6)["metadata"], rd(6)["metadata"])
 print(("ok" if not fails else "FAILED") + f": idle scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

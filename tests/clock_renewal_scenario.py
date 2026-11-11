@@ -65,6 +65,10 @@ def refused(name, f, *want):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.web import server
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -94,49 +98,49 @@ FORMS = ("hold=true", "wait_basis", 'wait_kind="event"', "wait_event", "ask_by",
 # ================================================================ the retired expected_by and expected_reason: no clock to renew
 doing(1)
 upd(1, expected_by=hrs(5))
-check("retired: a doing item's expected_by is accepted with nothing else changed (it is no clock) and not stored", "expected_by" not in mt(1) and mt(1)["wake"] == day(2), mt(1))
+check("retired: a doing item's expected_by is accepted with nothing else changed (it is no clock) and not stored", "expected_by" not in mt(1) and wk_(mt(1)) == day(2), mt(1))
 upd(1, expected_by=hrs(9), expected_reason="the second thing is running on the build box")
 check("retired: …neither is a new expected_reason: not stored", "expected_by" not in mt(1) and "expected_reason" not in mt(1), mt(1))
 refused_nw("wake: pushing a doing item's wake out with nothing else changed is refused, naming the park and the event-wait forms; the retired fields beside it are no reason", 1, lambda: upd(1, wake=day(5), expected_by=hrs(5), expected_reason="running the first thing now"),
            "Refused", "clock pushed out", "wake", *FORMS)
 refused_nw("wake: …and a re-sent next (the same lines) is no change of a step", 1, lambda: upd(1, wake=day(5), next="team-back: do the first thing\nteam-back: do the second thing"), "clock pushed out")
 upd(1, wake=day(5), done=[1])
-check("wake: a push-out with a step marked done is accepted", mt(1)["wake"] == day(5), mt(1))
+check("wake: a push-out with a step marked done is accepted", wk_(mt(1)) == day(5), mt(1))
 upd(1, wake=day(6), next="team-back: do a third thing")
-check("wake: …with a new line of next accepted", mt(1)["wake"] == day(6), mt(1))
+check("wake: …with a new line of next accepted", wk_(mt(1)) == day(6), mt(1))
 refused_nw("wake: a wait_reason on the write is no reason (any text would defeat the gate)", 1, lambda: upd(1, wake=day(7), wait_reason="x" * 60), "clock pushed out", "does not count")
 
 doing(90, owner=U[BACK])
 refused_nw("wake: a reword alone is no progress (it only restates the step), so a later wake with it is refused", 90, lambda: upd(90, wake=day(5), reword={2: "team-back: do the next thing"}), "clock pushed out", "wake")
 upd(90, reword={2: "team-back: do the next thing"})
-check("wake: …a reword without a later wake is accepted, and the wake stays", mt(90)["wake"] == day(2) and mt(90)["next"] == "team-back: do the first thing\nteam-back: do the next thing", mt(90))
+check("wake: …a reword without a later wake is accepted, and the wake stays", wk_(mt(90)) == day(2) and mt(90)["next"] == "team-back: do the first thing\nteam-back: do the next thing", mt(90))
 upd(90, wake=day(5), reword={2: "team-back: do the last thing"}, done=[1])
-check("wake: …a reword beside a step marked done is progress by the mark", mt(90)["wake"] == day(5) and mt(90)["next"] == "team-back: do the last thing", mt(90))
+check("wake: …a reword beside a step marked done is progress by the mark", wk_(mt(90)) == day(5) and mt(90)["next"] == "team-back: do the last thing", mt(90))
 
 # ================================================================ wake
 item(10, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 refused_nw("wake: a later wake with nothing else changed is refused", 10, lambda: upd(10, wake=day(5)), "clock pushed out", "wake", *FORMS)
 upd(10, wake=day(5), done=[1])
-check("wake: …with a step marked done accepted", mt(10)["wake"] == day(5), mt(10))
+check("wake: …with a step marked done accepted", wk_(mt(10)) == day(5), mt(10))
 upd(10, wake=day(6), description="- Goal: A thing, its reason changed\n- It lives here\n- Done when done")
-check("wake: …with a new description accepted", mt(10)["wake"] == day(6), mt(10))
+check("wake: …with a new description accepted", wk_(mt(10)) == day(6), mt(10))
 upd(10, wake=day(4))
-check("wake: an earlier wake is accepted", mt(10)["wake"] == day(4), mt(10))
+check("wake: an earlier wake is accepted", wk_(mt(10)) == day(4), mt(10))
 upd(10, wake=day(4))
-check("wake: the same wake again is accepted", mt(10)["wake"] == day(4), mt(10))
+check("wake: the same wake again is accepted", wk_(mt(10)) == day(4), mt(10))
 refused_nw("wake: a later time on the same day is a push-out too", 10, lambda: upd(10, wake=f"{day(4)}T18:00"), "clock pushed out")
 upd(10, clear_wake=True)
 check("wake: clearing it is accepted", "wake" not in mt(10), mt(10))
 upd(10, wake=day(7))
-check("wake: a wake set again after it was cleared is a first wake: accepted", mt(10)["wake"] == day(7), mt(10))
+check("wake: a wake set again after it was cleared is a first wake: accepted", wk_(mt(10)) == day(7), mt(10))
 item(11, needs=[BACK], next="team-back: do the thing")
 upd(11, wake=day(2))
-check("wake: the first wake an item gets is accepted", mt(11)["wake"] == day(2), mt(11))
+check("wake: the first wake an item gets is accepted", wk_(mt(11)) == day(2), mt(11))
 
 # a park: the basis text is the reason (a basis is bound to its wake and names a date from it, so a later wake carries a new one)
 item(12, needs=[BACK], next="team-back: wait for it", hold=True, wake=day(3), wait_basis={"text": f"the vendor ships on {day(3)}", "wake": day(3), "by": "team-back", "at": now0})
 upd(12, wake=day(5), wait_basis=f"the vendor moved the ship day to {day(5)}, a message from them says so")
-check("park: a later wake with new basis text is accepted", mt(12)["wake"] == day(5), mt(12))
+check("park: a later wake with new basis text is accepted", wk_(mt(12)) == day(5), mt(12))
 
 # ================================================================ the tool function: the self-wait gate and this gate both run
 from stackshot.waits import self_wait as SW
@@ -153,7 +157,7 @@ except server.ToolError as e:
     check("tool: a later wake with a long wait_reason is refused by the clock gate, after the self-wait gate passed it", "clock pushed out" in str(e) and len(CALLS) == 1, (str(e), len(CALLS)))
 check("tool: …and nothing is written", raw(15) == was15, None)
 server.stackshot_update("a15", sender=BACK, wake=day(5), done=[1], wait_reason="the vendor ships on that day, not before")
-check("tool: …with a step marked done accepted", mt(15)["wake"] == day(5), mt(15))
+check("tool: …with a step marked done accepted", wk_(mt(15)) == day(5), mt(15))
 
 # ================================================================ the owner's words in the same write are a reason
 _real_verify = server._said_verify
@@ -166,25 +170,25 @@ refused_nw("said: …an Acked-by entry that is unchecked (no readable transcript
 VERIFY["on"] = True
 refused_nw("said: …a checked Reported-by entry is refused", 40, lambda: upd(40, wake=day(4), said=said("Reported-by")), "clock pushed out")
 upd(40, wake=day(4), said=said())
-check("said: …a checked Acked-by entry, new on this write, is accepted", mt(40)["wake"] == day(4) and mt(40).get("said"), mt(40))
+check("said: …a checked Acked-by entry, new on this write, is accepted", wk_(mt(40)) == day(4) and mt(40).get("said"), mt(40))
 refused_nw("said: …the same quote sent again does not count a second time", 40, lambda: upd(40, wake=day(5), said=said()), "clock pushed out")
 refused_nw("said: …the same message with a new quote does not count either (the message is spent)", 40, lambda: upd(40, wake=day(5), said=said(quote="and a few more days after that")), "clock pushed out")
 upd(40, wake=day(5), said=said(quote="and a few more days after that", msg="11111111-1111-4111-8111-000000000002"))
-check("said: …a second message counts", mt(40)["wake"] == day(5), mt(40))
+check("said: …a second message counts", wk_(mt(40)) == day(5), mt(40))
 
 # ================================================================ a new holder: a changed mover or first session in needs is no renewal
 TWO = "team-back: do the first thing\nteam-back: do the second thing"
 doing(41)
 upd(41, wake=day(4), needs=["home-other"], next="home-other: do the first thing\nhome-other: do the second thing")
-check("holder: a real hand-off in needs (back to other, by back) is accepted: the new holder's own clock", mt(41)["wake"] == day(4) and mt(41)["needs"][0] == "home-other", mt(41))
+check("holder: a real hand-off in needs (back to other, by back) is accepted: the new holder's own clock", wk_(mt(41)) == day(4) and mt(41)["needs"][0] == "home-other", mt(41))
 refused_nw("holder: …the sender taking it back with a later time (the flip loop) is refused", 41, lambda: upd(41, wake=day(5), needs=[BACK]), "clock pushed out")
 upd(41, sender="home-other", wake=day(5), needs=[BACK])
-check("holder: …while the other session handing it back is a real hand-off: accepted", mt(41)["wake"] == day(5) and mt(41)["needs"][0] == BACK, mt(41))
+check("holder: …while the other session handing it back is a real hand-off: accepted", wk_(mt(41)) == day(5) and mt(41)["needs"][0] == BACK, mt(41))
 item(42, mover=BACK, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 refused_nw("holder: mover set to the holder it already has, with a later wake, is refused", 42, lambda: upd(42, wake=day(5), mover=BACK), "clock pushed out")
 refused_nw("holder: …the same holder written as its id is refused", 42, lambda: upd(42, wake=day(5), mover=U[BACK]), "clock pushed out")
 upd(42, wake=day(5), mover="home-other")
-check("holder: a changed mover is accepted", mt(42)["wake"] == day(5) and mt(42)["mover"] == "home-other", mt(42))
+check("holder: a changed mover is accepted", wk_(mt(42)) == day(5) and mt(42)["mover"] == "home-other", mt(42))
 item(43, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 refused_nw("holder: no mover stored, the first session in needs is the holder: mover=<it> is refused", 43, lambda: upd(43, wake=day(5), mover=BACK), "clock pushed out")
 item(44, mover=U[BACK], needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
@@ -210,14 +214,14 @@ except Exception as e:
 item(20, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
 refused_nw("ask_by: pushing the backstop out with nothing else changed is refused", 20, lambda: upd(20, ask_by=day(6)), "clock pushed out", "ask_by")
 upd(20, ask_by=day(6), done=[1])
-check("ask_by: …with a step marked done accepted", mt(20)["ask_by"] == day(6), mt(20))
+check("ask_by: …with a step marked done accepted", ab_(mt(20)) == day(6), mt(20))
 try:
     upd(20, ask_by=day(6))
 except Exception as e:
     check("text: an event wait is told to change what it stands on, not to use the event-wait form again", "a different wait_event or wait_anchor" in str(e) and "park it (" not in str(e), str(e))
 item(22, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
 upd(22, wait_event="fleet_op any", ask_by=day(6))
-check("wait structure: a changed wait_event with a later ask_by is accepted", mt(22)["ask_by"] == day(6) and mt(22)["wait_event"] == "fleet_op any", mt(22))
+check("wait structure: a changed wait_event with a later ask_by is accepted", ab_(mt(22)) == day(6) and mt(22)["wait_event"] == "fleet_op any", mt(22))
 item(23, wait_kind="event", wait_event="recycle", ask_by=day(3), post_wake_mover=BACK, needs=[], mover="none", next="team-back: wait for the recycle\nteam-back: then check it")
 refused_nw("wait structure: a changed post_wake_mover with a later ask_by is refused (who takes it after is not what the wait stands on)", 23, lambda: upd(23, post_wake_mover="home-other", ask_by=day(6)), "clock pushed out")
 refused_nw("wait structure: …the wait_event flipped back to the first one (A, B, A) with a later ask_by is refused", 22, lambda: upd(22, wait_event="recycle", ask_by=day(8)), "clock pushed out")
@@ -226,9 +230,9 @@ item(26, needs=[BACK], next="team-back: do the thing\nteam-back: and the other t
 item(27, needs=[BACK], next="team-back: the other blocker")
 item(24, needs=[BACK], next="team-back: the blocker")
 upd(26, wake=day(4), after=["a24"])
-check("wait structure: after A (first) with a later wake is accepted", mt(26)["wake"] == day(4), mt(26))
+check("wait structure: after A (first) with a later wake is accepted", wk_(mt(26)) == day(4), mt(26))
 upd(26, wake=day(5), after=["a27"])
-check("wait structure: …after B, a shape never held, with a later wake is accepted", mt(26)["wake"] == day(5), mt(26))
+check("wait structure: …after B, a shape never held, with a later wake is accepted", wk_(mt(26)) == day(5), mt(26))
 refused_nw("wait structure: …after A again (A, B, A) with a later wake is refused", 26, lambda: upd(26, wake=day(6), after=["a24"]), "clock pushed out")
 refused_nw("wait structure: …clearing after with a later wake is refused (a removal is no progress)", 26, lambda: upd(26, wake=day(6), clear_after=True), "clock pushed out")
 W = lambda k: f"{day(3)}T{k:02d}:00"      # a later wake each time within the same day (a wake may be at most 7 days out)
@@ -241,7 +245,7 @@ item(61, needs=[BACK], next="team-back: do the thing\nteam-back: and the other t
 for k_ in range(7):
     if k_ < 2:
         upd(61, wake=W(1 + k_), after=[f"a{70 + k_}"])
-        check(f"count: different real wait #{k_ + 1} in a row is let through", mt(61)["wake"] == W(1 + k_) and mt(61).get("clock_struct_n") == k_ + 1, mt(61))
+        check(f"count: different real wait #{k_ + 1} in a row is let through", wk_(mt(61)) == W(1 + k_) and mt(61).get("clock_struct_n") == k_ + 1, mt(61))
     else:
         refused_nw(f"count: different real wait #{k_ + 1} in a row is refused (the third and after)", 61, lambda k_=k_: upd(61, wake=W(1 + k_), after=[f"a{70 + k_}"]), "clock pushed out", "in a row", "Change something real")
 item(62, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
@@ -250,7 +254,7 @@ check("count: two passes are counted", mt(62).get("clock_struct_n") == 2, mt(62)
 upd(62, wake=W(3), next="team-back: a third thing")
 check("count: a step change resets it", not mt(62).get("clock_struct_n"), mt(62))
 upd(62, wake=W(4), after=["a72"])
-check("count: …and the next new shape alone is let through again (count 1)", mt(62)["wake"] == W(4) and mt(62).get("clock_struct_n") == 1, mt(62))
+check("count: …and the next new shape alone is let through again (count 1)", wk_(mt(62)) == W(4) and mt(62).get("clock_struct_n") == 1, mt(62))
 item(63, needs=[BACK], next="team-back: step 0", wake=day(3))
 for k_ in range(7):
     upd(63, wake=W(1 + k_), after=[f"a{70 + k_}"], next=f"team-back: step {k_ + 1}")      # a step changes with each: the count stays 0 and the record fills past 5
@@ -261,25 +265,25 @@ refused_nw("count: …a return to a shape older than the last five is a new shap
 item(25, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 refused_nw("wait structure: …the same wake push with no after is refused", 25, lambda: upd(25, wake=day(5)), "clock pushed out")
 upd(25, wake=day(5), after=["a24"])
-check("wait structure: an added after with a later wake is accepted", mt(25)["wake"] == day(5) and mt(25).get("after"), mt(25))
+check("wait structure: an added after with a later wake is accepted", wk_(mt(25)) == day(5) and mt(25).get("after"), mt(25))
 item(46, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 refused_nw("holder: needs moved to decision is no hand-off (it holds no session)", 46, lambda: upd(46, wake=day(5), needs=["decision"], ask="Decide: keep it parked or drop it · Recommend: yes · Stakes: low · By: tomorrow"), "clock pushed out")
 item(21, mover=BACK, next="team-back: do the thing")
 upd(21, wait_kind="event", wait_event="recycle", ask_by=day(4), post_wake_mover=BACK, mover="none")
-check("ask_by: the event-wait form itself (a first ask_by) is accepted", mt(21)["ask_by"] == day(4) and mt(21)["wait_kind"] == "event", mt(21))
+check("ask_by: the event-wait form itself (a first ask_by) is accepted", ab_(mt(21)) == day(4) and mt(21)["wait_kind"] == "event", mt(21))
 
 # ================================================================ what is not judged
 doing(30)
 server._update("a30", sender=BACK, wake=day(4))
-check("not judged: a write of the server's own (not a session's) pushing the wake out", mt(30)["wake"] == day(4), mt(30))
+check("not judged: a write of the server's own (not a session's) pushing the wake out", wk_(mt(30)) == day(4), mt(30))
 doing(31)
 CFG["guards"] = False
 upd(31, wake=day(4))
-check("not judged: [model] guards = false", mt(31)["wake"] == day(4), mt(31))
+check("not judged: [model] guards = false", wk_(mt(31)) == day(4), mt(31))
 CFG["guards"] = True
 doing(32)
 upd(32, priority="p2")
-check("not judged: a write that moves no clock", mt(32)["wake"] == day(2), mt(32))
+check("not judged: a write that moves no clock", wk_(mt(32)) == day(2), mt(32))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

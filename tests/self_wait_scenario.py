@@ -75,6 +75,10 @@ def mt(i): return rd(i)["metadata"]
 def files(): return sorted(p.name for p in (T / "store/a").glob("*.json"))
 
 from stackshot.web import server; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def _no_claude(*a, **k): raise AssertionError("the real model was called")
@@ -125,12 +129,12 @@ reset(answer(True, "the machines the step needs are online, so it can be applied
 refused("replay: a wake and a step at Monday's scheduled run, no blocker, the model says do it now: refused", lambda: upd(1, wake=D(7) + "T10:00", next="home-agent: apply the step at Monday's scheduled run", wait_reason="the scheduled run is when it is applied"),
         "can be done now", "the machines the step needs are online", "Do the step now", i=1, calls=1)
 check("replay: the model got the step, the wait and the reason", all(w in CALLS[0] for w in ("<step>", "apply the step", "<reason>the scheduled run is when it is applied", D(7))), CALLS[0] if CALLS else None)
-check("replay: nothing was written (no wake)", not mt(1).get("wake"), mt(1))
+check("replay: nothing was written (no wake)", not wk_(mt(1)), mt(1))
 
 # ---- a real blocker, the model says no
 reset(answer(False, "the build is still running"))
 passes("blocker: the reason names a real blocker and the model says no: accepted", lambda: upd(2, wake=D(3), next="home-agent: apply the step once the build is done", wait_reason=REASON), 1)
-check("blocker: the wake is written and wait_reason is not stored", mt(2).get("wake") and "wait_reason" not in json.dumps(rd(2)), mt(2))
+check("blocker: the wake is written and wait_reason is not stored", wk_(mt(2)) and "wait_reason" not in json.dumps(rd(2)), mt(2))
 
 # ---- no reason
 reset()
@@ -143,7 +147,7 @@ refused("no reason: tomorrow reads as a wait", lambda: upd(3, next="home-agent: 
 for name, ans in (("raises", RuntimeError("boom")), ("answers an error status", {"status": "timeout", "text": "", "note": "killed"}), ("answers something unreadable", {"status": "ok", "text": "I think so"})):
     reset(ans)
     passes(f"failure: a model that {name} lets the write through", lambda: upd(4, wake=D(5), wait_reason=REASON), 1)
-    check(f"failure: …and the wake is written ({name})", mt(4).get("wake") == D(5), mt(4).get("wake"))
+    check(f"failure: …and the wake is written ({name})", wk_(mt(4)) == D(5), wk_(mt(4)))
     upd(4, clear_wake=True)
 
 # ---- a deadline is no wait

@@ -62,6 +62,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -210,16 +214,16 @@ upd(2, goal=NEW_GOAL)
 check("update: a goal alone is stored and leaves needs as it was", mt(2)["goal"] == NEW_GOAL and mt(2)["needs"] == [BACK], mt(2))
 out = upd(1, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT, post_wake_mover="home-front", mover="none")
 m = mt(1)
-check("update: a relay wait is stored (kind, event, ask-by day, post-wake mover), and mover=none drops the mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and m["ask_by"] == FUT and m["post_wake_mover"] == "home-front" and "mover" not in m, m)
-check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; ask by {FUT}) · mover home-front" in server.stackshot_get("a1"), server.stackshot_get("a1"))
+check("update: a relay wait is stored (kind, event, ask-by day, post-wake mover), and mover=none drops the mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and ab_(m) == FUT and m["post_wake_mover"] == "home-front" and "mover" not in m, m)
+check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; until {FUT}) · mover home-front" in server.stackshot_get("a1"), server.stackshot_get("a1"))
 check("update: …the brief carries the model line of the item too", "model: waiting on news only" in server.stackshot_brief() and "model: alive · mover team-back" in server.stackshot_brief(), None)
 server._anc.save({"projects/alpha": [{"url": "https://example.org/pull/7", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
 out = upd(1, wait_kind="anchor", wait_anchor="https://example.org/pull/7", wait_event="merged", wake=FUT)
 m = mt(1)
-check("update: the kind can change; the old inputs stay stored until cleared, the new ones are read", m["wait_kind"] == "anchor" and m["wait_anchor"] == "https://example.org/pull/7" and "model: waiting on an anchor (https://example.org/pull/7: merged; backstop wake" in out, out)
+check("update: the kind can change; the old inputs stay stored until cleared, the new ones are read", m["wait_kind"] == "anchor" and m["wait_anchor"] == "https://example.org/pull/7" and "model: waiting on an anchor (https://example.org/pull/7: merged; until" in out, out)
 upd(1, clear_wait=True)
 m = mt(1)
-check("update: clear_wait drops the wait's five fields (wake and after keep their own flags)", not any(k in m for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")) and m["wake"] == FUT, m)
+check("update: clear_wait drops the wait's fields, its until with them (the one date the wait ends on is part of the wait; after keeps its own flag)", not any(k in m for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "until", "wake")), m)
 refused_nw("update: clear_wait does not go with a new wait field", 1, lambda: upd(1, clear_wait=True, wait_kind="time"), "clear_wait drops", "wait_kind")
 import inspect as _inspect
 _params, _doc = _inspect.signature(server.stackshot_update).parameters, server._MODEL_FORM

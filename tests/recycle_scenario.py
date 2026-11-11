@@ -303,7 +303,7 @@ server._update("a21", recycle=True); say(21); server._update("a21", hold=True, w
 server._update("a22", recycle=True); server._update("a22", after=["a25"], ask_by="2099-01-02"); server._update("a22", hold=True)   # and an open after
 server._update("a23", recycle=True)                                                                     # not held
 check("6b setup: a20 is held for the recycle alone, a21 has a wake, a22 an open after", server._held_only_for_recycle(rd(20)) and not server._held_only_for_recycle(rd(21))
-      and not server._held_only_for_recycle(rd(22)) and rd(21)["metadata"].get("wake") and rd(22)["metadata"].get("after") == ["a25"] and rd(22)["metadata"].get("hold"),
+      and not server._held_only_for_recycle(rd(22)) and rd(21)["metadata"].get("until") and rd(22)["metadata"].get("after") == ["a25"] and rd(22)["metadata"].get("until"),
       [rd(i)["metadata"] for i in (20, 21, 22)])
 w = server._recycle_wanted("testbox")
 check("wanted: an item held only for the recycle is listed", "a20" in w, w)
@@ -311,7 +311,8 @@ check("wanted: an item held for a wake as well is not listed", "a21" not in w, w
 check("wanted: an item held for an open after as well is not listed", "a22" not in w, w)
 check("wanted: an unheld flagged item is listed, as before", "a23" in w, w)
 it25 = rd(25); it25["status"] = "completed"; (T / "store/a/25.json").write_text(json.dumps(it25))
-check("wanted: once its after closes, the recycle is all a22's hold waits for, and it is listed", "a22" in server._recycle_wanted("testbox"), server._recycle_wanted("testbox"))
+it22 = rd(22); [it22["metadata"].pop(k, None) for k in ("until", "wait_kind", "after")]; (T / "store/a/22.json").write_text(json.dumps(it22))      # what the release does when its after closes: the wait ends, the date and kind go
+check("wanted: once its after closes and the wait ends, a22 waits for the recycle alone and is listed", "a22" in server._recycle_wanted("testbox"), server._recycle_wanted("testbox"))
 with TestClient(app) as c:
     h = {"Authorization": "Bearer " + tok}
     res = c.get("/client/recycle-wanted", headers=h)

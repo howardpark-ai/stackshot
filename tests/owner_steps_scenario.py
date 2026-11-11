@@ -274,7 +274,7 @@ import datetime as _dt
 _w = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
 r = upd(11, hold=True, wake=_w, wait_basis=f"the vendor ships the part {_w}")
 b = rd(11)
-check("(setup) a held item in an agent's hands has no step of his", b["metadata"].get("hold") and his(11) == [], st(11))
+check("(setup) a held item in an agent's hands has no step of his", b["metadata"].get("until") and his(11) == [], st(11))
 server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
 a = rd(11)
 check("a wake pass over a held item makes no step of his and ticks none", not a["metadata"].get("hold") and his(11) == [], (his(11), told[-1:] if told else None))

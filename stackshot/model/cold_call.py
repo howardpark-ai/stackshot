@@ -25,6 +25,7 @@ import re
 from typing import Any, Callable
 
 from stackshot.core import config as _cfg
+from stackshot.waits import waiting as _wt
 from stackshot.model.bullet_text import bullets   # a close's description as `- ` bullets, clipped by how it reads; shared with the question route
 
 ACTIONS = ("hand_to", "close", "ask_owner")
@@ -258,7 +259,7 @@ def build_hidden_message(shown: str, item: dict[str, Any], lines_flagged: list[s
     m = item.get("metadata") or {}
     obj = {      # wait_event and ask_by stand in for a party and a chase the retire pass took out (retire_fields.py)
         "item": shown, "subject": _clip(item.get("subject"), 200), "goal": _clip(m.get("goal"), 300), "description": _clip(item.get("description"), 1200), "next": _clip(m.get("next"), 900),
-        "ask": _clip(m.get("ask"), 300), "needs": m.get("needs") or [], "project": _clip(m.get("project"), 100), "wake": _clip(m.get("wake"), 30), "after": m.get("after") or [],
+        "ask": _clip(m.get("ask"), 300), "needs": m.get("needs") or [], "project": _clip(m.get("project"), 100), "wake": _clip(_wt.wake_value(m), 30), "after": m.get("after") or [],
         "party": _clip(m.get("party") or m.get("wait_event"), 160), "chase": _clip(m.get("chase") or m.get("ask_by"), 20),
     }
     out = [f"Today is {today.isoformat()} ({_cfg.get('instance', 'timezone') or 'UTC'}).", f"Why you are asked: {why}", "", "The item (data):", "<item>", json.dumps(obj, ensure_ascii=False), "</item>"]

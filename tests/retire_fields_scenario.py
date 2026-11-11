@@ -231,7 +231,7 @@ call(op="retire", items=["g3", "g5"])
 server._update("g3", sender="home-front", ask_by=day(9))                  # a session changes a key the pass wrote
 st_, d_ = call(op="unretire", items=[e for e in undo_entries if e["item"] in ("board#3", "board#5")])
 acts = {r["item"]: r["action"] for r in d_["results"]}
-check("8 a key a later save changed makes the entry `kept` (left as the session saved it); the others are put back", acts.get("board#3") == "kept" and acts.get("board#5") == "set" and mt(3)["ask_by"] == day(9) and mt(5).get("supplies") == "its output feeds the build" and raw(5)["description"] == DESC, (acts, mt(3), raw(5)["description"]))
+check("8 a key a later save changed makes the entry `kept` (left as the session saved it); the others are put back", acts.get("board#3") == "kept" and acts.get("board#5") == "set" and mt(3).get("until") == day(9) and mt(5).get("supplies") == "its output feeds the build" and raw(5)["description"] == DESC, (acts, mt(3), raw(5)["description"]))
 
 # ---- 9. the gate
 put(41, needs=["external"], state="outside")

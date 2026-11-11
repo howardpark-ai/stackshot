@@ -64,6 +64,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.github import ghsync; from stackshot.model import model
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -92,9 +96,9 @@ check("1 other writes: the same front agent's other writes on that item pass", "
 item(17, needs=[BACK])
 BASIS = f"vendor visit booked for {day(7)}"
 upd(17, FRONT, hold=True, wake=day(4), wait_basis=BASIS)
-check("1 park: a front agent parks an item team-back moves (hold=true with its wake): allowed, no reason needed", mt(17).get("hold") is True and mt(17).get("wake") == day(4) and "watch_reason" not in mt(17), mt(17))
+check("1 park: a front agent parks an item team-back moves (hold=true with its wake): allowed, no reason needed", hd_(mt(17)) is True and wk_(mt(17)) == day(4) and "watch_reason" not in mt(17), mt(17))
 upd(17, FRONT, wake=day(6), wait_basis=BASIS)
-check("1 park: …and moves the park's wake later, the item being waiting, not alive", mt(17).get("wake") == day(6) and "watch_reason" not in mt(17), mt(17))
+check("1 park: …and moves the park's wake later, the item being waiting, not alive", wk_(mt(17)) == day(6) and "watch_reason" not in mt(17), mt(17))
 upd(17, FRONT, clear_hold=True)
 check("1 park: …released, the item is alive again and a reminder wake on it is refused as before", "hold" not in mt(17), mt(17))
 refused_nw("1 park: …(the wake went with the hold)", 17, lambda: upd(17, FRONT, wake=FUT), RULE)
@@ -102,18 +106,18 @@ refused_nw("1 park: …(the wake went with the hold)", 17, lambda: upd(17, FRONT
 # ================================================================ the mover's own wake and check pass; Oliver as the mover
 item(2, needs=[])                                   # nobody else is named: the keeper of record home-front moves it
 upd(2, FRONT, wake=FUT)
-check("2 mover: the mover's own wake passes (the keeper of record moves an item with no session in needs)", mt(2).get("wake") == FUT and "watch_reason" not in mt(2), mt(2))
+check("2 mover: the mover's own wake passes (the keeper of record moves an item with no session in needs)", wk_(mt(2)) == FUT and "watch_reason" not in mt(2), mt(2))
 upd(2, FRONT, check="unit_active watchtest.service")
 check("2 mover: …and its own check", mt(2).get("check") == "unit_active watchtest.service", mt(2))
 item(3, needs=[BACK])
 upd(3, BACK, wake=FUT)
-check("3 mover: the mover itself (a background agent) sets its wake", mt(3).get("wake") == FUT, mt(3))
+check("3 mover: the mover itself (a background agent) sets its wake", wk_(mt(3)) == FUT, mt(3))
 upd(3, BACK, check="unit_active watchtest.service")
 check("3 mover: …and its check", mt(3).get("check") == "unit_active watchtest.service", mt(3))
 ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
 item(4, needs=["decision", BACK], ask=ASK, state="your-call")
 upd(4, FRONT, wake=FUT)
-check("4 Oliver moves it: a front agent's wake on an item he moves is not a watch on another session's work", mt(4).get("wake") == FUT, mt(4))
+check("4 Oliver moves it: a front agent's wake on an item he moves is not a watch on another session's work", wk_(mt(4)) == FUT, mt(4))
 
 # ================================================================ a hand-off and a wake in the same call: the old mover is no longer the mover
 item(5, needs=[])
@@ -124,13 +128,13 @@ upd(5, FRONT, mover=BACK, needs=[BACK])
 check("5 same call: the hand-off alone is made", mt(5).get("mover") == BACK, mt(5))
 refused_nw("5 after: the old mover's wake on the item it handed over is refused too", 5, lambda: upd(5, FRONT, wake=FUT), RULE)
 upd(5, BACK, wake=FUT)
-check("5 after: …and the new mover's own passes", mt(5).get("wake") == FUT, mt(5))
+check("5 after: …and the new mover's own passes", wk_(mt(5)) == FUT, mt(5))
 item(18, needs=[])
 upd(18, FRONT, mover=BACK, needs=[BACK], check="unit_active watchtest.service")
 check("5 same call: a hand-off with a done check in one call by the old mover is allowed", mt(18).get("mover") == BACK and mt(18).get("check") == "unit_active watchtest.service", mt(18))
 item(6, needs=[BACK])
 upd(6, FRONT, mover=FRONT, needs=[], wake=FUT)
-check("6 hand back: a hand-off back to the sender with its wake in the same call passes (it is the mover then)", mt(6).get("wake") == FUT and mt(6).get("mover") == FRONT, mt(6))
+check("6 hand back: a hand-off back to the sender with its wake in the same call passes (it is the mover then)", wk_(mt(6)) == FUT and mt(6).get("mover") == FRONT, mt(6))
 
 # ================================================================ the reason lets a real exception through, and is recorded
 item(7, needs=[BACK])
@@ -138,14 +142,14 @@ refused_nw("7 reason: a reason too short to name anything is refused", 7, lambda
 before = rd(7)
 upd(7, FRONT, wake=FUT, watch_reason=REASON)
 m = mt(7)
-check("7 reason: with a watch_reason naming why no push exists the wake passes and the reason is stored", m.get("wake") == FUT and m.get("watch_reason") == REASON, m)
+check("7 reason: with a watch_reason naming why no push exists the wake passes and the reason is stored", wk_(m) == FUT and m.get("watch_reason") == REASON, m)
 item(8, needs=[BACK])
 upd(8, FRONT, wake=FUT, watch_reason=REASON)
 upd(8, FRONT, wake=FUT)
-check("7 reason: re-sending the wake the item carries sets nothing: no refusal, and the reason stays", mt(8).get("wake") == FUT and mt(8).get("watch_reason") == REASON, mt(8))
+check("7 reason: re-sending the wake the item carries sets nothing: no refusal, and the reason stays", wk_(mt(8)) == FUT and mt(8).get("watch_reason") == REASON, mt(8))
 refused_nw("7 reason: …moving it later without a reason is a new wake and is refused", 8, lambda: upd(8, FRONT, wake=day(6)), RULE)
 upd(8, BACK, wake=day(6))
-check("7 reason: …the mover moving it drops the reason, which belonged to the old wake", mt(8).get("wake") == day(6) and "watch_reason" not in mt(8), mt(8))
+check("7 reason: …the mover moving it drops the reason, which belonged to the old wake", wk_(mt(8)) == day(6) and "watch_reason" not in mt(8), mt(8))
 upd(7, BACK, clear_wake=True, next="team-back: done")
 check("7 reason: …the mover clearing the wake drops it too", "wake" not in mt(7) and "watch_reason" not in mt(7), mt(7))
 item(9, needs=[BACK])
@@ -170,7 +174,7 @@ check("7 reason: …and one that fails it", "watch_reason" not in mt(21) and "ch
 # ================================================================ ask_by stays allowed from anyone; the retired expected_by is accepted and not stored
 item(11, needs=["external"], state="outside", party="Acme legal", chase=day(2))
 upd(11, FRONT, ask_by=day(4))
-check("8 dates: a front agent's ask_by on handed-off work is allowed", mt(11).get("ask_by") == day(4), mt(11))
+check("8 dates: a front agent's ask_by on handed-off work is allowed", ab_(mt(11)) == day(4), mt(11))
 item(10, needs=[BACK], state="doing")
 upd(10, FRONT, expected_by=day(1))
 check("8 dates: …and a retired expected_by is accepted and not stored", "expected_by" not in mt(10) and mt(10)["state"] == "doing", mt(10))
@@ -178,12 +182,12 @@ check("8 dates: …and a retired expected_by is accepted and not stored", "expec
 # ================================================================ only a front agent is refused
 item(12, needs=[OTHER])
 upd(12, BACK, wake=FUT)
-check("9 background: a background agent's wake on an item another session moves is allowed", mt(12).get("wake") == FUT and "watch_reason" not in mt(12), mt(12))
+check("9 background: a background agent's wake on an item another session moves is allowed", wk_(mt(12)) == FUT and "watch_reason" not in mt(12), mt(12))
 upd(12, BACK, check="unit_active watchtest.service")
 check("9 background: …and its check", mt(12).get("check") == "unit_active watchtest.service", mt(12))
 item(13, needs=[BACK])
 upd(13, NOBODY, wake=FUT)
-check("9 unknown: a sender no page lists is allowed (the rule fails open)", mt(13).get("wake") == FUT, mt(13))
+check("9 unknown: a sender no page lists is allowed (the rule fails open)", wk_(mt(13)) == FUT, mt(13))
 item(14, needs=[BACK])
 check("9 front test: home-front is front, team-back and home-nobody and the owner are not", server._front_sender(FRONT) and not server._front_sender(BACK) and not server._front_sender(NOBODY)
       and not server._front_sender(model.owner_display()) and not server._front_sender(""), None)
@@ -195,7 +199,7 @@ errbuf = io.StringIO()
 with contextlib.redirect_stderr(errbuf):
     upd(14, FRONT, wake=FUT)
 server._watch_others = _real_others
-check("9 fail open: a failure of the check itself passes the write, with one stderr line", mt(14).get("wake") == FUT and errbuf.getvalue().count("watch rule: a14 not judged") == 1, (mt(14), errbuf.getvalue()))
+check("9 fail open: a failure of the check itself passes the write, with one stderr line", wk_(mt(14)) == FUT and errbuf.getvalue().count("watch rule: a14 not judged") == 1, (mt(14), errbuf.getvalue()))
 _real_roles = server._anc.session_roles
 server._anc.session_roles = _boom
 errbuf = io.StringIO()
@@ -211,7 +215,7 @@ check("10 gate: a front agent's hand-off by a next line passes with no check and
 item(16, owner=U["home-front"], needs=[])
 refused("10 gate: a background agent's hand-off is still asked for a check or a wake", lambda: upd(16, BACK, next="home-other: build it"), "nothing would close the item")
 upd(16, BACK, next="home-other: build it", wake=FUT)
-check("10 gate: …and passes with a wake", mt(16).get("wake") == FUT, mt(16))
+check("10 gate: …and passes with a wake", wk_(mt(16)) == FUT, mt(16))
 
 # ================================================================ create's check: unchanged, it sets no wake
 def mk(owner, **kw): return server._create(subject="[home] watch create", description=DESC, project="projects/alpha", owner=owner, next="home-front: look", **kw)

@@ -62,6 +62,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.projects import pages as pg
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -178,12 +182,12 @@ item(20, needs=[BACK])
 upd(20, hold=True, wake=day(2), wait_basis=BAS)
 check("4: the first park is not a re-park (no counter)", "repark" not in mt(20), mt(20))
 upd(20, wake=day(3), wait_basis=BAS)
-check("4: moving the wake of a parked item with nothing else changed is the first re-park", mt(20).get("repark") == 1 and mt(20)["wake"] == day(3), mt(20))
+check("4: moving the wake of a parked item with nothing else changed is the first re-park", mt(20).get("repark") == 1 and wk_(mt(20)) == day(3), mt(20))
 upd(20, wake=day(4), wait_basis=BAS)
-check("4: …the second", mt(20).get("repark") == 2 and mt(20)["wake"] == day(4), mt(20))
+check("4: …the second", mt(20).get("repark") == 2 and wk_(mt(20)) == day(4), mt(20))
 refused_nw("4: …the third in a row is refused, saying to bring it to Oliver", 20, lambda: upd(20, wake=day(5), wait_basis=BAS),
            "re-parked 2 times in a row with nothing else changed", "third move of its wake", "needs=decision and an ask", "said=[")
-check("4: …the item still holds the second wake and the count", mt(20)["wake"] == day(4) and mt(20)["repark"] == 2, mt(20))
+check("4: …the item still holds the second wake and the count", wk_(mt(20)) == day(4) and mt(20)["repark"] == 2, mt(20))
 upd(20, next="team-back: look at it once more")
 check("4: a next edit changes nothing in the wait: the count stays (only the structured fields count)", mt(20).get("repark") == 2, mt(20))
 refused_nw("4: …and the third move is still refused after it", 20, lambda: upd(20, wake=day(5), wait_basis=BAS), "third move of its wake")
@@ -192,9 +196,9 @@ check("4: a change of a structured field (needs) resets the count", "repark" not
 upd(20, wake=day(5), wait_basis=BAS); upd(20, wake=day(6), wait_basis=BAS)
 check("4: …and it counts from the start again", mt(20).get("repark") == 2, mt(20))
 upd(20, wake=day(2), wait_basis=BAS)
-check("4: a pull-in to an earlier day neither counts nor resets", mt(20).get("repark") == 2 and mt(20)["wake"] == day(2), mt(20))
+check("4: a pull-in to an earlier day neither counts nor resets", mt(20).get("repark") == 2 and wk_(mt(20)) == day(2), mt(20))
 upd(20, wake=f"{day(2)}T18:00", wait_basis=BAS)
-check("4: …nor does a time of day on the same day", mt(20).get("repark") == 2 and mt(20)["wake"] == f"{day(2)}T18:00", mt(20))
+check("4: …nor does a time of day on the same day", mt(20).get("repark") == 2 and wk_(mt(20)) == f"{day(2)}T18:00", mt(20))
 upd(20, description="- A thing\n- It lives somewhere else\n- Done when done")
 check("4: a description change changes nothing in the wait: the count stays", mt(20).get("repark") == 2, mt(20))
 upd(20, needs=[BACK])
@@ -204,7 +208,7 @@ upd(20, wake=day(3), wait_basis=BAS); upd(20, wake=day(4), wait_basis=BAS)
 it = rd(20); it["metadata"]["answers"] = [{"ts": time.time() + 5, "kind": "comment", "text": "park it again, nothing has changed", "via": "board"}]
 (T / "store/a/20.json").write_text(json.dumps(it))
 upd(20, wake=day(5), wait_basis=BAS)
-check("4: his words on the item let a third re-park through, and reset the count", mt(20)["wake"] == day(5) and "repark" not in mt(20), mt(20))
+check("4: his words on the item let a third re-park through, and reset the count", wk_(mt(20)) == day(5) and "repark" not in mt(20), mt(20))
 item(21, needs=[BACK], hold=True, wake=day(3), wait_basis={"text": BAS, "wake": day(3), "by": "x", "at": now0})
 upd(21, wake=day(4), wait_basis=BAS); upd(21, wake=day(5), wait_basis=BAS)
 refused_nw("4: a stored hold counts the same", 21, lambda: upd(21, wake=day(6), wait_basis=BAS), "third move of its wake")
@@ -215,7 +219,7 @@ upd(22, wake=day(5), wait_basis=BAS)
 check("4: …and the next push-out is the second", mt(22).get("repark") == 2, mt(22))
 item(23, needs=[BACK])
 upd(23, wake=day(3)); upd(23, wake=day(4)); upd(23, wake=day(5)); upd(23, wake=day(6))
-check("4: a wake with no hold is a reminder, not a park: never counted", "repark" not in mt(23) and mt(23)["wake"] == day(6), mt(23))
+check("4: a wake with no hold is a reminder, not a park: never counted", "repark" not in mt(23) and wk_(mt(23)) == day(6), mt(23))
 
 # a changed wait_basis text is no structural change; cap_ok words are not
 item(24, needs=[BACK])
@@ -236,7 +240,7 @@ upd(30, priority="p2")
 check("4: …a write that moves nothing it stands on keeps the stored state, proof and end, and counts no re-park", mt(30)["state"] == "verifying" and mt(30)["end"] == day(25) and mt(30)["proof"] == "one real stuck-pane notice arrives" and "repark" not in mt(30), mt(30))
 # a verifying item with a wake of its own: the wake is read as before
 item(34, needs=[BACK], state="verifying", proof="p", end=day(20), wake=day(2), hold=False)
-check("4: …a wake of its own (an explicit reminder) is still read as a wake, ahead of the end", W.wake_epoch(mt(34)["wake"]) is not None and W.wake_epoch(mt(34)["wake"]) < W.due_epoch(mt(34)["end"]), mt(34))
+check("4: …a wake of its own (an explicit reminder) is still read as a wake, ahead of the end", W.wake_epoch(wk_(mt(34))) is not None and W.wake_epoch(wk_(mt(34))) < W.due_epoch(mt(34)["end"]), mt(34))
 # the item stays fresh until its end: render.freshness reads the end as a wait
 r30 = {**rd(30), "gid": "a30", "L": "a", "id": "30"}; r30["metadata"] = dict(r30["metadata"]); r30["confirmed"] = now0 - 10 * DAY
 r30n = json.loads(json.dumps(r30)); r30n["metadata"].pop("state")

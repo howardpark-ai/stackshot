@@ -49,7 +49,7 @@ def item(i, owner=None, status="open", su=None, **meta):
     su = now0 - 10 * DAY if su is None else su
     # the creator is no one's mover. An item the scenario means to be moved by its first session (what the creator used to be) stores that mover, as the server's start pass does for a live item with none.
     if status == "open" and not any(meta.get(k) for k in ("needs", "state", "wait_kind")):
-        meta = {("post_wake_mover" if (meta.get("hold") or meta.get("after") or meta.get("recycle")) else "mover"): owner or U["home-owner"], **meta}
+        meta = {("post_wake_mover" if (hd_(meta) or meta.get("after") or meta.get("recycle")) else "mover"): owner or U["home-owner"], **meta}
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status,
                                                        "updated": su, "state_updated": su, "confirmed": su,
                                                        "metadata": {"owner": owner or U["home-owner"], "project": "projects/alpha", "next": "do the thing", **meta}}))
@@ -65,6 +65,10 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -150,7 +154,7 @@ item(63, hold=True, wake=wk(5 * DAY), after=["a64", "a65"], su=now0 - DAY); item
 told.clear()
 server.stackshot_complete("a64", outcome="dropped", reason="not needed", description="- Dropped", sender="home-owner")
 m63 = rd(63)["metadata"]
-check("a prerequisite dropped while another still stands: the wait goes on, on the one left; nothing failed, nobody is told", m63.get("after") == ["a65"] and "wait_failed" not in m63 and m63.get("hold") is True and not [t for t in told if t[1] == "a63"], (m63, told))
+check("a prerequisite dropped while another still stands: the wait goes on, on the one left; nothing failed, nobody is told", m63.get("after") == ["a65"] and "wait_failed" not in m63 and hd_(m63) is True and not [t for t in told if t[1] == "a63"], (m63, told))
 item(66, hold=True, wake=wk(5 * DAY), after=["a67"], su=now0 - DAY); item(67, wake=wk(3 * DAY))
 server.stackshot_complete("a67", outcome="superseded", superseded_by="a61", reason="replaced", description="- Replaced", sender="home-owner")
 check("a prerequisite superseded by an item that is not open is no failure either: the item is released", "after" not in rd(66)["metadata"] and "wait_failed" not in rd(66)["metadata"], rd(66)["metadata"])
@@ -182,18 +186,18 @@ for i in range(30, 70): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 item(70, su=now0 - DAY)
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
 server._update("a70", wake=day(6), sender="home-owner")
-check("a wake within the cap (6 days) is accepted", rd(70)["metadata"].get("wake") == day(6), rd(70)["metadata"])
+check("a wake within the cap (6 days) is accepted", wk_(rd(70)["metadata"]) == day(6), rd(70)["metadata"])
 refused("a wake past the cap (8 days) is refused, naming the cap, the config key, and the ways to his words: ask him to answer on the item (first), or a checked said entry",
         lambda: server._update("a70", wake=day(8), sender="home-owner"), "at most 7 days", "[waiting] cap_days", "said=", "to answer on the item")
-check("…the refusal left the wake as it was", rd(70)["metadata"].get("wake") == day(6), rd(70)["metadata"])
+check("…the refusal left the wake as it was", wk_(rd(70)["metadata"]) == day(6), rd(70)["metadata"])
 refused("a hold with a far wake is refused the same way", lambda: server._update("a70", hold=True, wake=day(20), sender="home-owner"), "at most 7 days")
 server._cfg.CFG["waiting"]["cap_days"] = 10
 server._update("a70", wake=day(9), sender="home-owner")
-check("[waiting] cap_days is a config value, read at use", rd(70)["metadata"].get("wake") == day(9), rd(70)["metadata"])
+check("[waiting] cap_days is a config value, read at use", wk_(rd(70)["metadata"]) == day(9), rd(70)["metadata"])
 server._cfg.CFG["waiting"]["cap_days"] = 7
 server._cfg.CFG["waiting"]["cap_needs_owner"] = False
 server._update("a70", wake=day(20), sender="home-owner")
-check("cap_needs_owner = false: a longer wake is allowed", rd(70)["metadata"].get("wake") == day(20), rd(70)["metadata"])
+check("cap_needs_owner = false: a longer wake is allowed", wk_(rd(70)["metadata"]) == day(20), rd(70)["metadata"])
 server._cfg.CFG["waiting"]["cap_needs_owner"] = True
 server._update("a70", wake="none", sender="home-owner")
 # his words, checked against a real transcript
@@ -204,7 +208,7 @@ def entry(uuid, text, kind="human", ts=None):
                                            + entry("11111111-1111-4111-8111-000000000002", "relayed text", kind="peer") + "\n"
                                            + entry("11111111-1111-4111-8111-000000000003", "park it until the end of the month", ts="2026-09-01T00:00:00.000Z") + "\n")
 server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "keep it on hold for ten days", "msg": "11111111-1111-4111-8111-000000000001"}])
-check("a longer wake with his words behind it (an Acked-by entry checked against the transcript) is accepted", rd(70)["metadata"].get("wake") == day(10) and rd(70)["metadata"]["said"][-1]["checked"] is True, rd(70)["metadata"])
+check("a longer wake with his words behind it (an Acked-by entry checked against the transcript) is accepted", wk_(rd(70)["metadata"]) == day(10) and rd(70)["metadata"]["said"][-1]["checked"] is True, rd(70)["metadata"])
 server._update("a70", wake="none", sender="home-owner")
 refused("an unchecked said entry (a session whose transcript this box cannot read) is not enough for a long wake",
         lambda: server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "park it", "msg": "11111111-1111-4111-8111-000000000009", "session": "cse_0123456789abcdef"}]), "at most 7 days")
@@ -214,7 +218,7 @@ refused("a checked Acked-by entry for a message older than cap_days is not enoug
         lambda: server._update("a70", wake=day(10), sender="home-owner", said=[{"tag": "Acked-by", "quote": "park it until the end of the month", "msg": "11111111-1111-4111-8111-000000000003"}]), "at most 7 days")
 item(71, su=now0 - DAY, answers=[{"ts": now0 - 3600, "kind": "decision", "text": "wait until after the 30th", "via": "board"}])
 server._update("a71", wake=day(12), sender="home-owner")
-check("his board answer on the item, given since its last state change, is enough", rd(71)["metadata"].get("wake") == day(12), rd(71)["metadata"])
+check("his board answer on the item, given since its last state change, is enough", wk_(rd(71)["metadata"]) == day(12), rd(71)["metadata"])
 item(72, su=now0 - DAY, answers=[{"ts": now0 - 30 * DAY, "kind": "decision", "text": "an old answer", "via": "board"}])
 refused("…an answer from before the item's last state change is not", lambda: server._update("a72", wake=day(12), sender="home-owner"), "at most 7 days")
 item(74, su=now0 - DAY, answers=[{"ts": now0 - 3600, "kind": "decision", "text": "ok, wait until after the 30th", "via": "board"}])
@@ -249,7 +253,7 @@ check("words recorded for another wake do not cover this one", not W.words_of(rd
 item(29, su=now0 - DAY, due=day(20), wake=day(10), hold=True, cap_ok={"wake": day(10), "by": "a board answer", "due": day(20), "due_by": "a board answer"})
 server._update("a29", due=day(22), sender="home-owner")
 co = rd(29)["metadata"].get("cap_ok") or {}
-check("…changing the due leaves the wake's record (no record is kept for a due date any more)", co.get("wake") == day(10), rd(29)["metadata"])
+check("…changing the due leaves the wake's record (no record is kept for a due date any more)", wk_(co) == day(10), rd(29)["metadata"])
 server._update("a29", clear_due=True, sender="home-owner")
 check("…clearing the due leaves the wake's record", rd(29)["metadata"].get("cap_ok", {}).get("wake") == day(10), rd(29)["metadata"])
 server._update("a29", clear_hold=True, sender="home-owner")

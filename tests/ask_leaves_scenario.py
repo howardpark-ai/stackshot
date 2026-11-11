@@ -103,6 +103,10 @@ def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
 from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers
+from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
+hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
+wk_ = lambda m: _WT.wake_value(m)
+ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
@@ -681,11 +685,11 @@ check("the item goes to the then-mover and the notice says what was applied, not
 told.clear()
 res = server._answer("a31", "", "I'll do it tomorrow evening", "send"); m = rd(31)["metadata"]
 tomorrow = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
-check("his note 'tomorrow evening' holds the item until then: hold, wake, his words behind the wake", m.get("hold") is True and str(m.get("wake")) == f"{tomorrow}T19:00" and (m.get("cap_ok") or {}).get("quote") == "I'll do it tomorrow evening", (m.get("hold"), m.get("wake"), m.get("cap_ok")))
+check("his note 'tomorrow evening' holds the item until then: hold, wake, his words behind the wake", hd_(m) is True and str(wk_(m)) == f"{tomorrow}T19:00" and (m.get("cap_ok") or {}).get("quote") == "I'll do it tomorrow evening", (hd_(m), wk_(m), m.get("cap_ok")))
 check("the notice names the hold and the time, and asks nothing before then", told and "Judge the note" not in told[-1][2] and f"on hold until {tomorrow}T19:00" in told[-1][2] and "nothing is asked of you before then" in told[-1][2], told)
 told.clear()
 res = server._answer("a32", "", "can I do it tomorrow evening?", "send"); m = rd(32)["metadata"]
-check("a question naming a time is neither a tick nor a hold: it goes to the session to judge", res == "stepreply" and not m.get("hold") and not m.get("wake") and not (m["answers"][-1].get("applied")) and told and "Judge the note" in told[-1][2], (m, told))
+check("a question naming a time is neither a tick nor a hold: it goes to the session to judge", res == "stepreply" and not hd_(m) and not wk_(m) and not (m["answers"][-1].get("applied")) and told and "Judge the note" in told[-1][2], (m, told))
 told.clear()
 res = server._answer("a33", "", "ran it but it says forbidden", "send"); m = rd(33)["metadata"]
 check("a longer note that goes on is not a tick", not m["answers"][-1].get("applied") and told and "Judge the note" in told[-1][2], (m, told))
