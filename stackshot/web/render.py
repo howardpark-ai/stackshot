@@ -23,7 +23,7 @@ from stackshot.model import said as _said   # the trailers: his words on an item
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
 from stackshot.waits import waiting as _wt   # what an item waits on and whose move it is (waiting.py)
 from stackshot.anchors import anchor_scope as _ascope   # which anchors count for an item, from every project's page (anchor_scope.py)
-from stackshot.web import itempage as _ip  # the item page's words on the item model: since, the latest change, next lines
+from stackshot.web import itempage as _ip  # the item page's words on the item model: since, next lines
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)

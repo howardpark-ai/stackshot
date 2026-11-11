@@ -839,9 +839,9 @@ check("the rendered line in English: 'rendered' before the age, byte for byte wh
 check("…a template that puts the age first puts it first, the age's span intact and its words after it", rl_ko == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span><span class="rw"> was drawn</span></p>', rl_ko)
 check("…a template of the age alone draws no words around it", rl_bare == f'<p class="rline"><span id="rendered" data-stale="{_st}" title="T"><b>S</b></span></p>', rl_bare)
 _span = f'<span id="rendered" data-stale="{_st}" title="T"><b>S</b></span>'
-check("…a template with the age twice draws the age's span once, at the first place; the second place is empty and no marker leaks into its words",
+check("…REGRESSION: a template with the age twice draws the age's span once, at the first place; the second place is empty and no marker leaks into its words (the old code let the marker into the second span)",
       rl_twice == f'<p class="rline">{_span}<span class="rw"> was drawn, </span></p>' and rl_twice.count('id="rendered"') == 1, rl_twice)
-check("…a template with no age at all still draws the age's span once (it carries the stale colour, the title and the tick), after the template's words",
+check("…characterization (the old code gave the same): a template with no age at all draws the age's span once, words first and the span after (it carries the stale colour, the title and the tick)",
       rl_none == f'<p class="rline"><span class="rw">drawn lately</span>{_span}</p>', rl_none)
 check("…and the age is never a word of any translation (the template's own marker stays out of the page)", "\x00" not in rl_en + rl_ko + rl_bare + rl_twice + rl_none)
 
