@@ -1,4 +1,4 @@
-"""Scenario test for the layers of the package (Tue Nov 10th 2026) — the import graph of stackshot/ read as text, no import side effects, no server, no network.
+"""Scenario test for the layers of the package (Tue Nov 10th 2026) — the import graph of stackshot/ read with the ast module, no import is executed, no server, no network.
 
 The server structure plan (CONTRIBUTING.md, *Layout and dependencies*) has four layers and imports that point down only:
 
@@ -134,24 +134,32 @@ fake = {"stackshot": ("stackshot/__init__.py", True, ""),
         "stackshot.core": ("stackshot/core/__init__.py", True, ""),
         "stackshot.core.low": ("stackshot/core/low.py", False, "import json\nfrom stackshot import paths\nfrom . import peer\n\ndef f():\n    from stackshot.web import page\n"),
         "stackshot.core.peer": ("stackshot/core/peer.py", False, "import stackshot.model.rules\n"),
-        "stackshot.core.dyn": ("stackshot/core/dyn.py", False, "import importlib\nx = __import__('stackshot.web.page')\ny = importlib.import_module('stackshot.model.rules')\nz = __import__('json')\nw = importlib.import_module(name)\nv = importlib.import_module('.page', 'stackshot.web')\nu = importlib.import_module('.page', name)\n"),
+        "stackshot.core.dyn": ("stackshot/core/dyn.py", False, "import importlib\nx = __import__('stackshot.web.page')\ny = importlib.import_module('stackshot.model.rules')\nz = __import__('json')\nw = importlib.import_module(name)\nv = importlib.import_module('.page', 'stackshot.web')\nu = importlib.import_module('.page', name)\nt = importlib.import_module('.page', package='stackshot.web')\ns = importlib.import_module('.page', package=name)\n"),
+        "stackshot.core.multi": ("stackshot/core/multi.py", False, "from stackshot.web.page import f, g\n"),
         "stackshot.core.out": ("stackshot/core/out.py", False, "from stackshot.tools import cap\nfrom stackshot import cli\nimport stackshot.audit.report\nfrom stackshot import paths\n"),
         "stackshot.model": ("stackshot/model/__init__.py", True, ""),
-        "stackshot.model.rules": ("stackshot/model/rules.py", False, "from stackshot.core import low\nfrom ..web import page as p\n"),
+        "stackshot.model.rules": ("stackshot/model/rules.py", False, "from stackshot.core import low\nfrom ..web import page as p\nfrom stackshot.service import write\n"),
+        "stackshot.service": ("stackshot/service/__init__.py", True, ""),
+        "stackshot.service.write": ("stackshot/service/write.py", False, "from stackshot.web import page\nfrom stackshot.model import rules\nfrom stackshot.core import low\n"),
         "stackshot.web": ("stackshot/web/__init__.py", True, ""),
-        "stackshot.web.page": ("stackshot/web/page.py", False, "from stackshot.model import rules\nfrom stackshot.core.low import f\nfrom stackshot.audit import report\n"),
+        "stackshot.web.page": ("stackshot/web/page.py", False, "from stackshot.model import rules\nfrom stackshot.core.low import f\nfrom stackshot.audit import report\nfrom stackshot.service import write\n"),
         "stackshot.tools": ("stackshot/tools/__init__.py", True, ""),
         "stackshot.tools.cap": ("stackshot/tools/cap.py", False, "from stackshot.core import low\n"),
         "stackshot.audit": ("stackshot/audit/__init__.py", True, ""),
         "stackshot.audit.report": ("stackshot/audit/report.py", False, "from stackshot.web import page\n")}
 fg = graph(fake)
 got = upward(fg)
-check("the checker finds an upward import in a function body, a relative one, a plain `import a.b`, a from-import of a module, and a literal __import__ or import_module (a relative one too)",
+check("the checker finds an upward import in a function body, a relative one, a plain `import a.b`, a from-import of a module, and a literal __import__ or import_module (a relative one too, its package positional or by keyword)",
       set(got) == {("stackshot/core/low.py", "stackshot.web.page"), ("stackshot/core/peer.py", "stackshot.model.rules"), ("stackshot/core/dyn.py", "stackshot.web.page"),
-                   ("stackshot/core/dyn.py", "stackshot.model.rules"), ("stackshot/model/rules.py", "stackshot.web.page")}, got)
+                   ("stackshot/core/dyn.py", "stackshot.model.rules"), ("stackshot/model/rules.py", "stackshot.web.page"), ("stackshot/core/multi.py", "stackshot.web.page"),
+                   ("stackshot/service/write.py", "stackshot.web.page"), ("stackshot/model/rules.py", "stackshot.service.write")}, got)
+check("... a `from a import b, c` counts both names, so a listed file cannot add a name unseen", got[("stackshot/core/multi.py", "stackshot.web.page")] == [1, 1], got.get(("stackshot/core/multi.py", "stackshot.web.page")))
+check("... the layer order is exercised: service/ reaching web/ and the domain reaching service/ point up, web/ reaching service/ and service/ reaching the domain or core point down",
+      ("stackshot/service/write.py", "stackshot.web.page") in got and ("stackshot/model/rules.py", "stackshot.service.write") in got
+      and ("stackshot/web/page.py", "stackshot.service.write") not in got and not any(k[0] == "stackshot/service/write.py" and k[1] != "stackshot.web.page" for k in got), got)
 check("... and not a downward one, one inside a layer, one from or to a package outside the layers, a non-package __import__ or a non-literal import_module",
       ("stackshot/web/page.py", "stackshot.model.rules") not in got and ("stackshot/audit/report.py", "stackshot.web.page") not in got and ("stackshot/cli.py", "stackshot.web.page") not in got
-      and len([k for k in got if k[0] == "stackshot/core/dyn.py"]) == 2 and got[("stackshot/core/dyn.py", "stackshot.web.page")] == [2, 6], got)
+      and len([k for k in got if k[0] == "stackshot/core/dyn.py"]) == 2 and got[("stackshot/core/dyn.py", "stackshot.web.page")] == [2, 6, 8], got)
 out = outward(fg)
 check("the checker finds an import of tools/, the command line or audit/ from a layer below the surface, and lets paths.py and web/'s own use of audit/ be",
       set(out) == {("stackshot/core/out.py", "stackshot.tools.cap"), ("stackshot/core/out.py", "stackshot.cli"), ("stackshot/core/out.py", "stackshot.audit.report")}, out)
