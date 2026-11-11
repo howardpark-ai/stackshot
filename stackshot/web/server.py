@@ -9639,6 +9639,30 @@ def _ladder_look() -> float:
         return _ladder.LOOK
 
 
+def _alive_path() -> Path:
+    return _cfg.state("progress_alive.json")
+
+
+def _alive_load() -> dict[str, float]:
+    """When the stall pass first saw each open item due (not waiting, not the owner's move) in its current stretch of being alive: {gid: epoch}. The hand-up of an item that is not moving counts from the
+    later of its last progress and this (`progress.due`), so an item parked for a day and then alive again is not handed up for the park. The pass keeps it: the phase sweep writes the stored phase around
+    `_save` and writes the two keys only, so it cannot restart the progress clock itself."""
+    try:
+        with open(_alive_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        return {str(k): float(v) for k, v in d.items()} if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _alive_save(d: dict[str, float]) -> None:
+    try:
+        p = _alive_path(); p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); os.replace(tmp, p)
+    except Exception as e:  # noqa: BLE001
+        print(f"progress: alive record not saved: {e}", file=sys.stderr, flush=True)
+
+
 def _ladder_main_hours() -> float:
     """`[ladder] main_hours` (4): how long an alive item may go without progress before it is handed up to the project's -main agent, and how long before the same item is handed up again; also the
     interval of the silent-mover notice. A value that is not a positive number is 4."""
@@ -9712,6 +9736,15 @@ def _ladder_main_to(gid: str, who: str) -> str:
     return "" if not to or _session_id(to) == _session_id(who) else to
 
 
+def _ladder_no_main(gid: str, who: str) -> str:
+    """Why nobody is told when `_ladder_main_to` is empty, in words for the History line: the mover is itself the project's -main agent (nobody above it to tell), or the project has none."""
+    try:
+        main = _main_agent(str((_load(gid).get("metadata") or {}).get("project") or ""))
+    except Exception:  # noqa: BLE001
+        main = ""
+    return "its mover is the project's -main agent, so there is no one above it to tell" if main and _session_id(main) == _session_id(who) else "the project has no -main agent to tell"
+
+
 def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "list[tuple[str, str, str]] | None" = None, info: "dict[str, dict[str, str]] | None" = None) -> str:
     """The rung a live background mover's silence climbs to after the look (ladder.MAIN): a notice to the project's -main agent, which asks it to decide whether the item needs a nudge or a
     different mover, because the cold call and the builder replace a mover that cannot answer and this one can, so without it the item would sit unseen. A History line on the item says it. Not taken
@@ -9734,8 +9767,8 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
         told = _rmod.when_words(dt.datetime.fromtimestamp(before, ZONE)) if before else ""
         data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
         meta[_PROGRESS_UP] = now      # one hand-up per stretch: the no-progress path (`_ladder_stuck`) leaves the item alone for its interval after this notice too
-        _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else "the project has no -main agent to tell"))
-        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, no -main agent to tell"))
+        _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else _ladder_no_main(gid, who)))
+        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
     if to:
         line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no write since {since} ({span})" + (f", told before {told}" if told else "")
         if rows is not None and info is not None:
@@ -9772,7 +9805,7 @@ def _queued_behind(gid: str, who: str, now: float, limit: int = 5) -> str:
         return "unknown"
 
 
-def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, str]]", info: "dict[str, dict[str, str]]") -> str:
+def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, str]]", info: "dict[str, dict[str, str]]", alive_at: float = 0.0) -> str:
     """The second way into the ladder's hand-up (ladder.MAIN): an alive item whose mover has not moved it for `[ladder] main_hours` (4) goes to the project's -main agent, however much the mover has
     written meanwhile (a status line, a note and a reply are no progress: model/progress.py), in the same message as a silent live mover's item (`rows`, `info`, sent once per -main agent per pass by the
     tick). A History line on the item says it, and `metadata.progress_up_at` keeps the item from going up again until it has made progress and not moved for the interval again, or the interval
@@ -9787,17 +9820,17 @@ def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, st
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
             return ""
         handed = float(meta.get(_PROGRESS_UP) or 0)
-        if not _progress.due(item, now, hours, handed):
+        if not _progress.due(item, now, hours, handed, alive_at):
             return ""
         to = _ladder_main_to(gid, who)
-        last = _progress.at(item)
+        last = max(_progress.at(item), alive_at)      # counted from when the item last became alive, if that is later (the notice says how long it has been alive and not moving)
         span = _silence.minutes(now - last)
         since = _rmod.when_words(dt.datetime.fromtimestamp(last, ZONE))
         told = _rmod.when_words(dt.datetime.fromtimestamp(handed, ZONE)) if handed else ""
         data = {"kind": "progress", "subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told, "behind": behind}
         meta[_PROGRESS_UP] = now
-        _stall.note(meta, now, f"{_session_label(who)} has not moved it for {span} (no step done or dropped, no state change, no merge): " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else "the project has no -main agent to tell"))
-        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that it is not moving" if to else "it is not moving, no -main agent to tell"))
+        _stall.note(meta, now, f"{_session_label(who)} has not moved it for {span} (no step done or dropped, no state change, no merge): " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else _ladder_no_main(gid, who)))
+        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that it is not moving" if to else "it is not moving, " + ("its mover is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
     if to:
         line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no progress since {since} ({span}), queued behind {behind}" + (f", told before {told}" if told else "")
         rows.append((to, gid, line)); info[gid] = data
@@ -9943,7 +9976,9 @@ def _stall_tick(now: float | None = None) -> list[str]:
     idx = _sessions_index()
     keep: dict[str, dict[str, Any]] = {}
     todo: list[tuple[str, str, str, dict[str, Any]]] = []
-    stuck: list[tuple[str, str]] = []      # (gid, mover) of the alive items that have not moved for `[ladder] main_hours`: handed up to -main after the rungs below (`_ladder_stuck`)
+    alive_old = _alive_load() if ladder_on else {}
+    alive: dict[str, float] = {}      # open items due now, and since when (the first pass that saw them so; kept across passes): `_alive_load`
+    stuck: list[tuple[str, str, float]] = []      # (gid, mover) of the alive items that have not moved for `[ladder] main_hours`: handed up to -main after the rungs below (`_ladder_stuck`)
     main_hours = _ladder_main_hours()
     for gid, _p in _item_files():
         try:
@@ -9952,6 +9987,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 continue
             if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})):
                 continue                 # its work is not due now (the board shows it waiting, or it is the owner's or an outsider's move): no record is kept, so its clock starts when it is due
+            alive[gid] = alive_old.get(gid) or now
             old = old_st.get(gid)
             if not ladder_on:
                 old = _ladder.unwind(old)      # the flag was turned off in the middle of a ladder: its steps are read in the old table (the builder rung stays reachable)
@@ -9960,8 +9996,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
             who = _stall_mover(gid, it)
             meta = it.get("metadata") or {}
             r = _ho.record_of(it)
-            if ladder_on and who and _ho.is_session_name(who) and _progress.due(it, now, main_hours, float(meta.get(_PROGRESS_UP) or 0)):
-                stuck.append((gid, who))      # alive, a session moves it and nothing has moved for the interval: whatever the pane or the mover's replies say, -main hears of it (below)
+            if ladder_on and who and _ho.is_session_name(who) and _progress.due(it, now, main_hours, float(meta.get(_PROGRESS_UP) or 0), alive[gid]):
+                stuck.append((gid, who, alive[gid]))      # alive, a session moves it and nothing has moved for the interval: whatever the pane or the mover's replies say, -main hears of it (below)
             if not who or not _ho.is_session_name(who) or (r and r.get("recovery_at")):
                 continue                 # no session mover, or the fleet's builder was asked already for this record
             if isinstance(r and r.get("cold"), dict) and r["cold"].get("state") == "running" and now - float(r["cold"].get("at") or 0) < _ho.COLD_STALE:
@@ -10043,9 +10079,11 @@ def _stall_tick(now: float | None = None) -> list[str]:
                     told.add(who)
         except Exception as e:  # noqa: BLE001
             print(f"stall: {gid} step {act} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for gid, who in stuck:      # the items that are not moving go up in the same notice as a silent live mover's (`main_rows`); one already handed up in this pass carries its mark and is left
+    if ladder_on and alive != alive_old:
+        _alive_save(alive)      # a stretch of being alive ends when the item is not due (a hold, a wait) or closed: it is dropped, and counted again from the pass that sees it due
+    for gid, who, since_alive in stuck:      # the items that are not moving go up in the same notice as a silent live mover's (`main_rows`); one already handed up in this pass carries its mark and is left
         try:
-            if _ladder_stuck(gid, who, now, main_rows, main_info):
+            if _ladder_stuck(gid, who, now, main_rows, main_info, since_alive):
                 acted.append(gid)
                 ent = keep.get(gid)
                 if isinstance(ent, dict):

@@ -115,8 +115,13 @@ def cli_row(who, status, at):
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
 server.CLI_SESSIONS = T / "cli"
 server._stall_since(B)
-def stk(at):
-    """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on."""
+def stk(at, prime=True):
+    """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on. `prime`: the pass keeps when it first saw each item due (the server's alive record), and a
+    scenario that runs one pass at the due time would otherwise see every item as alive just now: an item the record does not know yet is entered as alive long ago, as an item that has been due for days is."""
+    if prime:
+        rec_ = server._alive_load()
+        for f_ in (T / "store/a").glob("*.json"): rec_.setdefault("a" + f_.stem, now0 - 100 * H)
+        server._alive_save(rec_)
     server._STALL_LAST[0] = 0.0
     out = server._stall_tick(at); drain()
     return out
@@ -318,6 +323,48 @@ drain(); c1 = len(up_notices(180)) + len([p for p in pushes_to("home-front", "a1
 stk(now0 + 1); stk(now0 + 2 * H)
 check("11 an item the silent-mover notice just handed up is not handed up again for not moving: the mark is shared", c1 == 1 and not up_notices(180) and mt(180).get("progress_up_at") == now0, (pushes_to("home-front", "a180"), mt(180)))
 close(180)
+
+# ================================================================ 12. a parked item that becomes alive again is not handed up for the time it was parked: its 4 hours count from when it became alive
+import datetime as _dt
+def iso(ts): return _dt.datetime.fromtimestamp(ts, ZONE).strftime("%Y-%m-%dT%H:%M")
+def sweep_at(t):
+    real_time = time.time; time.time = lambda: t      # the phase sweep reads the clock itself
+    try: return server._phase_sweep()
+    finally: time.time = real_time
+# parked 9 hours ago with a wake 5 hours ahead: the board shows it waiting; the progress clock holds the park time
+put(190, act=9 * 60, mover="home-peer"); prog(190, now0 - 9 * H)
+d_ = rd(190); d_["metadata"].update(hold=True, wake=iso(now0 + 5 * H), phase="waiting", waits_on="time"); (T / "store/a/190.json").write_text(json.dumps(d_))
+check("12 parked and waiting: not handed up however long ago it was parked", "a190" not in stk(now0 + 2 * H, prime=False) and not up_notices(190) and "a190" not in server._alive_load(), (pushes_to("home-front", "a190"), server._alive_load()))
+swept = sweep_at(now0 + 4.5 * H)      # the sweep stores alive before the wake (the board's reading moves ahead of the wake): the two keys only, so the progress clock is the park time still
+check("12 the phase sweep stores alive ahead of the wake and writes the two keys only: the progress clock is the park time still (no write of the item moved it), the item is still held", "a190" in swept and mt(190).get("phase") == "alive" and rd(190)["progress"] == now0 - 9 * H and mt(190).get("hold"), (swept, rd(190)))
+T1 = now0 + 4.5 * H
+stk(T1, prime=False)
+check("12 the pass after it records when the item became alive (the board reads the stored phase), and does not hand it up on the park's age", not up_notices(190) and server._alive_load().get("a190") == T1 and rd(190)["progress"] == now0 - 9 * H, (server._alive_load(), pushes_to("home-front", "a190")))
+save_at(now0 + 5 * H + 60, 190, lambda d: (d["metadata"].pop("hold", None), d["metadata"].pop("wake", None)), writer="")      # the wake passes and the server releases the hold: a save that finds the phase alive already, so it stamps no progress
+check("12 the wake's release moves no progress either (the phase was alive already), and does not restart the alive record", rd(190)["progress"] == now0 - 9 * H and not mt(190).get("hold") and server._alive_load().get("a190") == T1, (rd(190), server._alive_load()))
+stk(T1 + 60, prime=False); stk(now0 + 5 * H + 120, prime=False); stk(T1 + 4 * H - 60, prime=False)
+check("12 …and it is not handed up until main_hours after it became alive", not up_notices(190) and not mt(190).get("progress_up_at"), pushes_to("home-front", "a190"))
+done = stk(T1 + 4 * H + 60, prime=False)
+check("12 …then it is, once, having been alive and not moving for 4 hours", "a190" in done and len(up_notices(190)) == 1 and "has not moved for 4 hours" in up_notices(190)[0][1], (done, pushes_to("home-front", "a190")))
+close(190)
+# the same for an item ordered after another: it is alive when the blocker closes, whatever its progress clock says
+put(191, act=9 * 60, mover="home-peer"); prog(191, now0 - 9 * H)
+d_ = rd(191); d_["metadata"].pop("state", None); d_["metadata"].pop("needs", None); d_["metadata"].update(after=["a192"], phase="waiting", waits_on="item"); (T / "store/a/191.json").write_text(json.dumps(d_))
+put(192, act=30, mover="home-peer2"); prog(192, now0)
+check("12 ordered after an open item: not handed up", "a191" not in stk(now0 + 1, prime=False) and "a191" not in server._alive_load(), pushes_to("home-front", "a191"))
+close(192); sweep_at(now0 + 10)
+check("12 the blocker closed: it is alive, and is not handed up at once", mt(191).get("phase") == "alive" and "a191" not in stk(now0 + 10, prime=False) and not up_notices(191), (mt(191), server._alive_load()))
+check("12 …nor within the 4 hours after, and then it is", "a191" not in stk(now0 + 10 + 4 * H - 60, prime=False) and "a191" in stk(now0 + 10 + 4 * H + 60, prime=False) and len(up_notices(191)) == 1, pushes_to("home-front", "a191"))
+close(191)
+check("12 progress.due counts from the later of the last progress and when the item became alive", not PG.due({"progress": 0.0 + 100.0}, 100.0 + 5 * H, 4, 0.0, 100.0 + 2 * H) and PG.due({"progress": 100.0}, 100.0 + 6 * H, 4, 0.0, 100.0 + 2 * H), None)
+
+# ================================================================ 13. the mover is the project's -main agent: its own wording, once per interval
+put(195, act=30, mover="home-front"); prog(195, now0 - 5 * H)
+d_ = rd(195); d_["metadata"]["owner"] = U["home-peer"]; (T / "store/a/195.json").write_text(json.dumps(d_))
+n_push = len(pushes()); done = stk(now0 + 1); done2 = stk(now0 + 61); stk(now0 + 3 * H)
+lines = [x["text"] for x in log_of(195)]
+check("13 the mover is the -main agent: nobody is sent anything, and the History line says so (not 'no -main agent'), once in the interval", "a195" in done and len(pushes()) == n_push and len([x for x in lines if "is the project's -main agent" in x]) == 1 and not any("has no -main agent" in x for x in lines), (done, done2, lines))
+close(195)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

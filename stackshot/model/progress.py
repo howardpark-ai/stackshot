@@ -112,10 +112,11 @@ def stamp(item: dict[str, Any], before: dict[str, Any] | None, now: float, real:
     return item.get(FIELD) != old
 
 
-def due(item: dict[str, Any], now: float, hours: float, handed_at: float = 0.0) -> bool:
+def due(item: dict[str, Any], now: float, hours: float, handed_at: float = 0.0, alive_at: float = 0.0) -> bool:
     """Is the item to be handed up for not moving: its last progress is `hours` or more behind, and it was not handed up for that stretch already (the last hand-up, `handed_at`, is `hours` or
-    more behind too). Progress after a hand-up starts a stretch of its own, which `hours` after it can end in another hand-up."""
-    last = at(item)
+    more behind too). Progress after a hand-up starts a stretch of its own, which `hours` after it can end in another hand-up. `alive_at`: when the item last became alive (the server's record of
+    when it first saw the item due after a park or a wait): the time is counted from the later of that and the last progress, so a parked item is not handed up for the park."""
+    last = max(at(item), float(alive_at or 0))
     if last <= 0:
         return False
     span = hours * 3600.0
