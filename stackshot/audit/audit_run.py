@@ -844,7 +844,7 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
     sent: list[dict[str, Any]] = []
     sending_from = env.clock()
     reached_fs: list[dict[str, Any]] = []
-    groups: dict[str, dict[str, Any]] = {}
+    groups: dict[tuple[str, bool], dict[str, Any]] = {}     # (recipient, whether its message is marked for the owner), as `esc` and the digest: one session can be a front agent for one project and the mover of another's item
     esc: dict[tuple[str, bool], list[tuple[dict[str, Any], str]]] = {}     # (recipient, whether its message is marked for the owner): one session can be a front agent for one project and a builder for another, and gets one message of each kind
     up: dict[str, list[tuple[dict[str, Any], str]]] = {}
     for f in [f for f in fresh if f.get("escalate") == 2]:       # still unanswered after the builder was told: the project's -main agent hears of a finding that went to a builder, once (marked for the owner, as every message to it)
@@ -877,11 +877,11 @@ def deliver_findings(env: Env, fresh: list[dict[str, Any]], label: str) -> tuple
             reached_fs += [f for f, _ln in ls]
     for f in fresh:
         to, front = recipient(f.get("to") or f.get("mover") or "", f["project"], env, f.get("mover") or "")
-        g = groups.setdefault(to, {"front": front, "lines": [], "by": [], "fs": []})
+        g = groups.setdefault((to, front), {"front": front, "lines": [], "by": [], "fs": []})
         g["lines"].append(line_of(f))
         g["by"].append((f["project"], line_of(f)))
         g["fs"].append(f)
-    for to, g in sorted(groups.items()):
+    for (to, _front), g in sorted(groups.items()):
         text = compose(g["lines"], f"[stackshot] {label}: {len(g['lines'])} item(s) for you (id · check · evidence · what fixes it).", g["front"])
         ok, said = _send(env, to, text)
         sent.append({"to": to, "lines": len(g["lines"]), "delivered": ok, "said": _clip(said, 120)})

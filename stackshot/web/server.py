@@ -6420,15 +6420,14 @@ def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
     return _fleet_builder(), "fleet", builderless
 
 
-def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried: str, outcome: str, to: str = "", kind: str = "fleet") -> str:
+def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried: str, outcome: str, to: str = "") -> str:
     """The History line of a recovery request (metadata.stall.log, shown on the item as a line said by the server): which session is quiet, what happened to the request
-    (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. `kind` is the recipient's (`_recovery_target`): the wording names who was actually asked, the fleet's
-    builder or the project's -main agent. Written onto `item` in place; the caller saves it. → the text."""
+    (`outcome`, as _recovery_tell reports it: asked, held, self, nobody, failed) and what the ladder tried. The line names the session asked by its own name, so it
+    says the same whether that is the fleet's builder or a front-only project's -main agent. Written onto `item` in place; the caller saves it. → the text."""
     label = _session_label(to) or to
-    role = _RECOVERY_ROLE.get(kind, _RECOVERY_ROLE["fleet"])
     said = {"asked": f"{label} was asked to recover it",
             "held": f"not sent: the message to {label} was held back, not delivered",
-            "self": f"not sent: {label} is {role} itself, so nobody else could be asked",
+            "self": f"not sent: {label} is the fleet's builder itself, so nobody else could be asked",      # only a fleet request can be its own quiet session: the -main agent is never chosen for itself (_recovery_target)
             "failed": f"not sent: the send to {label} failed",
             "nobody": "not sent: no fleet builder resolves (operator_session unset, retired or without a keeper)"}.get(outcome, outcome)
     text = f"{quiet} is quiet and nobody could take the item: {said} (why: {_clip_line(why, 90)}; tried: {tried})"
@@ -6443,7 +6442,7 @@ def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: 
             item = _load(gid)
             if item.get("status") != "open":
                 return
-            _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to, kind)
+            _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to)
             role = _RECOVERY_ROLE.get(kind, _RECOVERY_ROLE["fleet"])
             _save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
     except Exception as e:  # noqa: BLE001
@@ -10287,7 +10286,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
             f"- {_rmod.when_words(dt.datetime.fromtimestamp(float(a.get('ts') or 0), ZONE))} {'comment' if a.get('kind') == 'comment' else 'note on his step' if a.get('kind') == 'step-reply' else 'answer'}: "
             + _answer_words(a, 1200) + (f" [chosen option: {a['choice']}: {a['choice_line']}]" if a.get("choice") and a.get("choice_line") else "") for a in ans[-3:]))
     idle = m.get("idle") if isinstance(m.get("idle"), dict) else {}
-    if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm
+    if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
         w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), ZONE))
         out.append(f"idle: poked {idle.get('to') or '?'} {w('poked')}" + (f", the fleet's builder was asked to recover it {w('recovery')}" if idle.get("recovery") else ""))
     for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
@@ -10499,7 +10498,7 @@ def _notice_report(nid: str) -> str:
 # What an agent does when the stall pass takes a wrong step; the same path is in stall.py's docstring and docs/stall-and-ladder.md.
 _STALL_FORM = (
     f" A `stall:` line is a step the stall pass took because the item's mover had no turn running (for a background agent as mover, follow-ups after the first notice go by the item's step status, not its pane): resend (the notice again), cold (a call named who takes it, or closed it), builder (handed to the project's builder), "
-    f"recovery (nobody could take it: the fleet's builder is sent one message, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
+    f"recovery (nobody could take it: one message goes to the project's -main agent when the project lists no background agent, to the fleet's builder otherwise, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
     f"and no pause lasts longer than 24 hours."

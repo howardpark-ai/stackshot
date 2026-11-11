@@ -11,7 +11,8 @@ a builder is unchanged. Fixture data (English stand-in names) in a temporary sto
   3  the unmoved digest (the daily run): the same split, one message per recipient, marked for the owner when it goes to a front agent; a digest that is not delivered leaves the item unchased
   4  the two lows of the review of that change: (a) a session that is a front-only project's -main agent and another project's builder gets one message of each kind (the mark is keyed by recipient AND
      whether it is a front agent, not by the recipient alone), for the unanswered finding and for the digest; (b) the digest never tells a -main agent to chase itself: when the mover of a front-only
-     project's unmoved item is its -main agent, the page key takes it, unmarked, as at the finding's first level (chase_to)
+     project's unmoved item is its -main agent, the page key takes it, unmarked, as at the finding's first level (chase_to); (c) the ordinary findings of one run are grouped by (recipient, front) too, so
+     one session that gets an owner-decision finding as a project's -main agent and a finding for an item it moves in another project gets two messages, only the first marked
 
     tests/run-suite audit_front_only        -> exit 0 / 1"""
 import contextlib, copy, datetime as dt, io, json, os, pathlib, re, sys, time
@@ -203,6 +204,19 @@ check("4b the digest never tells a -main agent to chase itself: the item its -ma
 check("4b …the other item of that project still goes to its -main agent", any(to == "solo-main" and B + "11 · " in t for to, t in dg), [(to, t[:90]) for to, t in dg])
 check("4b …and the record says who was sent which digest, the item chased once", sorted(s["chased"] for s in rec4["stuck"]) == [True, True, True]
       and sorted((m["to"], m["lines"]) for m in rec4["messages"] if m.get("kind") == "unmoved") == [(SOLO, 1), ("solo-main", 1), ("solo-main", 1)], [m for m in rec4["messages"] if m.get("kind") == "unmoved"])
+
+# 4c: ordinary findings (deliver_findings' groups) are keyed by (recipient, front): "dual" is the -main agent of DUALP (an owner-decision finding goes to it, marked) and moves an item of BUILT (its finding goes to it, unmarked)
+DUALP = "projects/dualp"
+MAINS[DUALP] = "dual"; FRONT_ONLY[DUALP] = True; ROLES["dual"] = {"role": "background"}
+sent.clear()
+fnd = [{"id": f"{B}9301", "project": DUALP, "to": "Oliver", "mover": "", "category": "stale", "detail": "an item that waits on his answer", "fix": "answer it"},
+       {"id": f"{B}9302", "project": BUILT, "to": "dual", "mover": "dual", "category": "stale", "detail": "an item it moves", "fix": "write it"}]
+with contextlib.redirect_stderr(io.StringIO()):
+    AR.deliver_findings(env(), fnd, "Board audit test")
+to_dual = [t for to, t, _f in sent if to == "dual"]
+check("4c one session, two kinds of ordinary finding: two messages to it, one marked for the owner and one not", len(to_dual) == 2 and sum(t.startswith("[for Oliver]\n") for t in to_dual) == 1, [t[:80] for t in to_dual])
+check("4c …the marked one holds only the finding it got as -main agent, the unmarked one only the finding for the item it moves (one message of both, marked by the first finding's kind, before)",
+      any(t.startswith("[for Oliver]\n") and B + "9301" in t and B + "9302" not in t for t in to_dual) and any(not t.startswith("[for") and B + "9302" in t and B + "9301" not in t for t in to_dual), [t[:120] for t in to_dual])
 
 if fails:
     print(f"\n{len(fails)} of {len(ran)} checks failed"); sys.exit(1)

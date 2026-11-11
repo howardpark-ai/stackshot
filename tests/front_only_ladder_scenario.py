@@ -229,6 +229,10 @@ check("5 a project with a builder: the fleet's builder, `recovery_by` the same, 
       and "asked a fresh session who takes it and tried the project's builder." in FLEET_ONLY("a14")[0][1], (ho(14), FLEET_ONLY("a14")))
 close(14)
 
+# (e) the text a session reads in `get`'s description (the stall form) names the -main agent as well as the fleet's builder
+check("5 the served stall form says where a recovery message goes: a front-only project's -main agent, else the fleet's builder (it said the fleet's builder only)",
+      "the project's -main agent when the project lists no background agent, to the fleet's builder otherwise" in server._STALL_FORM and "the fleet's builder is sent one message" not in server._STALL_FORM, server._STALL_FORM[:200])
+
 # ================================================================ 4. the choice on its own
 tgt = server._recovery_target
 check("4 a front-only project with a -main agent -> (that agent, main)", tgt("projects/beta", "home-peer3") == ("home-beta-front", "main", True), tgt("projects/beta", "home-peer3"))
