@@ -380,7 +380,7 @@ states14 = _pl14.Path(_st14.__file__).read_text(encoding="utf-8")
 check("5.14 the parked state's missing-field hint no longer says a wake alone is never a park", "a wake alone is a reminder, never a park" not in states14 and "a date alone makes the item wait until then, outside a hand-off" in states14, None)
 import re as _re14
 OLD14 = _re14.compile("|".join((r"alone (?:is|was|stays) (?:only |just )?a (?:plain )?reminder", r"is a reminder that leaves the item active", r"check-back reminder", r"never a park", r"(?:wake|date) (?:that )?only reminds",
-                                r"reminder wakes?\b", r"shows? no wait", r"a reminder, never", r"check-back", r"wake[^.\n]{0,60}is a (?:plain )?reminder", r"reminder[^.\n]{0,40}leaves (?:it|the item) (?:on agent|in its lane|active)")), _re14.I)
+                                r"reminder wakes?\b", r"until=\\*\"<when the (?:window|wait) ends>\\*\", wait_basis", r"shows? no wait", r"a reminder, never", r"check-back", r"wake[^.\n]{0,60}is a (?:plain )?reminder", r"reminder[^.\n]{0,40}leaves (?:it|the item) (?:on agent|in its lane|active)")), _re14.I)
 hits14 = []
 for f14 in sorted([*(root14 / "docs").glob("*.md"), *[x for x in (root14 / "stackshot").rglob("*") if x.is_file() and x.suffix not in (".pyc",)]]):
     try:

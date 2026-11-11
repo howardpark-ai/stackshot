@@ -7797,8 +7797,7 @@ def _wake_window_note(meta: dict[str, Any]) -> str:
     if not found:
         return ""
     return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's next waits for that date (\"{found}\"), so the item waits until then, listed as waiting. "
-            "If the work itself needs this window (a soak, a log or data collection, a trial week, a timer you started), give it its reason: "
-            "update(until=\"<when the window ends>\", wait_basis=\"<what the window collects> ends <YYYY-MM-DD>\"); "
+            "To move the date: update(until=\"<when the window ends>\"); "
             "if you keep moving the work and a step can run now, drop the date with until=\"none\")")
 
 
@@ -8087,7 +8086,7 @@ def _wake_step_note(item: dict[str, Any], senders: tuple[str, ...], legacy_wake:
     if not found:
         return ""
     return (f"\n(note: wake {_wt.wake_value(meta)} alone is a wait until that date, and this item's only open next line{'s' if len(found) > 1 else ''} of yours wait{'' if len(found) > 1 else 's'} for a time or an event (\"{found[0]}\"), "
-            "so the item waits until then, listed as waiting. Give the wait its reason: update(until=\"<when the wait ends>\", wait_basis=\"<what it waits on, with its date YYYY-MM-DD>\"), "
+            "so the item waits until then, listed as waiting. To move the date: update(until=\"<when the wait ends>\"), "
             "with wait_reason=<what the step waits on> when you set the date"
             + ("; when it waits on a named person outside answering, park it as an outside wait instead of a plain hold: needs=[\"external\"] with wait_kind=\"relay\", wait_event=<who> and ask_by=YYYY-MM-DD" if any(_mg.is_reply_trigger(f) for f in found) else "")
             + "; if the step can run now, write it as the action and drop the date with until=\"none\")")
