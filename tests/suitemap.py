@@ -116,9 +116,10 @@ selected every suite that ran it (136 of 207 for one edit of waiting.mover_of), 
 for a MODULE-LEVEL function with no decorator, or only PURE_DECORATORS, whose docstring is alone on its lines (nothing of the def or of
 another statement shares them), a change whose changed lines in that function are all docstring lines is not a change of its body:
   * the file's own text readers still run (rule 6: the `whole` of the map: inspect.getsource, a test that greps the file);
-  * the suites whose own file names the function (`server.f.__doc__`, `from m import f`, getattr(module, <not a literal>)) run, found as
-    the suites that read the name (see *names*), and the registrations at module level that read it (a call such as mcp.tool()(f) is an
-    effect that takes the file whole);
+  * the suites whose own file names the function (`server.f.__doc__`, `from m import f`) run, found as the suites that read the name (see
+    *names*); so does a suite that reads names wide (getattr(module, <not a literal>), a module loaded by a path in a variable) when its
+    file reads a docstring anywhere (`__doc__`, getdoc), since it may be this one; and so do the registrations at module level that read
+    the name (a call such as mcp.tool()(f) is an effect that takes the file whole);
   * every suite that ran code which reads a docstring itself (an attribute `__doc__`, getdoc, get_docstring, render_doc, help) or hands a
     function to a registry that builds a description from it (add_tool, from_function, add_resource, add_prompt, mcp.tool(...)(fn)): DOC_CALLS;
     the checkout has none today, so this adds nothing now;
@@ -289,7 +290,8 @@ PURE_DECORATORS = {"functools.wraps", "wraps", "functools.lru_cache", "lru_cache
 # signature and description are read by whoever calls it (it ran the body: measured) and by whatever lists the registry.
 # Listing is a call of one of these, on any object (a suite lists tools through its MCP client): the key (*, <enumerate>).
 # Code that reads a function's docstring, or hands the function to a registry that does (a tool server builds its description from it): a
-# docstring-only change reaches every suite that ran such code (see *Docstrings*). None of it exists in the checkout's own code today.
+# docstring-only change reaches every suite that ran such code, and a suite that reads names wide and reads a docstring (see *Docstrings*).
+# None of it exists in the checkout's own (non-suite) code today.
 DOC_CALLS = {"getdoc", "get_docstring", "render_doc", "help", "add_tool", "from_function", "add_resource", "add_prompt"}
 DOC_REGISTER = {"tool", "resource", "prompt"}   # mcp.tool(...)(fn) called as a function, not as a decorator
 ENUMERATE = "<enumerate>"
@@ -720,6 +722,24 @@ def readers(names_list, hit):
                     else:
                         scopes_.add((f, sc))
     return scopes_, suites_
+
+
+def doc_readers(names_list, hit):
+    """the suites that can see a docstring of the keys in hit: the suites whose own file reads one by name, and the suites that read
+    names wide (getattr(module, <not a literal>), a module loaded by a path in a variable) AND read a docstring somewhere in their
+    file (`x.__doc__`, getdoc: DOC_CALLS). A suite that reads names wide and never a docstring can see the text only by reading the
+    file, which the map's `whole` has"""
+    mods, names, out = {k[0] for k in hit}, {k[1] for k in hit}, set()
+    for N in names_list:
+        for f, m in N.files.items():
+            ms = SUITE_RE.match(f)
+            if not ms:
+                continue
+            for ks in m.refs.values():
+                if any(k in hit or (k[0] == "*" and k[1] in names) for k in ks) or \
+                        (m.docreads and any(k[1] == "*" and (k[0] in mods or k[0] == "*") for k in ks)):
+                    out.add(ms.group(1))
+    return out
 
 
 # ---------------------------------------------------------------- measure
@@ -1430,7 +1450,7 @@ def selection(m, a, b, pathspec=()):
                 # registration that reads it; not the callers' scopes, not what ran the body (the code that reads a docstring is in fns)
                 keys, w = reach(names, docs, ranfiles)
                 whole |= w
-                hit |= readers(names, keys)[1]
+                hit |= doc_readers(names, keys)
             for s, e in S.items():
                 py = e.get("py", {})
                 if any(p in py for p in whole) or any(q in py.get(p, ()) for p, q in fns) \

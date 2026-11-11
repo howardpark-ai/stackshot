@@ -266,7 +266,7 @@ check("DOC3 SUITEMAP_DOCSTRING_RULE=D1 gives the old answer for the same change 
 out, err, _ = sel_after(lambda: sub("mod.py", "the text a suite reads", "the text a suite reads, changed"), "docstring read by a suite")
 check("DOC4 a docstring a suite reads (z: mod.documented.__doc__) reaches that suite by the name, though no suite ran the body", out.split() == ["c", "z"], (out, err))
 out_d1 = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip(), env={"SUITEMAP_DOCSTRING_RULE": "D1"}).stdout.split()
-check("DOC5 …which the old rule missed (it chose the text reader alone: nothing ran documented())", out_d1 == ["c"], out_d1)
+check("DOC5 ...which the old rule missed (it chose the text reader alone: nothing ran documented())", out_d1 == ["c"], out_d1)
 def doc_and_code():
     sub("mod.py", "the helper's docstring", "the helper's new docstring"); sub("mod.py", "    return 1\n\ndef documented", "    return 11\n\ndef documented")
 out, err, _ = sel_after(doc_and_code, "docstring and code")
@@ -297,6 +297,15 @@ for what, code, scope in (("an attribute __doc__", "def describe(fn):\n    retur
     r = tool("select", "--map", str(with_ran(scope)), "--to", head); r0 = tool("select", "--map", str(MAP), "--to", head)
     check(f"DOC11 a docstring-only change reaches the suite that ran code reading a docstring ({what}); with no suite running it, the text reader alone",
           r.stdout.split() == ["a", "c"] and r0.stdout.split() == ["c"], (r.stdout, r.stderr[-300:], r0.stdout))
+# suites that read names wide (getattr(mod, <variable>)) are chosen only when they read a docstring somewhere: w1 does not, w2 does, w3 names deep()
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+for nm, extra in (("w1", ""), ("w2", "\nprint(mod.f.__doc__)"), ("w3", "\nmod.deep()")):
+    write(f"tests/{nm}_scenario.py", "import sys\nimport mod\ngetattr(mod, sys.argv[0])" + extra + "\n")
+wide_head = commit("wide readers")
+r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = (s.Names(sys.argv[1]),); "
+                    "print(' '.join(sorted(s.doc_readers(N, {('mod', 'deep')}))))", wide_head], capture_output=True, text=True, env=ENV, cwd=str(R))
+check("DOC13 a suite that reads names wide is a reader of a docstring only when it reads a docstring itself (w2), a suite that names the function always is (w3)",
+      r.stdout.split() == ["w2", "w3"], (r.stdout, r.stderr[-600:]))
 r = tool("list", env={"SUITEMAP_DOCSTRING_RULE": "x"})
 check("DOC12 a value that is not a rule is an error at once", r.returncode != 0 and "SUITEMAP_DOCSTRING_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
