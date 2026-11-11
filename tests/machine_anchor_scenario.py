@@ -220,17 +220,19 @@ check("own wait: a wait on another machine does not stop the notice for this one
 
 # an item that waits on someone else and is moved after its wait by the owner is never told, however a notice could be routed (`then`, the stored mover): his queue is the board
 reset()
-for i in (60, 61, 62):
+for i in (60, 61, 62, 63):
     (T / f"store/a/{i}.json").unlink(missing_ok=True)
 item(60, mover=BACK, then=BACK, subject="[home] waits on box-d, then his", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=server.OWNER, needs=[])
+item(63, mover=server.OWNER, then=BACK, subject="[home] waits on box-d, his by the mover", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), needs=[])
 item(61, mover=BACK, then=BACK, subject="[home] waits on box-d, then the back agent", next="team-back: run the sync on box-b", wait_kind="event", wait_event="box_online box-d", ask_by=day(5), post_wake_mover=BACK, needs=[])
-anchors(add=["machine:box-b"], items=["a60", "a61"])
+anchors(add=["machine:box-b"], items=["a60", "a61", "a63"])
 go_offline("host-b"); tick(); reset()
 checkin("host-b"); tick()
 told_gids = [g for x in notices() for g in x[0].split(",")]
 check("waiting item: one whose post-wake mover is the owner gets no notice, though `then` and its stored mover are sessions; the same item with a session after the wait still does",
       "a60" not in told_gids and "a61" in told_gids, (SENT, mt(60)))
 check("waiting item: ...and the owner's item stays as it was (nothing turned, nothing saved)", mt(60).get("post_wake_mover") and mt(60).get("wait_kind") == "event", mt(60))
+check("waiting item: one the owner picks up by its mover (no post_wake_mover) gets no notice either, and stays as it was", "a63" not in told_gids and mt(63).get("mover") == server.OWNER and mt(63).get("wait_kind") == "event", (SENT, mt(63)))
 
 # a box_online wait on machine A that turns an item and an anchor on machine B for it: A is told by the wait only, B is still told
 reset()

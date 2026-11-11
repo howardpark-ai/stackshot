@@ -1003,9 +1003,9 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                 miss.append(f"a relay wait names the party or event {H} relays: wait_event=<who or what>")
         if miss:
             add("wait_input", f"{what} waits on {_wait_text(w)} but its input is missing: " + " ".join(miss) + "." + drop_hint)
-        why = ctx.mover_problem(w.post_wake_mover, project)
+        why = ctx.mover_problem(w.mover, project)
         if why:
-            who = f"its post-wake mover, {ctx.label(w.post_wake_mover)}, {why}" if w.post_wake_mover else "it names no post-wake mover (no session in needs, and no project builder or -main agent)"
+            who = f"its post-wake mover, {ctx.label(w.mover)}, {why}" if w.mover else "it names no post-wake mover (no session in needs, and no project builder or -main agent)"
             add("post_wake", f"{what}'s wait: {who}. Set post_wake_mover=<{H}, a live session or the project's background agent> "
                              f"(when it is unset, the first session in needs, else the project's builder or -main agent, takes it)." + drop_hint)
         wake = clean(m.get("wake"))
@@ -1080,7 +1080,7 @@ def report(items: dict[str, dict[str, Any]], ctx: Ctx | None = None, *, anchors:
             rep.flagged.append(gid)
         if mod.state == _model.ALIVE and not mod.mover_explicit:
             rep.defaulted["mover"] = rep.defaulted.get("mover", 0) + 1
-        if mod.state == _model.WAITING and mod.wait is not None and not mod.wait.post_explicit:
+        if mod.state == _model.WAITING and mod.wait is not None and not mod.wait.mover_explicit:
             rep.defaulted["post_wake_mover"] = rep.defaulted.get("post_wake_mover", 0) + 1
     return rep
 

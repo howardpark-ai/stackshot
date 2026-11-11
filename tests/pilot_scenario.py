@@ -679,8 +679,8 @@ _l1 = _gsl("agents")[_gsl("agents").find('<li class="irow hrow" id="task-a-1"'):
 check("…a row is a top line (the item's number and goal linking its item page, then the age), the mover under it, then the next step on its own line",
       re.search(r'<li class="irow hrow" id="task-a-1" data-st="agent"><div class="ir-top"><span class="ir-title"><a class="ir-link" href="/items/a1"[^>]*><span class="ir-id">a1</span> <span class="hgoal">item 1</span></a></span><span class="tip ir-age"[^>]*>[^<]*</span></div><div class="ir-who"><span class="hwho">[^<]*</span></div><div class="ir-det"><span class="hnext">.+?</span></div>', _l1, re.S), _l1)
 _l13 = _gsl("waiting")[_gsl("waiting").find('<li class="irow hrow" id="task-a-13"'):]; _l13 = _l13[:_l13.find("</li>")]
-check("…a Waiting row carries the Waiting fields: the wait line says what it waits on, and above it who takes it then (and who watches, when something does: this one has no date)", '<span class="hwait">' in _l13
-      and re.search(r'<div class="ir-who">then <span class="hwho">[^<]*</span></div><div class="ir-det"><span class="hwait">[^<]*</span></div>', _l13) and "watched by" not in _l13
+check("…a Waiting row carries the Waiting fields: the wait line says what it waits on, and above it who picks it up (and who watches, when something does: this one has no date)", '<span class="hwait">' in _l13
+      and re.search(r'<div class="ir-who"><span class="hwho">[^<]*</span> picks it up</div><div class="ir-det"><span class="hwait">[^<]*</span></div>', _l13) and "watched by" not in _l13
       and 'class="hr"' not in _l13, _l13)
 _ag = _gsl("agents"); _a4 = _ag[_ag.find('id="task-a-4"'):]; _a1 = _ag[_ag.find('id="task-a-1"'):_ag.find("</li>", _ag.find('id="task-a-1"'))]
 check("…a row draws no project label, a sub-page's item included (the page says the project, and the row no longer links to the page it is on)",

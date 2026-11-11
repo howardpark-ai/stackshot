@@ -146,11 +146,11 @@ p60, p61, p62, p63 = (page(f"a{i}", answer=BOX) for i in (60, 61, 62, 63))
 check("a your-call item handed to Oliver shows no 'not yet taken' warning", istate(p60).startswith("Your move") and "not yet taken" not in p60, istate(p60))
 check("a your-step item handed to Oliver shows no 'not yet taken' warning", istate(p61).startswith("Your move") and "not yet taken" not in p61, istate(p61))
 check("a hand-off to a session that has not taken it shows the warning; one taken does not", "handed over, not yet taken" in istate(p62) and "not yet taken" not in p63, (istate(p62), istate(p63)))
-check("waiting on a time: the state line says Waiting and the post-wake mover; the wait block has what (his reason), watched by the scheduler, until",
-      istate(p3) == "Waiting · since 3h ago" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Then\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
-check("waiting on an item: its close, watched by the server", istate(p4).startswith("Waiting · since") and re.search(r"Waits on\s+a2\s+\(open\)\s+Watched by\s+the server\s+End\s+no end date set\s+Then\s+home-other", wt(p4)) is not None, (istate(p4), wt(p4)))
-check("waiting on an anchor: the event, watched by the anchor module, the backstop", istate(p5).startswith("Waiting · since") and re.search(r"the review lands\s+Watched by\s+the anchor module\s+Backstop\s+Sun Feb 1st\s+Then\s+home-other", wt(p5)) is not None, (istate(p5), wt(p5)))
-check("waiting on news only he relays: the party's event, ask by", istate(p6).startswith("Waiting · since") and re.search(r"Acme's the contract\s+\(news only Oliver relays\)\s+Watched by\s+the scheduler\s+Ask by\s+Sun Mar 1st\s+Then\s+home-other", wt(p6)) is not None, (istate(p6), wt(p6)))
+check("waiting on a time: the state line says Waiting; the wait block has what (his reason), watched by the scheduler, until",
+      istate(p3) == "Waiting · since 3h ago" and re.search(r"Waits on\s+the vendor's holiday\s+Watched by\s+the scheduler\s+Until\s+Thu Jan 1st\s+Picks it up\s+home-other", wt(p3)) is not None, (istate(p3), wt(p3)))
+check("waiting on an item: its close, watched by the server", istate(p4).startswith("Waiting · since") and re.search(r"Waits on\s+a2\s+\(open\)\s+Watched by\s+the server\s+End\s+no end date set\s+Picks it up\s+home-other", wt(p4)) is not None, (istate(p4), wt(p4)))
+check("waiting on an anchor: the event, watched by the anchor module, the backstop", istate(p5).startswith("Waiting · since") and re.search(r"the review lands\s+Watched by\s+the anchor module\s+Backstop\s+Sun Feb 1st\s+Picks it up\s+home-other", wt(p5)) is not None, (istate(p5), wt(p5)))
+check("waiting on news only he relays: the party's event, ask by", istate(p6).startswith("Waiting · since") and re.search(r"Acme's the contract\s+\(news only Oliver relays\)\s+Watched by\s+the scheduler\s+Ask by\s+Sun Mar 1st\s+Picks it up\s+home-other", wt(p6)) is not None, (istate(p6), wt(p6)))
 check("dead: Done <age>, and the close's reason under the state line", re.fullmatch(r"Done · \d+d ago", istate(p7)) is not None and '<p class="ireason">shipped as asked</p>' in p7, istate(p7))
 # the project is not on the line under the title: it stays on the sidebar's Project row. The page is one document in both layouts (the stylesheet moves the side panel beside the item from 768px and stacks it on a phone), so one read of the markup covers both
 _proj = "Alpha"
@@ -221,7 +221,7 @@ check("the Background shows the stored description (the field keeps its name) an
 # ---- 5. the wait and its chases
 wt5, wt6, wt3 = wt(p5), wt(p6), wt(p3)
 check("the wait block of an anchor wait: the anchor linked, the event, who watches, the backstop, then, the chases (count, when, who, note)",
-      '<a href="https://github.com/o/r/pull/9"' in p5 and "the review lands" in wt5 and "Watched by" in wt5 and "the anchor module" in wt5 and "Backstop" in wt5 and "Then" in wt5
+      '<a href="https://github.com/o/r/pull/9"' in p5 and "the review lands" in wt5 and "Watched by" in wt5 and "the anchor module" in wt5 and "Backstop" in wt5 and "Picks it up" in wt5
       and "Chases" in wt5 and "2 " in wt5 and "asked in the PR" in wt5 and "pinged the reviewer" in wt5 and 'drop it?' in wt5, wt5)
 check("a relay wait: the party's event, ask by, none chased yet", "Acme" in wt6 and "Ask by" in wt6 and "none yet" in wt6, wt6)
 check("a time wait: his reason and no chases row; an alive or closed item has no wait block", "the vendor's holiday" in wt3 and "Chases" not in wt3 and all('class="iwait"' not in p for p in (p1, p2, p7)))
@@ -234,7 +234,7 @@ check("the sidebar's fields in order: mover, creator (no contact), project, then
       labels(sd1) == ["Mover", "Creator", "Project", "Then", "Priority", "Anchors 1", "Confirmed"], labels(sd1))
 check("then: the session that takes the item after the owner's move, a sidebar row (the line under the title no longer says it)", re.search(r"<dt>Then</dt><dd>home-other</dd>", sd1) is not None and "Mover and then" not in sd1 and " then " not in istate(p1), sd1[:600])
 check("priority is a tag, the anchor scoped to the item is listed", '<span class="tag t-p1">P1</span>' in sd1 and "slack.com" in sd1 and '<dt>Anchors <span class="count">1</span></dt>' in sd1)
-check("a waiting item's sidebar: the post-wake mover (Then), and its wake, backstop or ask by", "<dt>Then</dt><dd>home-other</dd>" in side(p3) and "<dt>Wake</dt><dd>Thu Jan 1st</dd>" in side(p3) and "<dt>Backstop</dt>" in side(p5) and "<dt>Ask by</dt>" in side(p6), side(p3))
+check("a waiting item's sidebar: the one who picks it up is the Mover row and there is no Then row (it stands only beside the owner); its wake, backstop or ask by", "<dt>Then</dt>" not in side(p3) and "<dt>Mover</dt><dd>home-other" in side(p3) and "<dt>Wake</dt><dd>Thu Jan 1st</dd>" in side(p3) and "<dt>Backstop</dt>" in side(p5) and "<dt>Ask by</dt>" in side(p6), side(p3))
 check("a closed item's sidebar has no Expected by (an open one has none either) and no then; the header says how it ended", "<dt>Expected by</dt>" not in side(p7) and "<dt>Then</dt>" not in side(p7) and istate(p7).startswith("Done"), side(p7))
 check("today's other fields (due, confirmed) sit in a closed More details fold; the Mover row is not among them (it opens the panel); Whose move is gone", '<details class="fold imore" data-fold="item.more"><summary><h3>More details</h3></summary>' in sd1
       and "<dt>Mover</dt>" not in sd1.split("More details")[1] and "<dt>Confirmed</dt>" in sd1.split("More details")[1] and "<dt>Whose move</dt>" not in sd1)
@@ -250,8 +250,8 @@ for what, (g, who) in kinds.items():
 check("with a contact the group is Mover, Owner, Creator, in that order, and every other row keeps its place after it",
       labels(grp1(page("a1", contact="home-other"))) == ["Mover", "Owner", "Creator"] and labels(side(page("a1", contact="home-other")))[:6] == ["Mover", "Owner", "Creator", "Project", "Then", "Priority"], labels(side(page("a1", contact="home-other"))))
 check("a hostile mover name is escaped in the Mover row", "<dt>Mover</dt><dd>&lt;i&gt;evil&lt;/i&gt;</dd>" in grp1(page("a26")) and "<i>evil" not in page("a26").split("<h2>")[0], grp1(page("a26")))
-check("a waiting item says its `then` in the sidebar's Then row and in the wait block, never on the line under the title (nothing is lost with it)",
-      all("<dt>Then</dt><dd>home-other</dd>" in side(h_) and re.search(r"Then\s+home-other", wt(h_)) is not None and "then" not in istate(h_) for h_ in (p3, p4, p5, p6)), [istate(h_) for h_ in (p3, p4)])
+check("a waiting item says who picks it up in the sidebar's Mover row and in the wait block, never on the line under the title (nothing is lost with it); it has no Then row",
+      all("<dt>Then</dt>" not in side(h_) and "<dt>Mover</dt><dd>home-other" in side(h_) and re.search(r"Picks it up\s+home-other", wt(h_)) is not None and "then" not in istate(h_) for h_ in (p3, p4, p5, p6)), [istate(h_) for h_ in (p3, p4)])
 
 # ---- 6b. the Creator row: under Owner, on open and closed items, the History's name, a clear label when there is none
 CR_LBL = '<dt><span title="who created this item">Creator</span></dt>'

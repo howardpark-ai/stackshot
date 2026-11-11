@@ -132,7 +132,7 @@ check("derived: a stored value that is no state is ignored: read from the fields
 # ================================================================ explicit fields: what is stored wins, and says so
 m_ = D(state="doing", expected_by=day(2), needs=[BACK], mover=OTHER, then="ops-x")
 check("explicit: a stored mover is the mover, marked explicit", m_.mover == OTHER and m_.mover_explicit, m_)
-check("explicit: …then is kept beside a mover that is not the owner, with a conflict named (then follows the owner's answer)", m_.then == "ops-x" and m_.then_explicit and any("then=ops-x" in c for c in m_.conflicts), m_)
+check("explicit: …then is not read beside a mover that is not the owner (it stands only while he moves the item), and no conflict is named", m_.then == "" and not m_.then_explicit and not m_.conflicts, m_)
 m_ = D(state="your-call", needs=["decision", BACK], ask=ASK, mover="oliver", then="ops-x")
 check("explicit: mover=oliver is stored as the owner's name and is the owner; then explicit", m_.mover == OWN and m_.mover_explicit and m_.then == "ops-x" and m_.then_explicit and not m_.conflicts, m_)
 check("explicit: …owner_moves and next_mover read it", m_.owner_moves and m_.next_mover == "ops-x", m_)
@@ -153,7 +153,7 @@ check("explicit: a wait_kind that is no kind is ignored", m_.state == "alive" an
 m_ = D(state="doing", expected_by=day(2), needs=[BACK], wake=FUT)
 check("alive + a wake: the wake is the mover's check-back, the item stays alive", m_.state == "alive" and m_.checkback == FUT and m_.wait is None and not m_.conflicts, m_)
 m_ = D(needs=[BACK], hold=True, wake=FUT, mover=OTHER)
-check("conflict: a mover stored on a waiting item is named, and the wait stands", m_.state == "waiting" and any("mover=" in c for c in m_.conflicts), m_)
+check("mover on a waiting item: the one who picks it up when the wait ends, no conflict; the item's own mover stays empty while it waits", m_.state == "waiting" and m_.wait.mover == OTHER and m_.wait.mover_explicit and m_.picker == OTHER and m_.mover == "" and not m_.conflicts, m_)
 m_ = D(state="doing", expected_by=day(2), needs=[BACK], ask_by=day(3), post_wake_mover=OTHER)
 check("conflict: wait fields stored on an alive item are named", m_.state == "alive" and any("ask_by" in c and "post_wake_mover" in c for c in m_.conflicts), m_)
 
@@ -170,11 +170,11 @@ W_ = lambda mod: model.words(mod, lab, shown)
 check("words: alive, the owner the mover, with then", W_(D(state="your-call", needs=["decision", BACK], ask=ASK, mover="oliver", then=OTHER)) == f"model: alive · mover {OWN} (then ops-other)", W_(D(state="your-call", needs=["decision", BACK], ask=ASK, mover="oliver", then=OTHER)))
 check("words: …defaulted fields are named at the end", W_(D(state="your-call", needs=["decision", BACK], ask=ASK)) == f"model: alive · mover {OWN} (then ops-back) · derived: mover, then", W_(D(state="your-call", needs=["decision", BACK], ask=ASK)))
 check("words: alive with an agent mover and a check-back", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)) == f"model: alive · mover ops-back · check-back {FUT}", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)))
-check("words: waiting on a time", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)) == f"model: waiting on a time (wake {FUT}) · then ops-back", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)))
-check("words: …derived kind and post-wake mover named", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")) == "model: waiting on the close of board#18 · then ops-back · derived: wait_kind, post_wake_mover", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")))
+check("words: waiting on a time", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)) == f"model: waiting on a time (wake {FUT}) · mover ops-back", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)))
+check("words: …derived kind and post-wake mover named", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")) == "model: waiting on the close of board#18 · mover ops-back · derived: wait_kind, post_wake_mover", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")))
 check("words: an anchor wait, a relay wait, a closed item",
-      W_(D(wait_kind="anchor", wait_anchor="https://x/pull/1", wait_event="PR merged", wake=FUT, post_wake_mover=BACK, needs=[BACK])) == f"model: waiting on an anchor (https://x/pull/1: PR merged; backstop wake {FUT}) · then ops-back"
-      and W_(D(wait_kind="relay", wait_event="Robin's reply", ask_by=FUT, post_wake_mover=OWN, needs=[BACK])) == f"model: waiting on news only {OWN} relays (Robin's reply; ask by {FUT}) · then {OWN}"
+      W_(D(wait_kind="anchor", wait_anchor="https://x/pull/1", wait_event="PR merged", wake=FUT, post_wake_mover=BACK, needs=[BACK])) == f"model: waiting on an anchor (https://x/pull/1: PR merged; backstop wake {FUT}) · mover ops-back"
+      and W_(D(wait_kind="relay", wait_event="Robin's reply", ask_by=FUT, post_wake_mover=OWN, needs=[BACK])) == f"model: waiting on news only {OWN} relays (Robin's reply; ask by {FUT}) · mover {OWN}"
       and W_(model.derive(I(status="completed"), NOW)) == "model: dead", None)
 check("words: a wait with no date or anchor says so", "no wake set" in W_(D(state="parked", needs=[BACK], hold=True)) and "wait_anchor not set" in W_(D(wait_kind="anchor", needs=[BACK])) and "no anchor stored" not in W_(D(wait_kind="anchor", needs=[BACK])) and "no ask-by date" in W_(D(wait_kind="relay", needs=[BACK])), None)
 check("form: check_fields: what a write may not say", model.check_fields({"wait_kind": "sometime"}) and model.check_fields({"ask_by": "next week"}) and model.check_fields({"ask_by": "2099-02-30"}) and model.check_fields({"goal": "x" * 301})
@@ -211,7 +211,7 @@ check("update: a goal alone is stored and leaves needs as it was", mt(2)["goal"]
 out = upd(1, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT, post_wake_mover="home-front", mover="none")
 m = mt(1)
 check("update: a relay wait is stored (kind, event, ask-by day, post-wake mover), and mover=none drops the mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and m["ask_by"] == FUT and m["post_wake_mover"] == "home-front" and "mover" not in m, m)
-check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; ask by {FUT}) · then home-front" in server.stackshot_get("a1"), server.stackshot_get("a1"))
+check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; ask by {FUT}) · mover home-front" in server.stackshot_get("a1"), server.stackshot_get("a1"))
 check("update: …the brief carries the model line of the item too", "model: waiting on news only" in server.stackshot_brief() and "model: alive · mover team-back" in server.stackshot_brief(), None)
 server._anc.save({"projects/alpha": [{"url": "https://example.org/pull/7", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
 out = upd(1, wait_kind="anchor", wait_anchor="https://example.org/pull/7", wait_event="merged", wake=FUT)
@@ -354,7 +354,7 @@ check("get: no creator line, never `owner:` nor `keeper of record:`", not any(l.
 item(32, subject="[home] derived lead", needs=[BACK]); g = server.stackshot_get("a32").split("\n")
 check("get: a mover the item does not store reads (derived)", g[1] == "mover: team-back (derived)", g[:3])
 item(33, subject="[home] waiting lead", wait_kind="time", wake=FUT, post_wake_mover="team-back", needs=[BACK]); g = server.stackshot_get("a33").split("\n")
-check("get: a waiting item has no mover while it waits, and `then:` is the post-wake mover", g[1] == "mover: no one while it waits" and g[2] == "then: team-back (when the wait ends)", g[:4])
+check("get: a waiting item's mover line says who picks it up when the wait ends, and there is no `then:` line (it stands only beside the owner)", g[1] == "mover: team-back (picks it up when the wait ends)" and not any(l.startswith("then:") for l in g), g[:4])
 check("get: a closed item has no mover line", not any(l.startswith("mover:") for l in server.stackshot_get("a21").split("\n")), server.stackshot_get("a21")[:200])
 check("brief: the open items carry the model line that names the mover; the brief's items show `keeper of record:` too", "model: alive · mover team-back" in server.stackshot_brief() and not re.search(r"(?m)^owner:", server.stackshot_brief()), None)
 check("the tool descriptions say mover, name the model page and say owner only to say it is going", all(PAGE_ in str(f) for f in (server._MODEL_FORM, server.stackshot_get.__doc__)) and "mover" in server._UPDATE_DESC

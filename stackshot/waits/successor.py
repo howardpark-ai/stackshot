@@ -110,7 +110,7 @@ def pick(project: str, reg: dict[str, dict[str, Any]], live: Callable[[str], boo
 
 
 def record_of(item: dict[str, Any], derive: Callable[[dict[str, Any]], Any]) -> tuple[str, str]:
-    """(the item's state of record, the session it names) for an open item: ("alive", its effective mover) or ("waiting", its post-wake mover); ("", "") for a closed item, a HELD item (metadata.hold: it
+    """(the item's state of record, the session it names) for an open item: ("alive", its effective mover) or ("waiting", the one who picks it up when the wait ends); ("", "") for a closed item, a HELD item (metadata.hold: it
     waits on a wake, and the server returns it then; a parked item, which waits with no hold flag, is not held and its gone post-wake mover is replaced) or one that cannot be read. The session may be "" (nobody
     can be named) or the owner."""
     if not isinstance(item, dict) or item.get("status") != "open":
@@ -124,7 +124,7 @@ def record_of(item: dict[str, Any], derive: Callable[[dict[str, Any]], Any]) -> 
     if mod.state == _model.ALIVE:
         return "alive", str(mod.mover or "").strip()
     if mod.state == _model.WAITING and mod.wait is not None:
-        return "waiting", str(mod.wait.post_wake_mover or "").strip()
+        return "waiting", str(mod.wait.mover or "").strip()
     return "", ""
 
 

@@ -160,7 +160,7 @@ def fallback_mover(project: str) -> str:
 
 def mover_of(m: dict[str, Any]) -> dict[str, str]:
     """Whose move it is by the item's own needs: {"kind": "owner" | "outside" | "session", "who"} (the items API names the owner's kind by [items_api] owner_mover_kind: see server._wait_fields). Decision first, then external,
-    then the first session needs names, else the stored post-wake mover or mover, else the project's builder, else its -main agent (never the item's creator)."""
+    then the first session needs names, else the stored post_wake_mover (the old name of a waiting item's mover, which wins while it is stored) or the stored mover, else the project's builder, else its -main agent (never the item's creator)."""
     ns = needs_of(m)
     low = [x.lower() for x in ns]
     if "decision" in low:

@@ -190,7 +190,7 @@ for name, sec in (("Your move", yours), ("On agent", agents), ("Waiting", waits)
 check("Your move: the answer form sits under the detail, in the actions", re.search(r'<div class="ir-det">.*?</div><div class="ir-act"><form class="hanswer', yours, flags=re.S) is not None)
 check("Your move: the form keeps the hooks the page script reads (data-gid, hgoal)", 'data-gid="a1"' in yours and 'class="hgoal"' in yours)
 check("an amber or red age only on Your move", ("ir-age amber" in yours or "ir-age red" in yours) and "ir-age amber" not in waits + agents and "ir-age red" not in waits + agents)
-check("Waiting: the who line says then / watched by", all(re.search(r'class="ir-who">then ', li) for li in lis(waits)))
+check("Waiting: the who line says who picks it up / watched by", all(re.search(r'class="ir-who">.*? (picks|to pick) it up', li) for li in lis(waits)))
 check("Waiting: 'Until <day>: <what>' leads the detail", "Until Thu Nov 5th" in waits)
 check("Waiting: the next step follows as 'after the wait: X' on its own line", waits.count("after the wait:") == 3, waits.count("after the wait:"))
 check("Waiting: no old 'waits until' prose, no 'next:' label", "waits until" not in waits and "next:" not in waits)
@@ -376,7 +376,7 @@ check("item page: no 'Last change' line under the title (the state line stands a
       all("ilast" not in p_ and "Last change" not in p_ and "· updated" not in p_ for p_ in (p14, p1, p6, p10)) and re.search(r'<p class="istate">', p14) is not None and re.search(r'<p class="istate">', p10) is not None
       and 'id="history"' in p14 and '<ul class="hist">' in p14)
 check("item page: the old state words are gone (Alive, Mover and then, whose move)", not re.search(r"\bAlive\b|Mover and then|whose move", p14 + p1 + p6))
-check("item page: Details say Then, and no Expected by, without the owner's name or the basis", ">Then</dt>" in p6 and "Expected by" not in p6 and "needs set" not in p6 + p1 + p14 and "no date of its own" not in p6 + p1 + p14)
+check("item page: Details of a waiting item have no Then row (an agent picks it up, in the wait block), and no Expected by, without the owner's name or the basis", ">Then</dt>" not in p6 and ">Picks it up</dt>" in p6 and "Expected by" not in p6 and "needs set" not in p6 + p1 + p14 and "no date of its own" not in p6 + p1 + p14)
 check("item page: priority P1 is a red tag, P2 is plain text", 'class="tag t-p1">P1</span>' in p14 and "<dd>P2</dd>" in p1 and "badge prio" not in p14 + p1)
 nx14 = p14[p14.find("<h2>Next</h2>"):p14.find('<details class="fold" data-fold="item.description"')]
 check("item page: Next shows the newest finished step and the open step, and one fold of the other earlier ones with their count (a dropped step is not a done one)",

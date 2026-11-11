@@ -1847,14 +1847,14 @@ class Board:
     NO_AGENT = "no agent"      # D7: the group of an open item that sits under no agent (it is the owner's and its `then` names none)
     def _sess_obj(self, r): return self.sess_of(*self.mover_ref(r))
     def mover_ref(self, r):
-        """The agent an item sits under on the board, as a (session ref, display name) pair: the session that moves it now (alive: its mover; waiting: the one who takes it when the wait ends);
+        """The agent an item sits under on the board, as a (session ref, display name) pair: the session that moves it now (alive: its mover; waiting: the one who picks it up when the wait ends);
         an item the owner moves sits under its `then` agent. ("", "") for none: the creator is no one's agent (it stays a History fact, "created by")."""
         try:
             mod = r.get("_mod") or _model.derive(r, self.now.timestamp())
             if mod.state == _model.ALIVE:
                 who = mod.then if _model.is_owner(mod.mover) else mod.mover
-            else:
-                who = mod.wait.post_wake_mover if mod.wait else ""
+            else:      # waiting: the one who picks it up when the wait ends; when the owner does, his `then`
+                who = (mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else ""
         except Exception: return ("", "")
         if not who or _model.is_owner(who): return ("", "")
         return (who, "")
@@ -2639,7 +2639,7 @@ class Board:
             wlab = _ip.wait_end_label(w_) if (w_.until or w_.backstop) else "until"
             wend = w_.until or w_.backstop or _ip.clean(m.get("wake"))      # a wait the fields end by a date (a relay's ask-by, an event's backstop), else the wake the item carries
             wbits = f"{wlab} {self.wait_day(wend)}" if wend else "no end date set"
-        post = w_.post_wake_mover if (waiting and w_) else ""
+        post = w_.mover if (waiting and w_) else ""
         # ---- the History, split: what changed, and what people said
         evs, more = self.item_log(r)
         changes, said_ = [x for x in evs if not x["comment"]], [x for x in evs if x["comment"]]
@@ -2729,7 +2729,7 @@ class Board:
         elif pk: prj = (f'<code>{e(tk)}</code> <span class="dim">·</span> ' if tk != pk else "") + f'<code>{e(pk)}</code> <span class="aflag">page missing</span>'      # the flag sits beside the page that is missing, the one the item is filed on
         else: prj = '<span class="dim">no project</span>'
         if mirror: prj += f' <span class="dim">·</span> <a href="{e(mirror)}" target="_blank" rel="noopener">gbrain page ↗</a>'
-        then_v = who_html(mod.then) if (alive and mod.then) else who_html(post) if (waiting and post) else ""      # who takes it after: the sidebar's Then row (and the wait block's), no longer the header line
+        then_v = who_html(mod.then) if mod.then else ""      # who takes it after his answer: the sidebar's Then row, only while it stands (the owner moves the item, or picks it up when its wait ends)
         pr = str(m.get("priority") or "p2")
         prio = '<span class="tag t-p1">P1</span>' if pr == "p1" else e(pr.upper())      # P1 red; P2 and P3 plain
         wk = wake_of(r)
@@ -2800,7 +2800,7 @@ class Board:
         elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">(news only {e(_model.owner_display())} relays)</span>'
         else:
             what = e(wtext) if wtext and wtext != "a date" else "a date"
-        rows += [("Waits on", what), ("Watched by", e(_ip.watched_by(w.kind))), (e(end[0]), e(end[1])), ("Then", f'<b>{who_html(post)}</b>')]
+        rows += [("Waits on", what), ("Watched by", e(_ip.watched_by(w.kind))), (e(end[0]), e(end[1])), ("Picks it up", f'<b>{who_html(post)}</b>')] + ([("Then", f'<b>{who_html(mod.then)}</b>')] if mod.then else [])
         wwords = _wt.words_of(m)
         if wwords.get("quote"):
             rows.append(("His words", f'{e(wwords["quote"])}' + (f' <span class="dim">({e(wwords["source"])})</span>' if wwords.get("source") else "")))
@@ -3589,21 +3589,23 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         tip = f' data-tip="waiting since {t0:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t0)}" title=""' if t0 else ""
         return f'<span class="tip ir-age ir-end{"" if v else " dim"}"{tip}>{esc("until " + self.day_words(v)) if v else "no end date"}</span>'
     def wait_who(self, r, mod):
-        """A waiting row's who line: "then <who takes it after the wait> · watched by <what notices its end> · set by <who set the date>" (a long wait that stands on a real-world date says who set it). Nothing is
+        """A waiting row's who line: "<who picks it up when the wait ends> picks it up" ("<owner>, then <who>" when he does and a `then` stands) · watched by <what notices its end> · set by <who set the date>" (a long wait that stands on a real-world date says who set it). Nothing is
         said to watch a wait nothing can notice the end of: a time or a relay with no date, an item wait with neither an item nor a backstop date, an anchor wait with no anchor."""
         w = mod.wait
         if w is None: return ""
-        bits = [f'then {self.home_mover(w.post_wake_mover) if w.post_wake_mover else "nobody set"}']
+        if not w.mover: bits = ["nobody set to pick it up"]
+        elif _model.is_owner(w.mover): bits = [f'{self.home_mover(w.mover)}, then {self.home_mover(mod.then)}' if mod.then else f'{self.home_mover(w.mover)} picks it up']
+        else: bits = [f'{self.home_mover(w.mover)} picks it up']
         noticed = {"time": bool(w.until), "relay": bool(w.until), "item": bool(w.after or w.backstop), "anchor": bool(w.anchor or self.scoped_urls(r["gid"]))}.get(w.kind, True)
         if noticed: bits.append(f'watched by {esc("the scheduler" if w.kind == "item" and not w.after else _home.watched_by(w.kind))}')      # an item wait with only its backstop date is the scheduler's (watchers.can_end)
         wb = (r["metadata"] or {}).get("wait_basis")
         if w.kind == "time" and w.basis and isinstance(wb, dict): bits.append(f'set by {esc(shown_ref(str(wb.get("by") or "")) or "unknown")}')
         return " · ".join(bits)
     def known_movers(self, r, mod):
-        """The names a next line may open with and have the row drop them: the item's mover, owner and post-wake mover as stored (a name or a session id) and as the board names them
+        """The names a next line may open with and have the row drop them: the item's mover, owner and the one who picks it up when its wait ends, as stored (a name or a session id) and as the board names them
         (mover_name, the owner's display name), and the names of the fleet's sessions the board holds (the sala links use them)."""
         w = mod.wait
-        who = [mod.mover, r.get("owner"), r.get("owner_name"), (w.post_wake_mover if w else ""), mod.then]
+        who = [mod.mover, r.get("owner"), r.get("owner_name"), (w.mover if w else ""), mod.then]
         names = [self.mover_name(x) for x in who if x]
         o = self._sess_obj(r) or {}
         fleet = [x.get("name") for x in self.sess.values() if isinstance(x, dict)]

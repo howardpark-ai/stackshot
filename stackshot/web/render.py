@@ -948,14 +948,14 @@ class Board:
     NO_AGENT = "no agent"      # D7: the group of an open item that sits under no agent (it is the owner's and its `then` names none)
     def _sess_obj(self, r): return self.sess_of(*self.mover_ref(r))
     def mover_ref(self, r):
-        """The agent an item sits under on the board, as a (session ref, display name) pair: the session that moves it now (alive: its mover; waiting: the one who takes it when the wait ends);
+        """The agent an item sits under on the board, as a (session ref, display name) pair: the session that moves it now (alive: its mover; waiting: the one who picks it up when the wait ends);
         an item the owner moves sits under its `then` agent. ("", "") for none: the creator is no one's agent (it stays a History fact, "created by")."""
         try:
             mod = r.get("_mod") or _model.derive(r, self.now.timestamp())
             if mod.state == _model.ALIVE:
                 who = mod.then if _model.is_owner(mod.mover) else mod.mover
-            else:
-                who = mod.wait.post_wake_mover if mod.wait else ""
+            else:      # waiting: the one who picks it up when the wait ends; when the owner does, his `then`
+                who = (mod.then if _model.is_owner(mod.wait.mover) else mod.wait.mover) if mod.wait else ""
         except Exception: return ("", "")
         if not who or _model.is_owner(who): return ("", "")
         return (who, "")

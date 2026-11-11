@@ -116,7 +116,7 @@ ids = lambda which: {p[0]["gid"] for p in hl[which]}
 check("1 …on the home page it is in the Waiting list, not On agent", {"g1", "g2"} <= ids("waiting") and not ({"g1", "g2"} & ids("agents")) and "g18" in ids("agents"), {k: sorted(ids(k)) for k in hl})
 pair = next(p for p in hl["waiting"] if p[0]["gid"] == "g1")
 row_txt = re.sub(r"<[^>]+>", "", bd.home_wait(pair[0], pair[1]) + " " + bd.wait_who(pair[0], pair[1]) + " " + bd.wait_end_slot(pair[1], None))
-check("1 …its row names the basis, who set it, who takes it after and the end date", BASIS in row_txt and "set by" in row_txt and "then" in row_txt and "until" in row_txt, row_txt)
+check("1 …its row names the basis, who set it, who picks it up and the end date", BASIS in row_txt and "set by" in row_txt and "picks it up" in row_txt and "until" in row_txt, row_txt)
 order = [p[0]["gid"] for p in hl["waiting"] if p[0]["gid"] in ("g1", "g17")]
 check("1 …the Waiting sort orders it by its wake (the sooner wake first)", order == ["g17", "g1"], order)
 mls = "\n".join(server._model_lines(it_of(1), short=True))

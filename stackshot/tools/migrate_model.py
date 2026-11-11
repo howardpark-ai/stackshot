@@ -329,7 +329,7 @@ def reading(items: dict[str, Any], ctx: Any, anchors: dict[str, Any], M: Any) ->
         if it.get("status") != "open":
             continue
         mod = env.derive(gid, it)
-        out[gid] = {"state": mod.state, "mover": mod.mover or "", "post": mod.wait.post_wake_mover if mod.wait else "", "kind": mod.wait.kind if mod.wait else "",
+        out[gid] = {"state": mod.state, "mover": mod.mover or "", "post": mod.wait.mover if mod.wait else "", "kind": mod.wait.kind if mod.wait else "",
                     "today": mod.today or ""}
     return out
 
