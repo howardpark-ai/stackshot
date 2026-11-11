@@ -47,7 +47,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG
+from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids
 from fastmcp.exceptions import ToolError
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -150,13 +150,13 @@ def collect(fn):
 (T / "store/g").mkdir(exist_ok=True)
 (T / "store/g/5.json").write_text(json.dumps({"id": "5", "subject": "[home] item five", "description": DESC, "status": "open", "updated": time.time(), "state_updated": time.time(), "confirmed": 1.0,
                                               "metadata": {"owner": U["home-front"], "project": "projects/alpha", "next": "team-back: do the thing"}}))
-g, fx = collect(lambda: server._norm_id("12", bare=True))
-check("3 id: a bare number is read as board#N where the call is about the item, and the correction is noted", g == server._norm_id(BID(12)) and [k for k, _ in fx] == ["item-id"] and BID(12) in fx[0][1], (g, fx))
-g, fx = collect(lambda: server._norm_id(BID(12), bare=True))
-check("3 id: …the shown form passes with no note", fx == [] and g == server._norm_id(BID(12)), fx)
+g, fx = collect(lambda: _model_ids._norm_id("12", bare=True))
+check("3 id: a bare number is read as board#N where the call is about the item, and the correction is noted", g == _model_ids._norm_id(BID(12)) and [k for k, _ in fx] == ["item-id"] and BID(12) in fx[0][1], (g, fx))
+g, fx = collect(lambda: _model_ids._norm_id(BID(12), bare=True))
+check("3 id: …the shown form passes with no note", fx == [] and g == _model_ids._norm_id(BID(12)), fx)
 for given in ("12", "\u00b2", "\u0663", "1 2", ""):
     for bare in (False, True):
-        try: server._norm_id(given, bare=bare); bad = ""
+        try: _model_ids._norm_id(given, bare=bare); bad = ""
         except ToolError as e: bad = str(e)
         except Exception as e: bad = f"CRASH {type(e).__name__}"          # int('\u00b2') raises ValueError
         want_bad = not (bare and given == "12")

@@ -42,7 +42,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import nextlines as NL
+from stackshot.web import server; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -50,7 +50,7 @@ STK = "projects/example"
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 def create(next, sender=MAIN, **kw):
     r = server.stackshot_create(subject="[home] a thing", description=DESC, project=STK, sender=sender, next=next, **kw)
-    return server._norm_id(r.split()[1])
+    return _model_ids._norm_id(r.split()[1])
 def upd(gid, sender, **kw): return server._update(gid, sender=sender, **kw)
 def rd(gid): return json.loads(server._path(gid).read_text())
 def nx(gid): return rd(gid)["metadata"].get("next")
@@ -72,7 +72,7 @@ check("create: next is stored as given", nx(g) == K1, nx(g))
 check("create: the writer is the creator, the keeper of record", who(g) == [MAIN], who(g))
 check("create: the pair holds the canonical id, not the name", rd(g)["metadata"]["next_by"][0][0] == U[MAIN], rd(g)["metadata"].get("next_by"))
 refused("create with no next is refused for a session (N6)", lambda: create(""), "has no open step in next")
-g_none = server._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN).split()[1])     # the server's own write is not judged
+g_none = _model_ids._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN).split()[1])     # the server's own write is not judged
 check("create with no next stores neither next nor next_by", "next" not in rd(g_none)["metadata"] and "next_by" not in rd(g_none)["metadata"], rd(g_none)["metadata"])
 
 # ================================================================ two senders each keep their lines
@@ -308,7 +308,7 @@ check("notice: setting a line identical to another session's says nothing about 
 server._tell_woken = _tw
 
 # the migration's own write: a nameless line given a name keeps its writer
-gm = server._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
+gm = _model_ids._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
 upd(gm, GEN, next=f"{GEN}: second")
 it = server._load(gm)
 res = server._migrate_one({"item": gm, "set": {"next": f"{MAIN}: nameless line\n{GEN}: second"}, "drop": [], "expect": it["updated"], "expect_sig": server._migrate_sig(gm, it), "kind": "named"})

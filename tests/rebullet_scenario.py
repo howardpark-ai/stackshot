@@ -60,7 +60,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb
+from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -97,7 +97,7 @@ THICK = ("Move the widget to shelf-2 so it syncs from shelf-1 on its own when sh
          "Nothing is built yet; the first step is a dry run on shelf-2, and then the full sync test, which needs the second disk mounted first.")
 check("2 setup: the fixture text is thick and over 400 characters", len(THICK) > 400 and P(THICK) != "", len(THICK))
 out = server._create(subject="[home] a thick create", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
-gid = re.search(r"created (\S+) ", out).group(1); stored = server._load(server._norm_id(gid))
+gid = re.search(r"created (\S+) ", out).group(1); stored = server._load(_model_ids._norm_id(gid))
 check("2 note: the default writes the thick description and says so in the reply", stored["description"] == THICK and "(note: description has a paragraph of" in out and "short `- ` bullets, one line each" in out, out[:900])
 out = server._create(subject="[home] a bulleted create", description=DESC, project="projects/alpha", owner="home-front", next="home-front: go")
 check("2 note: bullets draw no note", "description has" not in out and "(note: description" not in out, out[:600])

@@ -40,7 +40,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server
+from stackshot.web import server; from stackshot.model import ids as _model_ids
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = lambda: None
 
@@ -54,7 +54,7 @@ def create(desc="- Goal: A thing\n- It lives here\n- Done when done", **kw):
     if not kw.get("next") and "ask" not in kw:
         kw["next"] = f"{MAIN}: carry on"          # an open item has an open step (N6): a create with no next of its own gets a named one
     r = server.stackshot_create(subject=kw.pop("subject", "[home] a thing"), description=desc, project=STK, owner=MAIN, **kw)
-    return r, server._norm_id(r.split()[1])
+    return r, _model_ids._norm_id(r.split()[1])
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)

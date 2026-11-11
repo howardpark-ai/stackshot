@@ -52,7 +52,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.fleet import client
+from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
@@ -69,13 +69,13 @@ def q(machine=None, **kw):
     return server._client_post(machine or me, "question", {k: v for k, v in b.items() if v is not None})
 def items():
     return sorted(p_.stem for d in (T / "store").iterdir() if d.is_dir() for p_ in d.glob("*.json") if p_.stem.isdigit() and p_.stem != "1")
-def item(shown): return server._load(server._norm_id(shown))
+def item(shown): return server._load(_model_ids._norm_id(shown))
 n0 = len(items())
 
 # ---- 1. a question filed over the client API
 st, out = q()
 check("filed: 200 with the item's id as shown, the project's key and its -main agent", st == 200 and out["project"] == "projects/alpha" and out["owner"] == "home-sparrow-main" and out["repeat"] is False
-      and out["item"] == server._gh.shown(server._norm_id(out["item"])), (st, out))
+      and out["item"] == server._gh.shown(_model_ids._norm_id(out["item"])), (st, out))
 it = item(out["item"]); m = it["metadata"]
 check("the item is open, needs = decision, with the ask and the two options (one recommended)", it["status"] == "open" and m["needs"] == ["decision"] and m["ask"] == ASK
       and m["options"] == OPTS, (it["status"], m))
@@ -213,20 +213,20 @@ st, r4c = q(machine="home-other", request_id="park-17")
 check("…and each machine's repeat is its own item again", r4c["item"] == r4b["item"] and r4c["repeat"] is True and len(items()) == n1 + 3, r4c)
 st, r5 = q(request_id="park-18"); st, r6 = q()
 check("another request id files a new item each time", len({r1["item"], r5["item"], r6["item"]}) == 3 and len(items()) == n1 + 5 and r6["repeat"] is False, (r5, r6))
-check("the triple is kept in the server's request map", server._gh.resolve(server._requests()[f"question\x1f{me}\x1fq-script\x1fpark-17"]) == server._norm_id(r1["item"]), list(server._requests())[-3:])
+check("the triple is kept in the server's request map", server._gh.resolve(server._requests()[f"question\x1f{me}\x1fq-script\x1fpark-17"]) == _model_ids._norm_id(r1["item"]), list(server._requests())[-3:])
 st, rg = q(project="gamma", request_id="park-19")
 check("a refused call remembers nothing: after the project is fixed the same id files", st == 409 and "park-19" not in " ".join(server._requests()) and q(request_id="park-19")[0] == 200)
 # a stale entry: the mapped item is gone -> filed anew, the map follows
-gone = server._path(server._norm_id(r5["item"])); gone.unlink()
+gone = server._path(_model_ids._norm_id(r5["item"])); gone.unlink()
 n2 = len(items()); st, r7 = q(request_id="park-18")
 check("a request id whose item no longer exists files anew (no previous entry), and the map now names the new item", st == 200 and r7["repeat"] is False and r7["item"] != r5["item"] and len(items()) == n2 + 1
-      and server._gh.resolve(server._requests()[f"question\x1f{me}\x1fq-script\x1fpark-18"]) == server._norm_id(r7["item"]), (st, r7))
+      and server._gh.resolve(server._requests()[f"question\x1f{me}\x1fq-script\x1fpark-18"]) == _model_ids._norm_id(r7["item"]), (st, r7))
 check("…and the same id again is a repeat of that new item", q(request_id="park-18")[1]["item"] == r7["item"])
 # the tool's own request_id, same fix
 tk = dict(subject="[home] a tool thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", request_id="tool-req-1", next="home-sparrow-engineer: carry on")
-t1 = server.stackshot_create(**tk); tg = server._norm_id(t1.split()[1]); server._path(tg).unlink()
+t1 = server.stackshot_create(**tk); tg = _model_ids._norm_id(t1.split()[1]); server._path(tg).unlink()
 t2 = server.stackshot_create(**tk)
-check("the create tool: a request id whose item is gone creates anew instead of failing", t2.startswith("created ") and server._norm_id(t2.split()[1]) != tg, t2[:120])
+check("the create tool: a request id whose item is gone creates anew instead of failing", t2.startswith("created ") and _model_ids._norm_id(t2.split()[1]) != tg, t2[:120])
 # concurrency: one triple from many threads is one item; different ids from many threads all land in the map
 import threading
 n3 = len(items()); res = []
@@ -248,7 +248,7 @@ import datetime as _dt
 def W(ts): return _dt.datetime.fromtimestamp(ts, server.ZONE).isoformat(timespec="seconds")      # the line's fourth field
 def TS(i): return 1_800_000_000 + 100 * i
 def put_answers(shown, *answers):
-    gid = server._norm_id(shown); it = server._load(gid)
+    gid = _model_ids._norm_id(shown); it = server._load(gid)
     it["metadata"]["answers"] = [{"ts": TS(i), "via": "board", **a} for i, a in enumerate(answers)]; server._save(gid, it)
 st, ct, body = server._client_get("answer", {"key": out["item"]})
 check("get answer: an empty body before he answers", st == 200 and body == "", (st, body))
@@ -269,7 +269,7 @@ put_answers(out["item"], {"kind": "decision", "choice": "Keep", "text": ""})
       "answers": [{"ts": 1.0, "kind": "decision", "choice": "Go", "text": "ok", "via": "board"}]}}))
 for form in ("a64", "A64"):
     check(f"get answer: an older item's id ({form}) is read as the tools read it", server._client_get("answer", {"key": form}) == (200, "text/plain; charset=utf-8", f"decision\tGo\tok\t{W(1.0)}\n"), server._client_get("answer", {"key": form}))
-sid_new = server._norm_id(out["item"])
+sid_new = _model_ids._norm_id(out["item"])
 check("get answer: the store form of a new item's id (s<n>) works as well as the form shown", server._client_get("answer", {"key": sid_new})[2] == server._client_get("answer", {"key": out["item"]})[2], sid_new)
 st, ct, body = server._client_get("answer", {"key": f"board#{BID_A}"}); check("get answer: an item that does not exist is 404", st == 404, (st, body))
 st, ct, body = server._client_get("answer", {"key": "nonsense"}); check("get answer: a malformed id is 404", st == 404, (st, body))
@@ -380,7 +380,7 @@ from stackshot.web.ui import render as ui_render
 from stackshot.github import ghsync as G
 st, pv = q(sender="nightly-job")
 LINE = f"Filed by nightly-job (a script on {me})"
-check("the item page shows the line that says who filed it", LINE in ui_render.Board(str(T / "store")).item_html(server._norm_id(pv["item"])), pv)
+check("the item page shows the line that says who filed it", LINE in ui_render.Board(str(T / "store")).item_html(_model_ids._norm_id(pv["item"])), pv)
 check("…and the description ends with it, as a bullet", item(pv["item"])["description"].splitlines()[-1] == "- " + LINE, item(pv["item"])["description"])
 def write_toml(sync):
     t = (T / "stackshot.toml").read_text(encoding="utf-8"); t, n = re.subn(r'(?m)^sync = (true|false)', f'sync = {"true" if sync else "false"}', t); assert n == 1
@@ -391,7 +391,7 @@ try:
     before_jobs = set(p_.name for p_ in G.pending())
     st, pm = q(sender="nightly-job")
     new_jobs = [p_ for p_ in G.pending() if p_.name not in before_jobs]
-    gid_pm = server._norm_id(pm["item"])
+    gid_pm = _model_ids._norm_id(pm["item"])
     check("with the mirror on, filing a question queues one job for the new issue and it is the script's item", st == 200 and len(new_jobs) == 1 and json.loads(new_jobs[0].read_text(encoding="utf-8"))["gid"] == gid_pm, (st, [p_.name for p_ in new_jobs]))
     body_md = G.body_of(gid_pm, server._load(gid_pm))
     check("…the GitHub issue body carries the same line (the description is in it) and no Ask or Options section", LINE in body_md and "### Ask" not in body_md and "### Options" not in body_md, body_md[:400])
