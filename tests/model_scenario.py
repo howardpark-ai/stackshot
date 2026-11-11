@@ -173,7 +173,7 @@ shown = lambda g: "board#" + g[1:]
 W_ = lambda mod: model.words(mod, lab, shown)
 check("words: alive, the owner the mover, with then", W_(D(state="your-call", needs=["decision", BACK], ask=ASK, mover="oliver", then=OTHER)) == f"model: alive · mover {OWN} (then ops-other)", W_(D(state="your-call", needs=["decision", BACK], ask=ASK, mover="oliver", then=OTHER)))
 check("words: …defaulted fields are named at the end", W_(D(state="your-call", needs=["decision", BACK], ask=ASK)) == f"model: alive · mover {OWN} (then ops-back) · derived: mover, then", W_(D(state="your-call", needs=["decision", BACK], ask=ASK)))
-check("words: alive with an agent mover and a check-back", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)) == f"model: alive · mover ops-back · check-back {FUT}", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)))
+check("words: alive with an agent mover and a backstop wake", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)) == f"model: alive · mover ops-back · backstop {FUT}", W_(D(state="doing", expected_by=day(2), needs=[BACK], mover=BACK, wake=FUT)))
 check("words: waiting on a time", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)) == f"model: waiting on a time (wake {FUT}) · mover ops-back", W_(D(needs=[BACK], hold=True, wake=FUT, wait_kind="time", post_wake_mover=BACK)))
 check("words: …derived kind and post-wake mover named", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")) == "model: waiting on the close of board#18 · mover ops-back · derived: wait_kind, post_wake_mover", W_(D(state="blocked", needs=[BACK], after=["a18"], supplies="x")))
 check("words: an anchor wait, a relay wait, a closed item",

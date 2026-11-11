@@ -1,6 +1,6 @@
 """machine_anchor.py: a machine of the fleet as an anchor.
 
-An item whose open step needs a machine that is offline used to sit on a date check-back long after the machine was back; only a `box_online <machine>` event wait turned
+An item whose open step needs a machine that is offline used to sit on a date long after the machine was back; only a `box_online <machine>` event wait turned
 an item, one machine per item, and only when its mover had set it by hand. A machine anchor is the standing form: the anchors tool takes `machine:<name>` beside the URLs
 (`anchors(project, add=["machine:laptop"], items=["board#N"])`), and every item the anchor counts for has its mover told, once, each time that machine checks in again
 (offline to online). An item may name several machines; each notice says which one came back. The item is not turned and not saved: a machine anchor is a notice, never a wait.

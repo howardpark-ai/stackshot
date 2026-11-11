@@ -378,13 +378,20 @@ check("5.14 the next_defers refusal says a bare date makes the item wait until t
       "is a reminder that leaves the item active" not in defer14 and "until=YYYY-MM-DD makes the item wait until then (outside a hand-off the date parks the item" in defer14, None)
 states14 = _pl14.Path(_st14.__file__).read_text(encoding="utf-8")
 check("5.14 the parked state's missing-field hint no longer says a wake alone is never a park", "a wake alone is a reminder, never a park" not in states14 and "a date alone makes the item wait until then, outside a hand-off" in states14, None)
-stale14 = [str(f.relative_to(root14)) for f in (root14 / "stackshot").rglob("*.py")
-           if any(x in f.read_text(encoding="utf-8") for x in ("a wake alone is a reminder", "A wake alone is a reminder", "is a reminder that leaves the item active", "check-back reminder, and the item stays alive"))]
-check("5.14 no stackshot source still says a wake alone is a reminder (the comments and docstrings too)", not stale14, stale14)
-phrases14 = {str(f.relative_to(root14)): [x for x in ("shows no wait", "show no wait") if x in f.read_text(encoding="utf-8")] for f in (root14 / "stackshot").rglob("*.py")}
-check("5.14 no stackshot source says a wake alone shows no wait (the get and brief text, the update description, comments)", not any(phrases14.values()), {k: v for k, v in phrases14.items() if v})
-served14 = [r for r in ("stackshot/web/server.py", "stackshot/waits/self_wait.py", "stackshot/model/model_guards.py", "stackshot/model/states.py") if "check-back" in (root14 / r).read_text(encoding="utf-8")]
-check("5.14 no served text or prompt (server.py, self_wait.py, model_guards.py, states.py) still calls a date a check-back", not served14, served14)
+import re as _re14
+OLD14 = _re14.compile("|".join((r"alone (?:is|was|stays) (?:only |just )?a (?:plain )?reminder", r"is a reminder that leaves the item active", r"check-back reminder", r"never a park", r"(?:wake|date) (?:that )?only reminds",
+                                r"reminder wakes?\b", r"shows? no wait", r"a reminder, never", r"check-back", r"wake[^.\n]{0,60}is a (?:plain )?reminder", r"reminder[^.\n]{0,40}leaves (?:it|the item) (?:on agent|in its lane|active)")), _re14.I)
+hits14 = []
+for f14 in sorted([*(root14 / "docs").glob("*.md"), *[x for x in (root14 / "stackshot").rglob("*") if x.is_file() and x.suffix not in (".pyc",)]]):
+    try:
+        t14 = f14.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        continue
+    for n14, l14 in enumerate(t14.split("\n"), 1):
+        m14 = OLD14.search(l14)
+        if m14:
+            hits14.append(f"{f14.relative_to(root14)}:{n14}: {l14[max(0, m14.start() - 40):m14.end() + 40]}")
+check("5.14 no doc (docs/*.md) or file under stackshot/ still teaches the old model: a wake alone is a reminder or never a park, a check-back, a reminder wake, a date that shows no wait", not hits14, hits14[:6])
 # what the update description now says about a basis is what the guard does: a bare date within the cap refuses one, a hold's wake and a date past the cap take one
 item(94, needs=[BACK]); item(95, needs=[BACK]); item(96, needs=[BACK])
 refused("5.14 a bare date within the cap refuses a wait_basis as not needed", lambda: bupd(94, until=w(3), wait_basis=f"the vendor ships {w(3)}"), "wait_basis is not needed", "a wait on its own")

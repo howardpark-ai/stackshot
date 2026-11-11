@@ -1020,6 +1020,24 @@ finally:
 check("15.1f a reading that fails counts as a hand-off (fail closed)", direct_ is True, direct_)
 check("15.1f …the failure is logged, naming that the date stays a backstop", "backstop not judged: RuntimeError: forced" in _err.getvalue() and "the item stays active" in _err.getvalue(), _err.getvalue()[-300:])
 check("15.1f …and a write whose reading fails keeps its date as the wake and leaves the item active", mt(149).get("wake") == FUT and not mt(149).get("until") and not server._is_parked(rd(149)), mt(149))
+# 15.1g a failed reading leaves a stored bare until untouched (no "ends that wait") and the reply says the reading failed
+item(163, mover="home-front"); server.stackshot_update("a163", sender="home-front", until=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
+server._ho.detect = _raising_detect
+try:
+    with _cl.redirect_stderr(_io.StringIO()):
+        out163 = server.stackshot_update("a163", sender="home-send", needs=["team-back"])      # a hand-off the derived mover shows: no hand-off line in next, so the reading itself runs
+finally:
+    server._ho.detect = _real_detect
+check("15.1g the stored until stays as it was, and the item stays parked on it", mt(163).get("until") == FUT and not mt(163).get("wake") and server._is_parked(rd(163)), mt(163))
+check("15.1g …the reply says the hand-off reading failed and the wait was kept, never that the hand-off ends it",
+      "the hand-off reading failed" in out163 and f"the wait until {FUT} is kept as it was" in out163 and "this hand-off ends that wait" not in out163, out163[-500:])
+item(164); server._ho.detect = _raising_detect
+try:
+    with _cl.redirect_stderr(_io.StringIO()):
+        out164 = server.stackshot_update("a164", sender="home-send", next="home-send: do the thing now", wake=FUT, wait_reason="the nightly run finishes at 03:00 tomorrow")
+finally:
+    server._ho.detect = _real_detect
+check("15.1g a new date whose reading failed is kept as the wake, and the reply says the reading failed", mt(164).get("wake") == FUT and "the hand-off reading failed, so the date is kept as it was given" in out164, (mt(164), out164[-400:]))
 upd(90, "home-peer2", mover="home-peer2", next="home-peer2: carry on")
 check("15 session: the mover writing itself in as the mover takes it, the record stays its own", ho(90).get("to") == "home-peer2" and not stale_now(90), ho(90))
 # 15.2 a session makes ITSELF the mover over a record to someone else: the old record ends (no record for a self-naming)

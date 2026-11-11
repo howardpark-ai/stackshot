@@ -148,7 +148,7 @@ check("2 due_at: a wake still ahead counts nothing from `now`; one that has pass
 # ---- 3. the evidence says the wake only reminds
 ahead = dict([quiet(60, 50, wake=W_AHEAD)]); past = dict([quiet(61, 50, wake=W_PAST)])
 d_ahead = SL.findings(ahead, now, env())[0][0]["detail"]; d_past = SL.findings(past, now, env())[0][0]["detail"]
-check("3 a bare wake ahead: the finding says the wake only reminds and what would park the item", d_ahead.startswith("no write for 50 minutes and a wake that only reminds and does not park the item") and "wait_basis" in d_ahead, d_ahead)
+check("3 a bare wake ahead: the finding says the wake is only a hand-off backstop and no wait, and what would make it one", d_ahead.startswith("no write for 50 minutes and a wake kept as a hand-off's backstop, which is no wait") and "set a wait with until" in d_ahead, d_ahead)
 check("3 a bare wake that passed: the finding says the wake has passed and asks for a new date or a wait, not for a hold with that wake", d_past.startswith("no write for 50 minutes and a wake that has passed (write the item, set a new date or a wait") and "hold it with the wake" not in d_past, d_past)
 bp = dict([quiet(62, 50, wake=W_PAST)]); bp["a62"]["metadata"]["wait_basis"] = BASIS(W_PAST)
 d_basis = SL.findings(bp, now, env())[0][0]["detail"]
@@ -372,7 +372,7 @@ st = quiet(122, 50, until=W_AHEAD, phase="alive")
 shown_st = MD.shown_waiting(st[1], now)
 if not shown_st:
     d_st = SL.findings(dict([st]), now, env())[0]
-    check("10 a stored until read as on agent (a stale alive stamp) reaches the wake branch: found, the evidence names it as a wake that only reminds", len(d_st) == 1 and "a wake that only reminds" in d_st[0]["detail"], d_st)
+    check("10 a stored until read as on agent (a stale alive stamp) reaches the wake branch: found, the evidence names it as a wake that only reminds", len(d_st) == 1 and "a wake kept as a hand-off's backstop" in d_st[0]["detail"], d_st)
 else:
     print("note: a stored until always shows the item waiting here, so `silent`'s wake_value branch is reached by a wake alone only")
 

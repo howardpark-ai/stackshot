@@ -273,7 +273,7 @@ def reads_as_wait(text: Any) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------------------------------------------- a wake alone whose next waits for that date
+# ---------------------------------------------------------------------------------------------------------------- a bare date whose next waits for that date
 # "Work moving in real time is on agent, however long it takes. A wait-and-see window the work itself needs is waiting (parked)." A bare date is a wait until it outside a hand-off (the board lists the
 # item as waiting); a wake the item still carries as one (a hand-off's backstop, or one stored before `until`) leaves it on agent, and when the item's next says the work waits for that date, the window
 # is a park. A note on the reply, never a refusal.
@@ -338,7 +338,7 @@ def window_line(text: Any, wake: Any) -> str:
     return _window_hit(text, wake)[0]
 
 
-# ---------------------------------------------------------------------------------------------------------------- a wake alone whose own step is timed
+# ---------------------------------------------------------------------------------------------------------------- a bare date whose own step is timed
 # The window note above reads a next that waits "until / after" the wake's day. Two more ways a mover's step waits and the item sits on agent with a wake alone: the step OPENS with a time at the
 # wake's own hour or day ("at 03:00 install the config", "on Mar 3rd ...", "tomorrow at 9 ..."), or it starts on an outside event ("when the next release lands, check ...", "once the vendor
 # replies ..."). Same kind of note on the reply, never a refusal; the server decides who the mover is and whether another party's step is in flight (server._wake_step_note). A time or day
@@ -1011,7 +1011,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                              f"(when it is unset, the first session in needs, else the project's builder or -main agent, takes it)." + drop_hint)
         on_until = until_wait or bool(_wt.stored_until(m))
         stated_time = clean(m.get("wait_kind")).lower() == "time" or hold_given
-        wake = "" if on_until and not (stated_time and date_given) else clean(_wt.wake_value(m))      # a wait on a date alone carries its reason as a reminder's wake did: wait_reason (the self-wait gate). A time wait stated as one (wait_kind=time, or hold=true in this write) carries the basis or his words when this write gives its date, as a hold's wake does, written as wake or as until; a date the server chose (a kind with no date) or one stored earlier is not rejudged
+        wake = "" if on_until and not (stated_time and date_given) else clean(_wt.wake_value(m))      # a wait on a date alone carries its reason as a bare wake did: wait_reason (the self-wait gate). A time wait stated as one (wait_kind=time, or hold=true in this write) carries the basis or his words when this write gives its date, as a hold's wake does, written as wake or as until; a date the server chose (a kind with no date) or one stored earlier is not rejudged
         if w.kind == "time" and wake:
             quote = str(_wt.words_of(m).get("quote") or "")
             if not (w.basis or (quote and has_wait_words(quote))):

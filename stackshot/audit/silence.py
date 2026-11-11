@@ -136,7 +136,7 @@ def silent(item: dict[str, Any], meta: dict[str, Any], mover: str, after_open: A
             if wake is not None and wake <= now:      # a passed wake, with a wait_basis or without (the dates pass words the same case "past its wake"): holding with that wake would not help, a new date or a wait would
                 what = "a wake that has passed (write the item, set a new date or a wait, or reword the step)"
             else:
-                what = ("a wake that does not cover the step in hand" if _overdue(item, meta, mover, now) else "a wake that only reminds and does not park the item") + " (write the item, hold it with the wake and a wait_basis, store a wait, date the step or reword it)"
+                what = ("a wake that does not cover the step in hand" if _overdue(item, meta, mover, now) else "a wake kept as a hand-off's backstop, which is no wait") + " (write the item, set a wait with until, date the step or reword it)"
         return f"no write for {minutes(now - last)} and {what}"
     return ""
 
