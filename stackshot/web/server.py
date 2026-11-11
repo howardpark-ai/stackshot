@@ -143,6 +143,7 @@ from stackshot.waits import ladder as _ladder  # noqa: E402  — the one ladder 
 from stackshot.waits import mover_state as _mover_state  # noqa: E402  — the item's effective mover (the pane half moved to liveness.py), shared by the stall pass and the audit
 from stackshot.fleet import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
 from stackshot.model import activity as _activity  # noqa: E402  — the item's `activity` clock: when something real last happened on the work, and which saves count (activity.py)
+from stackshot.model import progress as _progress  # noqa: E402  — the item's `progress` clock: when the work last moved (a step marked, a state change, a merge), not when it was last written to (progress.py)
 from stackshot.core import runner as _minute  # noqa: E402  — the minute set's one thread and one lock (runner.py)
 from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line a front agent's notice always leaves on the item (quiet.py)
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
@@ -718,6 +719,18 @@ def _stamp_activity(item: dict[str, Any], before: dict[str, Any] | None, writer:
         print(f"activity: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def _stamp_progress(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
+    """Move the item's `progress` clock when this save is progress (a step marked done or dropped, a state change, a merge recorded), seed it for an item that has none (progress.stamp). Called
+    once the fields are final, after the phase is stamped. A save that is no one's write about the work (the same test as the activity clock's: a migration, an audit, the server's bookkeeping) moves the
+    clock only by a status or phase change. A failure here never fails the write."""
+    try:
+        who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
+        real = _activity.counts(_activity.kind_of(writer, author, kind), who, _audit_writer_names())
+        _progress.stamp(item, before, time.time(), real)
+    except Exception as e:  # noqa: BLE001  — the clock is groundwork for the hand-up of a stuck item; a write is never refused for it
+        print(f"progress: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
 def _stamp_values(gid: str, item: dict[str, Any]) -> tuple[str, str]:
     """(phase, waits_on) of an item as the board shows it now: the one reading (model.view of model.derive, so a held or dated or wait_basis doing item is waiting) worked out by model.stamp_values,
     "" = the key is absent. Both the save's stamp (_phase_stamp) and the stamp pass (_stamp_one) take it from here."""
@@ -786,6 +799,7 @@ def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", auth
     _handoff_his_over(gid, item, author)     # his hand-off ends with his answer, or when the item is no longer his to move
     _handoff_follow(gid, before, item, writer, author)      # the record follows the mover whatever changed it: the server's own save, a script's, his answer; a stale open record ends
     _phase_stamp(gid, item)      # last, once the fields are final: the phase the board shows the item as (alive or waiting) is stored beside the fields it is read from
+    _stamp_progress(item, before, writer, author, activity)      # the progress clock reads the phase just stored: only a step marked, a state change or a merge moves it
     _ip.stamp(item.get("metadata"))      # and the project's permanent id beside the page it is filed on (a key that names a project sets it)
     tmp = p.with_name(f".{p.name}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -9625,6 +9639,16 @@ def _ladder_look() -> float:
         return _ladder.LOOK
 
 
+def _ladder_main_hours() -> float:
+    """`[ladder] main_hours` (4): how long an alive item may go without progress before it is handed up to the project's -main agent, and how long before the same item is handed up again; also the
+    interval of the silent-mover notice. A value that is not a positive number is 4."""
+    try:
+        v = float(_cfg.get("ladder", "main_hours", default=_ladder.MAIN_EVERY / 3600.0))
+        return v if v > 0 else _ladder.MAIN_EVERY / 3600.0
+    except (TypeError, ValueError):
+        return _ladder.MAIN_EVERY / 3600.0
+
+
 def _ladder_silence_on() -> bool:
     """`[ladder] silence` (default false) with `[ladder] enabled`: the silence audit and the dates pass bring an item to the one ladder, and a pane with no turn running no longer does. Only a TOML true.
     Read at use, so a reload turns it on or off."""
@@ -9709,6 +9733,7 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
         before = float(rec.get("main_at") or 0)      # when -main was told about this silence last, if it was
         told = _rmod.when_words(dt.datetime.fromtimestamp(before, ZONE)) if before else ""
         data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
+        meta[_PROGRESS_UP] = now      # one hand-up per stretch: the no-progress path (`_ladder_stuck`) leaves the item alone for its interval after this notice too
         _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else "the project has no -main agent to tell"))
         _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, no -main agent to tell"))
     if to:
@@ -9721,12 +9746,87 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
     return _ladder.MAIN
 
 
+_PROGRESS_UP = "progress_up_at"      # metadata: when the item was last handed up to its -main agent (either way in); the server's own key, no session writes it
+
+
+def _queued_behind(gid: str, who: str, now: float, limit: int = 5) -> str:
+    """What the item is queued behind, in words for the -main agent: the mover's other open items that are alive (not waiting, not the owner's move), by priority and then by age (the older id
+    first), at most `limit` of them. "no other item of its mover" when there is none, "unknown" when the store cannot be read. Read only for an item that is being handed up."""
+    try:
+        rows: list[tuple[str, int, str]] = []
+        for g, _p in _item_files():
+            if g == gid:
+                continue
+            it = _load(g)
+            if it.get("status") != "open" or _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or not _ho_same(_stall_mover(g, it), who):
+                continue
+            pr = str((it.get("metadata") or {}).get("priority") or "p2")
+            rows.append((pr, int(g[1:]) if g[1:].isdigit() else 10 ** 9, g))
+        if not rows:
+            return "no other item of its mover"
+        rows.sort()
+        shown = ", ".join(f"{_gh.shown(g)} ({pr})" for pr, _n, g in rows[:limit])
+        return shown + (f" and {len(rows) - limit} more" if len(rows) > limit else "")
+    except Exception as e:  # noqa: BLE001  — the line is context for -main; an item is never held back for it
+        print(f"ladder: {gid} queue not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return "unknown"
+
+
+def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, str]]", info: "dict[str, dict[str, str]]") -> str:
+    """The second way into the ladder's hand-up (ladder.MAIN): an alive item whose mover has not moved it for `[ladder] main_hours` (4) goes to the project's -main agent, however much the mover has
+    written meanwhile (a status line, a note and a reply are no progress: model/progress.py), in the same message as a silent live mover's item (`rows`, `info`, sent once per -main agent per pass by the
+    tick). A History line on the item says it, and `metadata.progress_up_at` keeps the item from going up again until it has made progress and not moved for the interval again, or the interval
+    has passed. Not taken ("" so it is tried again at the next tick) when the item is no longer open, alive and its mover's, or has moved or been handed up since the tick read it; taken with a History line
+    alone when the project has no -main agent to tell. → "main" when the item was handed up (or the History line written), else ""."""
+    from stackshot.audit import silence as _silence
+    hours = _ladder_main_hours()
+    behind = _queued_behind(gid, who, now)
+    with _ITEM_LOCK:
+        item = _load(gid)
+        meta = item.setdefault("metadata", {})
+        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
+            return ""
+        handed = float(meta.get(_PROGRESS_UP) or 0)
+        if not _progress.due(item, now, hours, handed):
+            return ""
+        to = _ladder_main_to(gid, who)
+        last = _progress.at(item)
+        span = _silence.minutes(now - last)
+        since = _rmod.when_words(dt.datetime.fromtimestamp(last, ZONE))
+        told = _rmod.when_words(dt.datetime.fromtimestamp(handed, ZONE)) if handed else ""
+        data = {"kind": "progress", "subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told, "behind": behind}
+        meta[_PROGRESS_UP] = now
+        _stall.note(meta, now, f"{_session_label(who)} has not moved it for {span} (no step done or dropped, no state change, no merge): " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else "the project has no -main agent to tell"))
+        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that it is not moving" if to else "it is not moving, no -main agent to tell"))
+    if to:
+        line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no progress since {since} ({span}), queued behind {behind}" + (f", told before {told}" if told else "")
+        rows.append((to, gid, line)); info[gid] = data
+    print(f"ladder: {gid} {who} has not moved it for {span}: " + (f"{to} told" if to else "no -main agent to tell"), file=sys.stderr, flush=True)
+    return _ladder.MAIN
+
+
 def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]") -> None:
     """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a notice that asks a front agent to act (tag
     "stall", kind exempt), marked for the owner as every message a front agent takes is, and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
     gids = [g for g, _l in items]
-    every = f"{_ladder.MAIN_EVERY / 3600.0:g} hours"
+    every = f"{_ladder_main_hours():g} hours"
     stop = f"To stop the repeats, write to the item, hold it or set its wait; it comes again in {every} while the item stays silent. "
+    if any(info[g].get("kind") == "progress" for g in gids):      # an item that is not moving (`_ladder_stuck`) is in the notice: its wording, for the silent movers' items too
+        stop_p = f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait); it comes again in {every} while it does not move. "
+        if len(items) == 1:
+            d = info[gids[0]]
+            again = f" {_session_label(to)} was told about this at {d['told']} and it has not moved since." if d["told"] else ""
+            text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has not moved for {d['span']} (since {d['since']}): its mover {d['mover']} has marked no step done or dropped, changed no state and merged nothing in that time; "
+                    f"a status line, a note or a reply does not count. It is queued behind: {d['behind']}.{again} "
+                    f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop_p}→ {_notice_link(gids[0])}")
+        else:
+            head = (f"{_FOR_OWNER}\n[stackshot] {len(items)} items have not moved (no step done or dropped, no state change, no merge; a status line, a note or a reply does not count), "
+                    "or have had no write from live background movers, and the ladder asks no one else:")
+            tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. "
+                    f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait) or write to it if it is silent; each comes again in {every} while it stays as it is. → {_shared.BOARD_URL}")
+            text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
+        _tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
+        return
     if len(items) == 1:
         d = info[gids[0]]
         again = f" {_session_label(to)} was told about this at {d['told']} and nothing has been written since." if d["told"] else ""
@@ -9843,6 +9943,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
     idx = _sessions_index()
     keep: dict[str, dict[str, Any]] = {}
     todo: list[tuple[str, str, str, dict[str, Any]]] = []
+    stuck: list[tuple[str, str]] = []      # (gid, mover) of the alive items that have not moved for `[ladder] main_hours`: handed up to -main after the rungs below (`_ladder_stuck`)
+    main_hours = _ladder_main_hours()
     for gid, _p in _item_files():
         try:
             it = _load(gid)
@@ -9858,6 +9960,8 @@ def _stall_tick(now: float | None = None) -> list[str]:
             who = _stall_mover(gid, it)
             meta = it.get("metadata") or {}
             r = _ho.record_of(it)
+            if ladder_on and who and _ho.is_session_name(who) and _progress.due(it, now, main_hours, float(meta.get(_PROGRESS_UP) or 0)):
+                stuck.append((gid, who))      # alive, a session moves it and nothing has moved for the interval: whatever the pane or the mover's replies say, -main hears of it (below)
             if not who or not _ho.is_session_name(who) or (r and r.get("recovery_at")):
                 continue                 # no session mover, or the fleet's builder was asked already for this record
             if isinstance(r and r.get("cold"), dict) and r["cold"].get("state") == "running" and now - float(r["cold"].get("at") or 0) < _ho.COLD_STALE:
@@ -9900,7 +10004,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
             if quiet:
                 floor = 0.0              # the silence entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
             live = bool(back and (status or not idx or not _handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
-            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
+            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live, main_every=main_hours * 3600.0) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
             if act == "cold" and not _cold_call_on():
                 act = "builder"
             if act:
@@ -9939,6 +10043,15 @@ def _stall_tick(now: float | None = None) -> list[str]:
                     told.add(who)
         except Exception as e:  # noqa: BLE001
             print(f"stall: {gid} step {act} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for gid, who in stuck:      # the items that are not moving go up in the same notice as a silent live mover's (`main_rows`); one already handed up in this pass carries its mark and is left
+        try:
+            if _ladder_stuck(gid, who, now, main_rows, main_info):
+                acted.append(gid)
+                ent = keep.get(gid)
+                if isinstance(ent, dict):
+                    ent["main_at"] = now      # the silent-mover notice counts its repeat interval from this one too
+        except Exception as e:  # noqa: BLE001
+            print(f"stall: {gid} not handed up for not moving: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     with _STALL_LOCK:
         cur = _stall_load()
         gone = {g for g in old_st if g not in cur}       # an entry forgotten while the pass ran (his answer) stays forgotten

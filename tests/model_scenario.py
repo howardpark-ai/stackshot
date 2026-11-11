@@ -298,9 +298,9 @@ server._update("a10", sender="home-front", next="team-back: after a server act")
 check("author: ...the next real write names its writer", wb(10) == ("home-front", U["home-front"]), rd(10))
 item(11, needs=[BACK], subject="[home] never written by a session"); server._save("a11", server._load("a11"))
 item(11, needs=[BACK], subject="[home] never written by a session"); before11 = raw(11); server._save("a11", server._load("a11"))
-check("author: a server save of an item no session wrote adds nothing: no writer, the file as it was (but for the activity clock an item from before that field gains at its first save, seeded with its last update: activity.py, and the stored phase every save of an open item writes)",
-      {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in rd(11).items() if k != "activity"} == json.loads(before11) and rd(11).get("written_by") is None
-      and rd(11).get("activity") == max(json.loads(before11)["updated"], json.loads(before11)["state_updated"]), rd(11))
+check("author: a server save of an item no session wrote adds nothing: no writer, the file as it was (but for the activity and progress clocks an item from before those fields gains at its first save, seeded with its last update: activity.py, progress.py, and the stored phase every save of an open item writes)",
+      {k: ({kk: vv for kk, vv in v.items() if kk != "phase"} if k == "metadata" else v) for k, v in rd(11).items() if k not in ("activity", "progress")} == json.loads(before11) and rd(11).get("written_by") is None
+      and rd(11).get("activity") == max(json.loads(before11)["updated"], json.loads(before11)["state_updated"]) and rd(11).get("progress") == rd(11).get("activity"), rd(11))
 it_ = server._load("a10"); server._save("a10", it_, note="answered", author=(server.OWNER, "board"))
 check("author: the owner's answer on the board records his name and `board`", wb(10) == (server.OWNER, "board"), wb(10))
 server._update("a10", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")

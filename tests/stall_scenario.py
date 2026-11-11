@@ -993,7 +993,7 @@ close(67)
 # ask the mover at 10 minutes of no turn; 30 minutes later, and only then, look at the pane (no turn running: the notice again); the cold call 10 minutes after that, then the project's builder,
 # then the fleet's builder asked once. With the flag off (the default) sections 1 to 21 above are the ladder.
 from stackshot.waits import ladder as LD
-def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, **kw}
+def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main_hours": 10000, **kw}      # main_hours: a value no scenario reaches; the hand-up of an item that has not moved is tests/ladder_progress_scenario.py's
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "no turn running" in p[1]]
 cold("no json at all here"); COLD_MSGS.clear(); set_cfg(); set_stall()
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, as at the top (an earlier section's config swap may have dropped it)

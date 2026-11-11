@@ -106,7 +106,8 @@ def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
 def ladder_cfg(enabled=True, silence=True, **kw):
-    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "silence": silence, **kw}.items() if v is not None}
+    # main_hours defaults to a value no scenario reaches: these sections test the silence ladder's rungs, and an item that has not moved for hours is handed up by the other way in (tests/ladder_progress_scenario.py)
+    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "silence": silence, "main_hours": 10000, **kw}.items() if v is not None}
 set_cfg(); server._cfg.CFG["stall"] = {}
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
 COLD_MSGS = []
@@ -449,7 +450,7 @@ check("10j action: the first rung of a pane-triggered ladder (the ask) still wai
 # ================================================================ 11. a live background mover that stays silent after the look reaches the project's -main agent
 def main_notices(i, to="home-front"): return [p for p in pushes_to(to, f"a{i}") if "background mover" in p[1]]
 def all_main_notices(to="home-front"): return [p for p in pushes_to(to) if "background mover" in p[1]]
-ladder_cfg(True, True); set_live("home-docs"); set_live("team-back")
+ladder_cfg(True, True, main_hours=4); set_live("home-docs"); set_live("team-back")      # section 11 runs with the real 4 hours: the silent mover's notice and the no-progress hand-up share one mark
 # 11a. the incident: a silent item on a live busy background agent: ask, look, then nothing for hours; now -main hears of it, once an interval
 clear_records(); put(70, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
 silence_pass([70]); stk(now0 + 31 * MIN)
