@@ -1,5 +1,5 @@
 """Scenario test for the item's last-activity record, `metadata.last_activity = {"at", "kind", "what"}` (model/last_activity.py, anchors/event_log.py, `server._stamp_last_activity`,
-`server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It only records; nothing reads it, so every other clock must be
+`server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It records; the On agent rows and the item page show it (tests/on_agent_row_scenario.py), and nothing else reads it, so every other clock must be
 exactly as it was. Fixture items, a fake clock (the passes are given their `now`, the saves are stamped from a fake `time`), no live store, no network, no model call.
 
   1  pure: the words for each signal (a step done or dropped, a state change, a merge, created), and what is no activity (a status line, a reply, a note, a confirm, a new or reworded step, a description edit,
@@ -790,6 +790,21 @@ hub_.bindings["github:acme/widgets#34"] = {"home-peer"}
 hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
+
+# ================================================================ 13. the rows show the record, so the minute pass publishes when it moved
+pubs13 = []
+real13 = (server._publish, server._anchor_pass, server._merge_progress_tick, server._event_activity_tick)
+server._publish = lambda: pubs13.append(1); server._anchor_pass = lambda: []; server._merge_progress_tick = lambda: []
+try:
+    server._event_activity_tick = lambda: []; server._minute_anchor_pass(); none13 = len(pubs13)
+    server._event_activity_tick = lambda: ["a1"]; server._minute_anchor_pass(); saved13 = len(pubs13) - none13
+    def boom13(): raise OSError("log gone")
+    server._event_activity_tick = boom13
+    with _Err() as e13: server._minute_anchor_pass()
+    failed13 = len(pubs13) - none13 - saved13
+finally: server._publish, server._anchor_pass, server._merge_progress_tick, server._event_activity_tick = real13
+check("13 the minute pass publishes the board when the event pass saved an item (the rows show the record), not when it saved none, and a failed read publishes nothing and is logged",
+      (none13, saved13, failed13) == (0, 1, 0) and "not read" in e13.text, (none13, saved13, failed13))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

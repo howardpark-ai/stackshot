@@ -733,7 +733,7 @@ def _stamp_progress(item: dict[str, Any], before: dict[str, Any] | None, writer:
 
 def _stamp_last_activity(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
     """Record in `metadata.last_activity` what this save did that is visible activity (last_activity.stamp: the progress clock's own test, with the words for it); the events on a tied pull request come
-    through `_event_activity_tick`. It only records: nothing reads it yet. A failure here never fails the write."""
+    through `_event_activity_tick`. It only records; the On agent rows and the item page show it. A failure here never fails the write."""
     try:
         who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
         _lastact.stamp(item, before, time.time(), _activity.counts(_activity.kind_of(writer, author, kind), who, _audit_writer_names()))
@@ -5992,10 +5992,11 @@ def _minute_anchor_pass() -> None:
         moved = []
         print(f"merge progress: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     try:
-        _event_activity_tick()      # records only (metadata.last_activity), nothing the board shows: no publish for it
-    except Exception as e:  # noqa: BLE001  — groundwork for a later part; the merge pass above is done and the next minute reads again
+        recorded = _event_activity_tick()      # the record the On agent rows and the item page show (metadata.last_activity): the board is published when an item's record moved, or the page would keep the old words until something else moved
+    except Exception as e:  # noqa: BLE001  — the merge pass above is done and the next minute reads again
+        recorded = []
         print(f"last activity: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if released or moved:
+    if released or moved or recorded:
         _publish()
 
 
@@ -16164,8 +16165,8 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 # `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity`, in `_save`) and, here, the events the hub saw on a pull request
 # tied to the item: a CI result, a comment by a person, a review, a merge (anchors/event_log.py: `Hub.emit` appends one line each, as it does for a merge, from what the event holds). The ties are
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
-# ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and
-# shows nothing. A commit or push is not here: the hub emits none.
+# ones left alone). The save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress` and adds no History line; the On agent rows and the item page
+# show the record, so the minute pass (`_minute_anchor_pass`) publishes the board when an item was saved here. A commit or push is not here: the hub emits none.
 _EVENT_ACT_FLOOR_H = _elog.FLOOR_H       # an event older than this is not read (a day of downtime, or a shorter file read again from its start): the record would only fill with old news (the hub applies the same window to the event's own time when it writes the line)
 _EVENT_ACT_AHEAD_S = _elog.AHEAD_S       # …nor one stamped more than this ahead of the server's clock (a skew of minutes is allowed and read as now)
 
