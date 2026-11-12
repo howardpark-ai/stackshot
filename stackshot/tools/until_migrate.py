@@ -389,6 +389,8 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
 def _holds_before(rec: dict[str, Any], e: dict[str, Any]) -> bool:
     """Does the entry's item, as its file stands now, still hold the wait keys the entry planned as `before` (and not `after`), and is it open? A False for anything else, an item that cannot be read included:
     only a clear answer resolves an entry."""
+    # Resolving an unrecorded entry to `same` assumes the server is no longer finishing that batch: an apply started within seconds of a crashed or timed-out batch could mark an entry `same`
+    # while the batch still writes it, and a later undo would then skip it.
     try:
         item, before, after = e.get("item"), e.get("before"), e.get("after")
         if not (isinstance(item, str) and ITEM_RX.fullmatch(item) and isinstance(before, dict) and before and isinstance(after, dict)):

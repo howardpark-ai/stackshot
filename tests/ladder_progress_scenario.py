@@ -661,6 +661,11 @@ check("14 merge_log writers: an over-cap repository or number (an anchor or a li
       caps_bad[:6] == [None] * 6 and caps_bad[6:] == [[], []] and ML.pull_of(f"github:{LONG_BAD}#5") == ("", 0) and ML.pull_of("", f"https://github.com/acme/widgets/pull/{ML.MAX_NUMBER + 1}") == ("", 0), caps_bad)
 check("14 merge_log: the regexes bound their digit runs and name parts, so no pattern can match a run longer than the caps (a 30-digit number is not read as its first ten)", "{1,10}" in ML._ANCHOR.pattern and "{1,10}" in ML._GITHUB_PATH.pattern and "{1,140}" in ML._ANCHOR.pattern
       and ML.pull_of("", f"https://github.com/acme/widgets/pull/{'1' * 30}") == ("", 0), (ML._ANCHOR.pattern, ML._GITHUB_PATH.pattern))
+_eleven = "https://github.com/a/b/pull/10000000001"      # eleven digits whose first ten are at the cap: only the lookahead keeps it from reading as number 1000000000
+_no_look = re.compile(ML._GITHUB_PATH.pattern.replace(r"(?!\d)", ""), re.I).search(_eleven)
+check("14 merge_log: the link pattern's lookahead is what refuses an eleven-digit number whose first ten digits are within the cap (without it the link reads as a/b#1000000000)",
+      r"(?!\d)" in ML._GITHUB_PATH.pattern and _no_look is not None and (_no_look.group(1), int(_no_look.group(2))) == ("a/b", 1000000000)
+      and ML._GITHUB_PATH.search(_eleven) is None and ML.pull_of("", _eleven) == ("", 0), (_no_look and _no_look.groups(), ML.pull_of("", _eleven)))
 check("14 merge_log.normal: the message of a refused line holds no more than the start of a long repo (it rides into a log line)", msg_.startswith("not a merge line: repo='zzz") and "z" * 41 not in msg_ and len(msg_) < 120, msg_)
 errs = _io.StringIO()
 with _cl.redirect_stderr(errs): kept = attempt(lambda: server._merge_rows([{"ts": now0, "repo": deep, "n": 5, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 6, "refs": []}], now0))
