@@ -718,6 +718,18 @@ check("16.12 …and a file at <run dir>/<pass id>/undo.json still takes the run 
 rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_u)), "undo": str(good / "undo.json")}))
 check("16.12 …and once the lock is let go the same undo runs", rc == 0 and "undone" in json.loads((good / "undo.json").read_text()), (rc, e[-200:]))
 
+# 16.12b --undo checks every entry before it does anything: an entry that is no object, or lacks the item and its before and after keys, and a file nested too deep to parse, are each the same clean one-line error and exit 1, creating nothing
+base_v = new_run("undoshape")
+shapes_u = {"empty entry": '{"items": [{}]}', "number entry": '{"items": [1]}', "no before and after": '{"items": [{"item": "g1"}]}', "item not text": '{"items": [{"item": 5, "before": {}, "after": {}}]}',
+            "deep": "[" * 100000}
+bad_shape = {}
+for n_, (k_, body_) in enumerate(shapes_u.items(), 1):
+    d_ = base_v / "run" / f"2020020{n_}-000000-cccccc"; d_.mkdir(parents=True); (d_ / "undo.json").write_text(body_)
+    rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_v)), "undo": str(d_ / "undo.json")}))
+    bad_shape[k_] = rc == 1 and "cannot use" in e and "Traceback" not in e and e.count("\n") == 1 and not (base_v / "run" / ".lock").exists() and not (d_ / "items").exists() and "undone" not in (d_ / "undo.json").read_text()
+check("16.12b --undo of a file with an entry that is no object or lacks item, before and after, or that is nested too deep to parse: exit 1, one clean line, no lock, nothing created or marked", all(bad_shape.values()) and len(bad_shape) == 5, bad_shape)
+check("16.12b …and the same files in the run directory do not stop --apply from naming the unfinished ones (a file that cannot be read is skipped)", UM.unfinished(base_v / "run") == [], UM.unfinished(base_v / "run"))
+
 # 16.13 a batch that gets no 4xx answer may have been written in part: its entries keep no result (the file is named unfinished and an undo can put them back); a 4xx is a refusal before any write
 class WrittenThenLostApp(DirectApp):
     """The server writes the batch and the answer never arrives (a timeout: status 0)."""
@@ -743,6 +755,41 @@ check("16.13 a 5xx before any write: the same record (no result), exit 1, the it
 rc, u, _ = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run_t)), "undo": o["undo"]}))
 check("16.13 …and its undo changes nothing and ends clean", rc == 0 and bytes_of(231) == b231, (rc, u))
 (T / "store/g/231.json").unlink()
+
+# 16.14 an unfinished undo file where the server wrote nothing: an entry whose item is open and still holds the planned `before` (not `after`) is `same`, so the file stops being unfinished; an item that holds `after`, or anything else, stays unresolved
+OLD14 = dict(needs=[BACK], hold=True, wake=day(3))
+def keys14(i): return {k: mt(i).get(k) for k in UP.KEYS}
+put(241, **OLD14); before14 = keys14(241)
+after14 = {**before14, "until": day(3), "wake": None, "hold": None}
+def unrecorded(tag, items, store=None):
+    """An undo file left by a run that died, one folder in a run directory of its own; every entry has no result."""
+    run = new_run(tag); d = run / "20200301-000000-dddddd"; d.mkdir()
+    (d / "undo.json").write_text(json.dumps({"pass_id": d.name, "store": str(store or T / "store"), "items": [{"item": g, "shown": BOARD + g[1:], "before": b, "after": a, "history": "", "dropped": [], "result": None} for g, b, a in items]}))
+    return run, d / "undo.json"
+run14, f14 = unrecorded("holds-before", [("g241", before14, after14)])
+bytes14 = bytes_of(241)
+check("16.14 an entry whose item still holds the planned before is not named unfinished, and `same` is written into the file", UM.unfinished(run14) == [] and [x["result"] for x in json.loads(f14.read_text())["items"]] == ["same"] and bytes_of(241) == bytes14, UM.unfinished(run14))
+old_mig = CFGM["migration"]; CFGM["migration"] = False
+rc, o, e = quiet(UM.apply, run_args(run14))
+CFGM["migration"] = old_mig
+check("16.14 …so a later --apply prints no 'did not finish recording' note for it", "did not finish recording" not in e and "the plan could not be made" in e, e[-300:])
+check("16.14 …and the pass folder reads finished, so the prune may remove it once it is old", not UM.unfinished(run14) and {x["result"] for x in json.loads(f14.read_text())["items"]} == {"same"}, None)
+
+put(242, needs=[BACK], until=day(3), wait_kind="time")      # the pass's own result: the item holds `after`
+b242, a242 = dict(before14), keys14(242)
+put(243, needs=[BACK], until=day(9), wait_kind="time")      # a later save: neither before nor after
+put(244, status="done", **OLD14)                            # closed: not decided here
+put(245, needs=[BACK], hold=True, wake=day(3))              # holds before, but its after is the same as its before: nothing to tell them apart
+run14b, f14b = unrecorded("others", [("g242", b242, a242), ("g243", before14, after14), ("g244", before14, after14), ("g245", before14, dict(before14)), ("g249", before14, after14)])
+left14 = [x["result"] for x in json.loads(f14b.read_text())["items"]]
+check("16.14 an item that holds after, one that holds anything else, a closed one, one whose after equals its before and one with no file stay unresolved, and the file stays unfinished", UM.unfinished(run14b) == [f14b] and left14 == [None] * 5, left14)
+check("16.14 …an unfinished file still counts for a prune: its folder is old and outside the newest five and stays", UM.prune_runs(run14b, T / "store") == [] and f14b.is_file(), None)
+run14d, f14d = unrecorded("path", [("g241", before14, after14)])
+rec14d = json.loads(f14d.read_text()); rec14d["items"][0]["item"] = "../../../x"
+f14d.write_text(json.dumps(rec14d))
+check("16.14 an item id that is no file id (a hand-edited path) is never read: the entry stays unresolved", UM.unfinished(run14d) == [f14d], UM.unfinished(run14d))
+for i_ in (241, 242, 243, 244, 245): (T / f"store/g/{i_}.json").unlink()
+for d_ in (run14, run14b, run14d, base_v): shutil.rmtree(d_, ignore_errors=True)
 
 # 16.9 a front agent's watch_reason goes with the wake when the watchers end the wait (the old wake pass dropped it)
 REASON = "no push reaches this session for the vendor"
