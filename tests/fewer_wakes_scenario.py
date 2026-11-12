@@ -103,7 +103,7 @@ _real_verdict = server._front_verdict
 server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 def cfg(live=True): _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, **({"live": True} if live else {})}
 cfg(True)
-saved = []                                                  # every _save with a note: the item's History line the report becomes
+saved = []                                                  # every writes.save with a note: the item's History line the report becomes
 _real_save = writes.save
 def _spy_save(gid, item_, writer="", note="", author=None, mirror=True, **kw):
     if note: saved.append((gid, note))

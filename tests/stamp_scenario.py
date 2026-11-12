@@ -7,7 +7,7 @@ writes them on the items nobody has saved since, without being an event on the i
   1  kind_stamped_per_case      waits_on equals the kind the board shows for all 23 cases (event too); an alive item has none; phase is right; model.stamp_values says the same
   2  wait_kind_never_added      wait_kind, watches, can_end, basis_wait and derive are identical before and after, per case
   3  only_two_keys_move         each item's JSON without the two keys deep-equals the original (an item with no activity clock gets none)
-  4  no_side_effects            no GitHub job, no notice, no For you or landed row, no hand-off record, no search touch, _save never called; written_by unchanged; the state folder unchanged
+  4  no_side_effects            no GitHub job, no notice, no For you or landed row, no hand-off record, no search touch, writes.save never called; written_by unchanged; the state folder unchanged
   5  closed_untouched           a closed item is byte-identical and answers `refused`, a stale stamp on it included
   6  idempotent                 a second stamp answers `same` for all and rewrites no file
   7  stale_fixed                a stored waiting the fields no longer read is a `fix`: a read shows the stored waiting before and the fields' alive after

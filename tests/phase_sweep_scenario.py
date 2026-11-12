@@ -7,7 +7,7 @@ start and after a config reload the sweep works every open item's pair out again
   1  edge_E1..E3        a stored value goes stale at the edge (E1 the wake coming within dated_wait_min_hours, E2 a wait_basis wake passing, E3 local midnight of the day a dated step waits for): the sweep just
                         before the edge writes nothing, one sweep after it restamps the item, a second writes nothing (bytes and mtimes equal); only the two keys change
   2  edge_E4..E6        E4 an `after` item closed while the old release stands down, E5 an anchor scoped to / taken off an item with no wait_kind, E6 a changed `dated_wait_min_hours` and a config reload
-  3  no_lock            a sweep with nothing to stamp never takes _ITEM_LOCK; one that stamps waits for it
+  3  no_lock            a sweep with nothing to stamp never takes `writes.ITEM_LOCK`; one that stamps waits for it
   4  not_an_event        no save, no GitHub job, no notice, no For you or landed row, no hand-off record, no search touch, no written_by, no state file; no History line on either renderer
   5  closed_untouched   a closed item (a stale stamp on it too) is byte-identical, an unreadable file is skipped
   6  moved              a writer between the read and the replace: `moved`, the write stands, the next sweep stamps it

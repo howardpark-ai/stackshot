@@ -796,7 +796,7 @@ check("12 his hand-off: [model] handoff = false records nothing", not ho(166), h
 set_cfg()
 to_him(34)
 raw_at = json.loads((T / "store/a/34.json").read_text()); raw_at["metadata"].update(needs=["team-back"], mover="team-back"); raw_at["metadata"].pop("ask", None); raw_at["metadata"].pop("then", None)
-(T / "store/a/34.json").write_text(json.dumps(raw_at))          # a stored item no longer his, its record to him still not taken (written outside _save)
+(T / "store/a/34.json").write_text(json.dumps(raw_at))          # a stored item no longer his, its record to him still not taken (written outside writes.save)
 server.stackshot_confirm("a34", sender="team-back")
 check("12 his hand-off: a confirm changes nothing but its clock: the record is not ended by it", not ho(34).get("taken_at") and mt(34)["mover"] == "team-back", ho(34))
 upd(34, "team-back", next="team-back: carry on")
@@ -810,7 +810,7 @@ check("12 his hand-off: a filing write (priority, rename) leaves the hand-off li
 to_him(65)
 upd(65, "team-back", status="completed", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done")
 check("12 his hand-off: a close drops the mover and then, settles nothing and leaves the closed item's record alone", "mover" not in mt(65) and "then" not in mt(65) and not ho(65).get("taken_at") and "handoff:" not in server.stackshot_get("a65"), (mt(65), ho(65)))
-# what a close and a confirm do to an item that stands in his state with then=<agent> and a hand-off to him not yet taken. The close path: _save reaches
+# what a close and a confirm do to an item that stands in his state with then=<agent> and a hand-off to him not yet taken. The close path: writes.save reaches
 # _settle_mover_on_save and _handoff_his_over with a closed item; model.settle returns None for status != open and handoff.pending_his is None for a closed record, so neither hook acts.
 # The mover and then go because of model.DROP_ON_CLOSE, which _update_unlocked applies, not because of settle.
 to_him(35)
@@ -1665,7 +1665,7 @@ done = hot(N0 + 11 * MIN, 1808)
 check("18 G off: a flag turned off mid-ladder gives the item back to the old ladder, which acts on it (the builder)", done == ["a1808"] and mt(1808)["mover"] == "team-back", (done, mt(1808), entry(1808)))
 close_(1808); ladder_cfg(True); cli_row("home-peer", "idle", IDLE17)
 
-check("15 every save of the run: no OPEN record named someone but the item's mover (a wrapper on _save, all sections)", INV_SAVES[0] > 100 and not INV_BAD, (INV_SAVES[0], INV_BAD[:4]))
+check("15 every save of the run: no OPEN record named someone but the item's mover (a wrapper on writes.save, all sections)", INV_SAVES[0] > 100 and not INV_BAD, (INV_SAVES[0], INV_BAD[:4]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

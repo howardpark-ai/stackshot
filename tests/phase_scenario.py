@@ -1,6 +1,6 @@
 """Scenario test for the stored phase (metadata.phase: alive | waiting) — fixture data, no live store, no network, no server socket.
 
-An open item stores what the board shows it as, beside the fields that board reading is made from. Every save writes it (server._phase_stamp, called from the one save path, _save);
+An open item stores what the board shows it as, beside the fields that board reading is made from. Every save writes it (server._phase_stamp, called from the one save path, writes.save);
 model.view takes the alive-or-waiting decision and the kind of the wait from it and from nothing else (an item that stores no usable pair is shown as the writer would store it, and counted). The
 older fields are stored exactly as before. A waiting item also stores `waits_on`, the kind of its wait as the board shows it (time | anchor | item | relay | event),
 beside the phase and under the same rules (tests/stamp_scenario.py is the suite of the pass that stamps it on items nobody has saved since).

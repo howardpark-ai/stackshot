@@ -6,7 +6,7 @@ messages recorded by a fake push, a fake clock (every pass is given its `now`, a
   1  pure: progress.moved (each kind, and what is none), at, stamp, due
   2  4 hours without progress: ONE notice to -main naming the item, the mover, how long it has not moved and what it is queued behind (the mover's other alive items by priority, then age); a History line; the mark
   3  no repeat within the next 4 hours, a repeat after another 4 hours of no progress, never one per pass
-  4  one scenario per kind of progress (step done, step dropped, state change, pull request merged): each starts the 4 hours again from the save that made it, through a real `_save`
+  4  one scenario per kind of progress (step done, step dropped, state change, pull request merged): each starts the 4 hours again from the save that made it, through a real `writes.save`
   5  what is no progress (a status line, a note, a reply, a confirm, a new step): the clock stays, the item goes up as it would have
   6  a busy mover that answers "no change" every 90 minutes (a work line in progress, a note, a reply) is still handed up at 4 hours, once
   7  out of scope: a waiting item and the owner's moves

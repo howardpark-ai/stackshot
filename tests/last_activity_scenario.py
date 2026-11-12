@@ -1,10 +1,10 @@
-"""Scenario test for the item's last-activity record, `metadata.last_activity = {"at", "kind", "what"}` (model/last_activity.py, anchors/event_log.py, `server._stamp_last_activity`,
+"""Scenario test for the item's last-activity record, `metadata.last_activity = {"at", "kind", "what"}` (model/last_activity.py, anchors/event_log.py, `service/writes.py`'s `_stamp_last_activity`,
 `server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It records; the On agent rows and the item page show it (tests/on_agent_row_scenario.py), and nothing else reads it, so every other clock must be
 exactly as it was. Fixture items, a fake clock (the passes are given their `now`, the saves are stamped from a fake `time`), no live store, no network, no model call.
 
   1  pure: the words for each signal (a step done or dropped, a state change, a merge, created), and what is no activity (a status line, a reply, a note, a confirm, a new or reworded step, a description edit,
      the server's own bookkeeping); newest wins; a torn candidate is skipped; a time in the future reads as now; the record never goes back
-  2  a real `_save`: a session's step mark and state change stamp it at the save's time; a status line, a reply and the ladder's own History line (a bookkeeping save) do not; the merge pass's save says "PR n merged"
+  2  a real `writes.save`: a session's step mark and state change stamp it at the save's time; a status line, a reply and the ladder's own History line (a bookkeeping save) do not; the merge pass's save says "PR n merged"
   3  the event log: kinds, a burst is one line per kind, a bot's comment is left out, a line is never written for what names no pull request; `Hub.emit` writes it for a CI result, a comment, a review and a merge
      and for nothing else; the merge log is untouched by a line of another kind
   4  the pass: each kind of event of a tied pull request stamps the right words at the event's time; the same tie rules as a merge (anchored, the body, the item's own words; a project-wide anchor, a waiting item,
@@ -169,7 +169,7 @@ check("1 pr_what: the words for each kind of event (a comment is on #n: the hub 
 closed_ = {"status": "completed", "metadata": {"steps": [step("a", "done", 9)]}}
 check("1 stamp: only an open item has a record", not LA.stamp(closed_, {"status": "open", "metadata": {"steps": [step("a", "open")]}}, 50.0) and "last_activity" not in closed_["metadata"], closed_)
 
-# ================================================================ 2. a real _save
+# ================================================================ 2. a real writes.save
 ASTEP = lambda text, status, at=0: step(text, status, at)
 put(300); put(301); put(302); put(303)
 save_at(now0 + 5 * MIN, 300, lambda d_: d_["metadata"].update(steps=[ASTEP("home-peer: do the thing", "done", now0 + 5 * MIN), ASTEP("home-peer: more", "open")], next="home-peer: more"))

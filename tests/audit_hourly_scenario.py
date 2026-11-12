@@ -272,14 +272,14 @@ for i in (1, 2): put(i, act=90)
 server._silence_tick()
 check("8 …and with `hourly_line` off the same tick writes none", lines(1) == [] and lines(2) == [])
 on()
-real_save = server._save
+real_save = server._writes.save
 def save_fail(gid, *a, **k):
     if gid == "a1": raise OSError("disk full")
     return real_save(gid, *a, **k)
-server._save = save_fail
+server._writes.save = save_fail
 for i in (1, 2): put(i, act=90)
 with _Err() as e8: got8 = tick()
-server._save = real_save
+server._writes.save = real_save
 check("8 one item that cannot be saved stops no other, and the failure is logged", got8 == ["a2"] and "a1 hourly line not written: OSError" in e8.text and lines(2) != [], (got8, e8.text))
 real_hourly = server._hourly_tick
 def boom(**kw): raise RuntimeError("pass failed")

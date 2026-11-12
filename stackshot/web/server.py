@@ -355,7 +355,7 @@ def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
     field or the state is not written, so a store that is clean writes nothing). Every OPEN item that still stores `metadata.rank` loses the field, whatever its value, and one whose stored
     state is the retired `queued` (a state that stood on the rank alone) loses the state, so it reads as derived from its fields (doing for an item in a builder's hands). Nothing else changes: `updated`, `state_updated`, `confirmed` and every other field stay as they were,
     a closed item is not read as a candidate (its record keeps whatever it held), and nothing is posted to GitHub (mirror off).
-    The save is quiet (_NO_SETTLE): no mover is settled and no hand-off record is ended. The item's History says it, because it reads the item's revisions: `rank cleared (was N)` and,
+    The save is quiet (the QUIET write context of `service/writes.py`): no mover is settled and no hand-off record is ended. The item's History says it, because it reads the item's revisions: `rank cleared (was N)` and,
     for a queued item, `state cleared (was queued)`. `apply=False` is the dry run: the same rows, nothing written.
     → [{gid, item, rank, queued}] in id order, the items cleaned (apply) or that would be; `rank` is the stored value or None, `queued` whether the stored state was `queued`."""
     out: list[dict[str, Any]] = []
@@ -436,7 +436,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
     """a live (open) item with no mover, no session in its needs and not on the owner's move used to be moved by whoever created it. It now gets the project's builder, else its -main
     agent, stored as its mover, never the creator (an item that waits has a post-wake mover, not a mover; one on his call is his). Once per start, before the server serves; idempotent (an item
     that has a mover stored, names a session in needs, waits or is his is not touched, so a store with none writes nothing); only metadata.mover changes, the clocks stay and nothing is posted to
-    GitHub (mirror off). The save is quiet (_NO_SETTLE): it records no hand-off and ends none, so a hand-off record that names another mover than the one given here is left for the repair pass
+    GitHub (mirror off). The save is quiet (the QUIET write context of `service/writes.py`): it records no hand-off and ends none, so a hand-off record that names another mover than the one given here is left for the repair pass
     (_handoff_repair_pass), which runs right after. An item whose project names no builder and no -main agent is left and counted in the stderr line.
     `apply=False` is the dry run: the same rows, nothing written. → [{gid, item, project, mover, creator}] in id order, the items given a mover (apply) or that would be; `mover` is "" for the ones no agent can be named for."""
     out: list[dict[str, Any]] = []
@@ -481,7 +481,7 @@ def _session_ids_pass() -> str:
     request is consumed first, so a crash never loops (a request met while the registry is unreadable is consumed too: ask again once it reads). It is
     safe because it runs before the server starts any writer thread or serves a request, so nothing else writes an item meanwhile (not because every
     writer takes the item lock: _update does not); the pass still holds the item lock, which the threads that do take it respect. It writes the undo file (<state>/session-ids-undo-<UTC time>.json: gid, field, old, new) before it touches the first item, and saves each item through
-    _save. A field that no longer holds the value the plan saw (apply) or the value the migration wrote (rollback) is left and said so.
+    `writes.save`. A field that no longer holds the value the plan saw (apply) or the value the migration wrote (rollback) is left and said so.
     Never fails the start: any error is logged and the start goes on. → the one-line summary logged ("" when there was no request)."""
     try:
         rp = _sid.request_path()
@@ -676,7 +676,7 @@ def _stamp_values(gid: str, item: dict[str, Any]) -> tuple[str, str]:
 
 def _phase_stamp(gid: str, item: dict[str, Any]) -> None:
     """Store the phase of an open item (metadata.phase: alive | waiting) and, for a waiting one, the kind of its wait (metadata.waits_on: time | anchor | item | relay | event), worked out from its fields by the one
-    reading the board shows today (model.view of model.derive, so a held or dated or wait_basis doing item is waiting), in the one place every save passes (_save). A closed item is dead and stores neither; an alive
+    reading the board shows today (model.view of model.derive, so a held or dated or wait_basis doing item is waiting), in the one place every save passes (`writes.save`). A closed item is dead and stores neither; an alive
     one stores no waits_on. Nothing else is written: the older fields are stored exactly as the write left them, and the stored values are what the readers take the decision from (model.view reads
     nothing else; the sweep keeps them true). A failure here never fails a write.
     The wait_kind is not added: a stored wait_kind hands an item to the watchers (watchers.watches) and, on a doing item, makes derive read a conflict, so adding one to an item that stores none would change what
@@ -2354,7 +2354,7 @@ def _presence_here(who: str, now: float | None = None, idx: dict[str, Any] | Non
 
 
 def _stamped_at(v: dict[str, Any]) -> float:
-    """When a revision's writer stamp (`written_by`, `written_by_id`) was written: `written_at`, which only a write by a session or the owner sets (_record_writer); a revision from before
+    """When a revision's writer stamp (`written_by`, `written_by_id`) was written: `written_at`, which only a write by a session or the owner sets (`writes.record_writer`); a revision from before
     that field has `updated`. A server save with no writer moves `updated` and leaves the stamp (and `written_at`) as the last real writer left them, so it is never a touch."""
     try:
         return float(v.get("written_at") or v.get("updated") or 0)
@@ -3026,7 +3026,7 @@ def _tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer:
 
 # A builder that hands an item back to its front agent keeper and then closes the same
 # item soon after woke the keeper twice. The hand-back line is now held for [board] handback_hold_seconds (default 180; 0 = sent at once, as before). A close of the item
-# inside the window (any close: _save sees it) drops the held line, so the keeper hears only "closed by …" (_tell_owner_close); a second hand-back
+# inside the window (any close: `writes.save` sees it) drops the held line, so the keeper hears only "closed by …" (_tell_owner_close); a second hand-back
 # of the same item inside the window replaces the first (one line, the latest `next`, the original due time). When the window ends the line is sent
 # if the item is still open and its needs still name the keeper alone; if the item moved on, it is dropped. The held lines are kept in
 # <state>/handback-held.json, so a restart loses none: the runner's fleet tick (every 60 s) sends what is due.
@@ -3783,7 +3783,7 @@ from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_sa
 from stackshot.web.publish import _publish, _publish_every, _publish_if_idle, _publish_now  # noqa: E402  — the debounced publish, its pace and its idle test; the timer is `stackshot.web.publish._PUB_TIMER` (web/publish.py)
 from stackshot.web.board_home import _BOARD_GEN_LOCK, _board_home_drop, _board_home_slot  # noqa: E402  — the kept home of the board's root, its drop and its slots (web/board_home.py)
 from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
-from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `_save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
+from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `writes.save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
 from stackshot.web import project_form as _pform  # noqa: E402,F401  — the New session form's calls that make and list projects and register their agents, with the one lock they share and the page store they write through; a suite sets `PAGE_IO` on this module (project_form.py)
 from stackshot.web.project_form import _FORM_MACHINES, _FORM_SENDERS, _PROJECT_LOCK, _RENAME_NOT_FORM, _RENAMING, _RETIRE_NOT_FORM, _cfg_names, _form_call, _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename_checks, _project_agent_rename_write, _project_agent_retire_checks, _project_agent_retire_write, _project_list, _projects_list  # noqa: E402,F401  — kept on this module as well: the client API's routes, the archive sweep and the hand-off read them, the two wrappers that stay here call the checks and the writes, and the suites read `server._form_call`, `server._PROJECT_LOCK` and `server._RENAMING` (project_form.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
@@ -3897,7 +3897,7 @@ def _ask_owed(meta: dict[str, Any]) -> str:
 # closes an item or answers for him, and it acts on the author's own plain sentence, nothing else a session writes. Everything it does is a line in History and in the reply. A board item the
 # ask waits on being dropped removes nothing: the author's next write to the item carries a line saying so (_ask_after_write).
 def _ask_stamp(item: dict[str, Any], before: dict[str, Any] | None, writer: str) -> None:
-    """_save's step: keep who wrote the ask and when (metadata.ask_rec). A failure here never fails a write."""
+    """`writes.save`'s step: keep who wrote the ask and when (metadata.ask_rec). A failure here never fails a write."""
     meta = item.get("metadata")
     if not isinstance(meta, dict):
         return
@@ -6137,13 +6137,13 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     written: list[str] = []
     for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same):
         try:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 item = _load(gid)
                 line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
-                _save(gid, item, note="audit: hourly line")
+                _writes.save(gid, item, note="audit: hourly line")
             written.append(gid)
             print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
         except Exception as e:  # noqa: BLE001  — one item never stops the others
@@ -8286,7 +8286,7 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
 
 # ----------------------------------------------------------------------------- the hand-off machinery (handoff.py, cold_call.py)
 # An alive item has one mover. A write that changes the effective mover to a session other than the writer records a hand-off on the item (metadata.handoff, handoff.py): who it
-# went to, from whom, when, when it was delivered (a push that came back "delivered": _tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; _save
+# went to, from whom, when, when it was delivered (a push that came back "delivered": _tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; `writes.save`
 # reports to _handoff_on_save). A delivered hand-off not taken in [model] handoff_minutes, one whose recipient's turn ended with no write to it, and a mover whose pane is gone go
 # down section 5 (_handoff_tick): the project's background agent, the cold call, the sender, then a recovery request to the fleet's builder; a background agent that is the mover is reminded once first (handoff.remind), and an anchor scoped to the item counts as taken. [model] handoff = false turns all of it off; [model] pause = true holds the
 # tick, and what is due fires in one batch, one message per recipient, when it is turned off again. The send-time guard (_gate_handoff) refuses a hand-off to a session with no pane.
@@ -8511,7 +8511,7 @@ def _handoff_minutes() -> float:
 
 # ---- recording: every real write
 def _handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None) -> None:
-    """Called by _save right after the writer is stamped: the writer touches the item (a hand-off to it is taken), and a change of the effective mover to someone else makes a
+    """Called by `writes.save` right after the writer is stamped: the writer touches the item (a hand-off to it is taken), and a change of the effective mover to someone else makes a
     hand-off record. Not for the server's own saves (no writer). Never fails a write."""
     if not _handoff_on() or author or not writer or _ho.is_script(writer):
         return      # the server's own save; the owner's board answer (author: _answer_tick covers it); a script's write (cap-words): no session's, so no hand-off
@@ -8532,7 +8532,7 @@ def _handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, An
 
 def _handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | None = None, quiet: bool = False) -> bool:
     """a hand-off to the owner is taken by no write of his own (he writes through the board, whose save carries `author`, or a session relays his answer), so it read "handed to the owner,
-    not yet taken" after he had answered. Called by _save for every save, right after the hand-off record of the write: his answer on the board ends it, and so does any save that leaves the item
+    not yet taken" after he had answered. Called by `writes.save` for every save, right after the hand-off record of the write: his answer on the board ends it, and so does any save that leaves the item
     not his to move (the mover is no longer he, or the item waits, or is closed): the record stays as history, taken then, with the reason. A save that just handed the item to him
     (a new record, or he still the mover) leaves it. Never fails a write. → True when it ended one."""
     try:
@@ -8552,7 +8552,7 @@ def _handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | 
 
 
 def _handoff_follow(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None, quiet: bool = False) -> str:
-    """Called by _save for every save, after the session's own hand-off record (_handoff_on_save) and the owner's (_handoff_his_over): the hand-off record follows the item's effective
+    """Called by `writes.save` for every save, after the session's own hand-off record (_handoff_on_save) and the owner's (_handoff_his_over): the hand-off record follows the item's effective
     mover, whatever path changed it. The invariant: an item has no OPEN record (nobody has taken it) whose `to` differs from its mover, so a record never names a mover the item left.
     A save of the server's own (no writer, no author: a wake that makes the post-wake mover the mover, an event wake, the stall pass, a release of `after`) that changes the mover to
     someone else makes a new record to the new mover, from the server. The record is `no_clock` (the 10-minute take clock runs only on a session's hand-off; a woken mover is timed by the
@@ -9650,7 +9650,7 @@ def _alive_path() -> Path:
 def _alive_load() -> dict[str, float]:
     """When the stall pass first saw each open item due (not waiting, not the owner's move) in its current stretch of being alive: {gid: epoch}. The hand-up of an item that is not moving counts from the
     later of its last progress and this (`progress.due`), so an item parked for a day and then alive again is not handed up for the park. The pass keeps it: the phase sweep writes the stored phase around
-    `_save` and writes the two keys only, so it cannot restart the progress clock itself."""
+    `writes.save` and writes the two keys only, so it cannot restart the progress clock itself."""
     try:
         with open(_alive_path(), encoding="utf-8") as f:
             d = json.load(f)
@@ -11686,7 +11686,7 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     comments, via github with the comment's id and url; no session's tool writes there), and the server copies the quote from that entry. The entry must
     read as a park (waiting.park_words: "Approve" or "sent" is his but no park), must stand behind the current wake (waiting.entry_pairs: given since the move that set it, or the last thing before it, no state move between them by the store's git history, else within 24 hours), the item must be open with a wake, and `quote`, when the caller sends
     it, must be the entry's text (a stale pick is refused). `commit` (the store commit that first held the entry) is kept as provenance. The record
-    is a filing edit made under the item lock through _save: no clock moves, History gets one line (the store's git, render.Board.item_log). → {"item", "wake", "quote", "source", "action": set | already}; refusals raise ToolError."""
+    is a filing edit made under the item lock through `writes.save`: no clock moves, History gets one line (the store's git, render.Board.item_log). → {"item", "wake", "quote", "source", "action": set | already}; refusals raise ToolError."""
     by = _script_sender(spec, machine)
     gid = _norm_id(str(spec.get("item") or ""))
     # The cheap gates first, on a read taken before the lock: the entry must be his and read as a park. Only then the store's history is read (a
@@ -11778,7 +11778,7 @@ def _state_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
 
 # ----------------------------------------------------------------------------- the migration onto the item model (migration.py, tools/migrate_model.py)
 # tools/migrate_model.py PLANS (the items, the guards' residue, the cold call's reads); this is where the plan is APPLIED, so the server stays the one writer: POST /client/migrate, the
-# machine token's route like /client/state. Each planned write is a filing edit made under the item lock through _save, author `migration`, so the History,
+# machine token's route like /client/state. Each planned write is a filing edit made under the item lock through `writes.save`, author `migration`, so the History,
 # the search and the For you list update as for any write, and no clock moves. It is not `_update`: it records no hand-off (the author is a script's), tells nobody (no needs notice, no
 # page debt) and sends nothing. While the pass runs the server holds the board-wide pause itself (watchers.hold: in this process, renewed by every batch, gone after a few minutes if the
 # script dies), so no wake fires, no wait ends, no hand-off clock runs and the checks and the For you ticks stand still; `end` lifts it and runs one wake pass, so
@@ -12203,7 +12203,7 @@ def _stamp_commit(p: Path, tmp: Path, h0: str) -> bool:
 
 
 def _stamp_write(p: Path, raw: dict[str, Any], h0: str, edits: dict[str, Any]) -> bool:
-    """Write `raw` (the item as its file holds it) with the two stamped keys set to `edits` (None drops a key): nothing else in the file changes, and none of _save's other work is done (no activity seed, no mover
+    """Write `raw` (the item as its file holds it) with the two stamped keys set to `edits` (None drops a key): nothing else in the file changes, and none of `writes.save`'s other work is done (no activity seed, no mover
     settled, no hand-off record, no for-you or landed row, no search or GitHub job: a stamp is not an event on the item). The metadata keeps its order; a new key goes last. → False when the file moved (_stamp_commit)."""
     _ro.guard("item write")
     meta = raw["metadata"]
@@ -13628,7 +13628,9 @@ def stackshot_confirm(item_id: str, sender: str = "") -> str:
     gid = _norm_id(item_id, bare=True)
     item = _load(gid)
     item["confirmed"] = time.time()
-    _writes.save(gid, item, writer=_session_id(sender) if sender.strip() else _holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)      # a bare confirm moves `confirmed` only, never `activity` # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
+    # a bare confirm moves `confirmed` only, never `activity`
+    # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
+    _writes.save(gid, item, writer=_session_id(sender) if sender.strip() else _holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
     _publish()
     item["gid"] = gid
     at = _rmod.when_words(dt.datetime.fromtimestamp(item["confirmed"], ZONE))
@@ -16013,7 +16015,7 @@ def _proof_tick(now: float | None = None) -> list[str]:
 # (that is the settle path's, `_proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
 # reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
 # body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
-# naming the pull request. The pass stores the key in `metadata.merged_seen` through `_save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
+# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
 _MERGE_PROG_KEEP = 20       # keys kept in an item's merged_seen (as released_told keeps its last 20)
 
 
@@ -16150,7 +16152,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 
 
 # ----------------------------------------------------------------------------- the last-activity record: events on a tied pull request
-# `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity`, in `_save`) and, here, the events the hub saw on a pull request
+# `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity` in `service/writes.py`, run by `writes.save`) and, here, the events the hub saw on a pull request
 # tied to the item: a CI result, a comment by a person, a review, a merge (anchors/event_log.py: `Hub.emit` appends one line each, as it does for a merge, from what the event holds). The ties are
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
 # ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and

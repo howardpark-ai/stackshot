@@ -3,7 +3,7 @@ and the text of a write with a bare store id (g7) written as the item's shown id
 
 The store's path (`STORE`), the list of its item files, the next item id and the write of an item file are core/store.py's (the owner of `STORE`; a suite that points the server at a copy of the
 store sets it there). The reads of one item are here, in the service layer, because they resolve a moved item's old id through github/ghsync and read the item through model/ (the project it
-is read through, the stored forms of needs and hold), both layers above core/, which imports neither. `_save`, the one writer, is `save` in service/writes.py, which reads the file through `_path`.
+is read through, the stored forms of needs and hold), both layers above core/, which imports neither. The one writer of an item is `save` in service/writes.py, which reads the file through `_path`.
 server.py imports `_load`, `_path`, `_shown_ids`, `_legacy_hold` and `_legacy_needs` for its own use."""
 from __future__ import annotations
 
