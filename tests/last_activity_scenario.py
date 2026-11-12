@@ -791,7 +791,22 @@ hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
 
-# ================================================================ 13. an anchor added after the merge: the first read of a pull request merged within a day writes the merge line, and the item the anchor is scoped to is credited
+# ================================================================ 13. the item's own words include a step's status tag: a merge whose pull request is named only there ties, and the tick records pr_merged
+def tagged(text): return step("home-peer: do the thing", "open") | {"tag": {"text": text, "state": "in progress", "ts": now0}}
+put(460, steps=[tagged("PR 260 released; PR 261 in review")])
+put(461, next="home-peer: land PR #262 and check it")
+put(462, project="projects/beta", steps=[tagged("PR 263 in review")])      # the number alone in a tag, in a project that holds no anchor in the repository: not tied
+put(463, steps=[step("home-peer: do the thing", "open"), step("home-peer: an earlier step", "done") | {"tag": {"text": "PR 264 released", "state": "done", "ts": now0}}])      # a finished step keeps its tag: stale, ties nothing
+put(464, steps=[tagged("PR 264 released")])      # the same tag on an open step ties
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/9999"}]}))      # an anchor in the repository for no item: a bare number in an item of the project speaks of that repository
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+emit(261, "pr_merged", "alice", 100 * MIN); emit(262, "pr_merged", "alice", 101 * MIN); emit(263, "pr_merged", "alice", 102 * MIN); emit(264, "pr_merged", "alice", 103 * MIN)
+saved = ev_pass(now0 + 110 * MIN)
+check("13 a merge whose pull request is named only in a step's tag (a460, PR 261) or on a line of the item's next (a461, PR 262) is tied: the tick records pr_merged at the merge, with the pull request in the words",
+      sorted(saved) == ["a460", "a461", "a464"] and lk(460) == "pr_merged" and la(460) == {"at": now0 + 100 * MIN, "what": "PR 261 merged"} and lk(461) == "pr_merged" and la(461) == {"at": now0 + 101 * MIN, "what": "PR 262 merged"}, (saved, la(460), la(461)))
+check("13 …and a bare number in a tag of an item whose project holds no anchor in that repository (a462, PR 263) is not tied: nothing is recorded", la(462) is None, la(462))
+check("13 …nor is a tag on a done step (a463, PR 264): only the tag of an open step counts, as the same tag on an open step (a464) ties", la(463) is None and lk(464) == "pr_merged" and la(464)["what"] == "PR 264 merged", (la(463), la(464)))
+# ================================================================ 14. an anchor added after the merge: the first read of a pull request merged within a day writes the merge line, and the item the anchor is scoped to is credited
 put(600); put(601); put(603); put(604)
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/90", "items": ["a600"]}, {"url": f"{W_}/pull/91"}, {"url": f"{W_}/pull/92", "items": ["a600"]}, {"url": f"{W_}/pull/93", "items": ["a603"]},
                                                                       {"url": f"{W_}/pull/94"}]}))
@@ -815,19 +830,19 @@ try:
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
 rows13, _ = EL.read(0); mrows13, _ = ML.read(0)
-check("13 a pull request that merged 2 hours ago, first read through an anchor added later, writes one merge line in each log; one that merged 30 hours ago writes none, and a second pass adds nothing",
+check("14 a pull request that merged 2 hours ago, first read through an anchor added later, writes one merge line in each log; one that merged 30 hours ago writes none, and a second pass adds nothing",
       sorted(r["n"] for r in mrows13) == [90, 91, 93, 94] and sorted((r["n"], r["kind"]) for r in rows13) == [(90, "merged"), (91, "merged"), (93, "merged"), (94, "merged")] and told13 == [], (mrows13, rows13, told13))
-check("13 …both logs carry the time it merged, not the hub's now (the merge pass skips a merge older than its floor)",
+check("14 …both logs carry the time it merged, not the hub's now (the merge pass skips a merge older than its floor)",
       all(abs(r["ts"] - (t13 - ago)) < 5 for lg in (mrows13, rows13) for r in lg for n, ago in ((90, 2 * H), (91, 2 * H), (93, 20 * H), (94, 2 * H)) if r["n"] == n), (mrows13, rows13))
-check("13 …the body's ids are not read on this path (a body can be edited long after the merge): the lines carry none", all(r["refs"] == [] for r in mrows13 + rows13), (mrows13, rows13))
+check("14 …the body's ids are not read on this path (a body can be edited long after the merge): the lines carry none", all(r["refs"] == [] for r in mrows13 + rows13), (mrows13, rows13))
 saved = ev_pass(time.time() + 5)
-check("13 …the pass credits the item the anchor is scoped to (pr_merged at the time it merged), even a merge of 20 hours ago; the project-wide anchor's pull request ties no item, and a body naming an item ties none",
+check("14 …the pass credits the item the anchor is scoped to (pr_merged at the time it merged), even a merge of 20 hours ago; the project-wide anchor's pull request ties no item, and a body naming an item ties none",
       sorted(saved) == ["a600", "a603"] and lk(600) == "pr_merged" and la(600)["what"] == "PR 90 merged" and abs(la(600)["at"] - (t13 - 2 * H)) < 5 and abs(la(603)["at"] - (t13 - 20 * H)) < 5
       and la(601) is None and la(604) is None, (saved, la(600), la(603), la(601), la(604)))
 (T / "state/merge-progress.json").unlink(missing_ok=True); gh_["issues_letter"] = "a"; CLK.t = time.time() + 5
 try: done13 = server._merge_progress_tick(time.time() + 5)
 finally: CLK.t = None
-check("13 …and the merge pass records the 2-hour merge on its item (progress clock) but not the 20-hour one, which is past its floor (credited as activity, no progress)",
+check("14 …and the merge pass records the 2-hour merge on its item (progress clock) but not the 20-hour one, which is past its floor (credited as activity, no progress)",
       done13 == ["a600"] and "acme/widgets#90" in (mt(600).get("merged_seen") or []) and not mt(603).get("merged_seen"), (done13, mt(600).get("merged_seen"), mt(603).get("merged_seen")))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
