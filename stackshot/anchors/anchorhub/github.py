@@ -264,7 +264,7 @@ def run(hub: Hub):
         return {k: c[k] for k in ("head_ref", "author") if (c or {}).get(k)}
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
-        commit once all its check runs have finished, naming the failed ones (cancelled ones counted, not a trigger); a later
+        commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later
         commit that passes after a failure gets one "passing again", and one that passes after a passing commit gets one "passing on"
         (a green result is activity on the item whatever the head before it was): that one is record_only, written to the event log and
         delivered to no one, so a green on every push wakes nothing. First sight seeds silently when CI has already finished; when it was
@@ -300,11 +300,11 @@ def run(hub: Hub):
             with hub.lock: title = (hub.status["anchors"].get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
         url = f"https://github.com/{repo}/pull/{n}/checks"
         if bad:
-            text = f"failed on {c['sha'][:7]}: {len(bad)} of {len(runs)} checks — " + ", ".join(bad[:6]) + (" …" if len(bad) > 6 else "") + (f" ({canc} cancelled)" if canc else "")
+            text = f"failed on {c['sha'][:7]}: {len(bad)} of {len(runs)} checks — " + ", ".join(bad[:6]) + (" …" if len(bad) > 6 else "") + (f" ({canc} canceled)" if canc else "")
         elif prev and prev[1]:
-            text = f"passing again on {c['sha'][:7]} ({len(runs)} checks{f', {canc} cancelled' if canc else ''})"
+            text = f"passing again on {c['sha'][:7]} ({len(runs)} checks{f', {canc} canceled' if canc else ''})"
         else:
-            text = f"passing on {c['sha'][:7]} ({len(runs)} checks{f', {canc} cancelled' if canc else ''})"      # a new head that is green after a green one, or the first finished result: ci_passed for the event log (and the item's last activity), record_only so nothing is delivered
+            text = f"passing on {c['sha'][:7]} ({len(runs)} checks{f', {canc} canceled' if canc else ''})"      # a new head that is green after a green one, or the first finished result: ci_passed for the event log (and the item's last activity), record_only so nothing is delivered
         fin = max((x["completed_at"] for x in runs if _ts(x.get("completed_at"))), key=_ts, default=None)      # when the last check run finished: a result seen after downtime keeps its own time; one outside the event log's window (a day old, an hour ahead) is the hub's, as before
         hub.event(a_id, {"title": title, "who": "CI", "text": text, "url": url, "ts": fin if fin and _events.event_time(fin, time.time()) is not None else now_iso(), "etype": "ci_failed" if bad else "ci_passed", "repo_id": rid(repo), "vouched": ("ci_failed" if bad else "ci_passed") if c.get("own_branch") else "", **({"record_only": True} if not bad and not (prev and prev[1]) else {}), **pr_meta(c)}, kind="github-state")
     def snap(i):

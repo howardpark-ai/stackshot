@@ -1859,7 +1859,10 @@ try:
     def runs_(*pairs, status="completed"): return {"check_runs": [{"name": nm, "status": status if c_ != "none" else "in_progress", "conclusion": c_} for nm, c_ in pairs]}
     del cievs[:]; GHD[f"{RP}/pulls/27"] = {**GHD[f"{RP}/pulls/27"], "head": {"sha": "7" * 40, "ref": "x/y"}}
     GHD[f"{RP}/commits/{'7' * 40}/check-runs?per_page=100"] = runs_(("suites", "success"), ("lint", "success"), ("docs", "cancelled")); one_pass()
-    check("anchor-hub CI: canceled runs are counted in the green text, as in the failed text", ci_texts(AN2) == [("ci_passed", "passing on 7777777 (3 checks, 1 cancelled)")], ci_texts(AN2))
+    check("anchor-hub CI: canceled runs are counted in the green text, as in the failed text", ci_texts(AN2) == [("ci_passed", "passing on 7777777 (3 checks, 1 canceled)")], ci_texts(AN2))
+    del cievs[:]; GHD[f"{RP}/pulls/27"] = {**GHD[f"{RP}/pulls/27"], "head": {"sha": "c" * 40, "ref": "x/y"}}
+    GHD[f"{RP}/commits/{'c' * 40}/check-runs?per_page=100"] = runs_(("suites", "failure"), ("lint", "success"), ("docs", "cancelled")); one_pass()
+    check("anchor-hub CI: …and the failed text names them the same way", ci_texts(AN2) == [("ci_failed", "failed on ccccccc: 1 of 3 checks — suites (1 canceled)")], ci_texts(AN2))
     # CI still running when the pull request is first looked at: nothing is seeded, the first finished result is reported once; CI finished at first sight seeds silently
     AN3 = "github:example-owner/stackshot#28"
     GHD[f"{RP}/issues/28"] = {**GHD[f"{RP}/issues/26"], "html_url": "https://github.com/example-owner/stackshot/pull/28"}
