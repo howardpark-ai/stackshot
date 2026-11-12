@@ -16088,8 +16088,8 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
             cl = _steps.view(meta, keeper=str(meta.get("owner") or ""))
             if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or _is_held(it):
                 continue      # the board shows it waiting, held or in the owner's lane: not on the stall ladder, and a stray mention must not reset its silence clock
-            # the item's own words: its description, its steps, each step's status tag (a tag is where a session writes "PR 136 released; PR 137 in review", often before the step's text says it) and the lines of `next`
-            tags = [t["text"] for t in (_steps.tag_of(c) for c in cl) if t]
+            # the item's own words: its description, its steps, the status tag of each open step (a tag is where a session writes "PR 136 released; PR 137 in review", often before the step's text says it) and the lines of `next`
+            tags = [t["text"] for t in (_steps.tag_of(c) for c in cl if c.get("status") == _steps.OPEN) if t]      # an open step's tag only: a done or dropped step keeps its tag, and a stale "PR 137 released" must not tie a later merge
             texts[gid] = "\n".join([str(it.get("description") or ""), *(c["text"] for c in cl), *tags, str(meta.get("next") or "")])
             projects[gid] = str(meta.get("project") or "")
         except Exception as e:  # noqa: BLE001
