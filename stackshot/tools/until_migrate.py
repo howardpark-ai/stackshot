@@ -249,14 +249,15 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
                 e["before"], e["after"], e["history"], e["dropped"], e["sha256_before"] = r["before"], r["after"], r.get("history", ""), r.get("dropped", []), r["sha256_before"]
         SP.write_atomic(undo_path, undo)      # the real result of each item, kept as it comes
     print(json.dumps({"pass_id": pass_id, "undo": str(undo_path), "backup": str(base / "items"), "results": dict(counts), "refused_in_the_plan": refused, "listed_in_the_plan": listed,
-                      "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"]}, indent=1))
+                      "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"], "left_by_the_write": [e["shown"] for e in entries.values() if e.get("result") == "kept"]}, indent=1))
     moved = [e["shown"] for e in entries.values() if e.get("result") == "moved"]
+    skipped = [e["shown"] for e in entries.values() if e.get("result") == "kept"]      # left by the write itself: a planned newly watched date came due between the plan and the write
     if counts.get("refused") or counts.get("batch refused"):
         say("the pass could not write every item it planned (the answers are above): a failure, exit 1")
         return 1
-    left_over = sorted({*refused, *listed, *moved})
+    left_over = sorted({*refused, *listed, *moved, *skipped})
     if left_over:
-        say(f"applied with items left over: {counts.get('set', 0)} items rewritten, {len(left_over)} left as they are (refused, listed, already due, or written by someone else meanwhile): exit {EXIT_LEFT_OVER}, not a failure")
+        say(f"applied with items left over: {counts.get('set', 0)} items rewritten, {len(left_over)} left as they are (refused, listed, already due, or written by someone else meanwhile): exit {EXIT_LEFT_OVER}, not a failure" + (f"; left by the write itself (its date came due after the plan): {skipped}" if skipped else ""))
         return EXIT_LEFT_OVER
     return 0
 

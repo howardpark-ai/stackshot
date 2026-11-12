@@ -91,7 +91,7 @@ import datetime as _dtm, itertools, random
 CFGM["migration"] = True
 call = lambda **body: server._client_post("box-a", "migrate", {"sender": SENDER, **body})
 put(31, needs=[BACK]); put(32, status="completed", needs=[BACK], outcome="done")
-DATES = {"past": day(-30), "soon": day(2), "later": day(10)}
+DATES = {"past": day(-30), "soon": day(2), "later": day(10), "soon, spaced": day(2) + "  09:30", "later, spaced": day(10) + "  09:30"}      # a hand-edited store can hold a date with a double space inside it: the old readers took it for no date
 KINDS = [("", {}), ("time", {"wait_kind": "time"}), ("item", {"wait_kind": "item"}), ("relay", {"wait_kind": "relay", "wait_event": "the vendor's reply"}),
          ("anchor", {"wait_kind": "anchor", "wait_anchor": "https://example.com/x"}), ("anchor, no target", {"wait_kind": "anchor"}),
          ("event", {"wait_kind": "event", "wait_event": "box_online box-b"}), ("event, bogus", {"wait_kind": "event", "wait_event": "bogus"})]
@@ -99,14 +99,14 @@ AFTERS = [("", {}), ("open", {"after": ["g31"]}), ("closed", {"after": ["g32"]})
 HOLDS = [("", {}), ("hold", {"hold": True, "hold_set": {"at": now0 - DAY, "by": BACK}}), ("hold+recycle", {"hold": True, "hold_set": {"at": now0 - DAY, "by": BACK}, "recycle": {"at": now0}})]
 NEEDS = [("back", {"needs": [BACK]}), ("external", {"needs": ["external"], "post_wake_mover": BACK})]
 BASES = [("", False), ("basis", True)]
-grid = []
+PLAIN = ("past", "soon", "later")
+grid, spaced_grid = [], []
 for w, a_, k, af, h, n, b in itertools.product([None, *DATES], [None, *DATES], KINDS, AFTERS, HOLDS, NEEDS, BASES):
-    if w is None and a_ is None:
+    if (w is None and a_ is None) or (b[1] and w is None):
         continue
-    if b[1] and w is None:
-        continue
-    grid.append((w, a_, k, af, h, n, b))
+    (grid if w in (None, *PLAIN) and a_ in (None, *PLAIN) else spaced_grid).append((w, a_, k, af, h, n, b))
 random.Random(20261112).shuffle(grid)
+random.Random(20261113).shuffle(spaced_grid)
 SAMPLE = 700
 chosen = grid[:SAMPLE]
 for axis in range(7):          # the sample keeps every value of every axis (a fixed seed; nothing is left to chance)
@@ -114,6 +114,7 @@ for axis in range(7):          # the sample keeps every value of every axis (a f
     for c in grid[SAMPLE:]:
         if repr(c[axis]) not in seen:
             chosen.append(c); seen.add(repr(c[axis]))
+chosen += spaced_grid[:150]        # and a smaller sample with a date that has a space inside it
 GID0 = 3000
 desc = {}
 for n_, (w, a_, k, af, h, n, b) in enumerate(chosen):
@@ -121,7 +122,7 @@ for n_, (w, a_, k, af, h, n, b) in enumerate(chosen):
     meta = {**k[1], **af[1], **h[1], **n[1]}
     if w: meta["wake"] = DATES[w]
     if a_: meta["ask_by"] = DATES[a_]
-    if b[1]: meta["wait_basis"] = {"text": "the vendor ships on the date", "wake": DATES[w], "by": BACK, "at": now0}
+    if b[1]: meta["wait_basis"] = {"text": "the vendor ships on the date", "wake": DATES[w].split("  ")[0], "by": BACK, "at": now0}
     put(i, **meta)
     desc[f"g{i}"] = f"wake={w} ask_by={a_} kind={k[0]!r} after={af[0]!r} hold={h[0]!r} needs={n[0]} basis={b[0]!r}"
 IDS = sorted(desc, key=lambda g: int(g[1:]))
@@ -219,6 +220,13 @@ rows = {
     "event with no phrase, future wake":     (route(5024, needs=[BACK], wait_kind="event", wake=future), "would_set", "previously only a notice", False),
     "event with a valid phrase, future wake": (route(5025, needs=[BACK], wait_kind="event", wait_event="box_online box-b", wake=future), "would_set", "", False),
     "anchor with its target, future wake":   (route(5026, needs=[BACK], wait_kind="anchor", wait_anchor="https://example.com/x", wake=future), "would_set", "", False),
+    "relay + hold, a wake in 3 days, a spaced ask_by": (route(5027, needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", hold=True, wake=day(3), ask_by=day(10) + "  09:30", **bk), "kept", "", False),
+    "hold, a spaced wake":                   (route(5028, needs=[BACK], hold=True, wake=day(3) + "  09:30", **bk), "kept", "", False),
+    "hold, a spaced wake in the past":       (route(5029, needs=[BACK], hold=True, wake=past + "  09:30", **bk), "kept", "", False),
+    "kind time, a spaced wake":              (route(5030, needs=[BACK], wait_kind="time", wake=day(3) + "  09:30"), "kept", "", False),
+    "kind time, a spaced wake in the past":  (route(5031, needs=[BACK], wait_kind="time", wake=past + "  09:30"), "kept", "", False),
+    "anchor, a spaced ask_by":               (route(5032, needs=[BACK], wait_kind="anchor", wait_anchor="https://example.com/x", ask_by=day(3) + "  09:30"), "kept", "", False),
+    "relay, a single-space ask_by (read as before)": (route(5033, needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", ask_by=day(3) + " 09:30"), "would_set", "", False),
     "anchor with no target, past ask_by":   (route(5008, needs=[BACK], wait_kind="anchor", ask_by=past), "kept", "never watched", True),
     "event with a bogus phrase, past ask_by": (route(5009, needs=[BACK], wait_kind="event", wait_event="bogus", ask_by=past), "kept", "never watched", True),
     "anchor with no target, future ask_by": (route(5010, needs=[BACK], wait_kind="anchor", ask_by=future), "would_set", "never watched", False),

@@ -71,6 +71,9 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
     if not _dated(meta.get("wake")) and not _dated(meta.get("ask_by")):
         out["kept"] = "no old date stored" if not form else "no old date to fold"
         return out
+    if any(isinstance(meta.get(k), str) and _dated(meta.get(k)) and meta[k].strip() != clean(meta[k]) for k in ("wake", "ask_by")):
+        out.update(kept="an old date has spaces inside it (the old readers took it for no date): left as it is", listed=True)    # only a hand-edited store holds one: the writers store canonical dates
+        return out
     if _wt.stored_until(meta):
         out.update(kept="an until and an old date field are both stored: left as it is", listed=True)
         return out

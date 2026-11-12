@@ -528,6 +528,21 @@ with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
     rcD = UM.apply(argparse.Namespace(sender=SENDER, run_dir=str(run5), undo=""), DateChangingApp())
 check("14 a newly watched date that moved between the plans stops the write (the signature carries the date)", rcD == 1 and "changed while the plan was being read" in _e.getvalue() and not list(run5.glob("*/undo.json")), (rcD, _e.getvalue()[-300:]))
 shutil.rmtree(run5, ignore_errors=True)
+# 15 a planned newly watched date that comes due between the second plan and the write: the write leaves it, and the apply says so
+for f in (T / "store").glob("*/*.json"): f.unlink()
+put(150, needs=[BACK], wait_kind="anchor", ask_by=day(6))
+class PassingApp(DirectApp):
+    """The date of the one planned item moves into the past after the second plan is read, before the first write."""
+    def call(self, body):
+        if body["op"] == "until" and not body.get("dry") and not getattr(self, "moved", False):
+            self.moved = True; put(150, needs=[BACK], wait_kind="anchor", ask_by=day(-3))
+        return super().call(body)
+run6 = pathlib.Path(_scratch.mkdtemp(prefix="untilmig-run6-"))
+_e, _o = io.StringIO(), io.StringIO()
+with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(_o):
+    rcP = UM.apply(argparse.Namespace(sender=SENDER, run_dir=str(run6), undo="", plan="", allow_changed_plan=False), PassingApp())
+check("15 an item the write leaves because its planned date came due is left over: exit 3, named, the file unchanged", rcP == 3 and f"{BOARD}150" in _e.getvalue() and mt(150).get("until") is None and mt(150).get("ask_by") == day(-3) and '"left_by_the_write"' in _o.getvalue(), (rcP, _e.getvalue()[-400:]))
+shutil.rmtree(run6, ignore_errors=True)
 CFGM["migration"] = False
 shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
 print(f"ok: until migrate scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")
