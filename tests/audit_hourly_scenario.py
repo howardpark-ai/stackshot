@@ -229,7 +229,7 @@ put(7, mover="Oliver", act=90, state="your-call", needs=["decision"], ask="pick 
 put(8, act=90, status="completed", outcome="done")
 put(9, mover="team-back", act=90, **{HO.KEY: HO.new_record("team-back", "", "home-front", now0 - 90 * MIN)})      # handed to a back agent, not taken
 put(10, mover="home-front", act=90, **{HO.KEY: HO.new_record("home-front", "", "team-back", now0 - 90 * MIN)})   # handed to a front agent, not taken: checked, as the silence pass does
-put(11, mover="home-peer", act=90, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 5 * H + 4 * H)))     # a wake alone is only a reminder: on agent
+put(11, mover="home-peer", act=90, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 5 * H + 4 * H)))     # a wake with no wait behind it leaves the item on agent
 d1 = rd(1); got5 = tick()
 check("5 a hold (dated wake or none), a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off to a back agent, and an item not yet due: none written",
       not any(g in got5 for g in ("a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9")), got5)
