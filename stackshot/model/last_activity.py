@@ -8,13 +8,13 @@ The one definition of activity. Something visible happened to the item when:
   a save moved the item's progress (model/progress.py `moved`, the same test, so this adds no second opinion): a step marked done or dropped, a state change (status, phase, the kind
   of a wait, mover, state, needs), a pull request recorded as merged, the item created. A save that is no one's write about the work (progress.moved with real=False) is the server's
   own bookkeeping and counts only by a status or phase change, as it does for progress; or
-  a pull request tied to the item had an event: a CI result (failed, or passing again), a comment by a person, a review, a merge (anchors/event_log.py, tied by merge_tie).
+  a pull request tied to the item had an event: a CI result (failed, or passing again), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
 
 What is not activity: a status line (`work`), a reply or a "no change" answer, a note, a message, a bare confirm, a new or reworded step, a description edit; and the server's own
 writes about the item, which are not in progress either: a History line (the ladder's, the silence pass's, a merge pass's reason), the ask itself, the step a session or the server
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
-Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment` (stamped today: the
+Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit` (stamped today: the
 progress signals of a save and the events of a tied pull request), and two that are defined and tested here but not stamped by anything yet: `update` (a mover's status write whose text differs
 from the previous status text, `update_signal`) and `audit` (a line the audit writes saying what it verified: a pane in a turn, a subagent running, a commit, a review or CI on the pull
 request). For those two the `what` is the short text itself. A later part stamps them; this one only knows them, so the record is extended by adding a signal, not by changing the record.
@@ -23,7 +23,8 @@ A reply that says nothing changed is no `update` (same text as before), and the 
 Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number, a kind that is none of KINDS)
 is skipped. The caller passes `now`; a candidate time after it is read as `now`.
 
-Not seen here: a commit or push to a tied pull request. The hub emits no push event, so no signal for it can be built; a later part adds that source."""
+A `commit` is the pull request's head commit changing: GitHub sends no push notification, so the hub's GitHub receiver notices the new head sha in the pull request read it already makes and reads that commit once, for its
+committer date (the time of the signal, so downtime does not shift it). A force-push to an older commit gives an older time, which never moves the record back."""
 from __future__ import annotations
 
 import math
@@ -38,14 +39,14 @@ MAX_WHAT = 80         # characters of the words kept
 MAX_STEPS_NAMED = 3   # steps named in one save's words
 
 # The named kinds of signal. STAMPED ones are what the server stamps today; the last two are defined here for the parts that come later.
-STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment"
+STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit"
 UPDATE, AUDIT = "update", "audit"
-STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT)
+STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT)
 KINDS = frozenset(STAMPED) | {UPDATE, AUDIT}
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
-PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED}
-PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing again on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged"}
+PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT}
+PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing again on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged", "commit": "commit on PR {n}"}
 
 _PR_NUMBER = re.compile(r"#(\d+)\s*$")
 

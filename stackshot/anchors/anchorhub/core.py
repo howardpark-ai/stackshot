@@ -69,7 +69,7 @@ def direct() -> dict[str, str]:
 # CI, a reopen, an unclassified event, an event on any other repository, a route outside the pilot and a session bound by
 # extra.json are delivered as before.
 GH_TYPES = ("pr_opened", "pr_reopened", "pr_synchronize", "pr_merged", "pr_closed", "issue_reopened", "issue_closed",
-            "ci_passed", "ci_failed", "ci_activity", "comment", "review", "review_comment")
+            "ci_passed", "ci_failed", "ci_activity", "comment", "review", "review_comment", "pr_commit")
 ROUTINE = frozenset({"pr_opened", "pr_synchronize", "pr_merged", "pr_closed", "ci_passed"})
 def own_repos() -> list[str]:
     """[pilot] own_repos: the fleet's own GitHub repositories, each entry "owner/repo", "owner/*" (every repository of that owner) or a numeric
@@ -396,6 +396,7 @@ class Hub:
         except Exception as e: log.warning("merge log: %s", str(e)[:120])
         try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
         except Exception as e: log.warning("event log: %s", str(e)[:120])
+        if ev.etype == "pr_commit": return      # a new head commit of a pull request: recorded for the item's last activity above, and tells no session
         to = direct().get(ev.anchor)
         if to: return self.emit_direct(ev, to)
         why = routine_own(ev)

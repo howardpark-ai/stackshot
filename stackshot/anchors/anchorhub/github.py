@@ -262,6 +262,19 @@ def run(hub: Hub):
     def pr_meta(c):
         """The head branch and author of the watched pull request, from the CI state `c` of its anchor (its last read of the PR; {} until it has been read): added to every event on the PR."""
         return {k: c[k] for k in ("head_ref", "author") if (c or {}).get(k)}
+    def commit_seen(a_id, repo, n, c, title=None):
+        """The head commit of a watched pull request changed (a push, or a force-push to another commit): record it as the item's last activity, at the commit's own committer date. GitHub sends no push notification, so
+        this is the only place it is seen; the pull request read the caller just made holds the new head sha, and this is the one extra read, made only now. Only a branch of the repository itself counts (the
+        read is not made for a fork's pull request: it would record nothing). A date the repository gives that lies ahead of the clock by more than a few minutes, or one that cannot be read, records nothing; a read that
+        fails records nothing and is not tried again (the next commit is the next signal). The event is recorded and told to no session (Hub.emit)."""
+        if not c.get("own_branch"): return
+        try: cm = gh(f"/repos/{repo}/git/commits/{c['sha']}")
+        except Exception as e: log.warning("github %s: commit %s: %s", a_id, c["sha"][:7], str(e)[:100]); return
+        when = _events.commit_time(((cm.get("committer") or {}) if isinstance(cm, dict) else {}).get("date"), time.time())
+        if when is None: return
+        if not title:
+            with hub.lock: title = ((hub.status.get("anchors") or {}).get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
+        hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", **pr_meta(c)}, kind="github-state")
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (cancelled ones counted, not a trigger); a later
@@ -275,10 +288,12 @@ def run(hub: Hub):
         if p is not None:
             c["pr"] = True
             learn(repo, (p.get("base") or {}).get("repo"))
+            was = c.get("sha")
             if (p.get("head") or {}).get("sha"): c["sha"] = p["head"]["sha"]
             c["head_ref"], c["author"] = str((p.get("head") or {}).get("ref") or ""), str((p.get("user") or {}).get("login") or "")      # whose pull request it is (a builder's branch is prefixed with its name); kept with the CI state, so a 304 later still knows
             hr, br = (str((((p.get(k) or {}).get("repo")) or {}).get("full_name") or "").lower() for k in ("head", "base"))
             c["own_branch"] = bool(hr) and hr == br      # the head branch is in the repository itself, not a fork's (a deleted fork has no head repo, and a payload that does not say names none): only then is a CI result the repository's own side moving
+            if was and c["sha"] != was: commit_seen(a_id, repo, n, c, title)      # the head commit changed since the last read of this pull request: the one extra read of the commit (a first sight has no earlier sha and reads nothing; a 304 has no payload and reads nothing)
         if not c["sha"]: return
         try: r = gh(f"/repos/{repo}/commits/{c['sha']}/check-runs?per_page=100", conditional=True)
         except Exception: return
