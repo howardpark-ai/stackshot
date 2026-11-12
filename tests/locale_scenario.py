@@ -824,6 +824,12 @@ check("English wording, pinned: the answer script's 'Nothing sent: {why}' (the t
       '"js.answer.nothing_sent": "Nothing sent: {why}"' in r2._SST_HEAD and "SST('js.answer.nothing_sent'" in r2._ANSWER_JS)
 d_en = {"wait": ipg.wait_what(W("item", after=("a1",))), "age": r2.age_words(600), "tip": r2.stale_tip({"_age": 3 * 3600, "metadata": {"needs": ["decision"]}})}
 check("the same calls in English give the words they always gave", d_en == {"wait": "the close of a1", "age": "10 min", "tip": "ask last confirmed 3 h ago — may be out of date"} and EN["more.age_min"] == "{n} min", d_en)
+# the temporary probe page /probe/sala-link: its words in English, pinned, and the page drawn from them (no session_view is set in this fixture, so it says so and draws no link)
+en_probe = bdx.probe_html()
+check("English wording, pinned: the probe page's heading, instruction and no-address line, and the labels of the variants A to F",
+      EN["probe.title"] == "Opening a session link" and EN["probe.note"] == "Open this page in the stackshot app on Android and tap each link in turn; tell the agent which opened the sala app."
+      and [EN[f"probe.{x}.label"] for x in "abcdef"] == ["A. Plain link, new tab", "B. Plain link, same tab", "C. Android intent link, new tab", "D. Android intent link, same tab", "E. Android intent link with view action", "F. Script buttons"]
+      and "<h1>Opening a session link</h1>" in en_probe and "No session view address is set under [client] session_view, so there is nothing to test." in en_probe, en_probe[-600:])
 
 # the "rendered ... ago" line is one template: English keeps its words and its order, a language can put the age anywhere, and the words around it are what the narrow page leaves off
 _rl = lambda: r2._rendered_line("<b>S</b>", tip="T"); _st = r2._stale_s()

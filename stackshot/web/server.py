@@ -17894,6 +17894,20 @@ async def site_search(request: Request):
     return HTMLResponse(await run_in_threadpool(page), headers={"Cache-Control": "no-store"})
 
 
+@mcp.custom_route("/probe/sala-link", methods=["GET"])
+async def probe_sala_link(request: Request):
+    """TEMPORARY PROBE (the installed-app session link test) (removed, or promoted into the session link, in the follow-up PR): one session link written six ways, so a tap on an Android phone in the installed app shows which way opens the installed
+    sala app (ui/render.py Board.probe_html). `?to=<url>` is used only when it is on the origin of [client] session_view; anything else is ignored. Behind the board's sign-in, as the other pages are (_ui_guard); it writes nothing."""
+    g = _ui_guard(request)
+    if g is not None:
+        return g
+    from starlette.concurrency import run_in_threadpool
+
+    rmod = _ui_mods()[0]
+    to = str(request.query_params.get("to") or "")
+    return HTMLResponse(await run_in_threadpool(lambda: rmod.Board(str(_store.STORE)).probe_html(to)), headers={"Cache-Control": "no-store"})
+
+
 @mcp.custom_route("/landed", methods=["GET"])
 async def landed_moved(request: Request):
     """The Landed page is now the Closed page, at /closed: an old address (a bookmark, a link from a message) goes there with its query (?page=N) kept. A permanent redirect, never cached ("no-store"), so a later move needs no
