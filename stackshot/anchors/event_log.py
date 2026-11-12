@@ -6,8 +6,15 @@ funnel every event passes, appends the line. The merge log stays as it is and ke
 another kind as a merge.
 
 One line per kind of event: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "kind": ci_failed | ci_passed | comment | review | merged,
-"refs": ["board#N", ...] the board ids the pull request's body names, when the event carried them (at most 10)}. The pass reads it from a byte offset it keeps and ties each line to the open items
+"refs": ["board#N", ...] the board ids the pull request's body names (at most 10), kept for a merge only}. The pass reads it from a byte offset it keeps and ties each line to the open items
 with merge_tie, as a merge is tied. A burst that joins several types in one event (a merge and a comment) is one line for each kind.
+
+Only a merge ties through the pull request's body (the rule the merge log has always had). A comment, a review or a CI result ties only through an anchor scoped to the item or the item's own
+words: in a public repository anyone can open a pull request whose body names an item and comment on it, and that must not stamp the item. So `refs` of any other kind is never written and is
+dropped when a line is read.
+
+Size: a line is about 100 bytes and the pass reads the file from the offset it keeps, so the cost of a pass is the new lines only; the file only grows, and is not pruned (a year of events is
+well under a few megabytes). If the offset is lost or the file is replaced, the pass reads it from its start and takes nothing older than 24 hours (`server._EVENT_ACT_FLOOR_H`).
 
 Left out on purpose: a comment or review by a bot (a login ending in "[bot]"; the hub drops its own account's upstream), a CI event on a repository's notifications with no pull request, and any
 event the hub cannot name a pull request for. Not here: a commit or push, which the hub does not emit (a later part adds it).
@@ -76,7 +83,7 @@ def lines_for(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: 
     if not repo or n <= 0:
         return []
     refs = [str(r) for r in (body_refs or []) if _ml._REF_OK.fullmatch(str(r))][:MAX_REFS]
-    return [{"ts": round(float(now), 3), "repo": repo, "n": n, "kind": k, "refs": refs} for k in kinds if not (k in PERSONS_ONLY and only_bots(who))]
+    return [{"ts": round(float(now), 3), "repo": repo, "n": n, "kind": k, "refs": refs if k == "merged" else []} for k in kinds if not (k in PERSONS_ONLY and only_bots(who))]
 
 
 def note(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float) -> int:
@@ -94,7 +101,7 @@ def normal(row: dict[str, Any]) -> dict[str, Any]:
     kind = str(row["kind"])
     if kind not in KINDS:
         raise ValueError(f"not an event kind: {kind[:30]!r}")
-    return {**out, "kind": kind}
+    return {**out, "kind": kind, "refs": out["refs"] if kind == "merged" else []}      # only a merge ties through the body
 
 
 def read(offset: int = 0) -> tuple[list[dict[str, Any]], int]:

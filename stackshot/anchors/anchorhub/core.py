@@ -227,7 +227,7 @@ def direct_notice(ev: Event) -> str:
     """The notice of a direct anchor: the usual header with the source's ids, then the whole text on the lines below,
     clipped at DIRECT_CLIP chars with the one-line notices' marker. An event with no full text or ids (a receiver that
     sets neither) gets the one-line notice."""
-    m = ev.meta or {}
+    m = {k: v for k, v in (ev.meta or {}).items() if k != "refs"}      # `refs` (the board ids a merged pull request's body names) is for the merge log, not a source's id: an event with only that gets the one-line notice
     if not ev.full and not m: return notice(ev)
     ids = " · ".join(f"{k} {m[k]}" for k in ("ts", "thread_ts") if m.get(k))
     head = f"[anchor] {ev.label}: {_LEAD[ev.kind]}{ev.who}" + (" (caught up)" if m.get("caught_up") else "") + (f" ({ids})" if ids else "") + f" → {ev.url}"

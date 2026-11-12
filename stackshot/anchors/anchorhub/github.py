@@ -205,7 +205,7 @@ def run(hub: Hub):
             if rc: news.append(f"{len(rc)} review comment" + ("s" if len(rc) > 1 else "")); who += [c["user"]["login"] for c in rc]; link = rc[-1].get("html_url") or link; types.append("review_comment")
         if not news: return None
         who = [w for w in dict.fromkeys(who) if w]
-        return "; ".join(news), ", ".join(who[:3]) or "someone", link, "+".join(types), _merges.refs(i.get("body"))      # the board ids the pull request's body names: the issue read above already holds the body
+        return "; ".join(news), ", ".join(who[:3]) or "someone", link, "+".join(types), (_merges.refs(i.get("body")) if "pr_merged" in types else [])      # the board ids the merged pull request's body names: the issue read above already holds the body
     def notifications(a_id):
         """A repo root (anchoring a repo as a whole: whatever activity the owner's GitHub account gets notified
         of): the repo's notification threads of the owner's account (all=true, read-only), relying on GitHub's own subscription
@@ -321,7 +321,6 @@ def run(hub: Hub):
             if (i["state"], i["comments"], i["updated_at"]) != (st["state"], st["comments"], st["updated"]): resolved.pop(a_id, None)      # the saved label of a finished anchor is made again at the next start
             title = f"{repo.split('/')[1]}#{n} \"{i['title'][:50]}\""
             if i["comments"] > st["comments"]:
-                body_refs = _merges.refs(i.get("body"))      # the board ids the pull request's body names, for the event log's tie to an item (the issue read above already holds the body)
                 for c in gh(f"/repos/{repo}/issues/{n}/comments?since={st['updated']}&per_page=20"):
                     if c["user"]["login"] == me and not os.environ.get("ANCHOR_HUB_ALLOW_SELF"): continue
                     # `since` is inclusive of the seed instant, so the comment that set the seeded updated_at
@@ -329,7 +328,7 @@ def run(hub: Hub):
                     # comments created after the last observed state are new
                     if _ts(c.get("created_at")) <= _ts(st.get("updated")): continue
                     body = (c.get("body") or "").replace("\n", " ")
-                    hub.event(a_id, {"title": title, "who": c["user"]["login"], "text": body[:140] + ("…" if len(body) > 140 else ""), "url": c["html_url"], "ts": c["created_at"], "etype": "comment", "repo_id": rid(repo), **({"meta": {"refs": body_refs}} if body_refs else {}), **pr_meta(ci_st.get(a_id))}, kind="github")
+                    hub.event(a_id, {"title": title, "who": c["user"]["login"], "text": body[:140] + ("…" if len(body) > 140 else ""), "url": c["html_url"], "ts": c["created_at"], "etype": "comment", "repo_id": rid(repo), **pr_meta(ci_st.get(a_id))}, kind="github")
             merged_now = bool((i.get("pull_request") or {}).get("merged_at"))
             if i["state"] != st["state"] or (merged_now and st.get("merged") is False):      # …or closed again by a merge after a reopening that fell between two looks
                 who = (i.get("closed_by") or {}).get("login") or "someone"

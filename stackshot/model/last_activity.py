@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from typing import Any, Iterable
 
 from stackshot.model import progress as _progress
@@ -44,7 +45,7 @@ KINDS = frozenset(STAMPED) | {UPDATE, AUDIT}
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
 PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED}
-PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing again on PR {n}", "comment": "comment on PR {n}", "review": "review on PR {n}", "merged": "PR {n} merged"}
+PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing again on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged"}
 
 _PR_NUMBER = re.compile(r"#(\d+)\s*$")
 
@@ -55,7 +56,9 @@ def _meta(item: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _words(v: Any) -> str:
-    return " ".join(str(v or "").split())[:MAX_WHAT]
+    """One line of at most MAX_WHAT characters: control and format characters (a newline, an escape, a zero-width mark) become spaces, runs of spaces one."""
+    text = "".join(" " if unicodedata.category(ch)[0] == "C" else ch for ch in str(v or ""))
+    return " ".join(text.split())[:MAX_WHAT]
 
 
 def clean(c: Any, now: float | None = None) -> dict[str, Any] | None:
@@ -64,11 +67,11 @@ def clean(c: Any, now: float | None = None) -> dict[str, Any] | None:
         return None
     try:
         at = float(c.get("at"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     what = _words(c.get("what"))
     kind = c.get("kind")
-    if not what or kind not in KINDS or not math.isfinite(at) or at <= 0:
+    if not what or not isinstance(kind, str) or kind not in KINDS or not math.isfinite(at) or at <= 0:      # a kind that is a list or a dict is torn, not a crash (it cannot be looked up in a set)
         return None
     return {"at": min(at, now) if now is not None else at, "kind": kind, "what": what}
 
