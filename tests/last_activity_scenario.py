@@ -791,5 +791,18 @@ hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
 
+# ================================================================ 13. the item's own words include a step's status tag: a merge whose pull request is named only there ties, and the tick records pr_merged
+def tagged(text): return step("home-peer: do the thing", "open") | {"tag": {"text": text, "state": "in progress", "ts": now0}}
+put(460, steps=[tagged("PR 260 released; PR 261 in review")])
+put(461, next="home-peer: land PR #262 and check it")
+put(462, project="projects/beta", steps=[tagged("PR 263 in review")])      # the number alone in a tag, in a project that holds no anchor in the repository: not tied
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/9999"}]}))      # an anchor in the repository for no item: a bare number in an item of the project speaks of that repository
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+emit(261, "pr_merged", "alice", 100 * MIN); emit(262, "pr_merged", "alice", 101 * MIN); emit(263, "pr_merged", "alice", 102 * MIN)
+saved = ev_pass(now0 + 110 * MIN)
+check("13 a merge whose pull request is named only in a step's tag (a460, PR 261) or on a line of the item's next (a461, PR 262) is tied: the tick records pr_merged at the merge, with the pull request in the words",
+      sorted(saved) == ["a460", "a461"] and lk(460) == "pr_merged" and la(460) == {"at": now0 + 100 * MIN, "what": "PR 261 merged"} and lk(461) == "pr_merged" and la(461) == {"at": now0 + 101 * MIN, "what": "PR 262 merged"}, (saved, la(460), la(461)))
+check("13 …and a bare number in a tag of an item whose project holds no anchor in that repository (a462, PR 263) is not tied: nothing is recorded", la(462) is None, la(462))
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

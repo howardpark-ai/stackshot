@@ -529,6 +529,22 @@ check("14 _minute_anchor_pass: an anchor pass that raises is logged and the merg
       "anchor pass: RuntimeError: anchor pass broke" in errs.getvalue() and mt(232).get("merged_seen") == ["acme/widgets#75"], (errs.getvalue()[-300:], mt(232)))
 close(230, 231, 232)
 
+# the item's own words include each step's status tag and the lines of its next: a session writes "PR 261 released; PR 262 in review" on the tag, or names the pull request on its next line, before any step text says it
+def tagged(text): return step("home-peer: do the thing", "open") | {"tag": {"text": text, "state": "in progress", "ts": now0 - 3 * H}}
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/9999"}]}))      # the project holds an anchor in the repository (for no item): a bare number in its items speaks of that repository
+fixture(250, project="projects/alpha", steps=[tagged("PR 260 released; PR 261 in review")])
+fixture(251, project="projects/alpha", next="home-peer: land PR #262 and check it")
+fixture(252, project="projects/beta", steps=[tagged("PR 263 in review")])      # the number alone in a tag, in a project that holds no anchor in the repository: another repository's number, not tied
+fixture(253, project="projects/alpha", steps=[tagged("PR 264 in review")])
+for n_ in (261, 262, 263, 265): ML.append(line(n_, at=-60))
+saved = merge_pass(now0 + 21 * MIN)
+check("14 the item's own words include a step's status tag (a250 names PR 261 only there) and a line of its next (a251 names PR 262 there): both tie, with the History line of the words", sorted(saved) == ["a250", "a251"]
+      and mt(250).get("merged_seen") == ["acme/widgets#261"] and mt(251).get("merged_seen") == ["acme/widgets#262"] and all(rd(i)["progress"] == now0 + 21 * MIN for i in (250, 251))
+      and any("own words name it" in x["text"] for x in log_of(250)) and any("own words name it" in x["text"] for x in log_of(251)), (saved, [mt(i).get("merged_seen") for i in (250, 251)], log_of(250)))
+check("14 …a bare number in a tag of an item that does not speak of that repository (a252, project beta, PR 263) ties nothing, nor does a merge no word of an item names (#265), nor a number the tag did not name (a253 names 264, which did not merge)",
+      all("merged_seen" not in mt(i) and rd(i)["progress"] == now0 - 3 * H - 30 * MIN for i in (252, 253)), [mt(i).get("merged_seen") for i in (252, 253)])
+close(250, 251, 252, 253)
+
 # merge_tie: a bare number ties only an item of a project that holds an anchor in the repository, or with a pull request of it anchored; a URL ties anywhere
 pg_ = MT.repo_pages({"projects/alpha": [{"url": f"{W_}/pull/1"}, {"url": "https://example.org/x"}], "projects/beta": [{"url": "https://github.com/other/repo/pull/2"}, "junk"]}, lambda u: "acme/widgets" if "acme/widgets" in u else "other/repo" if "other/repo" in u else "")
 check("14 merge_tie.repo_pages: the pages that hold an anchor in each repository (any scope), others and malformed entries left out", pg_ == {"acme/widgets": {"projects/alpha"}, "other/repo": {"projects/beta"}}, pg_)

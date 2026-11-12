@@ -4,7 +4,7 @@ The pure half: no server import, no file, no clock. A pull request is tied to an
 
   anchored   an anchor scoped to the item names the pull request (a project-wide anchor names no item: every item of a project would be tied to every merge, and no clock would run)
   body       the pull request's body names the item (`board#N`; the hub reads it with the event, merge_log.refs)
-  words      the item's own words (its description and its steps) name the pull request: its URL in any repository, or its number written `#n`, `PR n` or `PR #n` only for an item that speaks of
+  words      the item's own words (its description, its steps, their status tags and the lines of its next) name the pull request: its URL in any repository, or its number written `#n`, `PR n` or `PR #n` only for an item that speaks of
              that repository without a URL: one whose project page holds an anchor in the repository (its project is the repository's), or one that already has a pull request of the repository
              anchored to it. A bare number in any other item may be another repository's ("see #116" in an item of another project), so it ties nothing.
 
