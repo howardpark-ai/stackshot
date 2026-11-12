@@ -36,7 +36,7 @@ write("mod.py", '''
     """a module"""
     import functools
     import cfgmod as _c
-    from typing import Annotated
+    from typing import Annotated, Iterable
     from pydantic import Field
     LIMIT = 3
     ANN = str
@@ -68,6 +68,9 @@ write("mod.py", '''
 
     def typed(x: ANN) -> ANN:
         return x
+
+    def typed2(x: Iterable[int]) -> int:
+        return 0
 
     def h():
         return "h"
@@ -104,6 +107,61 @@ write("mod.py", '''
         return 5
 ''')
 write("cfgmod.py", 'NAME = "x"\n\ndef configure(v):\n    return v\n')
+# a module with postponed annotations (Imports and annotations, Thu Nov 12th 2026). Each typing name is annotation-only in one place, so an edit of the import line
+# tells which kind of annotation counts: Iterable (a parameter), Sequence (a return), Mapping (a local variable), Collection (a method's parameter), Iterator
+# (a parameter of pg, which z hands to typing.get_type_hints: the def's name is used as a value), Optional (a class-level field, which stays a read). Counter is
+# only re-exported (z reads pmod.Counter), deque and OrderedDict are read in code (pq run by b, pa run by a), json in pj (z); `chain` is read by pu in code
+# that tolerates its absence (a suite runs it), so adding the name to an import line must reach that suite; CAP is a default, SIZE a decorator argument,
+# ANN2 an annotation-only constant.
+write("pmod.py", '''
+    """a module with postponed annotations"""
+    from __future__ import annotations
+    import json
+    from collections import Counter, OrderedDict, deque
+    from functools import lru_cache
+    from typing import Collection, Iterable, Iterator, Mapping, Optional, Sequence
+
+    CAP = 5
+    SIZE = 8
+    ANN2 = str
+
+    def pa(items: Iterable[int], opt: Optional[str] = None) -> int:
+        return len(OrderedDict(enumerate(items)))
+
+    def pr(x: int) -> Sequence[int]:
+        return [x]
+
+    def pl(x: int):
+        seen: Mapping[str, int] = {}
+        return seen
+
+    def pd(n: int = CAP, kind: ANN2 = "k"):
+        return n
+
+    @lru_cache(maxsize=SIZE)
+    def pc(x: int) -> int:
+        return x
+
+    def pq():
+        return deque([1])
+
+    def pj():
+        return json.dumps({})
+
+    def pg(x: Iterator[int]) -> int:
+        return 1
+
+    def pu():
+        try:
+            return list(chain([1], [2]))
+        except NameError:
+            return []
+
+    class PK:
+        note: Optional[int] = None
+        def pm(self, x: Collection[str]) -> int:
+            return 1
+''')
 # a manual check (no suite runs it): its import-time call into cfgmod reads mod.LIMIT, which must not take cfgmod.py whole
 write("tests/w_check.py", '''
     import os, sys
@@ -122,15 +180,16 @@ write(".gitignore", "__pycache__/\n")   # as the checkout's: the bytecode measur
 write("tests/a_scenario.py", '''
     import os, sys
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, ROOT)
-    import mod
-    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2
+    import mod, pmod
+    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2 and mod.typed2([1]) == 0
+    assert pmod.pa([1]) == 1 and pmod.pr(1) == [1] and pmod.pl(1) == {} and pmod.pd() == 5 and pmod.pc(2) == 2 and pmod.pu() == [] and pmod.PK().pm([]) == 1
     assert open(os.path.join(ROOT, "data.txt")).read()
 ''')
 write("tests/b_scenario.py", '''
     import os, subprocess, sys
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, ROOT)
-    import mod
-    assert mod.g() == "g" and mod._c.NAME == "x" and mod.reg.list_tools()
+    import mod, pmod
+    assert mod.g() == "g" and mod._c.NAME == "x" and mod.reg.list_tools() and list(pmod.pq()) == [1]
     assert subprocess.run([sys.executable, "-c", "import mod; assert mod.h() == 'h'"], cwd=ROOT).returncode == 0
     assert subprocess.run(["sh", os.path.join(ROOT, "helper.sh")], capture_output=True).returncode == 0
     os._exit(0)
@@ -139,8 +198,9 @@ write("tests/b_scenario.py", '''
 write("tests/z_scenario.py", '''
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import mod
+    import mod, pmod, typing
     assert mod.documented.__doc__
+    assert pmod.pj() == "{}" and pmod.Counter and pmod.pg(iter([])) == 1 and typing.get_type_hints(pmod.pg)["return"] is int
 ''')
 write("tests/c_scenario.py", '''
     import os
@@ -310,6 +370,70 @@ check("DOC13 a suite that reads names wide is not chosen for a docstring by that
       r.stdout.split() == ["w3"], (r.stdout, r.stderr[-600:]))
 r = tool("list", env={"SUITEMAP_DOCSTRING_RULE": "x"})
 check("DOC12 a value that is not a rule is an error at once", r.returncode != 0 and "SUITEMAP_DOCSTRING_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
+# ---- Imports and annotations (Thu Nov 12th 2026): see the base pmod.py above for what each name is. I1 and N1 are the old rules: each case that narrows says what
+# the old rule chose, so it fails if the rule is reverted; the cases after them are the ones that must NOT narrow.
+TY = "from typing import Collection, Iterable, Iterator, Mapping, Optional, Sequence"
+CO = "from collections import Counter, OrderedDict, deque"
+I1, N1 = {"SUITEMAP_IMPORT_RULE": "I1"}, {"SUITEMAP_ANNOTATION_RULE": "N1"}
+def old_rule(head, env): return tool("select", "--map", str(MAP), "--to", head, env=env).stdout.split()
+def narrows(tag, what, edit, old_env, old_out, msg):
+    out, err, head = sel_after(edit, msg)
+    check(f"{tag} {what}: nothing is selected", out == "", (out, err))
+    check(f"{tag} ...and the old rule (reverting it) chose {old_out}", old_rule(head, old_env) == old_out, old_rule(head, old_env))
+narrows("IMP1", "a name added to an import line that no code reads leaves the names already on the line alone", lambda: sub("pmod.py", CO, CO + ", defaultdict"), I1, ["a", "b", "z"], "imp add")
+narrows("IMP2", "a line rewritten with the same names (parenthesised, one a line) changes no binding", lambda: sub("pmod.py", CO, "from collections import (\n    Counter,\n    OrderedDict,\n    deque,\n)"), I1, ["a", "b", "z"], "imp reformat")
+narrows("IMP3", "a name moved to a line of its own is the same binding", lambda: sub("pmod.py", CO, "from collections import Counter, OrderedDict\nfrom collections import deque"), I1, ["a", "b", "z"], "imp split")
+out, err, _ = sel_after(lambda: sub("pmod.py", CO, "from collections import Counter, OrderedDict"), "imp remove, read in code")
+check("IMP4 a name removed from an import line and read in code still reaches what runs that code (pq: b), not the other names' readers", out.split() == ["b"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", CO, "from collections import OrderedDict, deque"), "imp remove, re-exported")
+check("IMP5 a name removed and only re-exported (z reads pmod.Counter) reaches the suite that reads it so", out.split() == ["z"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "import json\n", "import json as js\n"), "imp rename")
+check("IMP6 a name renamed (json → js) is a name removed and one added: the suite that runs the code reading json (z)", out.split() == ["z"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "import json\n", "import json\nfrom itertools import chain, islice\n"), "imp add, read in code")
+check("IMP7 a name added to an import line and read in code (pu: a suite runs it, tolerating the missing name) reaches that suite, and only it", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", CO, "from collections import Counter, OrderedDict\nfrom queue import deque"), "imp resourced")
+check("IMP9 a name kept on the line but imported from another module (deque) is a changed binding: the suite that runs the code reading it (b)", out.split() == ["b"], (out, err))
+narrows("ANN1", "a name used only in a parameter annotation of a plain def in a postponed file is no read", lambda: sub("pmod.py", TY, TY.replace("Iterable, ", "")), N1, ["a"], "ann param")
+narrows("ANN2", "...a return annotation", lambda: sub("pmod.py", TY, TY.replace(", Sequence", "")), N1, ["a"], "ann return")
+narrows("ANN3", "...the annotation of a local variable", lambda: sub("pmod.py", TY, TY.replace("Mapping, ", "")), N1, ["a"], "ann local")
+narrows("ANN4", "...a method's parameter annotation", lambda: sub("pmod.py", TY, TY.replace("Collection, ", "")), N1, ["a"], "ann method")
+narrows("ANN5", "an annotation-only constant (ANN2 = str → int)", lambda: sub("pmod.py", "ANN2 = str", "ANN2 = int"), N1, ["a"], "ann constant")
+out, err, _ = sel_after(lambda: sub("pmod.py", TY, TY.replace("Iterator, ", "")), "ann escaped")
+check("ANN6 a def whose name is used as a value (z: typing.get_type_hints(pmod.pg)) keeps its annotation names as reads: the suite that does so (z), not a", out.split() == ["z"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", TY, TY.replace("Optional, ", "")), "ann field")
+check("ANN7 a name in a class-level annotation (a field a dataclass or a model reads) stays a read: the suite that uses the class (a)", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "from typing import Annotated, Iterable", "from typing import Annotated"), "ann runtime")
+check("ANN8 a name used in an annotation of a file WITHOUT postponed annotations is a read (the def evaluates it): the suite that calls the def (a) and the text reader", out.split() == ["a", "c"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "CAP = 5", "CAP = 6"), "ann default")
+check("ANN9 a constant a default value reads is a read", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "SIZE = 8", "SIZE = 9"), "ann decorator")
+check("ANN10 a constant a decorator reads is a read", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "from functools import lru_cache\n", ""), "ann decorator import")
+check("ANN11 the import of a name a decorator reads is a read", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "def pr(x: int) -> Sequence[int]:", "def pr(x: int) -> Sequence[str]:"), "ann signature")
+check("ANN12 a change to the def line (an annotation edited) still reaches the suites that call the def", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "from __future__ import annotations\n", ""), "future import removed")
+check("ANN13 postponed annotations turned off takes the file whole (every annotation of it changes meaning)", out.split() == ["a", "b", "z"] and "pmod.py: whole (pmod.py)" in err, (out, err))
+for v in ("I", "N"):
+    r = tool("list", env={f"SUITEMAP_{'IMPORT' if v == 'I' else 'ANNOTATION'}_RULE": "x"})
+    check(f"IMP8 a value that is not a rule is an error at once ({v})", r.returncode != 0 and "_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
+# the escapes the names rule sees: a def used as a value anywhere (an alias, a decorator, an attribute not called, a string, a script with a python shebang) keeps its annotations
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pa as alias\nuse = [alias]\n")
+write("tests/w2_scenario.py", "import pmod\nreg = {}\nreg['k'] = pmod.pr\n")
+write("tests/w3_scenario.py", "names = ['pl']\n")
+write("tests/w4_scenario.py", "import pmod\n@pmod.pd\ndef x(): pass\n")
+write("bin/runner", "#!/usr/bin/env python3\nimport pmod\nf = pmod.pc\n")
+esc_head = commit("escapes")
+r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
+                    esc_head, "pa", "pr", "pl", "pd", "pc", "pg", "pq", "pj", "pu", "pm", "pdd"], capture_output=True, text=True, env=ENV, cwd=str(R))
+check("ESC1 a def used as a value (alias, attribute, string, decorator, a script's shebang, get_type_hints argument) escapes; one only called does not",
+      r.stdout.split("|")[0].split() == ["pa", "pc", "pd", "pg", "pl", "pr"] and r.stdout.split("|")[1].strip() == "False", (r.stdout, r.stderr[-600:]))
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pa as alias\nuse = [alias]\n"); sub("pmod.py", TY, TY.replace("Iterable, ", "")); head2 = commit("ann param, escaped by an alias")
+out3 = tool("select", "--map", str(MAP), "--to", head2).stdout.split()
+check("ESC2 the same removal of Iterable that selected nothing (ANN1) selects a once pa is used as a value (w1: an alias of it; w1 has no measurement and runs anyway)",
+      out3 == ["a", "w1"], out3)
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")
@@ -1124,6 +1248,68 @@ check("TRIPWIRE a removed use fails too, so the pinned count is never stale (one
       doc_uses({real_q: scan[real_q].replace("help_text = client.__doc__", "help_text = ''", 1)}))
 check("TRIPWIRE stays quiet on the listed uses and on a bare module __doc__ (print(__doc__))",
       doc_uses({f: scan[f] for f, _ in DOCUSE_ALLOW}) == [] and doc_uses({"tests/new_scenario.py": "print(__doc__)"}) == [])
+
+# ---- the annotation tripwire (Thu Nov 12th 2026). The names of a plain def's annotations are no read in a file with postponed annotations while that def's name is
+# only ever called (tests/suitemap.py, *Imports and annotations*): nothing then evaluates them. That holds while nothing fetches a function by a variable name and hands
+# it to a reader of annotations. The scan above lists the Python of the checkout; the forms that evaluate or carry annotations are pinned per file below, so a new use
+# fails this scenario until its author has looked at whether the def it reaches keeps its annotations as reads. The tripwire selects nothing.
+# Not covered: an eval or exec string, vars(fn)["__annotations__"] by a computed key, a framework that evaluates annotations of a plain function it finds by a variable name.
+ANN_NAMES = ("get_type_hints", "get_annotations", "__annotations__", "annotationlib", "TypeAdapter", "create_model", "validate_call", "update_wrapper", "__wrapped__", "wraps")
+def ann_forms(src):
+    """the forms that evaluate, copy or inspect annotations a Python source uses, each with the number of its uses"""
+    out = collections.Counter()
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.Attribute) and n.attr in ANN_NAMES:
+            out[n.attr] += 1
+        elif isinstance(n, ast.Name) and n.id in ANN_NAMES:
+            out[n.id] += 1
+        elif isinstance(n, ast.Import):
+            out["annotationlib"] += sum(a.name.split(".")[0] == "annotationlib" for a in n.names)
+        elif isinstance(n, ast.ImportFrom):
+            out["annotationlib"] += (n.module or "").split(".")[0] == "annotationlib"
+            for a in n.names:
+                if a.name in ANN_NAMES:
+                    out[a.name] += 1
+        elif isinstance(n, ast.keyword) and n.arg == "eval_str":
+            out["eval_str"] += 1
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("getattr", "hasattr", "setattr") \
+                and any(isinstance(a, ast.Constant) and a.value in ("__annotations__", "__wrapped__") for a in n.args):
+            out["getattr of __annotations__ or __wrapped__"] += 1
+    return +out
+ANNUSE_ALLOW = {
+    ("stackshot/web/server.py", "wraps"): (2, "functools.wraps twice: a decorator's wrapper, and the update tool's own signature kept visible; the function it copies from (_update_unlocked) is used as a value there, so its annotation names stay reads"),
+    ("tests/read_only_scenario.py", "getattr of __annotations__ or __wrapped__"): (2, "hasattr(endpoint, '__wrapped__') twice: whether a route is wrapped, nothing is evaluated"),
+}
+def ann_uses(files):
+    """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""
+    out = []
+    for f, src in sorted(files.items()):
+        found = ann_forms(src)
+        for x in sorted(set(found) | {x for (g, x) in ANNUSE_ALLOW if g == f}):
+            pinned = ANNUSE_ALLOW.get((f, x), (0, ""))[0]
+            if found.get(x, 0) != pinned:
+                out.append((f, x, found.get(x, 0), pinned))
+    return out
+drift = ann_uses(scan)
+check("TRIPWIRE the use of every form that evaluates, copies or inspects annotations is the pinned number on the allow list (ANNUSE_ALLOW): a changed count "
+      "(" + "; ".join(f"{f}: {x} used {n}x, pinned {k}" for f, x, n, k in drift) + ") is a new or a removed use: look at it, can it reach a plain function by a variable name that "
+      "the names rule (tests/suitemap.py, *Imports and annotations*) took to be only called? Then pin the new count with a one-line reason", not drift, drift)
+check("TRIPWIRE every annotation allow list entry names a file the scan reads", all(f in scan for f, _ in ANNUSE_ALLOW), [f for f, _ in ANNUSE_ALLOW if f not in scan])
+for what, code, form in (("typing.get_type_hints", "import typing\nh = typing.get_type_hints(f)", "get_type_hints"), ("from typing import get_type_hints", "from typing import get_type_hints\nh = get_type_hints(f)", "get_type_hints"),
+                         ("inspect.get_annotations", "import inspect\nh = inspect.get_annotations(f)", "get_annotations"), ("fn.__annotations__", "a = fns[name].__annotations__", "__annotations__"),
+                         ("inspect.signature(eval_str=True)", "import inspect\ns = inspect.signature(f, eval_str=True)", "eval_str"), ("annotationlib", "import annotationlib\nannotationlib.get_annotations(f)", "annotationlib"),
+                         ("from annotationlib import X", "from annotationlib import get_annotations\nget_annotations(f)", "annotationlib"), ("a pydantic TypeAdapter", "from pydantic import TypeAdapter\nTypeAdapter(f)", "TypeAdapter"),
+                         ("create_model", "from pydantic import create_model\ncreate_model('M')", "create_model"), ("validate_call", "from pydantic import validate_call\nvalidate_call(f)", "validate_call"),
+                         ("functools.update_wrapper", "import functools\nfunctools.update_wrapper(g, f)", "update_wrapper"), ("functools.wraps", "import functools\nh = functools.wraps(f)(g)", "wraps"),
+                         ("g.__wrapped__", "x = g.__wrapped__", "__wrapped__"), ("getattr(f, '__annotations__')", "a = getattr(f, '__annotations__')", "getattr of __annotations__ or __wrapped__")):
+    flagged = [x for _f, x, _n, _k in ann_uses({"tests/new_scenario.py": code})]
+    check(f"TRIPWIRE fires on a new use of an annotation reader: {what} in a new suite", form in flagged, flagged)
+real_s = "stackshot/web/server.py"
+check("TRIPWIRE a new use in a file that already has an entry for that form fails (one more functools.wraps appended to server.py)",
+      ann_uses({real_s: scan[real_s]}) == [] and ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}) == [(real_s, "wraps", 3, 2)],
+      ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}))
+check("TRIPWIRE stays quiet on the listed uses and on a bare function def (def f(x: int) -> int)",
+      ann_uses({f: scan[f] for f, _ in ANNUSE_ALLOW}) == [] and ann_uses({"tests/new_scenario.py": "def f(x: int) -> int:\n    return x"}) == [])
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

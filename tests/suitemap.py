@@ -142,6 +142,30 @@ shape). A module-level function a suite reads by one of those is selected only i
 SUITEMAP_DOCSTRING_RULE=D1 (D2 by default; any other value is an error, checked when a command starts) gives
 the old rule everywhere: a docstring is part of the body. `audit` applies the same rule on both maps.
 
+Imports and annotations (Thu Nov 12th 2026). Two things made an edit of an import line reach far more than it changes. (1) The line bound EVERY
+name on it, so adding `Iterable` to `from typing import Any, Callable` reached the readers of Any and Callable too. (2) A name used only in an
+annotation counted as a read, so a def whose parameters were annotated with it reached every suite that called the def (164 suites for one
+`Iterable` added to a typing import of a core module, whose files all use postponed annotations). Now:
+  * I2: a changed import statement binds only the local names whose binding differs between the old file and the new (a name added, removed, or
+    renamed; a name whose import is the same on both sides is untouched, a line reformatted or a name moved to another line included). The comparison
+    is of the module-level import statements of the whole file, name by name (`from m import a as b` binds b to (m, a)). A statement of one of ours
+    that is not quiet still takes the file whole, and a name read in code is read as before: an edit that adds or removes it selects what reads it.
+  * N2: in a file with `from __future__ import annotations`, the names of an annotation are no read when it annotates (a) a parameter or the return of
+    a def with no decorator, or only a decorator that wraps (property, staticmethod, classmethod, abstractmethod, lru_cache, cache, cached_property,
+    contextmanager, overload), whose name is only ever CALLED in the whole checkout (a bare identifier used as a value anywhere, in a .py file or a script
+    with a python shebang, as an argument, an assignment, a decorator, an attribute read that is not called, or as a string, makes the def's annotations
+    read as before: that function object may reach typing.get_type_hints, functools.wraps, a registry), or (b) a local variable inside a function (never
+    evaluated). Everything else that annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the
+    registry evaluates them), of a class body (a dataclass, NamedTuple or pydantic model field), of a module-level variable, a default value, a
+    decorator, and every annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations`
+    line itself takes the file whole.
+  * Limits, kept honest: a function fetched by a variable name (getattr(module, name), inspect.getmembers, `from m import *`, globals()) and then handed to
+    typing.get_type_hints, inspect.signature with eval_str or a registry is not seen (as for a docstring); the tripwire in tests/suitemap_scenario.py pins the number of uses of those forms per file (get_type_hints,
+    get_annotations, __annotations__, eval_str, annotationlib, TypeAdapter, create_model, validate_call, update_wrapper, __wrapped__, wraps), so a new use
+    fails that scenario until its author has looked at it. A name inside a quoted annotation is not a read either way.
+SUITEMAP_IMPORT_RULE=I1 and SUITEMAP_ANNOTATION_RULE=N1 give the old rule (I2 and N2 by default; any other value is an error, checked when a command
+starts). `audit` applies the same rules on both maps.
+
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
 `shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
@@ -182,6 +206,23 @@ def docstring_rule():
     if v not in ("D1", "D2"):
         raise SystemExit(f"suitemap: SUITEMAP_DOCSTRING_RULE={os.environ.get('SUITEMAP_DOCSTRING_RULE')!r} is not a rule: the allowed values are D1 and D2")
     return v
+def import_rule():
+    """I2 (default): a changed import line binds only the names the change adds, removes or renames; I1: every name on the line (see *Imports and annotations*)"""
+    v = os.environ.get("SUITEMAP_IMPORT_RULE", "I2").strip().upper()
+    if v not in ("I1", "I2"):
+        raise SystemExit(f"suitemap: SUITEMAP_IMPORT_RULE={os.environ.get('SUITEMAP_IMPORT_RULE')!r} is not a rule: the allowed values are I1 and I2")
+    return v
+
+
+def annotation_rule():
+    """N2 (default): in a file with postponed annotations, a name used only in the annotations of a plain function that is only ever called, or of a
+    local variable, is not a read; N1: every annotation name is a read (see *Imports and annotations*)"""
+    v = os.environ.get("SUITEMAP_ANNOTATION_RULE", "N2").strip().upper()
+    if v not in ("N1", "N2"):
+        raise SystemExit(f"suitemap: SUITEMAP_ANNOTATION_RULE={os.environ.get('SUITEMAP_ANNOTATION_RULE')!r} is not a rule: the allowed values are N1 and N2")
+    return v
+
+
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
 TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"
@@ -298,6 +339,11 @@ PURE_DECORATORS = {"functools.wraps", "wraps", "functools.lru_cache", "lru_cache
                    "contextlib.contextmanager", "contextmanager", "contextlib.asynccontextmanager", "asynccontextmanager",
                    "dataclasses.dataclass", "dataclass", "typing.overload", "overload", "functools.total_ordering",
                    "total_ordering", "abc.abstractmethod", "abstractmethod", "functools.singledispatch", "singledispatch"}
+# decorators under which a def's annotations are still nobody's read (see *Imports and annotations*): they only wrap or describe what they decorate
+# and never evaluate the annotations (singledispatch.register does, a registry does, dataclass reads a class's)
+PLAIN_DECORATORS = {"property", "staticmethod", "classmethod", "abc.abstractmethod", "abstractmethod", "functools.lru_cache", "lru_cache",
+                    "functools.cache", "cache", "functools.cached_property", "cached_property", "contextlib.contextmanager", "contextmanager",
+                    "contextlib.asynccontextmanager", "asynccontextmanager", "typing.overload", "overload"}
 # A decorator on one of the module's own objects (@mcp.tool, @mcp.custom_route) registers the function there: its name,
 # signature and description are read by whoever calls it (it ran the body: measured) and by whatever lists the registry.
 # Listing is a call of one of these, on any object (a suite lists tools through its MCP client): the key (*, <enumerate>).
@@ -343,10 +389,26 @@ class ModNames:
         self.effect_targets = {}                    # first line of an effect-mod statement → the modules it sets state in
         self.text, self.ddoc, self.pdoc, self.body_of = [], set(), {}, []
         self.docreads = set()                       # scopes that read a docstring, or hand a function to a registry that does
+        self.postponed, self.imports, self.import_firsts = False, {}, set()
+        self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
+        self.valuse = set()                          # bare names used as a value (not just called): Names.settle
         if not self.ok:
             return
         self.body_of, _, self.ddoc, tree, self.pdoc = sc
         self.text = src.split("\n")
+        self.postponed = any(isinstance(st, ast.ImportFrom) and st.module == "__future__" and not st.level and any(a.name == "annotations" for a in st.names)
+                             for st in tree.body)
+        imports = collections.defaultdict(set)      # local name → where it comes from, over the module-level import statements
+        for st in tree.body:
+            if isinstance(st, ast.Import):
+                for a in st.names:
+                    imports[(a.asname or a.name).split(".")[0]].add(("import", a.name, a.asname))
+            elif isinstance(st, ast.ImportFrom):
+                for a in st.names:
+                    imports[a.asname or a.name].add(("from", st.level, st.module, a.name, a.asname))
+        self.imports = {k: frozenset(v) for k, v in imports.items()}
+        if self.postponed and annotation_rule() == "N2":
+            self.mark_annotations(tree)
         self.aliases, self.froms = {}, {}
         pkg = self.mod if path.endswith("/__init__.py") else self.mod.rpartition(".")[0]
         self.repo_tops = {r.split(".")[0] for r in repo_mods}
@@ -382,6 +444,45 @@ class ModNames:
             self.stmts.append(self.statement(st, st is tree.body[0]))
         for node in ast.walk(tree):
             self.read(node)
+        self.value_uses(tree)
+
+    def mark_annotations(self, tree):
+        """annot_skip[id(node)] = the def's name (None for a local variable) for every node of an annotation that is no read under N2 (see
+        *Imports and annotations*): the parameters and the return of a plain def, and the annotation of a variable inside a function"""
+        def visit(node, in_func):
+            for ch in ast.iter_child_nodes(node):
+                if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if all(dotted(d.func if isinstance(d, ast.Call) else d) in PLAIN_DECORATORS for d in ch.decorator_list):
+                        ar = ch.args
+                        for e in [ch.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
+                            if e is not None:
+                                for x in ast.walk(e):
+                                    self.annot_skip[id(x)] = ch.name
+                    visit(ch, True)
+                elif isinstance(ch, ast.ClassDef):
+                    visit(ch, False)
+                else:
+                    if in_func and isinstance(ch, ast.AnnAssign):
+                        for x in ast.walk(ch.annotation):
+                            self.annot_skip[id(x)] = None
+                    visit(ch, in_func)
+        visit(tree, False)
+
+    def value_uses(self, tree):
+        """the bare names this file uses as a value, not only as the callee of a call (an argument, an assignment, a decorator, an attribute read
+        that is not called, a string that is a name): what makes a function's annotations reachable by a registry or typing.get_type_hints
+        (see Names.settle)"""
+        callee = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and id(n) not in callee:
+                self.valuse.add(n.id)
+            elif isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and id(n) not in callee:
+                self.valuse.add(n.attr)
+            elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.isidentifier():
+                self.valuse.add(n.value)
+        for local, (_, name) in self.froms.items():
+            if local in self.valuse:
+                self.valuse.add(name)            # from m import f as g; get_type_hints(g): f is the one that escapes
 
     def literal_import(self, call):
         if isinstance(call, ast.Call) and dotted(call.func) in ("__import__", "importlib.import_module") and call.args \
@@ -459,7 +560,10 @@ class ModNames:
                 ks = {(m, "*")} if m else set()
             sc = self.scope(node)
         if sc is not None and ks:
-            self.refs[sc] |= ks
+            if id(node) in self.annot_skip:
+                self.ann.append((self.annot_skip[id(node)], sc, ks))   # an annotation of a postponed file: Names.settle decides
+            else:
+                self.refs[sc] |= ks
 
     def statement(self, st, first):
         """(first line, last line, kind, names bound, keys it reads at import); kind: bind (only binds names), effect"""
@@ -468,7 +572,7 @@ class ModNames:
         if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
             self.functions.add(st.name)
             bound = {st.name}
-            reads |= self.header_reads(st)
+            reads |= self.header_reads(st, a)
             kind, extra = self.decorators(st, reads)
             return a, b, kind, bound | extra, reads
         if isinstance(st, ast.ClassDef):
@@ -480,7 +584,7 @@ class ModNames:
             # (as a module-level def's are); the calls in a header are not checked for purity, as for a def
             for x in st.body:
                 if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    reads |= self.header_reads(x)
+                    reads |= self.header_reads(x, a)
             for part in [*st.bases, *[k.value for k in st.keywords],
                          *[x for x in st.body if not isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))]]:
                 for x in ast.walk(part):
@@ -519,7 +623,8 @@ class ModNames:
             return a, b, "bind", {"__doc__"}, reads
         if isinstance(st, (ast.Import, ast.ImportFrom)):
             names = {(x.asname or x.name).split(".")[0] for x in st.names}
-            ours = [m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
+            self.import_firsts.add(a)
+            ours =[m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
             if ours:
                 # one of ours: importing it runs its module level in every importer; `selection` decides (import-repo)
                 return a, b, "import-repo", names, set(ours)
@@ -538,14 +643,19 @@ class ModNames:
                 return a, b, "effect-mod", set(), reads
         return a, b, "effect", set(), reads
 
-    def header_reads(self, fn):
+    def header_reads(self, fn, first):
         """the keys a function's header reads when its def runs: the defaults and the annotations (a tool parameter's
-        Annotated[…, Field(…)] constant is read there)"""
+        Annotated[…, Field(…)] constant is read there). The annotations of a plain def in a postponed file are not returned: they wait in
+        ann_stmt (the statement's first line, the def's name, the keys) for Names.settle"""
         ar, reads = fn.args, set()
         for d in [*ar.defaults, *ar.kw_defaults, fn.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
             if d is not None:
                 for x in ast.walk(d):
-                    reads |= self.keys(x) if isinstance(x, (ast.Name, ast.Attribute)) else set()
+                    ks = self.keys(x) if isinstance(x, (ast.Name, ast.Attribute)) else set()
+                    if ks and id(x) in self.annot_skip:
+                        self.ann_stmt.append((first, self.annot_skip[id(x)], ks))
+                    else:
+                        reads |= ks
         return reads
 
     def decorators(self, st, reads):
@@ -631,10 +741,48 @@ class Names:
         srcs = cat_files(rev, files)
         self.files = {f: ModNames(f, srcs[f], self.repo) for f in files if f in srcs}
         self.by_mod = {m.mod: m for f, m in self.files.items() if not SUITE_RE.match(f)}
+        self.settle(rev)
         for m in self.files.values():
             for sc in m.refs:
                 m.refs[sc] = self.resolve(m.refs[sc])
             m.stmts = [(a, b, k, n, r if k == "import-repo" else self.resolve(r)) for a, b, k, n, r in m.stmts]
+
+    def scripts(self, rev):
+        """{path: ModNames} for the tracked files that are not .py but start with a python shebang, or None when git could not say"""
+        r = subprocess.run(["git", "-C", ROOT, "grep", "-lI", "-E", "^#!.*python", rev, "--", ".", ":!*.py"], capture_output=True, text=True)
+        if r.returncode not in (0, 1):
+            return None
+        paths = [x[len(rev) + 1:] for x in r.stdout.split("\n") if x.startswith(rev + ":")]
+        out = {}
+        for p, src in cat_files(rev, paths).items():
+            m = ModNames(p, src, self.repo)
+            if not m.ok:
+                return None
+            out[p] = m
+        return out
+
+    def settle(self, rev):
+        """decide the annotations that wait in each file (ModNames.ann, ann_stmt; see *Imports and annotations*): one of a plain def counts as a read
+        unless the def's name is only ever called in the checkout; one of a local variable never does"""
+        scripts = self.scripts(rev)
+        everyone = [*self.files.values(), *(scripts or {}).values()]
+        self.escaped = set().union(*(m.valuse for m in everyone)) if everyone else set()
+        self.blind = scripts is None   # could not list the scripts: any function may be reached by one
+
+        def skippable(m, fname):
+            return fname is None or not (self.blind or fname in self.escaped)
+        for m in self.files.values():
+            if not m.ok:
+                continue
+            for fname, sc, ks in m.ann:
+                if not skippable(m, fname):
+                    m.refs[sc] |= ks
+            extra = collections.defaultdict(set)
+            for first, fname, ks in m.ann_stmt:
+                if not skippable(m, fname):
+                    extra[first] |= ks
+            if extra:
+                m.stmts = [(a, b, k, n, r | extra[a] if a in extra else r) for a, b, k, n, r in m.stmts]
 
     def resolve(self, keys):
         """keys with each attribute chain on a module ("~", module, (a, b, …)) followed through that module's own imports"""
@@ -1159,7 +1307,10 @@ def py_change(names, S, a, b, old, new):
     ol, nl = changed_lines(a, b, old, new)
     if not old or not new or old != new:
         whole |= {p for p in (old, new) if p}
-    for N, p, ls in ((names[0], old, ol), (names[1], new, nl)):
+    mo, mw = names[0].files.get(old) if old else None, names[1].files.get(new) if new else None
+    if mo is not None and mw is not None and mo.ok and mw.ok and mo.postponed != mw.postponed:
+        whole |= {old, new}   # postponed annotations on or off: every annotation of the file changes meaning (see *Imports and annotations*)
+    for side, (N, p, ls) in enumerate(((names[0], old, ol), (names[1], new, nl))):
         mn = N.files.get(p) if p else None
         if p is None:
             continue
@@ -1199,6 +1350,11 @@ def py_change(names, S, a, b, old, new):
             if kind != "bind":
                 whole.add(p)
                 continue
+            if st[0] in mn.import_firsts and import_rule() == "I2":
+                # an import statement binds only the names whose import differs between the two files (added, removed, renamed): the others on
+                # the line are untouched, a line reformatted or a name moved included (see *Imports and annotations*)
+                other = names[1 - side].files.get((old, new)[1 - side])
+                bnames = {n for n in bnames if other is None or not other.ok or other.imports.get(n) != mn.imports.get(n)}
             bound |= {n if isinstance(n, tuple) else (mn.mod, n) for n in bnames}
             own |= {(p, n) for n in bnames if isinstance(n, str) and n in mn.functions | mn.classes}
     # a function whose code or def line changed too is selected as before: only a function whose changed lines are all docstring
@@ -1599,6 +1755,8 @@ def main():
     args = ap.parse_args()
     example_rule()   # a typo in SUITEMAP_EXAMPLE_RULE is an error at once, not a silent default
     docstring_rule()
+    import_rule()
+    annotation_rule()
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
