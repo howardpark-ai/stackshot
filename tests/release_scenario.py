@@ -34,6 +34,22 @@ import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threadin
 import _scratch
 from _release_harness import *
 check("release.sh parses", subprocess.run(["bash", "-n", os.path.join(STACK, "release.sh")]).returncode == 0)
+# a measured run sets COVERAGE_PROCESS_START for this process; what release.sh and its stubs start must not inherit it (every Python start would load coverage: a measured run took three times a plain one)
+import _release_harness as _h
+_dump = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-envdump-")) / "env"
+_held = {k: os.environ.get(k) for k in ("COVERAGE_PROCESS_START", "COVERAGE_FILE")}; _env0 = _h.ENV0
+try:   # a plain run has no coverage variable: set two in this process, take ENV0 again as the import does, and run one scenario (what its gh stub is started in) and the git environment the same way
+    os.environ["COVERAGE_PROCESS_START"] = "/nonexistent/rc"; os.environ["COVERAGE_FILE"] = "/nonexistent/data"
+    _h.ENV0 = _h._env0()
+    scenario("envdump", merge="ok", gq="queued,queued,merged", envdump=str(_dump))
+    _stub_env = _dump.read_text() if _dump.exists() else ""
+    _git_env = subprocess.run(["env"], env=_h._genv(), capture_output=True, text=True).stdout
+finally:
+    _h.ENV0 = _env0
+    for k, v in _held.items(): os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+check("harness: release.sh's stubs (scenario()) and the git calls (genv) are started without the COVERAGE_ variables of a measured run, and keep the rest",
+      "RT_DIR=" in _stub_env and "COVERAGE_" not in _stub_env and "GIT_AUTHOR_NAME=t" in _git_env and "COVERAGE_" not in _git_env
+      and _h.without_coverage({"COVERAGE_PROCESS_START": "x", "COVERAGE_FILE": "y", "PATH": "p"}) == {"PATH": "p"}, ([l.split("=")[0] for l in _stub_env.splitlines() if l.startswith("COVERAGE_")], [l.split("=")[0] for l in _git_env.splitlines() if l.startswith("COVERAGE_")], "RT_DIR=" in _stub_env, "GIT_AUTHOR_NAME=t" in _git_env))
 R = "example-owner/stackshot"
 ENQUEUE = f"id=PRNODE23 h={HEADSHA}"   # the enqueue mutation the stub saw: the PR's node id and the head it is pinned to
 MERGE_SHORT = "0106c0d"
@@ -1221,8 +1237,8 @@ try:
     for _ in range(600):
         if (sd / "parked").exists(): break
         threading.Event().wait(0.05)
-    st = subprocess.run(["bash", str(sd / "box/release.sh"), "--status", "23"], env={**os.environ, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
-    st0 = subprocess.run(["bash", str(sd / "box/release.sh"), "--status"], env={**os.environ, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
+    st = subprocess.run(["bash", str(sd / "box/release.sh"), "--status", "23"], env={**ENV0, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
+    st0 = subprocess.run(["bash", str(sd / "box/release.sh"), "--status"], env={**ENV0, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
 finally:
     (sd / "unpark").touch(); tp.join()
 stl = st.stdout.rstrip("\n").splitlines()
@@ -1230,7 +1246,7 @@ check("--status of a release waiting in the merge queue: the unit is active and 
       st.returncode == 0 and stl[0] == "unit stackshot-release-23: active" and "in the merge queue (QUEUED position 1)" in stl[-1], st.stdout)
 check("--status with no number: the latest release", st0.returncode == 0 and st0.stdout == st.stdout, (st0.stdout, st.stdout))
 check("--status: the same release then finishes with the deploy", sres.get("s") and sres["s"]["rc"] == 0 and sres["s"]["deploys"] == [MERGE], sres.get("s") and sres["s"]["out"])
-st = subprocess.run(["bash", str(sd / "box/release.sh"), "--status", "99"], env={**os.environ, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
+st = subprocess.run(["bash", str(sd / "box/release.sh"), "--status", "99"], env={**ENV0, "PATH": f"{sd}/bin:" + os.environ.get("PATH", ""), "RT_DIR": str(sd)}, capture_output=True, text=True, timeout=60)
 check("--status of a release with no log: the unit's state and nothing else", st.returncode == 0 and st.stdout.strip() == "unit stackshot-release-99: active", st.stdout)
 
 
