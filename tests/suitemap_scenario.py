@@ -206,9 +206,13 @@ write("imod.py", '''
 write("qmod.py", '''
     from os.path import join
     from posixpath import join
+    import os; QX = 1
 
     def qj():
         return join("a", "b")
+
+    def qx():
+        return QX
 ''')
 # a manual check (no suite runs it): its import-time call into cfgmod reads mod.LIMIT, which must not take cfgmod.py whole
 write("tests/w_check.py", '''
@@ -232,7 +236,7 @@ write("tests/a_scenario.py", '''
     assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2 and mod.typed2([1]) == 0
     assert pmod.pa([1]) == 1 and pmod.pr(1) == [1] and pmod.pl(1) == {} and pmod.pd() == 5 and pmod.pc(2) == 2 and pmod.pu() == [] and pmod.PK().pm([]) == 1
     import qmod
-    assert pmod.pk().f is None and pmod.pt(1) == 1 and pmod.PN(1).x == 1 and qmod.qj() == 'a/b'
+    assert pmod.pk().f is None and pmod.pt(1) == 1 and pmod.PN(1).x == 1 and qmod.qj() == 'a/b' and qmod.qx() == 1
     assert open(os.path.join(ROOT, "data.txt")).read()
 ''')
 write("tests/b_scenario.py", '''
@@ -513,6 +517,85 @@ write("tests/w1_scenario.py", "from pmod import pa as alias\nuse = [alias]\n"); 
 out3 = tool("select", "--map", str(MAP), "--to", head2).stdout.split()
 check("ESC2 the same removal of Iterable that selected nothing (ANN1) selects a once pa is used as a value (w1: an alias of it; w1 has no measurement and runs anyway)",
       out3 == ["a", "w1"], out3)
+# ---- the review of the import and annotation rules (Thu Nov 12th 2026). OLD: both old rules (what the PR before the rules chose).
+OLD = {**I1, **N1}
+# an import the file gains that does not resolve fails every importer at import; no annotation-only name shows it. imod.py imports Tag from tmod.py and uses it only in an annotation (b runs it).
+def tmod_bind(): sub("tmod.py", "Tag = int", "Tag = int\nTagg = int")
+out, err, head = sel_after(lambda: sub("imod.py", "from tmod import Tag\n", "from tmod import Tag, Tagg\n"), "name added, missing in its module")
+check("IMP10 a name ADDED to an import from one of our modules that does not bind it takes the importing file whole: the suite that imports it (b), as the old rule had it",
+      out.split() == ["b"] and "imod.py: whole (imod.py)" in err and old_rule(head, OLD) == ["b"], (out, err, old_rule(head, OLD)))
+def add_and_define(): sub("imod.py", "from tmod import Tag\n", "from tmod import Tag, Tagg\n"); tmod_bind()
+out, err, head = sel_after(add_and_define, "name added, and bound in its module")
+check("IMP11 ...but one the module binds (here in the same change) is a pure addition: nothing is selected (the old rule chose b through Tag)", out == "" and old_rule(head, OLD) == ["b"], (out, err, old_rule(head, OLD)))
+out, err, head = sel_after(lambda: sub("imod.py", "from tmod import Tag\n", "from tmod import Tagg\n"), "name renamed to a missing one")
+check("IMP12 a name renamed to one the module does not bind (not a pure addition) takes the file whole too: b", out.split() == ["b"] and "imod.py: whole (imod.py)" in err and old_rule(head, OLD) == ["b"], (out, err, old_rule(head, OLD)))
+out, err, head = sel_after(lambda: sub("qmod.py", "from os.path import join\n", "from os.path import join, split\n"), "name added from the stdlib")
+check("IMP13 a name added from the stdlib or an installed package cannot be looked up: it keeps the narrowing (a pure addition, nothing selected; the old rule chose a through join)", out == "" and old_rule(head, I1) == ["a"], (out, err, old_rule(head, I1)))
+# the cases that cannot be a suite's measured file here (a package, a star import, import a.b): py_change on two commits, with the new files marked as run by b
+def whole_of(a, b, path, ran=(), env=None):
+    code = ("import sys, json; sys.path.insert(0, 'tests'); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
+            "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
+            "print(json.dumps(sorted(s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[3])))")
+    r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("rp/__init__.py", ""); write("rp/b.py", "T = int\nimport collections\n")
+write("rp/a.py", "from __future__ import annotations\nfrom .b import T\n\ndef g(x: T):\n    return x\n")
+pkg_base = commit("a package with a relative import")
+RAN = ("rp/a.py", "rp/b.py", "rp/__init__.py")
+def rp(old, new, extra=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", pkg_base); sub("rp/a.py", old, new)
+    if extra: extra()
+    return whole_of(pkg_base, commit("relative import edit"), "rp/a.py", RAN)
+check("IMP14 a relative import added for a name the module binds (T2 here) narrows; one for a name it does not bind takes the file whole",
+      rp("from .b import T\n", "from .b import T, T2\n", lambda: sub("rp/b.py", "T = int\n", "T = int\nT2 = int\n")) == [] and rp("from .b import T\n", "from .b import T, U\n") == ["rp/a.py"],
+      (rp("from .b import T\n", "from .b import T, T2\n", lambda: sub("rp/b.py", "T = int\n", "T = int\nT2 = int\n")), rp("from .b import T\n", "from .b import T, U\n")))
+check("IMP15 a name that is a module below the package (from . import b), or one the module itself imports (collections in rp/b.py), is bound; a module that is not there is not",
+      rp("from .b import T\n", "from .b import T\nfrom . import b\n") == [] and rp("from .b import T\n", "from .b import T, collections\n") == []
+      and rp("from .b import T\n", "from .b import T\nfrom . import nothing\n") == ["rp/a.py"] and rp("from .b import T\n", "from .nothing import T\n") == ["rp/a.py"])
+check("IMP16 a star import added is unchecked (the names it brings are not on the line): the file whole, from a module of ours or from a library",
+      rp("from .b import T\n", "from .b import T\nfrom .b import *\n") == ["rp/a.py"] and rp("from .b import T\n", "from .b import T\nfrom os.path import *\n") == ["rp/a.py"])
+check("IMP17 `import a.b` added: a missing module of ours takes the file whole; a module of ours that is there, the stdlib's and an installed package's keep the narrowing",
+      rp("from .b import T\n", "from .b import T\nimport rp.nothing\n") == ["rp/a.py"] and rp("from .b import T\n", "from .b import T\nimport rp.b\n") == []
+      and rp("from .b import T\n", "from .b import T\nimport os.path\n") == [] and rp("from .b import T\n", "from .b import T\nimport nopkg.sub\n") == [])
+check("IMP18 a module whose names are not all known (a star import in it) does not vouch for a name: the file whole",
+      rp("from .b import T\n", "from .b import T, V\n", lambda: sub("rp/b.py", "import collections\n", "from os.path import *\n")) == ["rp/a.py"])
+rp("from .b import T\n", "from .b import T, U\n")
+check("IMP19 under the old import rule (I1) that unresolved addition is no whole-file case: the rule is the new one, switching it off brings the old selection back",
+      whole_of(pkg_base, git("rev-parse", "HEAD").strip(), "rp/a.py", RAN, I1) == [])
+# several statements on one line (import os; QX = 1, qmod.py): the second is a changed statement too, and the unchanged import binds nothing
+out, err, head = sel_after(lambda: sub("qmod.py", "import os; QX = 1", "import os; QX = 2"), "two statements on one line")
+check("MS1 the value changed on a line that also holds an import (`import os; QX = 1`) reaches the code that reads it: a (qx)", out.split() == ["a"], (out, err))
+out, err, head = sel_after(lambda: sub("qmod.py", "import os; QX = 1", "import os, re; QX = 1"), "two statements on one line, an import added")
+check("MS2 ...and an import edited on that line takes the other statement with it (the line changed): a, as the old rule had it, never nothing", out.split() == ["a"] and old_rule(head, I1) == ["a"], (out, err, old_rule(head, I1)))
+# a .py file that does not parse: reach() reads the imports of every file
+out, err, _ = sel_after(lambda: (write("cfgmod.py", "def configure(v:\n"), sub("mod.py", "LIMIT = 3", "LIMIT = 4")), "a file that does not parse, and a constant")
+r = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip())
+check("UNP1 a .py file that does not parse (cfgmod.py, which suite b ran) does not stop the selection with an error, and is taken whole (every suite here: b ran it, a and c read mod.py)",
+      r.returncode == 0 and "Traceback" not in r.stderr and r.stdout.split() in (["a", "b", "c"], ["all"]), (r.returncode, r.stdout, r.stderr[-500:]))
+# a name escapes through a rename chain across files, and a uv shebang is a script too
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pr as h\n")
+write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n")
+chain_head = commit("rename chain")
+def escaped(rev, names, shebang=None):
+    r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
+                        rev, *names], capture_output=True, text=True, env=ENV, cwd=str(R))
+    return r.stdout.split("|")[0].split(), r.stdout.split("|")[-1].strip(), r.stderr[-400:]
+check("ESC3 a def re-exported under another name (w1: `from pmod import pr as h`) and used as a value in another file (w2: get_type_hints(h)) escapes with it: h and pr",
+      escaped(chain_head, ["h", "pr", "pl"])[:2] == (["h", "pr"], "False"), escaped(chain_head, ["h", "pr", "pl"]))
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pr as h\n")
+write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n"); rm("Sequence")()
+out3 = tool("select", "--map", str(MAP), "--to", commit("return annotation of pr, escaped through a rename chain")).stdout.split()
+check("ESC4 so removing Sequence (the return annotation of pr, ANN2: nothing) now selects a, the suite that calls pr (w1 and w2 have no measurement and run anyway)", out3 == ["a", "w1", "w2"], out3)
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("bin/uvrunner", "#!/usr/bin/env -S uv run --script\nimport pmod\nf = pmod.pq\n")
+uv_head = commit("a uv script")
+check("UV1 a script with a `uv run` shebang counts as a use of a def as a value: pq escapes, and the scripts were listed (not blind)", escaped(uv_head, ["pq", "pj"])[:2] == (["pq"], "False"), escaped(uv_head, ["pq", "pj"]))
+write("bin/uvbroken", "#!/usr/bin/env -S uv run --script\nthis is ( not python\n")
+uvb_head = commit("a uv script that does not parse")
+check("UV2 ...and one that does not parse stays blind (any def may be reached)", escaped(uvb_head, ["pq"])[1] == "True", escaped(uvb_head, ["pq"]))
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")
