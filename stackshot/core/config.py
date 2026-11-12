@@ -698,6 +698,40 @@ def kw_rx(name: str, build, specs: tuple[tuple[str, str], ...], flags: int = 0):
     return _KW_RX[key]
 
 
+GMAIL_LABEL = re.compile(r"[A-Za-z0-9._-]+$")       # a mailbox name a Gmail anchor can scope itself to ([anchor_hub] gmail_names): no space, "@", "," or ":"
+_GMAIL_ADDR = re.compile(r"[^@\s,:]+@[^@\s,:]+$")
+
+
+def gmail_names_notes(cfg: dict[str, Any] | None = None) -> list[str]:
+    """notes() lines for [anchor_hub] gmail_names ({ work = "user@example.com" }): an entry the Gmail reader skips without a word is said here, at
+    the start and on a reload (the key itself is read when the Google receiver starts): an address that is no email address, a name with a
+    space, "@", "," or ":" (or none), two names that differ only in case (a scope matches names in any case, so the last one wins), and two names
+    for one address (the last one wins)."""
+    gn = get("anchor_hub", "gmail_names", cfg=cfg)
+    if gn is None or gn == {}:
+        return []
+    if not isinstance(gn, dict):
+        return ["[anchor_hub] gmail_names is not a table, so no mailbox has a name: write gmail_names = { work = \"user@example.com\" }"]
+    out: list[str] = []
+    names: dict[str, str] = {}
+    addrs: dict[str, str] = {}
+    for k, v in gn.items():
+        name, addr = str(k).strip(), str(v).strip()
+        if not GMAIL_LABEL.match(name):
+            out.append(f"[anchor_hub] gmail_names name {name!r} is skipped: a mailbox name is letters, digits, \".\", \"_\" and \"-\" only (no space or \"@\")")
+            continue
+        if not _GMAIL_ADDR.match(addr):
+            out.append(f"[anchor_hub] gmail_names {name} = {addr!r} is skipped: the value is the mailbox's email address, user@example.com")
+            continue
+        if name.lower() in names:
+            out.append(f"[anchor_hub] gmail_names names {names[name.lower()]!r} and {name!r} differ only in case, so they are one name and the last one wins: give each mailbox its own name")
+        if addr.lower() in addrs:
+            out.append(f"[anchor_hub] gmail_names gives {addr!r} two names, {addrs[addr.lower()]!r} and {name!r}: the last one wins, give each mailbox one name")
+        names[name.lower()] = name
+        addrs[addr.lower()] = name
+    return out
+
+
 def keyword_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """notes() lines for [keywords]: a section or key this version does not read, a value that is not a list of strings, a pattern that does not compile."""
     kw = get("keywords", cfg=cfg)
@@ -961,6 +995,7 @@ def notes(cfg: dict[str, Any] | None = None) -> list[str]:
     not a number above 0 is read as 30 (the default), so it is said here, at the start and on a reload, instead of changing silently. a paused stall pass is named first."""
     out: list[str] = stall_notes(cfg)
     out += keyword_notes(cfg)
+    out += gmail_names_notes(cfg)
     if not str(get("instance", "owner", cfg=cfg) or "").strip():
         out.append('[instance] has no owner, so the board names its person by a placeholder: set owner = "<first name>" (the example config has it)')
     pg = get("page_gate", cfg=cfg)

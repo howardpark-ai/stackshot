@@ -181,7 +181,7 @@ def anchor_id(url: str) -> str | None:
 
 
 # ---------- Gmail query anchors and their mailboxes ----------
-# `gmail:q:<query>` reads every mailbox the hub reads. A mailbox scope goes between `q` and the colon: `gmail:q@work:<query>`, or
+# `gmail:q:<query>` reads every mailbox the anchors service reads. A mailbox scope goes between `q` and the colon: `gmail:q@work:<query>`, or
 # `gmail:q@work,home:<query>` for several. Why there: the query after `gmail:q:` is Gmail operator text in which `name:` is ordinary
 # (`subject:`, a bare `work:` in a subject), so a mailbox written inside it (`gmail:q:work:<query>`) could not be told from a query word;
 # and no stored id has a character after `q` but the colon, so no existing anchor changes meaning. A mailbox is named by the label the
@@ -200,7 +200,7 @@ def gmail_query(aid: str) -> tuple[list[str] | None, str] | None:
 
 
 def gmail_resolve(names: list[str], boxes: dict[str, str]) -> tuple[list[str], list[str]]:
-    """The mailbox names of a scope against `boxes` ({label: address} of the mailboxes the hub reads): → (the labels they mean, in order and
+    """The mailbox names of a scope against `boxes` ({label: address} of the mailboxes the anchors service reads): → (the labels they mean, in order and
     without repeats, the names that mean none). A name is a label or an address, in any case."""
     low = {k.lower(): k for k in boxes}
     low.update({v.lower(): k for k, v in boxes.items()})
@@ -232,11 +232,16 @@ def gmail_reads(aid: str, address: str, boxes: dict[str, str]) -> bool:
 
 
 def gmail_title(aid: str, boxes: dict[str, str]) -> str:
-    """`<query> · <mailboxes>` for a Gmail query anchor (a name that is no mailbox now is marked), else ""."""
+    """`<query> · <mailboxes>` for a Gmail query anchor (a name that is no mailbox now is marked), else "". A mailbox is named by the label the
+    instance gives it and by nothing else: an unscoped anchor, which reads every mailbox, is named with them only when every one has a label,
+    so with no labels configured its title is the query alone, as it was before a scope existed (the title reaches item and project pages, and
+    an address does not belong there). A scoped anchor names the mailboxes it was written with."""
     q = gmail_query(aid)
     if q is None:
         return ""
     labels, bad = gmail_mailboxes(aid, boxes)
+    if q[0] is None and not all(k.lower() != boxes[k].lower() for k in labels):
+        labels = []
     named = ", ".join(labels + [f"{b} (no such mailbox)" for b in bad])
     return f"{q[1]} · {named}" if named else q[1]
 
@@ -781,8 +786,8 @@ def remove(store: dict, project: str, urls: list[str]) -> list[dict[str, Any]]:
 
 def fmt(entries: list[dict[str, Any]], status: dict[str, dict[str, Any]] | None = None, boxes: dict[str, str] | None = None) -> str:
     """A project's anchors, one per line. With anchor-hub's per-anchor status (status.json "anchors") each line also says
-    what the hub made of it: its name there, or that the hub cannot read it and why. With `boxes` ({label: address} of the mailboxes the
-    hub reads) a Gmail query line names the mailboxes it reads (`Gmail from:x · work, home`), also before the hub has named it."""
+    what the anchors service made of it: its name there, or that the anchors service cannot read it and why. With `boxes` ({label: address} of the mailboxes the
+    anchors service reads) a Gmail query line names the mailboxes it reads (`Gmail from:x · work, home`), also before the anchors service has named it."""
     def hub(e: dict[str, Any]) -> str:
         aid = anchor_id(split_fragment(e.get("url", ""))[0]) or ""
         st = (status or {}).get(aid) or {}

@@ -424,7 +424,7 @@ quiet = { drive = 1800 }                            # per event kind: after the 
 quiet_max_hold = 10800                              # s: a burst that never goes quiet still reports this often
 gmail_poll_seconds = 300                            # a mailbox Google will not push for is read this often (poll external servers sparingly)
 gmail_topics = {}                                   # per account: the Pub/Sub topic in its OAuth client's own Cloud project, "user@example.com" = "projects/<id>/topics/<name>"
-gmail_names = {}                                    # per mailbox, the short name a Gmail anchor scopes itself by: { work = "user@example.com" }; a mailbox with none is named by its address
+gmail_names = {}                                    # per mailbox, the short name a Gmail anchor scopes itself by: { work = "user@example.com" }; a mailbox with none is scoped by its address and not named in titles; names: letters, digits . _ -; a scope lists them comma-separated, no spaces
 google_oauth_envs = {}                              # stackshot/anchors/anchor_hub_google_auth.py: label → an oauth.env with GOOGLE_OAUTH_CLIENT_ID/SECRET, e.g. { team = "~/.config/example-google/oauth.env" }
 require_sender = false                              # stackshot/fleet/push.py refuses a drop that names no sender (--from or $PUSH_FROM). false (the bridge
                                                     # while callers switch): it is labelled with the calling program's name instead
