@@ -69,7 +69,7 @@ def direct() -> dict[str, str]:
 # CI, a reopen, an unclassified event, an event on any other repository, a route outside the pilot and a session bound by
 # extra.json are delivered as before.
 GH_TYPES = ("pr_opened", "pr_reopened", "pr_synchronize", "pr_merged", "pr_closed", "issue_reopened", "issue_closed",
-            "ci_passed", "ci_failed", "ci_activity", "comment", "review", "review_comment")
+            "ci_passed", "ci_failed", "ci_activity", "comment", "review", "review_comment", "pr_commit")
 ROUTINE = frozenset({"pr_opened", "pr_synchronize", "pr_merged", "pr_closed", "ci_passed"})
 def own_repos() -> list[str]:
     """[pilot] own_repos: the fleet's own GitHub repositories, each entry "owner/repo", "owner/*" (every repository of that owner) or a numeric

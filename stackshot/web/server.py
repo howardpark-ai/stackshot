@@ -16229,7 +16229,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 # tied to the item: a CI result, a comment by a person, a review, a merge (anchors/event_log.py: `Hub.emit` appends one line each, as it does for a merge, from what the event holds). The ties are
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
 # ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and
-# is no publish (the home page is kept for 30 s, so the On agent rows and the item page pick the record up on their next draw). A commit or push is not here: the hub emits none.
+# is no publish (the home page is kept for 30 s, so the On agent rows and the item page pick the record up on their next draw). A commit to a tied pull request comes in the same way: the hub's GitHub receiver sees the head sha change and emits it at the time it saw it (after downtime, at the commit's committer date).
 _EVENT_ACT_FLOOR_H = _elog.FLOOR_H       # an event older than this is not read (a day of downtime, or a shorter file read again from its start): the record would only fill with old news (the hub applies the same window to the event's own time when it writes the line)
 _EVENT_ACT_AHEAD_S = _elog.AHEAD_S       # …nor one stamped more than this ahead of the server's clock (a skew of minutes is allowed and read as now)
 
