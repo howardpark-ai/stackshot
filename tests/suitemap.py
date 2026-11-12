@@ -158,14 +158,18 @@ annotations). Now:
     a class, an assignment, an import there, a module of that name below it; the module must exist; a bare annotation, a name bound only under
     `if TYPE_CHECKING:` and a deleted name are no binding). A name that is not there, a module whose names are not
     all known (a star import, __getattr__, globals()), a star import added, a relative import that leads to nothing of ours and `import a.b` of a missing
-    module of ours are unchecked. An import from the stdlib or an installed package cannot be looked up: it keeps the I2 narrowing.
+    module of ours are unchecked. A library import is looked up as far as it can be without side effects: a stdlib module must have the name added (as an
+    attribute, or as a submodule), a top-level package that is neither the stdlib's nor installed is unchecked, a stdlib module that does something at
+    import (antigravity, tkinter, ...) is never imported and its import is unchecked, and so is any probe that fails. A name from an installed package cannot be
+    looked up: it keeps the I2 narrowing.
   * N2: in a file with `from __future__ import annotations`, the names of an annotation are no read when it annotates (a) a parameter or the return of
     a def with no decorator, or only a decorator that wraps (property, staticmethod, classmethod, abstractmethod, lru_cache, cache, cached_property,
     contextmanager, asynccontextmanager, overload), whose name is only ever CALLED in the whole checkout (a bare identifier used as a value anywhere, in a .py file or a script
     with a python or `uv run` shebang, as an argument, an assignment, a decorator, an attribute read that is not called, or as a string, makes the def's
     annotations read as before: that function object may reach typing.get_type_hints, functools.wraps, a registry; a name imported under another name
     (`from m import f as h`, followed across files) carries it to f; a script that does not parse makes every def count), or (b) a local variable inside a function (never evaluated). The parameters of a class's __init__, __call__, __new__ and __post_init__ are
-    read through the class (inspect.signature(Cls), a framework that builds its fields), so they escape with the CLASS's name. Everything else that
+    read through the class (inspect.signature(Cls), a framework that builds its fields), so they escape with the CLASS's name; a method name of those three (or __post_init__) used as a value anywhere (get_type_hints(C(1).__init__), get_type_hints(OBJ.__call__),
+    a class decorator or an __init_subclass__ doing it to cls.__init__) makes every class-keyed name escape. Everything else that
     annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the registry evaluates them), of a class body (a dataclass,
     NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
     annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations` line itself takes the
@@ -176,8 +180,9 @@ annotations). Now:
     typing.get_type_hints, inspect.signature with eval_str or a registry is not seen (as for a docstring); the tripwire in tests/suitemap_scenario.py pins the number of uses of those forms per file (get_type_hints,
     get_annotations, __annotations__, __annotate__, eval_str, annotationlib, TypeAdapter, create_model, validate_call, update_wrapper, __wrapped__, wraps,
     a subscript by "__annotations__"), so a new use fails that scenario until its author has looked at it. A name inside a quoted annotation is not a read either way.
-SUITEMAP_IMPORT_RULE=I1 and SUITEMAP_ANNOTATION_RULE=N1 give the old rule (I2 and N2 by default; any other value is an error, checked when a command
-starts). `audit` applies the same rules on both maps.
+SUITEMAP_IMPORT_RULE=I1 and SUITEMAP_ANNOTATION_RULE=N1 give the old selection, plus two differences that are always wider (I2 and N2 by default; any other
+value is an error, checked when a command starts): turning postponed annotations on or off takes the file whole under either rule (py_change), and a read of
+a name that a try/except fallback or a second line imports twice reads every source of it (ModNames.keys, froms_all). `audit` applies the same rules on both maps.
 
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
@@ -457,6 +462,8 @@ class ModNames:
         self.docreads = set()                       # scopes that read a docstring, or hand a function to a registry that does
         self.postponed, self.imports, self.import_ids = False, {}, set()   # import_ids: the indexes in stmts of the Import and ImportFrom nodes (`import os; os = 1` holds an import and a plain statement on one line)
         self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
+        self.class_keyed = set()                     # the class names under which the __init__, __call__ and __new__ annotations wait (mark_annotations)
+        self.attr_values = set()                     # attribute names read without being called, and the names getattr(obj, "name") asks for (Names.settle: C(1).__init__ as a value)
         self.valuse = set()                          # bare names used as a value (not just called): Names.settle
         self.import_seq, self.dropped = [], set()    # the module-level imports in order (None for another statement); (module, name) keys of repo imports whose only use was a dropped annotation
         self.aliases, self.froms, self.toplevel = {}, {}, set()   # set before the early return: reach() reads froms of every file, one that does not parse included
@@ -532,6 +539,8 @@ class ModNames:
                         # the annotations of a class's __init__, __call__ and __new__ are read through the CLASS (inspect.signature(Cls), a framework
                         # that builds its fields from them): they escape with the class's name, not the method's
                         key = cls if cls and ch.name in CLASS_CALLS else ch.name
+                        if key == cls and cls:
+                            self.class_keyed.add(cls)
                         ar = ch.args
                         for e in [ch.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
                             if e is not None:
@@ -557,8 +566,13 @@ class ModNames:
                 self.valuse.add(n.id)
             elif isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and id(n) not in callee:
                 self.valuse.add(n.attr)
+                self.attr_values.add(n.attr)
             elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.isidentifier():
                 self.valuse.add(n.value)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and dotted(n.func) in ("getattr", "inspect.getattr_static") and len(n.args) > 1 \
+                    and isinstance(n.args[1], ast.Constant) and isinstance(n.args[1].value, str):
+                self.attr_values.add(n.args[1].value)
         for local, srcs in self.froms_all.items():
             if local in self.valuse:
                 self.valuse.update(name for _, name in srcs)            # from m import f as g; get_type_hints(g): f is the one that escapes
@@ -870,6 +884,12 @@ class Names:
                         if local in self.escaped and name not in self.escaped:
                             self.escaped.add(name)
                             grew = True
+        # the parameters of a class's __init__, __call__ and __new__ wait under the CLASS's name, but they are also reached through the method itself
+        # (get_type_hints(C(1).__init__), get_type_hints(OBJ.__call__), a class decorator or __init_subclass__ doing get_type_hints(cls.__init__)): a method
+        # name read as an attribute without being called anywhere (or asked of getattr) escapes every class-keyed name. The tripwire pins each get_type_hints use
+        if any(m.attr_values & CLASS_CALLS for m in everyone):
+            for m in everyone:
+                self.escaped |= m.class_keyed
         self.blind = scripts is None   # could not list the scripts: any function may be reached by one
 
         def skippable(m, fname):
@@ -1515,14 +1535,19 @@ def unchecked_imports(N, m, items):
     with it: the old rule took the file whole, and so does this. An import from one of OUR modules is checked against that module's bindings: the module
     must exist and bind the name (a def, a class, an assignment, an import there, or a module of that name below it); one that does not, a module whose
     names are not all known (a star import, __getattr__, globals()), a star import added and a relative import that resolves to nothing of ours are
-    unchecked. An import of a library (stdlib or installed) cannot be checked here: its narrowing stays (I2); only a library import that names a
-    top-level package of ours (a module that is missing from the checkout) is unchecked"""
+    unchecked. An import of a library is checked as far as it can be without side effects (library_unresolved): a stdlib module must have the name
+    (an attribute, or a submodule of that name), a top-level package that is neither the stdlib's nor installed is unchecked, and a failed probe is
+    unchecked; an installed package's names cannot be looked up, so its narrowing stays (I2)"""
     repo = m.repo
     for _, src in items:
         if src[0] == "import":
             full = src[1]
             if full.split(".")[0] in m.repo_tops and full not in repo and not any(r.startswith(full + ".") for r in repo):
                 return True
+            if full.split(".")[0] not in m.repo_tops:
+                head, _, last = full.rpartition(".")
+                if (library_unresolved(head, last, True) if head else library_unresolved(last, None)):
+                    return True
             continue
         _, level, module, name, _ = src
         if name == "*":
@@ -1536,7 +1561,45 @@ def unchecked_imports(N, m, items):
                 return True
         elif level or base.split(".")[0] in m.repo_tops:
             return True   # a module of ours that is not there, or a relative import that leads nowhere we know
+        elif library_unresolved(base, name):
+            return True
     return False
+
+
+# stdlib modules whose import does something (opens a browser, prints, starts a GUI toolkit, runs a demo): never imported here, the import is unchecked
+NO_PROBE = {"antigravity", "this", "idlelib", "turtledemo", "tkinter", "turtle", "__main__", "__hello__", "__phello__", "test", "lib2to3", "pydoc_data"}
+_LIB = {}
+
+
+def library_unresolved(module, name, as_module=False):
+    """True when `from module import name` (`import module.name` with as_module) of a library may fail at import, or cannot be told: a top-level package
+    that is neither the stdlib's nor installed (a suite could not import it either; name None is `import module` alone), a stdlib module that has the
+    name neither as an attribute nor as a submodule (as a submodule only, with as_module), and any failure of the probe. Only a stdlib module is ever
+    imported, and not one in NO_PROBE; an installed package keeps the narrowing (I2)"""
+    top = module.split(".")[0]
+    if top not in sys.stdlib_module_names:
+        return top not in shadowable()
+    if name is None:
+        return False
+    if top in NO_PROBE:
+        return True
+    key = (module, name, as_module)
+    if key not in _LIB:
+        import importlib, importlib.util
+
+        def tries(fn):   # a probe that fails (SystemExit included) is no proof that the name is there
+            try:
+                return bool(fn())
+            except KeyboardInterrupt:
+                raise
+            except BaseException:
+                return False
+        if as_module:
+            ok = tries(lambda: importlib.import_module(f"{module}.{name}"))   # `import os.path`: a stdlib module, no side effect at import
+        else:
+            ok = tries(lambda: hasattr(importlib.import_module(module), name)) or tries(lambda: importlib.util.find_spec(f"{module}.{name}"))
+        _LIB[key] = not ok
+    return _LIB[key]
 
 
 def quiet_import(N, S, path, mod):

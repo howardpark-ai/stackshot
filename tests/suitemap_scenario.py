@@ -555,14 +555,29 @@ check("IMP15 a name that is a module below the package (from . import b), or one
       and rp("from .b import T\n", "from .b import T\nfrom . import nothing\n") == ["rp/a.py"] and rp("from .b import T\n", "from .nothing import T\n") == ["rp/a.py"])
 check("IMP16 a star import added is unchecked (the names it brings are not on the line): the file whole, from a module of ours or from a library",
       rp("from .b import T\n", "from .b import T\nfrom .b import *\n") == ["rp/a.py"] and rp("from .b import T\n", "from .b import T\nfrom os.path import *\n") == ["rp/a.py"])
-check("IMP17 `import a.b` added: a missing module of ours takes the file whole; a module of ours that is there, the stdlib's and an installed package's keep the narrowing",
+check("IMP17 `import a.b` added: a missing module of ours takes the file whole; a module of ours that is there and a stdlib module keep the narrowing (a package that is neither the stdlib's nor installed: IMP22)",
       rp("from .b import T\n", "from .b import T\nimport rp.nothing\n") == ["rp/a.py"] and rp("from .b import T\n", "from .b import T\nimport rp.b\n") == []
-      and rp("from .b import T\n", "from .b import T\nimport os.path\n") == [] and rp("from .b import T\n", "from .b import T\nimport nopkg.sub\n") == [])
+      and rp("from .b import T\n", "from .b import T\nimport os.path\n") == [] and rp("from .b import T\n", "from .b import T\nimport xml.etree.ElementTree\n") == [])
 check("IMP18 a module whose names are not all known (a star import in it) does not vouch for a name: the file whole",
       rp("from .b import T\n", "from .b import T, V\n", lambda: sub("rp/b.py", "import collections\n", "from os.path import *\n")) == ["rp/a.py"])
 rp("from .b import T\n", "from .b import T, U\n")
 check("IMP19 under the old import rule (I1) that unresolved addition is no whole-file case: the rule is the new one, switching it off brings the old selection back",
       whole_of(pkg_base, git("rev-parse", "HEAD").strip(), "rp/a.py", RAN, I1) == [])
+# the third round: an added library name that cannot resolve is invisible to a suite that reads nothing of it (a postponed file, an annotation-only name), and the PR goes green with every
+# importer broken. A stdlib module must have the name (an attribute or a submodule); a top-level package that is neither the stdlib's nor installed, and a stdlib module that does something at import, are unchecked.
+def rl(new, env=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", pkg_base); sub("rp/a.py", "from .b import T\n", "from .b import T\n" + new)
+    return whole_of(pkg_base, commit("library import edit"), "rp/a.py", RAN, env)
+W = ["rp/a.py"]
+check("IMP22 an added name the stdlib module does not have (`from typing import Annoted`, `from os import path, nonexistent`) takes the file whole; one it has (Any, path, a submodule such as ElementTree) keeps the narrowing",
+      rl("from typing import Annoted\n") == W and rl("from os import path, nonexistent\n") == W and rl("from typing import Any\n") == [] and rl("from os import path\n") == []
+      and rl("from xml.etree import ElementTree\n") == [] and rl("from collections.abc import Iterable, Nonesuch\n") == W,
+      [rl("from typing import Annoted\n"), rl("from os import path, nonexistent\n"), rl("from xml.etree import ElementTree\n")])
+check("IMP23 a top-level package that is neither the stdlib's nor installed (`from nopkg import x`, `import nopkg`, `import nopkg.sub`, `from nopkg.sub import x`) takes the file whole, and so does a submodule of the stdlib that is not there (`import os.nothing`)",
+      rl("from nopkg import x\n") == W and rl("import nopkg.sub\n") == W and rl("import nopkg\n") == W and rl("from nopkg.sub import x\n") == W and rl("import os.nothing\n") == W)
+check("IMP24 a stdlib module that does something at import (antigravity opens a browser, tkinter loads a toolkit) is never imported: the file whole; and under the old import rule (I1) none of these is whole",
+      rl("from antigravity import geohash\n") == W and rl("from tkinter import Tk\n") == W
+      and rl("from typing import Annoted\n", I1) == [] and rl("import nopkg\n", I1) == [])
 # the second round of the review: names that fail at runtime are no binding, two `as` imports of one local, a plain statement beside an import
 def pc_of(a, b, path, ran=(), env=None):
     """the whole py_change result for one file, as sorted strings: (fns, bound, own, whole)"""
@@ -641,6 +656,28 @@ check("ESC5 two `from … import x as h` for one local (a try/except ImportError
 write("tests/w1_scenario.py", "from pmod import pr as h\nfrom pmod import pl as h\n")
 tl_head = commit("two lines import one local")
 check("ESC6 ...and so do two plain lines of one file", escaped(tl_head, ["h", "pr", "pl"])[:2] == (["h", "pl", "pr"], "False"), escaped(tl_head, ["h", "pr", "pl"]))
+# the __init__, __call__ and __new__ annotations wait under the CLASS's name; the method itself reaches typing.get_type_hints too: a method name used as a value
+# anywhere (an attribute read that is not called) escapes every class-keyed name. cp/m.py: `T = int`, C.__init__(self, x: T), in a postponed file.
+def class_read(script, env=None, extra=None):
+    """True when the name T of cp/m.py is a read of the module (not a dropped annotation) once `script` (the text of tests/w5_scenario.py, or None) is in the checkout"""
+    git("checkout", "-q", "-B", f"t{len(ran)}", base)
+    write("cp/__init__.py", ""); write("cp/m.py", "from __future__ import annotations\nT = int\n\n\nclass C:\n    def __init__(self, x: T):\n        self.x = x\n\n    def __call__(self, y: T):\n        return y\n")
+    if script is not None: write("tests/w5_scenario.py", script)
+    rev = commit("class-keyed escape")
+    r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); m = N.files['cp/m.py']; print(any(('cp.m', 'T') in ks for ks in m.refs.values()))", rev],
+                       capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    return r.stdout.strip() == "True" if r.returncode == 0 else (r.stdout, r.stderr[-400:])
+HINTS = "import typing\nimport cp.m\n"
+check("ESC7 a class's __init__ annotations are no read while the class is only called (C(1)): T is dropped; get_type_hints(C(1).__init__), get_type_hints(OBJ.__call__), a class decorator doing get_type_hints(cls.__init__) and an __init_subclass__ doing it make the class-keyed names escape: T is a read",
+      class_read(HINTS + "c = cp.m.C(1)\n") is False
+      and class_read(HINTS + "typing.get_type_hints(cp.m.C(1).__init__)\n") is True
+      and class_read(HINTS + "OBJ = cp.m.C(1)\ntyping.get_type_hints(OBJ.__call__)\n") is True
+      and class_read(HINTS + "def deco(cls):\n    typing.get_type_hints(cls.__init__)\n    return cls\n") is True
+      and class_read(HINTS + "class Base:\n    def __init_subclass__(cls, **kw):\n        typing.get_type_hints(cls.__init__)\n"
+                     "class Sub(Base):\n    pass\n") is True,
+      [class_read(HINTS + "c = cp.m.C(1)\n"), class_read(HINTS + "typing.get_type_hints(cp.m.C(1).__init__)\n"), class_read(HINTS + "OBJ = cp.m.C(1)\ntyping.get_type_hints(OBJ.__call__)\n"),
+       class_read(HINTS + "def deco(cls):\n    typing.get_type_hints(cls.__init__)\n    return cls\n")])
+check("ESC8 ...and under the old annotation rule (N1) the name is a read whatever the script does", class_read(HINTS + "c = cp.m.C(1)\n", N1) is True)
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")
