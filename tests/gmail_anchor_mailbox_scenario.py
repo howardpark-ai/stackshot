@@ -422,6 +422,50 @@ check("paging cap: the cursor ends at the history id Gmail reported", cur == "99
 got, calls, cur, more = run_paged(2, 3)
 check("paging cap: a history that ends on the last page the cap allows leaves no second poll", len(calls) == 2 and got == [f"m{i}" for i in range(1, 7)] and cur == "99" and not more, (calls, got, cur, more))
 
+# ---- the reader tells an expired history from any other failure by the status, never by the text
+def run_fake(make, bindings, **consts):
+    """One mailbox (ADA) served by the fake `make()` returns, polled until the fake calls its stop(); `consts` are gworkspace constants set for the run.
+    → (the (anchor, text) heard, the fake, the saved read position, whether a further poll is queued)."""
+    env0 = pathlib.Path(core.ENVF).read_text(); acct0 = accts[ADA]; old = {k: getattr(gw, k) for k in ("HEALTH", *consts)}
+    try:
+        pathlib.Path(core.ENVF).write_text(f"GMAIL_ACCOUNTS={ADA}\n")
+        pg = accts[ADA] = make(); gw.HEALTH = 10 ** 12
+        for k, v in consts.items(): setattr(gw, k, v)
+        hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {k: {"sess"} for k in bindings}
+        got = []; hp.event = lambda anchor, summ, kind="slack": got.append((anchor, summ["text"])); pg.stop = hp.stopping.set
+        n = len(caught); gw.run(hp)
+        lp = next(t for t in caught[n:] if t.__name__ == "loop")
+        hp.triggers.put(("gmail", ADA)); lp()
+        return got, pg, hp.savers["google"]()[ADA], not hp.triggers.empty()
+    finally:
+        pathlib.Path(core.ENVF).write_text(env0); accts[ADA] = acct0
+        for k, v in old.items(): setattr(gw, k, v)
+        pathlib.Path(core.STATUS).write_text(saved_status)
+class HttpErr(Exception):
+    """What googleapiclient raises: a message that spells out the request URL, and the status on .resp."""
+    def __init__(self, status, text): super().__init__(text); self.resp = types.SimpleNamespace(status=status)
+class Failing(Account):
+    """history.list answers with one error; getProfile numbers its answers p1, p2, ... so a resync shows."""
+    def __init__(self, email, status, text): super().__init__(email); self.status, self.text, self.profiles, self.gets = status, text, 0, 0
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": self.profiles += 1; return {"historyId": f"p{self.profiles}"}
+        if key == "gmail.users.history.list": self.stop(); raise HttpErr(self.status, self.text)
+        if key == "gmail.users.messages.get": self.gets += 1
+        return super().handle(key, kw)
+URL404 = "<HttpError 503 when requesting https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=404404&pageToken=4040&alt=json returned \"Backend Error\">"
+got, pg, sv, more = run_fake(lambda: Failing(ADA, 503, URL404), [UN])
+check("expired history: a 503 whose text holds '404' leaves the cursor alone (no resync from getProfile), delivers nothing and asks for no second poll",
+      sv["hist"] == "p2" and pg.profiles == 2 and got == [] and not more, (sv, pg.profiles, got, more))
+got, pg, sv, more = run_fake(lambda: Failing(ADA, 429, URL404.replace("503", "429")), [UN])
+check("expired history: a 429 with '404' in its URL leaves the cursor alone too", sv["hist"] == "p2" and pg.profiles == 2 and got == [], (sv, pg.profiles))
+got, pg, sv, more = run_fake(lambda: Failing(ADA, 404, "Requested entity was not found."), [UN])
+check("expired history: Google's own 404 (the status, with no '404' in the text) resyncs the cursor from getProfile", sv["hist"] == "p3" and pg.profiles == 3 and got == [], (sv, pg.profiles))
+class StatusCode(Exception):
+    status_code = 404
+check("expired history: the status is read from resp.status, status_code or status, never from the text",
+      gw.http_status(HttpErr(404, "x")) == 404 and gw.http_status(StatusCode("404")) == 404 and gw.http_status(types.SimpleNamespace(status=404)) == 404
+      and gw.http_status(Exception("HTTP 404 /history?startHistoryId=404")) is None and gw.http_status(HttpErr(503, "404")) == 503, gw.http_status(HttpErr(503, "404")))
+
 # ---- the tool text teaches the syntax
 desc = server._ANCHORS_DESC
 check("text: the tool description teaches the scope and says the list names the mailboxes", "gmail:q@<mailbox>:<query>" in desc and "every mailbox" in desc and "mailboxes each Gmail anchor reads" in desc, desc[:300])

@@ -16,6 +16,13 @@ def mailbox_labels(emails) -> dict:
     cfg = _cfg.get("anchor_hub", "gmail_names") or {}
     given = {str(v).strip().lower(): str(k).strip() for k, v in cfg.items() if _cfg.GMAIL_LABEL.match(str(k).strip()) and _cfg.GMAIL_ADDR.match(str(v).strip())} if isinstance(cfg, dict) else {}   # the entries gmail_names_notes says are skipped
     return dict(sorted((given.get(e.lower(), e), e) for e in emails))      # by name: the anchors service's status file and the server's text agree on the order
+def http_status(e) -> int | None:
+    """The HTTP status a Google client error carries (googleapiclient's HttpError has it as resp.status, and as status_code in newer releases), else None. Never read from the
+    error's text: that holds the request URL, whose history id or page token can spell any number."""
+    for v in (getattr(getattr(e, "resp", None), "status", None), getattr(e, "status_code", None), getattr(e, "status", None)):
+        try: return int(v)
+        except (TypeError, ValueError): continue
+    return None
 def query_hits(q_anchors, address: str, hdr: dict, boxes: dict) -> list:
     """The Gmail query anchors (`gmail:q:` and `gmail:q@…:` ids) that a mail with the headers `hdr`, which arrived in the mailbox at `address`, matches: the mailbox must
     be one the anchor reads (all of them when it names none), and its terms must match."""
@@ -79,7 +86,7 @@ def run(hub: Hub):
         """True when Google itself says this account may not have the thing (not found, forbidden, a malformed id), or the
         account has no client for that service; False for anything else (the network, a 5xx, an expired token)."""
         if isinstance(e, AttributeError): return True                       # a["gmail"] is None: Gmail is not read on this account
-        return getattr(getattr(e, "resp", None), "status", None) in (400, 403, 404)
+        return http_status(e) in (400, 403, 404)
     def res_drive(a_id):
         fid = a_id[6:]; refused = True
         for a in accounts:
@@ -164,9 +171,8 @@ def run(hub: Hub):
                 token = r.get("nextPageToken")
                 if not token: break
         except Exception as e:
-            if "404" in str(e):   # history expired → resync cursor
-                a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]
-            else: raise
+            if http_status(e) != 404: raise     # only Google's own 404 says the history expired; any other failure leaves the cursor, and the next poll tries again
+            a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]     # history expired → resync cursor
             return
         seen = set()
         for h in history:
