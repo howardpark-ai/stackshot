@@ -1586,5 +1586,137 @@ check("TRIPWIRE a new use in a file that already has an entry for that form fail
 check("TRIPWIRE stays quiet on the listed uses and on a bare function def (def f(x: int) -> int)",
       ann_uses({f: scan[f] for f, _ in ANNUSE_ALLOW}) == [] and ann_uses({"tests/new_scenario.py": "def f(x: int) -> int:\n    return x"}) == [])
 
+# ---- route registrations (Thu Nov 12th 2026): a function decorated @reg.custom_route binds its own key, <enumerate-routes>, and only a reader of the routes (http_app,
+# routes, run_async, ...) matches it; @reg.tool keeps <enumerate>, which every listing attribute reads. A synthetic map, nothing measured: the suites are named for what
+# they read. ha: http_app; ro: routes; li: the listing attributes of tools, resources and prompts, never http_app or routes; dy, dv, dd: every name of the module
+# (getattr with a name that is not a literal, vars, dir); nm: the route's own name; ur: a tool's name; rs, hb, lb: no word of the registry in their
+# own file, they run `serve` (reads run_async), `builder` (reads http_app) and `lister` (reads list_tools) in a subprocess, as the map says; dg: getattr(reg, <variable>)
+# on an object that is not a module (no key under either rule: kept as it was).
+R = T / "repo4"; R.mkdir()
+git("init", "-q", "-b", "main")
+write("rmod.py", '''
+    """a module with a registry of tools and routes"""
+    class Reg:
+        def __init__(self):
+            self.t, self.r = {}, []
+        def tool(self, desc):
+            def add(fn):
+                self.t[fn.__name__] = desc
+                return fn
+            return add
+        def custom_route(self, path):
+            def add(fn):
+                self.r.append((path, fn))
+                return fn
+            return add
+        def list_tools(self):
+            return sorted(self.t)
+        def http_app(self):
+            return list(self.r)
+        @property
+        def routes(self):
+            return list(self.r)
+        async def run_async(self):
+            return self.http_app()
+
+    reg = Reg()
+
+    @reg.custom_route("/ping")
+    def ping():
+        return "pong"
+
+    @reg.tool(desc="says hi")
+    def hello():
+        return "hi"
+
+    @reg.custom_route("/both")
+    @reg.tool(desc="a route first, then a tool")
+    def both():
+        return 1
+
+    @reg.tool(desc="a tool first, then a route")
+    @reg.custom_route("/both2")
+    def both2():
+        return 2
+
+    def lister():
+        return reg.list_tools()
+
+    def builder():
+        return reg.http_app()
+
+    def serve():
+        return reg.run_async()
+''')
+RSUITES = {
+    "ha": "import rmod\napp = rmod.reg.http_app()\n",
+    "ro": "import rmod\nassert rmod.reg.routes\n",
+    "li": "import rmod\nrmod.reg.list_tools(); rmod.reg.get_tools(); rmod.reg.list_resources(); rmod.reg.list_prompts(); rmod.reg._tool_manager\n",
+    "dy": "import rmod\nname = input()\ngetattr(rmod, name)\n",
+    "dv": "import rmod\nvars(rmod)\n",
+    "dd": "import rmod\ndir(rmod)\n",
+    "nm": "import rmod\nrmod.ping()\n",
+    "ur": "import rmod\nrmod.hello()\n",
+    "rs": "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'import rmod; rmod.serve()'])\n",
+    "hb": "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'import rmod; rmod.builder()'])\n",
+    "lb": "import subprocess, sys\nsubprocess.run([sys.executable, '-c', 'import rmod; rmod.lister()'])\n",
+    "dg": "import rmod\nname = input()\ngetattr(rmod.reg, name)\n",
+}
+for s, body in RSUITES.items(): write(f"tests/{s}_scenario.py", body)
+shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+base4 = commit("base of the route cases")
+RRAN = {"ur": ["", "hello"], "nm": ["", "ping"], "rs": ["", "serve"], "hb": ["", "builder"], "lb": ["", "lister"]}
+RM = T / "map4.json"
+RM.write_text(json.dumps({"format": 1, "commit": base4, "strace": True, "suites": {
+    s: {"ok": True, "failed": False, "files": [], "dirs": ["", "tests"], "whole": [], "py": {"rmod.py": RRAN.get(s, [""])}, "seconds": 1} for s in RSUITES}}))
+def route_sel(edit, msg, env=None):
+    git("checkout", "-q", "-B", f"r{len(ran)}", base4)
+    edit()
+    head = commit(msg)
+    r = tool("select", "--map", str(RM), "--to", head, env={"SUITEMAP_ROOT": str(R), **(env or {})})
+    return sorted(r.stdout.split()), r.stderr
+OLD_R = {"SUITEMAP_ROUTE_RULE": "R1"}
+ROUTE_READERS = {"ha", "ro", "rs", "hb"}          # read the routes: http_app, routes, run_async (serve), http_app (builder)
+EVERY_NAME = {"dy", "dv", "dd"}              # every name of the module
+LISTERS = {"li", "lb"}                             # list the tools and nothing else
+route_edit = lambda: sub("rmod.py", "def ping():", "def ping(x=None):")
+tool_edit = lambda: sub("rmod.py", 'desc="says hi"', 'desc="says hello"')
+out, err = route_sel(route_edit, "route header")
+check("ROUTE 1 a route's header selects the readers of the routes (http_app, routes, a run of run_async or http_app by the map), the readers of its name and of every name of the module",
+      set(out) == ROUTE_READERS | EVERY_NAME | {"nm"}, (out, err))
+check("ROUTE 2 a route's header does not select the suites that only list the tools (list_tools and the other listing attributes, direct or run by the map), nor a reader of another name",
+      not (set(out) & (LISTERS | {"ur", "dg"})), (out, err))
+out_old, err_old = route_sel(route_edit, "route header, old rule", OLD_R)
+check("ROUTE 3 under SUITEMAP_ROUTE_RULE=R1 the same edit selects the listers too, and not the suite that serves the app by run_async (rs): the old answer; the narrowing and rs are the rule's",
+      set(out_old) == (ROUTE_READERS - {"rs"}) | EVERY_NAME | LISTERS | {"nm"} and set(out) == (set(out_old) - LISTERS) | {"rs"}, (out_old, err_old))
+out, err = route_sel(tool_edit, "tool header")
+check("ROUTE 4 a tool's header (@reg.tool) still selects every lister, every reader of the routes and every reader of every name, and the reader of its name (no regression)",
+      set(out) == LISTERS | ROUTE_READERS | EVERY_NAME | {"ur"}, (out, err))
+out_old, err_old = route_sel(tool_edit, "tool header, old rule", OLD_R)
+check("ROUTE 4b a tool edit selects everything the old rule did, and the suite that serves the app (rs), which serves the tools too", set(out_old) | {"rs"} == set(out) and "rs" not in out_old, (out, out_old))
+out, err = route_sel(lambda: (route_edit(), tool_edit()), "a route and a tool in one change")
+check("ROUTE 5 a route and a tool changed together select what the tool does and what names the route", set(out) == LISTERS | ROUTE_READERS | EVERY_NAME | {"ur", "nm"}, (out, err))
+for nm_, fn_ in (("both", "def both():"), ("both2", "def both2():")):
+    out, err = route_sel(lambda: sub("rmod.py", fn_, fn_.replace("():", "(x=None):")), f"{nm_}: a route and a tool decorating one function")
+    check(f"ROUTE 5b {nm_}: a function decorated with a route and a tool, in either order, binds both keys and selects the listers too", set(out) == LISTERS | ROUTE_READERS | EVERY_NAME, (out, err))
+out, err = route_sel(lambda: sub("rmod.py", 'return "pong"', 'return "pong!"'), "route body")
+check("ROUTE 6 a route's body alone reaches the suites that ran it by the map (nm), not the readers of the registry", set(out) == {"nm"}, (out, err))
+out, err = route_sel(lambda: sub("rmod.py", 'self.r.append((path, fn))', 'self.r.insert(0, (path, fn))'), "the registry's own code")
+out_old, err_old = route_sel(lambda: sub("rmod.py", 'self.r.append((path, fn))', 'self.r.insert(0, (path, fn))'), "the registry's own code, old rule", OLD_R)
+check("ROUTE 7 an edit of the registry's own code is not narrowed by the rule: the same answer as the old rule", out == out_old, (out, out_old))
+out, err = route_sel(lambda: sub("rmod.py", "def serve():\n    return reg.run_async()", "def serve():\n    return reg.run_async() or 1"), "serve body")
+check("ROUTE 8 an edit of the body of a function that serves the app (run_async) selects the suites that ran it by the map (rs), as for any function", out == ["rs"], (out, err))
+out, err = route_sel(lambda: sub("rmod.py", 'def lister():\n    return reg.list_tools()', 'def lister():\n    return reg.list_tools() or []'), "lister body")
+check("ROUTE 8b ... and a function that lists the tools only reaches its own runners (lb)", out == ["lb"], (out, err))
+out_a, _ = route_sel(route_edit, "dg new")
+out_b, _ = route_sel(route_edit, "dg old", OLD_R)
+check("ROUTE 9 getattr(reg, <variable>) on an object that is not a module gives no key under either rule: the suite is selected by neither a route nor a tool edit "
+      "(a gap as it was, named in tests/suitemap.py, *Route registrations*)", "dg" not in out_a and "dg" not in out_b, (out_a, out_b))
+bad = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_ROUTE_RULE": "r3"})
+check("ROUTE 10 a route rule that is not R1 or R2 is an error", bad.returncode != 0 and "SUITEMAP_ROUTE_RULE" in bad.stderr, (bad.returncode, bad.stderr[-300:]))
+okr = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_ROUTE_RULE": " r1 "})
+check("ROUTE 10b ... and r1 in lower case with spaces is R1", okr.returncode == 0, (okr.returncode, okr.stderr[-300:]))
+R = R_MAIN
+
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

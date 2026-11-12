@@ -172,7 +172,7 @@ annotations). Now:
     read through the class (inspect.signature(Cls), a framework that builds its fields), so they escape with the CLASS's name; a method name of those three (or __post_init__) used as a value anywhere (get_type_hints(C(1).__init__), get_type_hints(OBJ.__call__),
     a class decorator or an __init_subclass__ doing it to cls.__init__) makes every class-keyed name escape. In this repository that
     escape is ON for good: stackshot/cli.py reads `argparse.ArgumentParser.__init__` as a value (line 1007) and tests/package_layout_scenario.py does too
-    (line 156), so all the class-keyed names (30, in 20 files) always count as reads, which errs toward more suites; the negative control of the scenario
+    (line 156), so all the class-keyed names (26 distinct names, in 20 files) always count as reads, which errs toward more suites; the negative control of the scenario
     (ESC7, a class only called) describes a state this checkout never reaches. Everything else that
     annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the registry evaluates them), of a class body (a dataclass,
     NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
@@ -187,6 +187,28 @@ annotations). Now:
 SUITEMAP_IMPORT_RULE=I1 and SUITEMAP_ANNOTATION_RULE=N1 give the old selection, plus two differences that are always wider (I2 and N2 by default; any other
 value is an error, checked when a command starts): turning postponed annotations on or off takes the file whole under either rule (py_change), and a read of
 a name that a try/except fallback or a second line imports twice reads every source of it (ModNames.keys, froms_all). `audit` applies the same rules on both maps.
+
+Route registrations (Thu Nov 12th 2026). A function decorated `@mcp.custom_route(...)` (an HTTP route of the server: /health, /api/..., the pages)
+bound the key every registration binds, "<enumerate>", so every suite that reads the registry by ANY enumerating attribute (list_tools, get_tools,
+http_app, routes, ...) was selected for a one-line edit of one route (128 suites for one route of stackshot/web/server.py on PR 127). Most of them only
+list the tools; a route is no tool. Now (R2):
+  * A custom_route binds its OWN key, "<enumerate-routes>" (ENUMERATE_R), and not "<enumerate>". @mcp.tool, @mcp.resource and @mcp.prompt keep binding
+    "<enumerate>". A function decorated with both a route and one of those binds both keys.
+  * The readers of the routes match it: an attribute read of one of ROUTE_ATTRS (http_app, routes, streamable_http_app, sse_app,
+    _additional_http_routes, _get_additional_http_routes, run_async, run_http_async) reads BOTH keys, so it matches a tool edit and a route edit.
+    run_async and run_http_async are in the set because a suite that starts the server (`mcp.run_async(transport="http")`, the way _serve does, or a
+    subprocess that runs it) serves every route over real HTTP, whether or not it names http_app. list_tools, get_tools and every other attribute of
+    ENUMERATE_ATTRS read only "<enumerate>": a suite that lists the tools does not see a route.
+  * What stays wide: a reader that names the route's own function (`server.health`) is selected by that name, one that reads the file as text by the map's file half,
+    and a function that builds or serves the app (reads one of ROUTE_ATTRS) reaches every suite that ran it by the map, as before. Any
+    wildcard reader of a module (getattr(mod, name) with a name that is not a literal, vars(mod), dir(mod), inspect.getmembers(mod), a module loaded by a path) reads
+    every name of that module, the route's function included, so it is selected as before. An attribute read of a name in neither set is not an enumeration, as before.
+  * Limits, kept honest: `getattr(mcp, name)` with a name that is not a literal, or vars(mcp) / dir(mcp), on an object that is not a module of ours, gives
+    no key today for tools either (177 non-literal getattr calls in the checkout, most of them forwarders); a literal `getattr(x, "list_tools")` gives
+    none either; `from m import *` is no wildcard read (no star import of our modules exists in the checkout). `.routes` also matches any other object's `.routes` (a false positive, wider). A decorator on a method inside a class body is not
+    examined, for tools too.
+SUITEMAP_ROUTE_RULE=R1 (R2 by default; any other value is an error, checked when a command starts) gives the old selection: a custom_route binds
+"<enumerate>" and ROUTE_ATTRS adds nothing. `audit` applies the same rule on both maps.
 
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
@@ -234,6 +256,15 @@ def import_rule():
     v = os.environ.get("SUITEMAP_IMPORT_RULE", "I2").strip().upper()
     if v not in ("I1", "I2"):
         raise SystemExit(f"suitemap: SUITEMAP_IMPORT_RULE={os.environ.get('SUITEMAP_IMPORT_RULE')!r} is not a rule: the allowed values are I1 and I2")
+    return v
+
+
+def route_rule():
+    """R2 (default): a route (@mcp.custom_route) binds its own key and only the readers of the routes match it; R1: a route binds <enumerate>, as every
+    registered function did, so every reader of any listing attribute matches it (see *Route registrations*)"""
+    v = os.environ.get("SUITEMAP_ROUTE_RULE", "R2").strip().upper()
+    if v not in ("R1", "R2"):
+        raise SystemExit(f"suitemap: SUITEMAP_ROUTE_RULE={os.environ.get('SUITEMAP_ROUTE_RULE')!r} is not a rule: the allowed values are R1 and R2")
     return v
 
 
@@ -372,6 +403,8 @@ PLAIN_DECORATORS = {"property", "staticmethod", "classmethod", "abc.abstractmeth
 # A decorator on one of the module's own objects (@mcp.tool, @mcp.custom_route) registers the function there: its name,
 # signature and description are read by whoever calls it (it ran the body: measured) and by whatever lists the registry.
 # Listing is a call of one of these, on any object (a suite lists tools through its MCP client): the key (*, <enumerate>).
+# A route (@mcp.custom_route) is none of tool, resource or prompt: it binds its own key, <enumerate-routes>, and only a reader of the routes
+# (ROUTE_ATTRS) matches it (see *Route registrations*). A decorator with both (@mcp.tool and @mcp.custom_route on one function) binds both keys.
 # Code that reads a function's docstring, or hands the function to a registry that does (a tool server builds its description from it): a
 # docstring-only change reaches every suite that ran such code (see *Docstrings*). None of it exists in the checkout's own code today.
 DOC_CALLS = {"getdoc", "get_docstring", "render_doc", "help", "add_tool", "from_function", "add_resource", "add_prompt"}
@@ -379,6 +412,11 @@ DOC_REGISTER = {"tool", "resource", "prompt"}   # mcp.tool(...)(fn) called as a 
 ENUMERATE = "<enumerate>"
 ENUMERATE_ATTRS = {"list_tools", "get_tools", "_list_tools", "list_resources", "get_resources", "list_prompts", "get_prompts",
                    "list_resource_templates", "_tool_manager", "http_app", "routes"}
+ENUMERATE_R = "<enumerate-routes>"
+# what reads or serves the route list: the attributes that hand out the ASGI app (http_app; streamable_http_app and sse_app of earlier FastMCP releases), the list
+# itself (routes; _additional_http_routes and its getter) and the calls that build the app and serve it (run_async, run_http_async: a suite that starts the server
+# as a process and asks it for a page reads every route). Each of them reads BOTH keys (the app and the server serve the tools too, so a tool edit reaches them as well)
+ROUTE_ATTRS = {"http_app", "routes", "streamable_http_app", "sse_app", "_additional_http_routes", "_get_additional_http_routes", "run_async", "run_http_async"}
 
 
 def modname(path):
@@ -637,8 +675,11 @@ class ModNames:
                 ks = ks | {(self.mod, "*")}
         elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             sc, ks = self.scope(node), (self.keys(node) if dotted(node) else set())
-            if node.attr in ENUMERATE_ATTRS:
+            routes_ = node.attr in ROUTE_ATTRS and route_rule() == "R2"
+            if node.attr in ENUMERATE_ATTRS or routes_:
                 ks = ks | {("*", ENUMERATE)}
+            if routes_:
+                ks = ks | {("*", ENUMERATE_R)}
         elif isinstance(node, ast.Call):
             f = dotted(node.func)
             ks = set()
@@ -755,7 +796,8 @@ class ModNames:
 
     def decorators(self, st, reads):
         """('bind', extra names) when every decorator only wraps (PURE_DECORATORS) or registers on one of this module's
-        own objects (@mcp.tool: extra = <enumerate>); ('effect', set()) for any other"""
+        own objects (@mcp.tool: extra = <enumerate>; @mcp.custom_route: extra = <enumerate-routes>, or <enumerate> under route rule R1);
+        ('effect', set()) for any other"""
         extra = set()
         for d in st.decorator_list:
             for x in ast.walk(d):
@@ -765,7 +807,7 @@ class ModNames:
             if f in PURE_DECORATORS:
                 continue
             if f and "." in f and f.split(".")[0] in self.toplevel:
-                extra.add(ENUMERATE)
+                extra.add(ENUMERATE_R if f.endswith(".custom_route") and route_rule() == "R2" else ENUMERATE)
                 continue
             return "effect", set()
         return "bind", extra
@@ -1541,7 +1583,9 @@ def unchecked_imports(N, m, items):
     names are not all known (a star import, __getattr__, globals()), a star import added and a relative import that resolves to nothing of ours are
     unchecked. An import of a library is checked as far as it can be without side effects (library_unresolved): a stdlib module must have the name
     (an attribute, or a submodule of that name), a top-level package that is neither the stdlib's nor installed is unchecked, and a failed probe is
-    unchecked; an installed package's names cannot be looked up, so its narrowing stays (I2)"""
+    unchecked; an installed package's names cannot be looked up, so its narrowing stays (I2). A bare `import X` of a library is only looked up
+    (importlib.util.find_spec), never run; a dotted `import a.b` and a `from a import b` import the stdlib module they name. Any name with a __main__
+    in it, and a stdlib module in NO_PROBE (one whose import does something), is never imported or looked up, and is unchecked"""
     repo = m.repo
     for _, src in items:
         if src[0] == "import":
@@ -1994,6 +2038,7 @@ def main():
     docstring_rule()
     import_rule()
     annotation_rule()
+    route_rule()
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
