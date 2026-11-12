@@ -172,7 +172,7 @@ annotations). Now:
     read through the class (inspect.signature(Cls), a framework that builds its fields), so they escape with the CLASS's name; a method name of those three (or __post_init__) used as a value anywhere (get_type_hints(C(1).__init__), get_type_hints(OBJ.__call__),
     a class decorator or an __init_subclass__ doing it to cls.__init__) makes every class-keyed name escape. In this repository that
     escape is ON for good: stackshot/cli.py reads `argparse.ArgumentParser.__init__` as a value (line 1007) and tests/package_layout_scenario.py does too
-    (line 156), so all the class-keyed names (30, in 20 files) always count as reads, which errs toward more suites; the negative control of the scenario
+    (line 156), so all the class-keyed names (26 distinct names, in 20 files) always count as reads, which errs toward more suites; the negative control of the scenario
     (ESC7, a class only called) describes a state this checkout never reaches. Everything else that
     annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the registry evaluates them), of a class body (a dataclass,
     NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
@@ -1583,7 +1583,9 @@ def unchecked_imports(N, m, items):
     names are not all known (a star import, __getattr__, globals()), a star import added and a relative import that resolves to nothing of ours are
     unchecked. An import of a library is checked as far as it can be without side effects (library_unresolved): a stdlib module must have the name
     (an attribute, or a submodule of that name), a top-level package that is neither the stdlib's nor installed is unchecked, and a failed probe is
-    unchecked; an installed package's names cannot be looked up, so its narrowing stays (I2)"""
+    unchecked; an installed package's names cannot be looked up, so its narrowing stays (I2). A bare `import X` of a library is only looked up
+    (importlib.util.find_spec), never run; a dotted `import a.b` and a `from a import b` import the stdlib module they name. Any name with a __main__
+    in it, and a stdlib module in NO_PROBE (one whose import does something), is never imported or looked up, and is unchecked"""
     repo = m.repo
     for _, src in items:
         if src[0] == "import":
