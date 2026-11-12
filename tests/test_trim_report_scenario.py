@@ -412,6 +412,7 @@ def inproc(*args):
     return rc, out.getvalue(), err.getvalue()
 
 
+term_before = signal.getsignal(signal.SIGTERM)       # taken before any in-process run of main
 real_mkdtemp = tempfile.mkdtemp
 
 
@@ -427,7 +428,6 @@ finally:
 check("--fetch with no temporary folder: one line saying so, n/a minutes, exit 0, no traceback",
       rc == 0 and "no suite times: cannot make a temporary folder for the download: Permission denied" in out and "serial minutes: n/a" in out and "Traceback" not in err, (rc, out[-300:], err))
 
-term_before = signal.getsignal(signal.SIGTERM)
 rc, out, err = inproc("--map", str(MAP), "--state-dir", str(T / "st14"))
 check("main restores the SIGTERM handler it found", rc == 0 and signal.getsignal(signal.SIGTERM) == term_before, (rc, signal.getsignal(signal.SIGTERM)))
 rc, out, err = inproc("--map", str(MAP), "--state-dir", str(T / "st14"), "--config", str(T / "missing.toml"))
