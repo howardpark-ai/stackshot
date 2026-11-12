@@ -3,7 +3,7 @@ History line saying what the audit verified, or that it is idle. Fixture items i
 network, no model call, no message sent.
 
   1  due and verified: the mover's pane is busy, a subagent runs (a status line in progress, the mover's own), a tied pull request had a CI result in the last hour (metadata.last_activity), or several of
-     them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a recorded event (a tied pull request's CI result or review) is also the item's last-activity record (kind `audit`), one that rests on a busy pane or a subagent alone says `live state only` and stamps nothing; the activity clock, the progress clock, `updated` and the
+     them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a busy pane or a subagent alone says `live state only`; no line is stamped as the item's last-activity record; the activity clock, the progress clock, `updated` and the
      writer are as they were; an idle, shell or unreadable pane, another agent's status line, a done or old one, and a pull request event older than an hour verify nothing
   2  due and nothing verified: `Audit hh:mm: idle, nothing verified`, kind `audit_idle`, `hourly.idle_marked`; the last-activity record is untouched
   3  not due: under an hour of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the clock the silence pass reads decides
@@ -14,10 +14,11 @@ network, no model call, no message sent.
   7  a front agent's item gets its line like any other and nothing is sent to anyone (no message, no ladder entry)
   8  the tick: `_silence_tick` runs it (with the audit on in script mode) and stands still when the audit is off or in agent mode; an item read again under the lock that is no longer due is left alone; one that cannot
      be saved stops no other
-  9  the pure parts: the line's words, `last_line`, the log's cap, a malformed item
+  9  the pure parts: the line's words, `last_line`, the log's cap, a malformed item, a log entry dated far ahead, an item with no timestamp, each tied-pull-request kind, `new_entries`
   10 the cap on lines: one an hour for the first 24 hours of silence, then one every 6 hours (a week with the clock stepped), a clock that goes backwards delays the next line without a second write
   11 the lines are kept out of the stall ladder's log: its entries are untouched and not crowded out, `get` prints the newest as `audit:` and never as `stall:`, both History renderers show the line
   12 a last-activity record dated ahead of the clock is no event
+  13 the hourly line runs whatever the silence pass did: a ladder view that cannot be built (the pass returns early) or a pass that raises still gets the hourly line
 
     tests/run-suite audit_hourly       -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
@@ -146,16 +147,15 @@ check("1 a status line in progress on the mover's own step is a subagent running
 check("1 a CI result of a tied pull request in the last hour (metadata.last_activity) is verified, in the record's words, and a line that rests on a recorded event carries no live-state note", L[4][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn, CI failed on PR 5", L[4])
 check("1 …a review likewise", L[5][0]["text"] == f"Audit {hm(now0)}: verified review on PR 9", L[5])
 check("1 …several signals are joined in one line", L[6][0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn, a subagent is running on it, CI passing again on PR 7", L[6])
-check("1 a line that rests on a recorded event is the item's last-activity record (kind audit, the event's words, the time)",
-      mt(4)["last_activity"] == {"at": now0, "kind": "audit", "what": "CI failed on PR 5"} and mt(5)["last_activity"] == {"at": now0, "kind": "audit", "what": "review on PR 9"} and mt(6)["last_activity"] == {"at": now0, "kind": "audit", "what": "CI passing again on PR 7"},
-      (mt(4).get("last_activity"), mt(5).get("last_activity"), mt(6).get("last_activity")))
-check("1 …a line that rests on a busy pane or a subagent alone, and an idle one, stamp nothing: the record is as it was (none)", all("last_activity" not in mt(i) for i in (1, 2, 3)), [mt(i).get("last_activity") for i in (1, 2, 3)])
+check("1 no line is stamped as the item's last-activity record: a recorded event is in the record as it was (its own kind and time), a busy pane or a subagent or an idle one adds none",
+      all(mt(i).get("last_activity") == before[i]["metadata"].get("last_activity") for i in range(1, 7)) and mt(4)["last_activity"]["kind"] == "ci_result" and mt(4)["last_activity"]["at"] == now0 - 20 * MIN
+      and all("last_activity" not in mt(i) for i in (1, 2, 3)), [mt(i).get("last_activity") for i in range(1, 7)])
 check("1 the save is the server's own bookkeeping: the activity clock, the progress clock, `updated`, the confirm and the writer are exactly as they were",
       all(all(rd(i)[k] == before[i][k] for k in ("activity", "progress", "updated", "state_updated", "confirmed", "written_by", "written_at")) for i in range(1, 7)))
 ch = lambda i: {k for k in mt(i) if mt(i)[k] != before[i]["metadata"].get(k)}
-check("1 …the History shows it: the revision's new entries of the item's own log are the line (hourly_log.new_entries), and nothing else changed in the metadata but the log, the record of a recorded-event line and the phase stamp every save adds",
+check("1 …the History shows it: the revision's new entries of the item's own log are the line (hourly_log.new_entries), and nothing else changed in the metadata but the log and the phase stamp every save adds",
       [e["text"] for e in HL.new_entries(before[1]["metadata"], before[1]["metadata"])] == [] and [e["text"] for e in HL.new_entries(before[2]["metadata"], rd(2)["metadata"])] == [L[2][0]["text"]]
-      and ch(2) == {"hourly_audit", "phase"} and ch(4) == {"hourly_audit", "last_activity", "phase"}, (ch(2), ch(4)))
+      and ch(2) == {"hourly_audit", "phase"} and ch(4) == {"hourly_audit", "phase"}, (ch(2), ch(4)))
 check("1 nothing is sent to anyone: no message, no notice, no flag", sent == [], sent)
 check("1 the server logs each line on stderr", err.text.count("hourly line: Audit") == 6, err.text)
 # what verifies nothing
@@ -286,6 +286,31 @@ with _Err() as e8b: r8 = server._silence_tick()
 server._hourly_tick = real_hourly
 check("8 a hourly pass that raises never stops the silence tick that called it", e8b.text.count("hourly line not run: RuntimeError") == 1, e8b.text)
 
+# ================================================================ 13. the hourly line runs whatever the silence pass did
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90); put(2, act=90)
+real_skip = server._silence_skip
+def skip_boom(*a, **k): raise RuntimeError("ladder view failed")
+server._silence_skip = skip_boom
+with _Err() as e13: r13 = server._silence_tick()
+server._silence_skip = real_skip
+check("13 a ladder view that cannot be built sends the silence pass home early, and the hourly line is written all the same: one on each item", r13 is None and "ladder view not read" in e13.text and len(lines(1)) == 1 and len(lines(2)) == 1, (r13, e13.text, lines(1), lines(2)))
+for i in (1, 2): put(i, act=90)
+real_pass = server._silence_pass_tick
+def pass_boom(*a, **k): raise RuntimeError("silence pass failed")
+server._silence_pass_tick = pass_boom
+raised = None
+try: server._silence_tick()
+except RuntimeError as e: raised = e
+server._silence_pass_tick = real_pass
+check("13 a silence pass that raises still lets the hourly line run, and its error is not hidden", raised is not None and "silence pass failed" in str(raised) and len(lines(1)) == 1 and len(lines(2)) == 1, (raised, lines(1), lines(2)))
+server._cfg.CFG["audit"]["enabled"] = False
+for i in (1, 2): put(i, act=90)
+server._silence_tick()
+server._cfg.CFG["audit"]["enabled"] = True
+check("13 …but not with the audit off: the tick stands still as a whole", lines(1) == [] and lines(2) == [])
+
 # ================================================================ 10. the cap on lines, a clock that goes backwards
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
@@ -299,7 +324,7 @@ silent_at = lambda t: t - (now0 - 90 * MIN)
 gaps = [b_ - a_ for a_, b_ in zip(stamps, stamps[1:])]
 check("10 a week of silence on a busy pane writes 47 lines (23 in the first day, one an hour from 1.5 hours of silence; then one every 6 hours from 29.5), not 168", len(stamps) == 47, len(stamps))
 check("10 …one an hour for the first 24 hours of silence, then one every 6 hours", gaps[:22] == [H] * 22 and gaps[22:] == [6 * H] * 24 and all(silent_at(a_) < 24 * H for a_ in stamps[:23]) and silent_at(stamps[23]) >= 24 * H, (len(gaps), gaps[20:25]))
-check("10 …the log keeps its last eight and the item's last-activity record is still unset (a pane alone never stamps)", len(lines(1)) == 8 and "last_activity" not in mt(1), (len(lines(1)), mt(1).get("last_activity")))
+check("10 …the log keeps its last eight and the item's last-activity record is still unset (no line stamps it)", len(lines(1)) == 8 and "last_activity" not in mt(1), (len(lines(1)), mt(1).get("last_activity")))
 # a clock that goes backwards delays the next line and never doubles it
 put(2, act=90); tick(now0 + 5 * H); k0 = len(lines(2))
 back = tick(now0 + 5 * H - 30 * MIN); again = tick(now0 + 5 * H + 20 * MIN); later_ = tick(now0 + 5 * H + 61 * MIN)
@@ -334,9 +359,9 @@ for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90, last_activity={"at": now0 + 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"})
 put(2, act=90, last_activity={"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"})
 tick()
-check("12 a last-activity record dated ahead of the clock is no recorded event (the line says idle, the record is left alone); the same event ten minutes in the past is verified and stamped",
+check("12 a last-activity record dated ahead of the clock is no recorded event (the line says idle, the record is left alone); the same event ten minutes in the past is verified (and neither is stamped)",
       lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and mt(1)["last_activity"]["at"] == now0 + 10 * MIN
-      and lines(2)[0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 6" and mt(2)["last_activity"] == {"at": now0, "kind": "audit", "what": "CI failed on PR 6"}, (lines(1), mt(1).get("last_activity"), lines(2)))
+      and lines(2)[0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 6" and mt(2)["last_activity"] == {"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"}, (lines(1), mt(1).get("last_activity"), lines(2)))
 put(3, act=90); off()
 check("12 with the key absent from the loaded config the pass is off and writes nothing", "hourly_line" not in server._cfg.CFG["audit"] and HR.enabled() is False and tick() == [] and lines(3) == [])
 on()
@@ -353,6 +378,34 @@ check("9 the line's words: verified a, b / idle, nothing verified, hh:mm in the 
 check("9 the pass reads only: pass_ over the items writes nothing and gives the same list twice", (lambda items: HR.pass_(items, now0, server._silence_env(), lambda w: "busy", server._ho_same) == HR.pass_(items, now0, server._silence_env(), lambda w: "busy", server._ho_same))({"a1": rd(1), "a2": rd(2)}))
 check("9 an item the pass cannot read is left out, and a pane callable that raises verifies nothing", HR.pass_({"a1": {"status": "open", "metadata": "torn"}, "a2": rd(2)}, now0, server._silence_env(), lambda w: (_ for _ in ()).throw(OSError("x")), server._ho_same)[0][1]["kind"] == "audit_idle")
 check("9 a pane callable of None verifies nothing", HR.verified(rd(2), rd(2)["metadata"], "home-peer", now0, None, server._ho_same) == ([], []))
+
+# a log entry dated far ahead hides no later line
+far = {"hourly_audit": {"log": [{"at": now0 + 400 * 86400.0, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}]}}
+near = {"hourly_audit": {"log": [{"at": now0 + 30 * MIN, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}]}}
+check("9 last_line given the clock ignores an entry dated more than an hour ahead of it, and keeps one dated 30 minutes ahead; without the clock it reads both", HR.last_line(far, now0) is None and HR.last_line(near, now0) is not None and HR.last_line(far) is not None)
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90, hourly_audit=far["hourly_audit"]); put(2, act=90, hourly_audit=near["hourly_audit"])
+got9 = tick()
+check("9 an item whose log holds an entry dated 400 days ahead gets its line now; one whose log holds an entry 30 minutes ahead waits (a clock stepped back a little only delays the line)", got9 == ["a1"] and len(lines(1)) == 2 and len(lines(2)) == 1, (got9, len(lines(1)), len(lines(2))))
+# every tied pull request kind verifies, a merge and a comment included
+clean_pane(); panes["home-peer"] = "idle"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+kinds9 = {1: ("pr_merged", "PR 4 merged"), 2: ("comment", "comment on PR 4"), 3: ("ci_result", "CI passed on PR 4"), 4: ("review", "review on PR 4")}
+for i_, (k_, w_) in kinds9.items(): put(i_, act=90, last_activity={"at": now0 - 5 * MIN, "kind": k_, "what": w_})
+tick()
+check("9 a tied pull request's merge, comment, CI result and review each verify, in the record's words", all(lines(i_)[0]["text"] == f"Audit {hm(now0)}: verified {w_}" for i_, (k_, w_) in kinds9.items()), [lines(i_) for i_ in kinds9])
+# an item with no timestamp at all
+nots = rd(1); [nots.pop(k_, None) for k_ in ("activity", "progress", "updated", "state_updated", "created", "confirmed", "written_at")]
+try: wt = HR.due({"a1": nots}, "a1", now0, server._silence_env(), lambda w: "busy", server._ho_same)
+except Exception as e_: wt = e_
+check("9 an item with no timestamp at all is read without an error, and a line for it is written or not at all (never a crash)", wt is None or isinstance(wt, dict), wt)
+# new_entries: a later revision does not re-emit an older line
+m_a = {}; HL.note(m_a, 100.0, "Audit 10:00: idle, nothing verified", "audit_idle")
+m_b = json.loads(json.dumps(m_a)); HL.note(m_b, 4000.0, "Audit 11:00: verified x", "audit")
+m_c = json.loads(json.dumps(m_b)); m_c["other"] = 1
+check("9 new_entries: the revision that adds a second line shows only that one; a later revision that changes something else shows none, never the older lines again",
+      [e["text"] for e in HL.new_entries(m_a, m_b)] == ["Audit 11:00: verified x"] and HL.new_entries(m_b, m_c) == [] and [e["text"] for e in HL.new_entries(None, m_a)] == ["Audit 10:00: idle, nothing verified"])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

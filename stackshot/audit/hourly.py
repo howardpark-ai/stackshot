@@ -25,8 +25,9 @@ What the pass verifies, from data the server already holds, and says in the line
   - a subagent is running: a step status in progress, last changed within `silence.SUBAGENT_S`, on a step that opens with the mover's name (`silence.subagent_running`);
   - a pull request tied to the item had a CI result, a review, a comment by a person or a merge in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
 
-The first two are live states; the third is a recorded event, one the activity record already counts. Only a line that rests on a recorded event is stamped as the item's `last_activity` (kind `audit`):
-a pane that is busy all day must not keep every silent item looking fresh. A line that rests on live states alone says so in its words (`… (live state only, nothing recorded on the item)`) and stamps nothing.
+The first two are live states; the third is a recorded event, one the activity record already counts. A line that rests on live states alone says so in its words
+(`… (live state only, nothing recorded on the item)`). No line is stamped as the item's `last_activity`: a pane that is busy all day must not keep every silent item looking fresh, and an event
+that is recorded is in the record already.
 
 No pull request is read from GitHub here: the audit uses recorded data only. A commit or push to a tied pull request is not recorded by anything, so it is not a signal yet. When nothing is
 verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which a later part reads to hand the item on.
@@ -59,18 +60,19 @@ def enabled() -> bool:
     return _cfg.audit_hourly_line()
 
 
-def last_line(meta: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The newest audit line on an item, as its `metadata.hourly_audit.log` entry ({"at", "text", "kind"}); None when it has none or the entry is torn."""
+def last_line(meta: dict[str, Any] | None, now: float | None = None) -> dict[str, Any] | None:
+    """The newest audit line on an item, as its `metadata.hourly_audit.log` entry ({"at", "text", "kind"}); None when it has none or the entry is torn. With `now` given, an entry dated more than
+    `EVERY` ahead of it is torn too (a clock set far ahead once, or a bad write): it would otherwise hide every line until real time caught up. A clock stepped back by less than that only delays the next line."""
     best = None
     for e in _log.log_of(meta):
-        if e.get("kind") in (KIND_OK, KIND_IDLE) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (best is None or e["at"] >= best["at"]):
+        if e.get("kind") in (KIND_OK, KIND_IDLE) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (now is None or e["at"] <= now + EVERY) and (best is None or e["at"] >= best["at"]):
             best = e
     return best
 
 
-def idle_marked(meta: dict[str, Any] | None) -> bool:
-    """Is the newest audit line on the item one that verified nothing? What a later part reads to find the items to hand on."""
-    e = last_line(meta)
+def idle_marked(meta: dict[str, Any] | None, now: float | None = None) -> bool:
+    """Is the newest audit line on the item one that verified nothing? What a later part reads to find the items to hand on (given `now`, an entry dated far ahead of it is not read, as in `last_line`)."""
+    e = last_line(meta, now)
     return bool(e) and e.get("kind") == KIND_IDLE
 
 
@@ -115,7 +117,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     last = _silence.clock(it, mover)
     if not (last > 0 and now - last >= EVERY):
         return None
-    prior = last_line(meta)
+    prior = last_line(meta, now)
     if prior is not None and now - prior["at"] < (SLOW_EVERY if now - last >= LONG_AFTER else EVERY):
         return None      # a line was written lately (a clock that went backwards lands here too: the next line is only delayed)
     what, recorded = verified(it, meta, mover, now, pane, same)

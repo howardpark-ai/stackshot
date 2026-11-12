@@ -15,10 +15,9 @@ writes about the item, which are not in progress either: a History line (the lad
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
 Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment` (stamped today: the
-progress signals of a save and the events of a tied pull request), and two whose `what` is the short text itself: `update` (a mover's status write whose text differs from the previous status
-text, `update_signal`), defined and tested here but not stamped by anything yet (a later part stamps it), and `audit` (a line the hourly audit writes, audit/hourly.py, when what it verified is a
-recorded event: a CI result, review, comment or merge on a tied pull request; the words are the event's). A line that rests on a live state alone (a pane in a turn, a subagent running) is not stamped, so a
-busy pane cannot keep a silent item looking fresh. The record is extended by adding a signal, not by changing the record.
+progress signals of a save and the events of a tied pull request), and two that are defined and tested here but not stamped by anything yet: `update` (a mover's status write whose text differs
+from the previous status text, `update_signal`) and `audit` (a line the audit writes saying what it verified: a pane in a turn, a subagent running, a commit, a review or CI on the pull
+request). For those two the `what` is the short text itself. A later part stamps them; this one only knows them, so the record is extended by adding a signal, not by changing the record.
 A reply that says nothing changed is no `update` (same text as before), and the ladder's and the server's own lines are none of these kinds.
 
 Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number or is past MAX_AT, a kind that is none of KINDS)
@@ -45,7 +44,7 @@ BAND_WARN_S = 45 * 60   # the age from which a row's activity reads "quiet" (amb
 BAND_BAD_S = 60 * 60    # the age from which it reads "idle over 1 h" (red)
 OK, WARN, BAD = "ok", "warn", "bad"
 
-# The named kinds of signal. STAMPED ones are what a save and the event pass stamp; `audit` is stamped by the hourly audit line (for a recorded event only), `update` is defined here for a part that comes later.
+# The named kinds of signal. STAMPED ones are what the server stamps today; the last two are defined here for the parts that come later.
 STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment"
 UPDATE, AUDIT = "update", "audit"
 STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT)
@@ -133,8 +132,8 @@ def update_signal(previous: Any, text: Any, at: Any) -> dict[str, Any] | None:
 
 
 def audit_signal(verified: Any, at: Any) -> dict[str, Any] | None:
-    """The `audit` signal for a line the audit wrote saying what it verified (a review or CI result on a tied pull request: the server stamps it only for a line that rests on a recorded event, never for a pane or a subagent alone); the words are that short text.
-    A line that verified nothing is no signal."""
+    """The `audit` signal for a line the audit wrote saying what it verified (a pane in a turn, a subagent running, a commit, a review or CI on the pull request); the words are that short text. Nothing
+    stamps it yet. A line that verified nothing is no signal."""
     return signal(AUDIT, at, verified)
 
 
