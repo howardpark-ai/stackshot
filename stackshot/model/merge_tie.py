@@ -4,7 +4,7 @@ The pure half: no server import, no file, no clock. A pull request is tied to an
 
   anchored   an anchor scoped to the item names the pull request (a project-wide anchor names no item: every item of a project would be tied to every merge, and no clock would run)
   body       the pull request's body names the item (`board#N`; the hub reads it with the event, merge_log.refs)
-  words      the item's own words (its description and its steps) name the pull request: its URL in any repository, or its number written `#n`, `PR n` or `PR #n` only for an item that speaks of
+  words      the item's own words (its description, its steps, the status tags of its open steps and the lines of its next) name the pull request: its URL in any repository, or its number written `#n`, `PR n` or `PR #n` only for an item that speaks of
              that repository without a URL: one whose project page holds an anchor in the repository (its project is the repository's), or one that already has a pull request of the repository
              anchored to it. A bare number in any other item may be another repository's ("see #116" in an item of another project), so it ties nothing.
 
@@ -52,7 +52,7 @@ def repo_pages(store: Any, repo_of_url: Callable[[str], str]) -> dict[str, set[s
 def tied(key: str, body_items: Iterable[str], scoped: dict[str, set[str]], texts: dict[str, str], projects: dict[str, str] | None = None, pages: dict[str, set[str]] | None = None,
          canon: Callable[[str], str] = str.lower) -> dict[str, str]:
     """→ {item id: why} for the pull request `key`: `body_items` the ids its body names (already resolved to the store's), `scoped` {item id: the pull requests anchored to it}, `texts` {item id: its
-    description and steps, one string} of the items to search, `projects` {item id: its project page}, `pages` (repo_pages) {repository: the project pages that hold an anchor in it}: a number written
+    description, steps, the status tags of its open steps and the lines of its next, one string} of the items to search, `projects` {item id: its project page}, `pages` (repo_pages) {repository: the project pages that hold an anchor in it}: a number written
     without a URL ties only an item of one of those pages or one with a pull request of the repository anchored to it. The caller passes open items only."""
     projects, pages = projects or {}, pages or {}
     repo = repo_of(key)
