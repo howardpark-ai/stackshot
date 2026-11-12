@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -55,30 +56,60 @@ def vtime(v: dict[str, Any]) -> float:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the History: the store's git versions of an item's file
-def git_versions(store: Path, rel: str) -> tuple[list[tuple[float, dict[str, Any]]], str]:
+_LOG: dict[str, Any] = {"key": None, "commits": {}, "problem": ""}      # the store's whole log, read once per head commit: {item file (relative to the store): [(sha, commit time, path in the repository)], oldest first}
+_LOG_LOCK = threading.Lock()
+
+
+def _git(store: Path, *args: str, inp: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(["git", "-C", str(store), *args], input=inp, capture_output=True, timeout=GIT_TIMEOUT_S)
+
+
+def store_log(store: Path) -> tuple[dict[str, list[tuple[str, int, str]]], str]:
+    """The log of the whole store folder, grouped by file: {file relative to the store: [(commit, commit time, path in the repository)] oldest first}, "" or why it cannot be read. One walk of the repository for every item
+    (a walk per item costs seconds each on a store of thousands of commits), kept while the head commit is the same. Never `--follow`: its copy detection takes the file of another, similar item for a rename and brings that
+    item's History in (the small item files of one store look alike); a file that was renamed has the History it has under its present name."""
+    try:
+        head = _git(store, "rev-parse", "HEAD")
+        if head.returncode:
+            return {}, f"the store's git did not answer (exit {head.returncode}: not a repository, or no commit)"
+        key = f"{Path(store).resolve()}@{head.stdout.decode().strip()}"
+        with _LOG_LOCK:
+            if _LOG["key"] == key:
+                return _LOG["commits"], _LOG["problem"]
+            pre = _git(store, "rev-parse", "--show-prefix")
+            lg = _git(store, "log", "--no-renames", "--name-only", "--format=%x01%H%x09%ct", "--", ".")
+            if pre.returncode or lg.returncode:
+                return {}, f"the store's git did not answer the log (exit {lg.returncode or pre.returncode})"
+            prefix = pre.stdout.decode().strip()
+            by: dict[str, list[tuple[str, int, str]]] = {}
+            for chunk in lg.stdout.decode("utf-8", "replace").split("\x01")[1:]:
+                header, _, rest = chunk.partition("\n")
+                sha, _, ct = header.partition("\t")
+                if not sha:
+                    return {}, "a line of the store's git log names no commit"
+                for path in (x.strip() for x in rest.splitlines() if x.strip()):
+                    by.setdefault(path[len(prefix):] if path.startswith(prefix) else path, []).append((sha, int(ct or 0), path))
+            for v in by.values():
+                v.reverse()
+            _LOG.update(key=key, commits=by, problem="")
+            return by, ""
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        return {}, f"the store's git could not be read ({e.__class__.__name__})"
+
+
+def git_versions(store: Path, rel: str, log: dict[str, list[tuple[str, int, str]]] | None = None) -> tuple[list[tuple[float, dict[str, Any]]], str]:
     """The versions of the item file `rel` (relative to the store folder) at every commit of the store's git that touched it, oldest first → ([(commit time, version)], "") or ([], why it cannot be read). Strict where the
     History page is forgiving: a store outside git, a git that fails or times out, a version that is missing from the repository or is not a JSON object is a problem, not a version left out, because a missing
-    version could hold the newest activity. A file git has never seen gives no commits and no problem (the caller has the file on disk). The History of the path alone is read, not what `git log --follow` would join to it: that follows
-    a file by content, and the small item files of one store look alike, so a new item can be taken for a copy of another and read with that one's History. An item whose file was renamed (a temporary id that took its number)
-    has the History it has under its present name, and reads as created at the time of its first version there."""
-    def git(*args: str, inp: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(["git", "-C", str(store), *args], input=inp, capture_output=True, timeout=GIT_TIMEOUT_S)
+    version could hold the newest activity. A file git has never seen gives no commits and no problem (the caller has the file on disk). `log`: the store's log (`store_log`), read here when omitted."""
     try:
-        lg = git("log", "--no-renames", "--name-only", "--format=%x01%H%x09%ct", "--", rel)      # never --follow: its copy detection takes the file of another, similar item for a rename and brings that item's History in
-        if lg.returncode:
-            return [], f"the store's git did not answer the log of the item (exit {lg.returncode})"
-        commits: list[tuple[str, int, str]] = []
-        for chunk in lg.stdout.decode("utf-8", "replace").split("\x01")[1:]:
-            head, _, rest = chunk.partition("\n")
-            sha, _, ct = head.partition("\t")
-            path = next((x.strip() for x in rest.splitlines() if x.strip()), "")      # the file's path at that commit (the same path in every commit: a file that was renamed has the History it has under this name)
-            if not sha or not path:
-                return [], "a line of the store's git log names no commit or no file"
-            commits.append((sha, int(ct or 0), path))
-        commits.reverse()
+        if log is None:
+            log, why = store_log(store)
+            if why:
+                return [], why
+        commits = log.get(rel, [])
         out: list[tuple[float, dict[str, Any]]] = []
         if commits:
-            buf = git("cat-file", "--batch", inp="".join(f"{sha}:{path}\n" for sha, _c, path in commits).encode()).stdout
+            buf = _git(store, "cat-file", "--batch", inp="".join(f"{sha}:{path}\n" for sha, _c, path in commits).encode()).stdout
             i = 0
             for sha, ct, _path in commits:
                 nl = buf.find(b"\n", i)
@@ -93,13 +124,13 @@ def git_versions(store: Path, rel: str) -> tuple[list[tuple[float, dict[str, Any
                 i += n + 1
                 try:
                     v = json.loads(body)
-                except ValueError:
+                except (ValueError, RecursionError):
                     return [], f"the version at commit {sha[:8]} does not read as JSON"
                 if not isinstance(v, dict):
                     return [], f"the version at commit {sha[:8]} is not an item"
                 out.append((float(ct), v))
         return out, ""
-    except (OSError, ValueError, subprocess.SubprocessError, RecursionError) as e:
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
         return [], f"the store's git could not be read ({e.__class__.__name__})"
 
 

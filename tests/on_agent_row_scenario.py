@@ -34,9 +34,11 @@ M, H, D = 60.0, 3600.0, 86400.0
 S1, S2 = "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0"}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({S1: {"name": "front-a", "machine": "a", "seen": now, "url": ""}, S2: {"name": "worker-a", "machine": "a", "seen": now, "url": ""}}))
-PAGES = {"projects/demo": {"title": "Demo", "name": "Demo", "org": "work", "tags": [], "type": "project", "session": S1, "status": "active", "board": [], "board_open": 0, "agents": {"front-a": "builds"}}}
+PAGES = {"projects/demo": {"title": "Demo", "name": "Demo", "org": "work", "tags": [], "type": "project", "session": S1, "status": "active", "board": [], "board_open": 0, "agents": {"front-a": "builds"}},
+         "projects/quiet": {"title": "Quiet", "name": "Quiet", "org": "work", "tags": [], "type": "project", "session": S1, "status": "active", "board": [], "board_open": 0, "agents": {"front-a": "builds"}}}
 (T / "store/projects.json").write_text(json.dumps({"pages": PAGES}))
 (T / "brain/projects/demo.md").write_text("---\ntitle: demo\n---\n\n# demo\n")
+(T / "brain/projects/quiet.md").write_text("---\ntitle: quiet\n---\n\n# quiet\n")
 (T / "store/next-id").write_text("900")
 def item(i, subject, act=None, since=3 * H, **meta):
     """An item on worker-a (the mover); `act` is (seconds ago, kind, what) for its last-activity record, or a torn/empty value stored as it is."""
@@ -68,6 +70,7 @@ item(164, "[work] a string as the time", {"at": str(int(now - 10 * M)), "kind": 
 item(165, "[work] a time two hours ahead of the clock", (-2 * H, "step_done", "step 1 done"), since=3 * H)      # later than now + the skew: no record, never "<1m"
 item(166, "[work] a time five minutes ahead of the clock", (-5 * M, "step_done", "step 1 done"), since=3 * H)      # inside the skew: just now
 item(118, "[work] a fraction of a second past the hour", (3599.5, "ci_result", "CI failed on PR 124"))
+item(167, "[work] on a project whose rows have no record", None, since=3 * H, project="projects/quiet")
 BIG = (1e12, 2.6e11, 253402300799.0, 253402300800.0, 1e18, 1e300, 10 ** 30)      # finite and positive, and past what the calendar can take (a count of milliseconds, the end of year 9999 and a hair after, absurd ones)
 for n, v in enumerate(BIG): item(190 + n, f"[work] out of range {n}", {"at": v, "kind": "step_done", "what": "step 1 done"}, since=3 * H)
 item(170, "[work] held with a record", (200 * M, "step_done", "step 1 done"), hold=True, wake=(NOW + datetime.timedelta(days=2)).strftime("%Y-%m-%d"),
@@ -176,6 +179,9 @@ finally: render._lastact.read = _read
 check("…and a time that got past the source is caught in the row too: no activity, the old age", guarded is None and "ir-actl" not in rowh and "8h ago" in rowh and 'class="ir-actl"' not in iph)
 check("a held item with a record (it is in Waiting) is drawn with no activity line, and act_parts gives it nothing whatever the list",
       'class="ir-actl"' not in row(170) and "data-at" not in row(170) and b.act_parts(pair["a170"][0]) is None and b.act_parts(pair["a101"][0]) is not None, row(170)[:400])
+pj_demo, pj_quiet = b.routing_html("projects/demo"), b.routing_html("projects/quiet")
+check("the project page keeps its On agent rows current with the same script (it draws data-at, so it carries lact), and a project page whose rows have no record carries no script for it",
+      'data-at="' in pj_demo and "function lact()" in pj_demo.split("</main>")[0] and "ir-actl" in pj_demo and 'data-at="' not in pj_quiet and "function lact()" not in pj_quiet and "a167" in pj_quiet, (len(pj_demo), len(pj_quiet)))
 check("a Your move row with a record has none either: the nag there is its own age", 'class="ir-actl"' not in row(180) and "data-at" not in row(180) and "data-ts=" in row(180))
 check("a row of the same list with a record and one without sit together, each drawn its own way", "ir-pill" in row(101) and "ir-pill" not in row(160))
 
