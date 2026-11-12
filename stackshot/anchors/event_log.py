@@ -13,10 +13,9 @@ Only a merge ties through the pull request's body (the rule the merge log has al
 words: in a public repository anyone can open a pull request whose body names an item and comment on it, and that must not stamp the item. So `refs` of any other kind is never written and is
 dropped when a line is read.
 
-Size: a line is about 100 bytes and the pass reads the file from the offset it keeps, so the cost of a pass is the new lines only; the file only grows, and is not pruned (a year of events is
-well under a few megabytes). If the offset is lost or the file is replaced, the pass reads it from its start and takes nothing older than 24 hours (`server._EVENT_ACT_FLOOR_H`).
+Size: small rows (about 100 bytes), read from a saved offset, so the cost of a pass is the new lines only; the file only grows and is not pruned. If the offset is lost or the file is replaced, the pass reads it from its start and takes nothing older than 24 hours (`server._EVENT_ACT_FLOOR_H`).
 
-Left out on purpose: a comment or review by a bot (a login ending in "[bot]"; the hub drops its own account's upstream), a CI event on a repository's notifications with no pull request, and any
+Left out on purpose: a comment or review by a bot (a login ending in "[bot]", or an account the payload types as Bot; the hub drops its own account's comments upstream, so a comment made under that account is never seen), a CI event on a repository's notifications with no pull request, and any
 event the hub cannot name a pull request for. Not here: a commit or push, which the hub does not emit (a later part adds it).
 
 Pure apart from the files: no server import, no clock read (the caller passes `now`)."""
@@ -74,8 +73,9 @@ def only_bots(who: Any) -> bool:
     return bool(names) and all(_bot(w) for w in names)
 
 
-def lines_for(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float) -> list[dict[str, Any]]:
-    """The lines for an event, [] when it is no activity or names no pull request. A comment or review whose every author is a bot is left out."""
+def lines_for(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float, bot: bool = False) -> list[dict[str, Any]]:
+    """The lines for an event, [] when it is no activity or names no pull request. A comment or review is left out when every author is a bot: `bot` (the payload said the account is of type Bot) or every
+    login ends in "[bot]"."""
     kinds = kinds_of(etype)
     if not kinds:
         return []
@@ -83,12 +83,12 @@ def lines_for(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: 
     if not repo or n <= 0:
         return []
     refs = [str(r) for r in (body_refs or []) if _ml._REF_OK.fullmatch(str(r))][:MAX_REFS]
-    return [{"ts": round(float(now), 3), "repo": repo, "n": n, "kind": k, "refs": refs if k == "merged" else []} for k in kinds if not (k in PERSONS_ONLY and only_bots(who))]
+    return [{"ts": round(float(now), 3), "repo": repo, "n": n, "kind": k, "refs": refs if k == "merged" else []} for k in kinds if not (k in PERSONS_ONLY and (bot or only_bots(who)))]
 
 
-def note(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float) -> int:
+def note(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float, bot: bool = False) -> int:
     """The hub's call for each event: a line for each kind of activity it is. → how many lines were written."""
-    rows = lines_for(anchor, url, etype, who, body_refs, now)
+    rows = lines_for(anchor, url, etype, who, body_refs, now, bot)
     for row in rows:
         _ml.append(row, path())
     return len(rows)

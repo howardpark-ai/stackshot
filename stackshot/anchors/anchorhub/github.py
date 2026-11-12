@@ -328,7 +328,7 @@ def run(hub: Hub):
                     # comments created after the last observed state are new
                     if _ts(c.get("created_at")) <= _ts(st.get("updated")): continue
                     body = (c.get("body") or "").replace("\n", " ")
-                    hub.event(a_id, {"title": title, "who": c["user"]["login"], "text": body[:140] + ("…" if len(body) > 140 else ""), "url": c["html_url"], "ts": c["created_at"], "etype": "comment", "repo_id": rid(repo), **pr_meta(ci_st.get(a_id))}, kind="github")
+                    hub.event(a_id, {"title": title, "who": c["user"]["login"], "text": body[:140] + ("…" if len(body) > 140 else ""), "url": c["html_url"], "ts": c["created_at"], "etype": "comment", "repo_id": rid(repo), "bot": (c.get("user") or {}).get("type") == "Bot", **pr_meta(ci_st.get(a_id))}, kind="github")
             merged_now = bool((i.get("pull_request") or {}).get("merged_at"))
             if i["state"] != st["state"] or (merged_now and st.get("merged") is False):      # …or closed again by a merge after a reopening that fell between two looks
                 who = (i.get("closed_by") or {}).get("login") or "someone"

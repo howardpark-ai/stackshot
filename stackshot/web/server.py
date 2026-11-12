@@ -16177,6 +16177,11 @@ def _event_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
     return out
 
 
+def _event_item_live(it: dict[str, Any], now: float) -> bool:
+    """Is the item still on the stall ladder: not waiting, not held, not in the owner's lane (the test `_merge_tied` makes when it ties)?"""
+    return not (_stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or _is_held(it))
+
+
 def _event_activity_tick(now: float | None = None) -> list[str]:
     """The pass: read the hub's event log from where it stopped, tie each line to the open items it concerns (`_merge_tied`) and record it in the item's `metadata.last_activity` when it is later than what
     the item holds (last_activity.apply: newest wins, a repeat writes nothing). One item that cannot be read or saved is logged and skipped; the offset is stored whatever happened to the items, but
@@ -16195,18 +16200,24 @@ def _event_activity_tick(now: float | None = None) -> list[str]:
             except Exception as e:  # noqa: BLE001
                 print(f"last activity: items not read: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
                 return []
+            per_item: dict[str, tuple[list[dict[str, Any]], str]] = {}      # item → (its signals, the pull request of the first), so many lines for one item are one save
             for row, key, tied in sorted(ties, key=lambda t: t[0]["ts"]):
                 cand = _lastact.pr_candidate(row["kind"], row["n"], row["ts"], now)
                 for gid in tied:
-                    try:
-                        with _ITEM_LOCK:
-                            it = _load(gid)
-                            if it.get("status") == "open" and _lastact.apply(it, [cand], now):
-                                _save(gid, it, activity=_activity.BOOKKEEPING)
-                                if gid not in saved:
-                                    saved.append(gid)
-                    except Exception as e:  # noqa: BLE001  — one item never stops the others
-                        print(f"last activity: {gid} not saved for {key}: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
+                    sigs, first = per_item.setdefault(gid, ([], key))
+                    if cand is not None:
+                        sigs.append(cand)
+            for gid, (sigs, key) in per_item.items():
+                newest = _lastact.record(None, sigs, now)      # the newest of the item's signals (the last given of those at the same time)
+                try:
+                    with _ITEM_LOCK:
+                        it = _load(gid)
+                        # read again under the lock: the item may have closed, been put on hold or begun a wait since the tie was made (the same test as _merge_tied)
+                        if it.get("status") == "open" and _event_item_live(it, now) and newest is not None and _lastact.apply(it, [newest], now):
+                            _save(gid, it, activity=_activity.BOOKKEEPING)
+                            saved.append(gid)
+                except Exception as e:  # noqa: BLE001  — one item never stops the others
+                    print(f"last activity: {gid} not saved for {key}: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
         if (new != off or rows) and not _elog.save_offset(new):
             print("last activity: offset not saved", file=sys.stderr, flush=True)
         return saved

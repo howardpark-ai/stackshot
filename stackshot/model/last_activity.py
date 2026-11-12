@@ -181,8 +181,10 @@ def save_signals(before: dict[str, Any] | None, after: dict[str, Any], now: floa
 
 def record(item: dict[str, Any] | None, events: Iterable[Any] = (), now: float | None = None) -> dict[str, Any] | None:
     """The item's last activity: the newest of the stored record and the signals `events` ({"at", "kind", "what"}: a save's visible activity, a tied pull request's event, and in later parts an update or an audit line), None when there is nothing.
-    A candidate replaces the stored record only when strictly later; of candidates at the same time the last given wins. A torn candidate is skipped."""
+    A candidate replaces the stored record only when strictly later; of candidates at the same time the last given wins. A torn candidate is skipped. A stored record dated after `now` (given) is ignored."""
     best = read(item)
+    if best is not None and now is not None and best["at"] > now:
+        best = None      # a stored time ahead of the clock (it jumped forward once) is not a time that happened: it would block every later signal, so a later signal replaces it
     top: dict[str, Any] | None = None
     for e in events or ():
         c = clean(e, now)

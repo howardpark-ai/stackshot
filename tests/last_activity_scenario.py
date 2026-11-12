@@ -13,7 +13,8 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
      item that cannot be saved stops no other; nothing raises out of the pass; a standby and a held board run nothing
   6  a body names an item for anyone: only a merge ties through it (a comment, a review and a CI result tie by an anchor scoped to the item or the item's own words); a line the hub is still writing waits, a file
      with no newline at its end gets one before the next line; a torn stored record is repaired by the next signal; the words of a signal are one clean line
-  7  the hub's events are as they were: a comment's direct notice (the pull request's body naming an item) is byte for byte the notice it had, a merge's too
+  7  the hub's events are as they were: a comment's direct notice (the pull request's body naming an item) is byte for byte the notice it had, a merge's too; a comment by an account typed Bot is marked
+  8  one save for many lines of an item (the newest wins); a stored time ahead of the clock is ignored; an item closed, held or begun to wait between the tie and the save is not stamped; a bot by its type
 
     tests/run-suite last_activity       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, io, math
@@ -483,6 +484,13 @@ try:
     check("7 …neither carries ids from the body in its meta", (c_ and not c_.meta) and (t_ and not t_.meta), (c_ and c_.meta, t_ and t_.meta))
     check("7 …so the direct notice of the comment is the one-line notice it was, byte for byte: the text is there",
           c_ is not None and HUB.direct_notice(c_) == HUB.notice(c_) == f'[anchor] {c_.label}: comment by kim: "please look at this" → {W_}/pull/26#issuecomment-1' and "please look at this" in HUB.direct_notice(c_), c_ and HUB.direct_notice(c_))
+    check("7 a comment by an ordinary account is not marked as a bot's", c_ is not None and c_.bot is False, c_ and c_.bot)
+    GHD[f"{RP}/issues/26"] = pr_issue(comments=2, updated_at="2026-10-28T02:00:00Z")
+    GHD[f"{RP}/issues/26/comments?since=2026-10-28T01:00:00Z&per_page=20"] = [{"user": {"login": "helper", "type": "Bot"}, "body": "a helper wrote this", "html_url": f"{W_}/pull/26#issuecomment-9", "created_at": "2026-10-28T01:30:00Z"}]
+    del evs[:]; one_pass()
+    b_ = next((e for e in evs if e.anchor == AN and e.etype == "comment"), None)
+    check("7 a comment whose author the payload types as Bot is marked as one (no extra read; the login has no [bot] suffix)", b_ is not None and b_.bot is True and "helper" in b_.who, [(e.anchor, e.etype, e.bot, e.who) for e in evs])
+    check("7 …the marked comment is still the one-line notice it was (the mark is not in the meta)", b_ is not None and HUB.direct_notice(b_) == HUB.notice(b_) and not b_.meta, b_ and (b_.meta, HUB.direct_notice(b_)))
     GHD[f"{RP}/issues/26"] = pr_issue(comments=1, updated_at="2026-10-28T04:00:00Z", state="closed", closed_at="2026-10-28T04:00:00Z", closed_by={"login": "alice"}, pull_request={"merged_at": "2026-10-28T04:00:00Z"})
     del evs[:]; one_pass()
     m_ = next((e for e in evs if e.etype == "pr_merged" and e.anchor == AN), None)
@@ -492,6 +500,59 @@ finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
 sl_ = HUB.Event(anchor="slack:C1", kind="slack", title="#team", who="kim", text="hi", url="https://example.invalid/m", meta={"ts": "1.5", "thread_ts": "1.2", "refs": [BID(1)]}, full="the whole text")
 check("7 a Slack event keeps its full form (its ids in the header, the whole text below), the ids of a body aside", HUB.direct_notice(sl_) == "[anchor] Slack #team: new message from kim (ts 1.5 · thread_ts 1.2) → https://example.invalid/m\nthe whole text", HUB.direct_notice(sl_))
+
+# ================================================================ 8. one save for many lines of an item; a stored time ahead of the clock; the item read again under the lock; a bot by its type
+for i in (470, 471, 472, 473, 474): put(i)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/{n}", "items": [f"a{i}"]} for n, i in ((100, 470), (101, 471), (102, 472), (103, 473), (104, 474))]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+t8 = now0 + 100 * MIN
+emit(100, "comment", "alice", 101 * MIN); emit(100, "review", "bob", 104 * MIN); emit(100, "ci_failed", "CI", 102 * MIN); emit(100, "comment", "carol", 103 * MIN)      # the log is in the hub's order, not the events'
+emit(100, "review", "dan", 95 * MIN)
+saves_ = []
+real_save = server._save
+def counting(gid, item, *a, **kw):
+    saves_.append(gid); return real_save(gid, item, *a, **kw)
+server._save = counting
+try: saved = ev_pass(t8 + 10 * MIN)
+finally: server._save = real_save
+check("8 five lines for one item are one save, and the newest of them is the record", saves_ == ["a470"] and saved == ["a470"] and la(470) == {"at": t8 + 4 * MIN, "what": "review on PR 100"} and lk(470) == "review", (saves_, saved, la(470)))
+# a stored time later than the clock must not block every later signal
+put(471, last_activity={"at": t8 + 500 * H, "kind": "comment", "what": "comment on #1"})
+emit(101, "review", "bob", 111 * MIN)
+saved = ev_pass(t8 + 12 * MIN)
+check("8 a stored record dated far ahead of the clock is replaced by the next real signal (it would otherwise hide every later one)", saved == ["a471"] and la(471) == {"at": t8 + 11 * MIN, "what": "review on PR 101"}, (saved, la(471)))
+ahead = {"status": "open", "metadata": {"last_activity": {"at": 900.0, "kind": "comment", "what": "x"}}}
+check("8 last_activity: with a clock given, a stored time after it is ignored; without one, as it was (newest wins)",
+      LA.apply(dict(ahead, metadata=dict(ahead["metadata"])), [S_(50)], now=100) and not LA.apply(dict(ahead, metadata=dict(ahead["metadata"])), [S_(50)])
+      and LA.record(ahead, [S_(50)], 100)["at"] == 50.0 and LA.record(ahead, [S_(50)])["at"] == 900.0, None)
+# the item is read again under the lock: closed, held or begun to wait between the tie and the save
+real_tied = server._merge_tied
+def tie_then(mutate):
+    def f(rows, now):
+        out = real_tied(rows, now); mutate(); return out
+    return f
+def close_it():
+    d_ = rd(472); d_["status"] = "completed"; wr(472, d_)
+def hold_it():
+    d_ = rd(473); d_["metadata"]["hold"] = True; wr(473, d_)
+def wait_it():
+    d_ = rd(474); d_["metadata"].update(wake="2999-01-01T00:00", phase="waiting", waits_on="time"); wr(474, d_)
+for n_, i_, fn_, what_ in ((102, 472, close_it, "closed"), (103, 473, hold_it, "put on hold"), (104, 474, wait_it, "begun to wait")):
+    emit(n_, "comment", "alice", 121 * MIN)
+    server._merge_tied = tie_then(fn_)
+    try: saved = ev_pass(t8 + 22 * MIN)
+    finally: server._merge_tied = real_tied
+    after_ = rd(i_)
+    check(f"8 an item {what_} between the tie and the save is not stamped", saved == [] and "last_activity" not in after_["metadata"], (saved, after_["metadata"].get("last_activity")))
+# a bot by its type: the payload says Bot, the login has no suffix
+check("8 lines_for: a comment or review whose payload types the author as a bot is left out whatever the login; CI and a merge are kept",
+      EL.lines_for(A_, "", "comment", "helper", [], 10.0, True) == [] and EL.lines_for(A_, "", "review", "helper", [], 10.0, True) == [] and len(EL.lines_for(A_, "", "comment", "helper", [], 10.0, False)) == 1
+      and len(EL.lines_for(A_, "", "ci_failed", "helper", [], 10.0, True)) == 1 and len(EL.lines_for(A_, "", "pr_merged", "helper", [], 10.0, True)) == 1, None)
+EL.path().unlink(missing_ok=True)
+hub_.event("github:acme/widgets#60", {"title": "widgets#60", "who": "helper", "text": "did it", "url": f"{W_}/pull/60", "ts": "2026-11-12T00:00:00Z", "etype": "comment", "bot": True}, kind="github-state")
+check("8 the hub: an event the source marks as a bot's writes no line, the same without the mark writes one", EL.read(0)[0] == [], EL.read(0)[0])
+hub_.event("github:acme/widgets#60", {"title": "widgets#60", "who": "helper", "text": "did it", "url": f"{W_}/pull/60", "ts": "2026-11-12T00:00:00Z", "etype": "comment"}, kind="github-state")
+check("8 …and without the mark it writes one", len(EL.read(0)[0]) == 1, EL.read(0)[0])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

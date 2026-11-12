@@ -197,6 +197,7 @@ class Event:
                            # source's payload did not carry it, and [pilot] own_repos then matches by owner/name only
     head: str = ""         # GitHub pull request only: its head branch (head.ref), "" when unknown; the router passes a notice on a builder's PR to the builder
     author: str = ""       # GitHub pull request only: its author's login, "" when unknown
+    bot: bool = False      # GitHub only: the comment's author is an account of type Bot (the payload says so; no read is made for it): the event log leaves a bot's comment out
 
     @property
     def type(self) -> str:
@@ -380,7 +381,7 @@ class Hub:
         self.emit(Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
                         url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
                         full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
-                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or "")))
+                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot"))))
 
     def emit(self, ev: "Event"):
         """Route one event to the sessions bound to its anchor. The first event on (anchor, session) is delivered at once;
@@ -391,7 +392,7 @@ class Hub:
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
         try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), time.time())      # first, before any lane: a merge is recorded whatever happens to its notice
         except Exception as e: log.warning("merge log: %s", str(e)[:120])
-        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time())      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds
+        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds
         except Exception as e: log.warning("event log: %s", str(e)[:120])
         to = direct().get(ev.anchor)
         if to: return self.emit_direct(ev, to)
