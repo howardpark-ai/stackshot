@@ -7,6 +7,8 @@ GDIR = str(_cfg.secrets("anchor-hub", "google"))
 ROUTES = ("/hook/drive", "/hook/gmail")   # the webhooks this receiver registers in run(); anchor-hub answers them 503, not 404, while its start is being retried
 HISTORY_PAGE = 500    # records asked of Gmail's history.list per call (its largest page)
 HISTORY_PAGES = 10    # calls per mailbox per poll: 5000 records; a busier mailbox is read on in the next poll from where this one stopped
+MESSAGE_GETS = 200    # messages.get calls per mailbox per poll: a poll that reaches it stops after the last history record it handled whole, and the next poll goes on from there
+SENT_KEEP = 1000      # message ids remembered per mailbox as handled (saved with the cursor): the mail a repeated history record names is not delivered twice
 GPOLL = 5   # s; fallback only — used while push for that account is unavailable
 def _gmail_poll() -> int: return int(_cfg.get("anchor_hub", "gmail_poll_seconds") or 300)  # s; a mailbox whose watch Google refuses is polled for good (an account with no Pub/Sub topic
                                                                          # to push to), so not at the fallback's pace
@@ -63,10 +65,10 @@ def run(hub: Hub):
         sv = (hub.saved.get("google") or {}).get(email) or {}
         if sv.get("page"): page = sv["page"]                    # resume from the saved cursor, so a downtime's changes replay
         if hist and sv.get("hist"): hist = sv["hist"]           # (a Gmail history id older than about a week 404s → resync, as before)
-        accounts.append({"email": email, "drive": drive, "gmail": gmail if (not gmail_only or email in gmail_only) else None, "page": page, "hist": hist, "parents": {}})
+        accounts.append({"email": email, "drive": drive, "gmail": gmail if (not gmail_only or email in gmail_only) else None, "page": page, "hist": hist, "sent": [str(x) for x in (sv.get("sent") or [])][-SENT_KEEP:], "parents": {}})
         log.info("google: %s ready (drive cursor %s, gmail history %s)", email, page, hist)
     if not accounts: log.warning("google: no tokens in %s — run anchor-hub-google-auth.py", GDIR); return
-    hub.savers["google"] = lambda: {a["email"]: {"page": a["page"], "hist": a["hist"]} for a in accounts}
+    hub.savers["google"] = lambda: {a["email"]: {"page": a["page"], "hist": a["hist"], "sent": a["sent"]} for a in accounts}
     def drive_seen(a, fid, f):
         """Newest change by someone else: a folder's newest child (direct children only — Drive cannot query deeper),
         else the file itself, reaching back through its revisions when the owner made the last edit."""
@@ -174,27 +176,42 @@ def run(hub: Hub):
             if http_status(e) != 404: raise     # only Google's own 404 says the history expired; any other failure leaves the cursor, and the next poll tries again
             a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]     # history expired → resync cursor
             return
-        seen = set()
-        for h in history:
+        with hub.lock: bound = list(hub.bindings)
+        bx = boxes()
+        readers = [k for k in bound if _anc.gmail_query(k) is not None and _anc.gmail_reads(k, a["email"], bx)]     # the query anchors that read this mailbox: a mail in a mailbox nobody reads costs no get
+        keys = set(bound)
+        sent = list(a["sent"]); known = set(sent)        # the mail already handled in this mailbox (an inclusive startHistoryId repeats the last record)
+        seen, gets, stopped = set(), 0, None
+        for i, h in enumerate(history):
+            todo = []
             for m in h.get("messagesAdded", []):
                 mid = m["message"]["id"]; tid = m["message"]["threadId"]
-                if mid in seen: continue
+                if mid in seen or mid in known: continue
+                todo.append((mid, tid, bool(readers) or f"gmail:{tid}" in keys))
+            need = sum(1 for _m, _t, wanted in todo if wanted)
+            if gets and gets + need > MESSAGE_GETS: stopped = i; break      # the cap on gets in one poll: the records before this one were handled whole, the rest waits for the next poll
+            for mid, tid, wanted in todo:
                 seen.add(mid)
-                with hub.lock:
-                    q_anchors = [k for k in hub.bindings if _anc.gmail_query(k) is not None]
-                    hit_thread = f"gmail:{tid}" in hub.bindings
-                if not hit_thread and not q_anchors: continue
+                if not wanted: continue
+                gets += 1
                 try: msg = a["gmail"].users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "To", "Cc"]).execute()
                 except Exception: continue
+                sent.append(mid)
                 if "SENT" in msg.get("labelIds", []) or "DRAFT" in msg.get("labelIds", []): continue   # self-suppression
                 hdr = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
                 url = f"https://mail.google.com/mail/u/0/#all/{tid}"
                 summ = {"title": f"\"{hdr.get('subject', '(no subject)')[:60]}\"", "who": hdr.get("from", "?").split("<")[0].strip(' "'),
                         "text": (msg.get("snippet") or "")[:140], "url": url, "ts": msg.get("internalDate")}
-                if hit_thread: hub.event(f"gmail:{tid}", summ, kind="gmail")
-                for qa in query_hits(q_anchors, a["email"], hdr, boxes()): hub.event(qa, summ, kind="gmail")
-        if token and history:      # more pages than one poll reads: go on from the last record read, and read the rest at once
-            a["hist"] = history[-1]["id"]
+                if f"gmail:{tid}" in keys: hub.event(f"gmail:{tid}", summ, kind="gmail")
+                for qa in query_hits(readers, a["email"], hdr, bx): hub.event(qa, summ, kind="gmail")
+        a["sent"] = sent[-SENT_KEEP:]
+        def last_id(upto):      # the id of the last record before `upto` that has one (Gmail gives every record one)
+            return next((x["id"] for x in reversed(history[:upto]) if x.get("id")), None)
+        if stopped is not None:     # the get cap: go on from the last record handled whole, and read the rest at once
+            a["hist"] = last_id(stopped) or a["hist"]
+            hub.triggers.put(("gmail", a["email"]))
+        elif token and history:      # more pages than one poll reads: go on from the last record read, and read the rest at once
+            a["hist"] = last_id(len(history)) or a["hist"]
             hub.triggers.put(("gmail", a["email"]))
         else: a["hist"] = r.get("historyId", a["hist"])
 

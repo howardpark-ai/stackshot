@@ -22,7 +22,8 @@
   * a scope is a set: the same mailboxes in another order are one anchor (add and remove, also against a hand-made stored order); a #mention variant stays its own anchor; a scope with an
     unknown name keeps its spelling; labels that differ only in case are told apart by their exact spelling; a hand-made empty scope is shown and reported as reading nothing.
   * the reader pages Gmail's history: a fake Google answers with nextPageToken, every page's mail is heard, the page size and the cap hold, and a poll that stops at the cap goes on
-    from the last record it read.
+    from the last record it read; only Google's 404 status (never '404' in an error's text) resyncs an expired history; a mailbox no query anchor reads costs no messages.get; a poll makes at
+    most MESSAGE_GETS gets and goes on from the last record it handled whole; a repeated record (an inclusive startHistoryId) delivers nothing twice.
   * the label rules of the reader (gmail_names entries with a bad name or address are skipped, labels are listed in name order); the add reply's wording; a removal on a project whose page is gone.
 
     tests/run-suite gmail_anchor_mailbox        → exit 0 / 1"""
@@ -423,7 +424,7 @@ got, calls, cur, more = run_paged(2, 3)
 check("paging cap: a history that ends on the last page the cap allows leaves no second poll", len(calls) == 2 and got == [f"m{i}" for i in range(1, 7)] and cur == "99" and not more, (calls, got, cur, more))
 
 # ---- the reader tells an expired history from any other failure by the status, never by the text
-def run_fake(make, bindings, **consts):
+def run_fake(make, bindings, total=None, **consts):
     """One mailbox (ADA) served by the fake `make()` returns, polled until the fake calls its stop(); `consts` are gworkspace constants set for the run.
     → (the (anchor, text) heard, the fake, the saved read position, whether a further poll is queued)."""
     env0 = pathlib.Path(core.ENVF).read_text(); acct0 = accts[ADA]; old = {k: getattr(gw, k) for k in ("HEALTH", *consts)}
@@ -432,7 +433,11 @@ def run_fake(make, bindings, **consts):
         pg = accts[ADA] = make(); gw.HEALTH = 10 ** 12
         for k, v in consts.items(): setattr(gw, k, v)
         hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {k: {"sess"} for k in bindings}
-        got = []; hp.event = lambda anchor, summ, kind="slack": got.append((anchor, summ["text"])); pg.stop = hp.stopping.set
+        got = []; pg.stop = hp.stopping.set
+        def heard_(anchor, summ, kind="slack"):
+            got.append((anchor, summ["text"]))
+            if total is not None and len(got) >= total: hp.stopping.set()      # everything expected is heard: the pass in hand ends the run
+        hp.event = heard_
         n = len(caught); gw.run(hp)
         lp = next(t for t in caught[n:] if t.__name__ == "loop")
         hp.triggers.put(("gmail", ADA)); lp()
@@ -465,6 +470,67 @@ class StatusCode(Exception):
 check("expired history: the status is read from resp.status, status_code or status, never from the text",
       gw.http_status(HttpErr(404, "x")) == 404 and gw.http_status(StatusCode("404")) == 404 and gw.http_status(types.SimpleNamespace(status=404)) == 404
       and gw.http_status(Exception("HTTP 404 /history?startHistoryId=404")) is None and gw.http_status(HttpErr(503, "404")) == 503, gw.http_status(HttpErr(503, "404")))
+
+# ---- API calls per poll: no get for a mailbox nobody reads, a cap on gets per poll, and mail never delivered twice
+class Many(Account):
+    """A mailbox whose history is `n` records, "1".."n", each adding `per` mails (m<i>-<j>, thread t<i>-<j>), served `size` to a page; `inclusive` makes startHistoryId inclusive
+    (the record at the cursor comes back). It counts its history.list and messages.get calls and stops the run after `stop_lists` history.list calls (a runaway guard)."""
+    def __init__(self, email, n, per=1, size=500, inclusive=False, stop_lists=12, dup=False):
+        super().__init__(email); self.size, self.inclusive, self.stop_lists, self.lists, self.gets, self.starts = size, inclusive, stop_lists, 0, 0, []
+        self.n = n; self.recs = [{"id": str(i), "messagesAdded": [{"message": {"id": f"m{i}-{j}", "threadId": f"t{i}-{j}"}} for j in range(per)]} for i in range(1, n + 1)]
+        if dup:      # the first record's mail is named again in every later record (a mail changed by a later event is added to the history again)
+            for r in self.recs[1:]: r["messagesAdded"].append(self.recs[0]["messagesAdded"][0])
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": return {"historyId": "0"}
+        if key == "gmail.users.history.list":
+            self.lists += 1
+            if "pageToken" not in kw: self.starts.append(kw["startHistoryId"])
+            s = int(kw["startHistoryId"]); todo = [r for r in self.recs if (int(r["id"]) >= s if self.inclusive else int(r["id"]) > s)]
+            at = int(kw.get("pageToken", 0)); more = at + self.size < len(todo)
+            if self.lists >= self.stop_lists: self.stop()
+            return {"history": todo[at:at + self.size], **({"nextPageToken": str(at + self.size)} if more else {}), "historyId": str(self.n)}
+        if key == "gmail.users.messages.get": self.gets += 1; return {**super().handle(key, kw), "snippet": kw["id"]}
+        return super().handle(key, kw)
+def ids(n, per=1): return [f"m{i}-{j}" for i in range(1, n + 1) for j in range(per)]
+got, pg, sv, more = run_fake(lambda: Many(ADA, 10, stop_lists=1), ["gmail:q@home:from:pat"])
+check("gets: a mailbox that no query anchor reads makes no messages.get call, and its cursor still moves on", pg.gets == 0 and got == [] and sv["hist"] == "10", (pg.gets, got, sv))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 10, stop_lists=1), ["gmail:q@home:from:pat", "gmail:t3-0"])
+check("gets: a thread anchor needs the get for its own thread's mail and no other", pg.gets == 1 and got == [("gmail:t3-0", "m3-0")], (pg.gets, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 10, stop_lists=1), ["gmail:q@work:from:pat"])
+check("gets: a query anchor that reads the mailbox gets every mail once", pg.gets == 10 and sorted(t for _a, t in got) == sorted(ids(10)), (pg.gets, got))
+check("gets: the default cap is 200 and the default pages are 10", gw.MESSAGE_GETS == 200 and gw.HISTORY_PAGES == 10 and gw.HISTORY_PAGE == 500, (gw.MESSAGE_GETS, gw.HISTORY_PAGES))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 500), [UN], total=500)
+check("cap: 500 added mails with the default cap take three polls", pg.lists == 3 and pg.starts == ["0", "200", "400"], (pg.lists, pg.starts))
+check("cap: every mail is delivered exactly once, 500 gets in all, and no poll is left queued", sorted(t for _a, t in got) == sorted(ids(500)) and len(got) == 500 and pg.gets == 500 and not more, (len(got), pg.gets, more))
+check("cap: the cursor ends at the history id Gmail reported", sv["hist"] == "500", sv)
+got, pg, sv, more = run_fake(lambda: Many(ADA, 100, per=3), [UN], total=300)
+check("cap: a record is never split: the poll stops before the record that would pass the cap, and the cursor is the last record handled whole",
+      pg.starts == ["0", "66"] and pg.gets == 300 and sorted(t for _a, t in got) == sorted(ids(100, 3)) and len(got) == 300 and not more, (pg.starts, pg.gets, len(got), more))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 2, per=250), [UN], total=500)
+check("cap: one record holding more mails than the cap is handled whole (the poll cannot stall), the next record in the next poll", pg.starts == ["0", "1"] and len(got) == 500 and pg.gets == 500, (pg.starts, len(got), pg.gets))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 6, inclusive=True), [UN], total=6, MESSAGE_GETS=2)
+check("inclusive cursor: a repeated last record is neither fetched nor delivered again (capped polls)", pg.starts == ["0", "2", "4"] and pg.gets == 6 and sorted(t for _a, t in got) == sorted(ids(6)) and len(got) == 6, (pg.starts, pg.gets, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 6, size=2, inclusive=True), [UN], total=6, HISTORY_PAGES=2)
+check("inclusive cursor: the record at a page cap repeats on the next poll and is delivered once", pg.starts == ["0", "4"] and sorted(t for _a, t in got) == sorted(ids(6)) and len(got) == 6 and pg.gets == 6, (pg.starts, pg.gets, got))
+check("inclusive cursor: the handled mail is saved with the cursor, bounded", len(sv["sent"]) == 6 and set(sv["sent"]) == set(ids(6)), sv)
+got, pg, sv, more = run_fake(lambda: Many(ADA, 12, stop_lists=1), [UN], SENT_KEEP=5)
+check("inclusive cursor: only the last SENT_KEEP handled mails are kept", sv["sent"] == ids(12)[-5:], sv)
+got, pg, sv, more = run_fake(lambda: Many(ADA, 3, size=1, dup=True), [UN], total=3)
+check("dedupe: a mail named in several history records of one poll, also on different pages, is fetched and delivered once",
+      pg.lists == 3 and pg.gets == 3 and sorted(t for _a, t in got) == ["m1-0", "m2-0", "m3-0"] and len(got) == 3, (pg.lists, pg.gets, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 3, dup=True), [UN], total=3)
+check("dedupe: …and so when the records come on one page", pg.gets == 3 and sorted(t for _a, t in got) == ["m1-0", "m2-0", "m3-0"] and len(got) == 3, (pg.gets, got))
+class NoId(Many):
+    """History records that carry no id (Gmail gives every record one; the reader must not depend on it)."""
+    def handle(self, key, kw):
+        r = super().handle(key, kw)
+        return {**r, "history": [{k: v for k, v in x.items() if k != "id"} for x in r["history"]]} if "history" in r else r
+got, pg, sv, more = run_fake(lambda: NoId(ADA, 4, size=2, stop_lists=4), [UN], HISTORY_PAGES=1)
+check("page cap: a last record with no id keeps the old cursor (no KeyError), and the mail read again is delivered once",
+      sv["hist"] == "0" and pg.lists == 4 and sorted(t for _a, t in got) == ["m1-0", "m2-0"] and len(got) == 2 and pg.gets == 2, (sv, pg.lists, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 12, size=1), [UN], total=12)
+check("pages: with the module's own bound (not set here) a poll reads ten pages of history and the next poll goes on from the last record read",
+      pg.starts == ["0", "10"] and pg.lists == 12 and sorted(t for _a, t in got) == sorted(ids(12)) and len(got) == 12 and not more, (pg.starts, pg.lists, len(got), more))
 
 # ---- the tool text teaches the syntax
 desc = server._ANCHORS_DESC
