@@ -165,6 +165,9 @@ wait_end = "fix"                                    # the ten-minute filing pass
                                                     # online, a link) gets the wait the line names set by the server, with a History line the mover can send back, and the mover is asked about the rest; "ask" = only
                                                     # ask, "off" = no such check
 wait_end_settle_minutes = 60                        # the pass fixes nothing on an item written less than this many minutes ago; 0 = no wait
+hourly_line = false                                 # the ten-minute silence tick (mode "script"): an item on an agent with no activity for an hour gets ONE History line, `Audit hh:mm: verified …` (the mover's pane is in a
+                                                    # turn, a subagent is running, a tied pull request had a CI result, review, comment or merge in the last hour: recorded data only, nothing is read from GitHub) or `Audit hh:mm: idle, nothing
+                                                    # verified`; again an hour after the last line while the item stays silent. Nobody is messaged. false (the default): no line. Only a TOML true turns it on. See docs/stall-and-ladder.md
 orphan_handover = "report"                          # mode "script": an open item whose mover (or post-wake mover) is a session that is gone, a project's last retired agent included, is handed to the closest
                                                     # live agent (the project's own, then its parent's -main, its hub's, the scope's general one: stackshot/waits/successor.py), with a History line giving the reason; an item
                                                     # an owner moves is never moved, and one with no live successor stays and is reported. "report" (the default) = the run only lists them (`stackshot/audit/audit.py orphans`), "apply" = it also moves them (set this to switch on), "off" = no check

@@ -320,6 +320,11 @@ def audit_wait_end_settle_minutes() -> float:
     return n if n >= 0 and n == n and n != float("inf") else AUDIT_WAIT_END_SETTLE_MINUTES
 
 
+def audit_hourly_line() -> bool:
+    """[audit] hourly_line: the hourly audit line (audit/hourly.py): an item on an agent with no write for an hour gets one line saying what the audit verified. Default false; only a TOML true switches it on."""
+    return get("audit", "hourly_line", default=False) is True
+
+
 def audit_orphan_handover() -> str:
     """[audit] orphan_handover: what the audit does with an open item whose mover is gone (successor.py): "report" (the default for the first week of use) only lists it, "apply" hands it to the closest live agent, "off" makes no check.
     A value that is none of these reads as the default."""

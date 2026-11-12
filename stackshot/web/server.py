@@ -6221,7 +6221,49 @@ def _silence_tick() -> "dict[str, Any] | None":
         _silence_backstop(skip=skip, env=env)
     except Exception as e:  # noqa: BLE001  — the backstop is an extra: the pass above has run
         print(f"silence: backstop not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _hourly_tick(env=env)
+    except Exception as e:  # noqa: BLE001  — the hourly line is an extra (off by default): the passes above have run
+        print(f"audit: hourly line not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return res
+
+
+def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
+    """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
+    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified` (an entry of `metadata.stall.log`, the way the ladder's lines are written; kind `audit` or `audit_idle`).
+    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
+    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that verified something is also the item's last-activity record (kind `audit`). The save is
+    the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
+    passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
+    from stackshot.audit import hourly as _hourly
+    from stackshot.tools import next_report as _nr
+    if not _hourly.enabled() or _ro.is_read_only():
+        return []
+    now = time.time() if now is None else now
+    items = items if items is not None else _nr.load_all(None)
+    env = env if env is not None else _silence_env()
+    if pane is None:
+        idx = _sessions_index()
+        pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
+    written: list[str] = []
+    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same):
+        try:
+            with _ITEM_LOCK:
+                item = _load(gid)
+                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
+                if line is None:
+                    continue
+                _stall.note(item.setdefault("metadata", {}), now, line["text"], kind=line["kind"])
+                if line["verified"]:
+                    _lastact.apply(item, [_lastact.audit_signal(", ".join(line["verified"]), now)], now)
+                _save(gid, item, note="audit: hourly line")
+            written.append(gid)
+            print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"audit: {gid} hourly line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if written:
+        _publish()
+    return written
 
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour

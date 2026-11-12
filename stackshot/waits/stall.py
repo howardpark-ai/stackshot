@@ -174,10 +174,10 @@ def log_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [x for x in ((s or {}).get("log") or []) if isinstance(x, dict)] if isinstance(s, dict) else []
 
 
-def note(meta: dict[str, Any], now: float, text: str, keep: int = 8) -> None:
-    """Write a step onto the item's metadata (History shows each new entry as a line)."""
+def note(meta: dict[str, Any], now: float, text: str, keep: int = 8, kind: str = "") -> None:
+    """Write a step onto the item's metadata (History shows each new entry as a line). `kind`, when given, is kept on the entry so a reader can tell it from the ladder's own (the hourly audit line's)."""
     log = log_of(meta)
-    log.append({"at": now, "text": " ".join(str(text).split())[:240]})
+    log.append({"at": now, "text": " ".join(str(text).split())[:240], **({"kind": kind} if kind else {})})
     meta["stall"] = {"log": log[-keep:]}
 
 
