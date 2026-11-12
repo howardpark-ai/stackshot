@@ -153,15 +153,20 @@ check("1 …the History shows it: the revision's new stall entries are the line 
 check("1 nothing is sent to anyone: no message, no notice, no flag", sent == [], sent)
 check("1 the server logs each line on stderr", err.text.count("hourly line: Audit") == 6, err.text)
 # what verifies nothing
-clean_pane(); put(1, act=90); put(2, act=90, work=work("in progress", 30, agent="home-peer2")); put(3, act=90, work=work("done", 30)); put(4, act=90, work=work("in progress", 120))
-put(5, act=90, last_activity={"at": now0 - 90 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"}); put(6, act=90, last_activity={"at": now0 - 20 * MIN, "kind": "step_done", "what": "step 1 done"})
-put(7, act=90, last_activity={"at": now0 - 20 * MIN, "kind": "update", "what": "building"})
+def nothing_fixtures():
+    for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+    put(1, act=90); put(2, act=90, work=work("in progress", 30, agent="home-peer2")); put(3, act=90, work=work("done", 30)); put(4, act=90, work=work("in progress", 120))
+    put(5, act=90, last_activity={"at": now0 - 90 * MIN, "kind": "ci_result", "what": "CI failed on PR 5"}); put(6, act=90, last_activity={"at": now0 - 20 * MIN, "kind": "step_done", "what": "step 1 done"})
+    put(7, act=90, last_activity={"at": now0 - 20 * MIN, "kind": "update", "what": "building"})
+clean_pane()
 for pane_st in ("idle", "shell", "boom", ""):
     panes["home-peer"] = pane_st
-    put(1, act=90)
-    check(f"1 a pane that is {pane_st or 'not shown on this box'} verifies nothing", tick() == ["a1", "a2", "a3", "a4", "a5", "a6", "a7"] and lines(1)[-1]["kind"] == "audit_idle", lines(1))
-    for i in range(1, 8): put(i, act=90, **{k: v for k, v in mt(i).items() if k in ("work", "last_activity")})            # the items again, the lines wiped
-check("1 another agent's status line, a done one, one older than 90 minutes, a pull request event older than an hour, a step done and a bare update are not a subagent or a pull request event",
+    nothing_fixtures()
+    got_n = tick()
+    check(f"1 a pane that is {pane_st or 'not shown on this box'} verifies nothing, and no other signal on items 1 to 7 does: all seven say idle",
+          got_n == ["a1", "a2", "a3", "a4", "a5", "a6", "a7"] and all(lines(i)[-1]["kind"] == "audit_idle" for i in range(1, 8)), [lines(i) for i in range(1, 8)])
+nothing_fixtures()
+check("1 …(another agent's status line, a done one, one older than 90 minutes, a pull request event older than an hour, a step done and a bare update, each on its own item)",
       all(lines(i) == [] for i in range(1, 8)) and all(mt(i).get("stall") is None for i in range(1, 8)))
 panes["home-peer"] = "busy"
 tick()
@@ -205,10 +210,11 @@ put(4, act=90); stale_items = {"a4": rd(4)}
 tick()
 with _Err():
     real_pass = HR.pass_
-    HR.pass_ = lambda items, now, env=None, pane=None, same=None: [("a4", {"text": "stale"})]      # the list a slower pass made before the line was written
+    put(8, act=90, status="completed", outcome="done")
+    HR.pass_ = lambda items, now, env=None, pane=None, same=None: [("a4", {"text": "stale", "verified": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
     try: stale = server._hourly_tick(now=now0 + 5 * MIN)
     finally: HR.pass_ = real_pass
-check("4 an item read again under the lock that is no longer due is left alone", stale == [] and len(lines(4)) == 1, lines(4))
+check("4 an item read again under the lock that is no longer due (a line written since, or closed since) is left alone", stale == [] and len(lines(4)) == 1 and lines(8) == [], (stale, lines(4), lines(8)))
 
 # ================================================================ 5. not on an agent
 clean_pane(); panes["home-peer"] = "busy"; panes["team-back"] = "busy"; panes["home-front"] = "busy"

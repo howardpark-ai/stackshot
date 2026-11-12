@@ -37,6 +37,7 @@ from stackshot.audit import audit_checks as _ac
 from stackshot.audit import silence as _silence
 from stackshot.core import config as _cfg
 from stackshot.model import last_activity as _la
+from stackshot.waits import handoff as _ho
 from stackshot.waits import stall as _stall
 from stackshot.waits import waiting as _wt
 
@@ -99,7 +100,6 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     if not _silence.reading(it, mover, after_open, now) or _wt.is_held(it):
         return None      # not on an agent as the board shows it (a hold, a park, a stored wait, the owner's or an outsider's move), or on hold
     front = (env.is_front if hasattr(env, "is_front") else None)
-    from stackshot.waits import handoff as _ho  # noqa: PLC0415
     if _ho.awaiting_session(it) and not (front is not None and front(mover, str(meta.get("project") or ""))):
         return None      # an untaken hand-off to a back agent is the hand-off audit's (a front agent's is checked, as the silence pass does)
     last = _silence.clock(it, mover)
