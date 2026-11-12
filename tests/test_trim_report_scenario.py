@@ -397,7 +397,7 @@ base = ["--state-dir", str(T / "st5"), "--config", str(CONF)]
 CONF.write_text("")
 r = run(*base, "--fetch", "--github", "acme/widgets", "--map", str(T / "no-such-map.json"), env={"PATH": PATH2})
 check("--fetch wins over --map", r.returncode == 0 and "serial minutes: 22.5 (9 of 11 suites timed, 2 untimed)" in r.stdout, r.stdout + r.stderr)
-doc = TR.__doc__
+doc = pathlib.Path(TOOL).read_text(encoding="utf-8")       # the file's text, not the module's docstring attribute (the suitemap tripwire pins those uses)
 check("the docstring lists --fetch before --map, as the code takes them", 0 < doc.index("--fetch         the `suitemap`") < doc.index("--map FILE      this file"))
 EMPTY_CONF = T / "empty.toml"; EMPTY_CONF.write_text("")
 
