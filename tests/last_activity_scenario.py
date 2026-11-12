@@ -791,7 +791,23 @@ hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
 
-# ================================================================ 13. a green head after a green head is activity on the item the pull request is anchored to (it was dropped: only a pass after a failure was reported)
+# ================================================================ 13. the item's own words include a step's status tag: a merge whose pull request is named only there ties, and the tick records pr_merged
+def tagged(text): return step("home-peer: do the thing", "open") | {"tag": {"text": text, "state": "in progress", "ts": now0}}
+put(460, steps=[tagged("PR 260 released; PR 261 in review")])
+put(461, next="home-peer: land PR #262 and check it")
+put(462, project="projects/beta", steps=[tagged("PR 263 in review")])      # the number alone in a tag, in a project that holds no anchor in the repository: not tied
+put(463, steps=[step("home-peer: do the thing", "open"), step("home-peer: an earlier step", "done") | {"tag": {"text": "PR 264 released", "state": "done", "ts": now0}}])      # a finished step keeps its tag: stale, ties nothing
+put(464, steps=[tagged("PR 264 released")])      # the same tag on an open step ties
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/9999"}]}))      # an anchor in the repository for no item: a bare number in an item of the project speaks of that repository
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+emit(261, "pr_merged", "alice", 100 * MIN); emit(262, "pr_merged", "alice", 101 * MIN); emit(263, "pr_merged", "alice", 102 * MIN); emit(264, "pr_merged", "alice", 103 * MIN)
+saved = ev_pass(now0 + 110 * MIN)
+check("13 a merge whose pull request is named only in a step's tag (a460, PR 261) or on a line of the item's next (a461, PR 262) is tied: the tick records pr_merged at the merge, with the pull request in the words",
+      sorted(saved) == ["a460", "a461", "a464"] and lk(460) == "pr_merged" and la(460) == {"at": now0 + 100 * MIN, "what": "PR 261 merged"} and lk(461) == "pr_merged" and la(461) == {"at": now0 + 101 * MIN, "what": "PR 262 merged"}, (saved, la(460), la(461)))
+check("13 …and a bare number in a tag of an item whose project holds no anchor in that repository (a462, PR 263) is not tied: nothing is recorded", la(462) is None, la(462))
+check("13 …nor is a tag on a done step (a463, PR 264): only the tag of an open step counts, as the same tag on an open step (a464) ties", la(463) is None and lk(464) == "pr_merged" and la(464)["what"] == "PR 264 merged", (la(463), la(464)))
+
+# ================================================================ 14. a green head after a green head is activity on the item the pull request is anchored to (it was dropped: only a pass after a failure was reported)
 put(484)
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/40", "items": ["a484"]}]}))
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
@@ -802,13 +818,13 @@ with GH(g13, ["github:acme/widgets#40"]) as G:
     g13.update(pr9(40, sha="41" * 20))      # a new head, green as the one before
     ci13 = [e for e in G.one() if e.etype.startswith("ci_")]
     ci13b = [e for e in G.one() if e.etype.startswith("ci_")]
-check("13 a new green head after a green one is one ci_passed event, vouched for; the pass after it adds none",
+check("14 a new green head after a green one is one ci_passed event, vouched for; the pass after it adds none",
       [(e.etype, e.who, e.vouched, e.text) for e in ci13] == [("ci_passed", "CI", "ci_passed", "passing on 4141414 (1 checks)")] and ci13b == [], ([(e.etype, e.text) for e in ci13], ci13b))
 hub_.bindings["github:acme/widgets#40"] = {"home-peer"}
 for e in ci13: hub_.emit(e)
 rows13, _ = EL.read(0)
 saved = ev_pass_now()
-check("13 …it writes a ci_passed line for the pull request and stamps the item anchored to it: ci_result, 'CI passing on PR 40'",
+check("14 …it writes a ci_passed line for the pull request and stamps the item anchored to it: ci_result, 'CI passing on PR 40'",
       [(r["kind"], r["n"]) for r in rows13] == [("ci_passed", 40)] and saved == ["a484"] and la(484)["what"] == "CI passing on PR 40" and lk(484) == "ci_result", (rows13, saved, la(484)))
 
 # a fork's pull request: the same green after green is not the repository's own side, so it is not vouched for and writes no line
@@ -821,12 +837,12 @@ with GH(g13f, ["github:acme/widgets#42"]) as G:
     G.one()
     g13f.update(pr9(42, head="mallory/widgets", sha="43" * 20))
     ci13f = [e for e in G.one() if e.etype.startswith("ci_")]
-check("13 a fork's pull request: a green head after a green one is the same record_only ci_passed event, not vouched for", [(e.etype, e.vouched, e.record_only) for e in ci13f] == [("ci_passed", "", True)], [(e.etype, e.vouched, e.record_only) for e in ci13f])
+check("14 a fork's pull request: a green head after a green one is the same record_only ci_passed event, not vouched for", [(e.etype, e.vouched, e.record_only) for e in ci13f] == [("ci_passed", "", True)], [(e.etype, e.vouched, e.record_only) for e in ci13f])
 hub_.bindings["github:acme/widgets#42"] = {"home-peer"}
 for e in ci13f: hub_.emit(e)
 rows13f, _ = EL.read(0)
 saved = ev_pass_now()
-check("13 …it writes no line to the event log and stamps nothing (a fork's CI is not the repository's own side)", rows13f == [] and saved == [] and la(485) is None, (rows13f, saved, la(485)))
+check("14 …it writes no line to the event log and stamps nothing (a fork's CI is not the repository's own side)", rows13f == [] and saved == [] and la(485) is None, (rows13f, saved, la(485)))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
