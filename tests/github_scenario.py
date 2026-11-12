@@ -1863,6 +1863,35 @@ try:
     del cievs[:]; GHD[f"{RP}/pulls/27"] = {**GHD[f"{RP}/pulls/27"], "head": {"sha": "c" * 40, "ref": "x/y"}}
     GHD[f"{RP}/commits/{'c' * 40}/check-runs?per_page=100"] = runs_(("suites", "failure"), ("lint", "success"), ("docs", "cancelled")); one_pass()
     check("anchor-hub CI: …and the failed text names them the same way", ci_texts(AN2) == [("ci_failed", "failed on ccccccc: 1 of 3 checks — suites (1 canceled)")], ci_texts(AN2))
+    # ci() through the REAL Hub.emit (the checks above replace emit): a green after a green on a repository outside [pilot] own_repos is one event-log line and no notice, no routing line, no delivery;
+    # the same event without record_only goes down the notice path (the control)
+    AN5 = "github:example-owner/stackshot#30"
+    GHD[f"{RP}/issues/30"] = {**GHD[f"{RP}/issues/26"], "html_url": "https://github.com/example-owner/stackshot/pull/30"}
+    def own_head(sha):
+        GHD[f"{RP}/pulls/30"] = {"head": {"sha": sha, "ref": "x/y", "repo": {"full_name": "example-owner/stackshot"}}, "user": {"login": "example-owner"}, "base": {"repo": {"id": 7, "full_name": "example-owner/stackshot"}}}
+        GHD[f"{RP}/commits/{sha}/check-runs?per_page=100"] = runs_(("suites", "success"), ("lint", "success"))
+    own_head("e" * 40); hub.bindings[AN5] = {OWNER}; ghr_calls = {"send": 0, "deliver": 0, "record": 0, "record_auto": 0}
+    _o = (hub.send, hub.deliver, ahc._routing.record, ahc._routing.record_auto, hub.emit)
+    hub.send = lambda *a, **k: ghr_calls.__setitem__("send", ghr_calls["send"] + 1); hub.deliver = lambda *a, **k: ghr_calls.__setitem__("deliver", ghr_calls["deliver"] + 1)
+    ahc._routing.record = lambda *a, **k: ghr_calls.__setitem__("record", ghr_calls["record"] + 1) or "n0"; ahc._routing.record_auto = lambda *a, **k: ghr_calls.__setitem__("record_auto", ghr_calls["record_auto"] + 1) or "n0"
+    hub.emit = ahc.Hub.emit.__get__(hub)
+    try:
+        one_pass()      # first sight of #30: seeds
+        n_el0 = len(ahc._events.read(0)[0]); own_head("f" * 40); one_pass(); rows_ = ahc._events.read(0)[0][n_el0:]
+        check("anchor-hub CI, through the real Hub.emit: a green after a green (a repository outside own_repos) is exactly one event-log line, a ci_passed on #30",
+              not ahc.own_repos() and len(rows_) == 1 and rows_[0]["kind"] == "ci_passed" and rows_[0]["n"] == 30, (ahc.own_repos(), rows_))
+        check("…and no notice, no delivery, no routing-log line or ruling", ghr_calls == {"send": 0, "deliver": 0, "record": 0, "record_auto": 0} and not hub.pending, (ghr_calls, hub.pending))
+        ahc.Hub.emit(hub, ahc.Event(anchor=AN5, kind="github-state", title="stackshot#30", who="CI", text="passing on fffffff (2 checks)", url="https://github.com/example-owner/stackshot/pull/30/checks", etype="ci_passed", vouched="ci_passed"))
+        check("…the same event without record_only goes down the notice path (control)", ghr_calls["send"] + ghr_calls["deliver"] >= 1, ghr_calls)
+    finally:
+        hub.send, hub.deliver, ahc._routing.record, ahc._routing.record_auto, hub.emit = _o
+        hub.bindings.pop(AN5, None)
+    # a new head whose CI is still running on a pull request already seeded: no pending marker (only a first sight with CI running keeps one), nothing reported until it finishes, then one result
+    del cievs[:]; GHD[f"{RP}/pulls/27"] = {**GHD[f"{RP}/pulls/27"], "head": {"sha": "d" * 40, "ref": "x/y"}}
+    GHD[f"{RP}/commits/{'d' * 40}/check-runs?per_page=100"] = runs_(("suites", "none"), ("lint", "success")); one_pass(); one_pass()
+    check("anchor-hub CI: a new head still running on a seeded pull request reports nothing and keeps no pending marker", ci_texts(AN2) == [] and "pending" not in hub.gh_state["ci"][AN2] and hub.gh_state["ci"][AN2]["key"][0] == "c" * 40, (ci_texts(AN2), hub.gh_state["ci"][AN2]))
+    GHD[f"{RP}/commits/{'d' * 40}/check-runs?per_page=100"] = runs_(("suites", "success"), ("lint", "success")); one_pass(); del_ = list(cievs)
+    check("anchor-hub CI: …and when it finishes green after the failed head before it, it is one 'passing again' (the key of the failed head decides, the marker never did)", [(e.etype, e.text, e.record_only) for e in del_ if e.anchor == AN2] == [("ci_passed", "passing again on ddddddd (2 checks)", False)], [(e.etype, e.text) for e in del_])
     # CI still running when the pull request is first looked at: nothing is seeded, the first finished result is reported once; CI finished at first sight seeds silently
     AN3 = "github:example-owner/stackshot#28"
     GHD[f"{RP}/issues/28"] = {**GHD[f"{RP}/issues/26"], "html_url": "https://github.com/example-owner/stackshot/pull/28"}

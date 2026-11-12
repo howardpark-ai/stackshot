@@ -390,6 +390,8 @@ class Hub:
         """Route one event to the sessions bound to its anchor. The first event on (anchor, session) is delivered at once;
         further events are collapsed into one follow-up notice: after DEBOUNCE s for most kinds, after QUIET[kind] s of
         silence for a kind that comes in editing sessions (Drive), at the latest QUIET_MAX s after the first.
+        An event marked record_only (a new green head that follows no failure) stops right after the event log: no notice, no routing line, no release of
+        an item held on the anchor, whatever [pilot] own_repos says.
         An anchor in [anchor_hub] direct takes the direct lane instead (emit_direct).
         A routine event on the fleet's own pull request (routine_own) is logged instead of delivered to a session whose every
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
