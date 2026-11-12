@@ -1,7 +1,7 @@
 """event_log.py: the hub's record of the events on pull requests it saw, read by the server's last-activity pass (`server._event_activity_tick`).
 
 The same idea as merge_log.py (a file of the hub's own, one small line per event, nothing for a session to receive, no read of GitHub of its own), for the other events that are visible activity
-on a pull request: a CI result (a failure, or passing again after one: what the hub already reports), a comment by a person, a review (a review or a review comment), and a merge. `Hub.emit`, the
+on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), and a merge. `Hub.emit`, the
 funnel every event passes, appends the line. The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
 another kind as a merge.
 

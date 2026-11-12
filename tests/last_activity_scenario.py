@@ -19,7 +19,7 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
      stranger's comment on an anchored pull request and on an issue the item's words name; a fork's, a deleted fork's and a nameless CI result); a merge is not filtered
   10 the line's time is the event's own when it can be read and is within the window (a backlog is not now); absent or unreadable falls back to the hub's; outside the window writes no line
   11 History: a confirm and a last-activity stamp saved in one window still show the `confirm` line (both renderers)
-  14 what counts as a time (a number: a bool or a string is torn), the band at the hour (exactly 60 minutes is amber), a stored time ahead of the reader's clock (no record), the one-second boundary
+  15 what counts as a time (a number: a bool or a string is torn), the band at the hour (exactly 60 minutes is amber), a stored time ahead of the reader's clock (no record), the one-second boundary
 
     tests/run-suite last_activity       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, io, math
@@ -144,7 +144,7 @@ check("1 save_signals: each save signal has its kind: step_done, step_dropped, s
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
       and K(base, after(mover="n", merged_seen=["a/b#1"])) == ["state_change", "pr_merged"] and K(base, after(work=[{"id": "x"}])) == [], K(base, after(mover="n", merged_seen=["a/b#1"])))
-check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing again), review, comment and pr_merged",
+check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing), review, comment and pr_merged",
       [(LA.pr_candidate(k, 9, 5, 50) or {}).get("kind") for k in ("ci_failed", "ci_passed", "review", "comment", "merged")] == ["ci_result", "ci_result", "review", "comment", "pr_merged"], None)
 # update and audit: defined and tested, stamped by nothing yet
 check("1 update_signal: a status write whose text differs from the previous one is an update, the words the text itself; the same text again (case and spacing aside), a blank one and a torn time are not",
@@ -158,7 +158,7 @@ LA.apply(it_, [LA.update_signal("", "wired the thing", 10)]); first_ = dict(it_[
 LA.apply(it_, [LA.audit_signal("subagent running", 20)])
 check("1 update and audit signals take part in newest-wins like the rest: an audit line later than an update replaces it, an older update after it does not", first_["kind"] == "update" and it_["metadata"]["last_activity"] == {"at": 20.0, "kind": "audit", "what": "subagent running"}
       and not LA.apply(it_, [LA.update_signal("", "older", 15)]), it_)
-check("1 pr_what: the words for each kind of event (a comment is on #n: the hub does not say whether the anchor is a pull request); a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing again on PR 123", "comment on #123", "review on PR 123", "PR 123 merged"]
+check("1 pr_what: the words for each kind of event (a comment is on #n: the hub does not say whether the anchor is a pull request); a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing on PR 123", "comment on #123", "review on PR 123", "PR 123 merged"]
       and LA.pr_what("pr_closed", 5) == "" and LA.pr_what("comment", 0) == "" and LA.pr_candidate("pr_closed", 5, 100, 200) is None and LA.pr_candidate("comment", 5, 100, 200) == {"at": 100.0, "kind": "comment", "what": "comment on #5"}, None)
 closed_ = {"status": "completed", "metadata": {"steps": [step("a", "done", 9)]}}
 check("1 stamp: only an open item has a record", not LA.stamp(closed_, {"status": "open", "metadata": {"steps": [step("a", "open")]}}, 50.0) and "last_activity" not in closed_["metadata"], closed_)
@@ -808,27 +808,64 @@ check("13 a merge whose pull request is named only in a step's tag (a460, PR 261
 check("13 …and a bare number in a tag of an item whose project holds no anchor in that repository (a462, PR 263) is not tied: nothing is recorded", la(462) is None, la(462))
 check("13 …nor is a tag on a done step (a463, PR 264): only the tag of an open step counts, as the same tag on an open step (a464) ties", la(463) is None and lk(464) == "pr_merged" and la(464)["what"] == "PR 264 merged", (la(463), la(464)))
 
-# ================================================================ 14. what counts as a time: a number only; the band at the hour; a stored time ahead of the reader's clock
-SIG14 = {"kind": "comment", "what": "x"}
-check("14 clean: a bool, a string (digits or not), a list, bytes and a dict are no time; an int and a float are", all(LA.clean({"at": v, **SIG14}) is None for v in (True, False, "123", "1e9", " 5 ", [5], (5,), b"5", None, {"x": 1}))
-      and LA.clean({"at": 5, **SIG14})["at"] == 5.0 and LA.clean({"at": 5.5, **SIG14})["at"] == 5.5, [LA.clean({"at": v, **SIG14}) for v in (True, "123")])
-check("14 record, read, apply and the signal builders skip a bool or a string as the time, as for any torn candidate",
-      LA.record({"metadata": {}}, [{"at": True, **SIG14}, {"at": "123", **SIG14}]) is None and LA.read({"metadata": {"last_activity": {"at": True, **SIG14}}}) is None and LA.read({"metadata": {"last_activity": {"at": "123", **SIG14}}}) is None
+# ================================================================ 14. a green head after a green head is activity on the item the pull request is anchored to (it was dropped: only a pass after a failure was reported)
+put(484)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/40", "items": ["a484"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+g13 = {"/user": {"login": "hubaccount"}, **pr9(40)}
+with GH(g13, ["github:acme/widgets#40"]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()      # seeds the first green head: silent
+    g13.update(pr9(40, sha="41" * 20))      # a new head, green as the one before
+    ci13 = [e for e in G.one() if e.etype.startswith("ci_")]
+    ci13b = [e for e in G.one() if e.etype.startswith("ci_")]
+check("14 a new green head after a green one is one ci_passed event, vouched for; the pass after it adds none",
+      [(e.etype, e.who, e.vouched, e.text) for e in ci13] == [("ci_passed", "CI", "ci_passed", "passing on 4141414 (1 checks)")] and ci13b == [], ([(e.etype, e.text) for e in ci13], ci13b))
+hub_.bindings["github:acme/widgets#40"] = {"home-peer"}
+for e in ci13: hub_.emit(e)
+rows13, _ = EL.read(0)
+saved = ev_pass_now()
+check("14 …it writes a ci_passed line for the pull request and stamps the item anchored to it: ci_result, 'CI passing on PR 40'",
+      [(r["kind"], r["n"]) for r in rows13] == [("ci_passed", 40)] and saved == ["a484"] and la(484)["what"] == "CI passing on PR 40" and lk(484) == "ci_result", (rows13, saved, la(484)))
+
+# a fork's pull request: the same green after green is not the repository's own side, so it is not vouched for and writes no line
+put(485)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/42", "items": ["a485"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+g13f = {"/user": {"login": "hubaccount"}, **pr9(42, head="mallory/widgets")}
+with GH(g13f, ["github:acme/widgets#42"]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()
+    g13f.update(pr9(42, head="mallory/widgets", sha="43" * 20))
+    ci13f = [e for e in G.one() if e.etype.startswith("ci_")]
+check("14 a fork's pull request: a green head after a green one is the same record_only ci_passed event, not vouched for", [(e.etype, e.vouched, e.record_only) for e in ci13f] == [("ci_passed", "", True)], [(e.etype, e.vouched, e.record_only) for e in ci13f])
+hub_.bindings["github:acme/widgets#42"] = {"home-peer"}
+for e in ci13f: hub_.emit(e)
+rows13f, _ = EL.read(0)
+saved = ev_pass_now()
+check("14 …it writes no line to the event log and stamps nothing (a fork's CI is not the repository's own side)", rows13f == [] and saved == [] and la(485) is None, (rows13f, saved, la(485)))
+
+# ================================================================ 15. what counts as a time: a number only; the band at the hour; a stored time ahead of the reader's clock
+SIG15 = {"kind": "comment", "what": "x"}
+check("15 clean: a bool, a string (digits or not), a list, bytes and a dict are no time; an int and a float are", all(LA.clean({"at": v, **SIG15}) is None for v in (True, False, "123", "1e9", " 5 ", [5], (5,), b"5", None, {"x": 1}))
+      and LA.clean({"at": 5, **SIG15})["at"] == 5.0 and LA.clean({"at": 5.5, **SIG15})["at"] == 5.5, [LA.clean({"at": v, **SIG15}) for v in (True, "123")])
+check("15 record, read, apply and the signal builders skip a bool or a string as the time, as for any torn candidate",
+      LA.record({"metadata": {}}, [{"at": True, **SIG15}, {"at": "123", **SIG15}]) is None and LA.read({"metadata": {"last_activity": {"at": True, **SIG15}}}) is None and LA.read({"metadata": {"last_activity": {"at": "123", **SIG15}}}) is None
       and LA.signal("comment", True, "x") is None and LA.signal("comment", "9", "x") is None and LA.pr_candidate("comment", 3, True, 100.0) is None and LA.pr_candidate("comment", 3, "9", 100.0) is None and LA.update_signal("a", "b", True) is None and LA.audit_signal("a pane in a turn", "9") is None, None)
-st14 = {"status": "open", "metadata": {"last_activity": {"at": True, **SIG14}}}
-check("14 apply: a stored record whose time is a bool is replaced by the next real signal, whatever its time", LA.apply(st14, [{"at": 3, **SIG14}]) and st14["metadata"]["last_activity"]["at"] == 3.0, st14)
-check("14 band at the hour: 44m 59.999s ok, 45m warn, exactly 1h warn, 1h and a millisecond bad (strictly more than 60 minutes); the constants are 45 and 60 minutes",
+st15 = {"status": "open", "metadata": {"last_activity": {"at": True, **SIG15}}}
+check("15 apply: a stored record whose time is a bool is replaced by the next real signal, whatever its time", LA.apply(st15, [{"at": 3, **SIG15}]) and st15["metadata"]["last_activity"]["at"] == 3.0, st15)
+check("15 band at the hour: 44m 59.999s ok, 45m warn, exactly 1h warn, 1h and a millisecond bad (strictly more than 60 minutes); the constants are 45 and 60 minutes",
       LA.band(2699.999) == LA.OK and LA.band(2700) == LA.WARN and LA.band(3599.999) == LA.WARN and LA.band(3600) == LA.WARN and LA.band(3600.001) == LA.BAD and LA.band(0) == LA.OK and LA.BAND_WARN_S == 2700 and LA.BAND_BAD_S == 3600,
       [LA.band(x) for x in (2699.999, 2700, 3600, 3600.001)])
-NOW14 = 1_000_000.0
-rec14 = lambda at_: {"metadata": {"last_activity": {"at": at_, **SIG14}}}
-check("14 the reader: a stored time ahead of now by more than the skew is no record in read, at and age_s; exactly the skew ahead, and a second less, read as just now; without a `now` the record reads as stored",
-      LA.read(rec14(NOW14 + LA.SKEW_S + 1), NOW14) is None and LA.at(rec14(NOW14 + LA.SKEW_S + 1), NOW14) == 0.0 and LA.age_s(rec14(NOW14 + LA.SKEW_S + 1), NOW14) is None
-      and LA.age_s(rec14(NOW14 + LA.SKEW_S), NOW14) == 0.0 and LA.age_s(rec14(NOW14 + 1), NOW14) == 0.0 and LA.age_s(rec14(NOW14 - 90), NOW14) == 90.0 and LA.read(rec14(NOW14 + LA.SKEW_S + 1))["at"] == NOW14 + LA.SKEW_S + 1, None)
-check("14 the skew is the window an event's own time is allowed (event_log.AHEAD_S), one number for both", LA.SKEW_S == EL.AHEAD_S == 3600.0, (LA.SKEW_S, EL.AHEAD_S))
-check("14 the one-second boundary: a candidate one second after now is read as now, one at now is kept; a stored record one second after now is ignored, one at now is kept (the newest wins only against a record that happened)",
-      LA.record({"metadata": {}}, [{"at": NOW14 + 1, **SIG14}], NOW14)["at"] == NOW14 and LA.record({"metadata": {}}, [{"at": NOW14, **SIG14}], NOW14)["at"] == NOW14
-      and LA.record(rec14(NOW14 + 1), [{"at": NOW14 - 5, **SIG14}], NOW14)["at"] == NOW14 - 5 and LA.record(rec14(NOW14), [{"at": NOW14 - 5, **SIG14}], NOW14)["at"] == NOW14, None)
+NOW15 = 1_000_000.0
+rec15 = lambda at_: {"metadata": {"last_activity": {"at": at_, **SIG15}}}
+check("15 the reader: a stored time ahead of now by more than the skew is no record in read, at and age_s; exactly the skew ahead, and a second less, read as just now; without a `now` the record reads as stored",
+      LA.read(rec15(NOW15 + LA.SKEW_S + 1), NOW15) is None and LA.at(rec15(NOW15 + LA.SKEW_S + 1), NOW15) == 0.0 and LA.age_s(rec15(NOW15 + LA.SKEW_S + 1), NOW15) is None
+      and LA.age_s(rec15(NOW15 + LA.SKEW_S), NOW15) == 0.0 and LA.age_s(rec15(NOW15 + 1), NOW15) == 0.0 and LA.age_s(rec15(NOW15 - 90), NOW15) == 90.0 and LA.read(rec15(NOW15 + LA.SKEW_S + 1))["at"] == NOW15 + LA.SKEW_S + 1, None)
+check("15 the skew is the window an event's own time is allowed (event_log.AHEAD_S), one number for both", LA.SKEW_S == EL.AHEAD_S == 3600.0, (LA.SKEW_S, EL.AHEAD_S))
+check("15 the one-second boundary: a candidate one second after now is read as now, one at now is kept; a stored record one second after now is ignored, one at now is kept (the newest wins only against a record that happened)",
+      LA.record({"metadata": {}}, [{"at": NOW15 + 1, **SIG15}], NOW15)["at"] == NOW15 and LA.record({"metadata": {}}, [{"at": NOW15, **SIG15}], NOW15)["at"] == NOW15
+      and LA.record(rec15(NOW15 + 1), [{"at": NOW15 - 5, **SIG15}], NOW15)["at"] == NOW15 - 5 and LA.record(rec15(NOW15), [{"at": NOW15 - 5, **SIG15}], NOW15)["at"] == NOW15, None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
