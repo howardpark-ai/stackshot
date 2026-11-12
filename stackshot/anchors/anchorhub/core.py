@@ -28,6 +28,7 @@ from stackshot.core import config as _cfg   # stackshot.toml: the paths and iden
 from stackshot.core import interp as _interp   # a missing interpreter (its uv environment deleted) never stops a delivery
 from stackshot.anchors import anchors as _anc  # the project-anchors store + bindings (shared with the stackshot server)
 from stackshot.anchors import merge_log as _merges  # the pull requests seen merging, for the server's progress clock (one line each, no read of its own)
+from stackshot.anchors import event_log as _events  # the other activity seen on pull requests (CI results, comments by people, reviews, merges), for the server's last-activity record
 from stackshot.router import routing as _routing  # the routing log: every delivered notice, and the ruling on it (the pilot)
 try: from stackshot.router import router_live as _live          # the router's live mode: holds a pilot notice for the router instead of delivering it to the keeper
 except Exception: _live = None            # anchor-hub never fails to start for it: no router, the notice is delivered as ever
@@ -196,6 +197,9 @@ class Event:
                            # source's payload did not carry it, and [pilot] own_repos then matches by owner/name only
     head: str = ""         # GitHub pull request only: its head branch (head.ref), "" when unknown; the router passes a notice on a builder's PR to the builder
     author: str = ""       # GitHub pull request only: its author's login, "" when unknown
+    bot: bool = False      # GitHub only: the comment's author is an account of type Bot (the payload says so; no read is made for it): the event log leaves a bot's comment out
+    vouched: str = ""      # GitHub only: the kinds of this event (event_log.KINDS, "+"-joined) the payload vouches for as the repository's own side: a comment or review whose author_association is OWNER, MEMBER or
+                           # COLLABORATOR, a CI result from a branch of the repository itself. The event log writes no line for a comment, review or CI result that is not vouched for
 
     @property
     def type(self) -> str:
@@ -226,7 +230,7 @@ def direct_notice(ev: Event) -> str:
     """The notice of a direct anchor: the usual header with the source's ids, then the whole text on the lines below,
     clipped at DIRECT_CLIP chars with the one-line notices' marker. An event with no full text or ids (a receiver that
     sets neither) gets the one-line notice."""
-    m = ev.meta or {}
+    m = {k: v for k, v in (ev.meta or {}).items() if k != "refs"}      # `refs` (the board ids a merged pull request's body names) is for the merge log, not a source's id: an event with only that gets the one-line notice
     if not ev.full and not m: return notice(ev)
     ids = " · ".join(f"{k} {m[k]}" for k in ("ts", "thread_ts") if m.get(k))
     head = f"[anchor] {ev.label}: {_LEAD[ev.kind]}{ev.who}" + (" (caught up)" if m.get("caught_up") else "") + (f" ({ids})" if ids else "") + f" → {ev.url}"
@@ -379,7 +383,7 @@ class Hub:
         self.emit(Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
                         url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
                         full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
-                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or "")))
+                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or "")))
 
     def emit(self, ev: "Event"):
         """Route one event to the sessions bound to its anchor. The first event on (anchor, session) is delivered at once;
@@ -390,6 +394,8 @@ class Hub:
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
         try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), time.time())      # first, before any lane: a merge is recorded whatever happens to its notice
         except Exception as e: log.warning("merge log: %s", str(e)[:120])
+        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
+        except Exception as e: log.warning("event log: %s", str(e)[:120])
         to = direct().get(ev.anchor)
         if to: return self.emit_direct(ev, to)
         why = routine_own(ev)

@@ -85,9 +85,9 @@ def line_for(anchor: str, url: str, etype: Any, body_refs: Any, now: float) -> d
     return {"ts": round(float(now), 3), "repo": repo, "n": n, "refs": [str(r) for r in (body_refs or []) if _REF_OK.fullmatch(str(r))][:MAX_REFS]}
 
 
-def append(line: dict[str, Any]) -> None:
-    """Add one line (one write of a line shorter than a pipe's buffer, so two processes never interleave one)."""
-    p = path()
+def append(line: dict[str, Any], file: Path | None = None) -> None:
+    """Add one line (one write of a line shorter than a pipe's buffer, so two processes never interleave one). `file`: another log of the same shape (event_log.py), default the merge log."""
+    p = file or path()
     p.parent.mkdir(parents=True, exist_ok=True)
     row = (json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8")
     with open(p, "ab+") as f:      # appends always land at the end; the read is only to see the last byte
@@ -125,11 +125,11 @@ def normal(row: dict[str, Any]) -> dict[str, Any]:
     return {"ts": ts, "repo": repo, "n": n, "refs": [str(r) for r in rs if _REF_OK.fullmatch(str(r))][:MAX_REFS] if isinstance(rs, list) else []}
 
 
-def read(offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+def read(offset: int = 0, file: Path | None = None) -> tuple[list[dict[str, Any]], int]:
     """The lines from byte `offset` on, and the offset after the last whole line read. A file that is shorter than `offset` (replaced) is read from its start; a missing one reads as nothing.
-    A line that is not a JSON object, or cannot be parsed, is skipped and the rest are read."""
+    A line that is not a JSON object, or cannot be parsed, is skipped and the rest are read. `file`: another log of the same shape (event_log.py), default the merge log."""
     try:
-        with open(path(), "rb") as f:
+        with open(file or path(), "rb") as f:
             size = f.seek(0, 2)
             if offset > size or offset < 0:
                 offset = 0
