@@ -1,12 +1,26 @@
 """anchorhub.gworkspace — Google Drive and Gmail: push channels (Drive changes.watch, Gmail Pub/Sub) with cursor polling behind them."""
 import json, os, re, glob, hmac, queue, threading, time, uuid
-from .core import Hub, HEALTH, HOOK_URL, WATCHES, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at, read_env, transient
+from .core import Hub, HEALTH, HOOK_URL, WATCHES, _anc, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at, read_env, transient
 
 GDIR = str(_cfg.secrets("anchor-hub", "google"))
 ROUTES = ("/hook/drive", "/hook/gmail")   # the webhooks this receiver registers in run(); anchor-hub answers them 503, not 404, while its start is being retried
 GPOLL = 5   # s; fallback only — used while push for that account is unavailable
 def _gmail_poll() -> int: return int(_cfg.get("anchor_hub", "gmail_poll_seconds") or 300)  # s; a mailbox whose watch Google refuses is polled for good (an account with no Pub/Sub topic
                                                                          # to push to), so not at the fallback's pace
+def mailbox_labels(emails) -> dict:
+    """{label: address} of the mailboxes given by address: a mailbox is named by the label [anchor_hub] gmail_names gives its address
+    ({ work = "ada@example.com" }), else by the address itself. A Gmail anchor scopes itself to mailboxes by these names (gmail:q@work:from:x)."""
+    cfg = _cfg.get("anchor_hub", "gmail_names") or {}
+    given = {str(v).strip().lower(): str(k).strip() for k, v in cfg.items() if _cfg.GMAIL_LABEL.match(str(k).strip()) and str(v).strip()} if isinstance(cfg, dict) else {}
+    return dict(sorted((given.get(e.lower(), e), e) for e in emails))      # by name: the anchors service's status file and the server's text agree on the order
+def query_hits(q_anchors, address: str, hdr: dict, boxes: dict) -> list:
+    """The Gmail query anchors (`gmail:q:` and `gmail:q@…:` ids) that a mail with the headers `hdr`, which arrived in the mailbox at `address`, matches: the mailbox must
+    be one the anchor reads (all of them when it names none), and its terms must match."""
+    out = []
+    for qa in q_anchors:
+        q = _anc.gmail_query(qa)
+        if q is not None and _anc.gmail_reads(qa, address, boxes) and header_match(q[1], hdr): out.append(qa)
+    return out
 # One lock around every Google API call. google-api-python-client sits on httplib2, which is not
 # thread-safe: each account's drive/gmail service shares one connection, and the poll loop, the renewal thread and the
 # label resolvers can use it at the same moment during startup — interleaved TLS records can corrupt the connection and even
@@ -73,7 +87,12 @@ def run(hub: Hub):
             except Exception as e: refused = refused and refusal(e)
         return {"url": "", **({"unreadable": "none of the hub's Google accounts can open it (" + ", ".join(a["email"] for a in accounts) + "); it has to be shared with one of them"} if refused else {})}
     def res_gmail(a_id):
-        if a_id.startswith("gmail:q:"): return {"title": a_id[8:], "url": ""}
+        q = _anc.gmail_query(a_id)
+        if q is not None:      # a query: named by its terms and the mailboxes it reads; a scope naming a mailbox that is gone reads nothing and says so
+            bx = boxes(); labels, bad = _anc.gmail_mailboxes(a_id, bx)
+            if bad and not labels:
+                return {"title": _anc.gmail_title(a_id, bx), "url": "", "unreadable": "no mailbox of that name is read by the anchors service (" + ", ".join(bx) + ")"}
+            return {"title": _anc.gmail_title(a_id, bx), "url": ""}
         tid = a_id[6:]; refused = True
         for a in accounts:
             try:
@@ -85,7 +104,10 @@ def run(hub: Hub):
             except Exception as e: refused = refused and refusal(e)
         return {"url": "", **({"unreadable": "the thread is in none of the mailboxes the hub reads (" + ", ".join(a["email"] for a in accounts if a["gmail"]) + ")"} if refused else {})}
     hub.resolvers["drive"], hub.resolvers["gmail"] = res_drive, res_gmail
-    with hub.lock: hub.status["google"] = {"accounts": [a["email"] for a in accounts], "since": now_iso()}
+    def boxes() -> dict:
+        """{label: address} of the mailboxes whose mail the anchors service reads (GMAIL_ACCOUNTS names them, or all accounts when it is empty)."""
+        return mailbox_labels([a["email"] for a in accounts if a["gmail"] is not None])
+    with hub.lock: hub.status["google"] = {"accounts": [a["email"] for a in accounts], "mailboxes": boxes(), "since": now_iso()}
 
     def parents_of(a, fid, depth=0):
         """all ancestor folder ids of a file (cached), so a folder anchor catches changes anywhere below it"""
@@ -143,7 +165,7 @@ def run(hub: Hub):
                 if mid in seen: continue
                 seen.add(mid)
                 with hub.lock:
-                    q_anchors = [k for k in hub.bindings if k.startswith("gmail:q:")]
+                    q_anchors = [k for k in hub.bindings if _anc.gmail_query(k) is not None]
                     hit_thread = f"gmail:{tid}" in hub.bindings
                 if not hit_thread and not q_anchors: continue
                 try: msg = a["gmail"].users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "To", "Cc"]).execute()
@@ -154,8 +176,7 @@ def run(hub: Hub):
                 summ = {"title": f"\"{hdr.get('subject', '(no subject)')[:60]}\"", "who": hdr.get("from", "?").split("<")[0].strip(' "'),
                         "text": (msg.get("snippet") or "")[:140], "url": url, "ts": msg.get("internalDate")}
                 if hit_thread: hub.event(f"gmail:{tid}", summ, kind="gmail")
-                for qa in q_anchors:
-                    if header_match(qa[8:], hdr): hub.event(qa, summ, kind="gmail")
+                for qa in query_hits(q_anchors, a["email"], hdr, boxes()): hub.event(qa, summ, kind="gmail")
         a["hist"] = r.get("historyId", a["hist"])
 
     watches = {}
