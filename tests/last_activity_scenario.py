@@ -15,6 +15,10 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
      with no newline at its end gets one before the next line; a torn stored record is repaired by the next signal; the words of a signal are one clean line
   7  the hub's events are as they were: a comment's direct notice (the pull request's body naming an item) is byte for byte the notice it had, a merge's too; a comment by an account typed Bot is marked
   8  one save for many lines of an item (the newest wins); a stored time ahead of the clock is ignored; an item closed, held or begun to wait between the tie and the save is not stamped; a bot by its type
+  9  who counts: only a comment or review whose author_association is OWNER, MEMBER or COLLABORATOR, and a CI result from a branch of the repository itself, is activity (each association value; a
+     stranger's comment on an anchored pull request and on an issue the item's words name; a fork's, a deleted fork's and a nameless CI result); a merge is not filtered
+  10 the line's time is the event's own when it can be read and is within the window (a backlog is not now); absent or unreadable falls back to the hub's; outside the window writes no line
+  11 History: a confirm and a last-activity stamp saved in one window still show the `confirm` line (both renderers)
 
     tests/run-suite last_activity       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, io, math
@@ -185,7 +189,8 @@ save_at(now0 + 33 * MIN, 302, lambda d_: d_["metadata"].update(steps=[ASTEP("y",
 check("2 the other clocks are as they were: a save that records nothing leaves progress and activity to their own rules (a step added moves neither the record nor progress)", la(302) is None and rd(302)["progress"] == now0 - 30 * MIN, (la(302), rd(302)["progress"]))
 
 # ================================================================ 3. the event log and the hub
-def lines(anchor, url, etype, who="alice", refs=(), now=10.0): return EL.lines_for(anchor, url, etype, who, list(refs), now)
+ALLK = "comment+review+ci_failed+ci_passed"      # the kinds a source can vouch for: the tests below that are not about the filter vouch for all of them
+def lines(anchor, url, etype, who="alice", refs=(), now=10.0, vouched=ALLK, **kw): return EL.lines_for(anchor, url, etype, who, list(refs), now, vouched=vouched, **kw)
 A_ = "github:acme/widgets#40"
 check("3 kinds_of: a CI result, a comment, a review (a review comment is one), a merge; several joined with + are each once; others (closed, opened, a push, unclassified) are none",
       EL.kinds_of("ci_failed") == ["ci_failed"] and EL.kinds_of("review_comment") == ["review"] and EL.kinds_of("comment+review+review_comment+pr_merged") == ["comment", "review", "merged"]
@@ -209,11 +214,12 @@ check("3 normal: a good line is read as merge_log reads one, with its kind", EL.
 check("3 normal: a line of the wrong shape is refused (no kind, a kind that is none, a bad repository, a number that is no number, no number, a time that is not a number)",
       all(raises(lambda r=r: EL.normal(r)) for r in ({"ts": 1, "repo": "a/b", "n": 3}, {"ts": 1, "repo": "a/b", "n": 3, "kind": "pr_closed"}, {"ts": 1, "repo": "nope", "n": 3, "kind": "comment"},
                                                     {"ts": 1, "repo": "a/b", "n": "x", "kind": "comment"}, {"ts": 1, "repo": "a/b", "n": 0, "kind": "comment"}, {"ts": float("nan"), "repo": "a/b", "n": 1, "kind": "comment"})), None)
+def ISO_NOW(back=0.0): return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - back))      # an event's own time as the source writes it, built at run time (the window is relative to the clock)
 hub_ = HUB.Hub(); hub_.deliver = lambda anchor, session, text: None; hub_.write_status = lambda: None; hub_.persist = lambda: "saved"
 hub_.bindings = {"github:acme/widgets#60": {"home-peer"}}
 EL.path().unlink(missing_ok=True); ML.path().unlink(missing_ok=True)
 def hub_event(etype, who="alice", refs=None, url=f"{W_}/pull/60"):
-    summary = {"title": "widgets#60", "who": who, "text": "did it", "url": url, "ts": "2026-11-12T00:00:00Z", "etype": etype}
+    summary = {"title": "widgets#60", "who": who, "text": "did it", "url": url, "ts": ISO_NOW(), "etype": etype, "vouched": ALLK}
     if refs is not None: summary["meta"] = {"refs": refs}
     hub_.event("github:acme/widgets#60", summary, kind="github-state")
 for et in ("pr_closed", "pr_synchronize", "pr_opened", "ci_activity", ""): hub_event(et)
@@ -244,7 +250,7 @@ def ev_pass(now, **kw):
         else: gh_["issues_letter"] = had
 EL.path().unlink(missing_ok=True); (EL.offset_path()).unlink(missing_ok=True)
 def emit(n, etype, who="alice", at=10 * MIN, refs=(), url=None):
-    EL.note(f"github:acme/widgets#{n}", url or "", etype, who, list(refs), now0 + at)
+    EL.note(f"github:acme/widgets#{n}", url or "", etype, who, list(refs), now0 + at, vouched=ALLK)
 emit(31, "ci_failed", "CI", 10 * MIN); emit(32, "ci_passed", "CI", 11 * MIN); emit(33, "comment", "alice", 12 * MIN); emit(34, "review_comment", "bob", 13 * MIN); emit(35, "pr_merged", "alice", 14 * MIN)
 emit(36, "comment", "alice", 15 * MIN)                                   # a project-wide anchor: names no item
 emit(37, "pr_merged", "alice", 15 * MIN, [shown(401)])                    # the merged pull request's body names the item (a401), no anchor does
@@ -383,7 +389,7 @@ for i in (440, 441): put(i)
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
 hub_.bindings["github:acme/widgets#81"] = {"home-peer"}; hub_.bindings["github:acme/widgets#80"] = {"home-peer"}
 def hub_on(n, etype, who="mallory", refs=None):
-    summary = {"title": f"widgets#{n}", "who": who, "text": "did it", "url": f"{W_}/pull/{n}", "ts": "2026-11-12T00:00:00Z", "etype": etype}
+    summary = {"title": f"widgets#{n}", "who": who, "text": "did it", "url": f"{W_}/pull/{n}", "ts": ISO_NOW(), "etype": etype, "vouched": ALLK}
     if refs is not None: summary["meta"] = {"refs": refs}
     hub_.event(f"github:acme/widgets#{n}", summary, kind="github-state")
 CLK.t = None
@@ -393,7 +399,7 @@ check("6 a comment, a review and a CI result on a pull request whose body names 
 def ev_pass_now(): return ev_pass(time.time() + 5)
 saved = ev_pass_now()
 check("6 …and the pass stamps nothing for them: a body naming an item is not a tie for a comment, a review or a CI result (anyone can open such a pull request)", saved == [] and la(440) is None and la(441) is None, (saved, la(440)))
-hub_on(80, "comment", refs=[BID(441)]); EL.note("github:acme/widgets#80", "", "review", "bob", [], time.time() + 3)
+hub_on(80, "comment", refs=[BID(441)]); EL.note("github:acme/widgets#80", "", "review", "bob", [], time.time() + 3, vouched=ALLK)
 saved = ev_pass_now()
 check("6 …with an anchor scoped to the item the same events stamp it", saved == ["a441"] and la(441)["what"] == "review on PR 80" and lk(441) == "review" and la(440) is None, (saved, la(441)))
 hub_on(81, "pr_merged", "alice", refs=[BID(440)])
@@ -418,7 +424,7 @@ size_before = EL.path().stat().st_size
 with open(EL.path(), "ab") as f_: f_.write(row2)      # a whole line whose newline is not there yet
 saved = ev_pass(t0_ + 62)
 check("6b a line that is whole but has no newline yet is not read either", saved == [] and la(451) is None and EL.load_offset() == size_before, (saved, EL.load_offset(), size_before))
-EL.note("github:acme/widgets#92", "", "ci_failed", "CI", [], t0_ + 10)      # the next line is appended to a file that does not end with a newline
+EL.note("github:acme/widgets#92", "", "ci_failed", "CI", [], t0_ + 10, vouched=ALLK)      # the next line is appended to a file that does not end with a newline
 check("6b …the next line starts on a line of its own (the file got its newline first), so both rows read apart", EL.path().read_bytes().count(b"\n") == 3 and b"}{" not in EL.path().read_bytes(), EL.path().read_bytes()[-200:])
 saved = ev_pass(t0_ + 63)
 check("6b …and both are applied at the next pass", sorted(saved) == ["a451", "a452"] and la(451) == {"at": t0_ + 5, "what": "comment on #91"} and la(452)["what"] == "CI failed on PR 92", (saved, la(451), la(452)))
@@ -434,7 +440,7 @@ with _Err() as e_:
 check("6c a save with a torn stored record logs nothing and repairs it", la(460) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and "not recorded" not in e_.text and "clock not stamped" not in e_.text, (la(460), e_.text[:200]))
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/95", "items": ["a461"]}]}))
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
-EL.note("github:acme/widgets#95", "", "comment", "alice", [], now0 + 6 * MIN)
+EL.note("github:acme/widgets#95", "", "comment", "alice", [], now0 + 6 * MIN, vouched=ALLK)
 with _Err() as e_: saved = ev_pass(now0 + 7 * MIN)
 check("6c …and so does the event pass: the record is whole after it, and the item is saved once", saved == ["a461"] and la(461) == {"at": now0 + 6 * MIN, "what": "comment on #95"} and "not saved" not in e_.text, (saved, la(461), e_.text[:200]))
 import unicodedata
@@ -546,13 +552,195 @@ for n_, i_, fn_, what_ in ((102, 472, close_it, "closed"), (103, 473, hold_it, "
     check(f"8 an item {what_} between the tie and the save is not stamped", saved == [] and "last_activity" not in after_["metadata"], (saved, after_["metadata"].get("last_activity")))
 # a bot by its type: the payload says Bot, the login has no suffix
 check("8 lines_for: a comment or review whose payload types the author as a bot is left out whatever the login; CI and a merge are kept",
-      EL.lines_for(A_, "", "comment", "helper", [], 10.0, True) == [] and EL.lines_for(A_, "", "review", "helper", [], 10.0, True) == [] and len(EL.lines_for(A_, "", "comment", "helper", [], 10.0, False)) == 1
-      and len(EL.lines_for(A_, "", "ci_failed", "helper", [], 10.0, True)) == 1 and len(EL.lines_for(A_, "", "pr_merged", "helper", [], 10.0, True)) == 1, None)
+      EL.lines_for(A_, "", "comment", "helper", [], 10.0, True, vouched=ALLK) == [] and EL.lines_for(A_, "", "review", "helper", [], 10.0, True, vouched=ALLK) == [] and len(EL.lines_for(A_, "", "comment", "helper", [], 10.0, False, vouched=ALLK)) == 1
+      and len(EL.lines_for(A_, "", "ci_failed", "helper", [], 10.0, True, vouched=ALLK)) == 1 and len(EL.lines_for(A_, "", "pr_merged", "helper", [], 10.0, True)) == 1, None)
 EL.path().unlink(missing_ok=True)
-hub_.event("github:acme/widgets#60", {"title": "widgets#60", "who": "helper", "text": "did it", "url": f"{W_}/pull/60", "ts": "2026-11-12T00:00:00Z", "etype": "comment", "bot": True}, kind="github-state")
+hub_.event("github:acme/widgets#60", {"title": "widgets#60", "who": "helper", "text": "did it", "url": f"{W_}/pull/60", "ts": ISO_NOW(), "etype": "comment", "bot": True, "vouched": ALLK}, kind="github-state")
 check("8 the hub: an event the source marks as a bot's writes no line, the same without the mark writes one", EL.read(0)[0] == [], EL.read(0)[0])
-hub_.event("github:acme/widgets#60", {"title": "widgets#60", "who": "helper", "text": "did it", "url": f"{W_}/pull/60", "ts": "2026-11-12T00:00:00Z", "etype": "comment"}, kind="github-state")
+hub_.event("github:acme/widgets#60", {"title": "widgets#60", "who": "helper", "text": "did it", "url": f"{W_}/pull/60", "ts": ISO_NOW(), "etype": "comment", "vouched": ALLK}, kind="github-state")
 check("8 …and without the mark it writes one", len(EL.read(0)[0]) == 1, EL.read(0)[0])
+
+# ================================================================ 9. who counts: only the repository's own side is activity; a CI result counts from a branch of the repository itself
+class GH:
+    """The GitHub receiver on a fake `gh`: `ghd` maps an API path to its answer (a "404" string is a refusal); the receiver's events are kept in `evs` instead of being routed."""
+    def __init__(self, ghd, anchors):
+        self.ghd, self.caught, self.evs = ghd, [], []
+        self.hub = HUB.Hub(); self.hub.write_status = lambda: None; self.hub.emit = self.evs.append; self.hub.bindings = {a: {"home-peer"} for a in anchors}
+    def __enter__(self):
+        self.old = (ghr.subprocess, ghr.threading, ghr.time)
+        def fake(args, capture_output=True, text=True, timeout=30):
+            a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args
+            ans = self.ghd.get(path, [])
+            if ans == "404": return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
+            body = json.dumps(ans); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
+        ghr.subprocess = types.SimpleNamespace(run=fake, TimeoutExpired=subprocess.TimeoutExpired)
+        ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: self.caught.append(target)))
+        ghr.time = types.SimpleNamespace(time=time.time, sleep=_no_sleep)
+        ghr.run(self.hub); return self
+    def one(self):
+        del self.evs[:]
+        try: self.caught[0]()
+        except _Stop: pass
+        return list(self.evs)
+    def __exit__(self, *a): ghr.subprocess, ghr.threading, ghr.time = self.old
+tb_ = time.time() - 2 * H
+def iso9(dt): return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(tb_ + dt))      # a source's time, a little before now, built at run time
+def pr9(n, head="acme/widgets", base="acme/widgets", sha=None, **kw):
+    sha = sha or f"{n:02d}" * 20
+    pull = {"head": {"sha": sha, "ref": "x/y", "repo": ({"full_name": head} if head else None)}, "user": {"login": "someone"}, "base": {"repo": {"id": 7, **({"full_name": base} if base else {})}}}
+    return {f"/repos/acme/widgets/pulls/{n}": pull, f"/repos/acme/widgets/issues/{n}": {"state": "open", "comments": 0, "updated_at": iso9(0), "title": "a thing", "html_url": f"{W_}/pull/{n}", "body": "", "pull_request": {"merged_at": None}, **kw},
+            f"/repos/acme/widgets/commits/{sha}/check-runs?per_page=100": {"check_runs": [{"name": "suites", "status": "completed", "conclusion": "success"}]}}
+ASSOC = (("OWNER", True), ("MEMBER", True), ("COLLABORATOR", True), ("CONTRIBUTOR", False), ("NONE", False), ("FIRST_TIMER", False), ("FIRST_TIME_CONTRIBUTOR", False), ("MANNEQUIN", False), ("SOMETHING_NEW", False), ("member", False), (None, False))
+
+# the rule itself, in the one place the lines are made
+check("9 trusted_association: OWNER, MEMBER and COLLABORATOR only; every other value, a missing one and a value of another type are a stranger's",
+      [EL.trusted_association(a) for a, _ in ASSOC] == [ok for _, ok in ASSOC] and not EL.trusted_association(5) and not EL.trusted_association(["OWNER"]) and not EL.trusted_association({"OWNER"}), None)
+check("9 lines_for: a comment, a review and a CI result are lines only when the source vouched for that kind; nothing vouched writes none of them, a merge is not filtered",
+      lines(A_, "", "comment+review+ci_failed+pr_merged", vouched="") and [r["kind"] for r in lines(A_, "", "comment+review+ci_failed+pr_merged", vouched="")] == ["merged"]
+      and [r["kind"] for r in lines(A_, "", "comment+review+ci_passed", vouched="comment")] == ["comment"] and [r["kind"] for r in lines(A_, "", "comment+review", vouched="review+ci_failed")] == ["review"]
+      and [r["kind"] for r in lines(A_, "", "ci_failed", vouched=["ci_failed"])] == ["ci_failed"] and lines(A_, "", "ci_failed", vouched=None) == [] and lines(A_, "", "comment", vouched=5) == [], None)
+check("9 lines_for: a bot's comment stays out even when vouched", lines(A_, "", "comment", "helper", vouched="comment", ) != [] and lines(A_, "", "comment", "helper[bot]", vouched="comment") == [], None)
+
+# the receiver: what it vouches for, by the payload alone (no read of its own)
+AN9 = "github:acme/widgets#26"
+g9 = {"/user": {"login": "hubaccount"}, **pr9(26)}
+with GH(g9, [AN9]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()      # seeds
+    got9 = []
+    for i, (assoc, ok) in enumerate(ASSOC):
+        prev, new = iso9(i * 60), iso9((i + 1) * 60)
+        g9[f"{RP}/issues/26"] = pr9(26)[f"{RP}/issues/26"] | {"comments": i + 1, "updated_at": new}
+        g9[f"{RP}/issues/26/comments?since={prev}&per_page=20"] = [{"user": {"login": f"u{i}", "type": "User"}, "body": "hello", "html_url": f"{W_}/pull/26#issuecomment-{i}", "created_at": iso9(i * 60 + 30), **({"author_association": assoc} if assoc is not None else {})}]
+        e9 = [e for e in G.one() if e.etype == "comment"]
+        got9.append(e9[0] if e9 else None)
+check("9 the receiver vouches for a comment on an anchored pull request exactly for OWNER, MEMBER and COLLABORATOR (each value, a missing one and a lower-case one tried)",
+      all(e is not None for e in got9) and [e.vouched for e in got9] == ["comment" if ok else "" for _, ok in ASSOC], [e and e.vouched for e in got9])
+check("9 …and the notice text is untouched by it (the same one-line notice, no ids in the meta)", all(HUB.direct_notice(e) == HUB.notice(e) and not e.meta for e in got9), None)
+
+# A: a stranger comments on a pull request whose anchor is scoped to an item; B: the item's own words name an issue of a repository the project anchors
+put(480); put(481); d_ = rd(481); d_["description"] = "- Waiting for the reply on #81\n- Done when it replies"; wr(481, d_)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/26", "items": ["a480"]}, {"url": f"{W_}/pull/27"}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.bindings[AN9] = {"home-peer"}; hub_.bindings["github:acme/widgets#81"] = {"home-peer"}
+strangers = [e for e, (a, ok) in zip(got9, ASSOC) if not ok]; members = [e for e, (a, ok) in zip(got9, ASSOC) if ok]
+for e in strangers: hub_.emit(e)
+b9 = HUB.Event(anchor="github:acme/widgets#81", kind="github", title="widgets#81", who="mallory", text="please look", url=f"{W_}/issues/81#issuecomment-9", ts=iso9(100), etype="comment", vouched="")
+hub_.emit(b9)
+check("9 A+B: a stranger's comment on the anchored pull request and on the issue the item's words name write no line", EL.read(0)[0] == [], EL.read(0)[0])
+saved = ev_pass_now()
+check("9 …so the pass stamps neither item (a480 anchored to the pull request, a481 naming #81)", saved == [] and la(480) is None and la(481) is None, (saved, la(480), la(481)))
+hub_.emit(members[0])
+rows9, _ = EL.read(0)
+saved = ev_pass_now()
+check("9 A: a member's comment on the same pull request still stamps the anchored item, at the comment's own time", saved == ["a480"] and la(480)["what"] == "comment on #26" and lk(480) == "comment" and la(481) is None
+      and abs(la(480)["at"] - (tb_ + 30)) < 2 and len(rows9) == 1, (saved, la(480), rows9))
+hub_.emit(HUB.Event(anchor="github:acme/widgets#81", kind="github", title="widgets#81", who="maintainer", text="done", url=f"{W_}/issues/81#issuecomment-10", ts=iso9(200), etype="comment", vouched="comment"))
+saved = ev_pass_now()
+check("9 B: a collaborator's comment on the issue the item's words name stamps that item", saved == ["a481"] and la(481)["what"] == "comment on #81" and lk(481) == "comment", (saved, la(481)))
+
+# a review and a review comment from a thread of the repository's notifications: vouched by the association of the reviewers
+NA9 = "github:acme/widgets@notifications"; NP9 = f"{RP}/notifications?all=true&per_page=50"
+def thread9(updated, k=0, n=5): return {"id": "t9", "updated_at": updated, "reason": "comment", "subject": {"type": "PullRequest", "url": f"https://api.github.com{RP}/pulls/{n}", "title": f"a pull request {k}"}, "repository": {"id": 7}}      # a title of its own each round: one thread update is one notice
+n9 = {"/user": {"login": "hubaccount"}, NP9: [thread9(iso9(0))], f"{RP}/issues/5": {"state": "open", "comments": 1, "updated_at": iso9(0), "title": "t", "html_url": f"{W_}/pull/5", "body": "", "pull_request": {"merged_at": None}}}
+with GH(n9, [NA9]) as G:
+    G.one()
+    since9 = iso9(0)
+    def thread_case(cassoc, rassoc, rcassoc, k):
+        global since9
+        n9[NP9] = [thread9(iso9(k * 100 + 50), k)]
+        n9[f"{RP}/issues/5/comments?since={since9}&per_page=50"] = [{"user": {"login": "kim", "type": "User"}, "body": "x", "html_url": f"{W_}/pull/5#issuecomment-1", "created_at": iso9(k * 100 + 10), "author_association": cassoc}]
+        n9[f"{RP}/pulls/5/reviews?per_page=100"] = [{"user": {"login": "lee", "type": "User"}, "state": "APPROVED", "html_url": f"{W_}/pull/5#pullrequestreview-3", "submitted_at": iso9(k * 100 + 20), "author_association": rassoc}]
+        n9[f"{RP}/pulls/5/comments?since={since9}&per_page=50"] = [{"user": {"login": "lee", "type": "User"}, "body": "y", "html_url": f"{W_}/pull/5#discussion_r4", "created_at": iso9(k * 100 + 30), "author_association": rcassoc}]
+        out = G.one(); since9 = iso9(k * 100 + 50)
+        return [e for e in out if e.anchor == NA9]
+    th1 = thread_case("NONE", "MEMBER", "NONE", 1)
+    th2 = thread_case("COLLABORATOR", "FIRST_TIMER", "CONTRIBUTOR", 2)
+    th3 = thread_case("NONE", "NONE", "OWNER", 3)
+    th4 = thread_case("CONTRIBUTOR", "NONE", "NONE", 4)
+check("9 a thread of the notifications vouches per kind: a member's review (review), a collaborator's comment (comment), an owner's review comment (review), strangers alone nothing",
+      [e.vouched for e in th1 + th2 + th3 + th4] == ["review", "comment", "review", ""] and all(e.etype == "comment+review+review_comment" for e in th1 + th2 + th3 + th4), [(e.etype, e.vouched) for e in th1 + th2 + th3 + th4])
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.bindings[NA9] = {"home-peer"}
+for e in th1 + th2 + th3 + th4: hub_.emit(e)
+kinds9 = [r["kind"] for r in EL.read(0)[0]]
+check("9 …and the event log keeps exactly those kinds (4 events of three kinds each: 3 vouched kinds in all)", kinds9 == ["review", "comment", "review"], kinds9)
+
+# CI: from a branch of the repository itself; a fork's, a deleted fork's and a payload that does not say are not
+anchors9 = {n: f"github:acme/widgets#{n}" for n in (30, 31, 32, 33)}
+g30 = {"/user": {"login": "hubaccount"}, **pr9(30), **pr9(31, head="mallory/widgets"), **pr9(32, head=None), **pr9(33, head=None, base=None)}
+g30[f"{RP}/pulls/33"] = {"head": {"sha": "33" * 20, "ref": "x/y"}, "user": {"login": "someone"}, "base": {"repo": {"id": 7}}}      # a pull request read that names no repositories at all
+with GH(g30, list(anchors9.values())) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()      # seeds the passing state
+    for n in anchors9:
+        g30[f"{RP}/commits/{str(n) * 20}/check-runs?per_page=100"] = {"check_runs": [{"name": "suites", "status": "completed", "conclusion": "failure"}]}
+    ci9 = {e.anchor: e for e in G.one() if e.etype == "ci_failed"}
+check("9 the receiver vouches for a CI result only when the head repository is the base repository: the repository's own branch yes; a fork, a deleted fork and a payload that names none no",
+      sorted(ci9) == sorted(anchors9.values()) and [ci9[anchors9[n]].vouched for n in anchors9] == ["ci_failed", "", "", ""], {a: e.vouched for a, e in ci9.items()})
+put(482); put(483)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/30", "items": ["a482"]}, {"url": f"{W_}/pull/31", "items": ["a483"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+for a_, e in ci9.items(): hub_.bindings[a_] = {"home-peer"}; hub_.emit(e)
+saved = ev_pass_now()
+check("9 CI: a failure on the repository's own branch stamps the item anchored to it; the same on a fork's pull request stamps nothing", saved == ["a482"] and la(482)["what"] == "CI failed on PR 30" and lk(482) == "ci_result" and la(483) is None, (saved, la(482), la(483)))
+
+# ================================================================ 10. the line's time is the event's own when sane (a backlog after downtime is not now)
+now10 = 1_800_000_000.0
+iso_at = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+check("10 event_time: own time kept", EL.event_time(iso_at(now10 - 10 * H), now10) == now10 - 10 * H and EL.event_time(now10 - 5 * H, now10) == now10 - 5 * H and EL.event_time(iso_at(now10 - 3 * H).replace("Z", "+00:00"), now10) == now10 - 3 * H, EL.event_time(iso_at(now10 - 10 * H), now10))
+check("10 event_time: absent, empty, unreadable, boolean, infinite and negative times fall back to the hub's own",
+      all(EL.event_time(t, now10) == now10 for t in (None, "", "not a time", "2026-13-45T99:99:99Z", True, float("inf"), float("nan"), -5, 0, "x" * 500, [], {})), [EL.event_time(t, now10) for t in (None, "", "bad", True, float("inf"))])
+check("10 event_time: older than a day, or more than an hour ahead, is dropped (None): the rule the pass has always applied to a line; just inside both is kept",
+      EL.event_time(iso_at(now10 - 25 * H), now10) is None and EL.event_time(iso_at(now10 + 2 * H), now10) is None and EL.event_time(iso_at(now10 - 23 * H), now10) == now10 - 23 * H and EL.event_time(iso_at(now10 + 0.5 * H), now10) == now10 + 0.5 * H, None)
+check("10 a naive time is read in the instance's timezone, as the hub writes its own",
+      abs(EL.event_time(__import__("datetime").datetime.fromtimestamp(now10 - 2 * H, server._cfg.tz()).strftime("%Y-%m-%d %H:%M:%S"), now10) - (now10 - 2 * H)) < 1, None)
+check("10 lines_for: the line carries the event's own time; an event outside the window writes none, one with no time the hub's",
+      lines(A_, "", "comment", now=now10, ts=iso_at(now10 - 10 * H))[0]["ts"] == now10 - 10 * H and lines(A_, "", "comment", now=now10, ts=iso_at(now10 - 30 * H)) == [] and lines(A_, "", "comment", now=now10, ts=iso_at(now10 + 3 * H)) == []
+      and lines(A_, "", "comment", now=now10)[0]["ts"] == now10 and lines(A_, "", "pr_merged", now=now10, ts=iso_at(now10 - 2 * H))[0]["ts"] == now10 - 2 * H, None)
+# end to end: a backlog the hub reads after downtime
+put(490); put(491); put(492)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/{n}", "items": [f"a{i}"]} for n, i in ((110, 490), (111, 491), (112, 492))]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+for n in (110, 111, 112): hub_.bindings[f"github:acme/widgets#{n}"] = {"home-peer"}
+def hub_ts(n, ts, vouched="comment"):
+    e = HUB.Event(anchor=f"github:acme/widgets#{n}", kind="github", title=f"widgets#{n}", who="maintainer", text="x", url=f"{W_}/pull/{n}", etype="comment", vouched=vouched)
+    if ts is not _NOTS: e.ts = ts
+    hub_.emit(e)
+_NOTS = object()
+t_h = time.time()
+hub_ts(110, iso_at(t_h - 10 * H)); hub_ts(111, _NOTS); hub_ts(112, iso_at(t_h + 3 * H))
+rows10, _ = EL.read(0)
+check("10 the hub: a comment from ten hours ago keeps its own time, one without a time gets the hub's, one dated three hours ahead writes no line (a torn clock, as the pass reads it)",
+      [r["n"] for r in rows10] == [110, 111] and abs(rows10[0]["ts"] - (t_h - 10 * H)) < 2 and abs(rows10[1]["ts"] - t_h) < 5, rows10)
+saved = ev_pass(t_h + 60)
+check("10 the pass: the old comment stamps its own time, not the pass's; the absent time stamps now", sorted(saved) == ["a490", "a491"] and abs(la(490)["at"] - (t_h - 10 * H)) < 2 and abs(la(491)["at"] - t_h) < 5 and la(492) is None, (saved, la(490), la(491)))
+hub_ts(110, iso_at(t_h - 30 * H))
+check("10 …and a comment from thirty hours ago writes no line", len(EL.read(0)[0]) == 2, EL.read(0)[0])
+
+# ================================================================ 11. a confirm and a last-activity stamp in one publish window keep the confirmed line in the History
+from stackshot.web import render as root_render
+from stackshot.web.ui import render as ui_render
+STORE_DIR = str(T / "store")
+gitc = lambda *a: subprocess.run(["git", "-C", STORE_DIR, "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], check=True, capture_output=True)
+def events11(bd, gid): return [k for _t, k, _h in bd.item_events(next(r for r in bd.rows if r["gid"] == gid))[0]]
+def distinct11(i):      # the log follows a file across a rename by similarity, and the fixture items are near copies: give each a body of its own
+    d = rd(i); d["description"] = "\n".join(f"- line {n} of item {i}: " + "x%d" % ((n * 7919 + i * 104729) % 100003) * 3 for n in range(12)); d["subject"] = f"[home] history item {i} " + "y%d" % (i * 31337); wr(i, d)
+put(500, needs=["home-peer"]); distinct11(500); put(501, needs=["home-peer"]); distinct11(501)
+d_ = rd(500); d_["metadata"].pop("phase", None); d_["metadata"].pop("waits_on", None); wr(500, d_)
+gitc("init", "-q"); gitc("add", "a/500.json", "a/501.json"); gitc("commit", "-q", "-m", "fixture")
+d_ = rd(500); d_["confirmed"] = now0 - 5 * 86400; d_["metadata"]["last_activity"] = {"at": now0 - 6 * 86400, "kind": "comment", "what": "comment on #26"}; wr(500, d_)      # one window: the confirm and the event pass's stamp
+d_ = rd(501); d_["confirmed"] = now0 - 5 * 86400; wr(501, d_)                                                                                                         # the confirm alone
+for label, mod_ in (("ui/render.py", ui_render), ("render.py", root_render)):
+    bd = mod_.Board(STORE_DIR)
+    k500, k501 = events11(bd, "a500"), events11(bd, "a501")
+    check(f"11 {label}: a confirm and a last-activity stamp saved in one window still show the `confirm` line, as a confirm alone does", "confirm" in k500 and "confirm" in k501, (k500, k501))
+gitc("add", "a/500.json", "a/501.json"); gitc("commit", "-q", "-m", "confirmed")
+d_ = rd(500); d_["metadata"]["last_activity"] = {"at": now0 - 4 * 86400, "kind": "review", "what": "review on PR 26"}; wr(500, d_)      # a stamp alone, later
+for label, mod_ in (("ui/render.py", ui_render), ("render.py", root_render)):
+    bd = mod_.Board(STORE_DIR)
+    k500 = events11(bd, "a500")
+    check(f"11 {label}: …and a stamp alone adds no line (the record shows nothing)", k500.count("confirm") == 1 and len(k500) == len(events11(bd, "a501")) , k500)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

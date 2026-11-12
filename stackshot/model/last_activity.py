@@ -1,4 +1,4 @@
-"""last_activity.py: the item's one "last activity" record, `metadata.last_activity = {"at": epoch seconds, "what": "short words"}`.
+"""last_activity.py: the item's one "last activity" record, `metadata.last_activity = {"at": epoch seconds, "kind": what sort of activity (KINDS), "what": "short words"}`.
 
 The pure half: no server import, no clock read, no file. Part A of the rule that no item an agent moves goes more than an hour without visible activity: this records the
 last visible activity and nothing reads it yet (no flag, no notice, no board text); a later part reads it.

@@ -16158,8 +16158,8 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
 # ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and
 # shows nothing. A commit or push is not here: the hub emits none.
-_EVENT_ACT_FLOOR_H = 24.0       # an event older than this is not read (a day of downtime, or a shorter file read again from its start): the record would only fill with old news
-_EVENT_ACT_AHEAD_S = 3600.0     # …nor one stamped more than this ahead of the server's clock (the hub writes the time itself, on this machine: a skew of minutes is allowed and read as now)
+_EVENT_ACT_FLOOR_H = _elog.FLOOR_H       # an event older than this is not read (a day of downtime, or a shorter file read again from its start): the record would only fill with old news (the hub applies the same window to the event's own time when it writes the line)
+_EVENT_ACT_AHEAD_S = _elog.AHEAD_S       # …nor one stamped more than this ahead of the server's clock (a skew of minutes is allowed and read as now)
 
 
 def _event_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
