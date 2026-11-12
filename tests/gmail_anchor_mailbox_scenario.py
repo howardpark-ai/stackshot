@@ -424,8 +424,9 @@ got, calls, cur, more = run_paged(2, 3)
 check("paging cap: a history that ends on the last page the cap allows leaves no second poll", len(calls) == 2 and got == [f"m{i}" for i in range(1, 7)] and cur == "99" and not more, (calls, got, cur, more))
 
 # ---- the reader tells an expired history from any other failure by the status, never by the text
-def run_fake(make, bindings, total=None, **consts):
+def run_fake(make, bindings, total=None, saved=None, **consts):
     """One mailbox (ADA) served by the fake `make()` returns, polled until the fake calls its stop(); `consts` are gworkspace constants set for the run.
+    `saved` is what a service that ran before left for this mailbox (its read position as hub.saved holds it); None: a first start.
     → (the (anchor, text) heard, the fake, the saved read position, whether a further poll is queued)."""
     env0 = pathlib.Path(core.ENVF).read_text(); acct0 = accts[ADA]; old = {k: getattr(gw, k) for k in ("HEALTH", *consts)}
     try:
@@ -433,6 +434,7 @@ def run_fake(make, bindings, total=None, **consts):
         pg = accts[ADA] = make(); gw.HEALTH = 10 ** 12
         for k, v in consts.items(): setattr(gw, k, v)
         hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {k: {"sess"} for k in bindings}
+        if saved is not None: hp.saved = {"google": {ADA: saved}}
         got = []; pg.stop = hp.stopping.set
         def heard_(anchor, summ, kind="slack"):
             got.append((anchor, summ["text"]))
@@ -531,6 +533,18 @@ check("page cap: a last record with no id keeps the old cursor (no KeyError), an
 got, pg, sv, more = run_fake(lambda: Many(ADA, 12, size=1), [UN], total=12)
 check("pages: with the module's own bound (not set here) a poll reads ten pages of history and the next poll goes on from the last record read",
       pg.starts == ["0", "10"] and pg.lists == 12 and sorted(t for _a, t in got) == sorted(ids(12)) and len(got) == 12 and not more, (pg.starts, pg.lists, len(got), more))
+
+# ---- a restart resumes from the saved read position (mail that arrives while the service is stopped is still delivered)
+class Live(Many):
+    """A Many whose getProfile answers the mailbox's current position (its last history id), as Gmail's does: a start that resets the cursor to `now` skips what the mailbox gained meanwhile."""
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": return {"historyId": str(self.n)}
+        return super().handle(key, kw)
+got1, pg1, sv1, _m = run_fake(lambda: Live(ADA, 3, stop_lists=1), [UN])
+check("restart: a first start (nothing saved) begins at now: the three mails there already are not delivered, and the position is saved", got1 == [] and sv1["hist"] == "3", (got1, sv1))
+got2, pg2, sv2, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved=sv1)
+check("restart: mail that arrived while the service was stopped is delivered after the restart, once (the saved position is kept, not reset to now)",
+      sorted(t for _a, t in got2) == ["m4-0", "m5-0"] and len(got2) == 2 and sv2["hist"] == "5" and pg2.starts == ["3"], (got2, sv2, pg2.starts))
 
 # ---- the tool text teaches the syntax
 desc = server._ANCHORS_DESC
