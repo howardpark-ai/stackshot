@@ -657,7 +657,7 @@ def _close_description_repair(apply: bool = False, days: float = 14.0, now: floa
                     meta = it.setdefault("metadata", {})
                     meta["outcome_text"] = row["before"].strip()
                     it["description"] = row["after"]
-                    _writes.save(gid, it, background=True, ctx=_writes.QUIET)      # a body sync behind the live writes: nobody waits on a repair # a repair writes the description and the outcome text and nothing else: no mover is settled, no hand-off record ended
+                    _writes.save(gid, it, background=True, ctx=_writes.QUIET)      # a body sync behind the live writes: nobody waits on a repair; it writes the description and the outcome text and nothing else: no mover is settled, no hand-off record ended
                 except Exception as e:  # noqa: BLE001  — one item never stops the repair
                     print(f"close-repair: {gid} not repaired: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
                     skipped["failed"] = skipped.get("failed", 0) + 1
