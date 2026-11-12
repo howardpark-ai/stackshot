@@ -13,12 +13,20 @@ import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threadin
 import _scratch
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 fails = []; ran = []; dirs = []
+# The environment release.sh and its stubs run in: this process's, without the coverage variables of a measured run (suitemap.py measure sets COVERAGE_PROCESS_START).
+# release.sh is a shell script whose stubs (gh, git, salamander, config ...) are many short Python and shell starts outside the checkout, which coverage does not measure
+# (include = the checkout); but every Python start would still load coverage and write a data file, so a measured run took three times a plain one and set main's wall time.
+# This process itself stays measured (the variables are only left out of what it starts); strace follows the children all the same, so the files release.sh touches are still recorded.
+def without_coverage(env): return {k: v for k, v in env.items() if not k.startswith("COVERAGE_")}
+def _env0(): return without_coverage(os.environ)   # a function so a check can take it again with the variables set (a plain run has none at import)
+ENV0 = _env0()
 NOTLIVE = "ba5e0000000000000000000000000000000000ba"   # RT_LIVE for an old-path release that fails on main: a checkout at a commit older than the merge (the git stub says "in it" for HEAD when RT_LIVE is unset)
 def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:800]}" if got is not None else ""))
 
 GH_SH = r'''#!/bin/bash
+[ -z "${RT_ENVDUMP:-}" ] || env > "$RT_ENVDUMP"   # a check reads the environment this stub was started in
 # the waits ask `pr checks` once a cycle: answered here, in shell, so a measured run (coverage and strace -f in every Python start) does not pay a Python process for it; everything else goes to gh.py
 if [ "${1:-} ${2:-}" = "pr checks" ]; then
     echo "$*" >> "$RT_DIR/gh.log"
@@ -413,7 +421,7 @@ def scenario(name, args=(), front=False, hold=None, extra=None, grab=False, secs
     for p, body, x in ((box / "stackshot/core/config.py", CONFIG, False), (box / "stackshot/fleet/client.py", CLIENT, False), (box / "deploy.sh", DEPLOY, True),
                        (d / "bin/gh", GH_SH, True), (d / "bin/gh.py", GH, False), (d / "bin/git", GIT, True), (d / "bin/sleep", SLEEP, True), (d / "bin/sala", SALA, True), (d / "bin/notify", NOTIFY, True), (d / "bin/date", DATE, True), *(() if nosal else ((d / "bin/salamander", SALAMANDER_SH, True), (d / "bin/salamander.py", SALAMANDER, False)))):
         p.write_text(body); x and p.chmod(0o755)
-    e = {**os.environ, "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks
+    e = {**ENV0, "PATH": f"{d}/bin:" + (CLEAN_PATH if nosal else os.environ.get("PATH", "")), "RT_DIR": str(d), "XDG_CONFIG_HOME": str(d / "xdg"), "RELEASE_POLL_MAIN": "20", "RELEASE_POLL_PR": "20", "RELEASE_GH_TTL": "0", **{f"RT_{k.upper()}": v for k, v in env.items()}, **(extra or {})}   # the suite's waits are the 20 s ones it was written for, and no read is reused unless a scenario asks
     held = None; timer = None
     if hold is not None:
         (d / "releases").mkdir(exist_ok=True); held = open(d / "releases/deploy.lock", "w"); fcntl.flock(held, fcntl.LOCK_EX)
@@ -493,7 +501,8 @@ HEADSHA = "abc1234def5678abc1234def5678abc1234def56"
 def plain_merges(s): return [l for l in s["gh"].splitlines() if l.startswith("pr merge")]   # the plain merge call (the ruleset off)
 def enqueues(s): return s["enqueue_args"]   # the enqueuePullRequest mutations, "id=<node id> h=<the head it is pinned to>" each
 def merges(s): return [*plain_merges(s), *enqueues(s)]   # any call that merges or enqueues
-genv = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull}
+def _genv(): return {**ENV0, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull}
+genv = _genv()
 def g(*a, cwd=None): return subprocess.run(["git", *a], cwd=cwd, env=genv, capture_output=True, text=True, check=True).stdout.strip()
 BASE = "ba5e0000000000000000000000000000000000ba"; MERGE = "0106c0de0106c0de0106c0de0106c0de0106c0de"; GOOD = "600d0000000000000000000000000000000000d1"
 NEWER = "0107c0de0107c0de0107c0de0107c0de0107c0de"; LATER = "5ec00000000000000000000000000000000000c2"
