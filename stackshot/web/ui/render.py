@@ -5,7 +5,7 @@ import contextlib
 import io
 import json, os, sys, glob, datetime, re, subprocess, hashlib, textwrap, html as H
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from stackshot.web.ui import PREFIX, under   # the (empty) root prefix: every address this page writes goes through under()
 from stackshot.web.ui import kit as _ui   # the one item system: the state words and tags, the one row every list draws, the type scale
 from stackshot.web.ui import groups as _grp   # rows in one foldable subsection per scope: home's four lists and the Closed page (groups.py)
@@ -3942,6 +3942,64 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
                 + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
                 f'<h1>{_t("projects.title")}</h1><p class="pjnote">{_t("projects.note")}</p><section id="by-project">{self.projects_table()}</section></main>'
                 + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + f'<script>{_HOME_FOLD_JS}</script></body></html>')
+
+    # TEMPORARY PROBE (the installed-app session link test) (remove, or promote into sess_html, in the follow-up PR): GET /probe/sala-link, a signed-in page of the same session link written six ways, so a tap on an Android phone
+    # in the installed stackshot app shows which way opens the installed sala app instead of a Chrome Custom Tab. It makes no write and changes no link on any other page.
+    def probe_target(self, to=None) -> str:
+        """The one address every link of the probe page points at: `to` when it is on the origin of the [client] session_view template (scheme, host and port equal; no user info, control character or backslash), else the
+        session view of the first live session this board knows (sess_href), else the template's origin root; "" when no session_view is set."""
+        tpl = str(_cfg.get("client", "session_view") or "")
+        o = urlsplit(tpl.replace("{name}", "x")) if tpl else None
+        if o is None or o.scheme not in ("http", "https") or not o.netloc: return ""
+        t = to if isinstance(to, str) else ""
+        if t and len(t) <= 2000 and not any(ord(c) <= 32 or ord(c) == 127 or c == chr(92) for c in t):
+            try: u = urlsplit(t)
+            except ValueError: u = None
+            if u is not None and u.scheme == o.scheme and u.netloc.lower() == o.netloc.lower(): return t
+        for k in sorted(self.sess):
+            if k.startswith("name:"):
+                h = self.sess_href(k[5:])
+                if h: return h
+        return f"{o.scheme}://{o.netloc}/"
+    @staticmethod
+    def probe_intents(url: str) -> tuple[str, str]:
+        """The two intent:// forms of an http(s) address for the probe: (plain, with the VIEW action and the BROWSABLE category). The address without its #fragment follows intent:// (#Intent is the fragment of an intent link);
+        the fallback is the whole address percent-encoded, so it decodes back to `url` exactly."""
+        sp = urlsplit(url)
+        body = "intent://" + sp.netloc + quote(sp.path or "/", safe="/%:@!$&'()*+,;=-._~") + (("?" + quote(sp.query, safe="/?%:@!$&'()*+,;=-._~")) if sp.query else "")
+        fb = f"S.browser_fallback_url={quote(url, safe='')};end"
+        return (f"{body}#Intent;scheme={sp.scheme};{fb}",
+                f"{body}#Intent;scheme={sp.scheme};action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;{fb}")
+    def probe_html(self, to=None) -> str:
+        """The probe page (GET /probe/sala-link, behind the board's sign-in, drawn on request): a heading, one line of instruction and the variants A to F of one link (probe_target), each with a short label and one line saying
+        what it is. A to E are links (plain with and without target=_blank, the intent:// link with and without it, the intent:// link with the VIEW action and BROWSABLE category), F two buttons (window.open, location.href).
+        With no session_view set it says so and draws no link. Every value is escaped; the page writes nothing."""
+        e = esc
+        url = self.probe_target(to)
+        font_css = str(_cfg.get("instance", "font_css") or "")
+        if url:
+            c, ee = self.probe_intents(url)
+            ln = lambda href, tgt: f'<a href="{e(href)}"{" target=_blank" if tgt else ""}>{_t("probe.go")}</a>'
+            items = [(_t("probe.a.label"), _t("probe.a.what"), f'<a href="{e(url)}" target="_blank" rel="noopener">{_t("probe.go")}</a>'),
+                     (_t("probe.b.label"), _t("probe.b.what"), ln(url, False)),
+                     (_t("probe.c.label"), _t("probe.c.what"), ln(c, True)),
+                     (_t("probe.d.label"), _t("probe.d.what"), ln(c, False)),
+                     (_t("probe.e.label"), _t("probe.e.what"), ln(ee, False)),
+                     (_t("probe.f.label"), _t("probe.f.what"),
+                      f'<button type="button" class="b" data-probe="open" data-url="{e(url)}">{_t("probe.f.open")}</button> '
+                      f'<button type="button" class="b" data-probe="href" data-url="{e(url)}">{_t("probe.f.href")}</button>')]
+            body = (f'<p class="pjnote">{_t("probe.target", url="<code>" + e(url) + "</code>")}</p><ul class="probe">'
+                    + "".join(f'<li><b>{lab}</b><br><span class="dim">{what}</span><br>{ctl}</li>' for lab, what, ctl in items) + "</ul>"
+                    "<script>document.addEventListener('click',function(ev){var b=ev.target&&ev.target.closest?ev.target.closest('button[data-probe]'):null;if(!b)return;"
+                    "var u=b.getAttribute('data-url');if(b.getAttribute('data-probe')==='open')window.open(u,'_blank');else location.href=u});</script>")
+        else:
+            body = f'<p class="pjnote">{_t("probe.no_template")}</p>'
+        return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+                f'<meta name="color-scheme" content="light dark"><meta name="robots" content="noindex,nofollow"><title>{_t("probe.title")} · {e(self.title)}</title>'
+                f'<link rel="icon" href="{icon_href("favicon.svg")}" type="image/svg+xml">' + (f'<link rel="stylesheet" href="{e(font_css)}">' if font_css else "")
+                + _THEME_HEAD + _APP_HEAD + f'<style>{self._css()}ul.probe{{list-style:none;padding:0;margin:0}}ul.probe li{{margin:0 0 16px;overflow-wrap:anywhere}}</style></head>{_PANEL_BODY}<div id="layout"><main id="top">{self.page_header()}'
+                f'<h1>{_t("probe.title")}</h1><p class="pjnote">{_t("probe.note")}</p>{body}</main>'
+                + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _BFCACHE_JS + '</body></html>')
 
     def audits_html(self, runner=None) -> str:
         """The Audits page (GET /audits, behind the board's sign-in, drawn on request): the three paces the audits run at, the audit groups (each a fold of its audits with their pace and mode, the number
