@@ -94,6 +94,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.service import writes
 from stackshot.anchors.anchorhub import core
 server._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
@@ -102,12 +103,12 @@ _real_verdict = server._front_verdict
 server._front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
 def cfg(live=True): _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, **({"live": True} if live else {})}
 cfg(True)
-saved = []                                                  # every _save with a note: the item's History line the report becomes
-_real_save = server._save
+saved = []                                                  # every writes.save with a note: the item's History line the report becomes
+_real_save = writes.save
 def _spy_save(gid, item_, writer="", note="", author=None, mirror=True, **kw):
     if note: saved.append((gid, note))
     return _real_save(gid, item_, writer=writer, note=note, author=author, mirror=mirror, **kw)
-server._save = _spy_save
+writes.save = _spy_save
 def to(name, since): return [x for x in pushes()[since:] if x[0] == name]
 def why(fn):
     try: fn(); return ""

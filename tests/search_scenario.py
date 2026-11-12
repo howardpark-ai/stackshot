@@ -76,7 +76,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-from stackshot.web import server; from stackshot.web import render; from stackshot.web import search
+from stackshot.web import server; from stackshot.service import writes; from stackshot.web import render; from stackshot.web import search
 from stackshot.web.ui import search as ui_search, render as ui_render
 server._publish = lambda: None
 from starlette.testclient import TestClient
@@ -136,7 +136,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("control characters in text cannot forge a match marker (only the snippet's own <mark>)", "forged" in r.text and r.text.count("<mark>") == r.text.count("</mark>") and "\x02" not in r.text and "\x03" not in r.text, r.text.count("<mark>"))
 
     # ---- 6. an update re-indexes
-    server._save("a1", {**json.loads((STORE / "a/1.json").read_text()), "description": "the okapi checkpoint comes first"})
+    writes.save("a1", {**json.loads((STORE / "a/1.json").read_text()), "description": "the okapi checkpoint comes first"})
     check("the server's one item save asks for the item to be re-indexed", "a1" in search._FORCE, search._FORCE)
     r = get("/search?q=okapi")
     check("an update re-indexes: the new word is found at once (the results page syncs before it answers), the old one is not", 'href="/items/a1"' in r.text and "wombat" not in r.text and SEL("okapi").get("item") == ["a1"], SEL("okapi"))
@@ -303,7 +303,7 @@ def wait_for(q, secs=20, whole=False):   # whole: also wait for the pass to end 
     return False
 check("the thread's first build indexes the store with no page asked for", wait_for("okapi", whole=True), (SEL("okapi"), search.building()))
 check("7: the search thread runs at nice 10 (or at the runner's own, when that is higher) and the main thread keeps its own", bool(_tids) and os.getpriority(os.PRIO_PROCESS, _tids[0]) == max(10, _base) and os.getpriority(os.PRIO_PROCESS, threading.get_native_id()) == _base, (_base, _tids, os.getpriority(os.PRIO_PROCESS, _tids[0]) if _tids else None))
-server._save("a4", {**json.loads((STORE / "a/4.json").read_text()), "description": "closed long ago, then a xylophone arrived"})
+writes.save("a4", {**json.loads((STORE / "a/4.json").read_text()), "description": "closed long ago, then a xylophone arrived"})
 search.DEBOUNCE = 1.5; search._WAKE.set()
 _t_end = time.time() + 10
 while search._WAKE.is_set() and time.time() < _t_end: time.sleep(0.01)

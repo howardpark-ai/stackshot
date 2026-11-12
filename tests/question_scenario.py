@@ -52,7 +52,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
@@ -249,7 +249,7 @@ def W(ts): return _dt.datetime.fromtimestamp(ts, server.ZONE).isoformat(timespec
 def TS(i): return 1_800_000_000 + 100 * i
 def put_answers(shown, *answers):
     gid = _model_ids._norm_id(shown); it = server._load(gid)
-    it["metadata"]["answers"] = [{"ts": TS(i), "via": "board", **a} for i, a in enumerate(answers)]; server._save(gid, it)
+    it["metadata"]["answers"] = [{"ts": TS(i), "via": "board", **a} for i, a in enumerate(answers)]; writes.save(gid, it)
 st, ct, body = server._client_get("answer", {"key": out["item"]})
 check("get answer: an empty body before he answers", st == 200 and body == "", (st, body))
 put_answers(out["item"], {"kind": "decision", "choice": "Cut", "text": "Yes, cut it.\nTell Pat."})

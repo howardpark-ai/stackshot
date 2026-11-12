@@ -1,4 +1,4 @@
-"""Scenario test for the item's `activity` clock (activity.py and the stamp in server._save): the time of the last real activity on an item, which a later silence pass reads.
+"""Scenario test for the item's `activity` clock (activity.py and the stamp in writes.save): the time of the last real activity on an item, which a later silence pass reads.
 Fixture data in a temp store, no live store, no network, no server socket, no tmux.
 
   1  activity.counts: every kind against an ordinary writer, an audit writer (by session name, by id, by author label, case and spacing ignored) and no writer
@@ -55,6 +55,7 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
 from stackshot.web import server
+from stackshot.service import writes
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 assert server._cfg.audit_agent() == AUDIT_AGENT, server._cfg.audit_agent()
@@ -121,7 +122,7 @@ check("4 stamp: a seeded clock is then kept by a later non-counting save", not A
 # ---- 5. the server's saves
 for i in range(1, 12): item(i)
 def save(i, **kw):
-    it = server._load(f"a{i}"); it["updated"] = time.time(); server._save(f"a{i}", it, **kw)
+    it = server._load(f"a{i}"); it["updated"] = time.time(); writes.save(f"a{i}", it, **kw)
 t0 = time.time()
 # a legacy item, saved first by the server itself (a nudge): the field appears, at the old value
 save(1, note="stall: the notice was sent again")
@@ -173,7 +174,7 @@ c1 = act(1)
 save(1, writer=AUDIT_AGENT, activity=A.EVENT)
 check("5 …an audit's event or message write does not", act(1) == c1)
 # unknown kind never fails a write
-server._save("a2", server._load("a2"), writer="home-peer", activity="nonsense")
+writes.save("a2", server._load("a2"), writer="home-peer", activity="nonsense")
 check("5 a save with an unknown kind is not refused and the clock is left", rd(2).get("activity") in (None, OLD) or abs(rd(2)["activity"] - OLD) < 1, rd(2).get("activity"))
 # create: a session's create is a write
 gid, _r = server._create_item(subject="[home] a new item", description=DESC, project="projects/alpha", owner=U["home-peer"], next="home-peer: start", mover="home-peer")
@@ -241,7 +242,7 @@ rep = server._builder_report("home-front", "a31: PR 9 is live and the suites pas
 check("7 the audit's report is written onto the item too", rep.startswith("Not delivered: written onto"), rep)
 check("7 …but is not activity: the clock stays at the item's last update", abs((act(31) or 0) - OLD) < 1, (act(31), OLD))
 # the owner's recorded words for a wake: settle bookkeeping, not activity
-server._save("a32", server._load("a32"), note="his words recorded for the wake 2026-12-01: go (his answer), by a script")
+writes.save("a32", server._load("a32"), note="his words recorded for the wake 2026-12-01: go (his answer), by a script")
 check("7 a script copying the owner's stored words onto the wake (a save with no writer) leaves the clock", abs((act(32) or 0) - OLD) < 1, (act(32), OLD))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

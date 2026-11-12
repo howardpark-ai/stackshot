@@ -115,6 +115,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.service import writes
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
@@ -514,10 +515,10 @@ check("the check pass does not read it again", tick(5) == [] and "a35" not in st
 # ---- 6c. a check met while his decision is open waits (one line, once) and closes the item once the decision is cleared; clear_check takes the check off
 import inspect
 ASKD = "Decide: x · Recommend: yes · Stakes: z · By: no date"
-_saves = []; _orig_save = server._save
+_saves = []; _orig_save = writes.save
 def _spy_save(gid, it, writer="", note="", **kw):
     _saves.append((gid, note)); return _orig_save(gid, it, writer=writer, note=note, **kw)
-server._save = _spy_save
+writes.save = _spy_save
 item(62, status="completed", outcome="done", reason="finished")
 item(63, check="item_closed a62", needs=["decision"], ask=ASKD, next="home-owner: decide")
 item(64, check="item_closed a62", needs=["external"], next="home-owner: wait for them")
@@ -545,7 +546,7 @@ tick(1); n68 = len([1 for g, n in _saves if g == "a68" and "done check met" in n
 server._update("a68", check="unit_active nothing-here.service", sender="home-owner")
 server._unit_run = lambda argv: "LoadState=loaded\nActiveState=active\n"
 check("a different check met under the same open decision gets its own line", tick(1) == [] and len([1 for g, n in _saves if g == "a68" and "done check met" in n]) == n68 + 1 and "unit_active nothing-here.service" in [n for g, n in _saves if g == "a68"][-1], _saves)
-server._save = _orig_save
+writes.save = _orig_save
 server._update("a68", clear_check=True, sender="home-owner"); item(68, status="completed", outcome="dropped", reason="out of the passes")
 
 # clear_check: the flag removes the check, as clear_needs removes needs; check="" is not passed, as needs="" is
@@ -570,7 +571,7 @@ check("the update description and the tool's parameters name clear_check", "clea
 
 # ---- 6d. the waiting line is written once per met check: an error pass or a race keeps the record, a clean "not met" resets it; get shows "met" only while it is true
 _saves = []
-server._save = _spy_save
+writes.save = _spy_save
 def waits(g): return [n for gg, n in _saves if gg == g and "done check met" in n]
 UNITS = ["LoadState=loaded\nActiveState=active\n"]
 server._unit_run = lambda argv: UNITS[0]
@@ -602,7 +603,7 @@ server._update("a74", check="unit_active w74.service", sender="home-owner")
 check("get shows it again while the check is the one met and the decision is open", "met, and waiting for" in server.stackshot_get("a74"), server.stackshot_get("a74"))
 server._update("a74", clear_needs=True, sender="home-owner")
 check("…and not once the decision is cleared, before the pass that closes it", "waiting for" not in server.stackshot_get("a74") and rd(74)["status"] == "open", server.stackshot_get("a74"))
-server._save = _orig_save
+writes.save = _orig_save
 for i in (73, 74): item(i, status="completed", outcome="dropped", reason="out of the passes")
 
 # ---- 7. the descriptions say so

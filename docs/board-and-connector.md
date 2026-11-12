@@ -2,7 +2,7 @@
 
 What this page covers: the server and the publisher, the MCP connector, and every tool the connector offers. Back to the [README](../README.md).
 
-**The board and the publisher.** `stackshot/web/server.py` is the only writer of the store (one JSON file per item, `<store>/<letter>/<n>.json`; its path and its file write are in `stackshot/core/store.py`, its readers of one item in `stackshot/web/store.py`) and the
+**The board and the publisher.** `stackshot/web/server.py` is the only writer of the store (one JSON file per item, `<store>/<letter>/<n>.json`; its path and its file write are in `stackshot/core/store.py`, its readers of one item in `stackshot/service/store.py`, its one writer in `stackshot/service/writes.py`) and the
 only id allocator, and serves the rendered board at `/`. `stackshot/web/publish.py` renders the board
 (`stackshot/web/render.py`: markdown and the one-line brief), commits the store to a git repository and pushes it, after every
 write (debounced), on a timer and when the machine or session state changes. A publish that changes nothing commits

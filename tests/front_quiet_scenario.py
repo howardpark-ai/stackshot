@@ -68,7 +68,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.router import routing; from stackshot.waits import held; from stackshot.waits import quiet as Q
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.router import routing; from stackshot.waits import held; from stackshot.waits import quiet as Q
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -341,13 +341,13 @@ check("8 board: every held case left it too", all(held_cases.values()), held_cas
 import inspect
 # (a) written_at: a write by a session stamps it; a server save leaves it (and so "touched") alone
 d71 = {"metadata": {}}
-server._record_writer(d71, U["home-front"], None)
+writes.record_writer(d71, U["home-front"], None)
 check("9 written_at: a write by a session stamps written_by and written_at (now)", d71.get("written_by") == "home-front" and abs(d71.get("written_at", 0) - time.time()) < 5, d71)
 d72 = {"metadata": {}, "written_by": "home-send", "written_at": 123.0}
-server._record_writer(d72, "", None)
+writes.record_writer(d72, "", None)
 check("9 written_at: …a server write (no writer) leaves the stamp and written_at as the last real writer left them", d72["written_by"] == "home-send" and d72["written_at"] == 123.0, d72)
 item(71, writer="home-front", updated=STARTED - 75); d = rd(71); d["written_at"] = STARTED - 75; (T / "store/a/71.json").write_text(json.dumps(d))
-it71 = server._load("a71"); it71["updated"] = time.time(); server._save("a71", it71)      # a server save: `updated` moves, the writer stamp does not
+it71 = server._load("a71"); it71["updated"] = time.time(); writes.save("a71", it71)      # a server save: `updated` moves, the writer stamp does not
 check("9 written_at: …so a server save after the pane started is no touch by the agent whose earlier write predates it", rd(71)["updated"] > STARTED and rd(71)["written_at"] == STARTED - 75 and server._touched("a71", "home-front", STARTED) is False, rd(71))
 # (b) every sender of a close or a stuck notice gives the gate its kind
 src = lambda fn: inspect.getsource(fn)

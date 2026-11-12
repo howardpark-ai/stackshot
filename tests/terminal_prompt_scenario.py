@@ -67,7 +67,7 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
 server._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:
@@ -145,10 +145,10 @@ st, oo = tp("open", "home-other", "Is the plan right?")
 check("another session has its own item, under the same project, owned by the same -main agent", st == 200 and oo["item"] != out["item"] and oo["repeat"] is False and len(items()) == n1 + 1
       and item(oo["item"])["metadata"]["terminal_prompt"] == "home-other", (st, oo))
 # the session found by an old name when it was renamed after the item was filed: the mark is the old name, the call uses the new one
-rn = server._load(_model_ids._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; server._save(_model_ids._norm_id(oo["item"]), rn)
+rn = server._load(_model_ids._norm_id(oo["item"])); rn["metadata"]["terminal_prompt"] = "home-sparrow-eng"; writes.save(_model_ids._norm_id(oo["item"]), rn)
 check("a mark that holds an old name (a rename since) still matches the session by the registry", server._terminal_open_items("home-sparrow-builder") == [_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]
       or server._terminal_open_items("home-sparrow-builder") == sorted([_model_ids._norm_id(out["item"]), _model_ids._norm_id(oo["item"])]), server._terminal_open_items("home-sparrow-builder"))
-rn["metadata"]["terminal_prompt"] = "home-other"; server._save(_model_ids._norm_id(oo["item"]), rn)
+rn["metadata"]["terminal_prompt"] = "home-other"; writes.save(_model_ids._norm_id(oo["item"]), rn)
 st, c2 = tp("clear", "home-other", None)
 check("…and a clear of one session closes only its own item", c2["cleared"] == [oo["item"]] and item(oo["item"])["status"] == "completed" and item(out["item"])["status"] == "open", (c2, item(out["item"])["status"]))
 

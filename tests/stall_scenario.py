@@ -88,17 +88,17 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
 server._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
-_real_save = server._save
+_real_save = writes.save
 INV_BAD = []; INV_SAVES = [0]
 def _save_inv(gid, item, *a, **kw):
     out = _real_save(gid, item, *a, **kw)
     INV_SAVES[0] += 1
     if H.stale(item, H.mover_of(item, lambda it: server._ho_derive({**it, "gid": gid})), server._ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
     return out
-server._save = _save_inv
+writes.save = _save_inv
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
@@ -219,7 +219,7 @@ check("3 episode: …and at the last rung the new episode asks once more: two me
       and sum("was asked to recover it" in x["text"] for x in log_of(3)) == 2, (done, main_recovery_pushes("a3"), log_of(3)))
 check("3 episode: …and that one is not repeated either", stk(at3 + 20 * MIN + 40) == [] and stk(at3 + 6 * 3600) == [] and len(main_recovery_pushes("a3")) == 2, main_recovery_pushes("a3"))
 # an item that moves to another session (not by its mover's write) ends the record too: the new mover's ladder is its own
-server._save("a3", {**rd(3), "metadata": {**mt(3), "mover": "home-peer2", "next": "home-peer2: take over"}})
+writes.save("a3", {**rd(3), "metadata": {**mt(3), "mover": "home-peer2", "next": "home-peer2: take over"}})
 check("3 episode: …a server save that moves the item on ends the record as handed on: no request is carried to the new mover", not ho(3).get("recovery_at") and ho(3).get("to") == "home-peer2" and len(main_recovery_pushes("a3")) == 2, (ho(3), mt(3).get("handoff_history")))
 close(3); set_cfg()
 

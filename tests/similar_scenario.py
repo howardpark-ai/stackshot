@@ -39,7 +39,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import writes; from stackshot.model import ids as _model_ids
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
 server._publish = lambda: None
 MAIN, OTHER = "falcon-main", "home-other"
@@ -54,7 +54,7 @@ def note(r):
 def age(gid, days, status="completed"):
     it = server._load(gid); it["status"] = status
     it["state_updated"] = it["updated"] = time.time() - days * 86400
-    server._save(gid, it)
+    writes.save(gid, it)
 def created(r, gid):
     return r.startswith("created ") and server._load(gid)["status"] == "open"
 

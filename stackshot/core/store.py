@@ -1,8 +1,8 @@
 """store.py: the one store at the bottom layer: where it is (`STORE`, [paths] store), every item file in it, the next item id, and the write of one item file.
 
-What reads an item (`_path`, `_load`) stays in web/store.py: it resolves a moved item's old id through github/ghsync and reads the item through model/, both layers above this one, and an import
-upward is what tests/layers_scenario.py refuses. `_save`, the one writer, stays in server.py with its lock and its telling; the write of the file it ends with is `_write_item` here.
-A suite that points the server at a copy of the store sets `STORE` on this module (`core_store.STORE = ...`), the one place it is read from: the readers in web/store.py and the server's own
+What reads an item (`_path`, `_load`) is service/store.py's: it resolves a moved item's old id through github/ghsync and reads the item through model/, both layers above this one, and an import
+upward is what tests/layers_scenario.py refuses. `save`, the one writer, is service/writes.py's, with the item lock; the write of the file it ends with is `_write_item` here.
+A suite that points the server at a copy of the store sets `STORE` on this module (`core_store.STORE = ...`), the one place it is read from: the readers in service/store.py and the server's own
 reads (`_store.STORE`) see the same value. `NEXT_ID` is read where this module was imported, as it was when it lived in server.py."""
 from __future__ import annotations
 

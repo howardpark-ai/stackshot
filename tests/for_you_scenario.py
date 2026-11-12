@@ -90,6 +90,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.service import writes
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 server._publish = server._fyev._publish = lambda: None; server._PUSH = [sys.executable, str(T / "fakepush.py")]
@@ -656,7 +657,7 @@ try:
     with contextlib.redirect_stderr(err12):
         out60 = cl(60); out62 = cl(62); settle()
         it61 = server._load("a61"); it61["status"] = "completed"; it61["state_updated"] = time.time(); it61["metadata"] = {**it61["metadata"], "outcome": "done", "reason": "its check passed"}
-        server._save("a61", it61); told61 = server._tell_check_closed("a61", it61, "item_closed a99"); settle()
+        writes.save("a61", it61); told61 = server._tell_check_closed("a61", it61, "item_closed a99"); settle()
 finally:
     fy._save = orig_save
 to_a = lambda g: [(o, n) for _t, _g, o, n in told[t12:] if o == A and g in n]       # _tell_woken is section 7's stub: it records what would be pushed

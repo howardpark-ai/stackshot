@@ -72,7 +72,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -138,11 +138,11 @@ check("A: entry_pairs: with no history, 24 hours before pairs and more does not"
 # the sender is required, and an @ in his words never pings through the mirror's comment
 refused("A: a call without a sender is refused", lambda: server._record_cap_words({"item": "a18", "ts": TS}, "testbox"), "sender is required")
 notes = []
-_save0 = server._save
-server._save = lambda gid, it, *a, **k: (notes.append(k.get("note") or (a[2] if len(a) > 2 else "")), _save0(gid, it, *a, **k))[1]
+_save0 = writes.save
+writes.save = lambda gid, it, *a, **k: (notes.append(k.get("note") or (a[2] if len(a) > 2 else "")), _save0(gid, it, *a, **k))[1]
 item(63, hold=True, wake=day(30), answers=[{"ts": TB + 1, "kind": "decision", "text": "park this until Jun 4th, ask @someone-else", "via": "board"}])
 server._record_cap_words({"sender": "home-test @x", "item": "a63", "ts": TB + 1}, "testbox")
-server._save = _save0
+writes.save = _save0
 check("A: the mirror's note for the record breaks every @ (no one is pinged by his words or the sender)", notes and all(re.search("@(?!\u200b)", n) is None for n in notes) and "@\u200bsomeone-else" in notes[0], notes)
 
 # what must be refused
@@ -521,7 +521,7 @@ check("unreadable: a directory that is not a git checkout is None (the 24-hour l
 calls = []
 real_prior = W.prior_state_ts
 def spy(gid, wake, limit=200):
-    calls.append((gid, wake, server._ITEM_LOCK._is_owned()))
+    calls.append((gid, wake, writes.ITEM_LOCK._is_owned()))
     return real_prior(gid, wake, limit)
 W.prior_state_ts = spy
 try:

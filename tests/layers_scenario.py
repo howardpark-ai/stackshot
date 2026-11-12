@@ -3,7 +3,7 @@
 The package has four layers (CONTRIBUTING.md, *Layout and dependencies*) and imports that point down only:
 
     surface   web/
-    service   service/                                                             (not yet existing; sits between the surface and the domain)
+    service   service/                                                             (sits between the surface and the domain)
     domain    model/ waits/ projects/ router/ anchors/ fleet/ github/ notify/      (notify/ not yet existing)
     core      core/
 
@@ -33,7 +33,7 @@ def check(name, ok, detail=""):
 
 # the layers, top to bottom: a module may import a module of its own layer or a lower one, never a higher one
 LAYERS = [("surface", ("web",)),
-          ("service", ("service",)),                     # not yet existing
+          ("service", ("service",)),
           ("domain", ("model", "waits", "projects", "router", "anchors", "fleet", "github", "notify")),      # notify/ not yet existing
           ("core", ("core",))]
 RANK = {area: len(LAYERS) - i for i, (_, areas) in enumerate(LAYERS) for area in areas}      # higher number = higher layer

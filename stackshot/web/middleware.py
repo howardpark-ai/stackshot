@@ -81,7 +81,7 @@ class _RefusalLog(_MW):
 
 # on a warm standby copy (STACKSHOT_READ_ONLY=1) every tool that changes anything is refused here, before the tool runs, with the one
 # sentence readonly.REFUSAL; get, brief, sessions and rules (and `anchors` that only lists) keep working. The store layer refuses a write too
-# (_save, _next_id, anchors.save, projects._write): this is the explicit refusal, that is the backstop.
+# (writes.save, _next_id, anchors.save, projects._write): this is the explicit refusal, that is the backstop.
 _RO_WRITE_TOOLS = ("create", "update", "complete", "confirm", "message", "route", "bump_versions")
 
 

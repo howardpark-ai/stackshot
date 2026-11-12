@@ -64,7 +64,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -327,7 +327,7 @@ server._PUSH = [sys.executable, str(T / "failpush.py")]
 for i in range(85, 400): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 import threading
 item(53, su=now0 - DAY)
-with server._ITEM_LOCK:
+with writes.ITEM_LOCK:
     th = threading.Thread(target=lambda: server._record_undelivered("a53", "home-stew", "wait", "no pane"))
     th.start(); time.sleep(0.3)
     held_off = "undelivered" not in rd(53)["metadata"]
