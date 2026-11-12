@@ -887,13 +887,15 @@ _SST_HEAD = ("<script>window.SSD=" + json.dumps(_i18n.js_table("en")).replace("<
 _AGE_FN = ("function fa(s,q){var m=Math.floor(Math.max(s,0)/60),k=m<60?'age.min':m<2880?'age.hour':'age.day',n=m<60?m:m<2880?Math.floor(m/60):Math.floor(m/1440);"
            "return q?'>'+SST(k,{n:n}):s<60?SST('age.now'):SST(k,{n:n})}")
 # The last activity of an On agent row, kept current in script: every [data-at] (epoch seconds of the activity) is redrawn every 30 s. The age (.ir-age) says it as i18n.fmt_span does ("<1m", "46m", "1h 44m", "2d 3h", the age.span_* keys), the
-# pill (.ir-pill) as the band says (its data-w-ok, data-w-warn and data-w-bad, the words in the person's language: they are on the element, not in the string table every page carries), and both take the band in data-b: ok under 45 minutes, warn from 45, bad from 60 (model/last_activity.py BAND_*; keep them in step). Elements with no data-at are left alone.
+# pill (.ir-pill) as the band says (its data-w-ok, data-w-warn and data-w-bad, the words in the person's language: they are on the element, not in the string table every page carries), and both take the band in data-b: ok under 45 minutes, warn from 45 up to and including 60, bad only past 60 minutes
+# (model/last_activity.py BAND_* and band(); keep them in step: the script bands the age in seconds, as the model does, so that exactly an hour is amber and one second more is red). data-at is whole seconds, the same value the server banded by. A time ahead of the page's clock by more than
+# SKEW_S is no record: the script leaves that element as the server drew it (never "<1m" for a time that has not come); Elements with no data-at are left alone.
 _ACT_WORD = {_lastact.OK: "home.act.active", _lastact.WARN: "home.act.quiet", _lastact.BAD: "home.act.idle"}      # the pill's words by band (the string table's keys)
-_LACT_JS = ("function lact(){var n=Date.now()/1000;document.querySelectorAll('[data-at]').forEach(function(e){var m=Math.floor(Math.max(n-(+e.getAttribute('data-at')),0)/60),"
-            "b=m>=%d?'bad':m>=%d?'warn':'ok';e.setAttribute('data-b',b);"
+_LACT_JS = ("function lact(){var n=Date.now()/1000;document.querySelectorAll('[data-at]').forEach(function(e){var s=n-(+e.getAttribute('data-at'));if(s<-%d)return;s=Math.max(s,0);var m=Math.floor(s/60),"
+            "b=s>%d?'bad':s>=%d?'warn':'ok';e.setAttribute('data-b',b);"
             "e.textContent=e.classList.contains('ir-pill')?e.getAttribute('data-w-'+b):"
             "m<1?SST('age.span_now'):m<60?SST('age.span_min',{m:m}):m<1440?SST('age.span_hour',{h:Math.floor(m/60),m:m%%60}):SST('age.span_day',{d:Math.floor(m/1440),h:Math.floor(m%%1440/60)})})}"
-            "lact();setInterval(lact,30000);document.addEventListener('stackshot:swapped',lact);") % (_lastact.BAND_BAD_S // 60, _lastact.BAND_WARN_S // 60)
+            "lact();setInterval(lact,30000);document.addEventListener('stackshot:swapped',lact);") % (int(_lastact.SKEW_S), _lastact.BAND_BAD_S, _lastact.BAND_WARN_S)
 _APP_HEAD = _SST_HEAD + ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
              f'<link rel="apple-touch-icon" href="{icon_href("apple-touch-icon.png")}">'          # 180 px, opaque (signin.py _APP_ICONS)
              '<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)">'   # the app's title bar: each theme's --bg
@@ -3057,7 +3059,7 @@ class Board:
                 + fold("sessions", _t("routing.sec_sessions"), n_sess, sess_body or f'<p class="empty">{_t("page.none")}</p>')
                 + fold("anchors", _t("routing.sec_anchors"), len(seen), f'<ul class="alist">{alist}</ul>' if alist else f'<p class="empty">{_t("page.none")}</p>')
                 + fold("notices", _t("routing.sec_notices"), len(notes), f'<div class="rwrap"><table class="rlog"><thead><tr><th>{_t("routing.th_when", tz=_cfg.tz_abbr())}</th><th>{_t("routing.th_source")}</th><th>{_t("routing.th_what")}</th><th>{_t("routing.th_for")}</th><th>{_t("routing.th_ruling")}</th><th>{_t("routing.th_reason")}</th></tr></thead><tbody>{rows}</tbody></table></div>' if rows else f'<p class="empty">{_t("routing.nothing")}</p>', open_=False)
-                + f'<script>{_FOLD_JS}</script></main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
+                + f'<script>{_FOLD_JS}</script>' + (f'<script>(function(){{{_LACT_JS}}})();</script>' if 'data-at="' in items_body else '') + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _CARDS_JS + f'<script>{_HOME_JS}</script>' + _SENDKEY_JS + _BFCACHE_JS + '</body></html>')
 
     # ---------------- the emitters ----------------
     def render(self, modes) -> dict:
@@ -3764,10 +3766,11 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         under 45 minutes, quiet to an hour, idle over 1 h) and "Last: <what it was> at <HH:MM>" (the date too when it was not today). Both carry the activity's time in data-at, which the page script (_LACT_JS) keeps current, with the band in data-b.
         The age is taken from the render's own clock here, so a page with no script says the same."""
         if r.get("status") != "open" or is_parked(r): return None
-        rec = _lastact.read(r)
+        rec = _lastact.read(r, self.now.timestamp())      # a record stamped more than SKEW_S ahead of the clock is none: the old age and no line, never "<1m" for a time that has not come
         if not rec: return None
         try: t = datetime.datetime.fromtimestamp(rec["at"], self.now.tzinfo)
         except (ValueError, OverflowError, OSError): return None      # a time the calendar cannot take: the old age and no line, never a page that fails (the record already refuses one past MAX_AT)
+        rec = {**rec, "at": float(int(rec["at"]))}      # whole seconds, the value data-at carries: the server bands by the very number the page script reads, so the two cannot differ at a boundary
         sec = max(0.0, self.now.timestamp() - rec["at"]); b = _lastact.band(sec)
         words = {k: _t(v) for k, v in _ACT_WORD.items()}
         clock = f"{t:%H:%M}" if t.date() == self.now.date() else self.when(rec["at"])

@@ -19,6 +19,7 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
      stranger's comment on an anchored pull request and on an issue the item's words name; a fork's, a deleted fork's and a nameless CI result); a merge is not filtered
   10 the line's time is the event's own when it can be read and is within the window (a backlog is not now); absent or unreadable falls back to the hub's; outside the window writes no line
   11 History: a confirm and a last-activity stamp saved in one window still show the `confirm` line (both renderers)
+  15 what counts as a time (a number: a bool or a string is torn), the band at the hour (exactly 60 minutes is amber), a stored time ahead of the reader's clock (no record), the one-second boundary
 
     tests/run-suite last_activity       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, io, math
@@ -881,6 +882,28 @@ for e in ci13f: hub_.emit(e)
 rows13f, _ = EL.read(0)
 saved = ev_pass_now()
 check("14 …it writes no line to the event log and stamps nothing (a fork's CI is not the repository's own side)", rows13f == [] and saved == [] and la(485) is None, (rows13f, saved, la(485)))
+
+# ================================================================ 15. what counts as a time: a number only; the band at the hour; a stored time ahead of the reader's clock
+SIG15 = {"kind": "comment", "what": "x"}
+check("15 clean: a bool, a string (digits or not), a list, bytes and a dict are no time; an int and a float are", all(LA.clean({"at": v, **SIG15}) is None for v in (True, False, "123", "1e9", " 5 ", [5], (5,), b"5", None, {"x": 1}))
+      and LA.clean({"at": 5, **SIG15})["at"] == 5.0 and LA.clean({"at": 5.5, **SIG15})["at"] == 5.5, [LA.clean({"at": v, **SIG15}) for v in (True, "123")])
+check("15 record, read, apply and the signal builders skip a bool or a string as the time, as for any torn candidate",
+      LA.record({"metadata": {}}, [{"at": True, **SIG15}, {"at": "123", **SIG15}]) is None and LA.read({"metadata": {"last_activity": {"at": True, **SIG15}}}) is None and LA.read({"metadata": {"last_activity": {"at": "123", **SIG15}}}) is None
+      and LA.signal("comment", True, "x") is None and LA.signal("comment", "9", "x") is None and LA.pr_candidate("comment", 3, True, 100.0) is None and LA.pr_candidate("comment", 3, "9", 100.0) is None and LA.update_signal("a", "b", True) is None and LA.audit_signal("a pane in a turn", "9") is None, None)
+st15 = {"status": "open", "metadata": {"last_activity": {"at": True, **SIG15}}}
+check("15 apply: a stored record whose time is a bool is replaced by the next real signal, whatever its time", LA.apply(st15, [{"at": 3, **SIG15}]) and st15["metadata"]["last_activity"]["at"] == 3.0, st15)
+check("15 band at the hour: 44m 59.999s ok, 45m warn, exactly 1h warn, 1h and a millisecond bad (strictly more than 60 minutes); the constants are 45 and 60 minutes",
+      LA.band(2699.999) == LA.OK and LA.band(2700) == LA.WARN and LA.band(3599.999) == LA.WARN and LA.band(3600) == LA.WARN and LA.band(3600.001) == LA.BAD and LA.band(0) == LA.OK and LA.BAND_WARN_S == 2700 and LA.BAND_BAD_S == 3600,
+      [LA.band(x) for x in (2699.999, 2700, 3600, 3600.001)])
+NOW15 = 1_000_000.0
+rec15 = lambda at_: {"metadata": {"last_activity": {"at": at_, **SIG15}}}
+check("15 the reader: a stored time ahead of now by more than the skew is no record in read, at and age_s; exactly the skew ahead, and a second less, read as just now; without a `now` the record reads as stored",
+      LA.read(rec15(NOW15 + LA.SKEW_S + 1), NOW15) is None and LA.at(rec15(NOW15 + LA.SKEW_S + 1), NOW15) == 0.0 and LA.age_s(rec15(NOW15 + LA.SKEW_S + 1), NOW15) is None
+      and LA.age_s(rec15(NOW15 + LA.SKEW_S), NOW15) == 0.0 and LA.age_s(rec15(NOW15 + 1), NOW15) == 0.0 and LA.age_s(rec15(NOW15 - 90), NOW15) == 90.0 and LA.read(rec15(NOW15 + LA.SKEW_S + 1))["at"] == NOW15 + LA.SKEW_S + 1, None)
+check("15 the skew is the window an event's own time is allowed (event_log.AHEAD_S), one number for both", LA.SKEW_S == EL.AHEAD_S == 3600.0, (LA.SKEW_S, EL.AHEAD_S))
+check("15 the one-second boundary: a candidate one second after now is read as now, one at now is kept; a stored record one second after now is ignored, one at now is kept (the newest wins only against a record that happened)",
+      LA.record({"metadata": {}}, [{"at": NOW15 + 1, **SIG15}], NOW15)["at"] == NOW15 and LA.record({"metadata": {}}, [{"at": NOW15, **SIG15}], NOW15)["at"] == NOW15
+      and LA.record(rec15(NOW15 + 1), [{"at": NOW15 - 5, **SIG15}], NOW15)["at"] == NOW15 - 5 and LA.record(rec15(NOW15), [{"at": NOW15 - 5, **SIG15}], NOW15)["at"] == NOW15, None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
