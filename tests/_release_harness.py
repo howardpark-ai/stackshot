@@ -18,13 +18,15 @@ fails = []; ran = []; dirs = []
 # (include = the checkout); but every Python start would still load coverage and write a data file, so a measured run took three times a plain one and set main's wall time.
 # This process itself stays measured (the variables are only left out of what it starts); strace follows the children all the same, so the files release.sh touches are still recorded.
 def without_coverage(env): return {k: v for k, v in env.items() if not k.startswith("COVERAGE_")}
-ENV0 = without_coverage(os.environ)
+def _env0(): return without_coverage(os.environ)   # a function so a check can take it again with the variables set (a plain run has none at import)
+ENV0 = _env0()
 NOTLIVE = "ba5e0000000000000000000000000000000000ba"   # RT_LIVE for an old-path release that fails on main: a checkout at a commit older than the merge (the git stub says "in it" for HEAD when RT_LIVE is unset)
 def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:800]}" if got is not None else ""))
 
 GH_SH = r'''#!/bin/bash
+[ -z "${RT_ENVDUMP:-}" ] || env > "$RT_ENVDUMP"   # a check reads the environment this stub was started in
 # the waits ask `pr checks` once a cycle: answered here, in shell, so a measured run (coverage and strace -f in every Python start) does not pay a Python process for it; everything else goes to gh.py
 if [ "${1:-} ${2:-}" = "pr checks" ]; then
     echo "$*" >> "$RT_DIR/gh.log"
@@ -499,7 +501,8 @@ HEADSHA = "abc1234def5678abc1234def5678abc1234def56"
 def plain_merges(s): return [l for l in s["gh"].splitlines() if l.startswith("pr merge")]   # the plain merge call (the ruleset off)
 def enqueues(s): return s["enqueue_args"]   # the enqueuePullRequest mutations, "id=<node id> h=<the head it is pinned to>" each
 def merges(s): return [*plain_merges(s), *enqueues(s)]   # any call that merges or enqueues
-genv = {**ENV0, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull}
+def _genv(): return {**ENV0, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull}
+genv = _genv()
 def g(*a, cwd=None): return subprocess.run(["git", *a], cwd=cwd, env=genv, capture_output=True, text=True, check=True).stdout.strip()
 BASE = "ba5e0000000000000000000000000000000000ba"; MERGE = "0106c0de0106c0de0106c0de0106c0de0106c0de"; GOOD = "600d0000000000000000000000000000000000d1"
 NEWER = "0107c0de0107c0de0107c0de0107c0de0107c0de"; LATER = "5ec00000000000000000000000000000000000c2"

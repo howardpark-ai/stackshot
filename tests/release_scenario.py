@@ -35,9 +35,22 @@ import _scratch
 from _release_harness import *
 check("release.sh parses", subprocess.run(["bash", "-n", os.path.join(STACK, "release.sh")]).returncode == 0)
 # a measured run sets COVERAGE_PROCESS_START for this process; what release.sh and its stubs start must not inherit it (every Python start would load coverage: a measured run took three times a plain one)
-check("harness: the environment release.sh runs in has no COVERAGE_ variable of a measured run, and keeps the rest",
-      without_coverage({"COVERAGE_PROCESS_START": "x", "COVERAGE_FILE": "y", "PATH": "p", "RT_X": "1"}) == {"PATH": "p", "RT_X": "1"} and not any(k.startswith("COVERAGE_") for k in ENV0) and "PATH" in ENV0, sorted(ENV0))
-R ="example-owner/stackshot"
+import _release_harness as _h
+_dump = pathlib.Path(_scratch.mkdtemp(prefix="releasetest-envdump-")) / "env"
+_held = {k: os.environ.get(k) for k in ("COVERAGE_PROCESS_START", "COVERAGE_FILE")}; _env0 = _h.ENV0
+try:   # a plain run has no coverage variable: set two in this process, take ENV0 again as the import does, and run one scenario (what its gh stub is started in) and the git environment the same way
+    os.environ["COVERAGE_PROCESS_START"] = "/nonexistent/rc"; os.environ["COVERAGE_FILE"] = "/nonexistent/data"
+    _h.ENV0 = _h._env0()
+    scenario("envdump", merge="ok", gq="queued,queued,merged", envdump=str(_dump))
+    _stub_env = _dump.read_text() if _dump.exists() else ""
+    _git_env = subprocess.run(["env"], env=_h._genv(), capture_output=True, text=True).stdout
+finally:
+    _h.ENV0 = _env0
+    for k, v in _held.items(): os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+check("harness: release.sh's stubs (scenario()) and the git calls (genv) are started without the COVERAGE_ variables of a measured run, and keep the rest",
+      "RT_DIR=" in _stub_env and "COVERAGE_" not in _stub_env and "GIT_AUTHOR_NAME=t" in _git_env and "COVERAGE_" not in _git_env
+      and _h.without_coverage({"COVERAGE_PROCESS_START": "x", "COVERAGE_FILE": "y", "PATH": "p"}) == {"PATH": "p"}, ([l.split("=")[0] for l in _stub_env.splitlines() if l.startswith("COVERAGE_")], [l.split("=")[0] for l in _git_env.splitlines() if l.startswith("COVERAGE_")], "RT_DIR=" in _stub_env, "GIT_AUTHOR_NAME=t" in _git_env))
+R = "example-owner/stackshot"
 ENQUEUE = f"id=PRNODE23 h={HEADSHA}"   # the enqueue mutation the stub saw: the PR's node id and the head it is pinned to
 MERGE_SHORT = "0106c0d"
 def gl(s): return s["gh"].splitlines()
