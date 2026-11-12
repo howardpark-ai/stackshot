@@ -1180,6 +1180,28 @@ loads = [sum(secs.get(n, med) for n in p) for p in timed]
 check("shards: with a map, every suite is in exactly one shard, and the shards' measured times differ by no more than the longest suite",
       once(timed) and max(loads) - min(loads) <= max(secs.values()), loads)
 check("shards: an index outside 0..N-1 is refused", real("shard", "--of", "6", "--index", "6").returncode == 2)
+# The plan against the shape of main's real measured times (the 20 longest suites of the map saved by the run of Thu Nov 12th 2026, in seconds, and 193 short ones of 3.5 s each).
+# Then `release` (872) and `release_queue` (700) were measured with coverage in every Python start of release.sh's stubs and took three times their plain time: each sat alone in a shard
+# and set main's wall time, the other four shards finishing at 417. The plan is a longest-first fill, so a suite longer than a sixth of the total cannot be balanced by any plan: the
+# fix is in the suite's own time (tests/_release_harness.py ENV0), and this check keeps the plan honest for the shape after it: no shard planned over BALANCE times the median shard.
+BALANCE = 1.15
+REC = dict(release=872, release_queue=700, suitemap=144, pilot=132, locale=96, clean_text=93, page_currency=87, install=62, mq_replay_run=59, runners=47, audit_run=45, page_debt=33,
+           puller_reload=33, ask_leaves=32, handoff=27, router_live=25, update=23, project_verbs=21, mq_replay=20, tool_text=20, **{f"short{i}": 3.5 for i in range(193)})
+def planned(table, extra=()):
+    """(the lists, each shard's planned seconds) for a map of `table`, planning also the names in `extra` that the map does not know (new suites)"""
+    pl = sm.shard_plan([*table, *extra], sm.SHARDS, {"suites": {n: {"seconds": v} for n, v in table.items()}})
+    return pl, [sum(table.get(n, 0) for n in p) for p in pl]
+def median(xs): return sorted(xs)[len(xs) // 2]
+for label, table in (("as recorded, release and release_queue measured at three times their plain time", REC),
+                     ("with release and release_queue at their plain time (about 300 s and 260 s)", {**REC, "release": 300, "release_queue": 260})):
+    pl, ld = planned(table, extra=("new_a", "new_b"))
+    check(f"shard balance ({label}): every suite, and the two the map does not know, is in exactly one shard",
+          sorted(x for p in pl for x in p) == sorted([*table, "new_a", "new_b"]) and all(pl), [len(p) for p in pl])
+    if table is REC:
+        check("shard balance (as recorded): the plan cannot go below the longest suite when it is over a sixth of the total: release alone fills a shard at 872 s, over twice the median shard (why the suite's own time was cut)",
+              max(ld) == 872 and max(ld) > 2 * median(ld) and sum(1 for p in pl if "release" in p) == 1 and ["release"] in pl, ld)
+    else:
+        check(f"shard balance ({label}): no shard is planned over {BALANCE} times the median shard", max(ld) <= BALANCE * median(ld), ld)
 y = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8"))
 pj, mj, uj = y["jobs"]["shards"], y["jobs"]["measure"], y["jobs"]["suites"]
 plan_step = next(st for st in pj["steps"] if st.get("id") == "plan")
