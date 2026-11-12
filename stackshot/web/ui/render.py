@@ -31,6 +31,7 @@ from stackshot.model import owner_steps as _os   # the step the server makes on 
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
 from stackshot.waits import watchers as _wat   # the waits' watchers: the chases logged on a wait
+from stackshot.audit import hourly_log as _hlog   # the hourly audit lines written on an item (History lines)
 from stackshot.waits import stall as _stall   # the steps of the stall pass written on an item (History lines)
 from stackshot.waits import handover as _hov   # a finished step handed the item on: the record behind a History line (handover.py)
 from stackshot.waits import quiet as _quiet   # what a front agent was or was not told of an item, one History line each
@@ -2519,6 +2520,7 @@ class Board:
                     ev.append(("hold", _t("item.log.rank_set", rank=f"<b>{e(m['rank'])}</b>") if m.get("rank") else _t("item.log.rank_cleared", old=e(pm.get('rank')))))
                 if s_ != "completed":                       # a step the stall pass took (its mover's pane had no turn running), one line each, said by stackshot
                     for x in _stall.new_entries(pm, m): ev.append(("stall", "stackshot: " + e(x["text"])))
+                    for x in _hlog.new_entries(pm, m): ev.append(("stall", "stackshot: " + e(x["text"])))      # the hourly audit line (audit/hourly.py), its own log
                 if s_ != "completed":                       # a front agent's notice about the item (told on his next turn, or not told), the board keeps the news either way
                     for x in _quiet.new_entries(pm, m): ev.append(("front", "stackshot: " + e(x["text"])))
                 if s_ != "completed" and ps == "open":      # a mover change, in the model's words; a close or a reopening says its own line

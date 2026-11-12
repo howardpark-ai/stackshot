@@ -16,13 +16,17 @@ An item is owed a line when all of these hold, using the silence pass's own scop
     treated like any other: the pass sends nobody anything, it writes a History line, so there is no notice to hold back from a front agent;
   - the item has had no real activity for an hour: `silence.clock`, the clock the silence pass reads (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
     a write by the mover). A bare confirm ("no change") and the audit's own and the ladder's lines do not move it, so a "no change" reply is no update;
-  - no audit line was written on it in the last hour (the newest `Audit` entry of `metadata.stall.log`), so a second pass in the same hour writes nothing.
+  - no audit line was written on it lately: one an hour for the first 24 hours of silence, then one every 6 hours (`SLOW_EVERY`), so a week of silence is about fifty lines, not 168. The newest line of
+    `metadata.hourly_audit.log` is the clock, so a second pass in the same hour writes nothing and a clock that goes backwards only delays the next line.
 
 What the pass verifies, from data the server already holds, and says in the line (`Audit hh:mm: verified …`):
 
   - the mover's pane is in a turn: the CLI's registry shows it `busy` (read by the server on its own box; a session this box does not run shows nothing). A background subagent keeps a pane busy;
   - a subagent is running: a step status in progress, last changed within `silence.SUBAGENT_S`, on a step that opens with the mover's name (`silence.subagent_running`);
   - a pull request tied to the item had a CI result, a review, a comment by a person or a merge in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
+
+The first two are live states; the third is a recorded event, one the activity record already counts. Only a line that rests on a recorded event is stamped as the item's `last_activity` (kind `audit`):
+a pane that is busy all day must not keep every silent item looking fresh. A line that rests on live states alone says so in its words (`… (live state only, nothing recorded on the item)`) and stamps nothing.
 
 No pull request is read from GitHub here: the audit uses recorded data only. A commit or push to a tied pull request is not recorded by anything, so it is not a signal yet. When nothing is
 verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which a later part reads to hand the item on.
@@ -34,16 +38,19 @@ import datetime as dt
 from typing import Any, Callable
 
 from stackshot.audit import audit_checks as _ac
+from stackshot.audit import hourly_log as _log
 from stackshot.audit import silence as _silence
 from stackshot.core import config as _cfg
 from stackshot.model import last_activity as _la
 from stackshot.waits import handoff as _ho
-from stackshot.waits import stall as _stall
 from stackshot.waits import waiting as _wt
 
 EVERY = 3600.0           # an item on an agent is owed a line after this long without activity, and again this long after the last line
+LONG_AFTER = 24 * 3600.0     # …until it has been silent this long; then the lines thin out to one every SLOW_EVERY
+SLOW_EVERY = 6 * 3600.0
 PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:05: verified …`
-KIND_OK, KIND_IDLE = "audit", "audit_idle"      # the `kind` of the stall-log entry of a line that verified something, and of one that did not
+KIND_OK, KIND_IDLE = _log.KIND_OK, _log.KIND_IDLE      # the `kind` of the log entry of a line that verified something, and of one that did not
+LIVE_ONLY = " (live state only, nothing recorded on the item)"
 PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED})      # the recorded signals that are a tied pull request's events
 
 
@@ -53,11 +60,10 @@ def enabled() -> bool:
 
 
 def last_line(meta: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The newest audit line on an item, as its `metadata.stall.log` entry ({"at", "text", "kind"}); None when it has none. The log keeps the last eight entries, so a line pushed out by eight
-    others inside an hour (no pass writes that many) would be written again."""
+    """The newest audit line on an item, as its `metadata.hourly_audit.log` entry ({"at", "text", "kind"}); None when it has none or the entry is torn."""
     best = None
-    for e in _stall.log_of(meta):
-        if e.get("kind") in (KIND_OK, KIND_IDLE) and isinstance(e.get("at"), (int, float)) and (best is None or e["at"] >= best["at"]):
+    for e in _log.log_of(meta):
+        if e.get("kind") in (KIND_OK, KIND_IDLE) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (best is None or e["at"] >= best["at"]):
             best = e
     return best
 
@@ -68,10 +74,11 @@ def idle_marked(meta: dict[str, Any] | None) -> bool:
     return bool(e) and e.get("kind") == KIND_IDLE
 
 
-def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float, pane: Callable[[str], str] | None, same: Any = None) -> list[str]:
-    """What the audit can verify about the item now, as short phrases (empty: nothing). `pane(mover)` → the registry status of the mover's pane ("busy", "idle", "shell", or "" when unknown); one
-    that raises is read as unknown."""
+def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float, pane: Callable[[str], str] | None, same: Any = None) -> tuple[list[str], list[str]]:
+    """What the audit can verify about the item now: (all the short phrases, the ones that rest on a recorded event). Both empty: nothing verified. `pane(mover)` → the registry status of the mover's
+    pane ("busy", "idle", "shell", or "" when unknown); one that raises is read as unknown. A recorded event is one in the past: a record dated ahead of `now` is no event."""
     out: list[str] = []
+    recorded: list[str] = []
     try:
         if pane is not None and pane(mover) == "busy":
             out.append("the mover's pane is in a turn")
@@ -82,17 +89,20 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
     rec = _la.read(item)
     if rec and rec["kind"] in PR_KINDS and 0 <= now - rec["at"] <= EVERY:
         out.append(rec["what"])
-    return out
+        recorded.append(rec["what"])
+    return out, recorded
 
 
-def text(now: float, what: list[str]) -> str:
-    """The line: `Audit hh:mm: verified a, b` or `Audit hh:mm: idle, nothing verified`, the time in the instance zone."""
+def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
+    """The line: `Audit hh:mm: verified a, b` or `Audit hh:mm: idle, nothing verified`, the time in the instance zone. A line that rests on live states alone (nothing in `recorded`) says so."""
     hm = dt.datetime.fromtimestamp(now, _cfg.tz()).strftime("%H:%M")
-    return f"{PREFIX}{hm}: " + ("verified " + ", ".join(what) if what else "idle, nothing verified")
+    if not what:
+        return f"{PREFIX}{hm}: idle, nothing verified"
+    return f"{PREFIX}{hm}: verified " + ", ".join(what) + ("" if recorded else LIVE_ONLY)
 
 
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None) -> dict[str, Any] | None:
-    """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "kind"}. `env.is_front(name, project)` says who is a front agent (None reads none as front)."""
+    """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind"}. `env.is_front(name, project)` says who is a front agent (None reads none as front)."""
     item = items.get(gid) or {}
     if item.get("status") != "open":
         return None
@@ -106,10 +116,10 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     if not (last > 0 and now - last >= EVERY):
         return None
     prior = last_line(meta)
-    if prior is not None and now - prior["at"] < EVERY:
-        return None
-    what = verified(it, meta, mover, now, pane, same)
-    return {"text": text(now, what), "verified": what, "kind": KIND_OK if what else KIND_IDLE}
+    if prior is not None and now - prior["at"] < (SLOW_EVERY if now - last >= LONG_AFTER else EVERY):
+        return None      # a line was written lately (a clock that went backwards lands here too: the next line is only delayed)
+    what, recorded = verified(it, meta, mover, now, pane, same)
+    return {"text": text(now, what, recorded), "verified": what, "recorded": recorded, "kind": KIND_OK if what else KIND_IDLE}
 
 
 def pass_(items: dict[str, dict[str, Any]], now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None) -> list[tuple[str, dict[str, Any]]]:

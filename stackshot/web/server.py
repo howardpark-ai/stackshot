@@ -1984,7 +1984,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
 _REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")     # the structured fields a re-park may not change (status and hold beside them)
-_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
+_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "hourly_audit", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
 _DECISION_AGAIN_S = 3600.0        # a decision is not asked again within this long after the owner's last answer on the item unless the ask line changed
 
 
@@ -6230,12 +6230,14 @@ def _silence_tick() -> "dict[str, Any] | None":
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
-    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified` (an entry of `metadata.stall.log`, the way the ladder's lines are written; kind `audit` or `audit_idle`).
+    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one an hour for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
+    `metadata.stall.log`; kind `audit` or `audit_idle`).
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
-    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that verified something is also the item's last-activity record (kind `audit`). The save is
+    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on a recorded event (a tied pull request's CI result, review, comment or merge) is also the item's last-activity record (kind `audit`); one that rests on live states alone (a busy pane, a subagent) says so and stamps nothing. The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
     passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
     from stackshot.audit import hourly as _hourly
+    from stackshot.audit import hourly_log as _hlog
     from stackshot.tools import next_report as _nr
     if not _hourly.enabled() or _ro.is_read_only():
         return []
@@ -6253,9 +6255,9 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
                 line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
-                _stall.note(item.setdefault("metadata", {}), now, line["text"], kind=line["kind"])
-                if line["verified"]:
-                    _lastact.apply(item, [_lastact.audit_signal(", ".join(line["verified"]), now)], now)
+                _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
+                if line["recorded"]:      # only a line that rests on a recorded event is the item's last activity: a busy pane alone would keep every silent item looking fresh
+                    _lastact.apply(item, [_lastact.audit_signal(", ".join(line["recorded"]), now)], now)
                 _save(gid, item, note="audit: hourly line")
             written.append(gid)
             print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
@@ -10375,6 +10377,9 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
         w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), ZONE))
         out.append(f"idle: poked {idle.get('to') or '?'} {w('poked')}" + (f", the fleet's builder was asked to recover it {w('recovery')}" if idle.get("recovery") else ""))
+    from stackshot.audit import hourly_log as _hlog
+    for x in _hlog.log_of(m)[-1:]:           # the newest hourly audit line (audit/hourly.py), with its own prefix: it is no step of the stall pass
+        out.append(f"audit: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), ZONE))} {x.get('text') or ''}")
     for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
         out.append(f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), ZONE))} {x.get('text') or ''}")
     if _rmod.waits_recycle(item):            # waits for a pane recycle, since when
