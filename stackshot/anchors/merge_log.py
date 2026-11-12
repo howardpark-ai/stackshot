@@ -2,7 +2,7 @@
 
 Why a file of its own. The hub notices a pull request closing as merged at its source, from a read it makes anyway (an anchored pull request's own poll, a thread of a repository anchor's
 notifications), and that read already holds the pull request's body. The routing log does not carry the event in one shape (a routine event on the fleet's own pull request is logged with no
-event type, a direct anchor's with none either, a burst joins its types), and a notice has no room for the body. So `Hub.emit`, the one funnel every event passes before it takes any of those
+event type, a direct anchor's with none either, a burst joins its types), and a notice has no room for the body. So `Hub.emit`, the funnel every event passes before it takes any of those
 lanes, appends one line here for a merge: no second read of GitHub, nothing for a session to receive, nothing a router rules on.
 
 One line per merge: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "refs": ["board#N", ...] the board ids its body names (at most 10)}.

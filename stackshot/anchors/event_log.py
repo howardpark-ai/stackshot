@@ -2,7 +2,7 @@
 
 The same idea as merge_log.py (a file of the hub's own, one small line per event, nothing for a session to receive, no read of GitHub of its own), for the other events that are visible activity
 on a pull request: a CI result (a failure, or passing again after one: what the hub already reports), a comment by a person, a review (a review or a review comment), and a merge. `Hub.emit`, the
-funnel every event passes, appends the line. The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
+funnel every event passes, appends the line (and `Hub.record`, for a merge the receiver finds out late: an anchor first read on a pull request that merged within the last day). The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
 another kind as a merge.
 
 One line per kind of event: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "kind": ci_failed | ci_passed | comment | review | merged,

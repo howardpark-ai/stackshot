@@ -321,16 +321,19 @@ def run(hub: Hub):
         return "full" if (passno + zlib.crc32(a_id.encode())) % FINISHED_EVERY == 0 else "skip"
     late_failed: dict[str, int] = {}                  # anchor id → tries of its late merge line that failed (memory only: a restart gives a few more, no more)
     def logged_merge(repo, n):
-        """Has the merge of this pull request its line in the event log already (written by another anchor on it, the repository's notifications, an earlier start)? Read from the file's start: a merge found late is rare. The event log is
-        the one asked: `Hub.emit` writes both logs, and a late line that failed between the two (the merge log's written, the event log's not) is written again whole."""
-        key = (_cfg.canon_repo(repo), int(n))
-        for r in _events.read(0)[0]:
-            try:
-                if r.get("kind") == "merged" and (_cfg.canon_repo(r.get("repo")), int(r.get("n"))) == key: return True
-            except Exception: continue
-        return False
+        """Which logs hold this pull request's merge already (written by another anchor on it, the repository's notifications, an earlier try or start)? → (merge log, event log). Each is read from its start: a merge found late is rare.
+        Only a `merged` line of the event log counts (a comment's or a CI result's line is no merge)."""
+        key = (_cfg.canon_repo(repo), int(n)); out = []
+        for rows, kind in ((_merges.read(0)[0], None), (_events.read(0)[0], "merged")):
+            found = False
+            for r in rows:
+                try:
+                    if (kind is None or r.get("kind") == kind) and (_cfg.canon_repo(r.get("repo")), int(r.get("n"))) == key: found = True; break
+                except Exception: continue
+            out.append(found)
+        return tuple(out)
     def late_merge(a_id, repo, n, i):
-        """The anchor was first read (the seed in `watch`) on a pull request that has merged already. A merge within LATE_MERGE_S, not in the future, whose line is not in the logs gets its merge line now, so an anchor added
+        """The anchor was first read (the seed in `watch`) on a pull request that has merged already. A merge within LATE_MERGE_S, at most LATE_SKEW ahead of the hub's clock, gets its merge line now in each log that does not hold it, so an anchor added
         after the merge still counts it (the item it is scoped to is credited by the same tie as for any merge: an anchor scoped to items ties them, a project-wide one none). Recorded only (Hub.record): the sessions
         of the anchor are not told. The event log's line is stamped at the time it merged, and so is the merge log's (the server's merge pass skips a merge older than its floor, so a merge of 20 hours ago credits
         last activity but moves no progress clock). The body's refs are not read: it can be edited long after the merge, and the anchor's own scope is the tie here. A pull request still open, closed unmerged, merged
@@ -338,9 +341,11 @@ def run(hub: Hub):
         try:
             merged = (i.get("pull_request") or {}).get("merged_at")
             at, now = _ts(merged), time.time()      # one reading: the window here and the event log's own window are the same test
-            if not merged or at <= 0 or at > now + LATE_SKEW or now - at > LATE_MERGE_S or logged_merge(repo, n): return True
+            if not merged or at <= 0 or at > now + LATE_SKEW or now - at > LATE_MERGE_S: return True
+            has_merge, has_event = logged_merge(repo, n)
+            if has_merge and has_event: return True      # nothing to write: the logs hold it (a try that failed between the two writes writes only the log that lacks it)
             if not hub.record(a_id, {"title": f"{repo.split('/')[1]}#{n} \"{str(i.get('title') or '')[:50]}\"", "who": (i.get("closed_by") or {}).get("login") or "someone", "text": "merged it", "url": i.get("html_url") or f"https://github.com/{repo}/pull/{n}",
-                                     "ts": merged, "etype": "pr_merged", "repo_id": rid(repo), **pr_meta(ci_st.get(a_id))}, kind="github-state", now=now, at=min(at, now)):
+                                     "ts": merged, "etype": "pr_merged", "repo_id": rid(repo), **pr_meta(ci_st.get(a_id))}, kind="github-state", now=now, at=min(at, now), merge_log=not has_merge, event_log=not has_event):
                 return False
             log.info("github %s: merged %d min ago, before the anchor was added: merge line written", a_id, int(now - at) // 60)
             return True
@@ -359,9 +364,11 @@ def run(hub: Hub):
             st = state.get(a_id)
             if st is None:                                # first sight seeds; a merge of the last day gets its merge line before the seed, and a line that could not be written leaves the anchor unseeded and its ETag dropped, so the next pass reads it again
                 if late_merge(a_id, repo, n, i): state[a_id] = snap(i)
-                elif late_failed.__setitem__(a_id, late_failed.get(a_id, 0) + 1) or late_failed[a_id] >= LATE_TRIES:
-                    state[a_id] = snap(i); log.warning("github %s: the late merge line could not be written in %d tries; dropped, the anchor is seeded without it", a_id, LATE_TRIES)
-                else: etags.pop(f"/repos/{repo}/issues/{n}", None)
+                else:
+                    late_failed[a_id] = late_failed.get(a_id, 0) + 1      # per anchor
+                    if late_failed[a_id] >= LATE_TRIES:
+                        state[a_id] = snap(i); log.warning("github %s: the late merge line could not be written in %d tries; dropped, the anchor is seeded without it", a_id, LATE_TRIES)
+                    else: etags.pop(f"/repos/{repo}/issues/{n}", None)
                 return
             if (i["state"], i["comments"], i["updated_at"]) != (st["state"], st["comments"], st["updated"]): resolved.pop(a_id, None)      # the saved label of a finished anchor is made again at the next start
             title = f"{repo.split('/')[1]}#{n} \"{i['title'][:50]}\""

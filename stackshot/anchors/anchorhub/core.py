@@ -388,24 +388,27 @@ class Hub:
         """A receiver's report: summary = {title, who, text, url, ts[, body]} — the anchor's own title, never its type."""
         self.emit(self._event_of(anchor, summary, kind))
 
-    def record(self, anchor: str, summary: dict, kind: str = "github-state", *, now: float | None = None, at: float | None = None) -> bool:
-        """A receiver's report that is only recorded: the merge log and the event log get their line (log_activity, the part of `emit` that comes first), and no session is told, nothing is held or routed.
-        For what the receiver finds out late (a pull request that merged before its anchor was added), which the sessions of the anchor have no use for as news. `now` is the one clock reading the lines
-        and the receiver's window check share; `at` is the time the merge log gets (when it happened, not when the hub found out). → whether both lines were written."""
-        return self.log_activity(self._event_of(anchor, summary, kind), now=now, at=at, strict=True)
+    def record(self, anchor: str, summary: dict, kind: str = "github-state", *, now: float | None = None, at: float | None = None, merge_log: bool = True, event_log: bool = True) -> bool:
+        """A receiver's report that is only recorded: the merge log and the event log get their line (log_activity), and no session is told, nothing is held or routed. `Hub.emit` writes the same two lines first, then routes.
+        For what the receiver finds out late (a pull request that merged before its anchor was added), which the sessions of the anchor have no use for as news. `now` is the one clock reading the lines and the
+        receiver's window check share; `at` is the time the merge log gets (when it happened, not when the hub found out); `merge_log` and `event_log` off leave that log alone (it holds the line already).
+        → whether every log asked for was written."""
+        return self.log_activity(self._event_of(anchor, summary, kind), now=now, at=at, strict=True, merge_log=merge_log, event_log=event_log)
 
-    def log_activity(self, ev: "Event", *, now: float | None = None, at: float | None = None, strict: bool = False) -> bool:
+    def log_activity(self, ev: "Event", *, now: float | None = None, at: float | None = None, strict: bool = False, merge_log: bool = True, event_log: bool = True) -> bool:
         """The hub's two records of an event, each a line in a file the server reads: the merge log and the event log. A failure is logged and goes no further. `now`: the clock reading both lines are made at (default:
         the time of the call); `at`: the time the merge log's line carries (default `now`, when the hub saw the event; the server's merge pass skips a line older than its floor, so an event found late passes the time it
-        happened); `strict`: stop at the first write that raised (the event log's line is not written after a merge log line that failed), for a caller that tries the whole again. → False when either write raised."""
+        happened); `strict`: stop at the first write that raised, for a caller that tries the whole again; `merge_log` / `event_log` off: that log is not written. → False when a write raised."""
         now = time.time() if now is None else now
         ok = True
-        try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), now if at is None else at)      # first, before any lane: a merge is recorded whatever happens to its notice
-        except Exception as e:
-            ok = False; log.warning("merge log: %s", str(e)[:120])
-            if strict: return False
-        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), now, ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
-        except Exception as e: ok = False; log.warning("event log: %s", str(e)[:120])
+        if merge_log:
+            try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), now if at is None else at)      # first, before any lane: a merge is recorded whatever happens to its notice
+            except Exception as e:
+                ok = False; log.warning("merge log: %s", str(e)[:120])
+                if strict: return False
+        if event_log:
+            try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), now, ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
+            except Exception as e: ok = False; log.warning("event log: %s", str(e)[:120])
         return ok
 
     def emit(self, ev: "Event"):

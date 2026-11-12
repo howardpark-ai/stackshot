@@ -1907,8 +1907,61 @@ try:
             pass_of(h71)
         reads71 = calls.count(f"{RP}/issues/71") - n0      # the reads up to the seed (a seeded merged anchor is looked at once in a while after that, as any)
     finally: ahc._merges.note = real_note
-    check("anchor-hub: a log that cannot be written costs at most ghr.LATE_TRIES reads of the issue, then the anchor is seeded (the late line dropped, said in a warning)",
-          reads71 == ghr.LATE_TRIES and "github:example-owner/stackshot#71" in h71.gh_state["state"] and lines13(71) == ([], []) and any("dropped" in w and "late merge" in w for w in warned), (reads71, warned[-2:]))
+    check("anchor-hub: a log that cannot be written costs 3 reads of the issue (ghr.LATE_TRIES, three), then the anchor is seeded (the late line dropped, said in a warning)",
+          ghr.LATE_TRIES == 3 and reads71 == 3 and "github:example-owner/stackshot#71" in h71.gh_state["state"] and lines13(71) == ([], []) and any("dropped" in w and "late merge" in w for w in warned), (reads71, warned[-2:]))
+    # each log is written only if it lacks the line: a failure between the two writes is not repeated on the retry
+    def lines_of(n, repo="example-owner/stackshot"):
+        return [r for r in ahc._merges.read(0)[0] if r["n"] == n and r["repo"] == repo], [r for r in ahc._events.read(0)[0] if r["n"] == n and r["repo"] == repo and r["kind"] == "merged"]
+    ahc._merges.path().unlink(missing_ok=True); ahc._events.path().unlink(missing_ok=True)
+    real_enote = ahc._events.note; eboom = [1]
+    def flaky_event(*a, **k):
+        if eboom[0] > 0: eboom[0] -= 1; raise OSError("event log busy")
+        return real_enote(*a, **k)
+    add_pr(74, 2 * LH); ahc._events.note = flaky_event
+    try:
+        h74 = fresh_hub([74]); pass_of(h74); K74 = "github:example-owner/stackshot#74"
+        check("anchor-hub: an event log write that fails after the merge log's succeeded leaves the anchor unseeded, one merge log line, none in the event log", K74 not in h74.gh_state["state"] and [len(x) for x in lines_of(74)] == [1, 0], [len(x) for x in lines_of(74)])
+        pass_of(h74)
+    finally: ahc._events.note = real_enote
+    check("anchor-hub: …the retry writes only the event log: exactly one line in each log, and the anchor is seeded", K74 in h74.gh_state["state"] and [len(x) for x in lines_of(74)] == [1, 1], [len(x) for x in lines_of(74)])
+    add_pr(75, 2 * LH); eboom[0] = 10 ** 6; ahc._events.note = flaky_event
+    try:
+        h75 = fresh_hub([75]); K75 = "github:example-owner/stackshot#75"
+        for _ in range(8):
+            if K75 in h75.gh_state["state"]: break
+            pass_of(h75)
+    finally: ahc._events.note = real_enote
+    check("anchor-hub: an event log that never writes leaves exactly one merge log line (not one per try), none in the event log, and the anchor is seeded after the tries", K75 in h75.gh_state["state"] and [len(x) for x in lines_of(75)] == [1, 0], [len(x) for x in lines_of(75)])
+    # a line of another kind for the same pull request does not stand for its merge
+    add_pr(76, 2 * LH); ahc._events.note("github:example-owner/stackshot#76", "", "comment", "alice", [], time.time(), vouched="comment")
+    pass_of(fresh_hub([76]))
+    check("anchor-hub: a comment's line already in the event log for the pull request does not suppress its late merge line", [len(x) for x in lines_of(76)] == [1, 1], [len(x) for x in lines_of(76)])
+    # the clock skew: a minute ahead is read as now, five minutes ahead is a torn time
+    add_pr(77, -60); add_pr(78, -300); pass_of(fresh_hub([77, 78]))
+    check("anchor-hub: a merge time a minute ahead of the hub's clock is accepted; five minutes ahead writes neither log", [len(x) for x in lines_of(77)] == [1, 1] and lines_of(78) == ([], []), (lines_of(77), lines_of(78)))
+    # an exception inside the late path is a failure (not a seed): the anchor is read again
+    add_pr(79, 2 * LH); h79 = fresh_hub([79]); K79 = "github:example-owner/stackshot#79"; real_rec = h79.record
+    def raising(*a, **k): raise RuntimeError("boom")
+    h79.record = raising; pass_of(h79)
+    check("anchor-hub: an exception inside the late path leaves the anchor unseeded, its issue ETag dropped and no line written", K79 not in h79.gh_state["state"] and f"{RP}/issues/79" not in h79.gh_state["etags"] and lines_of(79) == ([], []), list(h79.gh_state["state"]))
+    h79.record = real_rec; pass_of(h79)
+    check("anchor-hub: …and the next pass writes it and seeds", K79 in h79.gh_state["state"] and [len(x) for x in lines_of(79)] == [1, 1], [len(x) for x in lines_of(79)])
+    # the retry count is per anchor: a second anchor failing gets its own three tries
+    add_pr(80, 2 * LH); add_pr(81, 2 * LH); ahc._merges.note = never; n80, n81 = calls.count(f"{RP}/issues/80"), calls.count(f"{RP}/issues/81")
+    try:
+        h80 = fresh_hub([80, 81])
+        for _ in range(8):
+            if all(f"github:example-owner/stackshot#{k}" in h80.gh_state["state"] for k in (80, 81)): break
+            pass_of(h80)
+    finally: ahc._merges.note = real_note
+    check("anchor-hub: the retry count is per anchor: two anchors that cannot be written each cost 3 reads of their issue", (calls.count(f"{RP}/issues/80") - n80, calls.count(f"{RP}/issues/81") - n81) == (3, 3), (calls.count(f"{RP}/issues/80") - n80, calls.count(f"{RP}/issues/81") - n81))
+    # what the line says
+    add_pr(82, 2 * LH); h82 = fresh_hub([82]); seen82 = []; rec82 = h82.record
+    h82.record = lambda anchor, summary, *a, **k: (seen82.append(dict(summary)), rec82(anchor, summary, *a, **k))[1]
+    pass_of(h82)
+    check("anchor-hub: the late line's report names the pull request, who closed it, its link and the time it merged",
+          len(seen82) == 1 and seen82[0]["title"] == 'stackshot#82 "pr 82"' and seen82[0]["who"] == "alice" and seen82[0]["url"] == "https://github.com/example-owner/stackshot/pull/82" and seen82[0]["etype"] == "pr_merged"
+          and abs(ahc._ts(seen82[0]["ts"]) - (time.time() - 2 * LH)) < 5 and "meta" not in seen82[0], seen82)
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
     ahc.log.removeHandler(_caph)
