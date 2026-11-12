@@ -13,10 +13,19 @@ with HOME and the XDG folders pointed into the scratch folder, a fake `gh` on PA
      removes again, and a failing gh gives n/a with the reason
   6  errors: an unwritable state folder is a clear message and a nonzero status with nothing printed on stdout; a bad config value, a missing
      explicit config and a checkout with no suites are status 2; a damaged previous record is started over with a note
-  7  read-only: the fake repository is byte for byte as it was, and nothing outside the state folder is written
+  7  a previous record that cannot be used (a field missing or mistyped, no UTC offset, a count that is negative, infinite or not whole,
+     another format or repository, not JSON, nested too deep): started over with one note and replaced, the next run compares with it
+  8  the config file: a mistyped key warns on stderr (exit 0), nan and booleans are status 2
+  9  growth equal to its limit does not trigger; the shipped limit never triggers with a previous run
+  10 a write that fails after the probe passed: status 1 and no temporary file
+  11 the suite map: negative, infinite and mistyped times are ignored with a note; a map matching no suite prints no slowest line
+  12 --fetch is taken before --map (and the docstring says so); no temporary folder gives one line; SIGTERM removes the download folder,
+     and the handler is restored
+  13 a root named g[1]; the file is executable
+  14 read-only: the fake repository is byte for byte as it was, and nothing outside the state folder is written
 
     tests/run-suite test_trim_report        -> exit 0 / 1"""
-import hashlib, json, os, pathlib, stat, subprocess, sys
+import contextlib, hashlib, io, json, os, pathlib, shutil, signal, stat, subprocess, sys, tempfile, time
 
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch
@@ -214,9 +223,9 @@ CONF.write_text("")
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": PATH2})
 check("--fetch: the artifact's map is used", r.returncode == 0 and "serial minutes: 22.5 (9 of 11 suites timed, 2 untimed)" in r.stdout, r.stdout + r.stderr)
 calls = GH_LOG.read_text().splitlines()
-check("--fetch: two gh calls, for main's push run of tests.yml and the suitemap artifact",
-      len(calls) == 2 and "--repo acme/widgets" in calls[0] and "--workflow tests.yml" in calls[0] and "--branch main" in calls[0] and "--event push" in calls[0]
-      and calls[1].startswith("run download 4242") and "--name suitemap" in calls[1], calls)
+check("--fetch: two gh calls, exactly: main's push run of tests.yml, then the suitemap artifact (the name is not a prefix of another)",
+      calls == ["run list --repo acme/widgets --workflow tests.yml --branch main --event push --status success --limit 1 --json databaseId",
+                f"run download 4242 --repo acme/widgets --name suitemap --dir {GH_DIR.read_text().strip()}"], calls)
 check("--fetch: the download folder is removed again", not pathlib.Path(GH_DIR.read_text().strip()).exists(), GH_DIR.read_text())
 r = run(*base, "--fetch", "--github", "acme/widgets", env={"PATH": PATH2, "GH_FAIL": "1"})
 check("--fetch: a failing gh gives n/a and the reason", r.returncode == 0 and "serial minutes: n/a" in r.stdout and "gh run list failed: boom" in r.stdout, r.stdout + r.stderr)
@@ -258,11 +267,217 @@ check("a bad --now: status 2", r.returncode == 2 and "not an ISO time" in r.stde
 r = run("--map", str(MAP), "--state-dir", str(T / "st7"))
 check("a damaged previous record is started over with a note", r.returncode == 0 and "starting over" in r.stdout and "this run is the baseline" in r.stdout, r.stdout + r.stderr)
 check("a damaged previous record is replaced by a good one", json.loads((T / "st7" / "fakerepo.json").read_text())["format"] == 1)
-(T / "st7" / "fakerepo.json").write_text(json.dumps({"format": 1, "generated": "not a time", "suites": {"a": 1}}))
+(T / "st7" / "fakerepo.json").write_text(json.dumps({"format": 1, "repo": "fakerepo", "generated": "not a time", "suites": {"a": 1}, "test_lines": 1}))
 r = run("--map", str(MAP), "--state-dir", str(T / "st7"))
-check("a previous record with a bad time is started over", r.returncode == 0 and "damaged; starting over" in r.stdout, r.stdout + r.stderr)
+check("a previous record with a bad time is started over", r.returncode == 0 and "damaged (generated); starting over" in r.stdout, r.stdout + r.stderr)
 
-# ------------------------------------------------------------------ 7 read-only, nothing outside
+# ------------------------------------------------------------------ 7 a previous record that cannot be used
+r = run("--map", str(MAP), "--state-dir", str(T / "st9g"), now="2026-01-12T09:00:00+00:00")
+GOOD = json.loads((T / "st9g" / "fakerepo.json").read_text())
+
+
+def mutated(**kw):
+    d = json.loads(json.dumps(GOOD)); d.update(kw)
+    return json.dumps(d)
+
+
+def dropped(k):
+    d = json.loads(json.dumps(GOOD)); del d[k]
+    return json.dumps(d)
+
+
+def with_suite(value_text):
+    d = json.loads(json.dumps(GOOD)); d["suites"]["a"] = "@@"
+    return json.dumps(d).replace('"@@"', value_text)
+
+
+def damaged_run(key, text, expect=None):
+    folder = T / "st9" / key.replace(" ", "_").replace("/", "_"); folder.mkdir(parents=True)
+    (folder / "fakerepo.json").write_text(text)
+    r = run("--map", str(MAP), "--state-dir", str(folder), now="2026-01-19T09:00:00+00:00")
+    notes = [l for l in r.stdout.splitlines() if l.startswith("note:")]
+    ok = (r.returncode == 0 and "Traceback" not in r.stderr and len(notes) == 1 and "starting over" in notes[0]
+          and "this run is the baseline" in r.stdout and (expect is None or expect in notes[0]))
+    check(f"previous record ({key}): started over with one note, exit 0, no traceback", ok, (r.returncode, r.stderr[-400:], notes))
+    fresh = json.loads((folder / "fakerepo.json").read_text())
+    check(f"previous record ({key}): replaced by this run's record", fresh["format"] == 1 and fresh["repo"] == "fakerepo" and fresh["generated"].startswith("2026-01-19") and fresh["test_lines"] == sum(fresh["suites"].values()), fresh.get("generated"))
+    r2 = run("--map", str(MAP), "--state-dir", str(folder), now="2026-01-26T09:00:00+00:00")
+    check(f"previous record ({key}): the next run compares with the record that replaced it", r2.returncode == 0 and "(7.0 days ago)" in r2.stdout and "starting over" not in r2.stdout, r2.stdout + r2.stderr)
+
+
+(T / "st9ok").mkdir()
+(T / "st9ok" / "fakerepo.json").write_text(json.dumps(GOOD))
+r = run("--map", str(MAP), "--state-dir", str(T / "st9ok"), now="2026-01-19T09:00:00+00:00")
+check("a sound previous record is used (the control of the damaged ones)", r.returncode == 0 and "(7.0 days ago)" in r.stdout and "starting over" not in r.stdout, r.stdout + r.stderr)
+damaged_run("format 2", mutated(format=2), "not of this tool's format")
+damaged_run("format true", mutated(format=True), "not of this tool's format")
+damaged_run("format missing", dropped("format"), "not of this tool's format")
+damaged_run("another repository", mutated(repo="otherrepo"), "otherrepo")
+damaged_run("no repo field", dropped("repo"), "repository")
+damaged_run("no test_lines", dropped("test_lines"))
+damaged_run("test_lines a string", mutated(test_lines="x"))
+damaged_run("test_lines true", mutated(test_lines=True))
+damaged_run("test_lines negative", mutated(test_lines=-1))
+damaged_run("test_lines a float", mutated(test_lines=1.5))
+damaged_run("test_lines huge", mutated(test_lines=10 ** 30))
+damaged_run("generated without an offset", mutated(generated="2026-01-05T09:00:00"), "UTC offset")
+damaged_run("generated a bare date", mutated(generated="2026-01-05"), "UTC offset")
+damaged_run("generated a number", mutated(generated=5))
+damaged_run("generated missing", dropped("generated"))
+damaged_run("suites a list", mutated(suites=[1, 2]))
+damaged_run("a suite count of 1e999", with_suite("1e999"))
+damaged_run("a negative suite count", with_suite("-3"))
+damaged_run("a suite count of true", with_suite("true"))
+damaged_run("a suite count as a string", with_suite('"3"'))
+damaged_run("a suite count with a fraction", with_suite("2.5"))
+damaged_run("a huge suite count", with_suite("1" + "0" * 40))
+damaged_run("a JSON list", "[1, 2]")
+damaged_run("JSON null", "null")
+damaged_run("an empty file", "")
+damaged_run("nesting deep enough to overflow the parser", "[" * 200000)
+
+# ------------------------------------------------------------------ 8 the config file: mistyped keys, nan, booleans
+CONF.write_text("max_suite = 5\nMAX_SUITES = 5\nmax_serial_minutes = 100\n[fakerepo]\nmax_test_line_growht = 3\n[otherrepo]\nmax_suites = 100\nmax_suit = 4\n")
+r = run("--map", str(MAP), "--state-dir", str(T / "st10"), "--config", str(CONF))
+check("an unknown key: one warning line per key on stderr, none for known keys or another repo's good keys",
+      r.stderr.splitlines() == [f"warning: unknown key max_suite in {CONF}", f"warning: unknown key MAX_SUITES in {CONF}",
+                                f"warning: unknown key max_test_line_growht in {CONF} (table [fakerepo])", f"warning: unknown key max_suit in {CONF} (table [otherrepo])"], r.stderr)
+check("an unknown key: exit 0, the report is printed and the key is not used", r.returncode == 0 and "test-trim report: fakerepo" in r.stdout and "TRIGGER" not in r.stdout, r.stdout)
+CONF.write_text("max_suites = 100\nmax_serial_minutes = 100\n[fakerepo]\nmax_suite_minutes = 100\n[otherrepo]\nmax_suites = 3\n")
+r = run("--map", str(MAP), "--state-dir", str(T / "st10"), "--config", str(CONF))
+check("a config with only the four keys (and another repo's table) warns of nothing", r.returncode == 0 and r.stderr == "", r.stderr)
+for key in ("max_suites", "max_serial_minutes", "max_suite_minutes", "max_test_line_growth"):
+    for bad in ("nan", "+nan", "true", "false"):
+        CONF.write_text(f"{key} = {bad}\n")
+        r = run("--map", str(MAP), "--state-dir", str(T / "st10"), "--config", str(CONF))
+        check(f"{key} = {bad}: exit 2 naming the key", r.returncode == 2 and f"{key} must be a number" in r.stderr and r.stdout == "", (r.returncode, r.stderr))
+CONF.write_text("[fakerepo]\nmax_suites = nan\n")
+r = run("--map", str(MAP), "--state-dir", str(T / "st10"), "--config", str(CONF))
+check("nan in the repo's table: exit 2 naming the key", r.returncode == 2 and "max_suites must be a number" in r.stderr, (r.returncode, r.stderr))
+
+# ------------------------------------------------------------------ 9 growth at its limit, and the default limit with a previous run
+st11 = ["--state-dir", str(T / "st11"), "--map", str(MAP)]
+run(*st11, now="2026-02-10T09:00:00+00:00")                       # the baseline
+suite("e01", 30)
+CONF.write_text("max_test_line_growth = 30\n")
+r = run(*st11, "--config", str(CONF), "--dry-run", "--json", now="2026-02-17T09:00:00+00:00")
+j = json.loads(r.stdout)
+check("growth equal to its limit does not trigger", j["growth_per_week"] == 30.0 and j["triggers"] == [], j.get("triggers"))
+CONF.write_text("max_test_line_growth = 29\n")
+r = run(*st11, "--config", str(CONF), "--dry-run", now="2026-02-17T09:00:00+00:00")
+check("growth one above its limit triggers", "TRIGGER: max_test_line_growth: +30 test lines per week > 29" in r.stdout, r.stdout)
+suite("e02", 3000)
+r = run(*st11, "--dry-run", "--json", now="2026-02-17T09:00:00+00:00")        # no config file at all: the shipped placeholder
+j = json.loads(r.stdout)
+check("the default max_test_line_growth with a previous run never triggers", r.returncode == 0 and j["growth_per_week"] == 3030.0 and j["triggers"] == [], r.stdout[:300] + r.stderr)
+for k in ("e01", "e02"):
+    (REPO / "tests" / f"{k}_scenario.py").unlink()
+
+# ------------------------------------------------------------------ 10 a failed write, after the probe passed
+st12 = T / "st12"; (st12 / "fakerepo.json").mkdir(parents=True)     # the record's place is a folder: the probe file can be made, the rename cannot
+r = run("--map", str(MAP), "--state-dir", str(st12))
+check("a failed write after the probe passed: exit 1, a message, nothing on stdout", r.returncode == 1 and r.stdout == "" and "cannot write" in r.stderr and "Traceback" not in r.stderr, (r.returncode, r.stdout[:100], r.stderr))
+check("a failed write leaves no temporary file behind", sorted(p.name for p in st12.iterdir()) == ["fakerepo.json"], [p.name for p in st12.iterdir()])
+
+# ------------------------------------------------------------------ 11 the suite map: negative, non-finite and mistyped times; a map that matches nothing
+(T / "neg-map.json").write_text(json.dumps({"format": 1, "commit": "c" * 40, "suites": {
+    "s01": {"seconds": -5}, "s02": {"seconds": 60}, "s03": {"seconds": float("inf")}, "s04": {"seconds": "9"}, "s05": {"seconds": True},
+    "s06": {"ok": False}, "gone_long_ago": {"seconds": -1}}}))
+r = run("--map", str(T / "neg-map.json"), "--state-dir", str(T / "st13"))
+notes = [l for l in r.stdout.splitlines() if l.startswith("note:")]
+check("a negative, infinite or mistyped time is ignored with a note naming the suites that have it (not a suite the checkout lacks, not a missing time)",
+      r.returncode == 0 and len(notes) == 1 and notes[0].endswith(": s01, s03, s04, s05"), (r.stdout, r.stderr))
+check("those suites count as untimed and add no minutes", "serial minutes: 1.0 (1 of 11 suites timed, 10 untimed)" in r.stdout and "slowest 1:" in r.stdout, r.stdout)
+(T / "none-map.json").write_text(json.dumps({"format": 1, "commit": "d", "suites": {"other": {"seconds": 5}}}))
+r = run("--map", str(T / "none-map.json"), "--state-dir", str(T / "st13"))
+check("a map that matches no suite prints no slowest line", r.returncode == 0 and "serial minutes: 0.0 (0 of 11 suites timed, 11 untimed)" in r.stdout and "slowest" not in r.stdout, r.stdout)
+
+# ------------------------------------------------------------------ 12 --fetch beats --map, a folder that cannot be made, SIGTERM
+base = ["--state-dir", str(T / "st5"), "--config", str(CONF)]
+CONF.write_text("")
+r = run(*base, "--fetch", "--github", "acme/widgets", "--map", str(T / "no-such-map.json"), env={"PATH": PATH2})
+check("--fetch wins over --map", r.returncode == 0 and "serial minutes: 22.5 (9 of 11 suites timed, 2 untimed)" in r.stdout, r.stdout + r.stderr)
+doc = TR.__doc__
+check("the docstring lists --fetch before --map, as the code takes them", 0 < doc.index("--fetch         the `suitemap`") < doc.index("--map FILE      this file"))
+EMPTY_CONF = T / "empty.toml"; EMPTY_CONF.write_text("")
+
+
+def inproc(*args):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            rc = TR.main(["--root", str(REPO), "--now", "2026-01-05T09:00:00+00:00", "--dry-run", "--config", str(EMPTY_CONF), *args])
+        except BaseException as e:
+            rc = f"raised {e!r}"
+    return rc, out.getvalue(), err.getvalue()
+
+
+real_mkdtemp = tempfile.mkdtemp
+
+
+def no_folder(*a, **k):
+    raise PermissionError(13, "Permission denied")
+
+
+tempfile.mkdtemp = no_folder
+try:
+    rc, out, err = inproc("--fetch", "--github", "acme/widgets", "--state-dir", str(T / "st14"))
+finally:
+    tempfile.mkdtemp = real_mkdtemp
+check("--fetch with no temporary folder: one line saying so, n/a minutes, exit 0, no traceback",
+      rc == 0 and "no suite times: cannot make a temporary folder for the download: Permission denied" in out and "serial minutes: n/a" in out and "Traceback" not in err, (rc, out[-300:], err))
+
+term_before = signal.getsignal(signal.SIGTERM)
+rc, out, err = inproc("--map", str(MAP), "--state-dir", str(T / "st14"))
+check("main restores the SIGTERM handler it found", rc == 0 and signal.getsignal(signal.SIGTERM) == term_before, (rc, signal.getsignal(signal.SIGTERM)))
+rc, out, err = inproc("--map", str(MAP), "--state-dir", str(T / "st14"), "--config", str(T / "missing.toml"))
+check("main restores the SIGTERM handler after a failed run too", rc == 2 and signal.getsignal(signal.SIGTERM) == term_before, (rc, signal.getsignal(signal.SIGTERM)))
+
+SLOW_BIN = T / "bin-slow"; SLOW_BIN.mkdir(); SLOW_PID = T / "slow.pid"; TOKEN = f"trimreport-fake-{os.getpid()}"
+(SLOW_BIN / "gh").write_text(f"#!/bin/sh\necho $$ > {SLOW_PID}\nexec sleep 30\n"); (SLOW_BIN / "gh").chmod(0o755)
+slow_env = {"PATH": f"{SLOW_BIN}:{os.environ['PATH']}", "HOME": str(HOME), "TMPDIR": tmp, "LANG": "C.UTF-8", "TRIMREPORT_FAKE": TOKEN}
+child = subprocess.Popen([sys.executable, TOOL, "--now", "2026-01-05T09:00:00+00:00", "--fetch", "--github", "acme/widgets", "--dry-run", "--config", str(EMPTY_CONF)],
+                         env=slow_env, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+fake_pid = None
+
+
+def tool_folders():
+    return sorted(p.name for p in T.iterdir() if p.name.startswith("test-trim-"))
+
+
+try:
+    waited = 0.0
+    while waited < 20 and not (SLOW_PID.exists() and SLOW_PID.read_text().strip()):
+        time.sleep(0.05); waited += 0.05
+    fake_pid = int(SLOW_PID.read_text().strip()) if SLOW_PID.exists() and SLOW_PID.read_text().strip() else None
+    during = tool_folders()
+    child.send_signal(signal.SIGTERM)                      # by PID: the tool we started, and nothing else
+    try:
+        out, err = child.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        child.kill(); out, err = child.communicate()
+    check("SIGTERM during the download: the tool ends with status 143 (its handler ran, it was not killed)", child.returncode == 143, (child.returncode, err[-300:]))
+    check("SIGTERM during the download: the folder existed and is removed", len(during) == 1 and tool_folders() == [], (during, tool_folders()))
+    check("SIGTERM during the download: the waiting gh is stopped too", fake_pid is not None and not os.path.exists(f"/proc/{fake_pid}"), fake_pid)
+finally:
+    if child.poll() is None:
+        child.kill(); child.wait()
+    if fake_pid is not None and os.path.exists(f"/proc/{fake_pid}"):
+        try:                                               # only our own fake gh: it carries the token in its environment
+            if TOKEN.encode() in pathlib.Path(f"/proc/{fake_pid}/environ").read_bytes():
+                os.kill(fake_pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+# ------------------------------------------------------------------ 13 a root whose name holds glob characters, the file's mode
+GLOBBY = T / "g[1]"; shutil.copytree(REPO, GLOBBY)
+r = run("--root", str(GLOBBY), "--map", str(MAP), "--dry-run", "--state-dir", str(T / "st15"))
+check("a root named g[1] is measured like any other (the path is not a pattern)", r.returncode == 0 and "suites: 11\n" in r.stdout and "g_1_" in r.stdout, (r.returncode, r.stdout[:200], r.stderr))
+with open(TOOL) as f:
+    first_line = f.readline()
+check("the tool is executable and has its shebang, like tools/text_check.py", os.stat(TOOL).st_mode & 0o111 == 0o111 and first_line.startswith("#!"), oct(os.stat(TOOL).st_mode))
+
+# ------------------------------------------------------------------ 14 read-only, nothing outside
 r = run("--map", str(MAP), "--json", "--dry-run")
 check("--json prints the record", r.returncode == 0 and json.loads(r.stdout)["repo"] == "fakerepo", r.stdout[:200] + r.stderr)
 shot = tree_hash(REPO)

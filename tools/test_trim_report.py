@@ -14,12 +14,13 @@ What it measures, per run:
                  starts with anything else are not counted. It is a size measure, not a coverage measure: stable between runs, cheap.
   * serial minutes, slowest suites   from the suite map's plain seconds per suite (`suites.<name>.seconds`, the file tests/suitemap.py
                  writes to .suitemap/map.json on main and CI keeps as the `suitemap` artifact): no second store of durations. A
-                 suite the map has no time for is counted as untimed. Where the map comes from, first that applies:
-                   --map FILE      this file;
+                 suite the map has no time for is counted as untimed, and a time that is negative or not a finite number is ignored
+                 with a note naming the suite. Where the map comes from, first that applies:
                    --fetch         the `suitemap` artifact of the newest successful push run of tests.yml on main, downloaded with
                                    `gh` into a temporary folder that is removed again (two GitHub calls; --github names the
                                    repository, default: the origin remote). CI keeps that artifact for 7 days, so a week with no
-                                   push to main leaves nothing to fetch;
+                                   push to main leaves nothing to fetch. It wins over --map;
+                   --map FILE      this file;
                    otherwise       <root>/.suitemap/map.json.
                  With no readable map the minutes are reported as n/a, the two minute thresholds are not checked, and the report says why.
   * since the previous run   suites added and deleted by name, test lines added and deleted (per suite, the rise or fall of its
@@ -33,26 +34,34 @@ the top of the file apply to every repository, and a table named after the repos
     max_suite_minutes     the slowest single suite
     max_test_line_growth  test lines gained since the previous run, scaled down to a week when the gap is longer than a week
 
+A key the file names that is none of these four (a mistyped `max_suite`) is not used: a `warning: unknown key <name> in <file>` line
+goes to stderr for each, and the exit status is unchanged. A value that is not a number of at least 0 (a boolean, a string, nan) is a
+config problem, exit 2.
+
 The defaults are placeholders that never trigger: set the real values from the measured medians. When a value is above its limit the
 report ends with `TRIGGER: <which>` lines (one per threshold, in the order above), the same lines are kept in the state file, and the
 exit status is still 0: this tool opens nothing and cleans nothing up. A trigger is the cue for a cleanup pass (a deep scan for
 duplicate or obsolete suites), which is not part of this report.
 
 State file: `${XDG_STATE_HOME:-~/.local/state}/stackshot/test-trim/<repo>.json` (--state-dir replaces the folder), written
-atomically (a temporary file in the same folder, then a rename). --dry-run prints the report and writes nothing; --json prints the
+atomically (a temporary file in the same folder, then a rename). A previous record that cannot be used (not JSON, another format or
+repository, a missing or wrong-typed field, a time without a UTC offset, a count that is not a non-negative whole number) is started
+over from with a one-line note, and this run's record replaces it. --dry-run prints the report and writes nothing; --json prints the
 record instead of the text. `--now ISO` sets the clock, for tests.
 
 Exit status: 0 the report was made (triggers included), 1 the state folder or file cannot be written, 2 a usage, config or checkout
-problem."""
+problem. SIGTERM ends the run cleanly (the download folder is removed first; status 143)."""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import glob
 import json
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -63,6 +72,7 @@ SUITE_GLOB = "tests/*_scenario.py"
 SUITE_NAME = re.compile(r"(\w+)_scenario\.py$")
 TEST_LINE = re.compile(r"^\s*(?:assert\b|(?:check|ck)\(|self\.assert\w*\()")
 SLOWEST = 8
+COUNT_MAX = 10 ** 12      # a count above this is not a test-line count; it would also overflow the float arithmetic
 LIST_MAX = 20            # names listed per added/deleted line of the report
 # Placeholders that never trigger. They are replaced by the measured medians in the config file, not by editing this table.
 DEFAULTS = {"max_suites": 1_000_000, "max_serial_minutes": 1_000_000.0, "max_suite_minutes": 1_000_000.0, "max_test_line_growth": 1_000_000}
@@ -83,7 +93,7 @@ def count_test_lines(text: str) -> int:
 def measure_suites(root: str) -> dict[str, int]:
     """{suite name: test lines} for every tests/<name>_scenario.py under root"""
     out: dict[str, int] = {}
-    for path in sorted(glob.glob(os.path.join(root, SUITE_GLOB))):
+    for path in sorted(glob.glob(os.path.join(glob.escape(root), SUITE_GLOB))):
         m = SUITE_NAME.search(os.path.basename(path))
         if not m:
             continue
@@ -95,8 +105,8 @@ def measure_suites(root: str) -> dict[str, int]:
     return out
 
 
-def read_map(path: str) -> tuple[dict[str, float], str]:
-    """({suite: plain seconds}, commit) from a suite map file; ValueError says what is wrong with it"""
+def read_map(path: str) -> tuple[dict[str, float], str, list[str]]:
+    """({suite: plain seconds}, commit, suites whose time is unusable) from a suite map file; ValueError says what is wrong with it"""
     try:
         with open(path, encoding="utf-8") as f:
             m = json.load(f)
@@ -107,11 +117,14 @@ def read_map(path: str) -> tuple[dict[str, float], str]:
     if not isinstance(m, dict) or m.get("format") != 1 or not isinstance(m.get("suites"), dict):
         raise ValueError(f"{path} is not a suite map of format 1")
     secs: dict[str, float] = {}
+    bad: list[str] = []
     for name, e in m["suites"].items():
         v = e.get("seconds") if isinstance(e, dict) else None
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0:
             secs[name] = float(v)
-    return secs, str(m.get("commit") or "")
+        elif isinstance(e, dict) and v is not None:
+            bad.append(str(name))
+    return secs, str(m.get("commit") or ""), sorted(bad)
 
 
 def github_slug(root: str) -> str | None:
@@ -173,10 +186,17 @@ def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
         raise Fail(f"cannot read config file {path}: {e.strerror or e}")
     except tomllib.TOMLDecodeError as e:
         raise Fail(f"config file {path} is not valid TOML: {e}")
+    for k, v in data.items():                   # a table is some repository's; any other key must be one of the four
+        if not isinstance(v, dict) and k not in DEFAULTS:
+            print(f"warning: unknown key {k} in {path}", file=sys.stderr)
+        if isinstance(v, dict):
+            for k2 in v:
+                if k2 not in DEFAULTS:
+                    print(f"warning: unknown key {k2} in {path} (table [{k}])", file=sys.stderr)
     for source in (data, data.get(repo) if isinstance(data.get(repo), dict) else {}):
         for k, v in source.items():
             if k in DEFAULTS:
-                if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or math.isnan(v) or v < 0:
                     raise Fail(f"config file {path}: {k} must be a number of at least 0, got {v!r}")
                 t[k] = v
     return t
@@ -201,23 +221,49 @@ def check_state_dir(folder: str) -> None:
         raise Fail(f"cannot write the state folder {folder}: {e.strerror or e}", 1)
 
 
-def read_previous(path: str) -> tuple[dict | None, str | None]:
-    """(previous record, note): no file is no note; a file that is not a record of this format is ignored with a note"""
+def valid_count(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= COUNT_MAX
+
+
+def record_problem(rec, repo: str) -> str | None:
+    """why a parsed previous record cannot be used (one line), or None when every field this tool reads is sound"""
+    if not (isinstance(rec, dict) and type(rec.get("format")) is int and rec["format"] == FORMAT):
+        return "is not of this tool's format"
+    if rec.get("repo") != repo:
+        return f"is for repository {str(rec.get('repo'))[:60]!r}, not {repo!r}"
+    if not isinstance(rec.get("suites"), dict):
+        return "is damaged (suites)"
+    if not all(valid_count(v) for v in rec["suites"].values()):
+        return "is damaged (a suite's test lines)"
+    if not valid_count(rec.get("test_lines")):
+        return "is damaged (test_lines)"
+    g = rec.get("generated")
+    if not isinstance(g, str):
+        return "is damaged (generated)"
+    try:
+        when = dt.datetime.fromisoformat(g)
+    except ValueError:
+        return "is damaged (generated)"
+    if when.tzinfo is None or when.utcoffset() is None:
+        return "is damaged (generated has no UTC offset)"
+    return None
+
+
+def read_previous(path: str, repo: str) -> tuple[dict | None, str | None]:
+    """(previous record, note): no file is no note; a file that cannot be used is ignored with a one-line note"""
     try:
         with open(path, encoding="utf-8") as f:
             rec = json.load(f)
     except FileNotFoundError:
         return None, None
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
         return None, f"the previous record {path} cannot be read ({e.__class__.__name__}); starting over"
-    if not (isinstance(rec, dict) and rec.get("format") == FORMAT and isinstance(rec.get("suites"), dict)
-            and isinstance(rec.get("generated"), str)):
-        return None, f"the previous record {path} is not of this tool's format; starting over"
     try:
-        dt.datetime.fromisoformat(rec["generated"])
-        rec["suites"] = {str(k): int(v) for k, v in rec["suites"].items()}
-    except (ValueError, TypeError):
-        return None, f"the previous record {path} is damaged; starting over"
+        why = record_problem(rec, repo)
+    except (ValueError, TypeError, OverflowError, KeyError, AttributeError):
+        why = "is damaged"
+    if why:
+        return None, f"the previous record {path} {why}; starting over"
     return rec, None
 
 
@@ -288,8 +334,9 @@ def render(rec: dict, prev: dict | None, days: float | None, notes: list[str]) -
     else:
         extra = f", {rec['untimed']} untimed" if rec["untimed"] else ""
         L.append(f"serial minutes: {rec['serial_minutes']:.1f} ({len(rec['timed'])} of {rec['suite_count']} suites timed{extra})")
-        L.append(f"slowest {min(SLOWEST, len(rec['slowest']))}:")
-        L.extend(f"  {i}. {n}  {m:.1f} min" for i, (n, m) in enumerate(rec["slowest"], 1))
+        if rec["slowest"]:
+            L.append(f"slowest {len(rec['slowest'])}:")
+            L.extend(f"  {i}. {n}  {m:.1f} min" for i, (n, m) in enumerate(rec["slowest"], 1))
     if prev is None:
         L.append("since the previous run: none kept, this run is the baseline")
     else:
@@ -307,6 +354,20 @@ def render(rec: dict, prev: dict | None, days: float | None, notes: list[str]) -
     return "\n".join(L)
 
 
+def make_work_folder(work: list[str]) -> str:
+    """a temporary folder for the download, listed in work at once: SIGTERM is held back between the two, so it cannot be missed"""
+    old = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        try:
+            folder = tempfile.mkdtemp(prefix="test-trim-")
+        except OSError as e:
+            raise ValueError(f"cannot make a temporary folder for the download: {e.strerror or e}")
+        work.append(folder)
+        return folder
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old)
+
+
 def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
     root = os.path.abspath(args.root)
     suites = measure_suites(root)
@@ -318,7 +379,7 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
     if not args.dry_run:
         check_state_dir(state_dir)
     state_file = os.path.join(state_dir, repo + ".json")
-    prev, note = read_previous(state_file)
+    prev, note = read_previous(state_file, repo)
     notes = [note] if note else []
 
     secs: dict[str, float] | None = None
@@ -328,12 +389,14 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
             slug = args.github or github_slug(root)
             if not slug:
                 raise ValueError("--fetch needs --github OWNER/REPO, and the origin remote names none")
-            folder = tempfile.mkdtemp(prefix="test-trim-")
-            work.append(folder)
-            map_path = fetch_map(slug, folder)
+            map_path = fetch_map(slug, make_work_folder(work))
         else:
             map_path = args.map or os.path.join(root, ".suitemap", "map.json")
-        secs, map_commit = read_map(map_path)
+        secs, map_commit, bad = read_map(map_path)
+        bad = [n for n in bad if n in suites]
+        if bad:
+            notes.append(f"suite times ignored (negative or not a finite number), counted as untimed: {', '.join(bad[:LIST_MAX])}"
+                         + (f", and {len(bad) - LIST_MAX} more" if len(bad) > LIST_MAX else ""))
     except ValueError as e:
         notes.append(f"no suite times: {e}")
 
@@ -365,6 +428,10 @@ def head_commit(root: str) -> str | None:
     return out if re.fullmatch(r"[0-9a-f]{40}", out) else None
 
 
+def on_sigterm(signum, _frame) -> None:
+    raise SystemExit(128 + signum)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="test_trim_report.py", description="The weekly size report of a repository's test suites (read-only).")
     ap.add_argument("--root", default=".", help="the checkout to measure (default: the current folder)")
@@ -379,6 +446,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--now", help="the clock as an ISO time with an offset, for tests")
     args = ap.parse_args(argv)
     work: list[str] = []
+    old_term = None
+    try:
+        old_term = signal.signal(signal.SIGTERM, on_sigterm)    # so the cleanup below also runs when the run is stopped
+    except ValueError:                                           # not the main thread: the caller owns its signals
+        pass
     try:
         try:
             now = dt.datetime.fromisoformat(args.now) if args.now else dt.datetime.now(dt.timezone.utc)
@@ -400,6 +472,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         for d in work:
             shutil.rmtree(d, ignore_errors=True)
+        if old_term is not None:
+            signal.signal(signal.SIGTERM, old_term)
 
 
 if __name__ == "__main__":
