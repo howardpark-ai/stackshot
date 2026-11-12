@@ -204,6 +204,7 @@ def dry_run(a: argparse.Namespace) -> int:
 PASS_DIR_RX = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")      # a pass folder's name (stamp_phase.new_pass_id)
 PRUNE_DAYS = 60            # a pass folder older than this is removed …
 PRUNE_KEEP = 5             # … unless it is one of the newest this many
+ITEM_RX = re.compile(r"[a-z]\d{1,9}")      # an item's file id as an undo entry names it (g12): the letter folder and the number of its file in the store
 
 
 class RunLocked(Exception):
@@ -385,33 +386,73 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
     return 0
 
 
+def _holds_before(rec: dict[str, Any], e: dict[str, Any]) -> bool:
+    """Does the entry's item, as its file stands now, still hold the wait keys the entry planned as `before` (and not `after`), and is it open? A False for anything else, an item that cannot be read included:
+    only a clear answer resolves an entry."""
+    # Resolving an unrecorded entry to `same` assumes the server is no longer finishing that batch: an apply started within seconds of a crashed or timed-out batch could mark an entry `same`
+    # while the batch still writes it, and a later undo would then skip it.
+    try:
+        item, before, after = e.get("item"), e.get("before"), e.get("after")
+        if not (isinstance(item, str) and ITEM_RX.fullmatch(item) and isinstance(before, dict) and before and isinstance(after, dict)):
+            return False
+        from stackshot.core import config as _cfg  # noqa: PLC0415
+        store = Path(rec["store"]) if isinstance(rec.get("store"), str) and rec["store"] else _cfg.path("paths", "store")
+        raw = json.loads((store / item[0] / f"{item[1:]}.json").read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or raw.get("status") != "open":
+            return False
+        meta = raw.get("metadata") or {}
+        now = {k: meta.get(k) for k in before}
+        return now == before and now != after
+    except Exception:  # noqa: BLE001  — an item that does not read stays unresolved
+        return False
+
+
 def resolve_unrecorded(rec: dict[str, Any], quiet: bool = False) -> int:
     """An entry whose result is still None is one the run died on, between the server writing its batch and the script recording the answer. The server keeps every batch's real results in its pass record
     (<state>/migration/<pass id>.json): for such an entry the record's action and keys are taken in place of the planned ones, in memory. An entry the record does not name (the run died before the server's
-    write, or no record is here) keeps its planned values, which the undo checks against the item as it stands: the item holds `before` (nothing to put back) or `after` (put back). → how many were resolved."""
+    write, or no record is here) keeps its planned values, which the undo checks against the item as it stands: the item holds `before` (nothing to put back) or `after` (put back). One narrow rule closes
+    such an entry without an undo: when the item is open and its keys still equal the entry's planned `before` and not its `after`, the server wrote nothing for it and the entry is `same`; an item that holds
+    `after`, or anything else, stays unresolved. → how many were resolved."""
     pend = [e for e in rec["items"] if e.get("result") is None]
     if not pend:
         return 0
+    by_shown: dict[Any, Any] = {}
     try:
         from stackshot.core import config as _cfg
         srv = json.loads(_cfg.state("migration", f"{rec.get('pass_id')}.json").read_text(encoding="utf-8"))
+        by_shown = {r.get("item"): r for r in srv.get("items") or [] if isinstance(r, dict)}
     except Exception as e:  # noqa: BLE001  — no record, or one that does not read: the planned values stand
         if not quiet:
             say(f"{len(pend)} entries have no recorded result and the server's pass record could not be read ({e.__class__.__name__}): their planned values are used")
-        return 0
-    by_shown = {r.get("item"): r for r in srv.get("items") or [] if isinstance(r, dict)}
-    n = 0
+    n = untouched = 0
     for e in pend:
         r = by_shown.get(e.get("shown"))
-        if not r or r.get("action") not in ("set", "same", "moved", "refused"):
-            continue
-        e["result"] = r["action"]
-        if r["action"] in ("set", "same"):
-            e["before"], e["after"], e["history"], e["dropped"] = r["before"], r["after"], r.get("history", e.get("history", "")), r.get("dropped", e.get("dropped", []))
-        n += 1
+        if r and r.get("action") in ("set", "same", "moved", "refused"):
+            e["result"] = r["action"]
+            if r["action"] in ("set", "same"):
+                e["before"], e["after"], e["history"], e["dropped"] = r["before"], r["after"], r.get("history", e.get("history", "")), r.get("dropped", e.get("dropped", []))
+            n += 1
+        elif _holds_before(rec, e):
+            e["result"] = "same"
+            n += 1
+            untouched += 1
     if not quiet:
-        say(f"{len(pend)} entries had no recorded result: {n} taken from the server's pass record, {len(pend) - n} keep their planned values")
+        say(f"{len(pend)} entries had no recorded result: {n - untouched} taken from the server's pass record, {untouched} found still holding their old keys (nothing was written for them), {len(pend) - n} keep their planned values")
     return n
+
+
+def read_undo(path: Path) -> dict[str, Any]:
+    """The undo file at `path`, checked: an object whose `items` is a list of objects that each carry what an undo sends (`item` as text, `before` and `after` as objects). Raises OSError, ValueError or
+    RecursionError (a file nested too deep to parse) for anything else, so the callers refuse it in one line before they do anything."""
+    rec = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(rec, dict) or not isinstance(rec.get("items"), list):
+        raise ValueError("it holds no list of items")
+    for i, e in enumerate(rec["items"], 1):
+        if not isinstance(e, dict):
+            raise ValueError(f"entry {i} is not an object")
+        if not isinstance(e.get("item"), str) or not e["item"].strip() or not isinstance(e.get("before"), dict) or not isinstance(e.get("after"), dict):
+            raise ValueError(f"entry {i} lacks an item and its before and after keys")
+    return rec
 
 
 def unfinished(run_dir: Path) -> list[Path]:
@@ -420,14 +461,14 @@ def unfinished(run_dir: Path) -> list[Path]:
     out: list[Path] = []
     for f in sorted(run_dir.glob("*/undo.json")) if run_dir.is_dir() else []:
         try:
-            rec = json.loads(f.read_text(encoding="utf-8"))
+            rec = read_undo(f)
             if rec.get("undone") or not any(e.get("result") is None for e in rec.get("items", [])):
                 continue
             if resolve_unrecorded(rec, quiet=True):
                 SP.write_atomic(f, rec)
             if any(e.get("result") is None for e in rec.get("items", [])):
                 out.append(f)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
     return out
 
@@ -437,10 +478,8 @@ def undo(a: argparse.Namespace, app: Any = None) -> int:
     file lives where a pass puts it, <run-dir>/<pass id>/undo.json, so a typo never makes a directory or a `.lock` of its own."""
     undo_path = Path(a.undo).expanduser()
     try:
-        rec = json.loads(undo_path.read_text(encoding="utf-8"))
-        if not isinstance(rec, dict) or not isinstance(rec.get("items"), list):
-            raise ValueError("it holds no list of items")
-    except (OSError, ValueError) as e:
+        read_undo(undo_path)
+    except (OSError, ValueError, RecursionError) as e:
         say(f"cannot use {undo_path} as an undo file ({e.__class__.__name__}: {str(e)[:120]}): nothing is done")
         return 1
     real = undo_path.resolve()
@@ -457,7 +496,7 @@ def undo(a: argparse.Namespace, app: Any = None) -> int:
 
 
 def _undo(a: argparse.Namespace, app: Any = None) -> int:
-    rec = json.loads(Path(a.undo).expanduser().read_text(encoding="utf-8"))
+    rec = read_undo(Path(a.undo).expanduser())
     resolve_unrecorded(rec)
     if any(e.get("result") is None for e in rec["items"]):
         say("some entries have no recorded result: they are put back from their planned values, which also reverts an item a LATER pass wrote; undo the later pass files first, then this one")

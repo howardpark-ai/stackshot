@@ -650,6 +650,22 @@ check("14 merge_log.normal: owner/repo at GitHub's longest (39 + 1 + 100) and a 
 try: ML.normal({**ok_row, "repo": "z" * 5000})
 except ValueError as e_: msg_ = str(e_)
 else: msg_ = ""
+LONG_OK, LONG_BAD = "a" * 39 + "/" + "b" * 100, "a" * 40 + "/" + "b" * 100      # GitHub's longest owner/repo (140 characters), and one character more
+caps_ok = [ML.line_for(f"github:{LONG_OK}#{ML.MAX_NUMBER}", "", "pr_merged", [], 5.0), ML.line_for("", f"https://github.com/{LONG_OK}/pull/{ML.MAX_NUMBER}", "pr_merged", [], 5.0), EL.lines_for(f"github:{LONG_OK}#{ML.MAX_NUMBER}", "", "pr_merged", "", [], 5.0)]
+caps_bad = [ML.line_for(f"github:{LONG_BAD}#5", "", "pr_merged", [], 5.0), ML.line_for("", f"https://github.com/{LONG_BAD}/pull/5", "pr_merged", [], 5.0), ML.line_for(f"github:acme/widgets#{ML.MAX_NUMBER + 1}", "", "pr_merged", [], 5.0),
+            ML.line_for(f"github:acme/widgets#{'9' * 400}", "", "pr_merged", [], 5.0), ML.line_for("", f"https://github.com/acme/widgets/pull/{ML.MAX_NUMBER + 1}", "pr_merged", [], 5.0), ML.line_for("", f"https://github.com/acme/widgets/pull/{'7' * 30}", "pr_merged", [], 5.0),
+            EL.lines_for(f"github:{LONG_BAD}#5", "", "pr_merged", "", [], 5.0), EL.lines_for(f"github:acme/widgets#{ML.MAX_NUMBER + 1}", "", "pr_merged", "", [], 5.0)]
+check("14 merge_log writers: a repository at the cap (140 characters) and a number at the cap (a billion) are written, and `normal` accepts each line", caps_ok[0] and caps_ok[1] and caps_ok[0]["n"] == ML.MAX_NUMBER and len(caps_ok[0]["repo"]) == ML.MAX_REPO and len(caps_ok[2]) == 1
+      and ML.normal(caps_ok[0])["n"] == ML.MAX_NUMBER and ML.normal(caps_ok[1])["repo"] == LONG_OK, caps_ok)
+check("14 merge_log writers: an over-cap repository or number (an anchor or a link, a run of digits however long) is no line at all, never one the reader would refuse; the same for event_log.lines_for",
+      caps_bad[:6] == [None] * 6 and caps_bad[6:] == [[], []] and ML.pull_of(f"github:{LONG_BAD}#5") == ("", 0) and ML.pull_of("", f"https://github.com/acme/widgets/pull/{ML.MAX_NUMBER + 1}") == ("", 0), caps_bad)
+check("14 merge_log: the regexes bound their digit runs and name parts, so no pattern can match a run longer than the caps (a 30-digit number is not read as its first ten)", "{1,10}" in ML._ANCHOR.pattern and "{1,10}" in ML._GITHUB_PATH.pattern and "{1,140}" in ML._ANCHOR.pattern
+      and ML.pull_of("", f"https://github.com/acme/widgets/pull/{'1' * 30}") == ("", 0), (ML._ANCHOR.pattern, ML._GITHUB_PATH.pattern))
+_eleven = "https://github.com/a/b/pull/10000000001"      # eleven digits whose first ten are at the cap: only the lookahead keeps it from reading as number 1000000000
+_no_look = re.compile(ML._GITHUB_PATH.pattern.replace(r"(?!\d)", ""), re.I).search(_eleven)
+check("14 merge_log: the link pattern's lookahead is what refuses an eleven-digit number whose first ten digits are within the cap (without it the link reads as a/b#1000000000)",
+      r"(?!\d)" in ML._GITHUB_PATH.pattern and _no_look is not None and (_no_look.group(1), int(_no_look.group(2))) == ("a/b", 1000000000)
+      and ML._GITHUB_PATH.search(_eleven) is None and ML.pull_of("", _eleven) == ("", 0), (_no_look and _no_look.groups(), ML.pull_of("", _eleven)))
 check("14 merge_log.normal: the message of a refused line holds no more than the start of a long repo (it rides into a log line)", msg_.startswith("not a merge line: repo='zzz") and "z" * 41 not in msg_ and len(msg_) < 120, msg_)
 errs = _io.StringIO()
 with _cl.redirect_stderr(errs): kept = attempt(lambda: server._merge_rows([{"ts": now0, "repo": deep, "n": 5, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 6, "refs": []}], now0))
