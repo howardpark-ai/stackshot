@@ -9,7 +9,7 @@ What a stored item gets (`plan_for`; the server's `one` refuses any item whose r
   ask_by / wake beside an after link with no kind    until = the date, wait_kind = item (as create and update store it)
   a bare wake (no hold, no kind, no wait_basis, no after link)    kept as it is: it is a backstop (a hand-off's, or one stored before until), not a wait, and as `until` it would park the item
   an item with no old date, or one that stores an until and an old date both    left as it is (the second is listed)
-  a date the old code did not act on (an ask_by that stood without a kind, so nothing read it, whatever else the item stores; or a wake beside an after link with no kind, which only got a notice)
+  a date the old code did not act on (an ask_by the old watchers did not read: they read it only for a relay, or as the backstop of an item wait, or of an anchor or event wait they could end, so one beside no kind, a time kind, an anchor wait with no anchor or an event wait with a bad phrase was never read; or a wake beside an after link with no kind, which only got a notice)
                        As until the watchers act on it. A date already past is NOT migrated (it would wake the item on the next tick): it is listed as "already due" for a person to re-save with the date meant;
                        a future one is migrated and listed as "newly watched", with the day it wakes and how it was read before (never watched, or only a notice). An item with a wake and a hold is not in
                        this class: the old wake pass released it at the date, as the watchers do.
@@ -205,7 +205,10 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             why = same(r0, r1)
             if why:
                 return {**out, "action": "refused", "why": f"the item would read differently as until: {why}; left as it is"}
-            how = HOW_NOTICE if plan["notice_only"] else HOW_NEVER if plan["source"] == "ask_by" and not r0["watched"] and r1["watched"] else ""
+            # an ask_by is a date the old watchers read only for a wait they owned (a relay, an item wait, an anchor or event wait they could end) and, as the chosen date, only when no dated wake is the earlier one: so a
+            # date taken from the ask_by was read exactly when the item was watched before (an anchor with no anchor, an event with a bad phrase, a kind time, no kind at all: not watched, not read)
+            read_ask_by = bool(r0["watched"]) and _uw.kind_of(meta) in ("relay", "item", "anchor", "event")
+            how = HOW_NOTICE if plan["notice_only"] else HOW_NEVER if plan["source"] == "ask_by" and not read_ask_by else ""
             if how:                                     # a date the old code did not act on as the watchers will: nothing read it, or the old pass only sent a notice
                 ep = _wt.wake_epoch(plan["until"])
                 if ep is not None and ep <= time.time():
