@@ -6,6 +6,7 @@ from stackshot.core import ghbudget as _gb   # the host's one hourly ledger of G
 GHPOLL = 60   # s; conditional GETs — a 304 does not count against the API budget
 FIRST_PASS = 600   # s; how long the first pass after a start may take before the board counts the silence (announced with hub.hold, cleared by the pass's own check)
 BACKOFF = 600   # s; the wait after GitHub refuses a read for its rate limit (announced to the board with hub.hold, so it is not shown stale)
+COMMIT_DOWNTIME = 600   # s; a pull request last looked at longer ago than this (or never) was missed by the hub: a new head found then is stamped at its committer date, a new head found live at the time it was seen
 FINISHED_EVERY = 10   # a closed or merged anchor is looked at once in this many passes (staggered by anchor), not every pass
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
 def run(hub: Hub):
@@ -262,16 +263,19 @@ def run(hub: Hub):
     def pr_meta(c):
         """The head branch and author of the watched pull request, from the CI state `c` of its anchor (its last read of the PR; {} until it has been read): added to every event on the PR."""
         return {k: c[k] for k in ("head_ref", "author") if (c or {}).get(k)}
-    def commit_seen(a_id, repo, n, c, title=None):
-        """The head commit of a watched pull request changed (a push, or a force-push to another commit): record it as the item's last activity, at the commit's own committer date. GitHub sends no push notification, so
-        this is the only place it is seen; the pull request read the caller just made holds the new head sha, and this is the one extra read, made only now. Only a branch of the repository itself counts (the
-        read is not made for a fork's pull request: it would record nothing). A date the repository gives that lies ahead of the clock by more than a few minutes, or one that cannot be read, records nothing; a read that
-        fails records nothing and is not tried again (the next commit is the next signal). The event is recorded and told to no session (Hub.emit)."""
+    def commit_seen(a_id, repo, n, c, down, title=None):
+        """The head commit of a watched pull request changed (a push, or a force-push to another commit, an old commit included): record it as the item's last activity. GitHub sends no push notification, so this is the only
+        place it is seen. Found live, it is stamped at the time the hub saw it, with no request: the push is what happened now, whenever the commit was made. Found after the hub was away (`down`: its last look at this pull
+        request is older than COMMIT_DOWNTIME or unknown), the commit is read once for its committer date (never later than now, never older than the event log's window); a read that fails (the hourly cap, a refusal, an
+        unreadable date) stamps the time seen instead, so the signal is not lost. Only a branch of the repository itself counts (nothing is read or recorded for a fork's pull request). The event is recorded and told to no session (Hub.emit)."""
         if not c.get("own_branch"): return
-        try: cm = gh(f"/repos/{repo}/git/commits/{c['sha']}")
-        except Exception as e: log.warning("github %s: commit %s: %s", a_id, c["sha"][:7], str(e)[:100]); return
-        when = _events.commit_time(((cm.get("committer") or {}) if isinstance(cm, dict) else {}).get("date"), time.time())
-        if when is None: return
+        now = time.time(); when = now
+        if down:
+            try: cm = gh(f"/repos/{repo}/git/commits/{c['sha']}")
+            except Exception as e: log.warning("github %s: commit %s: %s", a_id, c["sha"][:7], str(e)[:100])
+            else:
+                t = _events.commit_time(((cm.get("committer") or {}) if isinstance(cm, dict) else {}).get("date"), now)
+                if t is not None: when = t
         if not title:
             with hub.lock: title = ((hub.status.get("anchors") or {}).get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
         hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", **pr_meta(c)}, kind="github-state")
@@ -285,6 +289,7 @@ def run(hub: Hub):
         except Exception as e:
             if "404" in str(e) or "Not Found" in str(e): c["pr"] = False
             return
+        last, c["looked"] = c.get("looked"), time.time()      # when this pull request was last looked at (kept with the CI state, so it survives a restart): a head that changed after a gap was missed, not seen live
         if p is not None:
             c["pr"] = True
             learn(repo, (p.get("base") or {}).get("repo"))
@@ -293,7 +298,7 @@ def run(hub: Hub):
             c["head_ref"], c["author"] = str((p.get("head") or {}).get("ref") or ""), str((p.get("user") or {}).get("login") or "")      # whose pull request it is (a builder's branch is prefixed with its name); kept with the CI state, so a 304 later still knows
             hr, br = (str((((p.get(k) or {}).get("repo")) or {}).get("full_name") or "").lower() for k in ("head", "base"))
             c["own_branch"] = bool(hr) and hr == br      # the head branch is in the repository itself, not a fork's (a deleted fork has no head repo, and a payload that does not say names none): only then is a CI result the repository's own side moving
-            if was and c["sha"] != was: commit_seen(a_id, repo, n, c, title)      # the head commit changed since the last read of this pull request: the one extra read of the commit (a first sight has no earlier sha and reads nothing; a 304 has no payload and reads nothing)
+            if was and c["sha"] != was: commit_seen(a_id, repo, n, c, last is None or c["looked"] - last > COMMIT_DOWNTIME, title)      # the head commit changed since the last read of this pull request (a first sight has no earlier sha and records nothing; a 304 has no payload and records nothing)
         if not c["sha"]: return
         try: r = gh(f"/repos/{repo}/commits/{c['sha']}/check-runs?per_page=100", conditional=True)
         except Exception: return

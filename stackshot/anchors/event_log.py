@@ -25,10 +25,10 @@ The line's time is the event's own (`Event.ts`) when it is there and sane, else 
 cannot stamp as now. A time older than FLOOR_H or more than AHEAD_S ahead of the hub's clock is dropped (the rule the server's pass has always had for a line: a stale event is not news, a far-future one
 is a torn clock); a time that is absent or cannot be read falls back to the hub's.
 
-A commit is not a GitHub notification (a push sends none), so the receiver (`github.py`) finds it in the pull request read it already makes for every anchored pull request: when the head sha differs from the one it
-kept for that pull request, it reads that one commit (one extra request, only then) and hands the hub an event of type `pr_commit` at the commit's committer date, which the repository holds. Such an event is
-recorded here and never delivered to a session (`Hub.emit` returns after the logs). It counts only from a branch of the repository itself (vouched as a CI result is), and a committer date more than
-COMMIT_AHEAD_S ahead of the hub's clock writes nothing (`commit_time`).
+A commit is not a GitHub notification (a push sends none), so the receiver (`github.py`) finds it in the pull request read it already makes for every anchored pull request: when the head sha differs from the
+one it kept for that pull request, it hands the hub an event of type `pr_commit` stamped at the time it saw the new head (no extra request). Only when the hub was away (its last look at that pull request is older than
+ten minutes, or unknown) is the commit read once more for its committer date, which `commit_time` clamps to the window; a read that fails stamps the time the hub saw it. Such an event is recorded here and never delivered
+to a session (`Hub.emit` returns after the logs). It counts only from a branch of the repository itself (vouched as a CI result is).
 
 Left out on purpose: a comment or review by a bot (a login ending in "[bot]", or an account the payload types as Bot; the hub drops its own account's comments upstream, so a comment made under that account is never seen), a CI event on a repository's notifications with no pull request, and any
 event the hub cannot name a pull request for.
@@ -54,7 +54,7 @@ MAX_REFS = _ml.MAX_REFS
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})      # GitHub's author_association values that are the repository's own side; every other value and a missing one is a stranger's
 FLOOR_H = 24.0       # an event older than this is not activity (a day of downtime, or a file read again from its start): the record would only fill with old news
 AHEAD_S = 3600.0     # …nor one more than this ahead of the clock (a skew of minutes is allowed; the server's pass reads a line that far ahead as a torn one)
-COMMIT_AHEAD_S = 300.0     # a commit's committer date may be this far ahead of the hub's clock (a skew of minutes); a date further ahead is a wrong clock on the committer's machine and records nothing
+COMMIT_FLOOR_S = FLOOR_H * 3600.0 - 60.0     # after downtime a commit is stamped at its committer date, but never older than this (a minute inside the window above, so the line is not dropped as old news)
 
 
 def path() -> Path:
@@ -130,12 +130,12 @@ def event_time(ts: Any, now: float) -> float | None:
 
 
 def commit_time(date: Any, now: float) -> float | None:
-    """When a commit was made, for its line: the committer date the repository holds (`date`, an ISO string), read as epoch seconds and never later than `now`. None when it cannot be read or lies more
-    than COMMIT_AHEAD_S ahead of `now` (a torn clock: the commit records nothing). A date older than the window is dropped later, by `event_time`, as for any event."""
+    """When a commit is stamped, after downtime: the committer date the repository holds (`date`, an ISO string) as epoch seconds, never later than `now` (a committer's clock ahead of ours reads as now) and never
+    older than COMMIT_FLOOR_S before `now` (inside the window of `event_time`). None only when the date cannot be read: the caller then stamps the time it saw the commit."""
     own = _epoch(date)
-    if own is None or own > now + COMMIT_AHEAD_S:
+    if own is None:
         return None
-    return min(own, float(now))
+    return max(min(own, float(now)), float(now) - COMMIT_FLOOR_S)
 
 
 def lines_for(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float, bot: bool = False, *, vouched: Any = (), ts: Any = None) -> list[dict[str, Any]]:

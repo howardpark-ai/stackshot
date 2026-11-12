@@ -26,8 +26,9 @@ is skipped. The caller passes `now`; a candidate time after it is read as `now`.
 How a page reads the record (the On agent rows and the item page, model/last_activity.py `age_s`, `band`): the age is the time since `at`, taken at render and by the page script after; a band by that age: `ok` under
 BAND_WARN_S (45 minutes), `warn` from there to BAND_BAD_S (1 hour), `bad` from an hour on. An item with no record has no age here and nothing is made up for it.
 
-A `commit` is the pull request's head commit changing: GitHub sends no push notification, so the hub's GitHub receiver notices the new head sha in the pull request read it already makes and reads that commit once, for its
-committer date (the time of the signal, so downtime does not shift it). A force-push to an older commit gives an older time, which never moves the record back."""
+A `commit` is the pull request's head commit changing: GitHub sends no push notification, so the hub's GitHub receiver notices the new head sha in the pull request read it already makes. Seen live it is stamped at the time
+the hub saw it (a push of an old commit, or a commit whose author clock is off, still happened now); seen after the hub was away it is stamped at the commit's committer date, so downtime does not shift it, and at the time seen
+when that date cannot be read. A force-push to an older commit is a push like any other."""
 from __future__ import annotations
 
 import math
