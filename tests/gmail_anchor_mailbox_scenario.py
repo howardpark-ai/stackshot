@@ -276,7 +276,8 @@ pathlib.Path(core.STATUS).write_text(saved_status)
 REFUSALS = [("gmail:q:from:pat AND", "AND has nothing after it"), ("gmail:q:OR from:pat", "OR has nothing before it"),
             ("gmail:q:(from:pat OR from:amy", "an opening parenthesis is never closed"), ("gmail:q@work:(from:pat", "an opening parenthesis is never closed"),
             ("gmail:q:label:x", "label: is not supported"), ("gmail:q:-from:pat", "negation (-from) is not supported"), ("gmail:q:from:()", "has nothing inside"),
-            ("gmail:q@home,work:from:pat AND (", "has nothing inside"), ("gmail:q:(from:pat#mention=sam", "never closed"), (STOREDBAD, "")]
+            ("gmail:q@home,work:from:pat AND (", "has nothing inside"), ("gmail:q:(from:pat#mention=sam", "never closed"),
+            ("gmail:q:from:pat AND#mention=sam", "AND has nothing after it"), (STOREDBAD, "")]      # the #mention fragment is no part of the query: the query before it is the one judged
 for url, why in REFUSALS:
     try: anchors(add=[url]); check(f"tool grammar: {url!r} is refused when added", False, stored())
     except Exception as e:
@@ -362,6 +363,8 @@ try:
     check("labels: an entry with a bad name or a bad address is skipped, the others name their mailbox (M17)", gw.mailbox_labels([ADA, BO, CY]) == {CY: CY, "home": BO, "work": ADA}, gw.mailbox_labels([ADA, BO, CY]))
     core._cfg.CFG["anchor_hub"]["gmail_names"] = {"bad": "not-an-address"}
     check("labels: an address that is no address names nothing, and the mailbox keeps its own address", gw.mailbox_labels([ADA]) == {ADA: ADA}, gw.mailbox_labels([ADA]))
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = {"w": "not an address"}
+    check("labels: a name given to something that is no address is not used even for an account file of that name", gw.mailbox_labels(["not an address"]) == {"not an address": "not an address"}, gw.mailbox_labels(["not an address"]))
     core._cfg.CFG["anchor_hub"]["gmail_names"] = {"work": ADA, "home": BO}
     check("labels: the mailboxes are listed in name order, whichever order they are given (M19)", list(gw.mailbox_labels([CY, BO, ADA])) == [CY, "home", "work"] and list(gw.mailbox_labels([ADA, BO, CY])) == [CY, "home", "work"], list(gw.mailbox_labels([CY, BO, ADA])))
 finally:
