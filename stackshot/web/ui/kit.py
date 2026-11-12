@@ -126,7 +126,7 @@ li.irow:target{background:color-mix(in srgb,var(--acc) 8%,var(--card));box-shado
 .ir-age[data-b]{font-weight:600;font-variant-numeric:tabular-nums}
 .ir-actl{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:13px;line-height:18px;margin-top:2px;min-width:0}
 .ir-pill{flex:none;font-size:12px;line-height:16px;font-weight:600;padding:0 7px;border:1px solid currentColor;border-radius:999px;white-space:nowrap}
-.ir-lwhat{color:var(--mut);min-width:0;overflow-wrap:anywhere}
+.ir-lbl,.ir-lwhat{color:var(--mut);min-width:0;overflow-wrap:anywhere}
 .istat .ir-actl{flex:1 1 100%;margin-top:0}
 .ir-who{font-size:13px;line-height:18px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere}
 .ir-who .attn{color:var(--t-you);font-weight:600}.ir-who a{color:var(--mut)}.ir-who a:hover{color:var(--acc)}.ir-who .own{color:var(--t-you);font-weight:600}

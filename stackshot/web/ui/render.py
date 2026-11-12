@@ -2902,7 +2902,7 @@ class Board:
         if not_taken: bits.append(f'<span class="iwarn">{_t("item.not_taken")}</span>')
         sline = " · ".join(bits)
         act = self.act_parts(r) if kind_ == _ui.AGENT else None      # an item on an agent shows its last activity beside the state, as its row on the home page does: the age, the pill, what it was and when
-        act_html = f'<div class="ir-actl">{act[0]}{act[1]}</div>' if act else ""
+        act_html = f'<div class="ir-actl"><span class="ir-lbl">{esc(_t("home.last_label"))}</span>{act[0]}{act[1]}</div>' if act else ""      # the label tells this age from the "since" one beside the state
         said = "" if not done else (_t("item.no_outcome") if oc == "unrecorded" else (_ip.clean(why) or (_t("item.no_outcome") if not by else "")))
         reason_html = f'<p class="ireason">{M(said)}</p>' if said else ""
         goal_html = f'<p class="igoal">{self.mentions(e(goal), r["gid"])}</p>' if goal and goal != title else ""
@@ -3766,7 +3766,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         if r.get("status") != "open" or is_parked(r): return None
         rec = _lastact.read(r)
         if not rec: return None
-        t = datetime.datetime.fromtimestamp(rec["at"], self.now.tzinfo)
+        try: t = datetime.datetime.fromtimestamp(rec["at"], self.now.tzinfo)
+        except (ValueError, OverflowError, OSError): return None      # a time the calendar cannot take: the old age and no line, never a page that fails (the record already refuses one past MAX_AT)
         sec = max(0.0, self.now.timestamp() - rec["at"]); b = _lastact.band(sec)
         words = {k: _t(v) for k, v in _ACT_WORD.items()}
         clock = f"{t:%H:%M}" if t.date() == self.now.date() else self.when(rec["at"])

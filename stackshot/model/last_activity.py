@@ -20,7 +20,7 @@ from the previous status text, `update_signal`) and `audit` (a line the audit wr
 request). For those two the `what` is the short text itself. A later part stamps them; this one only knows them, so the record is extended by adding a signal, not by changing the record.
 A reply that says nothing changed is no `update` (same text as before), and the ladder's and the server's own lines are none of these kinds.
 
-Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number, a kind that is none of KINDS)
+Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number or is past MAX_AT, a kind that is none of KINDS)
 is skipped. The caller passes `now`; a candidate time after it is read as `now`.
 
 How a page reads the record (the On agent rows and the item page, model/last_activity.py `age_s`, `band`): the age is the time since `at`, taken at render and by the page script after; a band by that age: `ok` under
@@ -39,6 +39,7 @@ from stackshot.model import progress as _progress
 FIELD = "last_activity"
 MAX_WHAT = 80         # characters of the words kept
 MAX_STEPS_NAMED = 3   # steps named in one save's words
+MAX_AT = 32503680000.0  # the latest time kept (the start of year 3000): a time past it (a count of milliseconds, say) is torn, because no clock and no date reader can take it
 BAND_WARN_S = 45 * 60   # the age from which a row's activity reads "quiet" (amber)
 BAND_BAD_S = 60 * 60    # the age from which it reads "idle over 1 h" (red)
 OK, WARN, BAD = "ok", "warn", "bad"
@@ -68,7 +69,7 @@ def _words(v: Any) -> str:
 
 
 def clean(c: Any, now: float | None = None) -> dict[str, Any] | None:
-    """A signal as {"at": float, "kind": str, "what": str}, None for one that is torn: not a dict, a kind that is none of KINDS, no finite positive time, no words. A time after `now` (when given) is read as `now`."""
+    """A signal as {"at": float, "kind": str, "what": str}, None for one that is torn: not a dict, a kind that is none of KINDS, no finite positive time no later than MAX_AT, no words. A time after `now` (when given) is read as `now`."""
     if not isinstance(c, dict):
         return None
     try:
@@ -77,7 +78,7 @@ def clean(c: Any, now: float | None = None) -> dict[str, Any] | None:
         return None
     what = _words(c.get("what"))
     kind = c.get("kind")
-    if not what or not isinstance(kind, str) or kind not in KINDS or not math.isfinite(at) or at <= 0:      # a kind that is a list or a dict is torn, not a crash (it cannot be looked up in a set)
+    if not what or not isinstance(kind, str) or kind not in KINDS or not math.isfinite(at) or at <= 0 or at > MAX_AT:      # a kind that is a list or a dict is torn, not a crash (it cannot be looked up in a set)
         return None
     return {"at": min(at, now) if now is not None else at, "kind": kind, "what": what}
 

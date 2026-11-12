@@ -344,6 +344,7 @@ CATALOG: dict[str, str] = {
     "home.no_mover": "no mover",
     "home.handed": "handed to {who}, not yet taken",
     "home.last": "Last: {what} at {time}",
+    "home.last_label": "Last activity",
     "home.last_tip": "last activity {when} {tz}",
     "home.act.active": "active",
     "home.act.quiet": "quiet",

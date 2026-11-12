@@ -63,6 +63,8 @@ item(151, "[work] markup in the words", (10 * M, "update", "<b>bold</b> & more")
 item(160, "[work] no record", None, since=3 * H)
 item(161, "[work] torn record", {"at": now - 10 * M, "kind": "no_such_kind", "what": "x"}, since=3 * H)
 item(162, "[work] torn time", {"at": "soon", "kind": "step_done", "what": "step 1 done"}, since=3 * H)
+BIG = (1e12, 2.6e11, 253402300799.0, 253402300800.0, 1e18, 1e300, 10 ** 30)      # finite and positive, and past what the calendar can take (a count of milliseconds, the end of year 9999 and a hair after, absurd ones)
+for n, v in enumerate(BIG): item(190 + n, f"[work] out of range {n}", {"at": v, "kind": "step_done", "what": "step 1 done"}, since=3 * H)
 item(170, "[work] held with a record", (200 * M, "step_done", "step 1 done"), hold=True, wake=(NOW + datetime.timedelta(days=2)).strftime("%Y-%m-%d"),
      wait_basis={"text": "the vendor ships", "wake": (NOW + datetime.timedelta(days=2)).strftime("%Y-%m-%d"), "by": "worker-a", "at": now - D}, next="worker-a: review")
 ASK = "Decide: ship the thing? · Recommend: yes · Stakes: low · By: Fri"
@@ -140,13 +142,27 @@ for i, why in ((160, "no record"), (161, "a record of an unknown kind"), (162, "
     h_ = row(i)
     check(f"{why}: the old age ('3h ago', counted from the state's start, ticked by data-ts), no pill, no activity line",
           "3h ago" in h_ and 'data-ts="' in h_ and "ir-actl" not in h_ and "ir-pill" not in h_ and "data-at" not in h_ and "Last:" not in h_, h_[:500])
+for n, v in enumerate(BIG):
+    h_ = row(190 + n)
+    check(f"an `at` of {v!r} (past the calendar) is a torn record: the row is drawn with the old age and no line, nothing raises", "3h ago" in h_ and "ir-actl" not in h_ and "data-at" not in h_, h_[:300])
+h_all = b.html()
+check("…the home page and each such item's page are drawn whole", all('id="task-a-%d"' % (190 + n) in h_all for n in range(len(BIG))) and all("3h" in b.item_html(f"a{190 + n}") and 'class="ir-actl"' not in b.item_html(f"a{190 + n}") for n in range(len(BIG))))
+check("…the record refuses them at the source (read gives None) and the latest time kept is still readable",
+      all(la.read({"metadata": {"last_activity": {"at": v, "kind": "step_done", "what": "x"}}}) is None for v in BIG) and la.read({"metadata": {"last_activity": {"at": la.MAX_AT, "kind": "step_done", "what": "x"}}}) is not None)
+_read = render._lastact.read
+render._lastact.read = lambda it: {"at": 253402300800.0, "kind": "step_done", "what": "x"}      # a record that got past the source: the row still does not raise
+try:
+    try: guarded = b.act_parts(pair["a101"][0]); rowh = row(101); iph = b.item_html("a101")
+    except Exception as e_: guarded, rowh, iph = f"raised {e_!r}", "", ""
+finally: render._lastact.read = _read
+check("…and a time that got past the source is caught in the row too: no activity, the old age", guarded is None and "ir-actl" not in rowh and "8h ago" in rowh and 'class="ir-actl"' not in iph)
 check("a held item with a record (it is in Waiting) is drawn with no activity line, and act_parts gives it nothing whatever the list",
       'class="ir-actl"' not in row(170) and "data-at" not in row(170) and b.act_parts(pair["a170"][0]) is None and b.act_parts(pair["a101"][0]) is not None, row(170)[:400])
 check("a Your move row with a record has none either: the nag there is its own age", 'class="ir-actl"' not in row(180) and "data-at" not in row(180) and "data-ts=" in row(180))
 check("a row of the same list with a record and one without sit together, each drawn its own way", "ir-pill" in row(101) and "ir-pill" not in row(160))
 
 # ---- the home page as a whole ----
-h = b.html()
+h = h_all
 agents = h[h.find('<section id="agents-at-work">'):h.find("</section>", h.find('<section id="agents-at-work">'))]
 check("the home page's On agent list holds the activity lines of the 20 rows with a record (the held row has none), and none for the three without", agents.count('class="ir-actl"') == 20, agents.count('class="ir-actl"'))
 check("the home page's script redraws them: the script has the lact function, and a swap calls it", "function lact()" in h and "tick();lact();rcv()" in h)
@@ -165,7 +181,7 @@ check("a new activity is still a change: another time or other words give anothe
 
 # ---- the item page ----
 ip = b.item_html("a101")
-check("the item page shows the same line beside the state: the age, the pill, the words", re.search(r'<div class="istat"><p class="istate">.*?</p><div class="ir-actl"><span class="tip ir-age"[^>]*>1h 44m</span><span class="ir-pill"[^>]*>idle over 1 h</span><span class="ir-lwhat">Last: fix commit on PR 124 at 10:04</span></div></div>', ip) is not None, ip[ip.find('class="istat"'):][:700])
+check("the item page shows the same line beside the state: a label, the age, the pill, the words", re.search(r'<div class="istat"><p class="istate">.*?</p><div class="ir-actl"><span class="ir-lbl">Last activity</span><span class="tip ir-age"[^>]*>1h 44m</span><span class="ir-pill"[^>]*>idle over 1 h</span><span class="ir-lwhat">Last: fix commit on PR 124 at 10:04</span></div></div>', ip) is not None, ip[ip.find('class="istat"'):][:700])
 check("the item page keeps the age current with the same script", "function lact()" in ip.split("</main>")[0])
 check("the item page of an item with no record has no line and no script for it", 'class="ir-actl"' not in b.item_html("a160") and "function lact()" not in b.item_html("a160"))
 check("the item page of a Your move item has no line", 'class="ir-actl"' not in b.item_html("a180") and "function lact()" not in b.item_html("a180"))
