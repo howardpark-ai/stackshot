@@ -52,7 +52,7 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
 server._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
@@ -213,14 +213,14 @@ st, r4c = q(machine="home-other", request_id="park-17")
 check("…and each machine's repeat is its own item again", r4c["item"] == r4b["item"] and r4c["repeat"] is True and len(items()) == n1 + 3, r4c)
 st, r5 = q(request_id="park-18"); st, r6 = q()
 check("another request id files a new item each time", len({r1["item"], r5["item"], r6["item"]}) == 3 and len(items()) == n1 + 5 and r6["repeat"] is False, (r5, r6))
-check("the triple is kept in the server's request map", server._gh.resolve(server._requests()[f"question\x1f{me}\x1fq-script\x1fpark-17"]) == _model_ids._norm_id(r1["item"]), list(server._requests())[-3:])
+check("the triple is kept in the server's request map", server._gh.resolve(create_svc._requests()[f"question\x1f{me}\x1fq-script\x1fpark-17"]) == _model_ids._norm_id(r1["item"]), list(create_svc._requests())[-3:])
 st, rg = q(project="gamma", request_id="park-19")
-check("a refused call remembers nothing: after the project is fixed the same id files", st == 409 and "park-19" not in " ".join(server._requests()) and q(request_id="park-19")[0] == 200)
+check("a refused call remembers nothing: after the project is fixed the same id files", st == 409 and "park-19" not in " ".join(create_svc._requests()) and q(request_id="park-19")[0] == 200)
 # a stale entry: the mapped item is gone -> filed anew, the map follows
 gone = server._path(_model_ids._norm_id(r5["item"])); gone.unlink()
 n2 = len(items()); st, r7 = q(request_id="park-18")
 check("a request id whose item no longer exists files anew (no previous entry), and the map now names the new item", st == 200 and r7["repeat"] is False and r7["item"] != r5["item"] and len(items()) == n2 + 1
-      and server._gh.resolve(server._requests()[f"question\x1f{me}\x1fq-script\x1fpark-18"]) == _model_ids._norm_id(r7["item"]), (st, r7))
+      and server._gh.resolve(create_svc._requests()[f"question\x1f{me}\x1fq-script\x1fpark-18"]) == _model_ids._norm_id(r7["item"]), (st, r7))
 check("…and the same id again is a repeat of that new item", q(request_id="park-18")[1]["item"] == r7["item"])
 # the tool's own request_id, same fix
 tk = dict(subject="[home] a tool thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", request_id="tool-req-1", next="home-sparrow-engineer: carry on")
@@ -235,13 +235,13 @@ ths = [threading.Thread(target=lambda: res.append(q(request_id="race-1"))) for _
 check("eight threads posting one triple at once file one item and all get its id", len(items()) == n3 + 1 and len({r[1]["item"] for r in res}) == 1 and all(r[0] == 200 for r in res) and sum(1 for r in res if not r[1]["repeat"]) == 1, [r for r in res][:3])
 errs = []
 def remember(i):
-    try: server._remember_request(f"map-race-{i}", f"s{9000 + i}")
+    try: create_svc._remember_request(f"map-race-{i}", f"s{9000 + i}")
     except Exception as e: errs.append(e)
 ths = [threading.Thread(target=remember, args=(i,)) for i in range(40)]
 [t.start() for t in ths]; [t.join() for t in ths]
-mp = server._requests()
+mp = create_svc._requests()
 check("forty threads writing the request map at once lose no entry and fail none", not errs and all(mp.get(f"map-race-{i}") == f"s{9000 + i}" for i in range(40)), (errs[:2], sum(1 for i in range(40) if f"map-race-{i}" in mp)))
-check("…and leave no temporary file beside it", not [f for f in os.listdir(server.REQUESTS.parent) if f.startswith(".requests.json.")], os.listdir(server.REQUESTS.parent))
+check("…and leave no temporary file beside it", not [f for f in os.listdir(create_svc.REQUESTS.parent) if f.startswith(".requests.json.")], os.listdir(create_svc.REQUESTS.parent))
 
 # ---- 4. get answer
 import datetime as _dt

@@ -63,7 +63,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S
+from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
 REAL_MERGED_PRS, REAL_GIT_COMMIT = server._merged_prs, server._git_commit      # before the checks below swap them for tables
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -171,12 +171,12 @@ refused("write: …and a phrase the guard cannot read as an event", lambda: serv
 cfg(guards=False)
 n, g = None, None
 try:
-    g, out = server._create_item(subject="[home] filed waiting on a recycle", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing until the recycle", goal="Done when the recycle ran.",
+    g, out = create_svc.create_item(subject="[home] filed waiting on a recycle", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing until the recycle", goal="Done when the recycle ran.",
                                  wait_kind="event", wait_event="recycle testbox", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-1")
 except Exception as e:
     out = f"ERR {e}"
 check("create: an item can be filed already waiting on an event, its phrase canonical and the reply saying what is watched", g and server._load(g)["metadata"].get("wait_kind") == "event" and server._load(g)["metadata"].get("wait_event") == "recycle testbox" and "event wait:" in out, out[-400:])
-refused("create: …and a create for an event that already happened is refused", lambda: server._create_item(subject="[home] filed waiting on a live PR", description=DESC, project="projects/alpha", owner=U["home-front"],
+refused("create: …and a create for an event that already happened is refused", lambda: create_svc.create_item(subject="[home] filed waiting on a live PR", description=DESC, project="projects/alpha", owner=U["home-front"],
         next="team-back: nothing", goal="Done when it is live.", wait_kind="event", wait_event="pr_released 9", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-2"), "already merged and live")
 server._merged_prs = lambda head, limit=3000: {}
 
@@ -373,7 +373,7 @@ refused("gate: …and a PR the early read found merged is still refused", lambda
 check("gate: …the read for that refusal was also made outside the lock", LOCKED_CALLS == [False], LOCKED_CALLS)
 LOCKED_CALLS.clear(); server._EVW_GH.clear()
 try:
-    g2, _o = server._create_item(subject="[home] filed waiting on a merge", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing", goal="Done when it merged.",
+    g2, _o = create_svc.create_item(subject="[home] filed waiting on a merge", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing", goal="Done when it merged.",
                                  wait_kind="event", wait_event="pr_merged o/r#12", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-3")
 except Exception as e:
     g2 = None

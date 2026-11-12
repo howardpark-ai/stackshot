@@ -74,7 +74,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC
+from stackshot.web import server; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC; from stackshot.service import create as create_svc
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
@@ -318,9 +318,9 @@ check("note: an item with a box_online wait on the machine needs no anchor, and 
 out = server._update("a40", sender=BACK, next="team-back: run it on box-d")
 check("note: a machine that has never checked in is offline and says so", "names box-d (has not checked in yet)" in out, out[-500:])
 # a create
-cout = server._create_item(subject="[home] new item for box-b", description=DESC, project="projects/alpha", owner=U["home-front"], mover=BACK, next="team-back: run the sync on host-b", goal="Done when box-b ran it.", request_id="machanchor-create-1")[1]
+cout = create_svc.create_item(subject="[home] new item for box-b", description=DESC, project="projects/alpha", owner=U["home-front"], mover=BACK, next="team-back: run the sync on host-b", goal="Done when box-b ran it.", request_id="machanchor-create-1")[1]
 check("note: a create takes the same note, with the new item's id", "(note: an open step of" in cout and "names box-b" in cout and "machine:box-b" in cout, cout[-600:])
-cout = server._create_item(subject="[home] new item with no machine", description=DESC, project="projects/alpha", owner=U["home-front"], mover=BACK, next="team-back: write the report", goal="Done when written.", request_id="machanchor-create-2")[1]
+cout = create_svc.create_item(subject="[home] new item with no machine", description=DESC, project="projects/alpha", owner=U["home-front"], mover=BACK, next="team-back: write the report", goal="Done when written.", request_id="machanchor-create-2")[1]
 check("note: ...and none when no step names a machine", "(note: an open step of" not in cout, cout[-400:])
 # a closed item is never noted
 item(43, mover=BACK, subject="[home] closing", next="team-back: run it on box-b")

@@ -68,7 +68,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage
+from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -163,12 +163,12 @@ refused("write: the backstop is still required to be after now", lambda: server.
 server._update("a10", sender=BACK, next="team-back: keep going")
 check("write: an unrelated update keeps the wait (the gate reads only a changed wait)", mt(10).get("wait_event") == "box_online box-b", mt(10))
 try:
-    g, cout = server._create_item(subject="[home] filed waiting on box-b", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing until box-b is back", goal="Done when box-b ran it.",
+    g, cout = create_svc.create_item(subject="[home] filed waiting on box-b", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing until box-b is back", goal="Done when box-b ran it.",
                                   wait_kind="event", wait_event="box_online box-b", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="boxon-create-1")
 except Exception as e:
     g, cout = None, f"ERR {e}"
 check("create: an item can be filed already waiting on a machine, the gate the same", g and server._load(g)["metadata"].get("wait_event") == "box_online box-b" and "event wait:" in cout, cout[-400:])
-refused("create: ...and a create for a machine online now is refused", lambda: server._create_item(subject="[home] filed waiting on box-a", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing",
+refused("create: ...and a create for a machine online now is refused", lambda: create_svc.create_item(subject="[home] filed waiting on box-a", description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: nothing",
         goal="Done when box-a ran it.", wait_kind="event", wait_event="box_online box-a", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="boxon-create-2"), "box-a is online now")
 
 # ================================================================ the model reads it as waiting, and the stall pass leaves it alone

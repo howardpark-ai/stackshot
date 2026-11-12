@@ -54,7 +54,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
-from stackshot.web import server
+from stackshot.web import server; from stackshot.service import create as create_svc
 from stackshot.service import writes
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -177,7 +177,7 @@ check("5 …an audit's event or message write does not", act(1) == c1)
 writes.save("a2", server._load("a2"), writer="home-peer", activity="nonsense")
 check("5 a save with an unknown kind is not refused and the clock is left", rd(2).get("activity") in (None, OLD) or abs(rd(2)["activity"] - OLD) < 1, rd(2).get("activity"))
 # create: a session's create is a write
-gid, _r = server._create_item(subject="[home] a new item", description=DESC, project="projects/alpha", owner=U["home-peer"], next="home-peer: start", mover="home-peer")
+gid, _r = create_svc.create_item(subject="[home] a new item", description=DESC, project="projects/alpha", owner=U["home-peer"], next="home-peer: start", mover="home-peer")
 new = json.loads((T / f"store/{gid[0]}/{gid[1:]}.json").read_text())
 check("5 a new item made by a session starts with its clock at the creation", abs(new["activity"] - new["updated"]) < 2, (gid, new.get("activity")))
 # a session's filing-only update is a write about the item too

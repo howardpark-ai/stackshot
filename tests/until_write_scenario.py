@@ -57,7 +57,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL
+from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
@@ -103,11 +103,11 @@ out = bupd(5, wake=w(3))
 check("1 a second write of the old name moves the one date (it replaces, it does not add a second field)", (bupd(5, wake=w(2)) and True) and W.stored_until(mt(5)) == w(2) and no_old(mt(5)), mt(5))
 
 # a create
-g, out = server._create_item(subject="[home] created with an old name", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK],
+g, out = create_svc.create_item(subject="[home] created with an old name", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK],
                              wait_kind="relay", wait_event="the vendor's reply", ask_by=w(4), request_id="uw-create-1")
 m_ = mof(g)
 check("1 create: ask_by is stored as until, with the kind beside it and no old field, and the reply names until", W.stored_until(m_) == w(4) and m_.get("wait_kind") == "relay" and no_old(m_) and "ask_by is now written as until" in out, (out[-300:], m_))
-g2, out2 = server._create_item(subject="[home] created with until", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK],
+g2, out2 = create_svc.create_item(subject="[home] created with until", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK],
                                wait_kind="relay", wait_event="the vendor's reply", until=w(5), request_id="uw-create-2")
 m2_ = mof(g2)
 check("1 create: the until parameter is stored as it is, with no note about an old name", W.stored_until(m2_) == w(5) and no_old(m2_) and "now written as until" not in out2, (out2[-300:], m2_))
@@ -160,7 +160,7 @@ item(18, needs=[BACK])
 bupd(18, wait_kind="item", after=["a12"])
 out = bupd(18, wait_kind="relay", wait_event="the vendor's reply")
 check("2 a date held for one kind moves with the wait to another kind (no second fallback, no note)", mt(18).get("wait_kind") == "relay" and W.stored_until(mt(18)) == w(5) and "came with no date" not in out, (out[-300:], mt(18)))
-g3, out3 = server._create_item(subject="[home] created with a kind and no date", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK],
+g3, out3 = create_svc.create_item(subject="[home] created with a kind and no date", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK],
                                wait_kind="relay", wait_event="the vendor's reply", request_id="uw-create-3")
 m3_ = mof(g3)
 check("2 create: a kind with no date is not refused: until is taken and the reply says so", W.stored_until(m3_) == w(1) and "set to tomorrow" in out3 and no_old(m3_), (out3[-300:], m3_))
@@ -294,13 +294,13 @@ check("5.8 a bare date still needs only wait_reason (the wait on a date alone), 
 cap9 = W.cap_days()
 far9 = local_day(now0 + (cap9 + 20) * DAY)
 try:
-    server._create_item(subject="[home] created far out", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the date", needs=[BACK], until=far9, request_id="uw-create-cap-1"); e9 = ""
+    create_svc.create_item(subject="[home] created far out", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the date", needs=[BACK], until=far9, request_id="uw-create-cap-1"); e9 = ""
 except Exception as e_:
     e9 = str(e_)
 check("5.9 create with an until past the cap is refused as an update's wake is", "a wait runs at most" in e9 and "until" in e9, e9[:400])
-g9, out9 = server._create_item(subject="[home] created inside the cap", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the date", needs=[BACK], until=w(3), request_id="uw-create-cap-2")
+g9, out9 = create_svc.create_item(subject="[home] created inside the cap", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the date", needs=[BACK], until=w(3), request_id="uw-create-cap-2")
 check("5.9 ...an until inside the cap is stored", W.stored_until(mof(g9)) == w(3), mof(g9))
-g9b, out9b = server._create_item(subject="[home] relay far out", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", until=far9, request_id="uw-create-cap-3")
+g9b, out9b = create_svc.create_item(subject="[home] relay far out", description=DESC, project="projects/alpha", owner=U["home-front"], next=f"{BACK}: wait for the reply", needs=[BACK], wait_kind="relay", wait_event="the vendor's reply", until=far9, request_id="uw-create-cap-3")
 check("5.9 ...a relay's ask-by day is no wake: the cap does not judge it, as on an update", W.stored_until(mof(g9b)) == far9, mof(g9b))
 
 # 5.10 a decision beside an until is never parked: the tag, the brief and the session items listing read it the one way the board does (_is_parked)

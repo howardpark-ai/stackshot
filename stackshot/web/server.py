@@ -234,13 +234,13 @@ from stackshot.core import store as _store  # noqa: E402  — the store's path (
 from stackshot.core.store import _item_files, _next_id  # noqa: E402  — core/store.py
 from stackshot.service import writes as _writes  # noqa: E402  — the one write path of an item: its lock (`ITEM_LOCK`), its save (`save`) and the write context (service/writes.py)
 from stackshot.service.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item (service/store.py)
-REQUESTS = _cfg.state("requests.json")
+from stackshot.service import create as _create_svc  # noqa: E402  — creating an item: every gate and write of the create tool in their order, and the request map (service/create.py)
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
     _ro.install_backstop([_store.STORE, _cfg.state(), *(_cfg.path("paths", k) for k in ("repo", "markdown", "brain", "project_touch") if _cfg.get("paths", k))])
 else:
     (_store.STORE / _store.LETTER).mkdir(parents=True, exist_ok=True)
-    REQUESTS.parent.mkdir(parents=True, exist_ok=True)
+    _create_svc.REQUESTS.parent.mkdir(parents=True, exist_ok=True)
 
 
 # ----------------------------------------------------------------------------- store (the one store, every letter)
@@ -794,34 +794,6 @@ def _tell_comment(gid: str, item: dict[str, Any], text: str) -> list[str]:
 _gh.on_comment = _github_comment
 
 
-_REQ_LOCK = threading.RLock()      # the request map is read and rewritten whole: one thread at a time (the tool's creates and the client API's questions share it)
-
-
-def _requests() -> dict[str, str]:
-    with _REQ_LOCK:
-        try:
-            with open(REQUESTS, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-
-def _remember_request(rid: str, gid: str) -> None:
-    with _REQ_LOCK:
-        d = _requests(); d[rid] = gid
-        fd, tmp = tempfile.mkstemp(prefix=f".{REQUESTS.name}.", suffix=".tmp", dir=str(REQUESTS.parent))     # a name of its own, so no writer in another process shares one
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(d, f)
-            os.replace(tmp, REQUESTS)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
-
-
 # The write-time field checks and the registry readers they use (field_gates.py), kept on this module as well: the writes, the tools and the suites call `server.<name>`. Private names no caller on this module reads stay in that module:
 # SUBJECT_MAX_DEFAULT, CLOSE_REASON_MAX_DEFAULT, _RECYCLE_ONLY, _GOAL_RETRY, _registry_hit.
 from stackshot.web.field_gates import (  # noqa: E402,F401
@@ -909,7 +881,7 @@ def _pilot_keeper(project: str) -> tuple[str, str]:
 def _pilot_charge(project: str, writer: str) -> tuple[str, str]:
     """The pilot (stackshot.toml [pilot]): a state-changing board write on a pilot project
     is the page keeper's to account for. → (the keeper's session id, its role) when `writer` is not the keeper, else ("", ""). A script's
-    filing (_create_item with `by`) charges the keeper this returns and nobody else: no one when it returns none, and no one when the keeper
+    filing (create_item with `by`) charges the keeper this returns and nobody else: no one when it returns none, and no one when the keeper
     is the owner itself (the owner is never charged for what a script filed)."""
     who, role = _pilot_keeper(project)
     if who and _front_keeper(who, project)[0] and not _router_live.holds(project, who):    # a front agent keeper (a sub-page's `agent:`) is passed by: the writer owes it, the keeper past the grace; the general -main agent a nameless page's notices are addressed to is the router's, not passed by
@@ -1661,7 +1633,7 @@ def _gate_model(item: dict[str, Any], touched: "frozenset[str] | set[str] | None
     return "".join(f"\n(note: {p.text})" for p in notes)
 
 
-_TERMINAL_ROW = threading.local()  # set by the terminal-prompt and job-gap routes around their writes: the row is a script's notification of its own, so it owes no page and no session is told of it (_create_item, _update, the _tell_* notices; a job-gap item's builder is told by the needs notice of its create, which this does not stop)
+_TERMINAL_ROW = threading.local()  # set by the terminal-prompt and job-gap routes around their writes: the row is a script's notification of its own, so it owes no page and no session is told of it (create_item, _update, the _tell_* notices; a job-gap item's builder is told by the needs notice of its create, which this does not stop)
 _QUESTION = threading.local()     # set by the script question route around its create: guard 11 (alarming words) does not judge a headless run's own question text, so it is never stranded on a wording refusal
 _REFORMAT = threading.local()    # set by the re-bullet route around its update: a description written in bullets with the same content is a filing edit, no state change
 
@@ -11020,8 +10992,8 @@ def _create(
     fixes: "list[tuple[str, str, str]] | None" = None,
     until: str = "",
 ) -> str:
-    """The create tool without its identity check (_who): the reply text of _create_item."""
-    return _create_item(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes)[1]
+    """The create tool without its identity check (_who): the reply text of service/create.py's create_item."""
+    return _create_svc.create_item(subject=subject, description=description, project=project, owner=owner, next=next, needs=needs, priority=priority, due=due, anchors=anchors, request_id=request_id, owner_name=owner_name, ask=ask, options=options, agent=agent, observers=observers, after=after, said=said, check=check, goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, until=until, post_wake_mover=post_wake_mover, draft=draft, step_proof=step_proof, contact=contact, fixes=fixes)[1]
 
 
 def _record_fixes(meta: dict[str, Any], fixes: "list[tuple[str, str, str]] | None") -> None:
@@ -11033,207 +11005,85 @@ def _record_fixes(meta: dict[str, Any], fixes: "list[tuple[str, str, str]] | Non
             _sf.unmark(meta, fix, token)
 
 
-def _create_item(
-    subject: str,
-    description: str,
-    project: str,
-    owner: str,
-    next: str = "",
-    needs: list[str] | str = "",
-    priority: str = "",
-    due: str = "",
-    anchors: list[str] | None = None,
-    request_id: str = "",
-    owner_name: str = "",
-    ask: str = "",
-    options: list[dict[str, Any]] | str | None = None,
-    agent: str = "",
-    observers: list[str] | str = "",
-    after: list[str] | str = "",
-    said: list[dict[str, Any]] | str | None = None,
-    check: str = "",
-    by: str = "",
-    goal: str = "",
-    mover: str = "",
-    then: str = "",
-    wait_kind: str = "",
-    wait_anchor: str = "",
-    wait_event: str = "",
-    ask_by: str = "",
-    post_wake_mover: str = "",
-    draft: str = "",
-    step_proof: list[dict[str, Any]] | str | None = None,
-    contact: str = "",
-    extra: dict[str, Any] | None = None,
-    fixes: "list[tuple[str, str, str]] | None" = None,
-    until: str = "",
-) -> tuple[str, str]:
-    """Every gate and every write of the create tool, without its identity check (_who: the tool checks it, the client API's
-    question write is proved by its machine token instead) -> (the new item's id, the tool's reply). The one place an item is
-    created: the tool and `client.py post question` both come through here, so a script cannot file what the tool would refuse.
-    `by` = the writer when it is a script and not the creating session ("<label> (a script on <machine>)"): the item is saved and
-    mirrored under that name and records it as `filed_by`. The script owes no page, and nobody else is made to answer for its write
-    except the page's keeper: the page debt is charged to the keeper of a pilot project's page (the keeper, or a page's own agent that
-    is not a front agent) and told to it through the pilot relay, and to no one when the project has none; never to the creator, so a
-    burst of filings cannot get the creator's own board writes refused (_refuse_if_owing is skipped for the script, and the creator's existing debt does not
-    refuse it either). The mover is told nothing (a front agent mover is never messaged about its item, and no session is named in needs here);
-    each session the caller names in needs is told once, as for the tool."""
-    if request_id:
-        prev = _gh.resolve(_requests().get(request_id) or "")   # an id the worker re-keyed since → the item's id now
-        if prev and _path(prev).exists():      # an entry whose item is gone is no previous entry: file anew (the map is rewritten below)
-            it = _load(prev); it["gid"] = prev
-            return prev, f"already created as {_gh.shown(prev)} (same request_id).\n" + _fmt(it) + _nag()
-    subject, description, next, ask = (_shown_ids(x) for x in (subject, description, next, ask))   # g7 →
-    if subject.strip() and not by and not any(subject.startswith(pfx) for pfx in _cfg.CFG["subject"]["prefixes"]) and not _SUBJECT_TAGGED.match(subject):
-        pfx_ = _project_subject_prefix(project)        # a subject with no scope prefix takes its project's (a pure fact; the reply says so)
-        if pfx_:
-            subject = pfx_ + subject.lstrip()
-            _calls.fixed("subject-prefix", f"the scope prefix {pfx_.strip()} was put before the subject, as the project's scope names it")
-    _gate_subject(subject)
-    _gate_recycle_item(subject)
-    _gate_description(description)
-    if getattr(_SESSION_NEXT, "on", False) and not by:      # the create tool's own call: a script's item (the question route, a watcher, the terminal prompt) is filed whatever its first bullet
-        _gate_goal(description)
-    _gate_next(next, has_ask=bool(ask.strip()) and ask.strip().lower() not in _ASK_NONE)
-    ask = "" if ask.strip().lower() in _ASK_NONE else ask
-    if ask:
-        ask = _gate_ask(ask)
-    _gate_bare_urls({"description": description, "next": next, "ask": ask})
-    opts = _gate_options(options)
-    needs_l = _gate_needs(needs, project, owner) if (needs if isinstance(needs, list) else needs.strip()) and str(needs).strip().lower() not in _ASK_NONE else []
-    if agent.strip() and agent.strip().lower() not in _ASK_NONE:    # the older form writes the session into needs
-        needs_l = _canon_needs([*_needs_kinds({"needs": needs_l}), _gate_needs_session(agent, project, owner)], _anc.names())
-    obs = _gate_observers(observers) if (observers if isinstance(observers, list) else observers.strip()) and str(observers).strip().lower() not in _ASK_NONE else []
-    aft = _gate_after(after) if (after if isinstance(after, list) else after.strip()) and str(after).strip().lower() not in _ASK_NONE else []
-    owner = _session_id(owner)                                 # a pane name becomes its transcript id when the heartbeat knows it
-    said_l = _gate_said(said, owner, owner)                    # the trailers: his words checked against the transcript; a failed check refuses the create
-    chk = _parse_check(check) if check.strip() and check.strip().lower() not in _ASK_NONE else ""   # the done check: gated on its form; a create is never refused for a hand-off
-    meta: dict[str, Any] = {"owner": owner, "project": project, **(extra or {})}     # extra = a script route's own marks (the terminal prompt's), written with the item
-    until_v = _model.clean(until)
-    if until_v.lower() in _ASK_NONE:
-        until_v = ""                   # a "none" on a create is nothing to clear
-    alias_used = ["ask_by"] if _model.clean(ask_by) and _model.clean(ask_by).lower() not in _ASK_NONE else []
-    alias_ends = _wait_alias_gate(alias_used)
-    if until_v:
-        try:
-            until_at = _wake_at(_parse_wake(until_v))
-        except ToolError:
-            raise ToolError(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {until_v!r})")
-        if until_at <= _pages.zone_now():
-            raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
-        if _uw.slot_of(_model.clean(wait_kind).lower()) != "ask_by":      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
-            _gate_cap({}, said_l, "until", _parse_wake(until_v), until_at.timestamp())
-    elif alias_used:
-        until_v = _model.clean(ask_by)          # ask_by is the old name of the date (an until beside it wins)
-    model_set, _ = _gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
-                                     "until": until_v, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
-    if owner_name:
-        meta["owner_name"] = owner_name
-    contact_v = _gate_contact(contact, project, (owner,)) if contact.strip() else _contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
-    if contact_v:
-        meta["contact"] = contact_v
-    for k, v in (("needs", needs_l), ("ask", ask), ("priority", priority), ("due", due), ("options", opts), ("observers", obs), ("after", aft), ("said", said_l), ("check", chk)):
-        if v:
-            meta[k] = v
-    if next:
-        _next_put(meta, next, owner, owner)     # the writer of a create's lines is its creator (a script's filing included: its label is no session)
-    proof_note = _step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
-    _gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
-    meta.update(model_set)
-    wait_note = _uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else ""
-    if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
-        fb_d, _fb_how, fb_note = _fallback_wait_date(meta, next, description, due)
-        meta["until"] = fb_d
-        wait_note += fb_note
-    if _wt.stored_until(meta) and not _uw.kind_of(meta) and _wt.after_of(meta):
-        meta["wait_kind"] = "item"         # a date beside an after link is that wait's backstop (as ask_by was): the wait stays on the item
-    evw_note = _evwait_gate({}, meta, creating=True)            # an event wait: its phrase in the canonical form, and refused when the event already happened
-    then_note = _owner_then_default(None, meta, "open", _session_label(owner) or owner, "then" in model_set, mover.strip())      # D9: an item created for his call has the agent doing the work as its then (a builder that files its own decision item is its own then), not the front agent that relayed it
-    draft_txt, _ = _gate_draft_args(draft, False)             # the verbatim text the owner pastes elsewhere; a create has no state to guard it by (the guard runs when an update sets your-step)
-    if draft_txt:
-        meta["draft"] = draft_txt
-    if anchors:
-        raise ToolError("Refused: anchors belong to the project, not the item — create the item, then anchors(project=<its project>, add=[url…], items=[<its id>]) for a thread about this item, or without items for a project-wide one")
-    _gate_metadata(meta, creating=True)
-    lifted = "" if ask else _lift_ask(meta, writer=owner, keeper=owner)   # a client without the ask parameter: the ask's form as next's first line
-    asked = lifted + _ask_owed(meta)       # needs=decision without an ask: a nag line, or refused from [ask] refuse_after
-    _gate_one_decision(meta, description, bool(lifted))  # one decision per item, options in words: the ask is being written
-    _gate_alternatives(meta, description)  # alternatives named, none listed
-    if not getattr(_QUESTION, "on", False):    # a script's question is never lost on its wording: its Decide is the question as written, and the board may take no options
-        _gate_open_question(meta)          # an open question with no options: the page would draw Yes / No under it
-        _gate_recommend_stance(meta)       # no options and a Recommend that is no yes or no: the same Yes / No under a question it cannot answer
-    _gate_mockup(meta, description)        # a mockup linked in the text rides on the ask too
-    _gate_own_action(meta, create=True)    # his own action asked as a decision: it is a your-step
-    asked += _options_note(meta) + _actor_note(meta)
-    desc_note = _gate_model({"status": "open", "subject": subject, "description": description, "metadata": meta}, None, creating=True, date_given=bool(until_v))    # the write guards of the item model, every field judged on a create
-    _anchor_wait_gate({}, meta, creating=True)                  # an anchor wait: its anchor must be on the project's list already (after the model guards, whose refusals are more specific)
-    if getattr(_SESSION_NEXT, "on", False) and not by and (not _nl.split(meta.get("next")) or str(meta.get("next")).strip().lower() in _nl.NONE_WORDS) \
-            and not _model.stood_his({"status": "open", "metadata": meta}, lambda i_: _after_open(i_.get("metadata") or {})):      # N6: a session's create leaves the item with an open step (his server-made step, from needs=decision with an ask or a your-step, counts)
-        raise ToolError(f"Refused: the new item has no open step in next: {_nr.NO_STEP_FIX_HELD if meta.get('hold') else _nr.NO_STEP_FIX}")
-    if not getattr(_TERMINAL_ROW, "on", False):      # the terminal prompt's row files "<owner>: open … and answer" and sets its state your-step in the next call (_terminal_state; a create sets no step): its own script, not a session hiding a step
-        _gate_owner_step({"status": "open", "subject": subject, "description": description, "metadata": meta}, create=True)     # The owner's step under an agent's state is refused, as on an update
-    if getattr(_SESSION_NEXT, "on", False) and not by and _model_guards_on():
-        _gate_front_step("", {"status": "open", "subject": subject, "metadata": meta}, [], _steps.view(meta, keeper=owner), owner)     # a step that opens with a front agent on an item another session moves: nothing could wake it for the step
-    if meta.get("mover") or meta.get("then") or _needs_sessions(meta):     # step 2: a hand-off at creation to a session with no pane is refused: an item created with no mover is nobody's hand-off, the project's builder or -main agent takes it (D1)
-        _gate_handoff("", None, {"status": "open", "subject": subject, "metadata": meta}, by or owner)
-    if not by:                             # a script owes no page; the creator's own debt is not its to be refused for
-        _refuse_if_owing(owner)
-    _record_fixes(meta, fixes)             # what the server fixed in this create (server_fixes.py): the mark and a History line
-    item = {
-        "id": "",
-        "subject": subject,
-        "description": description,
-        "status": "open",
-        "metadata": meta,
-    }
-    if by:
-        item["filed_by"] = by              # the script that filed it (the creator is the session that answers for it)
-    local, local_held = "", False          # phase 2 prep: why the item got a local id (GitHub down, or the write budget spent), "" when it got its issue number
-    if _gh.issue_ids():                    # the id is the issue's number, so the issue comes first (the one write that waits for GitHub)
-        try:
-            n = _gh.allocate(item, {owner: _session_label(owner)}, max_wait=_gh.CREATE_WAIT)     # a create never waits out the hour's write budget: over a few seconds it takes a temporary id
-            gid = f"{_gh.letter()}{n}"
-        except _gh.GitHubDown as e:
-            if not _gh.enabled():          # no queue to carry the create later: the refusal of phase 1
-                raise ToolError(f"Refused: {e if isinstance(e, _gh.GitHubBudget) else f'GitHub did not answer ({e})'} — with [github] issue_ids on a new item's id is its issue number, so a create "
-                                "waits for GitHub; try again in a minute (an update or a close never waits: those are queued)")
-            gid, local = _gh.allocate_local(), str(e)   # the outage fallback (GitHub down, or the hour's write budget spent): a temporary id, the create queued ahead of the other jobs, re-keyed when the issue is made
-            local_held = isinstance(e, _gh.GitHubBudget)
-        except _gh.GitHubError as e:
-            raise ToolError(f"Refused: GitHub refused the issue for this item ({e})")
-    else:
-        gid = _next_id()
-    item["id"] = gid[1:]
-    item["updated"] = time.time()          # the item's own clock (the renderer used to trust the file's mtime, which a migration rewrites)
-    item["state_updated"] = item["updated"]  # state clock: only a state change moves it (the page-owed badge reads it)
-    item["confirmed"] = item["updated"]      # last confirmed true: a create, a state change or the confirm tool
-    writer = by or owner
-    _writes.save(gid, item, writer=writer)
-    if request_id:
-        _remember_request(request_id, gid)
-    stew, role = _pilot_charge(meta.get("project", ""), writer)
-    if getattr(_TERMINAL_ROW, "on", False):
-        stew, role = "", ""                # a terminal-prompt row owes the page nothing: no one is charged, the router and the keeper are told nothing
-    if stew and role == "name" and _writer_owes() and not by:   # the writer owes it; the keeper only past the grace (a script owes none)
-        told = _writer_charge(meta.get("project", ""), gid, owner, stew, "created", loose=False)
-    else:
-        if by and stew and _session_id(stew) == _session_id(owner):
-            stew = ""                  # a script's filing is never charged to the creator, even when it is also the keeper
-        charged = stew if by else (stew or owner)
-        if charged:
-            _owed_mark(meta.get("project", ""), charged, gid)  # a new item is a state change; in the pilot the page's keeper accounts for another session's (a script's filing: the keeper's alone)
-        told = _pilot_relay(meta.get("project", ""), gid, item, "created", writer, stew, role) if stew else ""
-    told += _tell_needed(gid, item, _needs_sessions(meta), writer)   # a session named in needs gets one notice
-    told += _handoff_notify(gid, item)     # step 2: the hand-off at creation is told, unless the notice above did
-    _publish()
-    item["gid"] = gid
-    machine_note = _machine_note(gid, item, owner)      # an open step names an offline machine and no machine anchor tells the mover when it is back: a note, never a refusal
-    if local:
-        why_ = f"GitHub is taking no new write right now ({local[:120]})" if local_held else f"GitHub did not answer ({local[:120]})"
-        told += (f"\n({why_}, so {_gh.shown(gid)} is a temporary id: the item takes its issue number when {'GitHub has room' if local_held else 'GitHub is back'}, "
-                 f"{_gh.shown(gid)} stays as an alias for it, and {_session_label(owner) or 'its mover'} is told the new id)")
-    return gid, (f"created {_gh.shown(gid)} — it is being published to the board ({_inst.BOARD_URL}) now.\n" + _fmt(item) + _said_note(said_l) + proof_note + asked + _form_notes(description, next, meta=meta, gid=gid, cmd=True, ext="external" in _needs_kinds(meta)) + desc_note + evw_note + wait_note + machine_note
-                 + then_note + _similar_note(gid, subject, str(meta.get("project") or "")) + told + _nag("" if by else owner))
+def _late(name: str) -> Callable[..., Any]:
+    """A function of this module looked up when it is called (not when the table below is built), so a suite that replaces it here reaches the create."""
+    return lambda *a, **k: globals()[name](*a, **k)
+
+
+# What a create still reaches on this module (service/create.py runs the create in its order): the gates and notices the update tool, the close and the telling share, the three thread-local flags
+# and two constants. A hook leaves this table when the area that holds it moves under service/.
+_create_svc.install(_create_svc.Hooks(
+    actor_note=_late("_actor_note"),
+    after_open=_late("_after_open"),
+    anchor_wait_gate=_late("_anchor_wait_gate"),
+    ask_owed=_late("_ask_owed"),
+    contact_default=_late("_contact_default"),
+    evwait_gate=_late("_evwait_gate"),
+    fallback_wait_date=_late("_fallback_wait_date"),
+    fmt=_late("_fmt"),
+    form_notes=_late("_form_notes"),
+    gate_after=_late("_gate_after"),
+    gate_alternatives=_late("_gate_alternatives"),
+    gate_ask=_late("_gate_ask"),
+    gate_bare_urls=_late("_gate_bare_urls"),
+    gate_cap=_late("_gate_cap"),
+    gate_contact=_late("_gate_contact"),
+    gate_description=_late("_gate_description"),
+    gate_draft_args=_late("_gate_draft_args"),
+    gate_front_step=_late("_gate_front_step"),
+    gate_goal=_late("_gate_goal"),
+    gate_handoff=_late("_gate_handoff"),
+    gate_metadata=_late("_gate_metadata"),
+    gate_mockup=_late("_gate_mockup"),
+    gate_model=_late("_gate_model"),
+    gate_model_args=_late("_gate_model_args"),
+    gate_needs=_late("_gate_needs"),
+    gate_needs_session=_late("_gate_needs_session"),
+    gate_next=_late("_gate_next"),
+    gate_observers=_late("_gate_observers"),
+    gate_one_decision=_late("_gate_one_decision"),
+    gate_open_question=_late("_gate_open_question"),
+    gate_options=_late("_gate_options"),
+    gate_own_action=_late("_gate_own_action"),
+    gate_owner_step=_late("_gate_owner_step"),
+    gate_recommend_stance=_late("_gate_recommend_stance"),
+    gate_recycle_item=_late("_gate_recycle_item"),
+    gate_said=_late("_gate_said"),
+    gate_step_gap=_late("_gate_step_gap"),
+    gate_subject=_late("_gate_subject"),
+    handoff_notify=_late("_handoff_notify"),
+    lift_ask=_late("_lift_ask"),
+    machine_note=_late("_machine_note"),
+    model_guards_on=_late("_model_guards_on"),
+    nag=_late("_nag"),
+    next_put=_late("_next_put"),
+    options_note=_late("_options_note"),
+    owed_mark=_late("_owed_mark"),
+    owner_then_default=_late("_owner_then_default"),
+    parse_check=_late("_parse_check"),
+    parse_wake=_late("_parse_wake"),
+    pilot_charge=_late("_pilot_charge"),
+    pilot_relay=_late("_pilot_relay"),
+    project_subject_prefix=_late("_project_subject_prefix"),
+    publish=_late("_publish"),
+    record_fixes=_late("_record_fixes"),
+    refuse_if_owing=_late("_refuse_if_owing"),
+    said_note=_late("_said_note"),
+    session_id=_late("_session_id"),
+    similar_note=_late("_similar_note"),
+    step_proof_set=_late("_step_proof_set"),
+    tell_needed=_late("_tell_needed"),
+    wait_alias_gate=_late("_wait_alias_gate"),
+    wake_at=_late("_wake_at"),
+    writer_charge=_late("_writer_charge"),
+    writer_owes=_late("_writer_owes"),
+    session_next=lambda: bool(getattr(_SESSION_NEXT, "on", False)),
+    question=lambda: bool(getattr(_QUESTION, "on", False)),
+    terminal_row=lambda: bool(getattr(_TERMINAL_ROW, "on", False)),
+    ask_none=_ASK_NONE,
+    subject_tagged=_SUBJECT_TAGGED,
+))
+
 
 
 # A close carries how the item ended, like an issue tracker's closed issue. Before, a completed
@@ -16309,11 +16159,11 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """`client.py post question --project P --ask "…" --subject "…" --request-id T [--option "label=line" …] [--recommended label] [--sender label]`
     (the question text on stdin): file an open needs=decision item on project P for the owner, filed under the project's front agent (its
     -main agent first, as the create tool's owner refusals name them), written by a script on `machine` named `sender`. It goes
-    through _create_item, the create tool's own code: the subject prefix, the ask's form, the options (2 to 6, exactly one recommended),
+    through create_item (service/create.py), the create tool's own code: the subject prefix, the ask's form, the options (2 to 6, exactly one recommended),
     the one-decision gate, the project page, the page-debt rules (charged to the page's keeper only) and the GitHub mirror all apply, and a refusal is
     the tool's text (400). A project that lists no front agent is refused (409). The subject and the request_id are required: there is no
     default prefix, and every filing is safe to repeat. The call is idempotent per (machine, sender, request_id): the same triple again
-    answers the same item and files nothing, kept in the server's request map (REQUESTS, <state>/requests.json) like a tool create's
+    answers the same item and files nothing, kept in the server's request map (REQUESTS in service/create.py, <state>/requests.json) like a tool create's
     request_id; an entry whose item is gone files anew. The text is written as `- ` bullets, each clipped to the line limit; too many lines or characters is a 400. The description ends
     with the bullet "- Filed by <sender> (a script on <machine>)". -> (status, {item, project, owner, repeat})."""
     project, ask, sender, subject, rid = (str(body.get(k) or "").strip() for k in ("project", "ask", "sender", "subject", "request_id"))
@@ -16358,7 +16208,7 @@ def _question(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             _QUESTION.on = True
             try:
                 subject = _fit(_shown_ids(subject), _subject_max())      # a script's subject is cut to the limit (ids expanded first), never refused: a script's item must not be lost on a 400
-                gid, _reply = _create_item(subject=subject, description=desc, project=key, owner=front[0], then=front[0], needs=["decision"], ask=ask, options=options,      # the project's -main agent takes it after the owner
+                gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=front[0], then=front[0], needs=["decision"], ask=ask, options=options,      # the project's -main agent takes it after the owner
                                            by=f"{sender} (a script on {machine})", request_id=f"question\x1f{machine}\x1f{sender}\x1f{rid}")
             finally:
                 _QUESTION.on = False
@@ -16458,7 +16308,7 @@ def _terminal_next(name: str, question: str) -> str:
 def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """`client.py post terminal-prompt open|clear --session S --sender L [--question Q]`: a pane waiting in its terminal becomes an open item in the owner's Your move list, and
     stops being one when the pane stops waiting. body: action (open | clear), session, sender, and for open the question (one line, at most 200 characters).
-    open: one open item per session. It is filed through _create_item, the create tool's own code, so the subject prefix, the description and next gates, the project page, the
+    open: one open item per session. It is filed through create_item (service/create.py), the create tool's own code, so the subject prefix, the description and next gates, the project page, the
     owner as mover and the GitHub mirror all apply and a refusal is the tool's text (400): the subject "<session> is waiting for your answer in its terminal", under the session's
     project from the registry (else projects/example-two), p1, mover the owner, then the project's front agent (its -main agent first, as _question), next "<owner>:
     open <the pane's address> and answer: <question>", marked metadata.terminal_prompt = the session's name; then its state is set to your-step with the step "Answer <session>'s
@@ -16494,7 +16344,7 @@ def _terminal_prompt(machine: str, body: dict[str, Any]) -> tuple[int, dict[str,
     try:
         with _TERMINAL_LOCK:         # the look for an open item and the write that follows are one step, so two calls for one session file one item
             _QUESTION.on = True      # a pane's own words are not judged for alarming ones (see _question)
-            _TERMINAL_ROW.on = True  # the row owes no page and tells no session (_create_item, _update, the _tell_* notices)
+            _TERMINAL_ROW.on = True  # the row owes no page and tells no session (create_item, _update, the _tell_* notices)
             try:
                 found = _terminal_open_items(name)
                 if action == "clear":
@@ -16551,7 +16401,7 @@ def _terminal_open(found: list[str], session: str, name: str, question: str, sen
     name_ = _shown_ids(name)
     room_ = (_subject_max() - len(pfx_) - len(tail_)) if _subject_max() else 0      # a long pane name is cut so the server's own subject is never refused
     subject = f"{pfx_}{_fit(name_, room_) if 0 < room_ < len(name_) else name_}{tail_}"
-    gid, _reply = _create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, priority="p1", mover=OWNER, then=owner, by=by, extra={"terminal_prompt": name})      # The owner answers, then the project's -main agent takes it
+    gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, priority="p1", mover=OWNER, then=owner, by=by, extra={"terminal_prompt": name})      # The owner answers, then the project's -main agent takes it
     try:                     # a create sets no step: the state is a second write, and an item the state fails for (a refusal or any error) is closed again, never left half made
         _terminal_state(gid, name, by)
     except Exception:  # noqa: BLE001  — re-raised below; a crash between the two writes is repaired by the next open (the repeat path)
@@ -16627,7 +16477,7 @@ def _jobgap_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, Any
     """`client.py post job-gap open <timer> <code> --repo <owner/name> [--detail T] [--sender L]` and `… clear <timer> <code> [--sender L]`: sala's job-gap watcher says a timer or service of
     the host has a gap (code: no-description | no-lane | bad-lane | not-git | git-differs; any `[a-z][a-z0-9-]*` is taken) or that the gap is fixed. body: action (open | clear), timer, code,
     sender (default "client.py"), and for open the repo and an optional detail (at most 600 characters).
-    open: one open item per (timer, code), filed through _create_item (the create tool's own code: subject prefix, description and next gates, project page, GitHub mirror; a refusal is the tool's
+    open: one open item per (timer, code), filed through create_item (service/create.py: the create tool's own code: subject prefix, description and next gates, project page, GitHub mirror; a refusal is the tool's
     text, 400). The repo is mapped to its project page by [job_gap.repos] (else none): the config repo -> projects/config, salamander -> projects/example-two, stackshot -> projects/example;
     a repo it does not list is a 400 naming the ones it does. The mover is the project's builder (_builder_agent: the background agent whose mandate builds), the creator the project's front
     agent (its -main first); a project with no builder is moved by that -main agent, and the item says so (`fallback` in the answer). The subject is "<prefix> <timer>: <the gap>" (the project scope's prefix, else [subject] fallback_prefix, else the first prefix) cut to [subject]
@@ -16727,7 +16577,7 @@ def _jobgap_open(found: list[str], rec: dict[str, Any], repo: str, timer: str, c
     extra: dict[str, Any] = {"job_gap": mark}
     if not builder:
         extra["job_gap_fallback"] = True
-    gid, _reply = _create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, needs=[builder] if builder else "", priority="p2", mover=mover, by=by, extra=extra)
+    gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=nxt, needs=[builder] if builder else "", priority="p2", mover=mover, by=by, extra=extra)
     meta = _load(gid).get("metadata") or {}
     return 200, {"item": _gh.shown(gid), "timer": timer, "code": code, "project": str(meta.get("project") or key), "mover": _session_label(mover), "owner": _session_label(owner),
                  "repeat": False, "fallback": not builder}
