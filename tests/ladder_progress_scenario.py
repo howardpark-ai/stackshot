@@ -583,5 +583,86 @@ raw_ = ML.path().read_bytes()
 check("14 merge_log.append: a file that already ends with a newline gets no blank line; a first row in a new file starts with none",
       b"\n\n" not in raw_ and raw_.count(b"\n") == 3 and raw_.endswith(b"\n") and (ML.path().unlink(), ML.append({"ts": 4, "repo": "acme/widgets", "n": 84, "refs": []}), ML.path().read_bytes().startswith(b"{"))[2], raw_)
 
+# ---- a line nested deeper than str() can follow: json still parses it, and `normal` used to turn its refs into text (RecursionError), then the handler turned the whole line into text (RecursionError again), so the pass
+# died before it saved its offset and every pass after it read the same line. Nothing below assumes a depth: the depth is found at run time, the first one where str() on this interpreter fails (str() follows the C
+# recursion limit of the interpreter, which is not always sys.getrecursionlimit()), starting from three times the Python limit.
+def nest(d):
+    x = []
+    for _ in range(d): x = [x]
+    return x
+def str_fails(x):
+    try: str(x)
+    except RecursionError: return True
+    return False
+depth = sys.getrecursionlimit() * 3
+while not str_fails(nest(depth)):
+    depth = int(depth * 1.1) + 1
+    assert depth < 3_000_000, depth
+deep = nest(depth)
+def attempt(fn):
+    try: return fn()
+    except Exception as e_: return f"raised {e_.__class__.__name__}"
+
+# (1) normal: a ref is a string, anything else is no ref and is never turned into text
+got = attempt(lambda: ML.normal({"ts": 1, "repo": "acme/widgets", "n": 5, "refs": [deep, "g12", [["g99"]], {"g98": deep}, "g13"]})["refs"])
+check("14 merge_log.normal: a ref that is a list or an object, however deep, is skipped as no ref (never turned into text); the line keeps its string refs", got == ["g12", "g13"], got)
+got = attempt(lambda: ML.normal({"ts": 1, "repo": "acme/widgets", "n": 5, "refs": [12, True, 1.5, None, "g12"]})["refs"])
+check("14 merge_log.normal: a number, a boolean and none are no refs (12 and True would match a ref's shape as text)", got == ["g12"], got)
+
+# (2) the handler: the exception's class and a bounded look at the line, never str(row)
+class _Hostile:
+    def __repr__(self): raise RuntimeError("no repr")
+got = attempt(lambda: (ML.shown(deep), ML.shown({"repo": deep}), ML.shown("x" * 5000), ML.shown({"a": "y" * 5000}), ML.shown(_Hostile())))
+check("14 merge_log.shown: at most 80 characters for a deep structure, a long string and a long value; an object whose repr raises shows as its class (reprlib's own fallback); it never raises",
+      isinstance(got, tuple) and all(len(x_) <= 80 for x_ in got) and got[4].startswith("<_Hostile"), got)
+errs = _io.StringIO()
+with _cl.redirect_stderr(errs): kept = attempt(lambda: server._merge_rows([{"ts": now0, "repo": deep, "n": 5, "refs": []}, {"ts": now0, "repo": "acme/widgets", "n": 6, "refs": []}], now0))
+logged = [l_ for l_ in errs.getvalue().splitlines() if "line skipped" in l_]
+check("14 _merge_rows: a line whose repo nests too deep for str() is logged as its exception class and a bounded look (one short line), and the line after it is kept",
+      isinstance(kept, list) and [r_["n"] for r_ in kept] == [6] and len(logged) == 1 and "RecursionError" in logged[0] and len(logged[0]) < 300, (kept, logged and logged[0][:300]))
+
+# (4) the whole pass: first with the lines handed in from memory (no parse, so no interpreter's parse depth matters), then through the file (the lines are parsed, or dropped by read, whichever this interpreter does)
+for i in (240, 241, 242, 243): fixture(i, project="projects/alpha")
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/{90 + k}", "items": [f"a{240 + k}"]} for k in range(4)]}))
+ML.path().unlink(missing_ok=True); server._merge_progress_save(0)
+SENT = 4321
+_real_read = ML.read
+ML.read = lambda offset=0, file=None: ([{"ts": now0, "repo": "acme/widgets", "n": 95, "refs": [deep, 12, "g12"]}, {"ts": now0, "repo": deep, "n": 96, "refs": []}, line(93, at=-30)], SENT)
+errs = _io.StringIO()
+try:
+    with _cl.redirect_stderr(errs): saved = attempt(lambda: merge_pass(now0))
+finally:
+    ML.read = _real_read
+check("14 the pass, lines nested too deep for str() handed in: it does not stop, the line after them moves its item's clock, and the offset is saved",
+      saved == ["a243"] and server._merge_progress_offset() == SENT and mt(243).get("merged_seen") == ["acme/widgets#93"] and rd(243)["progress"] > now0 - 3 * H and errs.getvalue().count("line skipped") == 1,
+      (saved, server._merge_progress_offset(), errs.getvalue()[-300:]))
+server._merge_progress_save(0)
+
+ML.path().unlink(missing_ok=True)
+ML.append(line(90, at=-120))
+with open(ML.path(), "ab") as f_:
+    f_.write(f'{{"ts": {int(now0)}, "repo": "acme/widgets", "n": 95, "refs": '.encode() + b"[" * depth + b"]" * depth + b"}\n")                  # nested refs
+    f_.write(f'{{"ts": {int(now0)}, "repo": '.encode() + b"[" * depth + b"]" * depth + f', "n": 96, "refs": []}}\n'.encode())                     # a nested repo
+ML.append(line(91, at=-60)); ML.append(line(92, at=-30))
+errs = _io.StringIO()
+with _cl.redirect_stderr(errs): saved = attempt(lambda: merge_pass(now0))
+check("14 the pass, the lines nested too deep for str() in the file: the offset is saved at its end, and the lines before and after them move their items' clocks",
+      isinstance(saved, list) and sorted(saved) == ["a240", "a241", "a242"] and server._merge_progress_offset() == ML.size() and all(rd(i)["progress"] > now0 - 3 * H for i in (240, 241, 242)), (saved, server._merge_progress_offset(), ML.size(), errs.getvalue()[-300:]))
+errs = _io.StringIO()
+with _cl.redirect_stderr(errs): again = attempt(lambda: merge_pass(now0 + 60))
+check("14 …and the pass after it does not read the deep lines again: nothing is saved, nothing is logged, the offset stays at the end",
+      again == [] and "line skipped" not in errs.getvalue() and server._merge_progress_offset() == ML.size(), (again, errs.getvalue()[-300:]))
+
+# (3) the documented behaviour of read: a line that is not JSON, or too deep to parse, is dropped with no log line (the doc says so)
+ML.path().unlink(missing_ok=True)
+with open(ML.path(), "ab") as f_: f_.write(b"[" * 200000 + b"\n" + b'{"ts": 1, "repo": "acme/wid\n')
+ML.append({"ts": 2, "repo": "acme/widgets", "n": 97, "refs": []})
+quiet = _io.StringIO()
+with _cl.redirect_stderr(quiet): quiet_rows, _ = ML.read(0)
+doc_ = pathlib.Path(STACK, "docs/stall-and-ladder.md").read_text(encoding="utf-8")
+check("14 docs: the merge pass's section says that merge_log.read drops a line that is not JSON or is too deep to parse without a log line, and the code does exactly that (it prints nothing)",
+      "`merge_log.read` without a log line" in doc_ and "(logged, the offset moves past it)" not in doc_ and [r_["n"] for r_ in quiet_rows] == [97] and quiet.getvalue() == "", (quiet_rows, quiet.getvalue()[:200]))
+close(240, 241, 242, 243)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
