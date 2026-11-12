@@ -1911,6 +1911,134 @@ try:
     hub.bindings[AN4] = {OWNER}; del cievs[:]; one_pass()
     GHD[f"{RP}/commits/{'9' * 40}/check-runs?per_page=100"] = runs_(("suites", "failure"), ("lint", "success")); one_pass()
     check("anchor-hub CI: a first finished result that failed is one ci_failed (delivered: not record_only)", [(e.etype, e.record_only) for e in cievs if e.anchor == AN4] == [("ci_failed", False)], [(e.etype, e.text) for e in cievs if e.anchor == AN4])
+    # an anchor added after the merge: the first read of a pull request that merged within the last day writes its merge line (the merge log and the event log) instead of seeding silently
+    set_reads(100000); LH = 3600
+    def add_pr(n, merged_ago=None, state="closed", body="", closed_ago=None, rp=RP):
+        at = None if merged_ago is None else iso(time.time() - merged_ago)
+        recent = None if closed_ago is None else iso(time.time() - closed_ago)      # closed unmerged a moment ago: recent closed_at and updated_at, no merged_at
+        GHD[f"{rp}/pulls/{n}"] = GHD[f"{RP}/pulls/26"]
+        GHD[f"{rp}/issues/{n}"] = {"state": state, "comments": 0, "updated_at": at or recent or "2026-10-28T00:00:00Z", "title": f"pr {n}", "html_url": f"https://github.com/{rp[7:]}/pull/{n}", "body": body, "closed_by": {"login": "alice"},
+                                   "closed_at": at or recent, "pull_request": {"merged_at": at}}
+    def lines13(n):
+        m = [r for r in ahc._merges.read(0)[0] if r["n"] == n]; e = [r for r in ahc._events.read(0)[0] if r["n"] == n]
+        return m, e
+    def fresh_hub(ids):
+        h = ahc.Hub(); h.write_status = lambda: None; told = []; h.emit = told.append; h.bindings = {(n if isinstance(n, str) else f"github:example-owner/stackshot#{n}"): {OWNER} for n in ids}; h.told = told
+        del caught[:]; ghr.run(h); return h
+    def pass_of(h):
+        try: caught[0]()
+        except _Stop: pass
+    ahc._merges.path().unlink(missing_ok=True); ahc._events.path().unlink(missing_ok=True)
+    add_pr(60, 2 * LH); add_pr(61, 30 * LH); add_pr(62, None, state="closed"); add_pr(63, -3 * LH); add_pr(64, None, state="open"); add_pr(65, 30)
+    h13 = fresh_hub([60, 61, 62, 63, 64, 65]); pass_of(h13)
+    m60, e60 = lines13(60)
+    check("anchor-hub: an anchor first read on a pull request that merged 2 hours ago writes its merge line (the merge log and the event log, once)", len(m60) == 1 and len(e60) == 1 and e60[0]["kind"] == "merged" and m60[0]["repo"] == "example-owner/stackshot", (m60, e60))
+    check("anchor-hub: …the event log line is stamped at the time it merged, not at the hub's now", abs(e60[0]["ts"] - (time.time() - 2 * LH)) < 5, e60)
+    check("anchor-hub: …a merge 30 hours ago, a pull request closed unmerged, one still open, and a merge time in the future are silent seeds: no line, state seeded",
+          all(lines13(n) == ([], []) for n in (61, 62, 63, 64)) and all(f"github:example-owner/stackshot#{n}" in h13.gh_state["state"] for n in (60, 61, 62, 63, 64)), [lines13(n) for n in (61, 62, 63, 64)])
+    check("anchor-hub: a merge half a minute ago is within the window (the hub's clock may be a little behind GitHub's)", len(lines13(65)[0]) == 1, lines13(65))
+    check("anchor-hub: the merge line is only recorded: the sessions of the anchor get no notice for it", h13.told == [], h13.told)
+    n_m, n_e = len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0]); pass_of(h13); pass_of(h13)
+    check("anchor-hub: a second pass writes nothing more", (len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0])) == (n_m, n_e), (n_m, n_e))
+    h13b = fresh_hub([60, 65]); pass_of(h13b)
+    check("anchor-hub: a hub that starts with nothing saved reads the anchor first again and writes no second line for the merge (the logs hold it already)", (len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0])) == (n_m, n_e), (len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0]), n_m, n_e))
+    # a line that could not be written: the anchor is not seeded and its ETag is dropped, so the next pass reads the pull request again and writes it; the merge log carries the time it merged
+    ahc._merges.path().unlink(missing_ok=True); ahc._events.path().unlink(missing_ok=True); add_pr(67, 2 * LH)
+    real_note = ahc._merges.note; boom = [True]
+    def failing_note(*a, **k):
+        if boom[0]: raise OSError("disk full")
+        return real_note(*a, **k)
+    ahc._merges.note = failing_note
+    try:
+        h13d = fresh_hub([67]); pass_of(h13d); K67 = "github:example-owner/stackshot#67"
+        check("anchor-hub: a merge line that could not be written leaves the anchor unseeded, its issue ETag dropped, and no line in the event log", K67 not in h13d.gh_state["state"] and f"{RP}/issues/67" not in h13d.gh_state["etags"] and lines13(67)[1] == [], (list(h13d.gh_state["state"]), list(h13d.gh_state["etags"])))
+        boom[0] = False; ghcli["304"] = True; pass_of(h13d)
+    finally:
+        ahc._merges.note = real_note; ghcli["304"] = False
+    m67, e67 = lines13(67)
+    check("anchor-hub: …the next pass reads it again, writes the merge line (the merge log stamped at the time it merged) and seeds", K67 in h13d.gh_state["state"] and len(m67) == 1 and abs(m67[0]["ts"] - (time.time() - 2 * LH)) < 5 and len(e67) == 1, (m67, e67))
+    # the first-read condition and the window's edges
+    ahc._merges.path().unlink(missing_ok=True); ahc._events.path().unlink(missing_ok=True)
+    add_pr(68, 24.5 * LH); add_pr(69, None, state="closed", closed_ago=2 * LH)
+    pass_of(fresh_hub([68, 69]))
+    check("anchor-hub: a merge 24.5 hours ago (the window is 24) writes neither log", lines13(68) == ([], []), lines13(68))
+    check("anchor-hub: a pull request closed unmerged 2 hours ago (recent closed_at and updated_at, no merged_at) writes neither log", lines13(69) == ([], []), lines13(69))
+    # a live open-to-merged transition is the ordinary merge event, exactly one line per log: the late path is the first read's alone
+    add_pr(70, None, state="open"); h70 = fresh_hub([70]); h70.emit = lambda ev: ahc.Hub.log_activity(h70, ev)      # emit's own first step: the two log lines
+    pass_of(h70); check("anchor-hub: an open pull request's first read writes no line", lines13(70) == ([], []), lines13(70))
+    add_pr(70, 1 * LH); pass_of(h70); m70, e70 = lines13(70)
+    check("anchor-hub: …and its merge, seen live, writes exactly one line in each log (the ordinary event, no late line before it)", len(m70) == 1 and len(e70) == 1, (m70, e70))
+    # the same number in two repositories is two pull requests
+    OP = "/repos/example-owner/other"; add_pr(73, 2 * LH); add_pr(73, 2 * LH, rp=OP)
+    pass_of(fresh_hub([73, "github:example-owner/other#73"]))
+    got73 = sorted(r["repo"] for r in ahc._events.read(0)[0] if r["n"] == 73); got73m = sorted(r["repo"] for r in ahc._merges.read(0)[0] if r["n"] == 73)
+    check("anchor-hub: the same pull request number merged in two repositories writes a line for each in both logs", got73 == got73m == ["example-owner/other", "example-owner/stackshot"], (got73, got73m))
+    # a log that can never be written costs a bounded number of reads, then the anchor is seeded without the line
+    add_pr(71, 2 * LH); real_note = ahc._merges.note
+    def never(*a, **k): raise OSError("read-only")
+    ahc._merges.note = never
+    try:
+        n0 = calls.count(f"{RP}/issues/71"); h71 = fresh_hub([71])
+        for _ in range(8):
+            if "github:example-owner/stackshot#71" in h71.gh_state["state"]: break
+            pass_of(h71)
+        reads71 = calls.count(f"{RP}/issues/71") - n0      # the reads up to the seed (a seeded merged anchor is looked at once in a while after that, as any)
+    finally: ahc._merges.note = real_note
+    check("anchor-hub: a log that cannot be written costs 3 reads of the issue (ghr.LATE_TRIES, three), then the anchor is seeded (the late line dropped, said in a warning)",
+          ghr.LATE_TRIES == 3 and reads71 == 3 and "github:example-owner/stackshot#71" in h71.gh_state["state"] and lines13(71) == ([], []) and any("dropped" in w and "late merge" in w for w in warned), (reads71, warned[-2:]))
+    # each log is written only if it lacks the line: a failure between the two writes is not repeated on the retry
+    def lines_of(n, repo="example-owner/stackshot"):
+        return [r for r in ahc._merges.read(0)[0] if r["n"] == n and r["repo"] == repo], [r for r in ahc._events.read(0)[0] if r["n"] == n and r["repo"] == repo and r["kind"] == "merged"]
+    ahc._merges.path().unlink(missing_ok=True); ahc._events.path().unlink(missing_ok=True)
+    real_enote = ahc._events.note; eboom = [1]
+    def flaky_event(*a, **k):
+        if eboom[0] > 0: eboom[0] -= 1; raise OSError("event log busy")
+        return real_enote(*a, **k)
+    add_pr(74, 2 * LH); ahc._events.note = flaky_event
+    try:
+        h74 = fresh_hub([74]); pass_of(h74); K74 = "github:example-owner/stackshot#74"
+        check("anchor-hub: an event log write that fails after the merge log's succeeded leaves the anchor unseeded, one merge log line, none in the event log", K74 not in h74.gh_state["state"] and [len(x) for x in lines_of(74)] == [1, 0], [len(x) for x in lines_of(74)])
+        pass_of(h74)
+    finally: ahc._events.note = real_enote
+    check("anchor-hub: …the retry writes only the event log: exactly one line in each log, and the anchor is seeded", K74 in h74.gh_state["state"] and [len(x) for x in lines_of(74)] == [1, 1], [len(x) for x in lines_of(74)])
+    add_pr(75, 2 * LH); eboom[0] = 10 ** 6; ahc._events.note = flaky_event
+    try:
+        h75 = fresh_hub([75]); K75 = "github:example-owner/stackshot#75"
+        for _ in range(8):
+            if K75 in h75.gh_state["state"]: break
+            pass_of(h75)
+    finally: ahc._events.note = real_enote
+    check("anchor-hub: an event log that never writes leaves exactly one merge log line (not one per try), none in the event log, and the anchor is seeded after the tries", K75 in h75.gh_state["state"] and [len(x) for x in lines_of(75)] == [1, 0], [len(x) for x in lines_of(75)])
+    # a line of another kind for the same pull request does not stand for its merge
+    add_pr(76, 2 * LH); ahc._events.note("github:example-owner/stackshot#76", "", "comment", "alice", [], time.time(), vouched="comment")
+    pass_of(fresh_hub([76]))
+    check("anchor-hub: a comment's line already in the event log for the pull request does not suppress its late merge line", [len(x) for x in lines_of(76)] == [1, 1], [len(x) for x in lines_of(76)])
+    # the clock skew: a minute ahead is read as now, five minutes ahead is a torn time
+    add_pr(77, -60); add_pr(78, -300); pass_of(fresh_hub([77, 78]))
+    check("anchor-hub: a merge time a minute ahead of the hub's clock is accepted; five minutes ahead writes neither log", [len(x) for x in lines_of(77)] == [1, 1] and lines_of(78) == ([], []), (lines_of(77), lines_of(78)))
+    # an exception inside the late path is a failure (not a seed): the anchor is read again
+    add_pr(79, 2 * LH); h79 = fresh_hub([79]); K79 = "github:example-owner/stackshot#79"; real_rec = h79.record
+    def raising(*a, **k): raise RuntimeError("boom")
+    h79.record = raising; pass_of(h79)
+    check("anchor-hub: an exception inside the late path leaves the anchor unseeded, its issue ETag dropped and no line written", K79 not in h79.gh_state["state"] and f"{RP}/issues/79" not in h79.gh_state["etags"] and lines_of(79) == ([], []), list(h79.gh_state["state"]))
+    h79.record = real_rec; pass_of(h79)
+    check("anchor-hub: …and the next pass writes it and seeds", K79 in h79.gh_state["state"] and [len(x) for x in lines_of(79)] == [1, 1], [len(x) for x in lines_of(79)])
+    # the retry count is per anchor: a second anchor failing gets its own three tries
+    add_pr(80, 2 * LH); add_pr(81, 2 * LH); ahc._merges.note = never; n80, n81 = calls.count(f"{RP}/issues/80"), calls.count(f"{RP}/issues/81")
+    try:
+        h80 = fresh_hub([80, 81])
+        for _ in range(8):
+            if all(f"github:example-owner/stackshot#{k}" in h80.gh_state["state"] for k in (80, 81)): break
+            pass_of(h80)
+    finally: ahc._merges.note = real_note
+    check("anchor-hub: the retry count is per anchor: two anchors that cannot be written each cost 3 reads of their issue", (calls.count(f"{RP}/issues/80") - n80, calls.count(f"{RP}/issues/81") - n81) == (3, 3), (calls.count(f"{RP}/issues/80") - n80, calls.count(f"{RP}/issues/81") - n81))
+    # what the line says
+    add_pr(82, 2 * LH); h82 = fresh_hub([82]); seen82 = []; rec82 = h82.record
+    h82.record = lambda anchor, summary, *a, **k: (seen82.append(dict(summary)), rec82(anchor, summary, *a, **k))[1]
+    pass_of(h82)
+    check("anchor-hub: the late line's report names the pull request, who closed it, its link and the time it merged",
+          len(seen82) == 1 and seen82[0]["title"] == 'stackshot#82 "pr 82"' and seen82[0]["who"] == "alice" and seen82[0]["url"] == "https://github.com/example-owner/stackshot/pull/82" and seen82[0]["etype"] == "pr_merged"
+          and abs(ahc._ts(seen82[0]["ts"]) - (time.time() - 2 * LH)) < 5 and "meta" not in seen82[0], seen82)
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
     ahc.log.removeHandler(_caph)
