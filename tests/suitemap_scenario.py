@@ -1726,6 +1726,11 @@ check("ROUTE 10b ... and r1 in lower case with spaces is R1", okr.returncode == 
 # rm: runs Cfg.read_k (reads self.K); rd: getattr(c, <variable>); rv, ri, rj, rdump: vars(Cfg), dir(c), Cfg.__dict__, a method reading other.__dict__ (dynamic); rmx: vars() of a name
 # that was a module once and is not now (dynamic). No `K`: ro runs Cfg.other, rsnap runs Cfg.snap (self.__dict__: an instance dict), rn reads .LIMIT only, rmj and rmi
 # vars() / getattr() a module (an import and importlib.import_module), which is no read of a class attribute.
+# Each guard of attr_setup / narrowable / attr_keys has a suite or a class that fails when the guard is removed (found by mutating a scratch copy of suitemap.py): the WHOLE
+# table below is one class per reason an edit must bind the class (a decorator, a base, __slots__, __getattr__ and the other ATTR_NEVER dunders, a default or annotation that
+# reads the class, a keyword, a metaclass, a method header calling locals / vars / dir / eval / exec); rlong, rlongn: a script over 160 characters that does or does not read
+# Cfg.K; rpm, rpmk: mock.patch.multiple(Cfg, K=...) and **kw; rgms, rh<name>: inspect.getmembers_static and setattr / hasattr / delattr / vars / dir handed a class instance.
+# globals() in a class body needs no class of its own: py_change already takes the whole file for a globals() call before it asks whether a class narrows.
 R = T / "repo5"; R.mkdir()
 git("init", "-q", "-b", "main")
 write("cmod.py", '''
@@ -1835,6 +1840,54 @@ write("cmod.py", '''
         def other(self, ns=vars()):
             return 1
 
+    class HdrL:
+        X_HL = 1
+        def other(self, ns=locals()):
+            return 1
+
+    class HdrD:
+        X_HD = 1
+        def other(self, ns=dir()):
+            return 1
+
+    class HdrE:
+        X_HE = 1
+        def other(self, ns=eval('1')):
+            return 1
+
+    class HdrX:
+        X_HX = 1
+        def other(self, ns=exec('')):
+            return 1
+
+    class Gta:
+        X_GA = 1
+        def __getattribute__(self, name):
+            return object.__getattribute__(self, name)
+        def other(self):
+            return 1
+
+    class Isc:
+        X_IS = 1
+        def __init_subclass__(cls, **kw):
+            return None
+        def other(self):
+            return 1
+
+    class Snm:
+        X_SN = 1
+        def __set_name__(self, owner, name):
+            return None
+        def other(self):
+            return 1
+
+    class Cgi:
+        X_CG = 1
+        def __class_getitem__(cls, item):
+            return cls
+        def other(self):
+            return 1
+
     LIM2 = Cfg.LIMIT * 2
     def use_lim2():
         return LIM2
@@ -1878,6 +1931,7 @@ CSUITES = {
     "rev": ("import cmod\neval(input())\n", INIT),
     "rgv": ("import cmod\nc = cmod.Cfg()\nlist(map(getattr, [c], [input()]))\n", INIT),
     "rrb": ("import cmod\n", ["", "Cfg.rebind"]),
+    "rgms": ("import cmod, inspect\ninspect.getmembers_static(cmod.Cfg)\n", INIT),
     # a module object is no class: vars() and getattr() of a module made by __import__, sys.modules[...], or either written in place are no read of a class attribute
     "rmn": ("import cmod\nm = __import__('json')\nvars(m)\ngetattr(m, input())\n", OTHER),
     "rms": ("import cmod, sys\nm = sys.modules['json']\nvars(m)\ngetattr(m, input())\n", OTHER),
@@ -1906,9 +1960,17 @@ WHOLE = {cls_: (line_, bump(line_), "other", why_) for cls_, line_, why_ in [
     ("Loc", "LK = 1", "reading its own namespace in the body (vars(): a call that is no pure one, so the class is an effect and the file goes whole)"),
     ("Kw", "KK = 1", "given a keyword (class Kw(metaclass=Meta): the metaclass may read the attributes of the class)"),
     ("Sl", 'SL = 1; SQ = len("ab")', "holding a literal and a call on one line (SL = 1; SQ = len('ab'): the line edit may be the call's)"),
-    ("Hdr", "HK = 1", "reading its namespace in a method's default (def other(self, ns=vars()): the default runs in the class body)")]}
+    ("Hdr", "HK = 1", "reading its namespace in a method's default (def other(self, ns=vars()): the default runs in the class body)"),
+    ("HdrL", "X_HL = 1", "reading its namespace in a method's default (ns=locals())"), ("HdrD", "X_HD = 1", "reading its namespace in a method's default (ns=dir())"),
+    ("HdrE", "X_HE = 1", "evaluating code in a method's default (ns=eval('1'))"),
+    ("HdrX", "X_HX = 1", "executing code in a method's default (ns=exec(''))"),
+    ("Gta", "X_GA = 1", "defined with __getattribute__"), ("Isc", "X_IS = 1", "defined with __init_subclass__"),
+    ("Snm", "X_SN = 1", "defined with __set_name__"), ("Cgi", "X_CG = 1", "defined with __class_getitem__")]}
 WHOLE["Mt"] = ('__match_args__ = ("x", "y")', '__match_args__ = ("y", "x")', "swap",
                "naming its positional pattern attributes in __match_args__ (a dunder: case Mt(p, q) reads x and y without naming them)")
+# each builtin of the handed-over list, as a value: map(setattr, ...), map(hasattr, ...), map(delattr, ...), map(vars, ...), map(dir, ...)
+for nm_ in ("setattr", "hasattr", "delattr", "vars", "dir"):
+    CSUITES[f"rh{nm_}"] = (f"import cmod\nlist(map({nm_}, [cmod.Cfg()]))\n", INIT)
 for cls_, (_l, _n, meth_, _w) in WHOLE.items():
     CSUITES[f"w{cls_.lower()}"] = ("import cmod\n", ["", f"{cls_}.{meth_}"])
 for s, (body, _ran) in CSUITES.items(): write(f"tests/{s}_scenario.py", body)
@@ -1925,7 +1987,7 @@ def class_sel(edit, msg, env=None):
     return sorted(r.stdout.split()), r.stderr
 OLD_C = {"SUITEMAP_CLASS_RULE": "C1"}
 # the suites that read an attribute by a name they compute: every attribute edit of the module reaches them
-DYN = {"rd", "rv", "ri", "rj", "rdump", "rmx", "rrb", "rsa", "rha", "rda", "rgs", "rgm", "rag", "rmcl", "rga", "rsd", "rev", "rgv", "rpmk"}
+DYN = {"rd", "rv", "ri", "rj", "rdump", "rmx", "rrb", "rsa", "rha", "rda", "rgs", "rgm", "rag", "rmcl", "rga", "rsd", "rev", "rgv", "rpmk", "rgms", "rhsetattr", "rhhasattr", "rhdelattr", "rhvars", "rhdir"}
 MODS = {"rmj", "rmi", "rmn", "rms", "rmp"}   # suites that vars() / getattr() a module object
 CFG_ALL = {"ra", "rst", "rs", "rf", "rm", "ro", "rsnap", "rn", "rmc", "rml", "rdf", "rlong", "rlongn", "rpm"} | DYN | MODS
 K_READERS = {"ra", "rst", "rs", "rf", "rm", "rlong", "rpm"} | DYN

@@ -467,7 +467,7 @@ ATTR_ALL = {"vars", "dir", "getmembers", "getmembers_static"}                  #
 ATTR_NAMES = {"attrgetter", "methodcaller"}                                    # operator.attrgetter(name)
 ATTR_VALUES = {"getattr", "setattr", "hasattr", "delattr", "vars", "dir"}      # the builtins handed over as a value (map(getattr, objs, names), partial(getattr, obj))
 ATTR_DICT = {"__dict__", "__getattribute__"}                                   # a namespace, an explicit lookup by name
-ATTR_BODY_CALLS = {"locals", "vars", "dir", "globals", "eval", "exec"}         # in a class body: the class's own namespace, read as a whole
+ATTR_BODY_CALLS = {"locals", "vars", "dir", "globals", "eval", "exec"}         # in a class body or a method header: the class's own namespace, read as a whole (globals() also takes the file whole through `dyn` in py_change: listed for completeness)
 ATTR_TOKEN = re.compile(r"[A-Za-z_]\w*")
 SELF_DECORATORS = PLAIN_DECORATORS - {"staticmethod", "classmethod"}            # a method under any other decorator may be a class method: its `self` is not an instance
 
