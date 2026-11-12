@@ -217,7 +217,7 @@ tick()
 with _Err():
     real_pass = HR.pass_
     put(8, act=90, status="completed", outcome="done")
-    HR.pass_ = lambda items, now, env=None, pane=None, same=None: [("a4", {"text": "stale", "verified": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
+    HR.pass_ = lambda items, now, env=None, pane=None, same=None: [("a4", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
     try: stale = server._hourly_tick(now=now0 + 5 * MIN)
     finally: HR.pass_ = real_pass
 check("4 an item read again under the lock that is no longer due (a line written since, or closed since) is left alone", stale == [] and len(lines(4)) == 1 and lines(8) == [], (stale, lines(4), lines(8)))
