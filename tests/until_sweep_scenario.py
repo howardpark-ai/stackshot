@@ -136,17 +136,30 @@ def restore(snap):
         if not q.exists() or q.read_bytes() != data:
             q.write_bytes(data)
 
+IGNORED = {"wake", "until", "ask_by", "hold", "hold_set", "wait_kind", "stall", "history"}
+def sig_of(g, b, a, told):
+    """What a tick did to one item: whether it was told about, and what it reads as after (phase, owner, mover, a kind kept when it had no hold, a hold kept) with every other key the tick changed; the old
+    date keys are left out (the migration moves them). A notice leaves the kind and the wait, a release drops them and hands the item on: these tell the two apart."""
+    mb, ma = (json.loads(b) if b else {}), json.loads(a)
+    m0, m1 = mb.get("metadata") or {}, ma.get("metadata") or {}
+    changed = tuple(sorted(k for k in set(m0) | set(m1) if k not in IGNORED and m0.get(k) != m1.get(k)))
+    return (bool(told), ma.get("status"), m1.get("owner"), m1.get("mover"), None if m0.get("hold") else bool(m1.get("wait_kind")), bool(m1.get("hold")), changed)
+
 def tick(epoch):
-    """The ids a tick at `epoch` acted on (a file rewritten, or a message that names the item); the store is put back after."""
+    """{id: what the tick did} for the ids a tick at `epoch` acted on (a file rewritten, or a message that names the item); the store is put back after."""
     before = snapshot(); sent.clear()
     server._wake_pass(_dtm.datetime.fromtimestamp(epoch, server._cfg.tz()))
     after = snapshot()
-    acted = {f"g{pn}" for pn in (int(k[:-5]) for k in after) if after.get(f"{pn}.json") != before.get(f"{pn}.json")}
+    notes = {}
     for entry in sent:
         text = str(entry)
-        acted |= {g for g in IDS if re.search(rf"(?<![0-9])(g|item |board#|{re.escape('board' + chr(35))}){g[1:]}(?![0-9])", text)}
+        for g in IDS:
+            if re.search(rf"(?<![0-9])(g|item |board#|{re.escape('board' + chr(35))}){g[1:]}(?![0-9])", text):
+                notes.setdefault(g, []).append(text)
+    acted = {f"g{pn}" for pn in (int(k[:-5]) for k in after) if after.get(f"{pn}.json") != before.get(f"{pn}.json")} | set(notes)
+    out = {g: sig_of(g, before.get(f"{g[1:]}.json"), after[f"{g[1:]}.json"], g in notes) for g in acted & set(IDS)}
     restore(before)
-    return acted & set(IDS)
+    return out
 
 res = {}
 for k in range(0, len(IDS), 40):
@@ -165,8 +178,8 @@ CASEWORDS = lambda gs: [f"{g} [{desc[g]}]" for g in sorted(gs)[:12]]
 epoch1, epoch2, epoch3 = now0 + 60, now0 + 3 * DAY, now0 + 20 * DAY
 acts = {}
 for label, ep in (("+1 minute", epoch1), ("+3 days", epoch2), ("+20 days", epoch3)):
-    restore(S0); pre = tick(ep)
-    restore(S1); post = tick(ep)
+    restore(S0); pre_sig = tick(ep); pre = set(pre_sig)
+    restore(S1); post_sig = tick(ep); post = set(post_sig)
     acts[label] = (pre, post)
     lost = pre - post
     check(f"1 {label}: nothing the tick before the migration acted on is left unacted after it ({len(lost)} lost of {len(pre)})", not lost, CASEWORDS(lost))
@@ -176,6 +189,8 @@ for label, ep in (("+1 minute", epoch1), ("+3 days", epoch2), ("+20 days", epoch
     else:
         unlisted = {g for g in extra if g not in newly or _dtm.datetime.fromtimestamp(ep, server._cfg.tz()).date() < _dtm.date.fromisoformat(newly[g][:10])}
         check(f"3 {label}: the only items the tick newly acts on are the listed newly watched ones, on or after their own date ({len(extra)} new, {len(unlisted)} unlisted)", not unlisted, CASEWORDS(unlisted))
+    differ = {g for g in pre & post if not json.loads(S0[f"{g[1:]}.json"])["metadata"].get("hold") and pre_sig[g] != post_sig[g] and not (g in newly and _dtm.datetime.fromtimestamp(ep, server._cfg.tz()).date() >= _dtm.date.fromisoformat(newly[g][:10]))}
+    check(f"5 {label}: an item with no hold that both ticks act on gets the same treatment (a notice stays a notice, a release a release, the kind kept alike; a hold's release is checked by 1-3) unless it is listed as newly watched ({len(differ)} differ)", not differ, [f"{g} [{desc[g]}] {pre_sig[g]} -> {post_sig[g]}" for g in sorted(differ)[:8]])
 
 # ---- the classes by name: what the old code read is migrated and unlisted; what it did not is left (past) or listed (future)
 def route(i, **meta):
@@ -196,6 +211,14 @@ rows = {
     "relay, a later wake, an earlier past ask_by": (route(5016, needs=["external"], wait_kind="relay", wait_event="the vendor's reply", wake=future, ask_by=past), "would_set", "", False),
     "kind time, a future wake, no hold":     (route(5017, needs=[BACK], wait_kind="time", wake=future), "refused", "", False),
     "kind event (valid), a future wake, no hold": (route(5018, needs=[BACK], wait_kind="event", wait_event="box_online box-b", wake=future), "would_set", "", False),
+    "anchor with no target, past wake":      (route(5019, needs=[BACK], wait_kind="anchor", wake=past), "kept", "previously only a notice", True),
+    "anchor with no target, future wake":    (route(5020, needs=[BACK], wait_kind="anchor", wake=future), "would_set", "previously only a notice", False),
+    "anchor with a blank target, past wake": (route(5021, needs=[BACK], wait_kind="anchor", wait_anchor="  ", wake=past), "kept", "previously only a notice", True),
+    "event with a bogus phrase, past wake":  (route(5022, needs=[BACK], wait_kind="event", wait_event="bogus", wake=past), "kept", "previously only a notice", True),
+    "event with a bogus phrase, future wake": (route(5023, needs=[BACK], wait_kind="event", wait_event="bogus", wake=future), "would_set", "previously only a notice", False),
+    "event with no phrase, future wake":     (route(5024, needs=[BACK], wait_kind="event", wake=future), "would_set", "previously only a notice", False),
+    "event with a valid phrase, future wake": (route(5025, needs=[BACK], wait_kind="event", wait_event="box_online box-b", wake=future), "would_set", "", False),
+    "anchor with its target, future wake":   (route(5026, needs=[BACK], wait_kind="anchor", wait_anchor="https://example.com/x", wake=future), "would_set", "", False),
     "anchor with no target, past ask_by":   (route(5008, needs=[BACK], wait_kind="anchor", ask_by=past), "kept", "never watched", True),
     "event with a bogus phrase, past ask_by": (route(5009, needs=[BACK], wait_kind="event", wait_event="bogus", ask_by=past), "kept", "never watched", True),
     "anchor with no target, future ask_by": (route(5010, needs=[BACK], wait_kind="anchor", ask_by=future), "would_set", "never watched", False),

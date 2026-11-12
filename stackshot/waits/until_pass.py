@@ -9,7 +9,7 @@ What a stored item gets (`plan_for`; the server's `one` refuses any item whose r
   ask_by / wake beside an after link with no kind    until = the date, wait_kind = item (as create and update store it)
   a bare wake (no hold, no kind, no wait_basis, no after link)    kept as it is: it is a backstop (a hand-off's, or one stored before until), not a wait, and as `until` it would park the item
   an item with no old date, or one that stores an until and an old date both    left as it is (the second is listed)
-  a date the old code did not act on (an ask_by the old watchers did not read: they read it only for a relay, or as the backstop of an item wait, or of an anchor or event wait they could end, so one beside no kind, a time kind, an anchor wait with no anchor or an event wait with a bad phrase was never read; or a wake beside an after link with no kind, which only got a notice)
+  a date the old code did not act on (an ask_by the old watchers did not read: they read it only for a relay, or as the backstop of an item wait, or of an anchor or event wait they could end, so one beside no kind, a time kind, an anchor wait with no anchor or an event wait with a bad phrase was never read; or a wake with no hold on a wait the watchers did not own (no kind, an anchor wait with no anchor, an event wait with a bad phrase), which only got a notice)
                        As until the watchers act on it. A date already past is NOT migrated (it would wake the item on the next tick): it is listed as "already due" for a person to re-save with the date meant;
                        a future one is migrated and listed as "newly watched", with the day it wakes and how it was read before (never watched, or only a notice). An item with a wake and a hold is not in
                        this class: the old wake pass released it at the date, as the watchers do.
@@ -63,11 +63,11 @@ def due_why(how: str) -> str:
 def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
     """The plan for one open item → {"edits": {key: new value, None drops}, "form": the old fields in words, "new": what the wait is stored as, "kept": why it is left (""), "listed": True when the kept item is
     to be listed for a person, "until": the date it is stored as, "source": "wake" | "ask_by" (which old field the date comes from; the old
-    wake pass read `wake`, nothing read an ask_by that stood without a kind), "notice_only": True when the date is a wake beside an after link with no kind (the old pass only sent a notice at it)}.
+    wake pass read `wake`, nothing read an ask_by that stood without a kind)}.
     `keeps_hold`: the hold waits on an anchor scoped to the item or on a pane recycle (the flag stays). Pure. Whether the date is one the watchers newly act on, and whether it is already due, is the server's
     to say (`one`): it needs the watched reading before and after."""
     form = old_form(meta)
-    out: dict[str, Any] = {"edits": {}, "form": form, "new": "", "kept": "", "listed": False, "until": "", "source": "", "notice_only": False}
+    out: dict[str, Any] = {"edits": {}, "form": form, "new": "", "kept": "", "listed": False, "until": "", "source": ""}
     if not _dated(meta.get("wake")) and not _dated(meta.get("ask_by")):
         out["kept"] = "no old date stored" if not form else "no old date to fold"
         return out
@@ -79,10 +79,8 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
         out["kept"] = f"{bare} is a backstop (a hand-off's, or one stored before until), not a wait: kept as it is"
         return out
     work = copy.deepcopy(meta)
-    item_rule = False
     if _wt.after_of(work) and not _uw.kind_of(work) and _uw.date_of(work):
-        work["wait_kind"] = "item"                       # a date beside an after link with no kind is that wait's backstop; the writers store the kind item
-        item_rule = True                                 # …stored as the kind item, the watchers act on it from then on
+        work["wait_kind"] = "item"                       # a date beside an after link with no kind is that wait's backstop; the writers store the kind item, and the watchers act on it from then on
     wake_before = _wt.wake_value(meta)
     hold_set = work.get("hold_set")
     u = _uw.fold(work)
@@ -106,7 +104,6 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
     wake_d = _dated(meta.get("wake"))
     out["until"] = u
     out["source"] = "wake" if wake_d and clean(wake_d) == clean(u) else "ask_by"
-    out["notice_only"] = bool(item_rule and out["source"] == "wake" and not meta.get("hold"))
     return out
 
 
@@ -208,7 +205,10 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             # an ask_by is a date the old watchers read only for a wait they owned (a relay, an item wait, an anchor or event wait they could end) and, as the chosen date, only when no dated wake is the earlier one: so a
             # date taken from the ask_by was read exactly when the item was watched before (an anchor with no anchor, an event with a bad phrase, a kind time, no kind at all: not watched, not read)
             read_ask_by = bool(r0["watched"]) and _uw.kind_of(meta) in ("relay", "item", "anchor", "event")
-            how = HOW_NOTICE if plan["notice_only"] else HOW_NEVER if plan["source"] == "ask_by" and not read_ask_by else ""
+            # a wake with no hold on a wait the watchers did not own (no kind, an anchor wait with no anchor, an event wait with no valid phrase) only got a backstop notice from the old wake pass; as until the
+            # watchers release the item. The kind check in read_ask_by is for a kind time, which reads only its own date; nothing seen reaches it, it costs nothing and states what the old code read.
+            notice = plan["source"] == "wake" and not meta.get("hold") and not r0["watched"]
+            how = HOW_NOTICE if notice else HOW_NEVER if plan["source"] == "ask_by" and not read_ask_by else ""
             if how:                                     # a date the old code did not act on as the watchers will: nothing read it, or the old pass only sent a notice
                 ep = _wt.wake_epoch(plan["until"])
                 if ep is not None and ep <= time.time():
