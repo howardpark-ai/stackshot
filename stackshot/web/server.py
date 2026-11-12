@@ -16063,8 +16063,15 @@ def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
     return out
 
 
+class _TiedRows(list):
+    """`_merge_tied`'s answer: the list of (line, key, tied), plus `problem`, why the anchors could not be read ("" = they were). The live passes log it and carry on with the other ties; the last-activity backfill
+    (`last_activity_pass.ties`) reports it as a ties problem, so its apply refuses instead of filling an item without the ties its anchors would give."""
+    problem: str = ""
+
+
 def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, Any], str, dict[str, str]]]:
-    """For each merge line the open items on the stall ladder it is tied to: [(line, "owner/repo#n", {item id: why})]. The items are read once for all lines; one that cannot be read is logged and left out."""
+    """For each merge line the open items on the stall ladder it is tied to: [(line, "owner/repo#n", {item id: why})]. The items are read once for all lines; one that cannot be read is logged and left out.
+    The anchors that cannot be read are logged and the other ties (the pull request's body, the item's own words) are still made; the answer's `problem` says so (`_TiedRows`)."""
     scoped = _released_anchors()
     texts: dict[str, str] = {}
     projects: dict[str, str] = {}
@@ -16083,12 +16090,15 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
             projects[gid] = str(meta.get("project") or "")
         except Exception as e:  # noqa: BLE001
             print(f"merge progress: {gid} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    problem = ""
     try:
         pages = _mtie.repo_pages(_anc.load(), _anchor_repo)
     except Exception as e:  # noqa: BLE001
         pages = {}
+        problem = f"the anchors could not be read ({e.__class__.__name__}: {str(e)[:120]})"
         print(f"merge progress: anchors not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    out = []
+    out = _TiedRows()
+    out.problem = problem
     for row in rows:
         key = f"{_cfg.canon_repo(str(row['repo']))}#{int(row['n'])}"
         body: list[str] = []
