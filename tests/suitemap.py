@@ -143,26 +143,33 @@ SUITEMAP_DOCSTRING_RULE=D1 (D2 by default; any other value is an error, checked 
 the old rule everywhere: a docstring is part of the body. `audit` applies the same rule on both maps.
 
 Imports and annotations (Thu Nov 12th 2026). Two things made an edit of an import line reach far more than it changes. (1) The line bound EVERY
-name on it, so adding `Iterable` to `from typing import Any, Callable` reached the readers of Any and Callable too. (2) A name used only in an
-annotation counted as a read, so a def whose parameters were annotated with it reached every suite that called the def (164 suites for one
-`Iterable` added to a typing import of a core module, whose files all use postponed annotations). Now:
-  * I2: a changed import statement binds only the local names whose binding differs between the old file and the new (a name added, removed, or
-    renamed; a name whose import is the same on both sides is untouched, a line reformatted or a name moved to another line included). The comparison
-    is of the module-level import statements of the whole file, name by name (`from m import a as b` binds b to (m, a)). A statement of one of ours
-    that is not quiet still takes the file whole, and a name read in code is read as before: an edit that adds or removes it selects what reads it.
+name on it, so adding `Iterable` to `from typing import Any` reached the readers of Any too. (2) A name used only in an annotation counted as a read,
+so a def whose parameters were annotated with it reached every suite that called the def (205 suites for one `Iterable` added to the typing import of
+stackshot/core/config.py on the map of that day, 22 now, which are the readers of every name of a path-loaded module; the core files all use postponed
+annotations). Now:
+  * I2: when the two files differ in their module-level imports by names ADDED and by nothing else, a changed import statement binds only the added
+    local names (a line reformatted, parenthesised or split binds none). Any other import edit keeps the old rule, every name on the changed line: a
+    name removed (the importer may fail with a NameError at import, and what it registers there is then wrong), renamed, taken from another module,
+    imported twice, swapped with another import of the same name, or moved below other code (`pure_import_add` compares the imports in order, the
+    other statements between them as one marker each run). A statement of one of ours that is not quiet still takes the file whole, and a name read
+    in code is read as before.
   * N2: in a file with `from __future__ import annotations`, the names of an annotation are no read when it annotates (a) a parameter or the return of
     a def with no decorator, or only a decorator that wraps (property, staticmethod, classmethod, abstractmethod, lru_cache, cache, cached_property,
     contextmanager, overload), whose name is only ever CALLED in the whole checkout (a bare identifier used as a value anywhere, in a .py file or a script
     with a python shebang, as an argument, an assignment, a decorator, an attribute read that is not called, or as a string, makes the def's annotations
-    read as before: that function object may reach typing.get_type_hints, functools.wraps, a registry), or (b) a local variable inside a function (never
-    evaluated). Everything else that annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the
-    registry evaluates them), of a class body (a dataclass, NamedTuple or pydantic model field), of a module-level variable, a default value, a
-    decorator, and every annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations`
-    line itself takes the file whole.
+    read as before: that function object may reach typing.get_type_hints, functools.wraps, a registry; a script that does not parse makes every def
+    count), or (b) a local variable inside a function (never evaluated). The parameters of a class's __init__, __call__, __new__ and __post_init__ are
+    read through the class (inspect.signature(Cls), a framework that builds its fields), so they escape with the CLASS's name. Everything else that
+    annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the registry evaluates them), of a class body (a dataclass,
+    NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
+    annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations` line itself takes the
+    file whole.
+  * The import statement keeps its own dependency: a name taken from another of our modules (`from tmod import Tag`) whose only uses are dropped
+    annotations is still needed by the statement, so a change to that name in its module takes the importing file whole (the import fails otherwise).
   * Limits, kept honest: a function fetched by a variable name (getattr(module, name), inspect.getmembers, `from m import *`, globals()) and then handed to
     typing.get_type_hints, inspect.signature with eval_str or a registry is not seen (as for a docstring); the tripwire in tests/suitemap_scenario.py pins the number of uses of those forms per file (get_type_hints,
-    get_annotations, __annotations__, eval_str, annotationlib, TypeAdapter, create_model, validate_call, update_wrapper, __wrapped__, wraps), so a new use
-    fails that scenario until its author has looked at it. A name inside a quoted annotation is not a read either way.
+    get_annotations, __annotations__, __annotate__, eval_str, annotationlib, TypeAdapter, create_model, validate_call, update_wrapper, __wrapped__, wraps,
+    a subscript by "__annotations__"), so a new use fails that scenario until its author has looked at it. A name inside a quoted annotation is not a read either way.
 SUITEMAP_IMPORT_RULE=I1 and SUITEMAP_ANNOTATION_RULE=N1 give the old rule (I2 and N2 by default; any other value is an error, checked when a command
 starts). `audit` applies the same rules on both maps.
 
@@ -223,6 +230,8 @@ def annotation_rule():
     return v
 
 
+# the methods whose parameter annotations a class's callers read through the class (see ModNames.mark_annotations)
+CLASS_CALLS = {"__init__", "__call__", "__new__", "__post_init__"}
 SUITE_RE = re.compile(r"tests/(\w+)_scenario\.py$")
 # what strace records: the calls that open, stat, run or look for a path, and the forks (to know which program a pid runs)
 TRACE = ("open,openat,openat2,creat,execve,execveat,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,"
@@ -392,6 +401,7 @@ class ModNames:
         self.postponed, self.imports, self.import_firsts = False, {}, set()
         self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
         self.valuse = set()                          # bare names used as a value (not just called): Names.settle
+        self.import_seq, self.dropped = [], set()    # the module-level imports in order (None for another statement); (module, name) keys of repo imports whose only use was a dropped annotation
         if not self.ok:
             return
         self.body_of, _, self.ddoc, tree, self.pdoc = sc
@@ -403,9 +413,13 @@ class ModNames:
             if isinstance(st, ast.Import):
                 for a in st.names:
                     imports[(a.asname or a.name).split(".")[0]].add(("import", a.name, a.asname))
+                    self.import_seq.append(((a.asname or a.name).split(".")[0], ("import", a.name, a.asname)))
             elif isinstance(st, ast.ImportFrom):
                 for a in st.names:
                     imports[a.asname or a.name].add(("from", st.level, st.module, a.name, a.asname))
+                    self.import_seq.append((a.asname or a.name, ("from", st.level, st.module, a.name, a.asname)))
+            else:
+                self.import_seq.append(None)
         self.imports = {k: frozenset(v) for k, v in imports.items()}
         if self.postponed and annotation_rule() == "N2":
             self.mark_annotations(tree)
@@ -449,23 +463,26 @@ class ModNames:
     def mark_annotations(self, tree):
         """annot_skip[id(node)] = the def's name (None for a local variable) for every node of an annotation that is no read under N2 (see
         *Imports and annotations*): the parameters and the return of a plain def, and the annotation of a variable inside a function"""
-        def visit(node, in_func):
+        def visit(node, in_func, cls=None):
             for ch in ast.iter_child_nodes(node):
                 if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if all(dotted(d.func if isinstance(d, ast.Call) else d) in PLAIN_DECORATORS for d in ch.decorator_list):
+                        # the annotations of a class's __init__, __call__ and __new__ are read through the CLASS (inspect.signature(Cls), a framework
+                        # that builds its fields from them): they escape with the class's name, not the method's
+                        key = cls if cls and ch.name in CLASS_CALLS else ch.name
                         ar = ch.args
                         for e in [ch.returns, *[x.annotation for x in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if x is not None]]:
                             if e is not None:
                                 for x in ast.walk(e):
-                                    self.annot_skip[id(x)] = ch.name
+                                    self.annot_skip[id(x)] = key
                     visit(ch, True)
                 elif isinstance(ch, ast.ClassDef):
-                    visit(ch, False)
+                    visit(ch, False, ch.name)
                 else:
                     if in_func and isinstance(ch, ast.AnnAssign):
                         for x in ast.walk(ch.annotation):
                             self.annot_skip[id(x)] = None
-                    visit(ch, in_func)
+                    visit(ch, in_func, cls)
         visit(tree, False)
 
     def value_uses(self, tree):
@@ -624,7 +641,7 @@ class ModNames:
         if isinstance(st, (ast.Import, ast.ImportFrom)):
             names = {(x.asname or x.name).split(".")[0] for x in st.names}
             self.import_firsts.add(a)
-            ours =[m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
+            ours = [m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
             if ours:
                 # one of ours: importing it runs its module level in every importer; `selection` decides (import-repo)
                 return a, b, "import-repo", names, set(ours)
@@ -774,9 +791,13 @@ class Names:
         for m in self.files.values():
             if not m.ok:
                 continue
+            # a name taken from another of our modules is still needed by the import statement (an ImportError at import), whatever the annotation does
+            imported = {k for k in m.froms.values() if k[0] in m.repo}
             for fname, sc, ks in m.ann:
                 if not skippable(m, fname):
                     m.refs[sc] |= ks
+                else:
+                    m.dropped |= ks & imported
             extra = collections.defaultdict(set)
             for first, fname, ks in m.ann_stmt:
                 if not skippable(m, fname):
@@ -853,6 +874,8 @@ def reach(names_list, seeds, ran=None):
                     if src in hit and (m.mod, local) not in hit:
                         hit.add((m.mod, local))
                         grew = True
+                if m.dropped and touches(m.dropped, hit) and m.path not in whole:
+                    whole.add(m.path)   # an annotation-only name taken from a changed module: the import statement needs it (see *Imports and annotations*)
                 for a, b, kind, bound, reads in m.stmts:
                     if kind == "import-repo" or not reads or not touches(reads, hit):
                         continue
@@ -1310,6 +1333,7 @@ def py_change(names, S, a, b, old, new):
     mo, mw = names[0].files.get(old) if old else None, names[1].files.get(new) if new else None
     if mo is not None and mw is not None and mo.ok and mw.ok and mo.postponed != mw.postponed:
         whole |= {old, new}   # postponed annotations on or off: every annotation of the file changes meaning (see *Imports and annotations*)
+    added = pure_import_add(mo, mw) if import_rule() == "I2" else None
     for side, (N, p, ls) in enumerate(((names[0], old, ol), (names[1], new, nl))):
         mn = N.files.get(p) if p else None
         if p is None:
@@ -1350,11 +1374,11 @@ def py_change(names, S, a, b, old, new):
             if kind != "bind":
                 whole.add(p)
                 continue
-            if st[0] in mn.import_firsts and import_rule() == "I2":
-                # an import statement binds only the names whose import differs between the two files (added, removed, renamed): the others on
-                # the line are untouched, a line reformatted or a name moved included (see *Imports and annotations*)
-                other = names[1 - side].files.get((old, new)[1 - side])
-                bnames = {n for n in bnames if other is None or not other.ok or other.imports.get(n) != mn.imports.get(n)}
+            if st[0] in mn.import_firsts and added is not None:
+                # the two files differ in their imports by names ADDED, and by nothing else (not a removal, a rename, a name taken from another
+                # module, an order or a position): an import statement binds only the added names, a line reformatted or split included. Any
+                # other import edit keeps the old rule: every name on the line (see *Imports and annotations*)
+                bnames = {n for n in bnames if n in added}
             bound |= {n if isinstance(n, tuple) else (mn.mod, n) for n in bnames}
             own |= {(p, n) for n in bnames if isinstance(n, str) and n in mn.functions | mn.classes}
     # a function whose code or def line changed too is selected as before: only a function whose changed lines are all docstring
@@ -1371,6 +1395,21 @@ def py_change(names, S, a, b, old, new):
                     else:
                         whole.add(f)
     return fns, bound, own, whole, {(mod, fn) for _, fn, mod in docs}
+
+
+def pure_import_add(mo, mw):
+    """the set of local names a new file adds to its module-level imports when adding names is all it does to them, else None. Each import is
+    (local name, where it comes from) and the files' lists are compared in order, a statement that is not an import counting as a marker, so a name
+    removed, renamed, taken from another module, imported twice, moved below other code or swapped with another import of the same name is no pure
+    addition (it may change which object the name is, or when)"""
+    if mo is None or mw is None or not mo.ok or not mw.ok:
+        return None
+    new = {x for x in mw.import_seq if x} - {x for x in mo.import_seq if x}
+    def runs(seq):   # the other statements between the imports count as one marker each run, so code added or removed elsewhere changes nothing
+        return [x for i, x in enumerate(seq) if x is not None or i == 0 or seq[i - 1] is not None]
+    if runs([x for x in mw.import_seq if x not in new]) != runs(mo.import_seq):
+        return None
+    return {l for l, _ in new}
 
 
 def quiet_import(N, S, path, mod):
