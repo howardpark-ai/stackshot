@@ -28,6 +28,7 @@ from stackshot.core import config as _cfg   # stackshot.toml: the paths and iden
 from stackshot.core import interp as _interp   # a missing interpreter (its uv environment deleted) never stops a delivery
 from stackshot.anchors import anchors as _anc  # the project-anchors store + bindings (shared with the stackshot server)
 from stackshot.anchors import merge_log as _merges  # the pull requests seen merging, for the server's progress clock (one line each, no read of its own)
+from stackshot.anchors import event_log as _events  # the other activity seen on pull requests (CI results, comments by people, reviews, merges), for the server's last-activity record
 from stackshot.router import routing as _routing  # the routing log: every delivered notice, and the ruling on it (the pilot)
 try: from stackshot.router import router_live as _live          # the router's live mode: holds a pilot notice for the router instead of delivering it to the keeper
 except Exception: _live = None            # anchor-hub never fails to start for it: no router, the notice is delivered as ever
@@ -390,6 +391,8 @@ class Hub:
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
         try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), time.time())      # first, before any lane: a merge is recorded whatever happens to its notice
         except Exception as e: log.warning("merge log: %s", str(e)[:120])
+        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time())      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds
+        except Exception as e: log.warning("event log: %s", str(e)[:120])
         to = direct().get(ev.anchor)
         if to: return self.emit_direct(ev, to)
         why = routine_own(ev)
