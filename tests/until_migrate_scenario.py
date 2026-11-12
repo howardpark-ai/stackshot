@@ -212,7 +212,7 @@ SP.write_atomic = spy
 rc1, out1 = cli(UM.apply, app=app)
 SP.write_atomic = orig_write
 undo_file = pathlib.Path(out1["undo"]) if isinstance(out1, dict) else pathlib.Path("/nonexistent")
-check("7 apply asks for the plan first (a dry call), writes the undo file, exits 1 only for the refused item it names", rc1 == 1 and out1["refused_in_the_plan"] == [BOARD + "11"] and app.log[0] == "until-dry" and "until" in app.log and undo_file.is_file() and out1["results"].get("set") == 6, (rc1, out1, app.log))
+check("7 apply asks for the plan first (a dry call), writes the undo file, ends with the left-over exit code (3, not a failure) for the refused and listed items it names", rc1 == UM.EXIT_LEFT_OVER == 3 and out1["refused_in_the_plan"] == [BOARD + "11"] and app.log[0] == "until-dry" and "until" in app.log and undo_file.is_file() and out1["results"].get("set") == 6, (rc1, out1, app.log))
 check("7 …the undo file is written whole before the first file changes", seen_undo and seen_undo[0][0] == 0 and seen_undo[0][1] == 6, seen_undo)
 bk = pathlib.Path(out1["backup"]) if isinstance(out1, dict) else pathlib.Path("/nonexistent")
 check("7 …the backup holds every touched file byte for byte as it was, and only those", sorted(p.name for p in bk.glob("*.json")) == sorted(f"g{i}.json" for i in (1, 2, 3, 4, 5, 10))
@@ -221,7 +221,7 @@ uj = json.loads(undo_file.read_text()) if undo_file.is_file() else {"items": []}
 check("7 …the undo file names each item with its keys before and after and the real result", {"pass_id", "by", "when", "store", "backup", "items"} <= set(uj) and all({"item", "before", "after", "sha256_before", "result"} <= set(e) and e["result"] == "set" for e in uj["items"]), uj["items"][:1])
 check("7 the pass left each touched file as the route wrote it: until stored, no old field", all(W.stored_until(mt(i)) and "wake" not in mt(i) for i in (1, 2, 3, 4, 5, 10)), None)
 rc2, out2 = cli(UM.apply)
-check("7 a second apply rewrites nothing", rc2 == 1 and out2 == {"rewritten": 0}, (rc2, out2))
+check("7 a second apply rewrites nothing", rc2 == 3 and out2["rewritten"] == 0 and BOARD + "11" in out2["left_over"], (rc2, out2))
 server.stackshot_update("g3", sender=BACK, until=day(3), wait_reason="the vendor replies only after that date")     # a session changes a key the pass wrote, on one item
 rc3, out3 = cli(UM.undo, undo=str(undo_file))
 vals_back = all({k: v for k, v in mt(i).items() if k != "stall"} == {k: v for k, v in json.loads(snapS0[f"{i}.json"])["metadata"].items() if k != "stall"} for i in (1, 2, 4, 5, 10))
@@ -287,7 +287,7 @@ except RuntimeError as ex:
 undo2 = sorted(RUN2.glob("*/undo.json"))
 rec2 = json.loads(undo2[0].read_text()) if undo2 else {"items": [], "pass_id": ""}
 check("9 the call failed after the server wrote the batch: six files are rewritten and every undo entry still has no result", died and sum(1 for k in snapshot() if snapshot()[k] != snapC0[k]) == 6 and [e["result"] for e in rec2["items"]] == [None] * 6, (died, [e["result"] for e in rec2["items"]]))
-check("9 a new apply finds nothing to rewrite, and the crashed pass is not named any more: its results are taken from the server's record and written into its undo file", cli(UM.apply)[1] == {"rewritten": 0} and UM.unfinished(RUN2) == []
+check("9 a new apply finds nothing to rewrite, and the crashed pass is not named any more: its results are taken from the server's record and written into its undo file", cli(UM.apply)[1]["rewritten"] == 0 and UM.unfinished(RUN2) == []
       and [e["result"] for e in json.loads(undo2[0].read_text())["items"]] == ["set"] * 6, (UM.unfinished(RUN2), [e["result"] for e in json.loads(undo2[0].read_text())["items"]]))
 rc9, out9 = cli(UM.undo, undo=str(undo2[0]))
 check("9 the undo of the crashed pass puts back all six (the entries are taken from the server's pass record)", rc9 == 0 and out9["results"] == {"set": 6} and snapshot().keys() == snapC0.keys() and all({k: v for k, v in mt(i).items()} == {k: v for k, v in json.loads(snapC0[f"{i}.json"])["metadata"].items()} for i in (1, 2, 3, 4, 5, 10)), (rc9, out9))
@@ -420,6 +420,65 @@ check("12 …and with the record gone the planned entry no longer matches the it
 CFGM["migration"] = False
 
 import shutil
+
+# ---- 13. a date nothing watched before: already due is not migrated; a future one is, and is listed as newly watched
+CFGM["migration"] = True
+put(95, needs=[BACK], after=["g31"], ask_by=day(-30)); b95 = bytes_of(95)
+put(96, needs=[BACK], after=["g31"], ask_by=day(6))
+put(98, needs=[BACK], after=["g31"], wake=day(-2))
+sent.clear()
+snap_before = {i: bytes_of(i) for i in (95, 98)}
+st_, d_ = call(op="until", items=["g95", "g96", "g98"], dry=True)
+r13 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
+check("13 a past ask_by beside an after link and no kind (never watched) is listed as already due and not rewritten", r13[95]["action"] == "kept" and r13[95]["due"] is True and "already due" in r13[95]["why"] and not r13[95]["after"], r13[95])
+check("13 …so does a past wake in that form", r13[98]["action"] == "kept" and r13[98]["due"] is True, r13[98])
+check("13 a future ask_by in that form is rewritten (the decided one-date model) and listed as newly watched, with its day", r13[96]["action"] == "would_set" and r13[96]["newly"] == day(6) and UM.watch_lines(list(r13.values())) == ([BOARD + "95", BOARD + "98"], [f"{BOARD}96 wakes on {day(6)}"]), UM.watch_lines(list(r13.values())))
+st_, d_ = call(op="until", items=["g95", "g96", "g98"])
+check("13 the write leaves the due items byte for byte and rewrites the future one", bytes_of(95) == b95 and {i: bytes_of(i) for i in (95, 98)} == snap_before and mt(96).get("until") == day(6) and mt(96).get("wait_kind") == "item" and "ask_by" not in mt(96), (wk(mt(96))))
+before_ticks = {i: bytes_of(i) for i in (95, 96, 98)}
+woke13 = server._wake_pass(); watched13 = server._watch_pass()
+check("13 a wake pass and a watch pass after the migration change none of the three items and message no one about the two a person has to look at or the migrated one (the old-form wake pass already notes a past wake with its own wording, unchanged)", {i: bytes_of(i) for i in (95, 96)} == {i: before_ticks[i] for i in (95, 96)} and not [x for x in sent if x[0] in ("g95", "g96")], (woke13, watched13, sent[-3:]))
+# the apply prints both lists, plans again before it writes, and refuses a plan that changed
+put(97, needs=[BACK], hold=True, wake=day(3))                       # an ordinary item for the apply to write
+put(101, needs=[BACK], after=["g31"], ask_by=day(7))                # a future date nothing watched before: the apply lists it as newly watched
+class ChangingApp(DirectApp):
+    """After the first plan, a new already-due item appears (a session saved it)."""
+    def __init__(self): super().__init__(); self.plans = 0; self.first = None
+    def call(self, body):
+        if body["op"] == "until" and body.get("dry"):
+            self.first = self.first or body["items"][0]
+            if body["items"][0] == self.first:          # the first chunk of a plan
+                self.plans += 1
+                if self.plans == 1:             # while the first plan is read: the second plan lists the candidates again and finds it
+                    put(99, needs=[BACK], after=["g31"], ask_by=day(-5))
+        return super().call(body)
+run4 = pathlib.Path(_scratch.mkdtemp(prefix="untilmig-run4-"))
+args = argparse.Namespace(sender=SENDER, run_dir=str(run4), undo="")
+snap13 = snapshot()
+_e = io.StringIO()
+with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
+    rcA = UM.apply(argparse.Namespace(**vars(args)), ChangingApp())
+check("13 the apply prints the newly watched and the already due lists before it writes", "newly watched:" in _e.getvalue() and "already due, not migrated:" in _e.getvalue() and f"{BOARD}101 wakes on {day(7)}" in _e.getvalue(), _e.getvalue()[-500:])
+check("13 an already due item that appeared after the first plan stops the write: exit 1, no file changed, no undo file", rcA == 1 and "changed while the plan was being read" in _e.getvalue() and {k: v for k, v in snapshot().items() if k != "99.json"} == snap13 and not list(run4.glob("*/undo.json")), (rcA, _e.getvalue()[-300:]))
+_e = io.StringIO()
+with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
+    rcB = UM.apply(argparse.Namespace(**{**vars(args), "allow_changed_plan": True}), DirectApp())
+check("13 --allow-changed-plan applies it, and the exit code says items were left over", rcB == 3 and "applied with items left over" in _e.getvalue() and mt(97).get("until") == day(3), (rcB, _e.getvalue()[-300:]))
+# --plan: the dry run's file; a changed list stops the apply
+planfile = run4 / "plan.json"
+st_, dd = call(op="until", items=[f"g{i}" for i in (95, 96, 98, 99)], dry=True)
+planfile.write_text(json.dumps(dd["results"]))
+put(100, needs=[BACK], after=["g31"], ask_by=day(-9))
+_e = io.StringIO()
+with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
+    rcC = UM.apply(argparse.Namespace(**{**vars(args), "plan": str(planfile)}), DirectApp())
+check("13 --plan: a due item the dry run in the file did not show stops the apply", rcC == 1 and "differ from the dry run in --plan" in _e.getvalue(), (rcC, _e.getvalue()[-300:]))
+# the catalog renames: a language without the key reads English, an unknown key shows itself
+import stackshot.web.i18n as _i18n
+check("13 the History wording keys (backstop set and cleared) read in a language that has no catalog for them, and the old keys are gone with no caller", _i18n.t("item.log.backstop_set", lang="zz", when="Fri Nov 13th") == "backstop set to Fri Nov 13th" and _i18n.t("item.log.backstop_cleared", lang="zz") == "backstop cleared"
+      and not subprocess.run(["grep", "-rn", "reminder_set\\|reminder_cleared", os.path.join(STACK, "stackshot")], capture_output=True, text=True).stdout.strip(), None)
+shutil.rmtree(run4, ignore_errors=True)
+CFGM["migration"] = False
 shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
 print(f"ok: until migrate scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")
 sys.exit(1 if fails else 0)

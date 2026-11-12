@@ -15,9 +15,12 @@ What the pass does per open item: it gives a wait stored in the old fields (wake
 fields imply one: an after link beside a date is an item wait), no old field, and one History line saying the wait was rewritten as until. A bare wake (no hold, no kind, no wait_basis, no after link) is a backstop,
 not a wait, and stays as it is; so does an item with no old date. The server refuses (and leaves as it is) an item whose phase, kind of wait, mover, watched status, hold, stored phase or end date would read
 differently. No item is closed or woken, nobody is told, no clock moves, nothing but the wait keys and the History line changes (the file is replaced whole under the item lock, with a sha256 check, as the stamp and
-retire passes do). Running it twice changes nothing the second time.
+retire passes do). Running it twice changes nothing the second time. The pass itself wakes nothing; the watchers act on the newly watched future dates it lists, when they come.
 
-Exit 0 · 1 when the dry run's second pass would still change something, or when a real write could not be made. Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
+Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole, an item could not be written, the plan differs from the one shown, or the dry run's second pass
+would still change something) · 3 the pass was applied and some items were left as they are (refused, listed or already due): not a failure, a person has items to look at. A date that is already past and was never
+watched (an after link and a date, no kind) is NOT migrated and is listed: as until the watchers would wake the item on the next tick. A future one is migrated and listed as newly watched, with the day it wakes. The
+apply prints both lists before it writes, plans again right before the first write, and refuses to write when the lists changed since (or differ from the dry run's --json given with --plan) unless --allow-changed-plan. Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
 from __future__ import annotations
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
@@ -56,6 +59,27 @@ def refused_note(date: str) -> str:
             f"the next write that touches its wait stores it as until, and a person re-saves it with update(until=...) before {date}, when the old parameters wake, ask_by and hold stop being accepted in writes")
 
 
+EXIT_LEFT_OVER = 3          # the pass was applied and some items were left as they are (refused, listed or already due): not a failure, but a person has items to look at
+
+
+def watch_lines(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """(the items already due and left unmigrated, "<item> wakes on <date>" for each item the pass would newly hand to the watchers) of a list of plan rows."""
+    due = [r["item"] for r in rows if r.get("due")]
+    newly = [f"{r['item']} wakes on {r['newly']}" for r in rows if r.get("newly") and r.get("action") in ("would_set", "set")]
+    return due, newly
+
+
+def signature(rows: list[dict[str, Any]]) -> list[list[Any]]:
+    """What a person was shown to decide on: the due items and the newly watched dates, sorted. A plan that differs from the one shown is not applied without --allow-changed-plan."""
+    return sorted([r["item"], bool(r.get("due")), r.get("newly") or ""] for r in rows if r.get("due") or (r.get("newly") and r.get("action") in ("would_set", "set")))
+
+
+def say_watch(rows: list[dict[str, Any]]) -> None:
+    due, newly = watch_lines(rows)
+    say(f"newly watched: {len(newly)} items get a date the watchers act on and none did before" + (f" ({'; '.join(newly)})" if newly else ""))
+    say(f"already due, not migrated: {len(due)} items" + (f" ({', '.join(due)}): their date is past and as until it would wake them on the next tick; re-save them with the date you mean" if due else ""))
+
+
 def alias_date() -> str:
     from stackshot.core import config as _cfg  # noqa: PLC0415
     return str(_cfg.get("model", "wait_alias_until", default="2026-11-25") or "2026-11-25")
@@ -72,6 +96,8 @@ def print_row(r: dict[str, Any]) -> None:
     print(f"    new: {show({k: (r.get('after') or {}).get(k) for k in keys})}")
     if history_of(r):
         print(f"    History line: stackshot: {history_of(r)}")
+    if r.get("newly") and r["action"] in ("would_set", "set"):
+        print(f"    newly watched: wakes on {r['newly']} (no watcher acted on this date before)")
     if r["action"] in ("refused", "kept"):
         print(f"    why: {r.get('why')}")
 
@@ -121,6 +147,9 @@ def dry_run(a: argparse.Namespace) -> int:
         if refused:
             print(f"  {refused_note(alias_date())}")
         print(f"items kept and listed for a person: {len(listed)}" + (f" {listed}" if listed else ""))
+        due, newly = watch_lines(rows)
+        print(f"items already due, not migrated (their date is past: as until the watchers would act on it at once; re-save them with the date you mean): {len(due)}" + (f" {due}" if due else ""))
+        print(f"items newly watched (a date no watcher acted on before; the watchers wake the item on it): {len(newly)}" + (f" {newly}" if newly else ""))
         print(f"items the pass would write: {by_result.get('set', 0)} of {len(rows)}")
         if a.json:
             Path(a.json).write_text(json.dumps(rows, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
@@ -139,27 +168,58 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
     store = _cfg.path("paths", "store")
     run_dir = Path(a.run_dir).expanduser()
     app = app or MM.LiveApplier(a.sender)
-    snap = SP.load_dir(store)
-    cands = sorted((g for g, it in snap.items() if it.get("status") == "open" and any(k in (it.get("metadata") or {}) for k in ("wake", "ask_by"))), key=SP.num)
-    say(f"{len(cands)} open items store a wake or an ask_by, of {len(snap)} items read from {store}")
+    def candidates() -> list[str]:
+        snap = SP.load_dir(store)
+        return sorted((g for g, it in snap.items() if it.get("status") == "open" and any(k in (it.get("metadata") or {}) for k in ("wake", "ask_by"))), key=SP.num)
+    cands = candidates()
+    say(f"{len(cands)} open items store a wake or an ask_by, read from {store}")
     for f in unfinished(run_dir):
         say(f"an earlier pass did not finish recording its results ({f}): its entries with no result are not known to have been written. Undoing it alone also reverts items a later --apply wrote, "
             f"so undo the later pass files first, then this one: --undo {f}")
-    plan: list[dict[str, Any]] = []
-    for ch in SP.chunks(cands):
-        st, d = app.call({"op": "until", "items": ch, "dry": True})
-        if st != 200:
-            say(f"the plan could not be made: [{st}] {d.get('error') if isinstance(d, dict) else d}")
-            return 1
-        plan += d["results"]
+    def make_plan() -> list[dict[str, Any]] | None:
+        nonlocal cands
+        cands = candidates()                  # read again each time: an item may have changed since the last plan
+        out: list[dict[str, Any]] = []
+        for ch in SP.chunks(cands):
+            st, d = app.call({"op": "until", "items": ch, "dry": True})
+            if st != 200:
+                say(f"the plan could not be made: [{st}] {d.get('error') if isinstance(d, dict) else d}")
+                return None
+            out += d["results"]
+        return out
+    plan = make_plan()
+    if plan is None:
+        return 1
     todo = [(g, r) for g, r in zip(cands, plan) if r.get("action") == "would_set"]
     refused = [r["item"] for r in plan if r.get("action") == "refused"]
-    say(f"{len(todo)} of {len(cands)} would be rewritten; {sum(1 for r in plan if r.get('action') == 'same')} left as they are; {sum(1 for r in plan if r.get('action') == 'kept')} kept and listed; {len(refused)} refused" + (f" ({', '.join(refused)})" if refused else ""))
+    listed = [r["item"] for r in plan if r.get("action") == "kept"]
+    say(f"{len(todo)} of {len(cands)} would be rewritten; {sum(1 for r in plan if r.get('action') == 'same')} left as they are; {len(listed)} kept and listed; {len(refused)} refused" + (f" ({', '.join(refused)})" if refused else ""))
+    say_watch(plan)
     if refused:
         say(refused_note(alias_date()))
+    seen_plan = getattr(a, "plan", "")
+    if seen_plan:
+        shown = json.loads(Path(seen_plan).expanduser().read_text(encoding="utf-8"))
+        if signature(shown) != signature(plan) and not getattr(a, "allow_changed_plan", False):
+            say("the due and newly watched lists differ from the dry run in --plan; nothing is written. Run the dry run again, or pass --allow-changed-plan to apply this plan")
+            return 1
+    if todo:
+        again = make_plan()           # right before the write: an item may have changed since the plan was made
+        if again is None:
+            return 1
+        if signature(again) != signature(plan) and not getattr(a, "allow_changed_plan", False):
+            say("the due and newly watched lists changed while the plan was being read; nothing is written. Run it again, or pass --allow-changed-plan")
+            return 1
+        plan = again
+        todo = [(g, r) for g, r in zip(cands, plan) if r.get("action") == "would_set"]
+        refused = [r["item"] for r in plan if r.get("action") == "refused"]
+        listed = [r["item"] for r in plan if r.get("action") == "kept"]
+    left_over = sorted({*refused, *listed})
     if not todo:
-        print(json.dumps({"rewritten": 0}))
-        return 1 if refused else 0
+        print(json.dumps({"rewritten": 0, "left_over": left_over}))
+        if left_over:
+            say(f"nothing to rewrite; {len(left_over)} items are left as they are (refused or listed): exit {EXIT_LEFT_OVER}")
+        return EXIT_LEFT_OVER if left_over else 0
     pass_id = SP.new_pass_id()
     base = run_dir / pass_id
     (base / "items").mkdir(parents=True, exist_ok=True)
@@ -187,9 +247,17 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
             if r["action"] in ("set", "same"):
                 e["before"], e["after"], e["history"], e["dropped"], e["sha256_before"] = r["before"], r["after"], r.get("history", ""), r.get("dropped", []), r["sha256_before"]
         SP.write_atomic(undo_path, undo)      # the real result of each item, kept as it comes
-    print(json.dumps({"pass_id": pass_id, "undo": str(undo_path), "backup": str(base / "items"), "results": dict(counts), "refused_in_the_plan": refused,
+    print(json.dumps({"pass_id": pass_id, "undo": str(undo_path), "backup": str(base / "items"), "results": dict(counts), "refused_in_the_plan": refused, "listed_in_the_plan": listed,
                       "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"]}, indent=1))
-    return 1 if counts.get("refused") or counts.get("batch refused") or refused else 0
+    moved = [e["shown"] for e in entries.values() if e.get("result") == "moved"]
+    if counts.get("refused") or counts.get("batch refused"):
+        say("the pass could not write every item it planned (the answers are above): a failure, exit 1")
+        return 1
+    left_over = sorted({*refused, *listed, *moved})
+    if left_over:
+        say(f"applied with items left over: {counts.get('set', 0)} items rewritten, {len(left_over)} left as they are (refused, listed, already due, or written by someone else meanwhile): exit {EXIT_LEFT_OVER}, not a failure")
+        return EXIT_LEFT_OVER
+    return 0
 
 
 def resolve_unrecorded(rec: dict[str, Any], quiet: bool = False) -> int:
@@ -273,6 +341,8 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--undo", default="", metavar="FILE", help="put back the keys the undo file of a real pass names (needs --sender)")
     ap.add_argument("--store", help="the dry run: a store directory to read (default: [paths] store of the live config)")
     ap.add_argument("--json", help="the dry run: write the rows to this file")
+    ap.add_argument("--plan", default="", metavar="FILE", help="--apply: the dry run's --json file; the due and newly watched lists must be the ones it showed")
+    ap.add_argument("--allow-changed-plan", action="store_true", help="--apply: apply even when the due or newly watched lists differ from the dry run or from the plan read a moment before")
     ap.add_argument("--sender", default="", help="the session that runs the pass (one of [model] migration_senders); needed with --apply and --undo")
     ap.add_argument("--run-dir", default=str(DEFAULT_RUN), help="the real pass: where the backup and the undo file are kept (<run-dir>/<pass id>/)")
     a = ap.parse_args(argv)
