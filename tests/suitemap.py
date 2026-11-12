@@ -229,13 +229,21 @@ most of them running other methods of Board). Now (C2):
     globals / eval / exec in its body; a name that is read as a bare Name in the class body (a derived attribute: `B = A + 1`, a decorator, a default, a
     lambda or a comprehension there); a value that is not a literal; an AnnAssign (dataclass and get_type_hints machinery
     reads annotated names without writing them); a dunder name; any changed line that is also part of another kind of statement; an import.
-  * Two accesses are no dynamic read: `self.__dict__` and `vars(self)` in a method (an instance's dict holds no class attribute), and getattr / vars on a
-    module object. A module object is a name that this file binds only by `import x`, `import x as y`, `m = importlib.import_module(...)`,
+  * A callee is matched by every name it goes by in the file: `from builtins import getattr as ga`, `from operator import attrgetter as ag`,
+    `from inspect import getmembers as gm`, `import builtins as b` (`b.vars(x)`), and a plain assignment of one (`g = getattr`, `pm = mock.patch.multiple`)
+    all read like the original (an alias map over the file's imports and assignments, followed transitively; a name goes by all the names it was ever given,
+    which over-selects). A builtin name that a function binds itself (a parameter or a local named `vars`) is no builtin there, so a use of it in that function is not
+    a dynamic read; the same name in another function or at module level that binds none still is. A name `self` that a method did not take as its first parameter
+    is a free name, and a `classmethod` gets the class as its first parameter: `self.__dict__` in either is a dynamic read.
+  * Some accesses are no dynamic read: `self.__dict__` and `vars(self)` in a plain method whose first parameter is `self` (an instance's dict holds no class
+    attribute), and, on a module object, getattr / setattr / hasattr / delattr, vars, dir, inspect.getmembers and `.__dict__`. A module object is a name that this file binds only by `import x`, `import x as y`, `m = importlib.import_module(...)`,
     `m = __import__(...)` or `m = sys.modules[...]` (or one of those calls written in place); a name bound any other way, anywhere in the file, is not one.
     A forwarder such as puller.py (`vars(_real)` of an imported module) therefore does not read every attribute of every class.
   * Limits, kept honest: code that reads an attribute by name from the text of a file (a template, a C extension) is not seen (none in the checkout today);
-    a method that receives a class as its `self` by hand is taken for an instance; a `self.__dict__` in a class body of its own is the same case. Where
-    a use looks like neither, it is a dynamic read.
+    a method that receives a class as its `self` by hand is taken for an instance; a `self.__dict__` in a class body of its own is the same case. A stdlib
+    function that reads an attribute by a name it gets as data, from a place no suite of ours shows, is not seen: `parser.parse_args([], namespace=Cfg())` with a
+    `--K` option sets `Cfg.K` and our code names neither `K` nor a dynamic accessor. An alias made any other way than an import or an assignment of a
+    dotted name (a parameter, a call result, a container) is not followed. Where a use looks like neither, it is a dynamic read.
 SUITEMAP_CLASS_RULE=C1 (C2 by default; any other value is an error, checked when a command starts) binds the whole class for every edit inside its body, as
 every edit did before C2. It is not simply a superset of C2: the plain `.x` readers in other modules that C2 adds are not looked for under C1.
 `audit` applies the same rule on both maps.
