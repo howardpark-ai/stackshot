@@ -55,7 +55,7 @@ for i, secs in ((111, 44 * M + 59), (112, 45 * M), (113, 59 * M + 59), (114, 60 
     item(i, f"[work] band {i}", (secs, "ci_result", "CI failed on PR 124"))
 # one item for each kind the record has
 KINDS = {"step_done": "step 3 done", "step_dropped": "step 1 dropped", "state_change": "state: waiting (time)", "pr_merged": "PR 124 merged", "ci_result": "CI passing again on PR 124",
-         "review": "review on PR 124", "comment": "comment on #124", "update": "moved to the staging tier", "audit": "a commit on PR 124 at the head"}
+         "review": "review on PR 124", "comment": "comment on #124", "commit": "commit on PR 124", "update": "moved to the staging tier", "audit": "a commit on PR 124 at the head"}
 for n, (kind, what) in enumerate(KINDS.items()):
     item(130 + n, f"[work] kind {kind}", (20 * M, kind, what))
 item(150, "[work] older day", (30 * H, "step_done", "step 1 done"))                         # yesterday, 05:48
@@ -164,7 +164,7 @@ check("a row of the same list with a record and one without sit together, each d
 # ---- the home page as a whole ----
 h = h_all
 agents = h[h.find('<section id="agents-at-work">'):h.find("</section>", h.find('<section id="agents-at-work">'))]
-check("the home page's On agent list holds the activity lines of the 20 rows with a record (the held row has none), and none for the three without", agents.count('class="ir-actl"') == 20, agents.count('class="ir-actl"'))
+check("the home page's On agent list holds the activity lines of the 21 rows with a record (the held row has none), and none for the three without", agents.count('class="ir-actl"') == 21, agents.count('class="ir-actl"'))
 check("the home page's script redraws them: the script has the lact function, and a swap calls it, in its own listener, so the receivers script keeps its shape", "function lact()" in h and "document.addEventListener('stackshot:swapped',lact)" in h and "tick();rcv()});})();" in h)
 check("the Your move list has no activity line at all", 'class="ir-actl"' not in h[h.find('<section id="your-move">'):h.find("</section>", h.find('<section id="your-move">'))])
 

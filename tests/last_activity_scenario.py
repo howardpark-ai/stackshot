@@ -812,6 +812,8 @@ for label, d, want in (("a minute ago", tn - 60, tn - 60), ("a day ago", tn - 86
                        ("two hours ahead", tn + 7200, None), ("garbage", "yesterday-ish", None), ("absent", None, None), ("a list", ["x"], None), ("a bool", True, None), ("zero", 0, None)):
     got = EL.commit_time(iso_at(d) if isinstance(d, float) else d, tn)
     check(f"13 commit_time: {label}", got == want, (d, got, want))
+check("13 commit_time and MAX_AT: a committer date in the year 3500, or a count of milliseconds, records nothing (past the clock, and past what the record keeps); the signal itself refuses a time past MAX_AT",
+      EL.commit_time("3500-01-01T00:00:00Z", tn) is None and EL.commit_time(1.8e12, tn) is None and LA.pr_candidate("commit", 9, LA.MAX_AT * 2, LA.MAX_AT * 4) is None and LA.pr_candidate("commit", 9, LA.MAX_AT, LA.MAX_AT * 4) is not None, None)
 A13 = "github:acme/widgets#140"
 check("13 lines_for: a commit is a line only when the source vouched for it (a fork's pull request writes none), at its own time; one older than a day or more than an hour ahead writes none; the line has no ids",
       [r["kind"] for r in lines(A13, "", "pr_commit", "x", vouched="commit", now=100.0, ts=90.0)] == ["commit"] and lines(A13, "", "pr_commit", "x", vouched="", now=100.0, ts=90.0) == []
