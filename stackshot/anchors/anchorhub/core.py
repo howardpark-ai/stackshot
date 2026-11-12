@@ -378,12 +378,27 @@ class Hub:
                 r = subprocess.run([*_interp.resilient(PUSH), "--flush", name], capture_output=True, text=True, env={**os.environ, "ANCHOR_PUSH_SOURCE": src})
                 if r.returncode == 0 and r.stdout.strip(): log.info(r.stdout.strip())
 
+    def _event_of(self, anchor: str, summary: dict, kind: str) -> "Event":
+        return Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
+                     url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
+                     full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
+                     repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or ""))
+
     def event(self, anchor: str, summary: dict, kind: str = "slack"):
         """A receiver's report: summary = {title, who, text, url, ts[, body]} — the anchor's own title, never its type."""
-        self.emit(Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
-                        url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
-                        full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
-                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or "")))
+        self.emit(self._event_of(anchor, summary, kind))
+
+    def record(self, anchor: str, summary: dict, kind: str = "github-state"):
+        """A receiver's report that is only recorded: the merge log and the event log get their line (log_activity, the part of `emit` that comes first), and no session is told, nothing is held or routed.
+        For what the receiver finds out late (a pull request that merged before its anchor was added), which the sessions of the anchor have no use for as news."""
+        self.log_activity(self._event_of(anchor, summary, kind))
+
+    def log_activity(self, ev: "Event"):
+        """The hub's two records of an event, each a line in a file the server reads: the merge log and the event log. A failure is logged and goes no further."""
+        try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), time.time())      # first, before any lane: a merge is recorded whatever happens to its notice
+        except Exception as e: log.warning("merge log: %s", str(e)[:120])
+        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
+        except Exception as e: log.warning("event log: %s", str(e)[:120])
 
     def emit(self, ev: "Event"):
         """Route one event to the sessions bound to its anchor. The first event on (anchor, session) is delivered at once;
@@ -392,10 +407,7 @@ class Hub:
         An anchor in [anchor_hub] direct takes the direct lane instead (emit_direct).
         A routine event on the fleet's own pull request (routine_own) is logged instead of delivered to a session whose every
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
-        try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), time.time())      # first, before any lane: a merge is recorded whatever happens to its notice
-        except Exception as e: log.warning("merge log: %s", str(e)[:120])
-        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
-        except Exception as e: log.warning("event log: %s", str(e)[:120])
+        self.log_activity(ev)
         to = direct().get(ev.anchor)
         if to: return self.emit_direct(ev, to)
         why = routine_own(ev)

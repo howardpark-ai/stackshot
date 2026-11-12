@@ -791,5 +791,38 @@ hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
 
+# ================================================================ 13. an anchor added after the merge: the first read of a pull request merged within a day writes the merge line, and the item the anchor is scoped to is credited
+put(600); put(601)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/90", "items": ["a600"]}, {"url": f"{W_}/pull/91"}, {"url": f"{W_}/pull/92", "items": ["a600"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True); ML.path().unlink(missing_ok=True)
+t13 = time.time()
+def late_pr(n, ago, **kw):
+    at = ISO_NOW(ago)
+    GHD[f"{RP}/pulls/{n}"] = GHD[f"{RP}/pulls/26"]
+    GHD[f"{RP}/issues/{n}"] = pr_issue(state="closed", html_url=f"{W_}/pull/{n}", closed_at=at, updated_at=at, closed_by={"login": "alice"}, pull_request={"merged_at": at}, body="", **kw)
+late_pr(90, 2 * H); late_pr(91, 2 * H); late_pr(92, 30 * H)
+told13 = []
+hub13 = HUB.Hub(); hub13.write_status = lambda: None; hub13.emit = told13.append
+hub13.bindings = {f"github:acme/widgets#{n}": {"home-peer"} for n in (90, 91, 92)}
+_sub, _thr, _tim = ghr.subprocess, ghr.threading, ghr.time
+ghr.subprocess = types.SimpleNamespace(run=_fake_gh, TimeoutExpired=subprocess.TimeoutExpired)
+ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: caught.append(target)))
+ghr.time = types.SimpleNamespace(time=time.time, sleep=_no_sleep)
+del caught[:]
+try:
+    ghr.run(hub13); one_pass(); one_pass()
+finally:
+    ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
+rows13, _ = EL.read(0)
+check("13 a pull request that merged 2 hours ago, first read through an anchor added later, writes one merge line in each log; one that merged 30 hours ago writes none, and a second pass adds nothing",
+      sorted(r["n"] for r in ML.read(0)[0]) == [90, 91] and sorted((r["n"], r["kind"]) for r in rows13) == [(90, "merged"), (91, "merged")] and told13 == [], (ML.read(0)[0], rows13, told13))
+saved = ev_pass(time.time() + 5)
+check("13 …the pass credits the item the anchor is scoped to (pr_merged at the time it merged); the project-wide anchor on the other pull request ties no item, as for any merge",
+      saved == ["a600"] and lk(600) == "pr_merged" and la(600)["what"] == "PR 90 merged" and abs(la(600)["at"] - (t13 - 2 * H)) < 5 and la(601) is None, (saved, la(600), la(601)))
+(T / "state/merge-progress.json").unlink(missing_ok=True); gh_["issues_letter"] = "a"; CLK.t = time.time() + 5
+try: done13 = server._merge_progress_tick(time.time() + 5)
+finally: CLK.t = None
+check("13 …and the merge pass records the merge on the same item (its progress clock), as it does for any merge the hub saw", done13 == ["a600"] and "acme/widgets#90" in (mt(600).get("merged_seen") or []), (done13, mt(600).get("merged_seen")))
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
