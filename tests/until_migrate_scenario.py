@@ -670,9 +670,79 @@ check("16.8 …nothing else in the run directory is touched (a folder with anoth
 inside = new_run("prune2"); (inside / "20200101-000000-cccccc").mkdir()
 check("16.8 …and a folder that is, holds or lies inside the live store is never removed", UM.prune_runs(inside, inside / "20200101-000000-cccccc") == [] and UM.prune_runs(inside, inside) == [] and (inside / "20200101-000000-cccccc").is_dir()
       and UM.prune_runs(new_run("prune3"), T / "store") == [], None)
+# The subprocess runs get a run directory and a HOME of their own and a server address nothing listens on: with the --store refusal gone they would otherwise run an apply against the default run directory
+# (<HOME>/.local/share/stackshot-runs/until-run) and the live server. Here the worst a missing refusal does is leave a lock file in a temp folder, which the check below looks for.
+sub_home = new_run("subhome"); sub_run = new_run("subrun")
+sub_env = {**os.environ, "HOME": str(sub_home), "STACKSHOT_URL": "http://127.0.0.1:9"}
 for opt in ("--apply", "--undo=x.json"):
-    pr = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/until_migrate.py"), opt, "--sender", "x", "--store", str(T / "store")], capture_output=True, text=True)
+    pr = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/until_migrate.py"), opt, "--sender", "x", "--store", str(T / "store"), "--run-dir", str(sub_run)], capture_output=True, text=True, env=sub_env)
     check(f"16.8 --store with {opt.split('=')[0]} is refused with a message (it would be ignored)", pr.returncode == 2 and "--store is for the dry run only" in pr.stderr, (pr.returncode, pr.stderr[-200:]))
+check("16.8 …and the refusal touches nothing: the run directory is empty and the temp HOME has no run directory", not list(sub_run.iterdir()) and not (sub_home / ".local").exists(), (list(sub_run.iterdir()), list(sub_home.iterdir())))
+
+# 16.11 the prune keeps the pass folder of an undo file that is unfinished (an entry with no result): it is the only record of what that pass wrote
+run_u = new_run("keepopen")
+def undo_file(folder, results, **extra):
+    d = run_u / folder; (d / "items").mkdir(parents=True)
+    (d / "undo.json").write_text(json.dumps({"pass_id": folder, "items": [{"item": f"g{i}", "shown": f"g{i}", "before": {}, "after": {}, "result": r} for i, r in enumerate(results, 1)], **extra}))
+undo_file("20200101-000000-aaaaa1", [None, "set"])                  # an entry with no result: unfinished
+undo_file("20200102-000000-aaaaa2", ["set", "same"])                 # every entry has its result
+undo_file("20200103-000000-aaaaa3", [None], undone="20200104-000000 KST")      # no result, but it was undone
+for n in range(4, 9): (run_u / f"2020010{n}-000000-aaaaa{n}").mkdir()
+rc, o, e = quiet(UM.apply, run_args(run_u))
+check("16.11 the prune keeps an old pass folder whose undo file is unfinished (and still names it), and removes the finished and the undone ones beyond the newest five",
+      rc == 0 and (run_u / "20200101-000000-aaaaa1/undo.json").is_file() and not (run_u / "20200102-000000-aaaaa2").exists() and not (run_u / "20200103-000000-aaaaa3").exists()
+      and "removed 2 pass folders" in e and "did not finish recording its results" in e and "20200101-000000-aaaaa1" in e, (rc, e[-400:], sorted(p_.name for p_ in run_u.iterdir())))
+check("16.11 …prune_runs itself: the unfinished folder is outside the newest five and older than 60 days and stays, a second call removes nothing more",
+      UM.prune_runs(run_u, T / "store") == [] and (run_u / "20200101-000000-aaaaa1").is_dir(), None)
+
+# 16.12 --undo reads its file first: a path that is none, or no undo file, is a clean error that creates no directory and no lock; the lock is taken only at <run dir>/<pass id>/undo.json
+base_u = new_run("undopath")
+typo = base_u / "nope" / "20200101-000000-aaaaaa" / "undo.json"
+rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_u)), "undo": str(typo)}))
+check("16.12 --undo of a path that is none: exit 1, a message, and no directory and no lock created", rc == 1 and "cannot use" in e and "Traceback" not in e and not (base_u / "nope").exists() and not list(base_u.iterdir()), (rc, e[-200:], list(base_u.iterdir())))
+(base_u / "run" / "20200101-000000-aaaaaa").mkdir(parents=True); (base_u / "run" / "20200101-000000-aaaaaa" / "undo.json").write_text("not json")
+(base_u / "run" / "20200102-000000-aaaaaa").mkdir(); (base_u / "run" / "20200102-000000-aaaaaa" / "undo.json").write_text("[1]")
+bad_ok = []
+for f_ in ("20200101-000000-aaaaaa", "20200102-000000-aaaaaa"):
+    rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_u)), "undo": str(base_u / "run" / f_ / "undo.json")}))
+    bad_ok.append(rc == 1 and "cannot use" in e and not (base_u / "run" / ".lock").exists())
+check("16.12 --undo of a file that is not JSON, or has no list of items: exit 1, a message, no lock file made", bad_ok == [True, True], bad_ok)
+odd = base_u / "odd"; odd.mkdir(); (odd / "undo.json").write_text(json.dumps({"pass_id": "x", "items": []}))
+rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_u)), "undo": str(odd / "undo.json")}))
+check("16.12 …an undo file outside the <run dir>/<pass id>/ layout is still read and undone, with a note that no lock is taken, and no lock file appears beside it or above it", rc == 0 and "no run directory's lock is taken" in e and not (odd / ".lock").exists() and not (base_u / ".lock").exists(), (rc, e[-300:]))
+good = base_u / "run" / "20200103-000000-aaaaaa"; good.mkdir(); (good / "undo.json").write_text(json.dumps({"pass_id": "20200103-000000-aaaaaa", "items": []}))
+lock_fd = os.open(base_u / "run" / ".lock", os.O_RDWR | os.O_CREAT, 0o600); fcntl.flock(lock_fd, fcntl.LOCK_EX)
+rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_u)), "undo": str(good / "undo.json")}))
+fcntl.flock(lock_fd, fcntl.LOCK_UN); os.close(lock_fd)
+check("16.12 …and a file at <run dir>/<pass id>/undo.json still takes the run directory's lock: held by another run, exit 1 and nothing done", rc == 1 and "another --apply or --undo is running" in e and "undone" not in json.loads((good / "undo.json").read_text()), (rc, e[-200:]))
+rc, o, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(base_u)), "undo": str(good / "undo.json")}))
+check("16.12 …and once the lock is let go the same undo runs", rc == 0 and "undone" in json.loads((good / "undo.json").read_text()), (rc, e[-200:]))
+
+# 16.13 a batch that gets no 4xx answer may have been written in part: its entries keep no result (the file is named unfinished and an undo can put them back); a 4xx is a refusal before any write
+class WrittenThenLostApp(DirectApp):
+    """The server writes the batch and the answer never arrives (a timeout: status 0)."""
+    def call(self, body):
+        st, d = super().call(body)
+        return (0, "TimeoutError: timed out") if body["op"] == "until" and not body.get("dry") else (st, d)
+class ServerErrorApp(DirectApp):
+    """The server fails (5xx) before it writes anything."""
+    def call(self, body):
+        if body["op"] == "until" and not body.get("dry"): return 503, {"error": "unavailable"}
+        return super().call(body)
+put(231, needs=[BACK], hold=True, wake=day(3)); b231 = bytes_of(231); run_t = new_run("lost")
+rc, o, e = quiet(UM.apply, run_args(run_t), WrittenThenLostApp())
+uf = json.loads(pathlib.Path(o["undo"]).read_text())
+check("16.13 a batch the server wrote whose answer never came is not recorded as refused: the entry keeps no result, the pass fails (exit 1) and says it does not know what was written",
+      rc == 1 and [x["result"] for x in uf["items"]] == [None] and o["results"] == {"batch unanswered": 1} and "no answer that says what it wrote" in e and mt(231).get("until") == day(3) and bytes_of(231) != b231, (rc, uf["items"], o, e[-300:]))
+rc, u, _ = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run_t)), "undo": o["undo"]}))
+check("16.13 …and its undo puts the written item back (it would have skipped it as a refused batch)", rc == 0 and mt(231).get("until") is None and mt(231).get("wake") == day(3) and mt(231).get("hold") is True, (rc, u, wk(mt(231))))
+b231 = bytes_of(231)
+rc, o, e = quiet(UM.apply, run_args(run_t), ServerErrorApp())
+uf = json.loads(pathlib.Path(o["undo"]).read_text())
+check("16.13 a 5xx before any write: the same record (no result), exit 1, the item untouched", rc == 1 and [x["result"] for x in uf["items"]] == [None] and bytes_of(231) == b231, (rc, uf["items"]))
+rc, u, _ = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run_t)), "undo": o["undo"]}))
+check("16.13 …and its undo changes nothing and ends clean", rc == 0 and bytes_of(231) == b231, (rc, u))
+(T / "store/g/231.json").unlink()
 
 # 16.9 a front agent's watch_reason goes with the wake when the watchers end the wait (the old wake pass dropped it)
 REASON = "no push reaches this session for the vendor"
@@ -691,6 +761,6 @@ check("16.10 same(): a new conflict is a difference; the same ones, or fewer, ar
 CFGM["migration"] = False
 CFGM["migration"] = False
 shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
-for d in (run16, run_s, run_l, run_p, fake_store, inside): shutil.rmtree(d, ignore_errors=True)
+for d in (run16, run_s, run_l, run_p, fake_store, inside, sub_home, sub_run, run_u, base_u, run_t): shutil.rmtree(d, ignore_errors=True)
 print(f"ok: until migrate scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")
 sys.exit(1 if fails else 0)

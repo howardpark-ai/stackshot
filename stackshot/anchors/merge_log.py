@@ -116,30 +116,40 @@ def size() -> int:
         return 0
 
 
+MAX_REPO = 140      # GitHub's longest "owner/repo": 39 + 1 + 100
+MAX_NUMBER = 10**9      # a pull request number past a billion is no number of GitHub's: it would only ride into merged_seen and a History line
+
+
 def normal(row: dict[str, Any]) -> dict[str, Any]:
-    """A line as the server uses it: {"ts": float, "repo": "owner/repo", "n": int > 0, "refs": [str]}. Raises ValueError or TypeError for a line of the wrong shape (a hand edit, a torn write that
-    still parsed): the caller skips it, logs it and moves on. A ref that is not a string is left out, so a line whose refs nest deeper than str() can follow costs nothing; `repo` is turned into text, so a
-    line whose repo does is raised as RecursionError, and the caller logs that too (`shown`, never `str`)."""
-    repo, n, ts = str(row["repo"]).strip().lower(), int(row["n"]), float(row.get("ts") or 0)
-    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or n <= 0 or ts != ts or ts in (float("inf"), float("-inf")):
-        raise ValueError(f"not a merge line: repo={repo!r} n={n} ts={ts}")
+    """A line as the server uses it: {"ts": float, "repo": "owner/repo", "n": int > 0, "refs": [str]}. Raises for a line of the wrong shape (a hand edit, a torn write that still parsed): ValueError for
+    a wrong value (a repo that is not "owner/repo" or is longer than MAX_REPO, a number below 1 or above MAX_NUMBER, a time that is not finite), TypeError for a wrong type (a repo that is not text, a
+    number or time that is a list or an object), OverflowError for a number that does not fit (n=1e999, a time of 400 digits), KeyError for a missing repo or number. The caller catches every Exception, skips
+    the line and logs it (`shown`, never `str`: a RecursionError from a hand-built structure is caught the same way). A ref that is not a string is left out, so a line whose refs nest deeper than str() can follow
+    costs nothing; a repo that is not text is refused before it is turned into text, so a deep one costs nothing either."""
+    raw = row["repo"]
+    if not isinstance(raw, str):
+        raise TypeError(f"repo is a {type(raw).__name__}, not text")
+    repo, n, ts = raw.strip().lower(), int(row["n"]), float(row.get("ts") or 0)
+    if len(repo) > MAX_REPO or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or not 0 < n <= MAX_NUMBER or ts != ts or ts in (float("inf"), float("-inf")):
+        raise ValueError(f"not a merge line: repo={repo[:40]!r}{' (cut)' if len(repo) > 40 else ''} n={str(n)[:12]} ts={ts}")
     rs = row.get("refs")
     return {"ts": ts, "repo": repo, "n": n, "refs": [r for r in rs if isinstance(r, str) and _REF_OK.fullmatch(r)][:MAX_REFS] if isinstance(rs, list) else []}      # a ref is a string: anything else (a number, a nested list or object, however deep) is no ref and is never turned into text
 
 
 def shown(x: Any, cap: int = 80) -> str:
-    """A look at anything for a log line, at most `cap` characters, that cannot raise or recurse: reprlib limits the depth and the size of each part, and if even that fails (an object whose repr
-    raises, a structure too deep for it) the class name stands in. Never `str(row)` for a line read from the file: a hand-made line can nest deeper than str() can follow."""
+    """A look at anything for a log line, at most `cap` characters (the one helper for a line read from a log file: event_log.shown is this with its own cap). reprlib limits the depth and the size of each
+    part, so a huge or deep value never builds a huge string, and if even that fails (a structure too deep for it, an object whose repr raises) the class name stands in, read with `type()` and not
+    `.__class__`, which an object can make raise. Never `str(row)` for a line read from the file: a hand-made line can nest deeper than str() can follow."""
     try:
         return reprlib.repr(x)[:cap]
     except Exception:  # noqa: BLE001  — RecursionError and a hostile __repr__ included
-        return f"<{x.__class__.__name__}>"[:cap]
+        return f"<{type(x).__name__}>"[:cap]
 
 
 def read(offset: int = 0, file: Path | None = None) -> tuple[list[dict[str, Any]], int]:
     """The lines from byte `offset` on, and the offset after the last whole line read. A file that is shorter than `offset` (replaced) is read from its start; a missing one reads as nothing.
-    A line that is not JSON, is nested too deep to parse (RecursionError) or is not an object with a repository and a number is skipped without a log line (the offset still moves past it) and the rest are read; a line
-    that parses but is of the wrong shape is found later, by `normal`, and logged by the caller. `file`: another log of the same shape (event_log.py), default the merge log."""
+    A line that is not JSON, is nested too deep to parse (RecursionError) or is not an object with a repository and a number (`{}`, `[1]`, a number of 0, an empty repository) is skipped without a log line (the offset still moves past it) and the rest are read; a line
+    that has a repository and a number but is of the wrong shape is found later, by `normal`, and logged by the caller. `file`: another log of the same shape (event_log.py), default the merge log."""
     try:
         with open(file or path(), "rb") as f:
             size = f.seek(0, 2)

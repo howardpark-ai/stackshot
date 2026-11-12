@@ -16067,7 +16067,7 @@ def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
         try:
             r = _mlog.normal(row)
         except Exception as e:  # noqa: BLE001
-            print(f"merge progress: line skipped ({e.__class__.__name__}): {_mlog.shown(row)}", file=sys.stderr, flush=True)      # the class and a bounded look, never str(row): a line can nest deeper than str() can follow
+            print(f"merge progress: line skipped ({e.__class__.__name__}: {str(e)[:80]}): {_mlog.shown(row)}", file=sys.stderr, flush=True)      # the class, the first of the message and a bounded look, never str(row): a line can nest deeper than str() can follow
             continue
         if r["ts"] >= floor:
             out.append(r)

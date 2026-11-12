@@ -17,7 +17,7 @@ not a wait, and stays as it is; so does an item with no old date. The server ref
 differently. No item is closed or woken, nobody is told, no clock moves, nothing but the wait keys and the History line changes (the file is replaced whole under the item lock, with a sha256 check, as the stamp and
 retire passes do). Running it twice changes nothing the second time. The pass itself wakes nothing; the watchers act on the newly watched future dates it lists, when they come.
 
-Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole, an item could not be written, the plan differs from the one shown, another --apply or --undo holds the run directory, or the dry run's second pass
+Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole or got no answer, an item could not be written, the plan differs from the one shown, another --apply or --undo holds the run directory, or the dry run's second pass
 would still change something) · 3 the pass was applied and some items were left as they are (refused, listed, already due, or closed between the plan and the write): not a failure, a person has items to look at. A date that is already past and was never
 watched (an after link and a date, no kind) is NOT migrated and is listed: as until the watchers would wake the item on the next tick. A future one is migrated and listed as newly watched, with the day it wakes. The
 apply prints both lists before it writes, plans again right before the first write, and refuses to write when the lists changed since (or differ from the dry run's --json given with --plan) unless --allow-changed-plan. Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
@@ -229,7 +229,8 @@ def run_lock(run_dir: Path):
 def prune_runs(run_dir: Path, store: Path, now: float | None = None, days: int = PRUNE_DAYS, keep: int = PRUNE_KEEP) -> list[str]:
     """Remove the pass folders of the run directory (<run-dir>/<pass id>/: the backup and the undo file) that are older than `days` days, keeping the newest `keep` whatever their age. → the names removed.
     Only a real folder (never a link) that sits directly in `run_dir` and is named like a pass id is a candidate; one that is, or holds, or lies inside the live store is never touched; so is nothing else in the
-    run directory. The age is the pass id's own time."""
+    run directory. The age is the pass id's own time. A folder whose undo file is unfinished (`unfinished`: an entry with no recorded result, not undone) is kept whatever its age: it is the only record of
+    what that pass wrote."""
     now = time.time() if now is None else now
     out: list[str] = []
     try:
@@ -237,6 +238,7 @@ def prune_runs(run_dir: Path, store: Path, now: float | None = None, days: int =
     except OSError:
         return out
     live = store.resolve()
+    open_passes: set[str] | None = None      # the folders with an unfinished undo file, read once and only when a folder is old enough to be removed
     for name in names[:-keep] if keep > 0 else names:
         try:
             at = time.mktime(time.strptime(name[:15], "%Y%m%d-%H%M%S"))
@@ -245,6 +247,10 @@ def prune_runs(run_dir: Path, store: Path, now: float | None = None, days: int =
         d = run_dir / name
         r = d.resolve()
         if now - at < days * 86400 or r == live or live in r.parents or r in live.parents:
+            continue
+        if open_passes is None:
+            open_passes = {f.parent.name for f in unfinished(run_dir)}
+        if name in open_passes:
             continue
         shutil.rmtree(d, ignore_errors=True)
         out.append(name)
@@ -340,10 +346,15 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
     for ch in SP.chunks([g for g, _ in todo]):
         st, d = app.call({"op": "until", "items": ch, "pass_id": pass_id})
         if st != 200:
-            say(f"a batch was refused as a whole: [{st}] {d.get('error') if isinstance(d, dict) else d}")
-            counts["batch refused"] += len(ch)
-            for g in ch:
-                entries[g]["result"] = "batch refused"            # the server wrote none of it: the entry is final, not an unrecorded one a later --apply would name as unfinished
+            why = d.get('error') if isinstance(d, dict) else d
+            if 400 <= st < 500:
+                say(f"a batch was refused as a whole: [{st}] {why}")
+                counts["batch refused"] += len(ch)
+                for g in ch:
+                    entries[g]["result"] = "batch refused"            # a 4xx answer is the route's refusal of the whole batch before any write: the entry is final, not an unrecorded one a later --apply would name as unfinished
+            else:
+                say(f"a batch got no answer that says what it wrote: [{st}] {why}")      # 0 (no answer, a timeout) or a 5xx can come after the server wrote some of it: the entries keep no result, so the file is named unfinished and an undo reads the server's pass record
+                counts["batch unanswered"] += len(ch)
             SP.write_atomic(undo_path, undo)
             continue
         for g, r in zip(ch, d["results"]):
@@ -363,7 +374,7 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
                       "closed_since_the_plan": closed_now}, indent=1))
     moved = [e["shown"] for e in entries.values() if e.get("result") == "moved"]
     skipped = [e["shown"] for e in entries.values() if e.get("result") == "kept"]      # left by the write itself: a planned newly watched date came due between the plan and the write
-    if counts.get("refused") or counts.get("batch refused"):
+    if counts.get("refused") or counts.get("batch refused") or counts.get("batch unanswered"):
         say("the pass could not write every item it planned (the answers are above): a failure, exit 1")
         return 1
     left_over = sorted({*refused, *listed, *moved, *skipped, *closed_now})
@@ -422,9 +433,21 @@ def unfinished(run_dir: Path) -> list[Path]:
 
 
 def undo(a: argparse.Namespace, app: Any = None) -> int:
-    """Put the keys of an undo file back, under the lock of the run directory the file lives in (<run-dir>/<pass id>/undo.json)."""
+    """Put the keys of an undo file back. The file is read first (a path that is none, or a file that is no undo file, is a clean error and creates nothing); the run directory's lock is taken only when the
+    file lives where a pass puts it, <run-dir>/<pass id>/undo.json, so a typo never makes a directory or a `.lock` of its own."""
     undo_path = Path(a.undo).expanduser()
-    run_dir = undo_path.resolve().parent.parent
+    try:
+        rec = json.loads(undo_path.read_text(encoding="utf-8"))
+        if not isinstance(rec, dict) or not isinstance(rec.get("items"), list):
+            raise ValueError("it holds no list of items")
+    except (OSError, ValueError) as e:
+        say(f"cannot use {undo_path} as an undo file ({e.__class__.__name__}: {str(e)[:120]}): nothing is done")
+        return 1
+    real = undo_path.resolve()
+    if real.name != "undo.json" or not PASS_DIR_RX.fullmatch(real.parent.name):
+        say(f"{undo_path} is not at <run-dir>/<pass id>/undo.json, so no run directory's lock is taken: make sure no other --apply or --undo is running")
+        return _undo(a, app)
+    run_dir = real.parent.parent
     try:
         with run_lock(run_dir):
             return _undo(a, app)
