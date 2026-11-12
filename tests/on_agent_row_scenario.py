@@ -27,7 +27,7 @@ toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', t
 toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml); assert n == 1
 (T / "stackshot.toml").write_text(toml, encoding="utf-8")
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
-for d in ("store/a", "fleet/a", "state/anchor-hub", "state/site", "brain/projects", "secrets", "touch"): (T / d).mkdir(parents=True)
+for d in ("store/a", "fleet/a", "state/site", "brain/projects", "secrets", "touch"): (T / d).mkdir(parents=True)
 ZONE = datetime.timezone(datetime.timedelta(hours=9))      # Asia/Seoul: UTC+9, no DST
 NOW = datetime.datetime(2026, 11, 12, 11, 48, tzinfo=ZONE); now = NOW.timestamp()
 M, H, D = 60.0, 3600.0, 86400.0
