@@ -188,6 +188,27 @@ SUITEMAP_IMPORT_RULE=I1 and SUITEMAP_ANNOTATION_RULE=N1 give the old selection, 
 value is an error, checked when a command starts): turning postponed annotations on or off takes the file whole under either rule (py_change), and a read of
 a name that a try/except fallback or a second line imports twice reads every source of it (ModNames.keys, froms_all). `audit` applies the same rules on both maps.
 
+Route registrations (Thu Nov 12th 2026). A function decorated `@mcp.custom_route(...)` (an HTTP route of the server: /health, /api/..., the pages)
+bound the key every registration binds, "<enumerate>", so every suite that reads the registry by ANY enumerating attribute (list_tools, get_tools,
+http_app, routes, ...) was selected for a one-line edit of one route (128 suites for one route of stackshot/web/server.py on PR 127). Most of them only
+list the tools; a route is no tool. Now (R2):
+  * A custom_route binds its OWN key, "<enumerate-routes>" (ENUMERATE_R), and not "<enumerate>". @mcp.tool, @mcp.resource and @mcp.prompt keep binding
+    "<enumerate>". A function decorated with both a route and one of those binds both keys.
+  * The readers of the routes match it: an attribute read of one of ROUTE_ATTRS (http_app, routes, streamable_http_app, sse_app,
+    _additional_http_routes, _get_additional_http_routes, run_async, run_http_async) reads BOTH keys, so it matches a tool edit and a route edit.
+    run_async and run_http_async are in the set because a suite that starts the server (`mcp.run_async(transport="http")`, the way _serve does, or a
+    subprocess that runs it) serves every route over real HTTP, whether or not it names http_app. list_tools, get_tools and every other attribute of
+    ENUMERATE_ATTRS read only "<enumerate>": a suite that lists the tools does not see a route.
+  * What stays wide: a reader that names the route's own function (`server.health`) or its path string is selected by name or by the string, as before. Any
+    wildcard reader of a module (getattr(mod, name) with a name that is not a literal, vars(mod), dir(mod), `from m import *`) reads every name of that
+    module, the route's function included, so it is selected as before. An attribute read of a name in neither set is not an enumeration, as before.
+  * Limits, kept honest: `getattr(mcp, name)` with a name that is not a literal, or vars(mcp) / dir(mcp), on an object that is not a module of ours, gives
+    no key today for tools either (177 non-literal getattr calls in the checkout, most of them forwarders); a literal `getattr(x, "list_tools")` gives
+    none either. `.routes` also matches any other object's `.routes` (a false positive, wider). A decorator on a method inside a class body is not
+    examined, for tools too.
+SUITEMAP_ROUTE_RULE=R1 (R2 by default; any other value is an error, checked when a command starts) gives the old selection: a custom_route binds
+"<enumerate>" and ROUTE_ATTRS adds nothing. `audit` applies the same rule on both maps.
+
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
 `shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
