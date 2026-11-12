@@ -210,6 +210,46 @@ list the tools; a route is no tool. Now (R2):
 SUITEMAP_ROUTE_RULE=R1 (R2 by default; any other value is an error, checked when a command starts) gives the old selection: a custom_route binds
 "<enumerate>" and ROUTE_ATTRS adds nothing. `audit` applies the same rule on both maps.
 
+Class attributes (Thu Nov 12th 2026). A line inside a class body (`Board._SENT = {...}` in stackshot/web/render.py) is module-level code, so an
+edit of one bound the whole class name, and the `own` rule then selected every suite that ran ANY scope of the class (183 suites for web/render.py alone,
+most of them running other methods of Board). Now (C2):
+  * A changed line that lies only inside direct class-body assignments (`x = <literal>`, plain names, the value `ast.literal_eval`-able) of a plain
+    top-level class binds the key (module, ".x"), the ATTRIBUTE, and not the class. A plain class is undecorated, has no keywords and no bases (or only
+    `object`). The old tree is read too, so a removed or renamed attribute binds its old name as well; a private name `__x` also binds `_Cls__x`.
+  * The readers of `.x` are the suites that run code that reads it: any attribute access `.x` (a load, a store, a delete, an augmented assignment and a
+    `case C(x=...)` pattern all read the class value), and any string that names it (`"x"`, as getattr(obj, "x") and a registry do) or holds it as a token
+    (a format string `"{x}"`, a dotted string such as `"Cfg.x"`, of any length: a script a suite hands to a subprocess is scanned whole). A string with
+    neither a `.` nor a `{` that merely contains the name is not scanned (a limit). A module-level statement that runs at import and reads it takes its file whole, as for a name.
+  * The key (".*") is read by every dynamic access to attributes: getattr / setattr / hasattr / delattr / inspect.getattr_static with a name that is not a
+    literal (or an argument with `*` or `**`), vars, dir, inspect.getmembers, operator.attrgetter / methodcaller with a non-literal, `.__dict__`,
+    `.__getattribute__`, a builtin of that list handed over as a value (map(getattr, ...)), a non-literal eval or exec, `patch.multiple(Cls, **kw)`. It matches every attribute edit.
+    The keywords of `patch.multiple(Cls, K=1)` read `.K`.
+  * NOT narrowed, the class is bound as before (over-selection is the safe side): a decorated class or one with bases or keywords; a class that defines
+    `__getattr__`, `__getattribute__`, `__init_subclass__`, `__set_name__`, `__class_getitem__` or `__slots__`; a class that calls locals / vars / dir /
+    globals / eval / exec in its body; a name that is read as a bare Name in the class body (a derived attribute: `B = A + 1`, a decorator, a default, a
+    lambda or a comprehension there); a value that is not a literal; an AnnAssign (dataclass and get_type_hints machinery
+    reads annotated names without writing them); a dunder name; any changed line that is also part of another kind of statement; an import.
+  * A callee is matched by every name it goes by in the file: `from builtins import getattr as ga`, `from operator import attrgetter as ag`,
+    `from inspect import getmembers as gm`, `import builtins as b` (`b.vars(x)`), and a plain assignment of one (`g = getattr`, `pm = mock.patch.multiple`)
+    all read like the original (an alias map over the file's imports and assignments, followed transitively; a name goes by all the names it was ever given,
+    which over-selects). A builtin name that a function binds itself (a parameter or a local named `vars`) is no builtin there, so a use of it in that function is not
+    a dynamic read; the same name in another function or at module level that binds none still is. A name `self` that a method did not take as its first parameter
+    is a free name, and a `classmethod` gets the class as its first parameter: `self.__dict__` in either is a dynamic read.
+  * Some accesses are no dynamic read: `self.__dict__` and `vars(self)` in a plain method whose first parameter is `self` (an instance's dict holds no class
+    attribute), and, on a module object, getattr / setattr / hasattr / delattr, vars, dir, inspect.getmembers and `.__dict__`. A module object is a name that this file binds only by `import x`, `import x as y`, `m = importlib.import_module(...)`,
+    `m = __import__(...)` or `m = sys.modules[...]` (or one of those calls written in place); a name bound any other way, anywhere in the file, is not one.
+    A forwarder such as puller.py (`vars(_real)` of an imported module) therefore does not read every attribute of every class.
+  * Limits, kept honest: code that reads an attribute by name from the text of a file (a template, a C extension) is not seen (none in the checkout today);
+    a method that receives a class as its `self` by hand is taken for an instance; a `self.__dict__` in a class body of its own is the same case. A stdlib
+    function that reads an attribute by a name it gets as data, from a place no suite of ours shows, is not seen: `parser.parse_args([], namespace=Cfg())` with a
+    `--K` option sets `Cfg.K` and our code names neither `K` nor a dynamic accessor. An alias made any other way than an import or an assignment of a
+    dotted name (a parameter, a call result, a container) is not followed. `vars(self)` / `self.__dict__` in a method of a metaclass (`class Meta(type)`),
+    whose `self` is a class, is taken for an instance's (exempt) and under-selects; and `mock.patch.object(Cls, name)` with a name that is a variable
+    (a literal name is a string we see) replaces an attribute we do not match. Where a use looks like neither, it is a dynamic read.
+SUITEMAP_CLASS_RULE=C1 (C2 by default; any other value is an error, checked when a command starts) binds the whole class for every edit inside its body, as
+every edit did before C2. It is not simply a superset of C2: the plain `.x` readers in other modules that C2 adds are not looked for under C1.
+`audit` applies the same rule on both maps.
+
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
 and every release waits for it. Now tests.yml runs it as a matrix of SHARDS jobs on the same labels, each `measure` over
 `shard --of SHARDS --index I`, and the `suites` job merges their maps (`merge`) and passes only when every shard passed and the
@@ -265,6 +305,16 @@ def route_rule():
     v = os.environ.get("SUITEMAP_ROUTE_RULE", "R2").strip().upper()
     if v not in ("R1", "R2"):
         raise SystemExit(f"suitemap: SUITEMAP_ROUTE_RULE={os.environ.get('SUITEMAP_ROUTE_RULE')!r} is not a rule: the allowed values are R1 and R2")
+    return v
+
+
+def class_rule():
+    """C2 (default): an edit of a literal assignment in the body of a plain class binds the attribute (module, ".name"), and only the readers of that attribute
+    match it; C1: it binds the class, as every edit inside a class did before C2, so every suite that ran any scope of the class matches it (the plain `.attr`
+    readers in other modules that C2 adds are not looked for) (see *Class attributes*)"""
+    v = os.environ.get("SUITEMAP_CLASS_RULE", "C2").strip().upper()
+    if v not in ("C1", "C2"):
+        raise SystemExit(f"suitemap: SUITEMAP_CLASS_RULE={os.environ.get('SUITEMAP_CLASS_RULE')!r} is not a rule: the allowed values are C1 and C2")
     return v
 
 
@@ -417,6 +467,20 @@ ENUMERATE_R = "<enumerate-routes>"
 # itself (routes; _additional_http_routes and its getter) and the calls that build the app and serve it (run_async, run_http_async: a suite that starts the server
 # as a process and asks it for a page reads every route). Each of them reads BOTH keys (the app and the server serve the tools too, so a tool edit reaches them as well)
 ROUTE_ATTRS = {"http_app", "routes", "streamable_http_app", "sse_app", "_additional_http_routes", "_get_additional_http_routes", "run_async", "run_http_async"}
+# Class attributes (see *Class attributes*). An edit of `_SENT = {...}` in a class body binds the key (module, "._SENT") instead of the class; a read of it is
+# the key ("*", "._SENT"): an attribute access `.x`, a string that names it. ATTR_ANY reads every attribute: a dynamic access by a name that is a value.
+ATTR_ANY = ("*", ".*")
+# a class that defines one of these is never narrowed: the interpreter or a framework reads its attributes without naming them
+ATTR_NEVER = {"__getattr__", "__getattribute__", "__init_subclass__", "__set_name__", "__class_getitem__", "__slots__"}
+ATTR_BY_NAME = {"getattr", "setattr", "hasattr", "delattr", "getattr_static"}   # an attribute looked up by a name that is a value (dynamic unless the name is a literal)
+ATTR_ALL = {"vars", "dir", "getmembers", "getmembers_static"}                  # all of an object's attributes
+ATTR_NAMES = {"attrgetter", "methodcaller"}                                    # operator.attrgetter(name)
+ATTR_VALUES = {"getattr", "setattr", "hasattr", "delattr", "vars", "dir"}      # the builtins handed over as a value (map(getattr, objs, names), partial(getattr, obj))
+ATTR_DICT = {"__dict__", "__getattribute__"}                                   # a namespace, an explicit lookup by name
+ATTR_BODY_CALLS = {"locals", "vars", "dir", "globals", "eval", "exec"}         # in a class body or a method header: the class's own namespace, read as a whole (globals() also takes the file whole through `dyn` in py_change: listed for completeness)
+ATTR_TOKEN = re.compile(r"[^\W\d]\w*")   # an identifier of any script (`{c.\u00f1ame}`): \w is Unicode in a str pattern
+ATTR_CALLEES = ATTR_BY_NAME | ATTR_ALL | ATTR_NAMES | ATTR_VALUES | ATTR_BODY_CALLS | {"multiple"}   # the names alias_map follows
+SELF_DECORATORS = PLAIN_DECORATORS - {"staticmethod", "classmethod"}            # a method under any other decorator may be a class method: its `self` is not an instance
 
 
 def modname(path):
@@ -436,6 +500,21 @@ def dotted(node):
         parts.append(node.id)
         return ".".join(reversed(parts))
     return None
+
+
+def eval_nodes(roots):
+    """every node under the roots that runs when they are evaluated: a function's header (decorators, defaults, annotations) is part of it, its body is not
+    (the body is a scope of its own, with its own reads)"""
+    stack = list(roots)
+    while stack:
+        n = stack.pop()
+        yield n
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            ar = n.args
+            stack.extend(x for x in [*n.decorator_list, *ar.defaults, *ar.kw_defaults, n.returns,
+                                     *[a.annotation for a in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if a is not None]] if x is not None)
+        else:
+            stack.extend(ast.iter_child_nodes(n))
 
 
 def module_bindings(tree):
@@ -505,6 +584,9 @@ class ModNames:
         self.postponed, self.imports, self.import_ids = False, {}, set()   # import_ids: the indexes in stmts of the Import and ImportFrom nodes (`import os; os = 1` holds an import and a plain statement on one line)
         self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
         self.class_keyed = set()                     # the class names under which the __init__, __call__ and __new__ annotations wait (mark_annotations)
+        self.attrs, self.narrow = False, {}          # class rule C2 (see *Class attributes*): attribute keys are read; narrow[line] = the attribute names of the class-body assignment that holds the line
+        self.callees, self.mod_objs, self.self_ok = set(), set(), set()   # attr_setup: ids of the callee of every call, the names bound only to modules, ids of `self.__dict__`
+        self.alias, self.shadowed = {}, set()        # attr_setup: local name → the ATTR_CALLEES names it may stand for (alias_map); ids of the Name loads whose name a scope around them binds (shadow_setup)
         self.attr_values = set()                     # attribute names read without being called, and the names getattr(obj, "name") asks for (Names.settle: C(1).__init__ as a value)
         self.valuse = set()                          # bare names used as a value (not just called): Names.settle
         self.import_seq, self.dropped = [], set()    # the module-level imports in order (None for another statement); (module, name) keys of repo imports whose only use was a dropped annotation
@@ -563,10 +645,16 @@ class ModNames:
             for t in (st.targets if isinstance(st, ast.Assign) else [getattr(st, "target", None)]):
                 if isinstance(t, ast.Name):
                     self.toplevel.add(t.id)
+        self.attrs = class_rule() == "C2"
+        if self.attrs:
+            self.attr_setup(tree)
         for st in tree.body:
             if isinstance(st, (ast.Import, ast.ImportFrom)):
                 self.import_ids.add(len(self.stmts))
-            self.stmts.append(self.statement(st, st is tree.body[0]))
+            a, b, kind, bound, reads = self.statement(st, st is tree.body[0])
+            if self.attrs and kind != "import-repo":
+                reads = reads | self.attr_reads(st)   # `X = obj.attr` at import reads the attribute, as `X = obj.f` reads f
+            self.stmts.append((a, b, kind, bound, reads))
         for node in ast.walk(tree):
             self.read(node)
         self.value_uses(tree)
@@ -701,6 +789,287 @@ class ModNames:
                 self.ann.append((self.annot_skip[id(node)], sc, ks))   # an annotation of a postponed file: Names.settle decides
             else:
                 self.refs[sc] |= ks
+        if self.attrs:
+            ak = self.attr_keys(node)
+            if ak:
+                self.refs[self.scope(node)] |= ak
+
+    def attr_setup(self, tree):
+        """what attr_keys needs to know about the whole file under class rule C2 (see *Class attributes*): the callee of every call, the names a callee may
+        stand for (an import alias, a name assigned another), the names a scope binds around a bare builtin, those bound only to module objects, the
+        `self.__dict__` of the methods, and the class-body assignments an edit narrows"""
+        self.callees = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.alias_map(tree)
+        self.shadow_setup(tree)
+        self.module_objects(tree)
+        self.self_dicts(tree)
+        self.narrowable(tree)
+
+    def alias_map(self, tree):
+        """self.alias: local name → the names of ATTR_CALLEES it may stand for: `from builtins import getattr as ga`, `g = getattr`, `m = mock.patch.multiple`
+        (the last name of the dotted value), through any chain of them (`h = g`). Every binding in the file counts, whatever its scope: a name bound to two things
+        stands for both (over-selection is the safe side)"""
+        edges = collections.defaultdict(set)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    edges[a.asname or a.name].add(a.name)
+            elif isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+                d = dotted(n.value)
+                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                    if d and isinstance(t, ast.Name):
+                        edges[t.id].add(d.split(".")[-1])
+        reach = {k: set(v) for k, v in edges.items()}
+        for _ in range(len(reach)):
+            grown = False
+            for k, v in reach.items():
+                more = set().union(*(reach[x] for x in v if x in reach and x != k)) - v
+                if more:
+                    v |= more
+                    grown = True
+            if not grown:
+                break
+        self.alias = {k: v & ATTR_CALLEES for k, v in reach.items() if v & ATTR_CALLEES}
+
+    def callee_names(self, f):
+        """the names a callee may be: a Name is itself and what it is an alias of; an attribute is its last name (`inspect.getmembers`, `builtins.vars`)"""
+        if isinstance(f, ast.Name):
+            return {f.id} | self.alias.get(f.id, set())
+        return {f.attr} if isinstance(f, ast.Attribute) else set()
+
+    def shadow_setup(self, tree):
+        """self.shadowed: the ids of the Name loads of an ATTR_VALUES builtin whose name is bound by a scope around them (a parameter, an assignment, a def, an
+        import, a loop target...): `def f(vars): return list(map(vars, objs))` hands over its parameter, no builtin, while the same name in another function is
+        the builtin. A class body is a scope for its own statements only, not for the functions in it; a comprehension is not looked into (its target would
+        shadow the name for the whole function: the safe side is to leave the name a builtin)"""
+        def bound(scope):
+            out = set()
+            if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                ar = scope.args
+                out |= {a.arg for a in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if a is not None}
+            stack = [scope.body] if isinstance(scope, ast.Lambda) else list(scope.body)
+            while stack:
+                n = stack.pop()
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    out.add(n.name)
+                    continue
+                if isinstance(n, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                    continue
+                if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+                    out.add(n.id)
+                elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                    out |= {(a.asname or a.name).split(".")[0] for a in n.names}
+                elif isinstance(n, ast.ExceptHandler) and n.name:
+                    out.add(n.name)
+                elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+                    out.add(n.name)
+                elif isinstance(n, ast.MatchMapping) and n.rest:
+                    out.add(n.rest)
+                stack.extend(ast.iter_child_nodes(n))
+            return out
+
+        def visit(node, chain):
+            for ch in ast.iter_child_nodes(node):
+                if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                    ar = ch.args
+                    for h in [*getattr(ch, "decorator_list", []), *ar.defaults, *ar.kw_defaults, getattr(ch, "returns", None)]:
+                        if h is not None:
+                            visit_one(h, chain)
+                    inner = [c for c in chain if not c[1]] + [(bound(ch), False)]
+                    for b in ([ch.body] if isinstance(ch, ast.Lambda) else ch.body):
+                        visit_one(b, inner)
+                elif isinstance(ch, ast.ClassDef):
+                    for h in [*ch.decorator_list, *ch.bases, *[k.value for k in ch.keywords]]:
+                        visit_one(h, chain)
+                    for b in ch.body:
+                        visit_one(b, chain + [(bound(ch), True)])
+                else:
+                    visit_one(ch, chain)
+
+        def visit_one(n, chain):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                holder = ast.Module(body=[n], type_ignores=[])
+                visit(holder, chain)
+                return
+            if isinstance(n, ast.Name) and n.id in ATTR_VALUES and any(n.id in b for b, _ in chain):
+                self.shadowed.add(id(n))
+            visit(n, chain)
+
+        visit(tree, [(bound(tree), False)])
+
+    def module_value(self, v):
+        """True for an expression that holds a module object: importlib.import_module(…), __import__(…), sys.modules[…]"""
+        if isinstance(v, ast.Call):
+            f = dotted(v.func)
+            return f in ("importlib.import_module", "__import__") or (f == "import_module" and any(b == "importlib" for b, _ in self.froms_all.get(f, ())))
+        return isinstance(v, ast.Subscript) and dotted(v.value) == "sys.modules"
+
+    def is_module(self, v):
+        """True when an expression is a module object: a name this file binds only by `import x` / `import x as y` / `m = importlib.import_module(…)` /
+        `m = sys.modules[…]` (any other binding of the same name, in any scope, makes it unknown), or such a call or lookup itself. getattr(<module>, name)
+        and vars(<module>) read a name of the module (the module rules follow those); they read no attribute of a class"""
+        return isinstance(v, ast.Name) and v.id in self.mod_objs or self.module_value(v)
+
+    def module_objects(self, tree):
+        """mod_objs: the names the file binds only to module objects (any other binding of the name, anywhere, rules it out)"""
+        mods, others, good = set(), set(), set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and self.module_value(n.value):
+                good |= {id(t) for t in n.targets if isinstance(t, ast.Name)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Import):
+                mods |= {(a.asname or a.name).split(".")[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom):
+                others |= {a.asname or a.name for a in n.names}
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                others.add(n.name)
+            elif isinstance(n, ast.arg):
+                others.add(n.arg)
+            elif isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+                (mods if id(n) in good else others).add(n.id)
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                others.add(n.name)
+            elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+                others.add(n.name)
+            elif isinstance(n, ast.MatchMapping) and n.rest:
+                others.add(n.rest)
+        self.mod_objs = mods - others
+
+    def self_dicts(self, tree):
+        """self_ok: the ids of the `self.__dict__` and `vars(self)` nodes in the methods of a class that cannot be handed a class as `self`: the first parameter
+        is `self`, the decorators are plain ones (not @classmethod or @staticmethod, or any we do not know), and `self` is not bound again in the method (a nested
+        def, lambda or class is not looked into). An instance's own namespace holds no class-body attribute"""
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for fn in cls.body:
+                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or not fn.args.args or fn.args.args[0].arg != "self" \
+                        or not all(dotted(d.func if isinstance(d, ast.Call) else d) in SELF_DECORATORS for d in fn.decorator_list):
+                    continue
+                nodes, stack = [], list(fn.body)
+                while stack:
+                    n = stack.pop()
+                    nodes.append(n)
+                    if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                        stack.extend(ast.iter_child_nodes(n))
+                if any(isinstance(n, ast.Name) and n.id == "self" and not isinstance(n.ctx, ast.Load) for n in nodes):
+                    continue
+                for n in nodes:
+                    if isinstance(n, ast.Attribute) and n.attr == "__dict__" and isinstance(n.value, ast.Name) and n.value.id == "self":
+                        self.self_ok.add(id(n))
+                    elif isinstance(n, ast.Call) and dotted(n.func) == "vars" and len(n.args) == 1 and not n.keywords \
+                            and isinstance(n.args[0], ast.Name) and n.args[0].id == "self":
+                        self.self_ok.add(id(n))
+
+    def narrowable(self, tree):
+        """sets self.narrow: line -> the attribute names bound by the class-body assignment(s) that hold the line, for each line whose edit may bind those
+        attributes and not the class (see *Class attributes*). A line is in it only if every statement on it is such an assignment: a direct Assign in the
+        body of a top-level class that is plain (no decorator, keyword or base but `object`; none of ATTR_NEVER defined; no call of ATTR_BODY_CALLS in the
+        body or in a method header), whose targets are plain names (no dunder), whose value is a literal, and whose names the class body does not read bare
+        (a derived attribute: `B = A + 1`, a default `def f(self, x=A)`). A line that holds any other statement as well (`X = 1; def …`), or the class line
+        itself, is not narrowed: the class is bound as before"""
+        holds, plain = collections.Counter(), collections.Counter()
+        for cls in tree.body:
+            if not isinstance(cls, ast.ClassDef) or cls.decorator_list or cls.keywords \
+                    or any(not (isinstance(b, ast.Name) and b.id == "object") for b in cls.bases):
+                continue
+            defined, loaded, whole = set(), set(), False
+            for n in eval_nodes(cls.body):
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    defined.add(n.name)
+                elif isinstance(n, ast.Name):
+                    if isinstance(n.ctx, ast.Store):
+                        defined.add(n.id)
+                    else:
+                        loaded.add(n.id)   # Load and Del: both need the attribute to exist
+                elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+                    loaded.add(n.target.id)
+                elif isinstance(n, ast.Call) and self.body_call(n.func):
+                    whole = True
+            if whole or defined & ATTR_NEVER:
+                continue
+            rows = []
+            for st in cls.body:
+                lines = range(st.lineno, (st.end_lineno or st.lineno) + 1)
+                names = set()
+                if isinstance(st, ast.Assign) and st.lineno > cls.lineno and all(isinstance(t, ast.Name) for t in st.targets):
+                    names = {t.id for t in st.targets}
+                    try:
+                        ast.literal_eval(st.value)
+                    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                        names = set()
+                    if names & loaded or any(n.startswith("__") and n.endswith("__") for n in names):
+                        names = set()
+                    # private names are mangled: `__x` in class C is read as `_C__x` outside the class
+                    names |= {f"_{cls.name.lstrip('_')}{n}" for n in names if n.startswith("__") and cls.name.strip("_")}
+                rows.append((lines, names))
+                holds.update(lines)
+            for lines, names in rows:
+                if names:
+                    for ln in lines:
+                        plain[ln] += 1
+                        self.narrow.setdefault(ln, set()).update(names)
+        self.narrow = {ln: frozenset(ns) for ln, ns in self.narrow.items() if plain[ln] == holds[ln]}
+
+    def body_call(self, f):
+        """True for a callee that reads a class's own namespace as a whole (ATTR_BODY_CALLS), however the file names it: `vars`, `ns = vars; ns()`,
+        `from builtins import vars as v`, `builtins.vars`"""
+        if isinstance(f, ast.Name):
+            return bool(self.callee_names(f) & ATTR_BODY_CALLS)
+        d = dotted(f)
+        return isinstance(f, ast.Attribute) and f.attr in ATTR_BODY_CALLS and d is not None and self.aliases.get(d.split(".")[0]) == "builtins"
+
+    def attr_reads(self, st):
+        """the attribute keys a module-level statement reads when it runs (a function's body is its own scope: Names of the functions' scopes read their own)"""
+        out = set()
+        for n in eval_nodes([st]):
+            out |= self.attr_keys(n)
+        return out
+
+    def attr_keys(self, node):
+        """the keys of the attributes one node reads under class rule C2: ("*", ".name") for an attribute access `.name`, a string that is the name, and a
+        string of any length with a `.` or `{` in it that holds it as a whole token (a format string "{a.name}", an attrgetter path, a script handed to a
+        subprocess); ATTR_ANY for an access by a name we cannot see: getattr and its kin with a name that is a value, vars, dir, inspect.getmembers,
+        `.__dict__` (an instance's own `self.__dict__` and a module's are no read of a class attribute). A match class pattern reads its keyword attributes
+        (see *Class attributes*)"""
+        if isinstance(node, ast.Attribute):
+            ks = {("*", "." + node.attr)}
+            if node.attr in ATTR_DICT and id(node) not in self.self_ok and not self.is_module(node.value):
+                ks.add(ATTR_ANY)
+            return ks
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            v = node.value
+            if v.isidentifier():
+                return {("*", "." + v)} | ({ATTR_ANY} if v in ATTR_DICT else set())
+            if "{" in v or "." in v:
+                return {("*", "." + t) for t in ATTR_TOKEN.findall(v)}
+            return set()
+        if isinstance(node, ast.Name):
+            # getattr handed over as a value (map(getattr, objs, names)): the name is in a call we do not see; a local variable called `dir` is no builtin
+            if isinstance(node.ctx, ast.Load) and id(node) not in self.callees \
+                    and (self.alias.get(node.id, set()) if id(node) in self.shadowed else {node.id} | self.alias.get(node.id, set())) & ATTR_VALUES:
+                return {ATTR_ANY}
+            return set()
+        if isinstance(node, ast.MatchClass):
+            return {("*", "." + a) for a in node.kwd_attrs}
+        if not isinstance(node, ast.Call):
+            return set()
+        f, a = node.func, node.args
+        fls = self.callee_names(f)   # a callee is matched by every name it may stand for (an import alias, `g = getattr`)
+        star = any(isinstance(x, ast.Starred) for x in a) or any(k.arg is None for k in node.keywords)
+        lit = lambda x: isinstance(x, ast.Constant) and isinstance(x.value, str)
+        out = set()
+        if fls & ATTR_BY_NAME:
+            out |= set() if not star and len(a) > 1 and (lit(a[1]) or self.is_module(a[0])) else {ATTR_ANY}
+        if fls & ATTR_ALL:
+            out |= set() if not star and (not a or id(node) in self.self_ok or self.is_module(a[0])) else {ATTR_ANY}
+        if fls & ATTR_NAMES:
+            out |= set() if not star and all(lit(x) for x in a) else {ATTR_ANY}
+        if "multiple" in fls and (isinstance(f, ast.Attribute) or f.id != "multiple"):   # mock.patch.multiple(Cls, K=1): each keyword names an attribute it replaces; **kw is a name we cannot see
+            out |= {ATTR_ANY} if any(k.arg is None for k in node.keywords) else {("*", "." + k.arg) for k in node.keywords}
+        if fls & {"eval", "exec"} and isinstance(f, ast.Name):
+            out |= set() if not star and a and lit(a[0]) else {ATTR_ANY}   # the code in a literal string is read as a string: its tokens
+        return out
 
     def statement(self, st, first):
         """(first line, last line, kind, names bound, keys it reads at import); kind: bind (only binds names), effect"""
@@ -1004,9 +1373,10 @@ def cat_files(rev, paths):
 
 def touches(reads, hit):
     """True when a set of keys read meets the keys hit: the same key, a read of every name of a module with a hit
-    (module, *), or a read of one name in any module (*, name)"""
+    (module, *), a read of one name in any module (*, name), or a read of every attribute (*, .*) with a hit on an attribute (module, .name)"""
     mods, names = {k[0] for k in hit}, {k[1] for k in hit}
-    return any(k in hit or (k[1] == "*" and (k[0] in mods or k[0] == "*")) or (k[0] == "*" and k[1] in names) for k in reads)
+    attrs = ATTR_ANY in reads and any(n.startswith(".") for n in names)
+    return attrs or any(k in hit or (k[1] == "*" and (k[0] in mods or k[0] == "*")) or (k[0] == "*" and k[1] in names) for k in reads)
 
 
 def reach(names_list, seeds, ran=None):
@@ -1519,6 +1889,10 @@ def py_change(names, S, a, b, old, new):
             sts = mn.stmts_at(ln)   # `import os; X = 1` has two statements on one line: each is changed
             if not sts or dyn:
                 whole.add(p)
+                continue
+            if ln in mn.narrow and len(sts) == 1 and sts[0][1][2] == "bind" and sts[0][0] not in mn.import_ids:
+                # a literal assigned in the body of a plain class (class rule C2): the attribute is bound, not the class (see *Class attributes*)
+                bound |= {(mn.mod, "." + n) for n in mn.narrow[ln]}
                 continue
             for si, st in sts:
                 _, _, kind, bnames, extra = st
@@ -2039,6 +2413,7 @@ def main():
     import_rule()
     annotation_rule()
     route_rule()
+    class_rule()
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
