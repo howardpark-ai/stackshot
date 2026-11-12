@@ -240,9 +240,15 @@ RAISE.pop("gate_subject")
 check("4 the first gate is the subject's: nothing is called before it", stop == ["gate_subject"] or stop[:1] == ["session_next"] and stop[1:] == ["gate_subject"], stop)
 
 # ---------------------------------------------------------------- 5. request map
+real_remember = create._remember_request
+def remember(rid, gid):
+    LOG.append(("remember_request", (rid, gid), {}))
+    return real_remember(rid, gid)
+create._remember_request = remember
 LOG.clear()
 gid1, rep1 = mk(request_id="rid-one")
-check("5 the first call files the item and remembers the request after the save", names().index("save") < len(names()) and create._requests().get("rid-one") == gid1, (names(), create._requests()))
+check("5 the first call files the item and remembers the request right after the save, before the page debt is charged", names().index("save") + 1 == names().index("remember_request") < names().index("pilot_charge") and create._requests().get("rid-one") == gid1, (names(), create._requests()))
+create._remember_request = real_remember
 n_before = len(files())
 gid2, rep2 = mk(request_id="rid-one", subject="[home] a different subject")
 check("5 a retry with the same request id returns the same item, files nothing and runs no gate", gid2 == gid1 and len(files()) == n_before and not {n for n in names()} - {"fmt", "nag"} , (gid2, names()))
