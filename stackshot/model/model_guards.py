@@ -957,7 +957,7 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
                             f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
     if "decision" in kinds and held:
         add("decision_hold", f"needs holds decision together with a hold: an ask for later is a time wait whose post-wake mover is {H}. Release the hold (clear_hold=true) and keep the ask, "
-                             f"or drop decision from needs and wait with hold=true, wake=YYYY-MM-DD, post_wake_mover={H} and the wait's reason.")
+                             f"or drop decision from needs and wait with hold=true, until=YYYY-MM-DD, post_wake_mover={H} and the wait's reason.")
     if mod.state == _model.ALIVE:
         clash = next((c for c in mod.conflicts if c.startswith("mover=")), "")
         if clash and mod.mover_explicit and not _model.is_owner(mod.mover) and _model.owner_state(m, mod.today):

@@ -211,13 +211,13 @@ check("B: …and a later far wake with its own basis replaces it", wk_(rd(22)["m
 refused("B: clear_wait_basis on a held wake would leave a time wait with no reason: refused", lambda: server._update("a22", clear_wait_basis=True, sender="home-owner"), "no reason")
 refused("B: wait_basis=\"none\" the same", lambda: server._update("a22", wait_basis="none", sender="home-owner"), "no reason")
 server._update("a22", clear_wait_basis=True, clear_hold=True, sender="home-owner")
-check("B: clear_wait_basis with the hold released (no wait is left) drops it, and the wake alone is a reminder again", "wait_basis" not in rd(22)["metadata"] and "hold" not in rd(22)["metadata"], rd(22)["metadata"])
+check("B: clear_wait_basis with the hold released (no wait is left) drops it, and the wake alone is a backstop again", "wait_basis" not in rd(22)["metadata"] and "hold" not in rd(22)["metadata"], rd(22)["metadata"])
 d_ = rd(22); d_["metadata"].update(hold=True, wake=day(42)); (T / "store/a/22.json").write_text(json.dumps(d_))
 check("B: …and a stored hold with that wake and no basis has none", not W.basis_of(rd(22)["metadata"]), rd(22)["metadata"])
 
 # refusals
 item(23, wake=day(3))
-refused("B: a wake under the cap that is no hold (a check-back reminder) needs no basis: refused (not needed)", lambda: server._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
+refused("B: a wake under the cap that is no hold (a backstop wake) needs no basis: refused (not needed)", lambda: server._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
 refused("B: …the same when the wake is set in the same call", lambda: server._update("a23", wake=day(6), wait_basis=B(7), sender="home-owner"), "not needed")
 item(2020, hold=True, wake=day(3))
 server._update("a2020", wait_basis=B(4), sender="home-owner")
@@ -234,7 +234,7 @@ refused("B: clear_wait_basis does not go with a new basis", lambda: server._upda
 refused("B: a basis does not go with a call that drops the wake", lambda: server._update("a29", wait_basis=B(33), clear_wake=True, sender="home-owner"), "drops the wake")
 check("B: …and nothing was recorded by the refusals", "wait_basis" not in rd(29)["metadata"] and "wait_basis" not in rd(23)["metadata"], (rd(29)["metadata"], rd(23)["metadata"]))
 W._cfg.CFG.setdefault("waiting", {})["cap_needs_owner"] = False
-refused("B: with the cap switched off ([waiting] cap_needs_owner = false) there is nothing to lift on a check-back wake: refused", lambda: server._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
+refused("B: with the cap switched off ([waiting] cap_needs_owner = false) there is nothing to lift on a backstop wake: refused", lambda: server._update("a23", wait_basis=B(4), sender="home-owner"), "not needed")
 server._update("a29", wait_basis=B(33), sender="home-owner")
 check("B: …a held wake still takes it: it is the time wait's reason, whatever the cap", W.basis_of(rd(29)["metadata"]) == B(33), rd(29)["metadata"])
 W._cfg.CFG["waiting"]["cap_needs_owner"] = True
@@ -624,7 +624,7 @@ ok_, err_ = tried(lambda: server._update("a83", hold=True, wake=day(1), wait_bas
 check("C: the same call with a wait_basis goes through", ok_, err_)
 m = rd(83)["metadata"]
 check("C: …the item is held, with the wake and the basis bound to it", hd_(m) is True and wk_(m) == day(1) and W.basis_of(m) == f"the soak ends {day(1)}", m)
-# the other side stays as it was: a wake alone on an alive item is a reminder that needs no basis, and a basis for it is not needed
+# the other side stays as it was: a wake alone on an alive item is a backstop that needs no basis, and a basis for it is not needed
 item(82, needs=["team-back"], state="doing")
 server._update("a82", wake=day(2), sender="team-back")
 check("C: a wake alone on a doing item is a date to wait on (stored as until, no hold): accepted with no basis", wk_(rd(82)["metadata"]) == day(2) and "hold" not in rd(82)["metadata"] and _WT.stored_until(rd(82)["metadata"]) == day(2), rd(82)["metadata"])

@@ -611,7 +611,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           [(a["kind"], a.get("choice"), a["text"], a["via"], a["step"]) for a in m41["answers"]] == [("step-reply", None, "which box do I run it on?", "board", _STEPN)], m41["answers"])
     _tz, _minreason = server._cfg.tz_abbr(), server._cfg.WAIT_GUARD_REASON_MIN
     _judge_old = ". Judge the note: if it finishes the step, carry on as after a Done; if it is a question or a request, answer it or do it, then hand the item back to Oliver with a new step (step=…)"
-    _judge_later = (f"; if it says he will do the step at a later time, put the item on hold until then (update hold=true, wake=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
+    _judge_later = (f"; if it says he will do the step at a later time, put the item on hold until then (update hold=true, until=<that time, YYYY-MM-DDTHH:MM {_tz}>, "
                     f"wait_reason=<what it waits on, at least {_minreason} characters>), leave his step open and hand no new step back.")
     _judge = _judge_old + _judge_later
     check("Send with a note: the then-mover alone is told, with his note and the instruction to judge it (the creator is not told)",
@@ -629,7 +629,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           sorted(t[1] for t in told) == [AGENT] and _judge_old + "; if it says he will do the step at a later time" in n45 and n45.endswith(_judge_later + f" → {BOARD}/items/a45")
           and "if it finishes the step, carry on as after a Done" in n45 and "then hand the item back to Oliver with a new step (step=…)" in n45, n45)
     check("the wait branch names the exact tool form: hold=true, a wake as YYYY-MM-DDTHH:MM in the instance zone, a wait_reason with its minimum length, his step left open, no new step handed back",
-          "update hold=true" in n45 and f"wake=<that time, YYYY-MM-DDTHH:MM {_tz}>" in n45 and f"wait_reason=<what it waits on, at least {_minreason} characters>" in n45
+          "update hold=true" in n45 and f"until=<that time, YYYY-MM-DDTHH:MM {_tz}>" in n45 and f"wait_reason=<what it waits on, at least {_minreason} characters>" in n45
           and "leave his step open and hand no new step back" in n45 and _minreason >= 15, n45)
     check("the server does not read a time out of a note that names none: the item is with the then-mover, not on hold, no wake (the instruction is the notice's text, carried out by the mover's update)",
           r_s45.headers["location"] == "/?sent=stepreply&item=a45&then=home-agent#task-a-45" and m45.get("mover") == "home-agent" and "hold" not in m45 and "wake" not in m45

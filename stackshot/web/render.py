@@ -213,15 +213,24 @@ def is_held(r):
     m = r.get("metadata") or {}
     date_wait = bool(_wt.stored_until(m)) and _wt.kind_of(m) == "time"        # a wait on a date alone (an until with no kind, or the kind time): parked like the hold with a wake it replaces
     return (st == "on_hold" or (st == "open" and (bool(m.get("hold")) or date_wait))) and needs_kind(r) != "call"
-def wake_of(r):
-    """An item's wake (on hold: when it is released; not on hold: a hand-off's backstop): a date ("YYYY-MM-DD", start of that day), a datetime in the instance timezone ("YYYY-MM-DDTHH:MM", the owner
-    "until friday evening"), or None. Board.when() draws either: "Fri Mar 6th" or "Fri Mar 6th 12:00"."""
-    md = r.get("metadata") or {}
-    v = (str(md.get("until") or "").strip() or str(md.get("wake", "")).strip()).replace(" ", "T")      # a stored `until` first, else the wake
+def _when_of(v):
+    v = str(v or "").strip().replace(" ", "T")
     try:
         if "T" in v: return datetime.datetime.fromisoformat(v[:16]).replace(tzinfo=_cfg.tz())
         return datetime.date.fromisoformat(v[:10])
     except Exception: return None
+def wake_of(r):
+    """An item's wake (on hold: when it is released; not on hold: a hand-off's backstop): a date ("YYYY-MM-DD", start of that day), a datetime in the instance timezone ("YYYY-MM-DDTHH:MM", the owner
+    "until friday evening"), or None. Board.when() draws either: "Fri Mar 6th" or "Fri Mar 6th 12:00"."""
+    md = r.get("metadata") or {}
+    return _when_of(str(md.get("until") or "").strip() or str(md.get("wake", "")).strip())      # a stored `until` first, else the wake
+def wait_date_of(r):
+    """The date an item's wait ends on as History compares it between two versions: its wake as above, else the date the old fields give for its kind (a relay's ask_by), so that rewriting a stored wait as
+    `until` (the data migration) reads as no change of date."""
+    md = r.get("metadata") or {}
+    if not _wt.stored_until(md) and str(md.get("ask_by") or "").strip():
+        return _when_of(_wt.until_of(md)) or wake_of(r)        # old fields with both dates: the one date they give for the kind, as the rewrite stores it
+    return wake_of(r) or _when_of(_wt.until_of(md))
 def wake_key(r):
     """A wake as a datetime in the instance timezone for sorting (a date is its midnight; no wake sorts last)."""
     w = wake_of(r)
@@ -1350,10 +1359,10 @@ class Board:
                         if po: ev.append(("needs", "the options were: " + "; ".join(f'{e(_ol.listed(o["label"], i))}{" (recommended)" if o["recommended"] else ""}' for i, o in enumerate(po))))
                     elif [shown_ref(x) for x in needs_sessions({"metadata": pm})] != [shown_ref(x) for x in needs_sessions({"metadata": m})]:   # the sessions named changed, the lane not
                         ns = [shown_ref(x) for x in needs_sessions({"metadata": m})]; ev.append(("needs", "needs: <b>" + e(", ".join(ns)) + "</b>" if ns else "needs: no session named any more"))
-                elif is_held(v) and is_held(prev) and wake_of(prev) != wake_of(v):
-                    w = wake_of(v); ev.append(("hold", f"wake {'set to ' + e(self.when(w)) if w else 'cleared'}"))
-                if not h_ and not ph and s_ != "completed" and ps == s_ and wake_of(prev) != wake_of(v):   # a wake that is no wait: set, moved or gone
-                    w = wake_of(v); ev.append(("hold", f"reminder {'set to ' + e(self.when(w)) if w else 'cleared'}"))
+                elif is_held(v) and is_held(prev) and wait_date_of(prev) != wait_date_of(v):
+                    w = wait_date_of(v); ev.append(("hold", f"wake {'set to ' + e(self.when(w)) if w else 'cleared'}"))
+                if not h_ and not ph and s_ != "completed" and ps == s_ and wait_date_of(prev) != wait_date_of(v):   # a date that is no wait (a backstop): set, moved or gone
+                    w = wait_date_of(v); ev.append(("hold", f"backstop {'set to ' + e(self.when(w)) if w else 'cleared'}"))
                 if s_ != "completed" and after_of({"metadata": pm}) != after_of({"metadata": m}):   # what it waits on
                     af = after_of({"metadata": m}); ev.append(("hold", "after: <b>" + e(", ".join(shown(g) for g in af)) + "</b>" if af else "after cleared: nothing left to wait on"))
                 if s_ != "completed" and (pm.get("state") != m.get("state") or any(pm.get(k) != m.get(k) for k in _states.CARRY_FIELDS)):   # where it stands, with what the state carries
@@ -1501,7 +1510,7 @@ class Board:
             # held doing items that wait for their wake (dated_wait.held_wait) and doing items whose wake stands on a wait_basis (dated_wait.basis_wait) are left out on purpose: the line's advice (park it, or write the step that can run now) does not apply to an item already on hold
             ndated = sum(1 for r in self.needs + self.agent + self.held if _dw.of(r, self.now.timestamp()) is not None and _dw.basis_wait(r, self.now.timestamp(), after_open) is None)      # the other way a stored doing item reads as waiting: every open step is dated for a later day (dated_wait.py)
             if n_basis: lines.append(f"  {n_basis} of the doing items have a wake that states its reason (wait_basis): the board lists them as waiting until the wake, whatever the stored state says")
-            if ndated: lines.append(f"  {ndated} of the doing items have a wake more than {_wt.dated_wait_min_hours():g} h out and every open step dated for a later day: the board lists them as waiting; park each (update hold=true, wake=...) or write the step that can run now")
+            if ndated: lines.append(f"  {ndated} of the doing items have a wake more than {_wt.dated_wait_min_hours():g} h out and every open step dated for a later day: the board lists them as waiting; park each (update hold=true, until=...) or write the step that can run now")
         if self.basis_waits and self.basis_due():     # the weekly list: long waits that stand on a real-world date, for a person to look at
             lines += [f"  waits on a real-world date: {rid_full(r)} {r['subject']} [wake {self.when(wake_of(r))} · {_wt.basis_of(r['metadata'])}]" for r in self.basis_waits[:8]]
             if len(self.basis_waits) > 8: lines.append(f"  and {len(self.basis_waits) - 8} more waits on a real-world date (the board's head lists them)")

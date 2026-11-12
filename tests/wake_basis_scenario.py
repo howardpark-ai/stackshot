@@ -1,13 +1,13 @@
 """Scenario test for a doing item whose wake stands on a stated real-world reason (metadata.wait_basis): the board lists it as waiting until the wake — fixture data, no live store, no network, no server socket.
 
-A wake is a reminder when it carries no reason, and the item stays active. A wake that carries a wait_basis names what the item waits for ("the subscription renews on <date>"), so until that wake
+A wake is a backstop when it carries no reason, and the item stays active. A wake that carries a wait_basis names what the item waits for ("the subscription renews on <date>"), so until that wake
 the item reads as waiting on a time, with the basis as the reason, whether or not it is on hold. model.view is the one place this is decided (dated_wait.basis_wait); the home page's lists, the brief,
 get and the wire `list` all read it, and derive (the guards, the router) is unchanged: the stored state stays doing.
 
   1. doing + wake in the future + wait_basis + no hold  → waiting on a time (kind time) until the wake, the basis shown, the mover kept for after it; listed under waiting on the home page (the Board's lists
      and the server's wire word), the brief's model line says so and why, the row names the basis, who set it and the end date; the sort puts it by its wake
   2. the same item with the wake in the past (or a basis written for another wake) → as stored: alive, listed on agents
-  3. a wake with no wait_basis → unchanged (a reminder: alive, agents)
+  3. a wake with no wait_basis → unchanged (a backstop: alive, agents)
   4. hold=true variants unchanged: a held doing item with a wake is still a held wait whose reason is the hold, with a basis or without; a hold with no wake stays alive
   5. needs=decision beside a wait_basis wake keeps its decision state; so does an open after link; a stored wait_kind is already a wait
   6. a verifying item is unchanged (it waits on its end date already, with no change to its model)
@@ -130,7 +130,7 @@ check("2 …a basis written for another wake is not read (basis_of): alive", vie
 check("2 …the same item flips by the clock alone: a minute before the wake it waits, a minute after it does not",
       _model.view(it_of(1), derive_of(1), W.wake_epoch(W1) - 60).state == _model.WAITING and _model.view(it_of(1), derive_of(1), W.wake_epoch(W1) + 60).state == _model.ALIVE, None)
 
-# ---- 3. a wake with no wait_basis is a reminder
+# ---- 3. a wake with no wait_basis is a backstop
 check("3 a wake with no wait_basis → unchanged: alive, listed on agents, no board note", view_of(5).state == _model.ALIVE and lst(5) == "agents" and "the board lists it as waiting" not in brief(5), view_of(5))
 
 # ---- 4. hold=true variants

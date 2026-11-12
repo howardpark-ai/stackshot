@@ -1,6 +1,6 @@
 """Scenario test for the event wait `box_online <machine>` (event_waits.py, server._evwait_box_poll) — fixture data, no live store, no network, no server socket.
 
-An item whose mover waits for an offline machine used to park on a date check-back and sit there after the machine was back. The wait names the machine; the server reads the machine's puller
+An item whose mover waits for an offline machine used to park on a dated backstop and sit there after the machine was back. The wait names the machine; the server reads the machine's puller
 check-ins itself (liveness.puller_online) and turns the item to its post-wake mover on the first pass after the machine is online. Covered:
 
   * the pure half: the phrase (one machine, nothing else), its canonical text and words, what matches (the machine, case ignored), the arrival line, that it is live, that a machine cannot report it.

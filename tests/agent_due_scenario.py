@@ -91,7 +91,7 @@ check("doing: get shows no expected_by under the state", "state: doing" in txt a
 item(2, needs=[BACK], state="doing")
 out = upd(2, expected_by=stamp(now0 + 30 * HOUR), expected_reason="the builder subagent runs the full test suite and the review")
 check("retired: a far expected_by (30 hours) with a reason, which was refused before, is accepted and not stored", mt(2)["state"] == "doing" and "expected_by" not in mt(2) and "expected_reason" not in mt(2), mt(2))
-check("retired: …the reply carries one note: no longer kept, and the park calls", out.count("no longer kept") == 1 and "update(hold=true, wake=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, out[-600:])
+check("retired: …the reply carries one note: no longer kept, and the park calls", out.count("no longer kept") == 1 and "update(hold=true, until=" in out and "after=[" in out and "wait_kind=\"relay\"" in out, out[-600:])
 for n_, kw_ in ((20, dict(expected_by="next week")), (21, dict(expected_by="2026-10-30 25:00")), (22, dict(expected_by=stamp(now0 - 2 * HOUR))), (23, dict(expected_by=time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET + DAY)))),
                 (24, dict(expected_reason="slow")), (25, dict(expected_by=stamp(now0 + 5 * HOUR), expected_reason="waits on Sunday's timer runs, deploying the Monday change"))):
     item(n_, needs=[BACK], state="doing"); o_ = upd(n_, **kw_)
@@ -138,7 +138,7 @@ refused("others: a wake past the 7-day cap is still refused without his words", 
 
 # ================================================================ 6b. a doing item whose next reads as a wait gets a note (the write still goes through)
 NOTE_HEAD = "reads as a wait"
-NOTE_CALL = "update(hold=true, wake="
+NOTE_CALL = "update(hold=true, until="
 OVERNIGHT = "box-g's first nightly run ends overnight; kestrel-hosting records its counts and cost in the morning"
 def bupd(i, **kw): return server._update(f"a{i}", sender=BACK, **kw)
 def doing_next(k, why):
@@ -152,7 +152,7 @@ item(70, needs=[BACK], state="doing")
 out = bupd(70, next="team-back: " + OVERNIGHT)
 check("wait note: the overnight example as the next line of a doing item is stored (the write goes through)", mt(70)["state"] == "doing" and "nightly run ends overnight" in mt(70)["next"], mt(70))
 check("wait note: …and the reply carries one note line that says to park it, with the hold, wake and wait_basis call",
-      out.count(NOTE_HEAD) == 1 and "(note: this item is doing, but its next reads as a wait (overnight)" in out and NOTE_CALL in out and 'wait_basis="<what it waits on, with its date YYYY-MM-DD>"' in out and 'wake="<the time it waits for>"' in out, out)
+      out.count(NOTE_HEAD) == 1 and "(note: this item is doing, but its next reads as a wait (overnight)" in out and NOTE_CALL in out and 'wait_basis="<what it waits on, with its date YYYY-MM-DD>"' in out and 'until="<the time it waits for>"' in out, out)
 out, err = doing_next(71, "building PR #13, tests running")
 check("wait note: work wording (building, tests running) gets no note", mt(71)["state"] == "doing" and NOTE_HEAD not in out, (out, err))
 for k, why in enumerate(("review of the diff, release running", "reviewing the builder's PR and running the suites", "the deploy step is running now"), 72):
@@ -392,7 +392,7 @@ async def tools():
 tl = asyncio.run(tools())
 ud, cd = tl["update"].description, tl["create"].description
 check("text: update's description says a doing item carries no expected time, that the old fields are accepted and not kept, and the park calls, and no ladder",
-      "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and "update(hold=true, wake=" in ud and 'wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, post_wake_mover and needs=["external"]' in ud
+      "carries no expected time (the item shows how long it has run)" in ud and "expected_by and expected_reason, which older calls pass, are accepted and not kept" in ud and "update(hold=true, until=" in ud and 'wait_kind="relay" with wait_event=<who>, ask_by=<the day to chase>, post_wake_mover and needs=["external"]' in ud
       and "ladder" not in ud and "stuck list" not in ud and "3 hours from this write" not in ud and "at most 12 hours ahead" not in ud, None)
 check("text: update's parameters still include expected_reason, a string (so an older call is not rejected)", tl["update"].parameters["properties"].get("expected_reason", {}).get("type") == "string", tl["update"].parameters["properties"].get("expected_reason"))
 check("text: create's description says agent work carries no expected time, and no tool text derives one or says past due for a wait",

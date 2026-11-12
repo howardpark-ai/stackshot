@@ -379,19 +379,37 @@ check("5.14 the next_defers refusal says a bare date makes the item wait until t
 states14 = _pl14.Path(_st14.__file__).read_text(encoding="utf-8")
 check("5.14 the parked state's missing-field hint no longer says a wake alone is never a park", "a wake alone is a reminder, never a park" not in states14 and "a date alone makes the item wait until then, outside a hand-off" in states14, None)
 import re as _re14
-OLD14 = _re14.compile("|".join((r"alone (?:is|was|stays) (?:only |just )?a (?:plain )?reminder", r"is a reminder that leaves the item active", r"check-back reminder", r"never a park", r"(?:wake|date) (?:that )?only reminds",
-                                r"reminder wakes?\b", r"until=\\*\"<when the (?:window|wait) ends>\\*\", wait_basis", r"shows? no wait", r"a reminder, never", r"check-back", r"wake[^.\n]{0,60}is a (?:plain )?reminder", r"reminder[^.\n]{0,40}leaves (?:it|the item) (?:on agent|in its lane|active)")), _re14.I)
+# The phrases the old model used for a date (a reminder that leaves the item active, a check-back, never a park) and the ones the wake pass, the History and the docs used for it before until.
+# "reminder wake" is also the front agent's own sense (a front agent's wake only reminds it: its own wake on an item another session moves is refused), so that one phrase is allowed on a line that names a front agent.
+OLD14_ANY = _re14.compile("|".join((r"alone (?:is|was|stays) (?:only |just )?a (?:plain )?reminder", r"is a reminder that leaves the item active", r"check-back reminder", r"never a park", r"(?:wake|date) (?:that )?only reminds",
+                                    r"(?<!hold=true, )until=\\*\"<when the (?:window|wait) ends>\\*\", wait_basis", r"shows? no wait", r"a reminder, never", r"check-back", r"wake[^.\n]{0,60}is a (?:plain )?reminder", r"reminder[^.\n]{0,40}leaves (?:it|the item) (?:on agent|in its lane|active)",
+                                    r"reminder \(wake", r"reminders came due", r"set another wake", r"a reminder's leaves it alone", r"reminder (?:set to|cleared)\b", r"\(a reminder:", r"no session text suggests parking")), _re14.I)
+OLD14_TEXT = _re14.compile(r"hold=true, wake=")                  # the park form taught with the old name: in the docs and the served text only (a test calls the alias on purpose)
+OLD14_FRONT_OK = _re14.compile(r"reminder wakes?\b", _re14.I)
+def old14_hit(line, text=True):
+    """The old-model phrase a line carries, "" when none: a front agent's own reminder wake is the one allowed sense."""
+    m = OLD14_ANY.search(line) or (OLD14_TEXT.search(line) if text else None)
+    if m:
+        return m.group(0)
+    m = OLD14_FRONT_OK.search(line)
+    return m.group(0) if m and not _re14.search(r"\bfront\b|front agent|_front|-front", line, _re14.I) else ""
+check("5.14 the check lets a front agent's reminder wake through and catches the same words elsewhere",
+      not old14_hit("A front agent's own reminder wakes are refused, so a step it is given needs a mover") and not old14_hit("this suite sets a reminder wake on an alive item as home-front")
+      and old14_hit("a reminder wake is sent to the mover") == "reminder wake" and old14_hit("N reminders came due for you") == "reminders came due" and old14_hit("reminder set to 2099-03-02") == "reminder set to"
+      and old14_hit("update(hold=true, wake=…, wait_basis=…)") == "hold=true, wake=", None)
 hits14 = []
-for f14 in sorted([*(root14 / "docs").glob("*.md"), *[x for x in (root14 / "stackshot").rglob("*") if x.is_file() and x.suffix not in (".pyc",)]]):
+for f14 in sorted([*(root14 / "docs").glob("*.md"), *[x for x in (root14 / "stackshot").rglob("*") if x.is_file() and x.suffix not in (".pyc",)], *(root14 / "tests").glob("*_scenario.py")]):
+    if f14.name == "until_write_scenario.py":
+        continue                                                   # this file holds the phrases it bans
     try:
         t14 = f14.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         continue
     for n14, l14 in enumerate(t14.split("\n"), 1):
-        m14 = OLD14.search(l14)
-        if m14:
-            hits14.append(f"{f14.relative_to(root14)}:{n14}: {l14[max(0, m14.start() - 40):m14.end() + 40]}")
-check("5.14 no doc (docs/*.md) or file under stackshot/ still teaches the old model: a wake alone is a reminder or never a park, a check-back, a reminder wake, a date that shows no wait", not hits14, hits14[:6])
+        h14 = old14_hit(l14, text=f14.parent.name != "tests")
+        if h14:
+            hits14.append(f"{f14.relative_to(root14)}:{n14}: {h14!r}")
+check("5.14 no doc (docs/*.md), file under stackshot/ or scenario under tests/ still teaches the old model: a wake alone is a reminder or never a park, a check-back, a reminder wake (a front agent's own is allowed), a wake pass that reminds, hold=true with wake=, a date that shows no wait", not hits14, hits14[:8])
 # what the update description now says about a basis is what the guard does: a bare date within the cap refuses one, a hold's wake and a date past the cap take one
 item(94, needs=[BACK]); item(95, needs=[BACK]); item(96, needs=[BACK])
 refused("5.14 a bare date within the cap refuses a wait_basis as not needed", lambda: bupd(94, until=w(3), wait_basis=f"the vendor ships {w(3)}"), "wait_basis is not needed", "a wait on its own")

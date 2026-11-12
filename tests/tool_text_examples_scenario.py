@@ -5,7 +5,7 @@ A worked example that the server refuses teaches the wrong call. Each example be
 (session, project, item ids, a day inside the wait cap for a placeholder day).
 
     create   own work · an item that needs the owner's call (ask and options) · a wait on another item · work for the builder
-    update   a step done and the next one added · reword · dropped · a work line · a park · a reminder wake on your own item · a wait on another item · a description
+    update   a step done and the next one added · reword · dropped · a work line · a park · a dated wait on your own item · a wait on another item · a description
     complete done · dropped · superseded
     message  a front agent · a plain result to the project · a question and a hand-off to a background agent (the hand-off example must sit in the first 2,048 characters)
     anchors  list · add · add scoped to an item · remove        confirm        route        check=  (create and update)

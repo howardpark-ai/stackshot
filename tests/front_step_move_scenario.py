@@ -341,7 +341,7 @@ check("6 …and moves a step whose clock is due, telling the mover through the s
       and [(m[0], m[5]) for m in msgs if "is now yours" in m[1]] == [("home-agent", True)] and all(m[2] == "stackshot audit" for m in msgs), (res["front_steps"], msgs))
 server._message = real_msg; _anc.file_roles = real_roles
 
-# ---- 7. a moved step is chased again (a far wake that only reminds does not silence it)
+# ---- 7. a moved step is chased again (a far wake that is only a backstop does not silence it)
 from stackshot.audit import silence as SL; from stackshot.tools import next_report as NR
 ZONE = dt.timezone(dt.timedelta(seconds=ZONE_OFFSET))
 def wake_in(hours): return dt.datetime.fromtimestamp(now + hours * H, ZONE).strftime("%Y-%m-%dT%H:%M")
@@ -357,7 +357,7 @@ seven_fixtures()
 check("7 control: an item whose far wake stands on a dated event (a wait_basis) is not silent, however long it stands; the same wake without one is only a reminder, so its item is silent after 45 minutes",
       bid(21) not in silent_ids(T0 + 5 * H) and bid(21) not in silent_ids(T0 + 20 * H) and silent_ids(T0 + 5 * H) == [bid(9030)], (silent_ids(T0 + 5 * H), silent_ids(T0 + 20 * H)))
 AR.filing_pass(now=T0, env=env()); sent.clear()
-check("7 the stuck-elsewhere finding still holds on an item with a far wake (a wake on a doing item is a check-back, not a wait): the clock starts", clock_of("a9030") is not None, list(get("a9030")["metadata"]))
+check("7 the stuck-elsewhere finding still holds on an item with a far wake (a wake on a doing item is a backstop, not a wait): the clock starts", clock_of("a9030") is not None, list(get("a9030")["metadata"]))
 f7 = SL.findings(items_now(), T0 + 50 * M)[0]
 check("7 a step found stuck is no longer covered by a wake: its mover is found silent after 45 minutes without activity, the evidence says why (the clock only, nothing moved yet)",
       [f["id"] for f in f7] == ["board#9030"] and "does not cover the step in hand" in f7[0]["detail"], f7)
@@ -382,7 +382,7 @@ res2 = SL.silence_pass(now=at7 + 10 * M, items=items_now(), env=env())
 check("7 …once per silence: the next pass sends nothing", res2["fresh"] == 0 and res2["repeats"] == 1 and sent == [], (res2, sent))
 d = get("a9030"); d["activity"] = at7 + 12 * M; put("a9030", d)
 check("7 a mover who acts (activity on the item) ends it: nothing 40 minutes later", silent_ids(at7 + 52 * M) == [], silent_ids(at7 + 52 * M))
-check("7 …and the next silence is counted from that write, not from the move: still quiet 44 minutes after it, found 46 minutes after it (a wake that only reminds covers nothing)",
+check("7 …and the next silence is counted from that write, not from the move: still quiet 44 minutes after it, found 46 minutes after it (a wake that is only a backstop covers nothing)",
       get("a9030")["metadata"].get(FS.LANDED, {}).get("step") == FS.step_hash(first_open("a9030")) and silent_ids(at7 + 12 * M + 44 * M) == [] and silent_ids(at7 + 12 * M + 46 * M) == [bid(9030)],
       (silent_ids(at7 + 12 * M + 44 * M), silent_ids(at7 + 12 * M + 46 * M)))
 d = get("a9030"); d["activity"] = 0; d["metadata"]["next"] = "home-agent: done differently\nhome-agent: then rerun the drill"; put("a9030", d)
