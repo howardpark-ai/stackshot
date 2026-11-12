@@ -54,7 +54,7 @@ MAX_REFS = _ml.MAX_REFS
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})      # GitHub's author_association values that are the repository's own side; every other value and a missing one is a stranger's
 FLOOR_H = 24.0       # an event older than this is not activity (a day of downtime, or a file read again from its start): the record would only fill with old news
 AHEAD_S = 3600.0     # …nor one more than this ahead of the clock (a skew of minutes is allowed; the server's pass reads a line that far ahead as a torn one)
-COMMIT_FLOOR_S = FLOOR_H * 3600.0 - 60.0     # after downtime a commit is stamped at its committer date, but never older than this (a minute inside the window above, so the line is not dropped as old news)
+COMMIT_FLOOR_S = FLOOR_H * 3600.0 - 180.0     # after downtime a commit is stamped at its committer date, but never older than this: three minutes inside the window above, more than the server pass's minute plus the time a line waits to be read, so a clamped line is not dropped as old news by the pass's own floor
 
 
 def path() -> Path:

@@ -568,6 +568,7 @@ check("8 …and without the mark it writes one", len(EL.read(0)[0]) == 1, EL.rea
 class GH:
     """The GitHub receiver on a fake `gh`: `ghd` maps an API path to its answer (a "404" string is a refusal); the receiver's events are kept in `evs` instead of being routed."""
     def __init__(self, ghd, anchors, etags=False, saved=None):
+        self.skew = 0.0
         self.ghd, self.caught, self.evs, self.calls, self.etags, self.not_modified = ghd, [], [], [], etags, []      # calls: (path, conditional) of every read; etags: the fake answers 304 to a matching If-None-Match, as GitHub does
         self.hub = HUB.Hub()
         if saved is not None: self.hub.saved = saved
@@ -579,6 +580,8 @@ class GH:
             self.calls.append((path, cond))
             ans = self.ghd.get(path, [])
             if ans == "404": return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
+            if ans == "timeout": raise subprocess.TimeoutExpired("gh", 30)
+            if ans == "badjson": return types.SimpleNamespace(returncode=0, stdout="<html>not json</html>", stderr="")
             if ans == "403": return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: API rate limit exceeded (HTTP 403)")
             body = json.dumps(ans)
             if self.etags and cond:
@@ -588,7 +591,7 @@ class GH:
             return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
         ghr.subprocess = types.SimpleNamespace(run=fake, TimeoutExpired=subprocess.TimeoutExpired)
         ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: self.caught.append(target)))
-        ghr.time = types.SimpleNamespace(time=time.time, sleep=_no_sleep)
+        ghr.time = types.SimpleNamespace(time=lambda: time.time() + self.skew, sleep=_no_sleep)      # the receiver's clock: the real one, plus `skew` seconds the test can move on
         ghr.run(self.hub); return self
     def one(self):
         del self.evs[:]
@@ -840,23 +843,25 @@ check("14 lines_for: a commit is a line only when the source vouched for it (a f
       and lines(A13, "", "pr_commit", "x", vouched="commit", now=100.0, ts=100.0 + 7200) == [] and lines(A13, "", "pr_commit", "x", vouched=["commit"], now=100.0, ts=90.0, refs=[BID(5)])[0]["refs"] == []
       and lines(A13, "", "pr_commit+comment", "x", vouched="commit", now=100.0, ts=90.0)[0]["kind"] == "commit"
       and lines(A13, "", "pr_commit", "x", vouched="commit", now=tn, ts=tn - EL.COMMIT_FLOOR_S) != [], None)
+check("14 the clamp to the window keeps a margin of at least two minutes (a pass runs once a minute, and reads a line some time after it was written), so a clamped line is not dropped by the pass's own floor", EL.FLOOR_H * 3600.0 - EL.COMMIT_FLOOR_S >= 120.0, EL.COMMIT_FLOOR_S)
 check("14 normal: a commit line is read, its ids dropped", EL.normal({"ts": 1, "repo": "a/b", "n": 3, "kind": "commit", "refs": [BID(1)]}) == {"ts": 1.0, "repo": "a/b", "n": 3, "kind": "commit", "refs": []}, None)
 
 # the receiver on a fake `gh` that answers 304 to a matching If-None-Match
-SHAS = iter("abcdefghijklmnopqrstuvwxyz")
-def sha13(): return next(SHAS) * 40
+import itertools
+SHAS = itertools.count(0xa0)
+def sha13(): return f"{next(SHAS):040x}"
 def commit_path(sha): return f"{RP}/git/commits/{sha}"
-def push13(G, g, n, sha, answer, head="acme/widgets", down=False):
+def push13(G, g, n, sha, answer, head="acme/widgets", down=False, looked_ago=None):
     """One pass after the pull request's head moved to `sha` (its commit answers `answer`, as the API holds it; `down`: the hub's last look at the pull request was an hour ago, as after downtime): → (the commit events the
     receiver handed the hub, the reads of a commit, the paths answered 304)."""
     g.update(pr9(n, head=head, sha=sha))
     if answer is not None: g[commit_path(sha)] = answer
-    if down: G.hub.gh_state["ci"][f"github:acme/widgets#{n}"]["looked"] = time.time() - 3600
+    if down or looked_ago is not None: G.hub.gh_state["ci"][f"github:acme/widgets#{n}"]["looked"] = time.time() + G.skew - (3600 if looked_ago is None else looked_ago)      # when the hub last looked at the pull request
     mark, m304 = len(G.calls), len(G.not_modified)
     evs_ = [e for e in G.one() if e.etype == "pr_commit"]
     return evs_, [p for p, _ in G.calls[mark:] if "/git/commits/" in p], G.not_modified[m304:]
 def cdate(back): return {"committer": {"date": iso_at(time.time() - back)}}
-def near(e, back=0.0): return abs(EL._epoch(e.ts) - (time.time() - back)) < 5      # the event's time is `back` seconds before now
+def near(e, back=0.0, skew=0.0): return abs(EL._epoch(e.ts) - (time.time() + skew - back)) < 5      # the event's time is `back` seconds before now
 SA = sha13()
 g13 = {"/user": {"login": "hubaccount"}, **pr9(140, sha=SA)}
 cap13 = {"armed": False}
@@ -917,12 +922,26 @@ try:
         check(f"14 after downtime, {label}: one read, and the commit is not lost: stamped at the time the hub saw it", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
         evs_, reads, nm = push13(G, g13, 140, sx, None)
         check("14 …and it is not read again on the next pass", reads == [] and evs_ == [], reads)
+    for label, ans in (("a timeout of gh", "timeout"), ("an answer that is not JSON", "badjson")):
+        sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, ans, down=True)
+        check(f"14 after downtime, {label} (an error of another type than a refused read): one read, and the commit is stamped at the time seen", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
     sx = sha13(); cap13["armed"] = True
     evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN), down=True)
     check("14 after downtime with the hourly cap spent: no commit request goes out, and the commit is stamped at the time seen", reads == [] and len(evs_) == 1 and near(evs_[0]) and not cap13["armed"], (reads, [e.ts for e in evs_]))
     SK = sha13()
     evs_, reads, nm = push13(G, g13, 140, SK, cdate(60))
     check("14 a commit after all of those is recorded as usual (one failure does not stop the next)", len(evs_) == 1 and near(evs_[0]) and reads == [], (reads, evs_))
+    # the ten-minute line (COMMIT_DOWNTIME): a look 598 s ago is live, one 602 s ago is a gap
+    sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN), looked_ago=598)
+    check("14 the last look 598 seconds ago (inside ten minutes): seen live, stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
+    sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN), looked_ago=602)
+    check("14 the last look 602 seconds ago (past ten minutes): a gap, the commit is read once and stamped at its committer date (fifty minutes ago)", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0], 50 * MIN), (reads, [e.ts for e in evs_]))
+    # a quiet pull request: passes answered 304 for longer than ten minutes keep the look current, so a push after them is live
+    G.one(); G.skew += 250.0; G.one(); G.skew += 250.0; G.one(); G.skew += 250.0; G.one()      # four passes (the first re-reads the last push), three of them 250 s apart: 750 s of the receiver's clock, all 304
+    m304 = len(G.not_modified); G.skew += 250.0; G.one()
+    check("14 the passes just before were answered 304 (the pull request is quiet) across more than ten minutes of the receiver's clock", len(G.not_modified) > m304 and G.skew >= 1000.0, (m304, len(G.not_modified), G.skew))
+    sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN))
+    check("14 a push after more than ten minutes of 304 passes is still seen live (a 304 refreshes the look): stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0], 0, G.skew), (reads, [e.ts for e in evs_], G.skew))
 
   # a fork's pull request, and one whose fork was deleted (no head repository): the head branch is not the repository's, so a commit there is nobody's activity: nothing is read or recorded, live or after downtime
   for label, n_, head_ in (("a fork's", 141, "evil/widgets"), ("a deleted fork's (no head repository)", 143, None)):
