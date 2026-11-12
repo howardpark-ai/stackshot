@@ -44,6 +44,7 @@ EN.update({
     "date.ord.1": "st", "date.ord.2": "nd", "date.ord.3": "rd", "date.ord.n": "th",
     "age.now": "just now",
     "age.min": "{n}m ago", "age.hour": "{n}h ago", "age.day": "{n}d ago",
+    "age.span_now": "<1m", "age.span_min": "{m}m", "age.span_hour": "{h}h {m}m", "age.span_day": "{d}d {h}h",      # how long since the last activity of an On agent row: "46m", "1h 44m", "2d 3h" (fmt_span)
 })
 for _i, _w in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")):
     EN[f"date.wd.{_i}"] = _w
@@ -272,6 +273,18 @@ def fmt_date(ts: Any, lang: str | None = None, clock: bool = True, tz: datetime.
     if isinstance(d, datetime.datetime) and clock:
         return t("date.full", lang, hm=f"{d:%H:%M}", **f)
     return t("date.nohm", lang, **f)
+
+
+def fmt_span(seconds: float, lang: str | None = None) -> str:
+    """How long since, to the minute and with no "ago": "<1m", "46m", "1h 44m" (to a day), "2d 3h". The age of an On agent row's last activity; the page script (render.py _LACT_JS) draws the same forms from the same age.span_* keys."""
+    m = max(int(seconds), 0) // 60
+    if m < 1:
+        return t("age.span_now", lang)
+    if m < 60:
+        return t("age.span_min", lang, m=m)
+    if m < 1440:
+        return t("age.span_hour", lang, h=m // 60, m=m % 60)
+    return t("age.span_day", lang, d=m // 1440, h=m % 1440 // 60)
 
 
 def fmt_age(seconds: float, lang: str | None = None, quiet: bool = False) -> str:

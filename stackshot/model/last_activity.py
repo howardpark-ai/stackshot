@@ -1,7 +1,7 @@
 """last_activity.py: the item's one "last activity" record, `metadata.last_activity = {"at": epoch seconds, "kind": what sort of activity (KINDS), "what": "short words"}`.
 
 The pure half: no server import, no clock read, no file. Part A of the rule that no item an agent moves goes more than an hour without visible activity: this records the
-last visible activity and nothing reads it yet (no flag, no notice, no board text); a later part reads it.
+last visible activity. The home page's On agent rows and the item page show it (ui/render.py `act_parts`); no flag and no notice read it yet, a later part does.
 
 The one definition of activity. Something visible happened to the item when:
 
@@ -23,6 +23,9 @@ A reply that says nothing changed is no `update` (same text as before), and the 
 Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number, a kind that is none of KINDS)
 is skipped. The caller passes `now`; a candidate time after it is read as `now`.
 
+How a page reads the record (the On agent rows and the item page, model/last_activity.py `age_s`, `band`): the age is the time since `at`, taken at render and by the page script after; a band by that age: `ok` under
+BAND_WARN_S (45 minutes), `warn` from there to BAND_BAD_S (1 hour), `bad` from an hour on. An item with no record has no age here and nothing is made up for it.
+
 Not seen here: a commit or push to a tied pull request. The hub emits no push event, so no signal for it can be built; a later part adds that source."""
 from __future__ import annotations
 
@@ -36,6 +39,9 @@ from stackshot.model import progress as _progress
 FIELD = "last_activity"
 MAX_WHAT = 80         # characters of the words kept
 MAX_STEPS_NAMED = 3   # steps named in one save's words
+BAND_WARN_S = 45 * 60   # the age from which a row's activity reads "quiet" (amber)
+BAND_BAD_S = 60 * 60    # the age from which it reads "idle over 1 h" (red)
+OK, WARN, BAD = "ok", "warn", "bad"
 
 # The named kinds of signal. STAMPED ones are what the server stamps today; the last two are defined here for the parts that come later.
 STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment"
@@ -85,6 +91,17 @@ def at(item: dict[str, Any] | None) -> float:
     """When the item last had visible activity, 0 when no record is stored (an item from before the record, or one with none yet)."""
     r = read(item)
     return r["at"] if r else 0.0
+
+
+def age_s(item: dict[str, Any] | None, now: float) -> float | None:
+    """Seconds since the item's last activity, None when it has no record (the caller keeps its old age and draws no activity line). A record stamped ahead of `now` is read as just now."""
+    r = read(item)
+    return max(0.0, now - r["at"]) if r else None
+
+
+def band(seconds: float) -> str:
+    """The colour band of an age: OK under 45 minutes, WARN from 45 minutes to an hour, BAD from an hour on (both bounds belong to the worse band)."""
+    return BAD if seconds >= BAND_BAD_S else WARN if seconds >= BAND_WARN_S else OK
 
 
 def signal(kind: str, at: Any, what: Any = "") -> dict[str, Any] | None:
