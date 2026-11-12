@@ -44,6 +44,7 @@ from stackshot.web import landed as _ld  # the Landed list: the closes of agents
 from stackshot.model import item_project as _iproj   # an item's project by its permanent id: the page key read through the id (item_project.py)
 from stackshot.projects import projects as _prj   # the project record: an agent registered there whose page line is still owed (with_pending)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
+from stackshot.model import last_activity as _lastact   # the item's last-activity record: the On agent rows and the item page show it (act_parts)
 from stackshot.web import home as _home   # the home page's three lists on that model: Your move, On agent, Waiting (home.py)
 from stackshot.waits import handoff as _ho   # "handed to X, not yet taken" on an On agent row (handoff.py)
 LIST_ORDER = (_home.YOUR_MOVE, _home.AGENTS, RELEASE_LIST, _home.WAITING)      # the four lists in the order the home page and the project page draw them
@@ -885,6 +886,14 @@ _SST_HEAD = ("<script>window.SSD=" + json.dumps(_i18n.js_table("en")).replace("<
 # How long ago, in script: the same forms as i18n.fmt_age ("just now", "12m ago", "3h ago" to 48 h, "5d ago"; q: the ">21h ago" mark of a silence's start), from the table's age.* keys.
 _AGE_FN = ("function fa(s,q){var m=Math.floor(Math.max(s,0)/60),k=m<60?'age.min':m<2880?'age.hour':'age.day',n=m<60?m:m<2880?Math.floor(m/60):Math.floor(m/1440);"
            "return q?'>'+SST(k,{n:n}):s<60?SST('age.now'):SST(k,{n:n})}")
+# The last activity of an On agent row, kept current in script: every [data-at] (epoch seconds of the activity) is redrawn every 30 s. The age (.ir-age) says it as i18n.fmt_span does ("<1m", "46m", "1h 44m", "2d 3h", the age.span_* keys), the
+# pill (.ir-pill) as the band says (its data-w-ok, data-w-warn and data-w-bad, the words in the person's language: they are on the element, not in the string table every page carries), and both take the band in data-b: ok under 45 minutes, warn from 45, bad from 60 (model/last_activity.py BAND_*; keep them in step). Elements with no data-at are left alone.
+_ACT_WORD = {_lastact.OK: "home.act.active", _lastact.WARN: "home.act.quiet", _lastact.BAD: "home.act.idle"}      # the pill's words by band (the string table's keys)
+_LACT_JS = ("function lact(){var n=Date.now()/1000;document.querySelectorAll('[data-at]').forEach(function(e){var m=Math.floor(Math.max(n-(+e.getAttribute('data-at')),0)/60),"
+            "b=m>=%d?'bad':m>=%d?'warn':'ok';e.setAttribute('data-b',b);"
+            "e.textContent=e.classList.contains('ir-pill')?e.getAttribute('data-w-'+b):"
+            "m<1?SST('age.span_now'):m<60?SST('age.span_min',{m:m}):m<1440?SST('age.span_hour',{h:Math.floor(m/60),m:m%%60}):SST('age.span_day',{d:Math.floor(m/1440),h:Math.floor(m%%1440/60)})})}"
+            "lact();setInterval(lact,30000);") % (_lastact.BAND_BAD_S // 60, _lastact.BAND_WARN_S // 60)
 _APP_HEAD = _SST_HEAD + ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
              f'<link rel="apple-touch-icon" href="{icon_href("apple-touch-icon.png")}">'          # 180 px, opaque (signin.py _APP_ICONS)
              '<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)">'   # the app's title bar: each theme's --bg
@@ -1664,6 +1673,7 @@ _ANSWER_JS, _HOME_JS, _LANDED_JS, _LIVE_JS, _AUDIT_JS = (x.replace("@ROOTR@", PR
 # it current, and a swap keeps the live one). Two renders of the same board give a block the same hash; _LIVE_JS swaps only
 # a block whose hash changed. The blocks' own markup carries nothing extra.
 _VOLATILE = ((re.compile(r'(<span class="tip[^"]*" data-ts="\d+"[^>]*>)[^<]*(</span>)'), r"\1\2"),
+             (re.compile(r'(<span class="[^"]*\bir-(?:age|pill)\b[^"]*" data-at="\d+") data-b="\w+"([^>]*>)[^<]*(</span>)'), r"\1\2\3"),      # the last activity's age, pill and band (the page script redraws them from data-at)
              (re.compile(r'(data-wait="\d+"[^>]*>)[^<]*'), r"\1"),
              (re.compile(r'<div id="audit".*?</div>', re.S), ""))   # the card's rows are spans, so its first </div> closes it
 def _fp(html):
@@ -2883,13 +2893,16 @@ class Board:
                 + self.watch_html(watch)
                 + self.more_html(r, done))
         # ---- the header line: [state tag] · since (the words and colors of the lists; the mover, the then and the project are the sidebar's Mover, Then and Project rows, never this line), then why it ended when it has
-        bits = [_ui.tag(self.state_kind(r))]
+        kind_ = self.state_kind(r)
+        bits = [_ui.tag(kind_)]
         if since:
             stamp_ = self.stamp(datetime.datetime.fromtimestamp(since, self.now.tzinfo))
             bits.append(stamp_ if done else _t("item.since", when=stamp_))
         if done and by: bits.append(_t("item.by", who=f'<a href="{e(id_href(by))}">{e(shown(by))}</a>'))
         if not_taken: bits.append(f'<span class="iwarn">{_t("item.not_taken")}</span>')
         sline = " · ".join(bits)
+        act = self.act_parts(r) if kind_ == _ui.AGENT else None      # an item on an agent shows its last activity beside the state, as its row on the home page does: the age, the pill, what it was and when
+        act_html = f'<div class="ir-actl">{act[0]}{act[1]}</div>' if act else ""
         said = "" if not done else (_t("item.no_outcome") if oc == "unrecorded" else (_ip.clean(why) or (_t("item.no_outcome") if not by else "")))
         reason_html = f'<p class="ireason">{M(said)}</p>' if said else ""
         goal_html = f'<p class="igoal">{self.mentions(e(goal), r["gid"])}</p>' if goal and goal != title else ""
@@ -2909,12 +2922,12 @@ class Board:
                 # the sidebar comes first in the source; from 768px wide the grid puts it in the right-hand column. On a phone
                 # (one column) the CSS orders it after the state line, the Ask and the answer box and before Next (the Ask first, not a screen below the fields as on GitHub's mobile page)
                 f'<div class="ilayout"><aside class="iside" aria-label="{e(_t("item.details"))}">{side}</aside><div class="imain">'
-                f'<div class="istat"><p class="istate">{sline}</p>{" ".join(extra)}</div>{reason_html}{outcome_html}{sb_html}{draft_html}{ask_html}{"" if sb_html else (form or cform)}{wait_html}'
+                f'<div class="istat"><p class="istate">{sline}</p>{" ".join(extra)}{act_html}</div>{reason_html}{outcome_html}{sb_html}{draft_html}{ask_html}{"" if sb_html else (form or cform)}{wait_html}'
                 + ("" if done and not checklist else fold("next", _t("item.after_wait") if waiting else _t("item.next"), nxt, True))
                 + fold("description", _t("item.background"), dsc, True)
                 + fold("history", _t("item.history", count=f'<span class="count">{len(changes)}{"+" if more else ""}</span>'), hist)
                 + fold("comments", _t("item.comments", count=f'<span class="count">{len(said_)}</span>'), comm)
-                + f'</div></div><script>{_FOLD_JS}</script></main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _SAID_JS + _BFCACHE_JS + (_ANSWER_JS + _CARDS_JS + "<script>" + _ABOX_JS + "</script>" + _SENDKEY_JS if '<form class="ianswer"' in form + cform else "") + '</body></html>')
+                + f'</div></div><script>{_FOLD_JS}</script>' + (f'<script>(function(){{{_LACT_JS}}})();</script>' if act_html else "") + '</main>' + self.panel_tail() + _FAB_PAIR + _THEME_JS + _RELOAD_JS + _TOTOP_JS + _COPY_JS + _SAID_JS + _BFCACHE_JS + (_ANSWER_JS + _CARDS_JS + "<script>" + _ABOX_JS + "</script>" + _SENDKEY_JS if '<form class="ianswer"' in form + cform else "") + '</body></html>')
     def wait_day(self, v) -> str:
         """A wait's end as a person reads it: "Sat Mar 28th" for a date, "Sat Mar 28th 09:00" for a date and a time (the board's zone); the text itself when it reads as neither."""
         t = str(v or "").strip().replace(" ", "T")
@@ -3745,6 +3758,23 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         o = self._sess_obj(r) or {}
         fleet = [x.get("name") for x in self.sess.values() if isinstance(x, dict)]
         return tuple(dict.fromkeys(str(x) for x in who + names + [o.get("name")] + fleet if x))
+    def act_parts(self, r):
+        """The last activity of an open item (its metadata.last_activity record, model/last_activity.py) as an On agent row and the item page draw it: (age_html, line_html), None when the item has no record or is parked (on hold, or after
+        another item: nothing is expected of it, so no idle flag). The age is the time since the activity ("46m", "1h 44m", "2d 3h"), drawn on the title line in place of the age since the row's state began; the line is the pill (active
+        under 45 minutes, quiet to an hour, idle over 1 h) and "Last: <what it was> at <HH:MM>" (the date too when it was not today). Both carry the activity's time in data-at, which the page script (_LACT_JS) keeps current, with the band in data-b.
+        The age is taken from the render's own clock here, so a page with no script says the same."""
+        if r.get("status") != "open" or is_parked(r): return None
+        rec = _lastact.read(r)
+        if not rec: return None
+        t = datetime.datetime.fromtimestamp(rec["at"], self.now.tzinfo)
+        sec = max(0.0, self.now.timestamp() - rec["at"]); b = _lastact.band(sec)
+        words = {k: _t(v) for k, v in _ACT_WORD.items()}
+        clock = f"{t:%H:%M}" if t.date() == self.now.date() else self.when(rec["at"])
+        tip = esc(_t("home.last_tip", when=self.when(rec["at"]), tz=_cfg.tz_abbr(t)))
+        age = f'<span class="tip ir-age" data-at="{int(rec["at"])}" data-b="{b}" data-tip="{tip}" title="">{esc(_i18n.fmt_span(sec))}</span>'
+        line = (f'<span class="ir-pill" data-at="{int(rec["at"])}" data-b="{b}" data-w-ok="{esc(words[_lastact.OK])}" data-w-warn="{esc(words[_lastact.WARN])}" data-w-bad="{esc(words[_lastact.BAD])}">{esc(words[b])}</span>'
+                f'<span class="ir-lwhat">{esc(_t("home.last", what=rec["what"], time=clock))}</span>')
+        return age, line
     def home_row(self, r, mod, which, flags=False, named=False):
         """One row of Your move (which = home.YOUR_MOVE), On agent or Waiting: the one row (ui/kit.py). Line one: `#id title` (wrapping, never cut) and the age since the row's state began at the right (a stamp the page
         script keeps current; on Your move amber past two days and red past five; on Waiting, which is sorted by end date, the end date in its place: "until Wed Mar 4th" or "no end date", plain text, the age on hover; wait_end_slot). The who line, small and gray, only when it says something: On agent the mover, or "handed to X, not yet taken";
@@ -3759,6 +3789,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         cls = _home.age_class((self.now - t0).total_seconds()) if (which == _home.YOUR_MOVE and t0) else ""
         age = self.stamp(t0, "ir-age" + (f" {cls}" if cls else "")) if t0 else ""
         if which == _home.WAITING: age = self.wait_end_slot(mod, t0)      # Waiting is sorted by end date, so its slot shows the end date; the age is the hover
+        act = self.act_parts(r) if which == _home.AGENTS else None      # On agent: the age is the time since the item's last activity, with the pill and what it was under the mover; an item with no record keeps the old age and has no line
+        if act: age = act[0]
         who = []
         if which in (_home.AGENTS, RELEASE_LIST):      # Queued for release rows are On agent rows: the mover, or the hand-off not yet taken
             ho = _ho.record_of(r)
@@ -3788,7 +3820,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         else: detail = f'<span class="hnext">{nxt}</span>{dr}'
         return _ui.row(href=item_href(r), rid=rid(r), title=self.bare(r["subject"]), age_html=age, who_html=" · ".join(x for x in who if x),
                        detail_html=detail + "".join(notes), actions_html=actions, li_id=anchor(r), li_class="hrow",
-                       project_html=self.row_line(r, project=named), edge=RELEASE_LIST if which == RELEASE_LIST else _ui.kind_of_list(which))
+                       project_html=self.row_line(r, project=named), edge=RELEASE_LIST if which == RELEASE_LIST else _ui.kind_of_list(which),
+                       act_html=act[1] if act else "")
     def project_line(self, r):
         """The project's name as the small line above a row's title (home and Closed): a link to the project's page, the label proj_label gives for the item's top-level project (proj_top), never the sub-page it is filed on (the project page's
         own sub-page badge and the who line name that); "" for an item with no project. Reads the registry the board already holds, no lookup of its own."""
@@ -4427,6 +4460,7 @@ function tick(){{var n=Date.now()/1000;document.querySelectorAll('[data-ts]').fo
 
 var g=document.getElementById('rendered'),gs=g&&g.querySelector('[data-ts]');if(gs)g.classList.toggle('old',n-(+gs.getAttribute('data-ts'))>+g.getAttribute('data-stale'))}}
 tick();setInterval(tick,30000);
+{_LACT_JS}
 var NET=new RegExp({json.dumps(_NET_ERR)},'i');
 var gone=false;document.addEventListener('stackshot:signedout',function(){{gone=true}});
 function rcv(){{if(gone)return;fetch('{PREFIX}/receivers.json',{{cache:'no-store'}}).then(function(r){{if(r.status===401)gone=true;return r.ok?r.json():null}}).then(function(d){{if(!d)return;
@@ -4437,7 +4471,7 @@ var h=c.querySelector('.st');if(h){{h.className='lbl st '+k;h.title=raw;h.textCo
 if(v.ok&&+v.stale>0){{var sw=SST('js.rcv.stale',{{age:dur(+v.stale)}}),sn=String(v.stale_note||sw);c.classList.remove('ok','bad');c.classList.add('warn');c.title=SST('js.rcv.title',{{raw:sn,checked:v.checked,tz:'{_cfg.tz_abbr()}'}});if(h){{h.className='lbl st warn';h.title=sn;h.textContent=sw}}}}
 var t=c.querySelector('[data-ts]');if(t&&v.ts){{t.setAttribute('data-ts',v.ts);t.setAttribute('data-tip',v.checked+' {_cfg.tz_abbr()}')}}
 var y=c.querySelector('.rtype');if(y&&v.type)y.textContent=v.type}});tick()}}).catch(function(){{}})}}
-rcv();setInterval(rcv,60000);document.addEventListener('stackshot:swapped',function(){{tick();rcv()}});}})();
+rcv();setInterval(rcv,60000);document.addEventListener('stackshot:swapped',function(){{tick();lact();rcv()}});}})();
 {_AUDIT_JS}
 {_FORYOU_JS if _SHOW_FOR_YOU else ''}
 {_LIVE_JS}
