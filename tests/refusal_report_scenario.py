@@ -47,7 +47,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
 from fastmcp.exceptions import ToolError
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -208,7 +208,7 @@ for badw in (f"{day}T24:00", f"{day}T12", f"{day}T12:00+25:00", f"{day}T12:00:61
     check(f"3 wake: {badw!r} is refused naming the two forms", msg.startswith("Refused: metadata.wake must be YYYY-MM-DD or YYYY-MM-DDTHH:MM"), msg)
 # the subject prefix
 def create(subject, **kw):
-    return server._create_item(subject=subject, description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: begin", mover="team-back", **kw)
+    return create_svc.create_item(subject=subject, description=DESC, project="projects/alpha", owner=U["home-front"], next="team-back: begin", mover="team-back", **kw)
 (g1, out1), fx = collect(lambda: create("Check the nightly job"))
 it = json.loads((T / "store" / g1[0] / f"{g1[1:]}.json").read_text())
 check("3 subject: a subject with no scope prefix takes the project's scope prefix and the correction is noted", it["subject"] == "[work] Check the nightly job" and [k for k, _ in fx] == ["subject-prefix"] and "[work]" in fx[0][1], (it["subject"], fx))
@@ -222,7 +222,7 @@ for tagged in ("[Work] Fix X", "[work]Fix X", " [work] Fix X", "work: Fix X", "[
     try: create(tagged); tref = ""
     except ToolError as e: tref = str(e)
     check(f"3 subject: {tagged!r} already opens with a tag: refused with the prefix list named, never stacked", tref.startswith("Refused: subject must start with one of ['[work] ', '[home] ']"), tref)
-try: server._create_item(subject="No project to name a scope", description=DESC, project="projects/no-such", owner=U["home-front"], next="team-back: begin", mover="team-back"); nref = ""
+try: create_svc.create_item(subject="No project to name a scope", description=DESC, project="projects/no-such", owner=U["home-front"], next="team-back: begin", mover="team-back"); nref = ""
 except ToolError as e: nref = str(e)
 check("3 subject: …a project that names no record gets no guess: refused as before", "subject must start with" in nref or "project" in nref, nref)
 wipe()

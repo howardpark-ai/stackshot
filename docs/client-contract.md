@@ -109,7 +109,7 @@ Underneath it is one authenticated write:
   the same triple again answers the same item (`"repeat": true`, the same id printed, exit 0) and files nothing. If that item has since
   been removed, the call files a new one. **the fleet tool passes one per parked question**, the same token each time that question is filed
   again, with the same `--sender`.
-- It is the create tool's own code (`_create_item` in `stackshot/web/server.py`): the subject prefix, the ask's form, the options (2 to 6, exactly
+- It is the create tool's own code (`create_item` in `stackshot/service/create.py`): the subject prefix, the ask's form, the options (2 to 6, exactly
   one recommended), one decision per ask, the project page, the GitHub mirror and the page-debt rules apply as to a session, and a
   refusal is the tool's text (400). A script owes no page, and the owner is charged none: the page debt goes to the page's keeper
   (a page's own agent that is not a front agent, else the hub's or the scope's general `-main` agent) to no one when the page has none, and to no one when the keeper is the owner itself, so a burst of
@@ -164,7 +164,7 @@ Exit 1 prints the reason on stderr (a usage line on misuse). Underneath it is on
 - **A second `open` for a session** that has an open item changes its next line and files nothing (`repeat: true`, the same id); the same question again writes nothing. After a `clear`, an `open` files a new item.
 - **`clear`** closes the session's open item: outcome `done`, reason `the pane stopped waiting`, the end state in `outcome_text`, the description unchanged. None open is a no-op (200, `cleared: []`).
 - **The row owes no page and tells no session.** It is a notification that opens and closes with the pane: the writes set `_TERMINAL_ROW` (`stackshot/web/server.py`), so no page debt is charged to the script, the mover or the page's keeper, the router
-  gets no notice of it, and the close is told to no one (the `_tell_*` notices return nothing). Otherwise it is the normal write path: `_create_item`, then `_update` for the state, and `_update` to close, with every gate.
+  gets no notice of it, and the close is told to no one (the `_tell_*` notices return nothing). Otherwise it is the normal write path: `create_item`, then `_update` for the state, and `_update` to close, with every gate.
   The create sets no step, so the state is a second write; if it is refused, the item is closed again as dropped, never left half made.
 - A deploy restarts `stackshot.service` (`stackshot/web/server.py` changed) and `stackshot-puller.service` (`stackshot/fleet/client.py` changed); a session runs `stackshot/fleet/client.py` fresh at each call, so no recycle is needed for it ([docs/session-reload.md](session-reload.md)).
 
@@ -184,7 +184,7 @@ write, `POST /client/job-gap`, `Authorization: Bearer <machine token>`, body `{"
 
 - **The repo is mapped to its project page** by `[job_gap.repos]` (`"owner/name" = "<page key>"`; the default, when the table is absent, is none: an instance lists the repos it files job-gap items for). Names are compared as the other repository checks do (case, `[github.moved]`). A repo the table does not list is a 400 that names the ones it does.
 - **One open item per (timer, code)**, marked `metadata.job_gap` = `<timer>: <code>`. Subject `<prefix> <timer>: <the gap>` (the scope prefix of the project, else `[subject] fallback_prefix`, else the first prefix; a long unit name is cut so the subject is never refused), p2, filed
-  through `_create_item` (every gate applies). The **mover is the project's builder** (`_builder_agent`: the background agent whose mandate builds), who is named in needs and told once, at the create, by the needs notice; the **creator
+  through `create_item` (every gate applies). The **mover is the project's builder** (`_builder_agent`: the background agent whose mandate builds), who is named in needs and told once, at the create, by the needs notice; the **creator
   is the project's `-main` agent** (a front agent is not woken). `next` is `<builder>: <the fix for the code>` (put the unit file in the repo with an `X-Model-Lane=` line, linked from there), and the description bullets say the gap, the
   fix and who opened it. A project with no builder moves the item by its `-main` agent, and the item, the answer (`fallback: true`) and the client (a line on stderr) say so.
 - **No mentions.** A unit name takes an `@` only between letters or digits (`job@1.service`), so it can never start a GitHub mention; an `@` in `--detail` or `--sender` is broken with a zero-width space (`_no_ping`, as the

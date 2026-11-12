@@ -8,7 +8,7 @@ Covers, through stackshot_create and stackshot_update (a session's write):
       clear_next); a close is exempt; an item that had no open step before is not refused for an unrelated write
   N7  a commit id, a test count, a past-tense status, a since-time stamp, "at work since" and a mid-line status word are noted in the reply and the write goes through; "release PR #16", "merge PR #12
       after green CI", a condition and a `Oliver:` line are quiet
-Internal writers (server._update, server._create, _create_item, the answer, the hold and the wake pass) are not judged: only the two tools mark a session's write.
+Internal writers (server._update, server._create, create_item, the answer, the hold and the wake pass) are not judged: only the two tools mark a session's write.
 
     tests/run-suite next_rules        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, time
