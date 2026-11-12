@@ -468,7 +468,8 @@ ATTR_NAMES = {"attrgetter", "methodcaller"}                                    #
 ATTR_VALUES = {"getattr", "setattr", "hasattr", "delattr", "vars", "dir"}      # the builtins handed over as a value (map(getattr, objs, names), partial(getattr, obj))
 ATTR_DICT = {"__dict__", "__getattribute__"}                                   # a namespace, an explicit lookup by name
 ATTR_BODY_CALLS = {"locals", "vars", "dir", "globals", "eval", "exec"}         # in a class body or a method header: the class's own namespace, read as a whole (globals() also takes the file whole through `dyn` in py_change: listed for completeness)
-ATTR_TOKEN = re.compile(r"[A-Za-z_]\w*")
+ATTR_TOKEN = re.compile(r"[^\W\d]\w*")   # an identifier of any script (`{c.\u00f1ame}`): \w is Unicode in a str pattern
+ATTR_CALLEES = ATTR_BY_NAME | ATTR_ALL | ATTR_NAMES | ATTR_VALUES | ATTR_BODY_CALLS | {"multiple"}   # the names alias_map follows
 SELF_DECORATORS = PLAIN_DECORATORS - {"staticmethod", "classmethod"}            # a method under any other decorator may be a class method: its `self` is not an instance
 
 
@@ -574,7 +575,8 @@ class ModNames:
         self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
         self.class_keyed = set()                     # the class names under which the __init__, __call__ and __new__ annotations wait (mark_annotations)
         self.attrs, self.narrow = False, {}          # class rule C2 (see *Class attributes*): attribute keys are read; narrow[line] = the attribute names of the class-body assignment that holds the line
-        self.callees, self.binds, self.mod_objs, self.self_ok = set(), set(), set(), set()   # attr_setup: ids of the callee of every call, the names the file binds, those bound only to modules, ids of `self.__dict__`
+        self.callees, self.mod_objs, self.self_ok = set(), set(), set()   # attr_setup: ids of the callee of every call, the names bound only to modules, ids of `self.__dict__`
+        self.alias, self.shadowed = {}, set()        # attr_setup: local name → the ATTR_CALLEES names it may stand for (alias_map); ids of the Name loads whose name a scope around them binds (shadow_setup)
         self.attr_values = set()                     # attribute names read without being called, and the names getattr(obj, "name") asks for (Names.settle: C(1).__init__ as a value)
         self.valuse = set()                          # bare names used as a value (not just called): Names.settle
         self.import_seq, self.dropped = [], set()    # the module-level imports in order (None for another statement); (module, name) keys of repo imports whose only use was a dropped annotation
@@ -783,12 +785,107 @@ class ModNames:
                 self.refs[self.scope(node)] |= ak
 
     def attr_setup(self, tree):
-        """what attr_keys needs to know about the whole file under class rule C2 (see *Class attributes*): the callee of every call, the names the file binds
-        and those bound only to module objects, the `self.__dict__` of the methods, and the class-body assignments an edit narrows"""
+        """what attr_keys needs to know about the whole file under class rule C2 (see *Class attributes*): the callee of every call, the names a callee may
+        stand for (an import alias, a name assigned another), the names a scope binds around a bare builtin, those bound only to module objects, the
+        `self.__dict__` of the methods, and the class-body assignments an edit narrows"""
         self.callees = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.alias_map(tree)
+        self.shadow_setup(tree)
         self.module_objects(tree)
         self.self_dicts(tree)
         self.narrowable(tree)
+
+    def alias_map(self, tree):
+        """self.alias: local name → the names of ATTR_CALLEES it may stand for: `from builtins import getattr as ga`, `g = getattr`, `m = mock.patch.multiple`
+        (the last name of the dotted value), through any chain of them (`h = g`). Every binding in the file counts, whatever its scope: a name bound to two things
+        stands for both (over-selection is the safe side)"""
+        edges = collections.defaultdict(set)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    edges[a.asname or a.name].add(a.name)
+            elif isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+                d = dotted(n.value)
+                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                    if d and isinstance(t, ast.Name):
+                        edges[t.id].add(d.split(".")[-1])
+        reach = {k: set(v) for k, v in edges.items()}
+        for _ in range(len(reach)):
+            grown = False
+            for k, v in reach.items():
+                more = set().union(*(reach[x] for x in v if x in reach and x != k)) - v
+                if more:
+                    v |= more
+                    grown = True
+            if not grown:
+                break
+        self.alias = {k: v & ATTR_CALLEES for k, v in reach.items() if v & ATTR_CALLEES}
+
+    def callee_names(self, f):
+        """the names a callee may be: a Name is itself and what it is an alias of; an attribute is its last name (`inspect.getmembers`, `builtins.vars`)"""
+        if isinstance(f, ast.Name):
+            return {f.id} | self.alias.get(f.id, set())
+        return {f.attr} if isinstance(f, ast.Attribute) else set()
+
+    def shadow_setup(self, tree):
+        """self.shadowed: the ids of the Name loads of an ATTR_VALUES builtin whose name is bound by a scope around them (a parameter, an assignment, a def, an
+        import, a loop target...): `def f(vars): return list(map(vars, objs))` hands over its parameter, no builtin, while the same name in another function is
+        the builtin. A class body is a scope for its own statements only, not for the functions in it; a comprehension is not looked into (its target would
+        shadow the name for the whole function: the safe side is to leave the name a builtin)"""
+        def bound(scope):
+            out = set()
+            if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                ar = scope.args
+                out |= {a.arg for a in [*ar.posonlyargs, *ar.args, *ar.kwonlyargs, ar.vararg, ar.kwarg] if a is not None}
+            stack = [scope.body] if isinstance(scope, ast.Lambda) else list(scope.body)
+            while stack:
+                n = stack.pop()
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    out.add(n.name)
+                    continue
+                if isinstance(n, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                    continue
+                if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+                    out.add(n.id)
+                elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                    out |= {(a.asname or a.name).split(".")[0] for a in n.names}
+                elif isinstance(n, ast.ExceptHandler) and n.name:
+                    out.add(n.name)
+                elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+                    out.add(n.name)
+                elif isinstance(n, ast.MatchMapping) and n.rest:
+                    out.add(n.rest)
+                stack.extend(ast.iter_child_nodes(n))
+            return out
+
+        def visit(node, chain):
+            for ch in ast.iter_child_nodes(node):
+                if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                    ar = ch.args
+                    for h in [*getattr(ch, "decorator_list", []), *ar.defaults, *ar.kw_defaults, getattr(ch, "returns", None)]:
+                        if h is not None:
+                            visit_one(h, chain)
+                    inner = [c for c in chain if not c[1]] + [(bound(ch), False)]
+                    for b in ([ch.body] if isinstance(ch, ast.Lambda) else ch.body):
+                        visit_one(b, inner)
+                elif isinstance(ch, ast.ClassDef):
+                    for h in [*ch.decorator_list, *ch.bases, *[k.value for k in ch.keywords]]:
+                        visit_one(h, chain)
+                    for b in ch.body:
+                        visit_one(b, chain + [(bound(ch), True)])
+                else:
+                    visit_one(ch, chain)
+
+        def visit_one(n, chain):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                holder = ast.Module(body=[n], type_ignores=[])
+                visit(holder, chain)
+                return
+            if isinstance(n, ast.Name) and n.id in ATTR_VALUES and any(n.id in b for b, _ in chain):
+                self.shadowed.add(id(n))
+            visit(n, chain)
+
+        visit(tree, [(bound(tree), False)])
 
     def module_value(self, v):
         """True for an expression that holds a module object: importlib.import_module(…), __import__(…), sys.modules[…]"""
@@ -804,7 +901,7 @@ class ModNames:
         return isinstance(v, ast.Name) and v.id in self.mod_objs or self.module_value(v)
 
     def module_objects(self, tree):
-        """binds: every name the file binds anywhere; mod_objs: those bound only to module objects"""
+        """mod_objs: the names the file binds only to module objects (any other binding of the name, anywhere, rules it out)"""
         mods, others, good = set(), set(), set()
         for n in ast.walk(tree):
             if isinstance(n, ast.Assign) and self.module_value(n.value):
@@ -826,7 +923,7 @@ class ModNames:
                 others.add(n.name)
             elif isinstance(n, ast.MatchMapping) and n.rest:
                 others.add(n.rest)
-        self.binds, self.mod_objs = mods | others, mods - others
+        self.mod_objs = mods - others
 
     def self_dicts(self, tree):
         """self_ok: the ids of the `self.__dict__` and `vars(self)` nodes in the methods of a class that cannot be handed a class as `self`: the first parameter
@@ -877,7 +974,7 @@ class ModNames:
                         loaded.add(n.id)   # Load and Del: both need the attribute to exist
                 elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
                     loaded.add(n.target.id)
-                elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ATTR_BODY_CALLS:
+                elif isinstance(n, ast.Call) and self.body_call(n.func):
                     whole = True
             if whole or defined & ATTR_NEVER:
                 continue
@@ -903,6 +1000,14 @@ class ModNames:
                         plain[ln] += 1
                         self.narrow.setdefault(ln, set()).update(names)
         self.narrow = {ln: frozenset(ns) for ln, ns in self.narrow.items() if plain[ln] == holds[ln]}
+
+    def body_call(self, f):
+        """True for a callee that reads a class's own namespace as a whole (ATTR_BODY_CALLS), however the file names it: `vars`, `ns = vars; ns()`,
+        `from builtins import vars as v`, `builtins.vars`"""
+        if isinstance(f, ast.Name):
+            return bool(self.callee_names(f) & ATTR_BODY_CALLS)
+        d = dotted(f)
+        return isinstance(f, ast.Attribute) and f.attr in ATTR_BODY_CALLS and d is not None and self.aliases.get(d.split(".")[0]) == "builtins"
 
     def attr_reads(self, st):
         """the attribute keys a module-level statement reads when it runs (a function's body is its own scope: Names of the functions' scopes read their own)"""
@@ -931,7 +1036,8 @@ class ModNames:
             return set()
         if isinstance(node, ast.Name):
             # getattr handed over as a value (map(getattr, objs, names)): the name is in a call we do not see; a local variable called `dir` is no builtin
-            if isinstance(node.ctx, ast.Load) and node.id in ATTR_VALUES and id(node) not in self.callees and node.id not in self.binds:
+            if isinstance(node.ctx, ast.Load) and id(node) not in self.callees \
+                    and (self.alias.get(node.id, set()) if id(node) in self.shadowed else {node.id} | self.alias.get(node.id, set())) & ATTR_VALUES:
                 return {ATTR_ANY}
             return set()
         if isinstance(node, ast.MatchClass):
@@ -939,20 +1045,21 @@ class ModNames:
         if not isinstance(node, ast.Call):
             return set()
         f, a = node.func, node.args
-        fl = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+        fls = self.callee_names(f)   # a callee is matched by every name it may stand for (an import alias, `g = getattr`)
         star = any(isinstance(x, ast.Starred) for x in a) or any(k.arg is None for k in node.keywords)
         lit = lambda x: isinstance(x, ast.Constant) and isinstance(x.value, str)
-        if fl in ATTR_BY_NAME:
-            return set() if not star and len(a) > 1 and (lit(a[1]) or self.is_module(a[0])) else {ATTR_ANY}
-        if fl in ATTR_ALL:
-            return set() if not star and (not a or id(node) in self.self_ok or self.is_module(a[0])) else {ATTR_ANY}
-        if fl in ATTR_NAMES:
-            return set() if not star and all(lit(x) for x in a) else {ATTR_ANY}
-        if fl == "multiple" and isinstance(f, ast.Attribute):   # mock.patch.multiple(Cls, K=1): each keyword names an attribute it replaces; **kw is a name we cannot see
-            return {ATTR_ANY} if any(k.arg is None for k in node.keywords) else {("*", "." + k.arg) for k in node.keywords}
-        if fl in ("eval", "exec") and isinstance(f, ast.Name):
-            return set() if not star and a and lit(a[0]) else {ATTR_ANY}   # the code in a literal string is read as a string: its tokens
-        return set()
+        out = set()
+        if fls & ATTR_BY_NAME:
+            out |= set() if not star and len(a) > 1 and (lit(a[1]) or self.is_module(a[0])) else {ATTR_ANY}
+        if fls & ATTR_ALL:
+            out |= set() if not star and (not a or id(node) in self.self_ok or self.is_module(a[0])) else {ATTR_ANY}
+        if fls & ATTR_NAMES:
+            out |= set() if not star and all(lit(x) for x in a) else {ATTR_ANY}
+        if "multiple" in fls and (isinstance(f, ast.Attribute) or f.id != "multiple"):   # mock.patch.multiple(Cls, K=1): each keyword names an attribute it replaces; **kw is a name we cannot see
+            out |= {ATTR_ANY} if any(k.arg is None for k in node.keywords) else {("*", "." + k.arg) for k in node.keywords}
+        if fls & {"eval", "exec"} and isinstance(f, ast.Name):
+            out |= set() if not star and a and lit(a[0]) else {ATTR_ANY}   # the code in a literal string is read as a string: its tokens
+        return out
 
     def statement(self, st, first):
         """(first line, last line, kind, names bound, keys it reads at import); kind: bind (only binds names), effect"""
