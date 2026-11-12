@@ -842,6 +842,10 @@ with GH(g13, [A13], etags=True) as G:
     again = G.one()
     check("13 an unchanged sha: no commit event, no commit read, and the pull request's own read is answered 304 (nothing added to the poll)",
           not [e for e in again if e.etype == "pr_commit"] and not [p for p, _ in G.calls[mark:] if "/git/commits/" in p] and f"{RP}/pulls/140" in G.not_modified and G.calls[mark:].count((f"{RP}/pulls/140", True)) == 1, (G.calls[mark:], G.not_modified))
+    g13[f"{RP}/pulls/140"] = {**g13[f"{RP}/pulls/140"], "title": "retitled"}      # the pull request changed in some other way (a title, a label): its read is a 200 with the same head sha
+    mark, m304 = len(G.calls), len(G.not_modified)
+    ev200 = [e for e in G.one() if e.etype == "pr_commit"]
+    check("13 the pull request read answered 200 with the same head sha (a retitle): no commit event and no commit read", ev200 == [] and (f"{RP}/pulls/140" not in G.not_modified[m304:]) and not [p for p, _ in G.calls[mark:] if "/git/commits/" in p], (G.calls[mark:], G.not_modified[m304:]))
     SB = sha13(); t0_ = time.time()
     evs_, reads, nm = push13(G, g13, 140, SB, cdate(600))
     check("13 the head sha changed: exactly one extra read (that commit) and one commit event, stamped at the committer date (ten minutes ago, not now), vouched, on the pull request",
