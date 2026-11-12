@@ -1916,8 +1916,16 @@ write("cmod.py", '''
         @classmethod
         def reg(self):
             return self.__dict__
+        @staticmethod
+        def sreg(self):
+            return self.__dict__
         def other(self):
             return 1
+
+    class Sh:
+        vars = len
+        def m(self, objs):
+            return list(map(vars, objs))
 
     class Fs:
         FK = 1
@@ -1993,7 +2001,10 @@ CSUITES = {
     # Cm: a classmethod gets the class as its first parameter, whatever it is called, so its self.__dict__ is the class's (rcm); Fs: a method whose first parameter is not
     # self reads the module-level name self, which here is the class (rfs). Both are selected by an edit of the class's attribute; the suite that ran another method is not
     "rcm": ("import cmod\n", ["", "Cm.reg"]),
+    "rsm": ("import cmod\n", ["", "Cm.sreg"]),
     "rco": ("import cmod\n", ["", "Cm.other"]),
+    # Sh: a name bound in a class body is not visible in its methods, so the vars a method hands to map is the builtin
+    "rshc": ("import cmod\n", ["", "Sh.m"]),
     "rfs": ("import cmod\n", ["", "Fs.reg"]),
     "rfo": ("import cmod\n", ["", "Fs.other"]),
     # a module object is no class: vars() and getattr() of a module made by __import__, sys.modules[...], or either written in place are no read of a class attribute
@@ -2058,7 +2069,7 @@ OLD_C = {"SUITEMAP_CLASS_RULE": "C1"}
 # the suites that read an attribute by a name they compute: every attribute edit of the module reaches them
 DYN = {"rd", "rv", "ri", "rj", "rdump", "rmx", "rrb", "rsa", "rha", "rda", "rgs", "rgm", "rag", "rmcl", "rga", "rsd", "rev", "rgv", "rpmk", "rgms", "rhsetattr", "rhhasattr", "rhdelattr", "rhvars", "rhdir",
        "rali_ga", "rali_ag", "rali_gm", "rali_ev", "rali_gv", "rali_pm", "rshd"}
-XDYN = {"rcm", "rfs"}   # methods of other classes that read self.__dict__ where self may be a class: they read any attribute, so any attribute edit of the module reaches them (C1 does not: they ran no scope of the edited class)
+XDYN = {"rcm", "rsm", "rfs", "rshc"}   # methods of other classes that read self.__dict__ where self may be a class: they read any attribute, so any attribute edit of the module reaches them (C1 does not: they ran no scope of the edited class)
 MODS = {"rmj", "rmi", "rmn", "rms", "rmp"}   # suites that vars() / getattr() a module object
 CFG_ALL = {"ra", "rst", "rs", "rf", "rm", "ro", "rsnap", "rn", "rmc", "rml", "rdf", "rlong", "rlongn", "rpm", "rshn"} | DYN | MODS
 K_READERS = {"ra", "rst", "rs", "rf", "rm", "rlong", "rpm"} | DYN
@@ -2069,7 +2080,7 @@ check("CLASS 1 an edit of a literal class attribute selects the suites that read
       "rdump other.__dict__ in a method, rmx vars() of a name that is no module, rsa setattr, rha hasattr, rda delattr, rgs inspect.getattr_static, rgm inspect.getmembers, rag operator.attrgetter, "
       "rpm mock.patch.multiple(Cfg, K=1), rpmk patch.multiple(Cfg, **kw), rmcl operator.methodcaller, rga .__getattribute__(name), rsd getattr(obj, '__dict__'), rev eval(name), rgv getattr handed over as a value, rrb vars(self) / self.__dict__ in a method that rebinds self), "
       "and the same readers under another name: rali_ga (from builtins import getattr as ga), rali_ag (operator.attrgetter as ag), rali_gm (inspect.getmembers as gm), rali_ev (eval as ev), "
-      "rali_gv (the aliased getattr handed over as a value), rali_pm (pm = mock.patch.multiple), rshd (list(map(vars, objs)) in a function that binds no vars, next to another that has a parameter vars)",
+      "rali_gv (the aliased getattr handed over as a value), rali_pm (pm = mock.patch.multiple), rshd (list(map(vars, objs)) in a function that binds no vars, next to another that has a parameter vars), rshc (the same in a method of a class that binds vars in its body: the class scope is not the method's)",
       set(out) == K_READERS | XDYN, (out, err))
 check("CLASS 2 ... and not the suites that ran another method of the class (ro, rsnap: self.__dict__ is an instance's), nor one that reads only another attribute (rn: .LIMIT), "
       "nor one that vars() / getattr()s a module (rmj: an import, rmi: importlib.import_module, rmn: __import__, rms: sys.modules[...], rmp: either written in place), "
@@ -2095,8 +2106,8 @@ for cls_, (line_, new_, meth_, why_) in WHOLE.items():
           "(Loc: every suite, the file is whole), the same answer as C1",
           (f"w{cls_.lower()}" in out or (cls_ == "Loc" and out == ["all"])) and out == out_old, (out, out_old, err))
 out, err = class_sel(lambda: sub("cmod.py", "CK = 1", "CK = 2"), "Cm.CK")
-check("CLASS 9 a classmethod's self is the class, whatever the first parameter is called: self.__dict__ in it reads the class's attributes, so the suite that ran it (rcm) is selected "
-      "and the one that ran another method (rco) is not", "rcm" in out and "rco" not in out, (out, err))
+check("CLASS 9 a classmethod's first parameter is the class, whatever it is called, and a staticmethod's is whatever the caller passes: self.__dict__ in either reads a class's attributes, so the suites that ran them (rcm, rsm) are selected "
+      "and the one that ran another method (rco) is not", {"rcm", "rsm"} <= set(out) and "rco" not in out, (out, err))
 out, err = class_sel(lambda: sub("cmod.py", "FK = 1", "FK = 2"), "Fs.FK")
 check("CLASS 10 a method whose first parameter is not self reads a free name self, which may be the class: self.__dict__ in it is no instance's namespace, so the suite that ran it (rfs) is selected "
       "and the one that ran another method (rfo) is not", "rfs" in out and "rfo" not in out, (out, err))
