@@ -9,8 +9,10 @@ What a stored item gets (`plan_for`; the server's `one` refuses any item whose r
   ask_by / wake beside an after link with no kind    until = the date, wait_kind = item (as create and update store it)
   a bare wake (no hold, no kind, no wait_basis, no after link)    kept as it is: it is a backstop (a hand-off's, or one stored before until), not a wait, and as `until` it would park the item
   an item with no old date, or one that stores an until and an old date both    left as it is (the second is listed)
-  an after link, a date and no kind (the date was never watched)    until = the date, wait_kind = item: the watchers act on it from then on. A date that is already due is NOT migrated (it would wake the item on the
-                       next tick): it is listed as "already due" for a person to re-save with the date meant; a future one is migrated and listed as "newly watched"
+  a date the old code did not act on (an ask_by that stood without a kind, so nothing read it, whatever else the item stores; or a wake beside an after link with no kind, which only got a notice)
+                       As until the watchers act on it. A date already past is NOT migrated (it would wake the item on the next tick): it is listed as "already due" for a person to re-save with the date meant;
+                       a future one is migrated and listed as "newly watched", with the day it wakes and how it was read before (never watched, or only a notice). An item with a wake and a hold is not in
+                       this class: the old wake pass released it at the date, as the watchers do.
 A rewritten item also gets one History line (metadata.stall.log, shown as "stackshot: ..."), which says the wait was rewritten as until; no other key changes, no clock moves, nobody is told.
 
 Pure functions of a metadata dict and callbacks: no server import. `entry_for` builds the undo entry (the keys before and after), `apply_edits` the new item."""
@@ -50,15 +52,22 @@ def old_form(meta: dict[str, Any]) -> str:
     return " + ".join(parts)
 
 
-DUE_WHY = "already due: not migrated (as until the watchers would act on it at once); re-save it with the date you mean"
+HOW_NEVER = "never watched"                         # nothing read this date before (an ask_by with no kind)
+HOW_NOTICE = "previously only a notice"             # the old wake pass only sent a backstop notice at this date (a wake beside an after link with no kind)
 
 
-def plan_for(meta: dict[str, Any], keeps_hold: bool = False, now: float | None = None) -> dict[str, Any]:
+def due_why(how: str) -> str:
+    return (f"already due: not migrated (its date is past and was {how}: as until the watchers would act on it at once); re-save it with the date you mean")
+
+
+def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
     """The plan for one open item → {"edits": {key: new value, None drops}, "form": the old fields in words, "new": what the wait is stored as, "kept": why it is left (""), "listed": True when the kept item is
-    to be listed for a person, "due": True when it is listed because its old date is not yet watched and is already past, "newly": the date the watchers will act on that no watcher acted on before ("" when
-    none)}. `keeps_hold`: the hold waits on an anchor scoped to the item or on a pane recycle (the flag stays). `now`: the clock, for the due check. Pure given `now`."""
+    to be listed for a person, "until": the date it is stored as, "source": "wake" | "ask_by" (which old field the date comes from; the old
+    wake pass read `wake`, nothing read an ask_by that stood without a kind), "notice_only": True when the date is a wake beside an after link with no kind (the old pass only sent a notice at it)}.
+    `keeps_hold`: the hold waits on an anchor scoped to the item or on a pane recycle (the flag stays). Pure. Whether the date is one the watchers newly act on, and whether it is already due, is the server's
+    to say (`one`): it needs the watched reading before and after."""
     form = old_form(meta)
-    out: dict[str, Any] = {"edits": {}, "form": form, "new": "", "kept": "", "listed": False, "due": False, "newly": ""}
+    out: dict[str, Any] = {"edits": {}, "form": form, "new": "", "kept": "", "listed": False, "until": "", "source": "", "notice_only": False}
     if not _dated(meta.get("wake")) and not _dated(meta.get("ask_by")):
         out["kept"] = "no old date stored" if not form else "no old date to fold"
         return out
@@ -70,10 +79,10 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False, now: float | None =
         out["kept"] = f"{bare} is a backstop (a hand-off's, or one stored before until), not a wait: kept as it is"
         return out
     work = copy.deepcopy(meta)
-    unwatched = False
+    item_rule = False
     if _wt.after_of(work) and not _uw.kind_of(work) and _uw.date_of(work):
         work["wait_kind"] = "item"                       # a date beside an after link with no kind is that wait's backstop; the writers store the kind item
-        unwatched = True                                 # …and nothing watched that date until now: stored as the kind item, the watchers act on it
+        item_rule = True                                 # …stored as the kind item, the watchers act on it from then on
     wake_before = _wt.wake_value(meta)
     hold_set = work.get("hold_set")
     u = _uw.fold(work)
@@ -83,11 +92,6 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False, now: float | None =
     if (meta.get("wait_basis") or meta.get("cap_ok")) and clean(wake_before) != u:
         out.update(kept="a reason or an approval is bound to another date than the one the wait is stored as: left as it is", listed=True)
         return out
-    if unwatched and now is not None:
-        ep = _wt.wake_epoch(u)
-        if ep is not None and ep <= now:
-            out.update(kept=DUE_WHY, listed=True, due=True)       # as until it would wake the item on the next tick: it is left, and listed for a person
-            return out
     if keeps_hold and meta.get("hold"):
         work["hold"] = True
         if hold_set is not None:
@@ -99,7 +103,10 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False, now: float | None =
     out["edits"] = edits
     kind = clean(work.get("wait_kind"))
     out["new"] = f"until={u}" + (f", wait_kind={kind}" if kind else "")
-    out["newly"] = u if unwatched else ""
+    wake_d = _dated(meta.get("wake"))
+    out["until"] = u
+    out["source"] = "wake" if wake_d and clean(wake_d) == clean(u) else "ask_by"
+    out["notice_only"] = bool(item_rule and out["source"] == "wake" and not meta.get("hold"))
     return out
 
 
@@ -188,15 +195,22 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             h0 = S._stamp_sha(data)
             meta = raw["metadata"]
             keeps = bool({"anchor", "recycle"} & set(S._hold_held_by(gid, meta))) if meta.get("hold") else False
-            plan = plan_for(meta, keeps, time.time())
+            plan = plan_for(meta, keeps)
             if not plan["edits"]:
-                return {"item": shown, "action": "kept" if plan["listed"] else "same", "why": plan["kept"], "form": plan["form"], "new": "", "before": {}, "after": {}, "due": plan["due"], "newly": "", "sha256_before": h0}
+                return {"item": shown, "action": "kept" if plan["listed"] else "same", "why": plan["kept"], "form": plan["form"], "new": "", "before": {}, "after": {}, "due": False, "newly": "", "how": "", "sha256_before": h0}
             plan = with_history(meta, plan, time.time())
             new = apply_edits(raw, plan)
-            out = {"item": shown, "form": plan["form"], "new": plan["new"], **entry_for(raw, plan), "due": False, "newly": plan["newly"], "sha256_before": h0}
-            why = same(reading(S, gid, raw), reading(S, gid, new))
+            out = {"item": shown, "form": plan["form"], "new": plan["new"], **entry_for(raw, plan), "due": False, "newly": "", "how": "", "sha256_before": h0}
+            r0, r1 = reading(S, gid, raw), reading(S, gid, new)
+            why = same(r0, r1)
             if why:
                 return {**out, "action": "refused", "why": f"the item would read differently as until: {why}; left as it is"}
+            how = HOW_NOTICE if plan["notice_only"] else HOW_NEVER if plan["source"] == "ask_by" and not r0["watched"] and r1["watched"] else ""
+            if how:                                     # a date the old code did not act on as the watchers will: nothing read it, or the old pass only sent a notice
+                ep = _wt.wake_epoch(plan["until"])
+                if ep is not None and ep <= time.time():
+                    return {"item": shown, "action": "kept", "why": due_why(how), "form": plan["form"], "new": "", "before": {}, "after": {}, "due": True, "newly": "", "how": how, "sha256_before": h0}
+                out["newly"], out["how"] = plan["until"], how
             if dry:
                 return {**out, "action": "would_set", "why": "the wait would be rewritten as until"}
             if not S._stamp_write(p, raw, h0, plan["edits"]):

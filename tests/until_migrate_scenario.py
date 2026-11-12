@@ -432,7 +432,7 @@ st_, d_ = call(op="until", items=["g95", "g96", "g98"], dry=True)
 r13 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
 check("13 a past ask_by beside an after link and no kind (never watched) is listed as already due and not rewritten", r13[95]["action"] == "kept" and r13[95]["due"] is True and "already due" in r13[95]["why"] and not r13[95]["after"], r13[95])
 check("13 …so does a past wake in that form", r13[98]["action"] == "kept" and r13[98]["due"] is True, r13[98])
-check("13 a future ask_by in that form is rewritten (the decided one-date model) and listed as newly watched, with its day", r13[96]["action"] == "would_set" and r13[96]["newly"] == day(6) and UM.watch_lines(list(r13.values())) == ([BOARD + "95", BOARD + "98"], [f"{BOARD}96 wakes on {day(6)}"]), UM.watch_lines(list(r13.values())))
+check("13 a future ask_by in that form is rewritten (the decided one-date model) and listed as newly watched, with its day", r13[96]["action"] == "would_set" and r13[96]["newly"] == day(6) and UM.watch_lines(list(r13.values())) == ([BOARD + "95", BOARD + "98"], [f"{BOARD}96 wakes on {day(6)} (never watched)"]) and r13[98]["how"] == "previously only a notice", UM.watch_lines(list(r13.values())))
 st_, d_ = call(op="until", items=["g95", "g96", "g98"])
 check("13 the write leaves the due items byte for byte and rewrites the future one", bytes_of(95) == b95 and {i: bytes_of(i) for i in (95, 98)} == snap_before and mt(96).get("until") == day(6) and mt(96).get("wait_kind") == "item" and "ask_by" not in mt(96), (wk(mt(96))))
 before_ticks = {i: bytes_of(i) for i in (95, 96, 98)}
@@ -478,6 +478,56 @@ import stackshot.web.i18n as _i18n
 check("13 the History wording keys (backstop set and cleared) read in a language that has no catalog for them, and the old keys are gone with no caller", _i18n.t("item.log.backstop_set", lang="zz", when="Fri Nov 13th") == "backstop set to Fri Nov 13th" and _i18n.t("item.log.backstop_cleared", lang="zz") == "backstop cleared"
       and not subprocess.run(["grep", "-rn", "reminder_set\\|reminder_cleared", os.path.join(STACK, "stackshot")], capture_output=True, text=True).stdout.strip(), None)
 shutil.rmtree(run4, ignore_errors=True)
+CFGM["migration"] = False
+
+# ---- 14. what the old code did not act on is defined by what it read: a hold kept by a recycle with an ask_by and no kind, a wake beside an after link, the boundaries of "already due"
+import datetime as _dtm
+CFGM["migration"] = True
+tzone = server._cfg.tz()
+nowz = _dtm.datetime.now(tzone)
+stamp = lambda d: d.strftime("%Y-%m-%dT%H:%M")
+put(102, needs=[BACK], hold=True, hold_set={"at": now0 - DAY, "by": BACK}, recycle={"at": now0}, ask_by=day(-30)); b102 = bytes_of(102)
+put(103, needs=[BACK], hold=True, hold_set={"at": now0 - DAY, "by": BACK}, recycle={"at": now0}, ask_by=day(8))
+put(104, needs=[BACK], hold=True, wake=day(-3), hold_set={"at": now0 - DAY, "by": BACK})            # a hold with a wake: the old pass released it at the date (consumed), whatever the date
+put(105, needs=[BACK], after=["g31"], wake=day(5))
+sent.clear()
+st_, d_ = call(op="until", items=[f"g{i}" for i in (102, 103, 104, 105)], dry=True)
+r14 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
+check("14 a hold kept by a recycle with a past ask_by and no kind (nothing read that date) is listed as already due and not rewritten", r14[102]["action"] == "kept" and r14[102]["due"] is True and r14[102]["how"] == "never watched" and "already due" in r14[102]["why"], r14[102])
+check("14 …with a future ask_by it is rewritten and listed as newly watched, never watched before", r14[103]["action"] == "would_set" and r14[103]["newly"] == day(8) and r14[103]["how"] == "never watched" and UM.watch_lines([r14[103]])[1] == [f"{BOARD}103 wakes on {day(8)} (never watched)"], r14[103])
+check("14 a hold with a wake is consumed by the old wake pass: it is neither listed as due nor as newly watched, whatever the date", r14[104]["action"] in ("would_set", "refused") and not r14[104]["due"] and not r14[104]["newly"], r14[104])
+check("14 a wake beside an after link is listed as previously only a notice", r14[105]["action"] == "would_set" and r14[105]["newly"] == day(5) and r14[105]["how"] == "previously only a notice", r14[105])
+st_, d_ = call(op="until", items=["g102", "g103"])
+before_t = bytes_of(102), bytes_of(103)
+woke14 = server._wake_pass(); watched14 = server._watch_pass()
+check("14 the write leaves the due one byte for byte, and a wake and a watch pass change neither it nor the future one, and message nobody about them", bytes_of(102) == b102 and (bytes_of(102), bytes_of(103)) == before_t and mt(103).get("until") == day(8) and mt(103).get("hold") is True and not [x for x in sent if x[0] in ("g102", "g103")], (woke14, watched14, sent[-2:]))
+# the boundaries: the day itself (a date alone is the start of that day), tomorrow, an hour ago, an hour ahead
+cases = {106: (nowz.strftime("%Y-%m-%d"), True), 107: ((nowz + _dtm.timedelta(days=1)).strftime("%Y-%m-%d"), False), 108: (stamp(nowz - _dtm.timedelta(hours=1)), True), 109: (stamp(nowz + _dtm.timedelta(hours=1)), False)}
+for i, (dte, _due) in cases.items():
+    put(i, needs=[BACK], after=["g31"], ask_by=dte)
+st_, d_ = call(op="until", items=[f"g{i}" for i in cases], dry=True)
+r14b = {int(r["item"].split("#")[1]): r for r in d_["results"]}
+check("14 already due at the boundaries: today's date alone and an hour ago are due and left; tomorrow and an hour ahead are migrated and listed as newly watched", all(r14b[i]["due"] is _due and r14b[i]["action"] == ("kept" if _due else "would_set") and bool(r14b[i]["newly"]) is (not _due) for i, (_d, _due) in cases.items()), {i: (r14b[i]["action"], r14b[i]["due"], r14b[i]["newly"]) for i in cases})
+# the signature carries the date and how it was read
+sg = lambda d, how="never watched": UM.signature([{"item": "x", "action": "would_set", "newly": d, "how": how}])
+check("14 the plan signature changes with the newly watched date and with how it was read", sg("2026-01-01") != sg("2026-01-02") and sg("2026-01-01") != sg("2026-01-01", "previously only a notice") and UM.signature([{"item": "x", "action": "kept", "due": True}]) != UM.signature([]), None)
+class DateChangingApp(DirectApp):
+    """While the second plan is read, a newly watched date is moved by a session."""
+    def __init__(self): super().__init__(); self.first = None; self.plans = 0
+    def call(self, body):
+        if body["op"] == "until" and body.get("dry"):
+            self.first = self.first or body["items"][0]
+            if body["items"][0] == self.first:
+                self.plans += 1
+                if self.plans == 2:             # item 107 is in both plans; its date moves as the second is read
+                    put(107, needs=[BACK], after=["g31"], ask_by=(nowz + _dtm.timedelta(days=3)).strftime("%Y-%m-%d"))
+        return super().call(body)
+run5 = pathlib.Path(_scratch.mkdtemp(prefix="untilmig-run5-"))
+_e = io.StringIO()
+with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
+    rcD = UM.apply(argparse.Namespace(sender=SENDER, run_dir=str(run5), undo=""), DateChangingApp())
+check("14 a newly watched date that moved between the plans stops the write (the signature carries the date)", rcD == 1 and "changed while the plan was being read" in _e.getvalue() and not list(run5.glob("*/undo.json")), (rcD, _e.getvalue()[-300:]))
+shutil.rmtree(run5, ignore_errors=True)
 CFGM["migration"] = False
 shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
 print(f"ok: until migrate scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")

@@ -59,25 +59,26 @@ def refused_note(date: str) -> str:
             f"the next write that touches its wait stores it as until, and a person re-saves it with update(until=...) before {date}, when the old parameters wake, ask_by and hold stop being accepted in writes")
 
 
+HOW_NEVER = "never watched"      # until_pass.HOW_NEVER (not imported: until_pass loads the config, which the dry run must not do before it switches to its copy)
 EXIT_LEFT_OVER = 3          # the pass was applied and some items were left as they are (refused, listed or already due): not a failure, but a person has items to look at
 
 
 def watch_lines(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(the items already due and left unmigrated, "<item> wakes on <date>" for each item the pass would newly hand to the watchers) of a list of plan rows."""
     due = [r["item"] for r in rows if r.get("due")]
-    newly = [f"{r['item']} wakes on {r['newly']}" for r in rows if r.get("newly") and r.get("action") in ("would_set", "set")]
+    newly = [f"{r['item']} wakes on {r['newly']} ({r.get('how') or HOW_NEVER})" for r in rows if r.get("newly") and r.get("action") in ("would_set", "set")]
     return due, newly
 
 
 def signature(rows: list[dict[str, Any]]) -> list[list[Any]]:
     """What a person was shown to decide on: the due items and the newly watched dates, sorted. A plan that differs from the one shown is not applied without --allow-changed-plan."""
-    return sorted([r["item"], bool(r.get("due")), r.get("newly") or ""] for r in rows if r.get("due") or (r.get("newly") and r.get("action") in ("would_set", "set")))
+    return sorted([r["item"], bool(r.get("due")), r.get("newly") or "", r.get("how") or ""] for r in rows if r.get("due") or (r.get("newly") and r.get("action") in ("would_set", "set")))
 
 
 def say_watch(rows: list[dict[str, Any]]) -> None:
     due, newly = watch_lines(rows)
-    say(f"newly watched: {len(newly)} items get a date the watchers act on and none did before" + (f" ({'; '.join(newly)})" if newly else ""))
-    say(f"already due, not migrated: {len(due)} items" + (f" ({', '.join(due)}): their date is past and as until it would wake them on the next tick; re-save them with the date you mean" if due else ""))
+    say(f"newly watched: {len(newly)} items get a date the watchers act on that the old code did not (never watched, or only a notice)" + (f" ({'; '.join(newly)})" if newly else ""))
+    say(f"already due, not migrated: {len(due)} items" + (f" ({', '.join(due)}): their date is past and as until it would act on them on the next tick; re-save them with the date you mean" if due else ""))
 
 
 def alias_date() -> str:
@@ -97,7 +98,7 @@ def print_row(r: dict[str, Any]) -> None:
     if history_of(r):
         print(f"    History line: stackshot: {history_of(r)}")
     if r.get("newly") and r["action"] in ("would_set", "set"):
-        print(f"    newly watched: wakes on {r['newly']} (no watcher acted on this date before)")
+        print(f"    newly watched: wakes on {r['newly']} ({r.get('how') or HOW_NEVER}: the watchers act on this date from now on)")
     if r["action"] in ("refused", "kept"):
         print(f"    why: {r.get('why')}")
 
@@ -148,8 +149,8 @@ def dry_run(a: argparse.Namespace) -> int:
             print(f"  {refused_note(alias_date())}")
         print(f"items kept and listed for a person: {len(listed)}" + (f" {listed}" if listed else ""))
         due, newly = watch_lines(rows)
-        print(f"items already due, not migrated (their date is past: as until the watchers would act on it at once; re-save them with the date you mean): {len(due)}" + (f" {due}" if due else ""))
-        print(f"items newly watched (a date no watcher acted on before; the watchers wake the item on it): {len(newly)}" + (f" {newly}" if newly else ""))
+        print(f"items already due, not migrated (their date is past and the old code did not act on it: as until the watchers would act on it at once; re-save them with the date you mean): {len(due)}" + (f" {due}" if due else ""))
+        print(f"items newly watched (a date the old code did not act on: never watched, or only a notice; the watchers act on it): {len(newly)}" + (f" {newly}" if newly else ""))
         print(f"items the pass would write: {by_result.get('set', 0)} of {len(rows)}")
         if a.json:
             Path(a.json).write_text(json.dumps(rows, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
