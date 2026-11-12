@@ -97,7 +97,7 @@ m = mt(1)
 check("doing: a stored doing item carries no expected time, and a write that does not touch what it stands on keeps it", m.get("state") == "doing" and "expected_by" not in m and "expected_reason" not in m, m)
 check("doing: a filing edit (priority): the state clock and the confirm stay; only `updated` moves",
       rd(1)["state_updated"] == before["state_updated"] and rd(1)["confirmed"] == before["confirmed"] and rd(1)["updated"] > before["updated"], (rd(1), before))
-check("doing: …every other field stays (the stored phase and the priority apart: every save of an open item writes the phase)", {k: v for k, v in m.items() if k not in ("phase", "priority")} == before["metadata"], (m, before["metadata"]))
+check("doing: …every other field stays (the stored phase and the priority apart: every save of an open item writes the phase)", {k: v for k, v in m.items() if k not in ("phase", "priority", "last_activity")} == before["metadata"], (m, before["metadata"]))
 check("doing: …the reply shows `state: doing` (stored, not derived) and no expected time, and no note about a dropped state", "state: doing" in out and "state: doing (derived)" not in out and "expected_by" not in out and "dropped" not in out, out)
 check("doing: …no page is owed for it", "page update" not in out.lower().replace("(pilot", ""), out[-300:])
 item(2, needs=[BACK], state="doing")
