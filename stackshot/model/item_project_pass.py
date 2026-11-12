@@ -43,7 +43,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
     project_id is written: `project` is never touched. `dry`: nothing is written."""
     shown = S._gh.shown(gid)
     try:
-        with S._ITEM_LOCK:
+        with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown, closed_ok=True)
             if refusal is not None:
                 return refusal
@@ -95,7 +95,7 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
             return S._migrate_refuse(shown, f"{side} holds a value that is no project id")
         sides[side] = d
     try:
-        with S._ITEM_LOCK:
+        with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown, closed_ok=True)
             if refusal is not None:
                 return refusal

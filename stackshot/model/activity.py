@@ -1,6 +1,6 @@
 """activity.py — the item's `activity` clock: when something real last happened on the work.
 
-The pure half: no server import, no clock read, no file. server._save asks `counts` once per save and stamps the item (`item["activity"]`, epoch seconds, top level
+The pure half: no server import, no clock read, no file. service/writes.py's save asks `counts` once per save and stamps the item (`item["activity"]`, epoch seconds, top level
 beside `updated` and `confirmed`); a pass that wants "how long has this item been quiet" reads `at`.
 
 Why a clock of its own. `updated` moves for every save, the server's own nudges included, and `confirmed` moves for a bare confirm, so neither can say whether anyone
@@ -20,7 +20,7 @@ from typing import Any, Iterable
 
 FIELD = "activity"
 
-# The kinds a save is filed under (server._save's `activity` argument, else derived from who wrote it).
+# The kinds a save is filed under (service/writes.py's save, its `activity` argument, else derived from who wrote it).
 WRITE = "write"              # a session's (or the owner's) write through a tool: create, update, close
 ANSWER = "answer"            # the owner's answer on the board or his comment on GitHub
 MESSAGE = "message"          # a message written onto the item as a History line

@@ -244,6 +244,7 @@ check("…the CLI's cue was logged like any other", n0 == 5 and json.loads((D / 
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.service import writes
 server._publish = lambda: None
 from starlette.testclient import TestClient
 calls = []
@@ -280,12 +281,12 @@ with TestClient(server.mcp.http_app()) as c:
 # ---- 8. the audit's own writes and a bare confirm do not move an item's activity clock (activity.py; its full table is tests/activity_scenario.py)
 from stackshot.model import activity
 audit_agent = config.audit_agent()
-check("8 the server counts the configured audit agent among the audit's own writers", audit_agent in server._audit_writer_names() and "stackshot audit" in server._audit_writer_names(), server._audit_writer_names())
+check("8 the server counts the configured audit agent among the audit's own writers", audit_agent in writes.audit_writer_names() and "stackshot audit" in writes.audit_writer_names(), writes.audit_writer_names())
 ACT_OLD = T0 - 7200
 (T / "store/a/60.json").write_text(json.dumps({"id": "60", "subject": "[home] an item", "description": "- A\n- B\n- C", "status": "open", "updated": ACT_OLD, "state_updated": ACT_OLD, "confirmed": ACT_OLD,
                                                "metadata": {"owner": "home-a", "project": "projects/a", "next": "home-a: do it", "mover": "home-a"}}))
 def act60(): return json.loads((T / "store/a/60.json").read_text()).get("activity")
-def save60(**kw): it = server._load("a60"); it["updated"] = time.time(); server._save("a60", it, **kw)
+def save60(**kw): it = server._load("a60"); it["updated"] = time.time(); writes.save("a60", it, **kw)
 save60(writer=audit_agent)
 seed = act60()
 check("8 an audit agent's write to an old item leaves its activity at the item's last update (the field is seeded, not set to now)", seed is not None and abs(seed - ACT_OLD) < 1, (seed, ACT_OLD))
@@ -293,7 +294,7 @@ save60(note="stall: the notice was sent again")
 save60(note="nudge", author=("stackshot audit", "stackshot audit"))
 check("8 …nor does the server's own nudge, nor a write stamped with the audit's label", act60() == seed, act60())
 time.sleep(0.02)
-item60 = server._load("a60"); item60["confirmed"] = time.time(); server._save("a60", item60, writer="home-a", activity=activity.CONFIRM)
+item60 = server._load("a60"); item60["confirmed"] = time.time(); writes.save("a60", item60, writer="home-a", activity=activity.CONFIRM)
 check("8 a bare confirm moves `confirmed` and not `activity`", json.loads((T / "store/a/60.json").read_text())["confirmed"] > ACT_OLD + 1 and act60() == seed, act60())
 save60(writer="home-a")
 check("8 a write by the item's mover does move it", act60() > seed + 3600, act60())

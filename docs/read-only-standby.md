@@ -66,7 +66,7 @@ grows older every second, which is the signal to look at the copy job.
   `bump_versions`, and `anchors` with an add or remove) answer it as a tool error. Every web route answers a POST,
   PUT, PATCH or DELETE with HTTP 503 and the same sentence; so does `/audit/now` for any method. `/runners` answers
   the same refusal, since it exists to show live GitHub runs; its Disable / Enable button, `POST /runners/switch`, is refused like any other POST.
-- **Backstops under the tool and route level:** the store's write functions (`_save`, `_next_id`, the anchors,
+- **Backstops under the tool and route level:** the store's write functions (`save` in `stackshot/service/writes.py`, `_next_id`, the anchors,
   projects, publish and GitHub-mirror writers) raise, and an audit hook refuses a file write, rename or removal
   under the store, state directory, repository, markdown file, page store and project-touch directory, and a git
   write command started from the process.

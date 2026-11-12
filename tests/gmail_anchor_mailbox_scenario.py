@@ -15,7 +15,16 @@
     scope reads no mailbox; the address of an account is matched in any case; a space in a scope is refused when the anchor is added.
   * a scope stored as typed (the service had named no mailbox yet) is the same anchor as its canonical spelling: one entry, and a removal finds it in either spelling.
   * with no [anchor_hub] gmail_names an unscoped anchor's title is its query alone (a mailbox with no name is not named in a title).
-  * config.notes says an entry of gmail_names the reader skips, two names that differ only in case, and two names for one address.
+  * config.notes says an entry of gmail_names the reader skips, two names that differ only in case (in either order), and two names for one address; RESTART_ONLY holds gmail_names.
+  * the query grammar through the reader and the tool (the grammar itself is tests/gmail_query_grammar_scenario.py): an OR, an AND and a `key:(a OR b)` anchor hears the mail it
+    should; an unsupported query is refused when added with one line naming what is wrong and nothing is stored, a stored one can still be removed, and the add reply shows how
+    the query is read; the wait gate refuses such a query too.
+  * a scope is a set: the same mailboxes in another order are one anchor (add and remove, also against a hand-made stored order); a #mention variant stays its own anchor; a scope with an
+    unknown name keeps its spelling; labels that differ only in case are told apart by their exact spelling; a hand-made empty scope is shown and reported as reading nothing.
+  * the reader pages Gmail's history: a fake Google answers with nextPageToken, every page's mail is heard, the page size and the cap hold, and a poll that stops at the cap goes on
+    from the last record it read; only Google's 404 status (never '404' in an error's text) resyncs an expired history; a mailbox no query anchor reads costs no messages.get; a poll makes at
+    most MESSAGE_GETS gets and goes on from the last record it handled whole; a repeated record (an inclusive startHistoryId) delivers nothing twice.
+  * the label rules of the reader (gmail_names entries with a bad name or address are skipped, labels are listed in name order); the add reply's wording; a removal on a project whose page is gone.
 
     tests/run-suite gmail_anchor_mailbox        → exit 0 / 1"""
 import json, logging, os, pathlib, queue, re, sys, time, types
@@ -118,8 +127,11 @@ GONE, WGONE = "gmail:q@gone:from:pat", "gmail:q@gone,work:from:pat"
 OTHER = "gmail:q@work:from:someone-else"
 EMPTY = "gmail:q@:from:pat"                                        # a scope that names no mailbox (nothing can add one now; an older or hand-made store could hold it)
 AT, AT2 = "gmail:q:from:pat@example.test", "gmail:q:from:pat@example.test subject:quarterly"      # an "@" in an unscoped query
+OR1, OR2, OR3 = "gmail:q:from:(zed OR pat)", "gmail:q@home:from:zed OR subject:quarterly", "gmail:q:from:zed OR from:amy"      # the grammar: OR, a key group, no match
+AND1, GRP = "gmail:q@work:from:pat AND subject:quarterly", "gmail:q:(from:zed OR from:pat) AND (subject:budget OR subject:numbers)"
+STOREDBAD = "gmail:q:subject:quarterly(x"      # stored before the grammar, which refuses it: the old matcher reads it, and it matches nothing here
 h = core.Hub(); h.status["receivers"] = {}; h.triggers = FastQ()
-h.bindings = {a: {"sess"} for a in (UN, W, H, WH, GONE, WGONE, OTHER, EMPTY, AT, AT2)}
+h.bindings = {a: {"sess"} for a in (UN, W, H, WH, GONE, WGONE, OTHER, EMPTY, AT, AT2, OR1, OR2, OR3, AND1, GRP, STOREDBAD)}
 events = []
 h.event = lambda anchor, summ, kind="slack": events.append((anchor, summ["text"]))
 gw.run(h)
@@ -141,6 +153,12 @@ check("reader: a gone mailbox beside a live one reads the live one", heard(WGONE
 check("reader: a scoped anchor still needs its query to match", heard(OTHER) == [], events)
 check("reader: an empty scope reads no mailbox (the reader called with it, not only the add refused)", heard(EMPTY) == [], events)
 check("reader: an unscoped query holding an '@' is still unscoped and reads every mailbox", heard(AT) == [ADA, BO] and heard(AT2) == [ADA, BO], events)
+check("reader: an OR in a key group hears the mail in every mailbox it reads", heard(OR1) == [ADA, BO], events)
+check("reader: an OR of a term that does not match and one that does, in a scope", heard(OR2) == [BO], events)
+check("reader: an OR with no matching side hears nothing", heard(OR3) == [], events)
+check("reader: AND in a scope", heard(AND1) == [ADA], events)
+check("reader: groups joined by AND", heard(GRP) == [ADA, BO], events)
+check("reader: a stored query the grammar refuses is read as it always was (here: no match) and does not stop the reader", heard(STOREDBAD) == [] and heard(W) == [ADA], events)
 HDR = {"from": "Pat <pat@example.test>", "subject": "Quarterly numbers"}
 check("reader: query_hits called directly, an empty scope matches nowhere, and the account address is matched in any case",
       gw.query_hits([EMPTY], ADA, HDR, h.status["google"]["mailboxes"]) == [] and gw.query_hits([W], "ADA@Example.Test", HDR, {"work": "Ada@EXAMPLE.test"}) == [W]
@@ -251,6 +269,268 @@ check("notes: two names for one address are named once", len(nt({"a": "ada@examp
 check("notes: a gmail_names that is no table is named", len(nt("work")) == 1)
 check("notes: config.notes carries them, one line each, and the real config has none",
       sum("gmail_names" in n for n in _cfgmod.notes({"anchor_hub": {"gmail_names": {"my work": "x", "w": "ada@example.test"}}})) == 1 and not [n for n in _cfgmod.notes() if "gmail_names" in n], _cfgmod.notes())
+
+# ---- the query grammar through the tool: a query the matcher cannot evaluate is refused when added (one line, nothing stored); one that works is shown as it is read
+from stackshot.anchors import gmail_query as gq
+pathlib.Path(core.STATUS).write_text(saved_status)
+(T / "store/anchors.json").write_text("{}")
+REFUSALS = [("gmail:q:from:pat AND", "AND has nothing after it"), ("gmail:q:OR from:pat", "OR has nothing before it"),
+            ("gmail:q:(from:pat OR from:amy", "an opening parenthesis is never closed"), ("gmail:q@work:(from:pat", "an opening parenthesis is never closed"),
+            ("gmail:q:label:x", "label: is not supported"), ("gmail:q:-from:pat", "negation (-from) is not supported"), ("gmail:q:from:()", "has nothing inside"),
+            ("gmail:q@home,work:from:pat AND (", "has nothing inside"), ("gmail:q:(from:pat#mention=sam", "never closed"),
+            ("gmail:q:from:pat AND#mention=sam", "AND has nothing after it"), (STOREDBAD, "")]      # the #mention fragment is no part of the query: the query before it is the one judged
+for url, why in REFUSALS:
+    try: anchors(add=[url]); check(f"tool grammar: {url!r} is refused when added", False, stored())
+    except Exception as e:
+        m = str(e)
+        check(f"tool grammar: {url!r} is refused with one line naming what is wrong", m.startswith("Refused: the Gmail query in") and "is not one the matcher can evaluate: " in m and why in m and "\n" not in m, m)
+        check(f"tool grammar: {url!r}: the reason is the matcher's own", gq.problem(anc.gmail_query(anc.split_fragment(url)[0])[1]) in m, m)
+check("tool grammar: no refused add stored anything", stored() == [], stored())
+check("tool grammar: the refusal names the terms a query may use", all(s in m for s in ("from:, to:, cc:, subject: and person:", "AND, OR and parentheses", "key:(a OR b)", "quotation marks")), m)
+out = anchors(add=["gmail:q@work:from:pat AND subject:quarterly"])
+check("tool grammar: an AND query in a scope is stored and the reply shows how it is read", stored() == ["gmail:q@work:from:pat AND subject:quarterly"]
+      and 'It matches a mail when: from contains "pat" AND subject contains "quarterly".' in out, out)
+check("tool reply: a scoped query names its mailboxes with no remark about every mailbox", "Gmail query 'from:pat AND subject:quarterly' reads the mailboxes: work." in out, out)
+out = anchors(add=["gmail:q:from:(zed OR pat)"])
+check("tool grammar: a key group is stored and shown as the OR of its keys", "gmail:q:from:(zed OR pat)" in stored() and 'It matches a mail when: from contains "zed" OR from contains "pat".' in out, out)
+check("tool reply: an unscoped query names every mailbox, and says the other form reads one",
+      "Gmail query 'from:(zed OR pat)' reads the mailboxes: home, work (every mailbox the anchors service reads; gmail:q@<mailbox>:<query> reads only the one named)." in out, out)
+tail = out.split("\nThe anchors service reads each new anchor", 1)
+check("tool reply: the closing text speaks of the anchors service, with no component name, and says a Gmail query is named at once",
+      len(tail) == 2 and "within two minutes" in tail[1] and "hub" not in tail[1].lower() and "other than a Gmail query (named by its mailboxes at once)" in tail[1], out)
+out = anchors(add=["gmail:q:from:pat subject:quarterly"])
+check("tool grammar: an old query is stored as typed and read as it always was", "gmail:q:from:pat subject:quarterly" in stored() and 'It matches a mail when: from contains "pat" AND subject contains "quarterly".' in out, out)
+os.remove(core.STATUS)
+out = anchors(add=["gmail:q:from:pat OR from:amy"])
+check("tool reply: with no mailbox known the reply says so (M35)", "reads the mailboxes: none the anchors service has named yet (every mailbox" in out and 'from contains "pat" OR from contains "amy"' in out, out)
+pathlib.Path(core.STATUS).write_text(saved_status)
+# a query stored before the grammar can still be listed and removed
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": STOREDBAD, "items": None, "added": 1, "by": "t"}]}))
+check("tool grammar: a stored query the grammar refuses is listed", "subject:quarterly(x" in anchors(), stored())
+anchors(remove=[STOREDBAD])
+check("tool grammar: …and removed", stored() == [], stored())
+# the wait gate
+gate = lambda url: server._anchor_wait_gate({}, {"wait_kind": "anchor", "wait_anchor": url, "project": "projects/alpha"}, creating=True)
+refuse("wait gate: a query the matcher cannot evaluate is refused with the reason", lambda: gate("gmail:q:from:pat AND"), "cannot evaluate", "AND has nothing after it", "can never be on the list")
+refuse("wait gate: a good query that is not on the list still gets the add-first refusal", lambda: gate("gmail:q:from:pat OR from:amy"), "is not on projects/alpha's anchors list")
+check("tool text: the description teaches the grammar and the refusal", all(s in server._ANCHORS_DESC for s in ("AND", "OR", "key:(a OR b)", "in capitals", "no negation", "is refused when added")), server._ANCHORS_DESC[:200])
+
+# ---- a scope is a set: the same mailboxes in another order are one anchor
+(T / "store/anchors.json").write_text("{}")
+anchors(add=["gmail:q@work,home:from:pat"]); anchors(add=["gmail:q@home,work:from:pat"]); anchors(add=["gmail:q@WORK,Home:from:pat"])
+check("set scope: the mailboxes in any order are one anchor, stored in label order", stored() == ["gmail:q@home,work:from:pat"], stored())
+anchors(remove=["gmail:q@work,home:from:pat"])
+check("set scope: a removal in the other order finds it", stored() == [], stored())
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": "gmail:q@work,home:from:pat", "items": None, "added": 1, "by": "t"}]}))      # a hand-made order
+anchors(add=["gmail:q@home,work:from:pat"])
+check("set scope: an anchor stored in the other order is the one added to (no second entry)", stored() == ["gmail:q@work,home:from:pat"], stored())
+anchors(add=["gmail:q@home,work:from:pat#mention=sam"])
+check("set scope: a #mention variant is its own anchor (M31)", sorted(stored()) == ["gmail:q@home,work:from:pat#mention=sam", "gmail:q@work,home:from:pat"], stored())
+anchors(remove=["gmail:q@home,work:from:pat"])
+check("set scope: a removal takes the stored spelling and leaves the #mention variant", stored() == ["gmail:q@home,work:from:pat#mention=sam"], stored())
+anchors(remove=["gmail:q@work,home:from:pat#mention=sam"])
+check("set scope: …and the variant goes in the other order too", stored() == [], stored())
+check("set scope: gmail_canonical sorts the labels and keeps a scope with an unknown name as written (M12)",
+      anc.gmail_canonical("gmail:q@work,home:x", BX) == "gmail:q@home,work:x" and anc.gmail_canonical("gmail:q@work,nope:x", BX) == "gmail:q@work,nope:x"
+      and anc.gmail_canonical("gmail:q:x", BX) == "gmail:q:x" and anc.gmail_canonical("gmail:q@:x", BX) == "gmail:q@:x" and anc.gmail_canonical("gmail:1111111111111111", BX) == "gmail:1111111111111111",
+      (anc.gmail_canonical("gmail:q@work,nope:x", BX), anc.gmail_canonical("gmail:q@:x", BX)))
+# a hand-made empty scope
+check("empty scope: the title says no mailbox is named, never the plain anchor", anc.gmail_title(EMPTY, BX) == "from:pat · no mailbox named", anc.gmail_title(EMPTY, BX))
+re_ = res(EMPTY)
+check("empty scope: the reader reports it unreadable, saying why", re_.get("title") == "from:pat · no mailbox named" and "names no mailbox" in re_.get("unreadable", ""), re_)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": EMPTY, "items": None, "added": 1, "by": "t"}]}))
+check("empty scope: the tool list shows it as naming no mailbox", "no mailbox named" in anchors(), anchors())
+(T / "store/anchors.json").write_text("{}")
+# labels that differ only in case
+for order in (({"Work": ADA, "work": BO}), ({"work": BO, "Work": ADA})):
+    CB = dict(order)
+    check("case labels: the exact spelling picks its mailbox, another case picks the label that sorts first", anc.gmail_resolve(["work"], CB) == (["work"], []) and anc.gmail_resolve(["Work"], CB) == (["Work"], [])
+          and anc.gmail_resolve(["WORK"], CB) == (["Work"], []) and anc.gmail_resolve([ADA], CB) == (["Work"], []), (order, anc.gmail_resolve(["WORK"], CB)))
+    check("case labels: a scope reads the mailbox its exact spelling names",
+          anc.gmail_reads("gmail:q@work:x", BO, CB) and not anc.gmail_reads("gmail:q@work:x", ADA, CB) and anc.gmail_reads("gmail:q@Work:x", ADA, CB) and not anc.gmail_reads("gmail:q@Work:x", BO, CB)
+          and anc.gmail_reads("gmail:q@WORK:x", ADA, CB) and not anc.gmail_reads("gmail:q@WORK:x", BO, CB), order)
+    check("case labels: both spellings in one scope read both, written in label order", anc.gmail_canonical("gmail:q@work,Work:x", CB) == "gmail:q@Work,work:x" and anc.gmail_title("gmail:q@work,Work:x", CB) == "x · work, Work", anc.gmail_title("gmail:q@work,Work:x", CB))
+n1, n2 = nt({"Work": ADA, "work": BO}), nt({"work": BO, "Work": ADA})
+check("case labels: the startup note is one line, the same in either order, and says which mailbox another case reads (M39)",
+      len(n1) == 1 and n1 == n2 and "'Work' and 'work' differ only in case" in n1[0] and "any other case of them reads 'Work'" in n1[0], (n1, n2))
+check("case labels: the note does not say the last one wins (it is not true of case)", "last one wins" not in n1[0], n1)
+n3 = nt({"a": ADA, "b": ADA})
+check("names: two names for one address say the last one wins, and the reader does let it", len(n3) == 1 and "the last one wins" in n3[0], n3)
+_names = core._cfg.CFG["anchor_hub"]["gmail_names"]
+try:
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = {"a": ADA, "b": ADA}
+    check("names: the reader gave the address its last name", gw.mailbox_labels([ADA]) == {"b": ADA}, gw.mailbox_labels([ADA]))
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = {"work": ADA, "my work": BO, "bad": "not-an-address", "home": BO, "x@y": CY}
+    check("labels: an entry with a bad name or a bad address is skipped, the others name their mailbox (M17)", gw.mailbox_labels([ADA, BO, CY]) == {CY: CY, "home": BO, "work": ADA}, gw.mailbox_labels([ADA, BO, CY]))
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = {"bad": "not-an-address"}
+    check("labels: an address that is no address names nothing, and the mailbox keeps its own address", gw.mailbox_labels([ADA]) == {ADA: ADA}, gw.mailbox_labels([ADA]))
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = {"w": "not an address"}
+    check("labels: a name given to something that is no address is not used even for an account file of that name", gw.mailbox_labels(["not an address"]) == {"not an address": "not an address"}, gw.mailbox_labels(["not an address"]))
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = {"work": ADA, "home": BO}
+    check("labels: the mailboxes are listed in name order, whichever order they are given (M19)", list(gw.mailbox_labels([CY, BO, ADA])) == [CY, "home", "work"] and list(gw.mailbox_labels([ADA, BO, CY])) == [CY, "home", "work"], list(gw.mailbox_labels([CY, BO, ADA])))
+finally:
+    core._cfg.CFG["anchor_hub"]["gmail_names"] = _names
+check("restart: gmail_names is read at start, so a changed value waits for a restart; the poll interval is live (M43)",
+      _cfgmod._restart_only("anchor_hub.gmail_names") is not None and _cfgmod._restart_only("anchor_hub.gmail_poll_seconds") is None, (_cfgmod._restart_only("anchor_hub.gmail_names"), _cfgmod._restart_only("anchor_hub.gmail_poll_seconds")))
+# the removal on a project whose page is gone takes the same spellings as the removal on a page
+(T / "store/anchors.json").write_text(json.dumps({"projects/gone": [{"url": "gmail:q@home,work:from:pat", "items": None, "added": 1, "by": "t"}, {"url": "gmail:q@work:from:amy", "items": None, "added": 1, "by": "t"}]}))
+txt = server._anchors("projects/gone", remove=["gmail:q@Work,HOME:from:pat"], who="tester")
+left = [e["url"] for e in json.loads((T / "store/anchors.json").read_text()).get("projects/gone", [])]
+check("gone page: a removal in another case and order finds the anchor, as on a page that exists", left == ["gmail:q@work:from:amy"] and "names no page any more" in txt, (left, txt))
+refuse("gone page: nothing can be added to it", lambda: server._anchors("projects/gone", add=["gmail:q:from:pat"], who="tester"), "still holds anchors")
+(T / "store/anchors.json").write_text("{}")
+
+# ---- the reader pages Gmail's history
+class Paged(Account):
+    """A mailbox whose history is six records, "1".."6", one mail each, served `size` to a page with a nextPageToken; the history ids are numbers, as Gmail's are."""
+    def __init__(self, email, size):
+        super().__init__(email); self.size, self.calls, self.stop = size, [], (lambda: None)
+        self.recs = [{"id": str(i), "messagesAdded": [{"message": {"id": f"m{i}", "threadId": f"t{i}"}}]} for i in range(1, 7)]
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": return {"historyId": "0"}
+        if key == "gmail.users.history.list":
+            self.calls.append(dict(kw))
+            todo = [r for r in self.recs if int(r["id"]) > int(kw["startHistoryId"])]
+            at = int(kw.get("pageToken", 0)); more = at + self.size < len(todo)
+            if not more or len(self.calls) > 12: self.stop()      # the last page ends the run (and so does a runaway)
+            return {"history": todo[at:at + self.size], **({"nextPageToken": str(at + self.size)} if more else {}), "historyId": "99"}
+        if key == "gmail.users.messages.get": return {**super().handle(key, kw), "snippet": kw["id"]}
+        return super().handle(key, kw)
+def run_paged(cap, size):
+    """One mailbox with Paged history, polled with `cap` pages to a poll: → (the mail heard, the history.list calls, the cursor at the end, whether a further poll is queued)."""
+    env0 = pathlib.Path(core.ENVF).read_text(); acct0, cap0, hl0 = accts[ADA], gw.HISTORY_PAGES, gw.HEALTH
+    try:
+        pathlib.Path(core.ENVF).write_text(f"GMAIL_ACCOUNTS={ADA}\n")
+        pg = accts[ADA] = Paged(ADA, size); gw.HISTORY_PAGES = cap; gw.HEALTH = 10 ** 12
+        hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {UN: {"sess"}}
+        got = []; hp.event = lambda anchor, summ, kind="slack": got.append(summ["text"]); pg.stop = hp.stopping.set
+        n = len(caught); gw.run(hp)
+        lp = next(t for t in caught[n:] if t.__name__ == "loop")
+        hp.triggers.put(("gmail", ADA)); lp()
+        return got, pg.calls, hp.savers["google"]()[ADA]["hist"], not hp.triggers.empty()
+    finally:
+        pathlib.Path(core.ENVF).write_text(env0); accts[ADA], gw.HISTORY_PAGES, gw.HEALTH = acct0, cap0, hl0
+        pathlib.Path(core.STATUS).write_text(saved_status)
+got, calls, cur, more = run_paged(10, 2)
+check("paging: every page of a busy mailbox's history is read in one poll, and its mail heard once", got == [f"m{i}" for i in range(1, 7)], got)
+check("paging: the next page is asked for by the token the last one gave, and each call asks for the biggest page",
+      [c.get("pageToken") for c in calls] == [None, "2", "4"] and all(c["startHistoryId"] == "0" and c["maxResults"] == gw.HISTORY_PAGE == 500 for c in calls), calls)
+check("paging: the cursor ends at the history id Gmail reported, with no poll left queued", cur == "99" and not more, (cur, more))
+got, calls, cur, more = run_paged(2, 2)
+check("paging cap: a poll reads at most the cap's pages, and the rest is read on from where the poll stopped", [c["startHistoryId"] for c in calls] == ["0", "0", "4"] and [c.get("pageToken") for c in calls] == [None, "2", None], calls)
+check("paging cap: no mail is lost or heard twice across the two polls", got == [f"m{i}" for i in range(1, 7)], got)
+check("paging cap: the cursor ends at the history id Gmail reported", cur == "99", cur)
+got, calls, cur, more = run_paged(2, 3)
+check("paging cap: a history that ends on the last page the cap allows leaves no second poll", len(calls) == 2 and got == [f"m{i}" for i in range(1, 7)] and cur == "99" and not more, (calls, got, cur, more))
+
+# ---- the reader tells an expired history from any other failure by the status, never by the text
+def run_fake(make, bindings, total=None, **consts):
+    """One mailbox (ADA) served by the fake `make()` returns, polled until the fake calls its stop(); `consts` are gworkspace constants set for the run.
+    → (the (anchor, text) heard, the fake, the saved read position, whether a further poll is queued)."""
+    env0 = pathlib.Path(core.ENVF).read_text(); acct0 = accts[ADA]; old = {k: getattr(gw, k) for k in ("HEALTH", *consts)}
+    try:
+        pathlib.Path(core.ENVF).write_text(f"GMAIL_ACCOUNTS={ADA}\n")
+        pg = accts[ADA] = make(); gw.HEALTH = 10 ** 12
+        for k, v in consts.items(): setattr(gw, k, v)
+        hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {k: {"sess"} for k in bindings}
+        got = []; pg.stop = hp.stopping.set
+        def heard_(anchor, summ, kind="slack"):
+            got.append((anchor, summ["text"]))
+            if total is not None and len(got) >= total: hp.stopping.set()      # everything expected is heard: the pass in hand ends the run
+        hp.event = heard_
+        n = len(caught); gw.run(hp)
+        lp = next(t for t in caught[n:] if t.__name__ == "loop")
+        hp.triggers.put(("gmail", ADA)); lp()
+        return got, pg, hp.savers["google"]()[ADA], not hp.triggers.empty()
+    finally:
+        pathlib.Path(core.ENVF).write_text(env0); accts[ADA] = acct0
+        for k, v in old.items(): setattr(gw, k, v)
+        pathlib.Path(core.STATUS).write_text(saved_status)
+class HttpErr(Exception):
+    """What googleapiclient raises: a message that spells out the request URL, and the status on .resp."""
+    def __init__(self, status, text): super().__init__(text); self.resp = types.SimpleNamespace(status=status)
+class Failing(Account):
+    """history.list answers with one error; getProfile numbers its answers p1, p2, ... so a resync shows."""
+    def __init__(self, email, status, text): super().__init__(email); self.status, self.text, self.profiles, self.gets = status, text, 0, 0
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": self.profiles += 1; return {"historyId": f"p{self.profiles}"}
+        if key == "gmail.users.history.list": self.stop(); raise HttpErr(self.status, self.text)
+        if key == "gmail.users.messages.get": self.gets += 1
+        return super().handle(key, kw)
+URL404 = "<HttpError 503 when requesting https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=404404&pageToken=4040&alt=json returned \"Backend Error\">"
+got, pg, sv, more = run_fake(lambda: Failing(ADA, 503, URL404), [UN])
+check("expired history: a 503 whose text holds '404' leaves the cursor alone (no resync from getProfile), delivers nothing and asks for no second poll",
+      sv["hist"] == "p2" and pg.profiles == 2 and got == [] and not more, (sv, pg.profiles, got, more))
+got, pg, sv, more = run_fake(lambda: Failing(ADA, 429, URL404.replace("503", "429")), [UN])
+check("expired history: a 429 with '404' in its URL leaves the cursor alone too", sv["hist"] == "p2" and pg.profiles == 2 and got == [], (sv, pg.profiles))
+got, pg, sv, more = run_fake(lambda: Failing(ADA, 404, "Requested entity was not found."), [UN])
+check("expired history: Google's own 404 (the status, with no '404' in the text) resyncs the cursor from getProfile", sv["hist"] == "p3" and pg.profiles == 3 and got == [], (sv, pg.profiles))
+class StatusCode(Exception):
+    status_code = 404
+check("expired history: the status is read from resp.status, status_code or status, never from the text",
+      gw.http_status(HttpErr(404, "x")) == 404 and gw.http_status(StatusCode("404")) == 404 and gw.http_status(types.SimpleNamespace(status=404)) == 404
+      and gw.http_status(Exception("HTTP 404 /history?startHistoryId=404")) is None and gw.http_status(HttpErr(503, "404")) == 503, gw.http_status(HttpErr(503, "404")))
+
+# ---- API calls per poll: no get for a mailbox nobody reads, a cap on gets per poll, and mail never delivered twice
+class Many(Account):
+    """A mailbox whose history is `n` records, "1".."n", each adding `per` mails (m<i>-<j>, thread t<i>-<j>), served `size` to a page; `inclusive` makes startHistoryId inclusive
+    (the record at the cursor comes back). It counts its history.list and messages.get calls and stops the run after `stop_lists` history.list calls (a runaway guard)."""
+    def __init__(self, email, n, per=1, size=500, inclusive=False, stop_lists=12, dup=False):
+        super().__init__(email); self.size, self.inclusive, self.stop_lists, self.lists, self.gets, self.starts = size, inclusive, stop_lists, 0, 0, []
+        self.n = n; self.recs = [{"id": str(i), "messagesAdded": [{"message": {"id": f"m{i}-{j}", "threadId": f"t{i}-{j}"}} for j in range(per)]} for i in range(1, n + 1)]
+        if dup:      # the first record's mail is named again in every later record (a mail changed by a later event is added to the history again)
+            for r in self.recs[1:]: r["messagesAdded"].append(self.recs[0]["messagesAdded"][0])
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": return {"historyId": "0"}
+        if key == "gmail.users.history.list":
+            self.lists += 1
+            if "pageToken" not in kw: self.starts.append(kw["startHistoryId"])
+            s = int(kw["startHistoryId"]); todo = [r for r in self.recs if (int(r["id"]) >= s if self.inclusive else int(r["id"]) > s)]
+            at = int(kw.get("pageToken", 0)); more = at + self.size < len(todo)
+            if self.lists >= self.stop_lists: self.stop()
+            return {"history": todo[at:at + self.size], **({"nextPageToken": str(at + self.size)} if more else {}), "historyId": str(self.n)}
+        if key == "gmail.users.messages.get": self.gets += 1; return {**super().handle(key, kw), "snippet": kw["id"]}
+        return super().handle(key, kw)
+def ids(n, per=1): return [f"m{i}-{j}" for i in range(1, n + 1) for j in range(per)]
+got, pg, sv, more = run_fake(lambda: Many(ADA, 10, stop_lists=1), ["gmail:q@home:from:pat"])
+check("gets: a mailbox that no query anchor reads makes no messages.get call, and its cursor still moves on", pg.gets == 0 and got == [] and sv["hist"] == "10", (pg.gets, got, sv))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 10, stop_lists=1), ["gmail:q@home:from:pat", "gmail:t3-0"])
+check("gets: a thread anchor needs the get for its own thread's mail and no other", pg.gets == 1 and got == [("gmail:t3-0", "m3-0")], (pg.gets, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 10, stop_lists=1), ["gmail:q@work:from:pat"])
+check("gets: a query anchor that reads the mailbox gets every mail once", pg.gets == 10 and sorted(t for _a, t in got) == sorted(ids(10)), (pg.gets, got))
+check("gets: the default cap is 200 and the default pages are 10", gw.MESSAGE_GETS == 200 and gw.HISTORY_PAGES == 10 and gw.HISTORY_PAGE == 500, (gw.MESSAGE_GETS, gw.HISTORY_PAGES))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 500), [UN], total=500)
+check("cap: 500 added mails with the default cap take three polls", pg.lists == 3 and pg.starts == ["0", "200", "400"], (pg.lists, pg.starts))
+check("cap: every mail is delivered exactly once, 500 gets in all, and no poll is left queued", sorted(t for _a, t in got) == sorted(ids(500)) and len(got) == 500 and pg.gets == 500 and not more, (len(got), pg.gets, more))
+check("cap: the cursor ends at the history id Gmail reported", sv["hist"] == "500", sv)
+got, pg, sv, more = run_fake(lambda: Many(ADA, 100, per=3), [UN], total=300)
+check("cap: a record is never split: the poll stops before the record that would pass the cap, and the cursor is the last record handled whole",
+      pg.starts == ["0", "66"] and pg.gets == 300 and sorted(t for _a, t in got) == sorted(ids(100, 3)) and len(got) == 300 and not more, (pg.starts, pg.gets, len(got), more))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 2, per=250), [UN], total=500)
+check("cap: one record holding more mails than the cap is handled whole (the poll cannot stall), the next record in the next poll", pg.starts == ["0", "1"] and len(got) == 500 and pg.gets == 500, (pg.starts, len(got), pg.gets))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 6, inclusive=True), [UN], total=6, MESSAGE_GETS=2)
+check("inclusive cursor: a repeated last record is neither fetched nor delivered again (capped polls)", pg.starts == ["0", "2", "4"] and pg.gets == 6 and sorted(t for _a, t in got) == sorted(ids(6)) and len(got) == 6, (pg.starts, pg.gets, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 6, size=2, inclusive=True), [UN], total=6, HISTORY_PAGES=2)
+check("inclusive cursor: the record at a page cap repeats on the next poll and is delivered once", pg.starts == ["0", "4"] and sorted(t for _a, t in got) == sorted(ids(6)) and len(got) == 6 and pg.gets == 6, (pg.starts, pg.gets, got))
+check("inclusive cursor: the handled mail is saved with the cursor, bounded", len(sv["sent"]) == 6 and set(sv["sent"]) == set(ids(6)), sv)
+got, pg, sv, more = run_fake(lambda: Many(ADA, 12, stop_lists=1), [UN], SENT_KEEP=5)
+check("inclusive cursor: only the last SENT_KEEP handled mails are kept", sv["sent"] == ids(12)[-5:], sv)
+got, pg, sv, more = run_fake(lambda: Many(ADA, 3, size=1, dup=True), [UN], total=3)
+check("dedupe: a mail named in several history records of one poll, also on different pages, is fetched and delivered once",
+      pg.lists == 3 and pg.gets == 3 and sorted(t for _a, t in got) == ["m1-0", "m2-0", "m3-0"] and len(got) == 3, (pg.lists, pg.gets, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 3, dup=True), [UN], total=3)
+check("dedupe: …and so when the records come on one page", pg.gets == 3 and sorted(t for _a, t in got) == ["m1-0", "m2-0", "m3-0"] and len(got) == 3, (pg.gets, got))
+class NoId(Many):
+    """History records that carry no id (Gmail gives every record one; the reader must not depend on it)."""
+    def handle(self, key, kw):
+        r = super().handle(key, kw)
+        return {**r, "history": [{k: v for k, v in x.items() if k != "id"} for x in r["history"]]} if "history" in r else r
+got, pg, sv, more = run_fake(lambda: NoId(ADA, 4, size=2, stop_lists=4), [UN], HISTORY_PAGES=1)
+check("page cap: a last record with no id keeps the old cursor (no KeyError), and the mail read again is delivered once",
+      sv["hist"] == "0" and pg.lists == 4 and sorted(t for _a, t in got) == ["m1-0", "m2-0"] and len(got) == 2 and pg.gets == 2, (sv, pg.lists, got))
+got, pg, sv, more = run_fake(lambda: Many(ADA, 12, size=1), [UN], total=12)
+check("pages: with the module's own bound (not set here) a poll reads ten pages of history and the next poll goes on from the last record read",
+      pg.starts == ["0", "10"] and pg.lists == 12 and sorted(t for _a, t in got) == sorted(ids(12)) and len(got) == 12 and not more, (pg.starts, pg.lists, len(got), more))
 
 # ---- the tool text teaches the syntax
 desc = server._ANCHORS_DESC

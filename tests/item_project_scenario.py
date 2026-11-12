@@ -73,7 +73,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
-from stackshot.web import server; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.web import server; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
 from stackshot.web.ui import render as R2
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -198,13 +198,13 @@ check("7 the record moves the page again and the stored items follow, the former
 d1["projects"][G]["page"] = "projects/gamma"; d1["projects"][G]["former_keys"] = ["projects/old-gamma"]; write_record(d1)
 
 # ---- 8. the write paths
-it = server._load("g1"); it["metadata"]["project"] = "projects/beta"; server._save("g1", it)
+it = server._load("g1"); it["metadata"]["project"] = "projects/beta"; writes.save("g1", it)
 check("8 a save of an item re-filed under another project sets that project's id", mt(1)["project"] == "projects/beta" and mt(1)["project_id"] == B, mt(1))
-it = server._load("g1"); it["metadata"]["project"] = "projects/alpha/sub"; server._save("g1", it)
+it = server._load("g1"); it["metadata"]["project"] = "projects/alpha/sub"; writes.save("g1", it)
 check("8 …a sub-page's key sets the id of the project that owns it and stays the stored key", mt(1)["project"] == "projects/alpha/sub" and mt(1)["project_id"] == A, mt(1))
-it = server._load("g7"); it["metadata"]["subject_note"] = "x"; server._save("g7", it)
+it = server._load("g7"); it["metadata"]["subject_note"] = "x"; writes.save("g7", it)
 check("8 …a key that names no project leaves the item without an id (nothing is made up)", "project_id" not in mt(7), mt(7))
-m12 = dict(mt(12)); it = server._load("g12"); server._save("g12", it)
+m12 = dict(mt(12)); it = server._load("g12"); writes.save("g12", it)
 check("8 …a save of an item whose page moved stores the page now, the id stays, and the move is no re-file (no refile record, the contact and mover as they were)",
       mt(12)["project"] == "projects/gamma" and mt(12)["project_id"] == G and "refiled" not in mt(12) and mt(12).get("contact") == m12.get("contact") and mt(12).get("mover") == m12.get("mover"), (m12, mt(12)))
 r_ = server.stackshot_update("g4", sender="home-sparrow-main", project="projects/alpha")

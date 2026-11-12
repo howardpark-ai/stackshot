@@ -231,8 +231,9 @@ def _pub_letter() -> str:
 
 
 from stackshot.core import store as _store  # noqa: E402  — the store's path (`_store.STORE`, read from [paths] store at this import), its item files, the next id and the file write (core/store.py); `STORE` is read and set on that module, never here
-from stackshot.core.store import _item_files, _next_id, _write_item  # noqa: E402  — core/store.py
-from stackshot.web.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item, kept on this module as well (web/store.py)
+from stackshot.core.store import _item_files, _next_id  # noqa: E402  — core/store.py
+from stackshot.service import writes as _writes  # noqa: E402  — the one write path of an item: its lock (`ITEM_LOCK`), its save (`save`) and the write context (service/writes.py)
+from stackshot.service.store import _legacy_hold, _legacy_needs, _load, _path, _shown_ids  # noqa: E402  — the readers of one item (service/store.py)
 REQUESTS = _cfg.state("requests.json")
 if _ro.is_read_only():
     # a warm standby copy changes nothing: no directory is made, and any file write under the instance's own directories is refused
@@ -243,7 +244,7 @@ else:
 
 
 # ----------------------------------------------------------------------------- store (the one store, every letter)
-# STORE, _item_files, _next_id and the file write are core/store.py's; _path, _load and _shown_ids are web/store.py's (imported where STORE was defined, above).
+# STORE, _item_files, _next_id and the file write are core/store.py's; _path, _load and _shown_ids are service/store.py's (imported where STORE was defined, above).
 
 
 # _norm_id, _bare_id_ok and _GID (an id as a session writes it → the store's) are model/ids.py's.
@@ -291,7 +292,7 @@ def _migrate_needs() -> list[str]:
             continue
         if it.get("status") != "open" or not _legacy_needs(it):
             continue
-        _save(gid, it)
+        _writes.save(gid, it)
         out.append(gid)
         print(f"migrate: {gid} needs → {it['metadata'].get('needs') or []} (the linked agent, if any, moved into it), clocks unchanged — {it.get('subject')}",
               file=sys.stderr, flush=True)
@@ -343,7 +344,7 @@ def _migrate_owner_mover() -> list[str]:
             continue
         if not did:
             continue
-        _save(gid, it, mirror=False)         # a start-up pass posts nothing to GitHub (no comment per migrated item)
+        _writes.save(gid, it, mirror=False)         # a start-up pass posts nothing to GitHub (no comment per migrated item)
         out.append(gid)
         print(f"migrate: {gid} {'; '.join(did)}, clocks unchanged — {it.get('subject')}", file=sys.stderr, flush=True)
     return out
@@ -354,7 +355,7 @@ def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
     field or the state is not written, so a store that is clean writes nothing). Every OPEN item that still stores `metadata.rank` loses the field, whatever its value, and one whose stored
     state is the retired `queued` (a state that stood on the rank alone) loses the state, so it reads as derived from its fields (doing for an item in a builder's hands). Nothing else changes: `updated`, `state_updated`, `confirmed` and every other field stay as they were,
     a closed item is not read as a candidate (its record keeps whatever it held), and nothing is posted to GitHub (mirror off).
-    The save is quiet (_NO_SETTLE): no mover is settled and no hand-off record is ended. The item's History says it, because it reads the item's revisions: `rank cleared (was N)` and,
+    The save is quiet (the QUIET write context of `service/writes.py`): no mover is settled and no hand-off record is ended. The item's History says it, because it reads the item's revisions: `rank cleared (was N)` and,
     for a queued item, `state cleared (was queued)`. `apply=False` is the dry run: the same rows, nothing written.
     → [{gid, item, rank, queued}] in id order, the items cleaned (apply) or that would be; `rank` is the stored value or None, `queued` whether the stored state was `queued`."""
     out: list[dict[str, Any]] = []
@@ -368,7 +369,7 @@ def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
         if head.get("status") != "open" or not isinstance(hm, dict) or ("rank" not in hm and hm.get("state") != "queued"):
             continue
         try:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 it = _load(gid)
                 m = it.get("metadata")
                 if it.get("status") != "open" or not isinstance(m, dict) or ("rank" not in m and m.get("state") != "queued"):
@@ -378,12 +379,7 @@ def _retire_rank_pass(apply: bool = True) -> list[dict[str, Any]]:
                     m.pop("rank", None)
                     if m.get("state") == "queued":
                         m.pop("state", None)
-                    was_no_settle = getattr(_NO_SETTLE, "on", False)
-                    _NO_SETTLE.on = "quiet"
-                    try:
-                        _save(gid, it, mirror=False)
-                    finally:
-                        _NO_SETTLE.on = was_no_settle
+                    _writes.save(gid, it, mirror=False, ctx=_writes.QUIET)
         except Exception as e:  # noqa: BLE001  — one item never stops the start
             if out and out[-1]["gid"] == gid:
                 out.pop()
@@ -413,7 +409,7 @@ def _close_marks_pass(apply: bool = True) -> list[dict[str, Any]]:
         if head.get("status") != "completed" or not any(isinstance(s, dict) and s.get("status") == _steps.OPEN for s in ((head.get("metadata") or {}).get("steps") or [])):
             continue
         try:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 it = _load(gid)
                 m = it.get("metadata") or {}
                 cl = _steps.view(m, closed=True)
@@ -425,7 +421,7 @@ def _close_marks_pass(apply: bool = True) -> list[dict[str, Any]]:
                             "steps": [(i + 1, _steps.first_line(cl[i]["text"])) for i in open_ix]})
                 if apply:
                     it.setdefault("metadata", {})["steps"] = _steps.stored(_steps.mark_open(cl, m.get("outcome"), CLOSE_MARKS_BY, at))
-                    _save(gid, it, mirror=False)
+                    _writes.save(gid, it, mirror=False)
         except Exception as e:  # noqa: BLE001  — one item never stops the start
             if out and out[-1]["gid"] == gid:
                 out.pop()
@@ -440,7 +436,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
     """a live (open) item with no mover, no session in its needs and not on the owner's move used to be moved by whoever created it. It now gets the project's builder, else its -main
     agent, stored as its mover, never the creator (an item that waits has a post-wake mover, not a mover; one on his call is his). Once per start, before the server serves; idempotent (an item
     that has a mover stored, names a session in needs, waits or is his is not touched, so a store with none writes nothing); only metadata.mover changes, the clocks stay and nothing is posted to
-    GitHub (mirror off). The save is quiet (_NO_SETTLE): it records no hand-off and ends none, so a hand-off record that names another mover than the one given here is left for the repair pass
+    GitHub (mirror off). The save is quiet (the QUIET write context of `service/writes.py`): it records no hand-off and ends none, so a hand-off record that names another mover than the one given here is left for the repair pass
     (_handoff_repair_pass), which runs right after. An item whose project names no builder and no -main agent is left and counted in the stderr line.
     `apply=False` is the dry run: the same rows, nothing written. → [{gid, item, project, mover, creator}] in id order, the items given a mover (apply) or that would be; `mover` is "" for the ones no agent can be named for."""
     out: list[dict[str, Any]] = []
@@ -454,7 +450,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
         if head.get("status") != "open" or _model.norm_who(hm.get("mover")) or _needs_sessions(hm):
             continue
         try:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 it = _load(gid)
                 m = it.get("metadata") or {}
                 if it.get("status") != "open" or _model.norm_who(m.get("mover")) or _needs_sessions(m):
@@ -467,12 +463,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
                 out.append({"gid": gid, "item": _gh.shown(gid), "project": project, "mover": who, "creator": _session_label(str(m.get("owner") or "")) or str(m.get("owner") or "")})
                 if apply and who:
                     it.setdefault("metadata", {})["mover"] = who
-                    was_no_settle = getattr(_NO_SETTLE, "on", False)
-                    _NO_SETTLE.on = "quiet"
-                    try:
-                        _save(gid, it, mirror=False)
-                    finally:
-                        _NO_SETTLE.on = was_no_settle
+                    _writes.save(gid, it, mirror=False, ctx=_writes.QUIET)
         except Exception as e:  # noqa: BLE001  — one item never stops the start
             if out and out[-1]["gid"] == gid:
                 out.pop()
@@ -489,8 +480,8 @@ def _session_ids_pass() -> str:
     items' creator (metadata.owner), needs and observers to permanent session ids (session_ids.py), or put a past one back (the request names its undo file). The
     request is consumed first, so a crash never loops (a request met while the registry is unreadable is consumed too: ask again once it reads). It is
     safe because it runs before the server starts any writer thread or serves a request, so nothing else writes an item meanwhile (not because every
-    writer takes _ITEM_LOCK: _update does not); the pass still holds _ITEM_LOCK, which the threads that do take it respect. It writes the undo file (<state>/session-ids-undo-<UTC time>.json: gid, field, old, new) before it touches the first item, and saves each item through
-    _save. A field that no longer holds the value the plan saw (apply) or the value the migration wrote (rollback) is left and said so.
+    writer takes the item lock: _update does not); the pass still holds the item lock, which the threads that do take it respect. It writes the undo file (<state>/session-ids-undo-<UTC time>.json: gid, field, old, new) before it touches the first item, and saves each item through
+    `writes.save`. A field that no longer holds the value the plan saw (apply) or the value the migration wrote (rollback) is left and said so.
     Never fails the start: any error is logged and the start goes on. → the one-line summary logged ("" when there was no request)."""
     try:
         rp = _sid.request_path()
@@ -506,7 +497,7 @@ def _session_ids_pass() -> str:
             print(line, file=sys.stderr, flush=True)
             return line
         rep = _sid.new_report()
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             if kind == "apply":
                 if not _sr.available():
                     line = "session ids: apply requested but no session registry is readable: nothing done"
@@ -532,7 +523,7 @@ def _session_ids_pass() -> str:
                             else:
                                 rep["skipped"].append((g, f, "it changed since the plan was made: left"))
                         if moved:
-                            _save(gid, it)
+                            _writes.save(gid, it)
                             rep["written"] += 1
             else:
                 d = json.loads(Path(arg).read_text(encoding="utf-8"))
@@ -543,7 +534,7 @@ def _session_ids_pass() -> str:
                     except Exception:  # noqa: BLE001
                         rep["skipped"].append((gid, f, "no such item now")); continue
                     if _sid.apply_to(it, f, c["new"], c["old"]):
-                        _save(gid, it)
+                        _writes.save(gid, it)
                         rep["written"] += 1
                         rep["changed"].append((gid, f, c["new"], c["old"]))
                     else:
@@ -635,7 +626,7 @@ def _migrate_holds() -> list[str]:
             continue
         if not _legacy_hold(it):
             continue
-        _save(gid, it)
+        _writes.save(gid, it)
         out.append(gid)
         print(f"migrate: {gid} status on_hold → open + metadata.hold (wake {it['metadata'].get('wake') or 'none'}), clocks unchanged — {it.get('subject')}",
               file=sys.stderr, flush=True)
@@ -656,7 +647,7 @@ def _close_description_repair(apply: bool = False, days: float = 14.0, now: floa
         gid = row["gid"]
         row = {**row, "shown": _gh.shown(gid)}
         if apply:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 try:
                     with open(_path(gid), encoding="utf-8") as f:
                         it = json.load(f)
@@ -666,80 +657,13 @@ def _close_description_repair(apply: bool = False, days: float = 14.0, now: floa
                     meta = it.setdefault("metadata", {})
                     meta["outcome_text"] = row["before"].strip()
                     it["description"] = row["after"]
-                    was_no_settle = getattr(_NO_SETTLE, "on", False)
-                    _NO_SETTLE.on = "quiet"      # a repair writes the description and the outcome text and nothing else: no mover is settled, no hand-off record ended
-                    try:
-                        _save(gid, it, background=True)      # a body sync behind the live writes: nobody waits on a repair
-                    finally:
-                        _NO_SETTLE.on = was_no_settle
+                    _writes.save(gid, it, background=True, ctx=_writes.QUIET)      # a body sync behind the live writes: nobody waits on a repair; it writes the description and the outcome text and nothing else: no mover is settled, no hand-off record ended
                 except Exception as e:  # noqa: BLE001  — one item never stops the repair
                     print(f"close-repair: {gid} not repaired: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
                     skipped["failed"] = skipped.get("failed", 0) + 1
                     continue
         out.append(row)
     return out, skipped
-
-
-def _record_writer(item: dict[str, Any], writer: str, author: tuple[str, str] | None) -> None:
-    """Stamp the item with who is writing this revision (the store keeps every revision as a commit of the item's file, and until now none said who wrote it,
-    every commit being the server's). `written_by` is the name: the session's name as the fleet tool shows it, the owner's name for his answer on the board (`author`) or a
-    script's label; a server save (no writer: a wake, an idle mark, a migration) leaves the item untouched, so the hand-off clock reads the last real writer; `written_by_id` is the session's transcript or permanent id when the writer
-    is one (the owner's board answer: `board`), absent otherwise, so a later step compares by id and shows by name. A revision with no field predates this."""
-    if not author and not writer:      # the server's own bookkeeping (a wake, an idle mark, a check close, a migration): the item is left exactly as it is, the last real writer stays
-        return
-    if author:
-        who, wid = author[0], author[1]
-    else:
-        who, wid = _session_label(writer) or writer, (writer if _anc.is_id(writer) else "")
-    item["written_by"] = who
-    item["written_at"] = time.time()      # when this stamp was written; `updated` also moves for a server save that leaves the stamp alone, so "did this session write the item since T" reads this
-    if wid:
-        item["written_by_id"] = wid
-    else:
-        item.pop("written_by_id", None)
-
-
-def _audit_writer_names() -> set[str]:
-    """The names whose writes are an audit's own and never move an item's `activity` clock (activity.counts): the audit agent, the label the audit's cue is pushed as, the instance's own
-    name and the router's ruling name, and the migration's label."""
-    out = {NAME, _routing.AUTO_RULER, _mig.AUTHOR, "stackshot audit"}
-    try:
-        out.add(_cfg.audit_agent())
-    except Exception:  # noqa: BLE001  — a config that does not read leaves the fixed names
-        pass
-    return out
-
-
-def _stamp_activity(item: dict[str, Any], before: dict[str, Any] | None, writer: str, author: tuple[str, str] | None, kind: str, when: float | None = None) -> None:
-    """Move the item's `activity` clock when this save is real activity, seed it for an item that has none (activity.stamp). A failure here never fails the write."""
-    try:
-        k = _activity.kind_of(writer, author, kind)
-        who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
-        _activity.stamp(item, before, time.time(), k, who, _audit_writer_names(), when=when)
-    except Exception as e:  # noqa: BLE001  — the clock is groundwork for a later pass; a write is never refused for it
-        print(f"activity: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _stamp_progress(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
-    """Move the item's `progress` clock when this save is progress (a step marked done or dropped, a state change, a merge recorded), seed it for an item that has none (progress.stamp). Called
-    once the fields are final, after the phase is stamped. A save that is no one's write about the work (the same test as the activity clock's: a migration, an audit, the server's bookkeeping) moves the
-    clock only by a status or phase change. A failure here never fails the write."""
-    try:
-        who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
-        real = _activity.counts(_activity.kind_of(writer, author, kind), who, _audit_writer_names())
-        _progress.stamp(item, before, time.time(), real)
-    except Exception as e:  # noqa: BLE001  — the clock is groundwork for the hand-up of a stuck item; a write is never refused for it
-        print(f"progress: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _stamp_last_activity(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
-    """Record in `metadata.last_activity` what this save did that is visible activity (last_activity.stamp: the progress clock's own test, with the words for it); the events on a tied pull request come
-    through `_event_activity_tick`. It only records, with no publish of its own (the home page is kept for 30 s, then drawn again, and picks the record up); the On agent rows and the item page show it. A failure here never fails the write."""
-    try:
-        who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
-        _lastact.stamp(item, before, time.time(), _activity.counts(_activity.kind_of(writer, author, kind), who, _audit_writer_names()))
-    except Exception as e:  # noqa: BLE001  — groundwork for a later part; a write is never refused for it
-        print(f"last activity: {item.get('id')} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
 def _stamp_values(gid: str, item: dict[str, Any]) -> tuple[str, str]:
@@ -752,7 +676,7 @@ def _stamp_values(gid: str, item: dict[str, Any]) -> tuple[str, str]:
 
 def _phase_stamp(gid: str, item: dict[str, Any]) -> None:
     """Store the phase of an open item (metadata.phase: alive | waiting) and, for a waiting one, the kind of its wait (metadata.waits_on: time | anchor | item | relay | event), worked out from its fields by the one
-    reading the board shows today (model.view of model.derive, so a held or dated or wait_basis doing item is waiting), in the one place every save passes (_save). A closed item is dead and stores neither; an alive
+    reading the board shows today (model.view of model.derive, so a held or dated or wait_basis doing item is waiting), in the one place every save passes (`writes.save`). A closed item is dead and stores neither; an alive
     one stores no waits_on. Nothing else is written: the older fields are stored exactly as the write left them, and the stored values are what the readers take the decision from (model.view reads
     nothing else; the sweep keeps them true). A failure here never fails a write.
     The wait_kind is not added: a stored wait_kind hands an item to the watchers (watchers.watches) and, on a doing item, makes derive read a conflict, so adding one to an item that stores none would change what
@@ -775,69 +699,22 @@ def _phase_stamp(gid: str, item: dict[str, Any]) -> None:
         print(f"phase: {gid} not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def _save(gid: str, item: dict[str, Any], writer: str = "", note: str = "", author: tuple[str, str] | None = None, mirror: bool = True, background: bool = False, activity: str = "", activity_at: float | None = None) -> None:
-    """Write the item's file. `writer` is the session whose write this is (a name or id; '' = the server's own act: a wake,
-    a release, a migration). `note` is the server's own line on one of its passes that is an event on the item
-    (a wake, a release from hold, a recycle done) and `author` = (name, id) of a write that is neither a session's nor the server's
-    own pass: only the owner's answer on the board, `(OWNER, "board")`. Neither reaches GitHub since an earlier change (the issue mirror carries the subject, open or
-    closed and the description alone, with no comment); the arguments stay for the callers. `author` still stamps the revision (_record_writer). A session's write to an item settles an answer it was told of (_answer_ack). An update that names the mover, or only files, sets `_NO_SETTLE` around its save: the mover is left as the write has it (his step on the checklist is still made or dropped when the update names the mover; a filing save leaves it). `mirror` False: no job for the GitHub queue (the migration
-    pass writes an item that has no issue so: a "changed" job for such an item would create one). `background` True: a bulk repair's save, whose description sync
-    is queued behind every live job (ghsync.on_change) and stays inside the reserve a live write keeps. `activity` files the save under an activity kind (activity.py) when the writer
-    alone does not say: the confirm tool (`confirm`), an anchor event (`event`), a message written onto the item (`message`), the owner's comment on GitHub (`answer`); left blank a session's
-    write is a `write`, the owner's board answer an `answer`, and a save with no writer the server's own bookkeeping, which does not move the item's `activity` clock. `activity_at`: when the
-    activity happened, for one the server reads later (the owner's GitHub comment): the clock takes that time, never later than now and never earlier than it already read (activity.stamp)."""
-    _ro.guard("item write")                   # the lowest store-write layer; a warm standby copy never writes an item
-    writer = str(writer or "").strip()        # a blank writer is the server's own act, never an author-less `[author: unknown · -]`
-    p = _path(gid)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    before = None
-    if p.exists():                            # the version before, for the comment that says what changed; the For you list reads it too (a state change is an event)
-        try:
-            with open(p, encoding="utf-8") as f:
-                before = json.load(f)
-            _ip.read_through(before)              # read as `item` was: through the project's id, so a page that moved is no re-file of the item
-        except Exception:  # noqa: BLE001
-            before = None
-    if not getattr(_NO_SETTLE, "on", False):
-        _settle_mover_on_save(item, before)      # an item that waits on him has him as mover (the agent in then), and the mover he held goes back when it leaves his state: for every save, the server's own included
-        _owner_steps_on_save(item, before, writer, author)      # N2/N4/N5: an item that waits on him has his open step on its checklist, and one that stops waiting on him by a session's write loses it: every save, the server's own included
-    elif _NO_SETTLE.on == "named":
-        _owner_steps_on_save(item, before, writer, author)      # an update that names the mover leaves the mover as written, but his step still follows the stored fields (a step= with a named mover in one call must leave a step of his for his note to tick); only a write that merely files or confirms ("quiet") leaves the checklist alone
-    _record_writer(item, writer, author)     # every revision names who wrote it (the hand-off clock reads it)
-    _stamp_activity(item, before, writer, author, activity, activity_at)      # the activity clock: only a real write about the work moves it (an audit's write and a bare confirm do not)
-    _ask_stamp(item, before, writer)      # who wrote the ask and when (metadata.ask_rec), on a save that changes it
-    _handoff_on_save(gid, before, item, writer, author)      # step 2: the writer touches the item (a hand-off to it is taken); a new mover is a hand-off record
-    _handoff_his_over(gid, item, author)     # his hand-off ends with his answer, or when the item is no longer his to move
-    _handoff_follow(gid, before, item, writer, author)      # the record follows the mover whatever changed it: the server's own save, a script's, his answer; a stale open record ends
-    _phase_stamp(gid, item)      # last, once the fields are final: the phase the board shows the item as (alive or waiting) is stored beside the fields it is read from
-    _stamp_progress(item, before, writer, author, activity)      # the progress clock reads the phase just stored: only a step marked, a state change or a merge moves it
-    _stamp_last_activity(item, before, writer, author, activity)      # the last-activity record takes the same signals, with the words for them
-    _ip.stamp(item.get("metadata"))      # and the project's permanent id beside the page it is filed on (a key that names a project sets it)
-    _write_item(p, item)
-    try:
-        _foryou_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
-    except Exception as e:  # noqa: BLE001  — the list never fails a write
-        print(f"for-you: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    try:
-        _landed_on_save(gid, before, item, writer, bool(author and author[1] == "board"))
-    except Exception as e:  # noqa: BLE001  — the list never fails a write
-        print(f"landed: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    _search.touch(gid)                       # step 3: the search index takes the item a moment later, in its own thread (never in this write's time)
-    if item.get("status") == "completed":
-        try:
-            _handback_drop(gid, "the item closed")      # the keeper hears the close alone
-        except Exception as e:  # noqa: BLE001  — never fails a write
-            print(f"hand-back: {gid} held line not dropped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if mirror and _gh.enabled():
-        try:
-            _gh.on_change(gid, before, item, background=background)     # a job only when the subject, open or closed, or the description changed; no comment
-        except Exception as e:  # noqa: BLE001  — the mirror never fails a write
-            print(f"ghsync: {gid} not queued: {e}", file=sys.stderr, flush=True)
-    if writer:
-        try:
-            _answer_ack(gid, writer)
-        except Exception as e:  # noqa: BLE001  — the escalation's bookkeeping never fails a write
-            print(f"answer: {gid} ack not recorded: {e}", file=sys.stderr, flush=True)
+# The steps of a save whose code is still on this module (service/writes.py runs them in its order). Each is looked up when a save runs, so a suite that replaces one on this module reaches the save;
+# one leaves this table when the area that holds it moves under service/.
+_writes.install(_writes.Steps(
+    settle_mover=lambda item, before: _settle_mover_on_save(item, before),
+    owner_steps=lambda item, before, writer, author: _owner_steps_on_save(item, before, writer, author),
+    ask_stamp=lambda item, before, writer: _ask_stamp(item, before, writer),
+    handoff_on_save=lambda gid, before, item, writer, author: _handoff_on_save(gid, before, item, writer, author),
+    handoff_his_over=lambda gid, item, author, quiet: _handoff_his_over(gid, item, author, quiet),
+    handoff_follow=lambda gid, before, item, writer, author, quiet: _handoff_follow(gid, before, item, writer, author, quiet),
+    phase_stamp=lambda gid, item: _phase_stamp(gid, item),
+    foryou_on_save=lambda gid, before, item, writer, own: _foryou_on_save(gid, before, item, writer, own),
+    landed_on_save=lambda gid, before, item, writer, own: _landed_on_save(gid, before, item, writer, own),
+    search_touch=lambda gid: _search.touch(gid),
+    handback_drop=lambda gid, why: _handback_drop(gid, why),
+    answer_ack=lambda gid, writer: _answer_ack(gid, writer),
+))
 
 
 def _rekeyed(old: str, new: str, item: dict[str, Any]) -> None:
@@ -867,7 +744,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
     its needs are told one line each (_tell_comment). Reading only: needs, status and the page stay as they are. → False when
     no item has the id (the reader skips the comment); True when it is on the item (a second call for the same comment, after
     a restart between the save and the reader's mark, tells nobody again)."""
-    with _ITEM_LOCK:        # it reads, changes the hand-off record and saves, so it takes turns with an update and an answer
+    with _writes.ITEM_LOCK:        # it reads, changes the hand-off record and saves, so it takes turns with an update and an answer
         try:
             item = _load(gid)
         except ToolError:
@@ -887,7 +764,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
                 _ho.answered(item, time.time(), f"{OWNER} commented on GitHub", at=float(c.get("ts") or time.time()))
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        _save(gid, item, activity=_activity.ANSWER, activity_at=float(c.get("ts") or 0) or None)      # the owner's comment is an answer: real activity though the save is the server's, stamped at the comment's own time (a backlog read after a restart is not activity now)
+        _writes.save(gid, item, activity=_activity.ANSWER, activity_at=float(c.get("ts") or 0) or None)      # the owner's comment is an answer: real activity though the save is the server's, stamped at the comment's own time (a backlog read after a restart is not activity now)
     _publish()
     _tell_comment(gid, item, str(c.get("text") or ""))
     return True
@@ -1811,8 +1688,6 @@ def _model_apply(meta: dict[str, Any], status: str, setv: dict[str, str], drop: 
     meta.update(setv)
 
 
-_NO_SETTLE = threading.local()    # `.on` around a save: "named" (an update that names the mover itself: _save's mover settling leaves it as the write has it) or "quiet" (a write that only files, re-bullets or confirms: no mover settled and no hand-off record ended); False otherwise
-
 
 def _is_background(who: str, project: str) -> bool:
     """Is `who` a background agent of the project's hub? False for a front agent, the owner, a session no page lists and "" (the test the hand-off gate uses, model_guards.Ctx)."""
@@ -2479,7 +2354,7 @@ def _presence_here(who: str, now: float | None = None, idx: dict[str, Any] | Non
 
 
 def _stamped_at(v: dict[str, Any]) -> float:
-    """When a revision's writer stamp (`written_by`, `written_by_id`) was written: `written_at`, which only a write by a session or the owner sets (_record_writer); a revision from before
+    """When a revision's writer stamp (`written_by`, `written_by_id`) was written: `written_at`, which only a write by a session or the owner sets (`writes.record_writer`); a revision from before
     that field has `updated`. A server save with no writer moves `updated` and leaves the stamp (and `written_at`) as the last real writer left them, so it is never a touch."""
     try:
         return float(v.get("written_at") or v.get("updated") or 0)
@@ -2576,14 +2451,14 @@ def _front_board_line(gid: str, owner: str, told: bool, why: str, note: str) -> 
         label = _session_label(owner) or str(owner)
         text = _frontq.line(label, told, why, note)
         for g in [x for x in re.split(r"[,\s]+", str(gid or "")) if _GID.match(x)][:5]:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 it = _load(g)
                 if it.get("status") != "open":
                     continue
                 meta = dict(it.get("metadata") or {})
                 if _frontq.note(meta, time.time(), text):
                     it["metadata"] = meta
-                    _save(g, it, note="a front agent's notice: " + ("told on his next turn" if told else "not told"))
+                    _writes.save(g, it, note="a front agent's notice: " + ("told on his next turn" if told else "not told"))
                     out.append(g)
     except Exception as e:  # noqa: BLE001  — the line is a record; the gate's verdict stands without it
         print(f"front gate: {gid} board line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -3151,7 +3026,7 @@ def _tell_handback(gid: str, item: dict[str, Any], was_needs: list[str], writer:
 
 # A builder that hands an item back to its front agent keeper and then closes the same
 # item soon after woke the keeper twice. The hand-back line is now held for [board] handback_hold_seconds (default 180; 0 = sent at once, as before). A close of the item
-# inside the window (any close: _save sees it) drops the held line, so the keeper hears only "closed by …" (_tell_owner_close); a second hand-back
+# inside the window (any close: `writes.save` sees it) drops the held line, so the keeper hears only "closed by …" (_tell_owner_close); a second hand-back
 # of the same item inside the window replaces the first (one line, the latest `next`, the original due time). When the window ends the line is sent
 # if the item is still open and its needs still name the keeper alone; if the item moved on, it is dropped. The held lines are kept in
 # <state>/handback-held.json, so a restart loses none: the runner's fleet tick (every 60 s) sends what is due.
@@ -3440,7 +3315,7 @@ def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str
     prev = _holder(item)       # the session that held the item before the agent is named hears of it
     already = list(_needs_sessions(meta))
     _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
-    _save(gid, item, note=f"named {agent}: {why}")
+    _writes.save(gid, item, note=f"named {agent}: {why}")
     was = ", ".join(_session_label(s) for s in already)
     told = ""
     if tail:
@@ -3908,7 +3783,7 @@ from stackshot.projects.project_registry import ROLES, _registry, _roles_sync_sa
 from stackshot.web.publish import _publish, _publish_every, _publish_if_idle, _publish_now  # noqa: E402  — the debounced publish, its pace and its idle test; the timer is `stackshot.web.publish._PUB_TIMER` (web/publish.py)
 from stackshot.web.board_home import _BOARD_GEN_LOCK, _board_home_drop, _board_home_slot  # noqa: E402  — the kept home of the board's root, its drop and its slots (web/board_home.py)
 from stackshot.web import foryou_events as _fyev  # noqa: E402,F401  — the rows the For you list makes from a change of an item: whether he watches it, the row a save makes, the Landed record beside it, the due-date pass; a suite that stubs the publish for that pass sets it here (foryou_events.py)
-from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `_save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
+from stackshot.web.foryou_events import _FORYOU_FAILED, _FORYOU_LAST, _foryou_key, _foryou_on_save, _foryou_tick, _foryou_watched, _landed_on_save  # noqa: E402,F401  — kept on this module as well: `writes.save` and the close fallback call them, and the suites set `server._FORYOU_LAST[0]` and `server._foryou_tick` (foryou_events.py)
 from stackshot.web import project_form as _pform  # noqa: E402,F401  — the New session form's calls that make and list projects and register their agents, with the one lock they share and the page store they write through; a suite sets `PAGE_IO` on this module (project_form.py)
 from stackshot.web.project_form import _FORM_MACHINES, _FORM_SENDERS, _PROJECT_LOCK, _RENAME_NOT_FORM, _RENAMING, _RETIRE_NOT_FORM, _cfg_names, _form_call, _new_project, _page_io, _project_agent, _project_agent_mandate, _project_agent_rename_checks, _project_agent_rename_write, _project_agent_retire_checks, _project_agent_retire_write, _project_list, _projects_list  # noqa: E402,F401  — kept on this module as well: the client API's routes, the archive sweep and the hand-off read them, the two wrappers that stay here call the checks and the writes, and the suites read `server._form_call`, `server._PROJECT_LOCK` and `server._RENAMING` (project_form.py)
 _pages.LOCAL_ONLY = True   # the server answers the client API, so pages._api must never call it (a request to itself from the event loop stalls every request until its timeout)
@@ -4022,7 +3897,7 @@ def _ask_owed(meta: dict[str, Any]) -> str:
 # closes an item or answers for him, and it acts on the author's own plain sentence, nothing else a session writes. Everything it does is a line in History and in the reply. A board item the
 # ask waits on being dropped removes nothing: the author's next write to the item carries a line saying so (_ask_after_write).
 def _ask_stamp(item: dict[str, Any], before: dict[str, Any] | None, writer: str) -> None:
-    """_save's step: keep who wrote the ask and when (metadata.ask_rec). A failure here never fails a write."""
+    """`writes.save`'s step: keep who wrote the ask and when (metadata.ask_rec). A failure here never fails a write."""
     meta = item.get("metadata")
     if not isinstance(meta, dict):
         return
@@ -4093,7 +3968,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
     decision's hand-over leaves it), one History line says what and why, and metadata.ask_left keeps the ask and its options so that his late answer is kept as a comment (_answer). Only its
     author's own plain sentence (`why`) calls for it; `expect` = the ask the caller saw, so a write that changed it meanwhile leaves it alone. The server's own save: it
     answers nothing for him, writes no ask and closes nothing. → the reply line ("" when nothing was taken off)."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         try:
             item = _load(gid)
         except ToolError:
@@ -4118,7 +3993,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
         _stall.note(meta, now, f"ask taken off {OWNER}'s move by the server (its author said so: {_clip_line(why, 110)}): \"{_clip_line(ask, 90)}\"")
         item["metadata"] = meta
         item["updated"] = item["state_updated"] = item["confirmed"] = now
-        _save(gid, item, note="ask taken off his move")
+        _writes.save(gid, item, note="ask taken off his move")
     _publish()
     item["gid"] = gid
     to = _holder(item)
@@ -4195,7 +4070,7 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
     if not gid:
         return ""
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
         now_ask = _ask_stands(item)
         meta = item.get("metadata") or {}
@@ -4504,7 +4379,7 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 it["metadata"] = meta
                 it["updated"] = time.time()  # the item's own clock; the state clock and the confirm stay (a filing edit, like a recycle done)
                 what = f"backstop (wake {wake})"
-                _save(gid, it, note=f"{what}: still active, {_rmod.WHOSE[_rmod.needs_kind({'metadata': meta})]}")
+                _writes.save(gid, it, note=f"{what}: still active, {_rmod.WHOSE[_rmod.needs_kind({'metadata': meta})]}")
                 woke.append(gid)
                 print(f"wake: {gid} backstop (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
                 _wake_notify(gid, it, what, out=out, reminder=True)
@@ -4517,7 +4392,7 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
             it["updated"] = time.time()
             it["state_updated"] = it["updated"]
             what = f"woke (wake {wake})"
-            _save(gid, it, note=f"{what}: {_back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
+            _writes.save(gid, it, note=f"{what}: {_back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
             woke.append(gid)
             print(f"wake: {gid} back from hold (wake {wake}) — {it.get('subject')}", file=sys.stderr, flush=True)
             _wake_notify(gid, it, what, out=out)
@@ -4679,7 +4554,7 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
         left = _after_open(meta)
         if left:                  # another blocker is still open: the wait goes on, on the ones left (a dropped one is simply no longer waited on)
             it["metadata"] = meta; it["updated"] = time.time()
-            _save(g, it, note=f"{_gh.ref(gid)} closed as {outcome}" + (f", followed to {_gh.ref(rep)}" if rep_open else "")   # the History note: other items as #N
+            _writes.save(g, it, note=f"{_gh.ref(gid)} closed as {outcome}" + (f", followed to {_gh.ref(rep)}" if rep_open else "")   # the History note: other items as #N
                   + f"; still waits on {', '.join(_gh.ref(x) for x in left)}")
             print(f"after: {g} now waits on {', '.join(left)} ({gid} closed as {outcome}" + (f", followed to {rep}" if rep_open else "") + ")", file=sys.stderr, flush=True)
             continue
@@ -4696,7 +4571,7 @@ def _release_after(gid: str, outcome: str, superseded_by: str, writer: str, reas
         how = lambda sh: ("was dropped" if outcome == "dropped" else f"was superseded by {sh(rep or superseded_by)}, which is closed too" if outcome == "superseded"
                           else "closed (done)")   # sh: ghsync.shown for the notice a session reads, ghsync.ref for a History note (#N), str for the stderr line
         what = lambda sh: f"woke: {sh(gid)}, the last item it waited on, {how(sh)}" + (f" by {_session_label(writer)}" if writer else "")
-        _save(g, it, note=f"{what(_gh.ref)}: {_back_words(meta, _gh.ref)}"); released.append(g)   # phase 2 prep: the note is the History line, written by the server; other items as #N
+        _writes.save(g, it, note=f"{what(_gh.ref)}: {_back_words(meta, _gh.ref)}"); released.append(g)   # phase 2 prep: the note is the History line, written by the server; other items as #N
         print(f"after: {g} released, {gid} {how(str)} — {it.get('subject')}", file=sys.stderr, flush=True)
         _wake_notify(g, it, what(_gh.shown))
     for sid, rows in wout.items():
@@ -4832,7 +4707,6 @@ def _tell_wait_failed(gid: str, item: dict[str, Any], what: str, why: str, skip:
     return kid
 
 
-_ITEM_LOCK = threading.RLock()      # a session's update and a failed delivery's record read, change and save an item under it
 _UNDELIVERED_KEEP = 5       # the last this many failed deliveries stay on an item (metadata.undelivered); a state change drops them
 
 
@@ -4844,7 +4718,7 @@ def _record_undelivered(gids: str, to: str, tag: str, why: str) -> list[str]:
     notice). A state change by a session drops the record: the item has moved since. → the gids recorded."""
     out = []
     for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
-        with _ITEM_LOCK:                       # re-read under the lock: an update that landed meanwhile is kept
+        with _writes.ITEM_LOCK:                       # re-read under the lock: an update that landed meanwhile is kept
             try:
                 it = _load(g)
                 meta = dict(it.get("metadata") or {})
@@ -4852,7 +4726,7 @@ def _record_undelivered(gids: str, to: str, tag: str, why: str) -> list[str]:
                 rows.append({"to": _session_label(to) or str(to), "tag": tag, "at": time.time(), "why": _clip_line(why, 200)})
                 meta["undelivered"] = rows[-_UNDELIVERED_KEEP:]
                 it["metadata"] = meta
-                _save(g, it, note=f"a notice ({tag}) to {_session_label(to) or to} was not delivered: {_clip_line(why, 160)}")
+                _writes.save(g, it, note=f"a notice ({tag}) to {_session_label(to) or to} was not delivered: {_clip_line(why, 160)}")
                 out.append(g)
             except Exception as e:  # noqa: BLE001  — the record never fails the pass that told
                 print(f"{tag}: {g} undelivered notice not recorded: {e}", file=sys.stderr, flush=True)
@@ -5012,7 +4886,7 @@ def _anchor_release(project: str, n: dict[str, Any], by: str = "", only_watched:
         _state_end(meta, "parked")
         it["updated"] = it["state_updated"] = time.time()
         what = f"woke: a notice from {url}, the anchor it waited on, {how}"
-        _save(g, it, note=f"{what}: {_back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
+        _writes.save(g, it, note=f"{what}: {_back_words(meta, _gh.ref)}")   # phase 2 prep: the note is the History line, written by the server; another item as #N
         _wake_notify(g, it, what)
         print(f"anchor wait: {g} released ({project}, notice {n.get('id')})", file=sys.stderr, flush=True)
         released.append(g)
@@ -5158,14 +5032,14 @@ def _watch_failed(gid: str, now: float) -> None:
     for g in [g for g, t in _WATCH_BACKOFF.items() if t < now - _watch.BACKOFF]:      # the dict stays small
         _WATCH_BACKOFF.pop(g, None)
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             it = _load(gid)
             m = dict(it.get("metadata") or {})
             w = dict(m.get("watch") or {}) if isinstance(m.get("watch"), dict) else {}
             w["failed_at"] = now
             m["watch"] = w
             it["metadata"] = m
-            _save(gid, it)
+            _writes.save(gid, it)
     except Exception as e:  # noqa: BLE001
         print(f"watch: {gid} failure not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -5176,7 +5050,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
     is left alone. `recheck` (the clock's pass): the cause is read again under the lock and the item turns only if it is still due. → True when it turned; _WatchStuck when the wait is due and cannot turn.
     `detail["what"]` replaces the words of the arrival (the caller knows what closed or arrived)."""
     detail = detail or {}
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         it = _load(gid)
         if not _watch.watches(it):
             return False
@@ -5239,7 +5113,7 @@ def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str,
             it["confirmed"] = _rmod.confirmed_at(it)
         it["metadata"] = meta
         it["updated"] = it["state_updated"] = now
-        _save(gid, it, note=(f"woke: {what} → {_watch_label(mover)}" if mover != OWNER else f"the wait ended: {what}; asks {OWNER}: {meta.get('ask')}"))
+        _writes.save(gid, it, note=(f"woke: {what} → {_watch_label(mover)}" if mover != OWNER else f"the wait ended: {what}; asks {OWNER}: {meta.get('ask')}"))
         print(f"watch: {gid} {kind} wait over ({cause}) → {mover} — {it.get('subject')}", file=sys.stderr, flush=True)
         if mover != OWNER:
             out.setdefault(_session_id(mover), []).append((gid, it, what))
@@ -5301,7 +5175,7 @@ def _watch_item_closed(g: str, it: dict[str, Any], closed: str, outcome: str, re
     """`closed` just closed and the watched item `g` waits after it (_release_after). A superseded one is followed to its open replacement (the item then waits on that); the closed ones stay
     in `after` as the record of what it waited on. When no `after` item is open any more the wait is over: the item turns (a message is collected in `wout`). While paused it stays as it is
     and the next pass after the pause finds every `after` item closed. A watched wait of another kind keeps its `after` as it was. → True when it turned."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         it = _load(g)
         meta = dict(it.get("metadata") or {})
         if _watch.stored_kind(meta) != "item":
@@ -5310,7 +5184,7 @@ def _watch_item_closed(g: str, it: dict[str, Any], closed: str, outcome: str, re
         if rep and rep not in after and rep != g:
             meta["after"] = [rep if x == closed else x for x in after]
             it["metadata"] = meta; it["updated"] = time.time()
-            _save(g, it, note=f"{_gh.ref(closed)} was superseded, followed to {_gh.ref(rep)}")
+            _writes.save(g, it, note=f"{_gh.ref(closed)} was superseded, followed to {_gh.ref(rep)}")
         left = _after_open(meta)
         if left:
             print(f"after: {g} (watched) still waits on {', '.join(left)} ({closed} closed as {outcome})", file=sys.stderr, flush=True)
@@ -5371,7 +5245,7 @@ def _watch_floor(it: dict[str, Any]) -> float:
 def _watch_stamp(gid: str) -> None:
     """Give an anchor wait that has no `watch.set_at` one, now (a filing save: no clock moves): the minute pass does it on first sight, so a wait stored before this deploy is not woken by a
     notice from the days it already waited through."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         it = _load(gid)
         m = dict(it.get("metadata") or {})
         w = dict(m.get("watch") or {}) if isinstance(m.get("watch"), dict) else {}
@@ -5380,7 +5254,7 @@ def _watch_stamp(gid: str) -> None:
         w["set_at"] = time.time()
         m["watch"] = w
         it["metadata"] = m
-        _save(gid, it)
+        _writes.save(gid, it)
 
 
 def _watch_anchor_seen(project: str, url: str, since: float) -> str:
@@ -5870,6 +5744,8 @@ def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", 
     if not _anc.anchor_id(_anc.split_fragment(url)[0]):
         raise ToolError(f"Refused: wait_anchor {url!r} is not an anchor shape the anchors tool accepts, so it can never be on the list ({_ANCHOR_SHAPES}). "
                         "Set wait_anchor to a link of one of those shapes, add it to the anchors list, then set the wait")
+    if _anc.gmail_query_problem(url):
+        raise ToolError(f"Refused: wait_anchor {url!r} is a Gmail query the matcher cannot evaluate ({_anc.gmail_query_problem(url)}), so it can never be on the list. {_GMAIL_TERMS}")
     if creating:
         fix = (f"add it project-wide first: anchors(project=\"{project}\", add=[\"{url}\"]); or create the item without the wait, "
                f"then anchors(project=\"{project}\", add=[\"{url}\"], items=[<its id>]), then set the wait")
@@ -6051,7 +5927,7 @@ def _front_step_mark(gid: str, h: "str | None", now: float, mover: str = "") -> 
     under that mover is there already; with None: the clock is dropped. → whether the item was written."""
     from stackshot.audit import audit_checks as _ac  # noqa: PLC0415
     from stackshot.audit import front_step as _fs  # noqa: PLC0415
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict):
@@ -6067,7 +5943,7 @@ def _front_step_mark(gid: str, h: "str | None", now: float, mover: str = "") -> 
             if _fs.still_holds(gid, item, _load, mover, now):
                 return False
             meta[_fs.CLOCK] = {"step": h, "mover": mover, "at": now}
-        _save(gid, item)
+        _writes.save(gid, item)
         return True
 
 
@@ -6078,7 +5954,7 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
     dropped and the step's hash is kept in `metadata.stuck_moved`, so the step moves once. The server's own write (no writer). → {"moved": bool, "why": str, "line": the step's new first line}."""
     from stackshot.audit import audit_checks as _ac  # noqa: PLC0415
     from stackshot.audit import front_step as _fs  # noqa: PLC0415
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open":
@@ -6116,7 +5992,7 @@ def _front_step_move(gid: str, h: str, opener: str, mover: str, hours: float, no
         shown = f"{(now - at) / 3600:.1f}".rstrip("0").rstrip(".")
         _stall.note(meta, now, f"step moved from {_session_label(opener) or opener} to {name} after {shown} hours open with the stuck-elsewhere finding unanswered (reword it back to undo): "
                     f"\"{_clip_line(_steps.strip_opener(_steps.first_line(first)), 70)}\"")
-        _save(gid, item, note="front step moved to the mover")
+        _writes.save(gid, item, note="front step moved to the mover")
         return {"moved": True, "why": "", "line": _steps.first_line(new_text)}
 
 
@@ -6261,13 +6137,13 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     written: list[str] = []
     for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same):
         try:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 item = _load(gid)
                 line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
-                _save(gid, item, note="audit: hourly line")
+                _writes.save(gid, item, note="audit: hourly line")
             written.append(gid)
             print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
         except Exception as e:  # noqa: BLE001  — one item never stops the others
@@ -6533,13 +6409,13 @@ def _recovery_note(item: dict[str, Any], now: float, quiet: str, why: str, tried
 def _recovery_log(gid: str, quiet: str, why: str, tried: str, outcome: str, to: str, now: float | None = None, kind: str = "fleet") -> None:
     """Write the History line of a recovery request once its outcome is known: on a fresh read of the item under the lock (the send's thread may have recorded a failure on it meanwhile). Never raises."""
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
             if item.get("status") != "open":
                 return
             _recovery_note(item, time.time() if now is None else now, quiet, why, tried, outcome, to)
             role = _RECOVERY_ROLE.get(kind, _RECOVERY_ROLE["fleet"])
-            _save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
+            _writes.save(gid, item, note="nobody could take it: " + (f"{role} was asked" if outcome == "asked" else f"{role} could not be asked"))      # the server's own act: the state clock stays, and no page is owed
     except Exception as e:  # noqa: BLE001
         print(f"recovery: {gid} History line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
@@ -6903,7 +6779,7 @@ def _check_close(gid: str, it: dict[str, Any], check: str, now: float) -> None:
     meta["outcome"], meta["reason"] = "done", _fit(f"done check passed: {label}", _close_reason_max())     # kept to the reason limit a session's close is held to
     it["status"] = "completed"; it["metadata"] = meta
     it["updated"] = it["state_updated"] = it["confirmed"] = now
-    _save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity
+    _writes.save(gid, it, activity=_activity.EVENT)      # no writer, no note: the History line is the change itself ("completed · done — done check passed: …"); the event the check waited for is activity
     print(f"check: {gid} closed, {label} — {it.get('subject')}", file=sys.stderr, flush=True)
     try:
         _tell_check_closed(gid, it, label)
@@ -6953,7 +6829,7 @@ def _check_fail(gid: str, it: dict[str, Any], check: str, why: str, now: float) 
     meta["wait_failed"] = {"what": f"check {label}", "why": why, "at": now}
     it["metadata"] = meta
     it["updated"] = it["state_updated"] = now
-    _save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
+    _writes.save(gid, it, note=f"check failed: {label}: {why}; the item stays open")
     print(f"check: {gid} failed, {label}: {why} — {it.get('subject')}", file=sys.stderr, flush=True)
     _tell_wait_failed(gid, it, f"check {label}", why)
 
@@ -6964,7 +6840,7 @@ def _check_wait(gid: str, it: dict[str, Any], check: str) -> None:
     waits for the decision: the server's own note and the History. The pass calls this once per check (its record,
     items[gid]["met"], keeps the check text); the first pass after the decision is cleared closes the item as any passed check does."""
     label = _check_label(check)
-    _save(gid, it, note=f"done check met: {label}; the item needs {OWNER}'s decision, so it stays open and the server closes it once the decision is cleared", activity=_activity.EVENT)
+    _writes.save(gid, it, note=f"done check met: {label}; the item needs {OWNER}'s decision, so it stays open and the server closes it once the decision is cleared", activity=_activity.EVENT)
     print(f"check: {gid} met, {label}: waits for the decision before it closes — {it.get('subject')}", file=sys.stderr, flush=True)
 
 
@@ -7331,7 +7207,7 @@ def _main_agent_without(project: str, name: str) -> str:
 
 def _contact_set(gid: str, new: str, was: str, why: str) -> bool:
     """Store a contact on an open item as a filing write by the server (the migration author): no state, clock, hand-off or page moves. → True when written."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         it = _load(gid)
         meta = it.get("metadata") if isinstance(it.get("metadata"), dict) else {}
         if it.get("status") != "open" or str(meta.get("contact") or "") != was:
@@ -7341,7 +7217,7 @@ def _contact_set(gid: str, new: str, was: str, why: str) -> bool:
         else:
             meta.pop("contact", None)
         it["metadata"] = meta
-        _save(gid, it, note=why, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=False)
+        _writes.save(gid, it, note=why, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=False)
     return True
 
 
@@ -7492,7 +7368,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
     note = "released: " + _clip_line(re.sub(r"^\[release\]\s*", "", gist), 400)
     for g in dict.fromkeys(g for gs in _pr_items([pr]).values() for g in gs):
         try:
-            _save(g, _load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
+            _writes.save(g, _load(g), note=note)       # unchanged: the server's note in the History; no clock moves, no page owed
             commented.append(g)
         except Exception as e:  # noqa: BLE001  — a comment that fails never fails the log line
             print(f"release: {g} not commented: {e}", file=sys.stderr, flush=True)
@@ -8000,7 +7876,7 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
     builds from the step's own words, the wake as stored), made as the server's own save: no writer, so the item's author, its activity clock and a pending decision answer are untouched
     (the model is `_front_step_move`). Read again under the lock. Nothing for an item that is not open or that the owner moves, a wake the mover sent back, or one `_date_only_wait` does not park
     (the finding stands then). Never closes an item and writes no ask. → {"parked": bool, "wake": str, "why": str}."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or not _wt.wake_value(meta) or meta.get("hold"):
@@ -8027,7 +7903,7 @@ def _wake_park(gid: str, now: float) -> "dict[str, Any]":
         _state_apply(meta, "open", "", {}, frozenset({"wake", "hold", "wait_basis"}))
         _basis_put(meta, basis_ok, wake, NAME)
         _sf.record(meta, _sf.WAKE_PARK, wake, _wake_park_line(wake, basis_ok), now)
-        _save(gid, item, note="wake parked")
+        _writes.save(gid, item, note="wake parked")
         return {"parked": True, "wake": wake, "why": ""}
 
 
@@ -8054,7 +7930,7 @@ def _wait_end_facts() -> "_we.Facts":
 
     def takes(url: str) -> bool:
         try:
-            return bool(_anc.anchor_id(_anc.split_fragment(url)[0]))
+            return bool(_anc.anchor_id(_anc.split_fragment(url)[0])) and not _anc.gmail_query_problem(url)
         except Exception:  # noqa: BLE001
             return False
     return _we.Facts(machines={k: f for k, (f, _r) in boxes.items()}, online=frozenset(f.lower() for f, r in boxes.values() if r and _lv.puller_online(r)),
@@ -8086,7 +7962,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
     facts = _wait_end_facts()
     if op == "event":
         _evwait_preread("event", plan.get("phrase"))
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.get("metadata")
         if not isinstance(meta, dict) or item.get("status") != "open" or meta.get("hold") or _waits_decision(meta):
@@ -8168,7 +8044,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
                 what = f"wait_anchor={_clip_line(plan.get('url'), 50)}"
             _watch_on_write(gid, was, meta, {}, set(), "", False)       # the wait's stamp, and the event wait's gate (a wait for what has already happened is refused)
             _sf.record(meta, _sf.WAIT_END, tok, _we.history({**plan, "pos": gap.pos}, gap.line, gap.pos, back, _session_label(mover) or mover), now)
-            _save(gid, item, note="wait set")
+            _writes.save(gid, item, note="wait set")
             saved = True
         except ToolError as e:
             return no(str(e)[:200])
@@ -8410,7 +8286,7 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
 
 # ----------------------------------------------------------------------------- the hand-off machinery (handoff.py, cold_call.py)
 # An alive item has one mover. A write that changes the effective mover to a session other than the writer records a hand-off on the item (metadata.handoff, handoff.py): who it
-# went to, from whom, when, when it was delivered (a push that came back "delivered": _tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; _save
+# went to, from whom, when, when it was delivered (a push that came back "delivered": _tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; `writes.save`
 # reports to _handoff_on_save). A delivered hand-off not taken in [model] handoff_minutes, one whose recipient's turn ended with no write to it, and a mover whose pane is gone go
 # down section 5 (_handoff_tick): the project's background agent, the cold call, the sender, then a recovery request to the fleet's builder; a background agent that is the mover is reminded once first (handoff.remind), and an anchor scoped to the item counts as taken. [model] handoff = false turns all of it off; [model] pause = true holds the
 # tick, and what is due fires in one batch, one message per recipient, when it is turned off again. The send-time guard (_gate_handoff) refuses a hand-off to a session with no pane.
@@ -8635,7 +8511,7 @@ def _handoff_minutes() -> float:
 
 # ---- recording: every real write
 def _handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None) -> None:
-    """Called by _save right after the writer is stamped: the writer touches the item (a hand-off to it is taken), and a change of the effective mover to someone else makes a
+    """Called by `writes.save` right after the writer is stamped: the writer touches the item (a hand-off to it is taken), and a change of the effective mover to someone else makes a
     hand-off record. Not for the server's own saves (no writer). Never fails a write."""
     if not _handoff_on() or author or not writer or _ho.is_script(writer):
         return      # the server's own save; the owner's board answer (author: _answer_tick covers it); a script's write (cap-words): no session's, so no hand-off
@@ -8654,13 +8530,13 @@ def _handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, An
         print(f"handoff: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def _handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | None = None) -> bool:
+def _handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | None = None, quiet: bool = False) -> bool:
     """a hand-off to the owner is taken by no write of his own (he writes through the board, whose save carries `author`, or a session relays his answer), so it read "handed to the owner,
-    not yet taken" after he had answered. Called by _save for every save, right after the hand-off record of the write: his answer on the board ends it, and so does any save that leaves the item
+    not yet taken" after he had answered. Called by `writes.save` for every save, right after the hand-off record of the write: his answer on the board ends it, and so does any save that leaves the item
     not his to move (the mover is no longer he, or the item waits, or is closed): the record stays as history, taken then, with the reason. A save that just handed the item to him
     (a new record, or he still the mover) leaves it. Never fails a write. → True when it ended one."""
     try:
-        if not _handoff_on() or _ho.pending_his(item) is None or (getattr(_NO_SETTLE, "on", False) == "quiet" and not author):      # a write that only files or only confirms ends nothing
+        if not _handoff_on() or _ho.pending_his(item) is None or (quiet and not author):      # a write that only files or only confirms ends nothing
             return False
         if author and author[1] == "board":
             why = f"{OWNER} answered on the board"
@@ -8675,8 +8551,8 @@ def _handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | 
         return False
 
 
-def _handoff_follow(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None) -> str:
-    """Called by _save for every save, after the session's own hand-off record (_handoff_on_save) and the owner's (_handoff_his_over): the hand-off record follows the item's effective
+def _handoff_follow(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None, quiet: bool = False) -> str:
+    """Called by `writes.save` for every save, after the session's own hand-off record (_handoff_on_save) and the owner's (_handoff_his_over): the hand-off record follows the item's effective
     mover, whatever path changed it. The invariant: an item has no OPEN record (nobody has taken it) whose `to` differs from its mover, so a record never names a mover the item left.
     A save of the server's own (no writer, no author: a wake that makes the post-wake mover the mover, an event wake, the stall pass, a release of `after`) that changes the mover to
     someone else makes a new record to the new mover, from the server. The record is `no_clock` (the 10-minute take clock runs only on a session's hand-off; a woken mover is timed by the
@@ -8686,7 +8562,7 @@ def _handoff_follow(gid: str, before: dict[str, Any] | None, item: dict[str, Any
     a wait that leaves no mover and a session's write that makes itself the mover hand nothing over: they end a record that names the mover the item left. A write that only files or
     confirms ends nothing.
     Never fails a write. → "recorded" | "ended" | ""."""
-    if not _handoff_on() or (getattr(_NO_SETTLE, "on", False) == "quiet" and not author):
+    if not _handoff_on() or (quiet and not author):
         return ""
     try:
         derive = lambda it: _ho_derive({**it, "gid": gid})
@@ -8737,7 +8613,7 @@ def _handoff_repair_one(gid: str, p: Any, apply: bool, now: float) -> dict[str, 
         return None
     if not isinstance(it, dict) or _ho.record_of(it) is None:
         return None
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         if apply:      # the item as stored now, under the lock
             with open(p, encoding="utf-8") as f:
                 it = json.load(f)
@@ -8754,12 +8630,7 @@ def _handoff_repair_one(gid: str, p: Any, apply: bool, now: float) -> dict[str, 
                "delivered": bool(r.get("delivered_at")), "recovery": bool(r.get("recovery_at")), "mover": mover, "ended": ""}
         if apply:
             row["ended"] = _ho.follow(it, "", mover, now, same=_ho_same, label=_session_label, ident=_ho_ident)
-            was_no_settle = getattr(_NO_SETTLE, "on", False)
-            _NO_SETTLE.on = "quiet"      # a repair writes the history of the record and nothing else: no mover is settled, no other record ended
-            try:
-                _save(gid, it, note="hand-off record repaired: it named a mover the item no longer has", mirror=False)
-            finally:
-                _NO_SETTLE.on = was_no_settle
+            _writes.save(gid, it, note="hand-off record repaired: it named a mover the item no longer has", mirror=False, ctx=_writes.QUIET)      # a repair writes the history of the record and nothing else: no mover is settled, no other record ended
         return row
 
 
@@ -8885,7 +8756,7 @@ def _handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
     for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
         try:
             act = ""
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 it = _load(g)
                 r = _ho.record_of(it)
                 if it.get("status") != "open" or not r or r.get("recovery_at"):
@@ -8901,7 +8772,7 @@ def _handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
                     act = _ho.failed(it, owner, why or outcome, now, _ho_same)
                     changed = bool(act)
                 if changed:
-                    _save(g, it)
+                    _writes.save(g, it)
             if act == "retry":
                 rec = _ho.record_of(it) or {}
                 _tell_woken(g, owner, _handoff_text(g, it, rec, again=bool(rec.get("resent_at"))), tag="handoff")      # a notice sent again stays worded as one when its push is tried once more
@@ -9044,7 +8915,7 @@ def _handoff_fallback(gid: str, why: str, cold_ok: bool = True, cold_at: float |
     """An item that has a hand-off record and cannot go on (a push failed twice, the cold call failed): the next step of section 5 now, not at the next pass. Not when its mover has
     taken it since, or (`cold_at`: the cold call's own stamp) when the record is no longer the one that call was asked about."""
     now = time.time()
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         r = _ho.record_of(item)
         if item.get("status") != "open" or not r or r.get("taken_at") or r.get("recovery_at"):
@@ -9094,7 +8965,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
     cold_started = False
     for st in steps:
         try:
-            with _ITEM_LOCK:
+            with _writes.ITEM_LOCK:
                 item = _load(st.gid)
                 if item.get("status") != "open":
                     continue
@@ -9115,7 +8986,7 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
                     nobuilder = target[2]      # a front-only project has no builder to have tried, whoever is asked
                     tried = (("the stall pass sent the notice again and asked a fresh session who takes it" if nobuilder else "the stall pass sent the notice again, asked a fresh session who takes it and tried the project's builder") if r.get("stall")
                              else "the hand-off ladder tried " + ("a fresh session's call and the sender" if nobuilder else "the project's builder, a fresh session's call and the sender"))
-                    _save(st.gid, item, note=f"nobody could take it: recovery requested ({st.why})")      # the mark (recovery_at) is written BEFORE the send, on purpose: a failed send is not retried every pass (metadata.undelivered records it, the audit's unmoved digest is the backstop); the send writes the History line
+                    _writes.save(st.gid, item, note=f"nobody could take it: recovery requested ({st.why})")      # the mark (recovery_at) is written BEFORE the send, on purpose: a failed send is not retried every pass (metadata.undelivered records it, the audit's unmoved digest is the backstop); the send writes the History line
                     to_recover.append((st.gid, dict(item), quiet, st.why, tried, target))
                 elif st.kind == "enter":
                     # the one ladder takes the item (ladder.py): its entry is written now, the first rung is taken below once the item lock is let go
@@ -9128,14 +8999,14 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
                     r = _ho.resend(item, st, now, _cfg.tz(), env.started(st.frm))
                     if r is None:
                         continue
-                    _save(st.gid, item, note=f"{st.why}: the notice was sent again, and the clock restarts from it")
+                    _writes.save(st.gid, item, note=f"{st.why}: the notice was sent again, and the clock restarts from it")
                     to_again.append((st.gid, st.frm, _handoff_text(st.gid, item, r, again=True)))
                 elif st.kind == "remind":
                     # a background agent that did not take it is reminded once, ahead of the ladder; the clock restarts from the reminder's delivery
                     r = _ho.remind(item, st, now)
                     if r is None or not st.to:
                         continue
-                    _save(st.gid, item, note=f"{st.why}: its mover was reminded, and the clock restarts from the reminder")
+                    _writes.save(st.gid, item, note=f"{st.why}: its mover was reminded, and the clock restarts from the reminder")
                     to_remind.append((st.gid, st.to, f"{_gh.shown(st.gid)} {item.get('subject') or ''} ({(item.get('metadata') or {}).get('project') or ''}): handed to you by {r.get('from') or 'a session'}",
                                       _handoff_text(st.gid, item, r)))
                 elif st.kind == "cold":
@@ -9144,13 +9015,13 @@ def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env:
                         continue               # one cold call at a time board-wide, one started per pass: this item is planned again at the next tick
                     cold_started = True
                     r = _ho.mark_cold(item, st, now, _ho_same, _session_label)
-                    _save(st.gid, item, note=f"{st.why}: the cold call was asked")
+                    _writes.save(st.gid, item, note=f"{st.why}: the cold call was asked")
                     th = threading.Thread(target=_handoff_cold, args=(st.gid, now), daemon=True)
                     _HO_COLD_THREADS.append(th)
                     th.start()
                 else:
                     _handoff_write_move(item, st, now)
-                    _save(st.gid, item, note=f"handed to {_session_label(st.to)}: {st.why}")
+                    _writes.save(st.gid, item, note=f"handed to {_session_label(st.to)}: {st.why}")
                     subject, project = str(item.get("subject") or ""), str((item.get("metadata") or {}).get("project") or "")
                     to_new.append((st.to, st.gid, f"{_gh.shown(st.gid)} {subject} ({project}): {st.why}" + ("; it comes back to you as its sender" if st.via == "return" else "")))
                     if st.sender and not _ho_same(st.sender, st.to):
@@ -9238,7 +9109,7 @@ def _handoff_cold(gid: str, cold_at: float) -> None:
     The stall ladder's cold call (the record carries `stall`) never asks <owner>: it is offered hand_to and close only (cold_call.STALL_RUBRIC), an ask_owner, a none, an answer
     it could not give or a write the item refused is never written, and `_stall_cold_no_taker` sends the item on to the builder. Never raises."""
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
         meta = item.get("metadata") or {}
         rec0 = _ho.record_of(item) or {}
@@ -9260,7 +9131,7 @@ def _handoff_cold(gid: str, cold_at: float) -> None:
         if ans is not None:
             ans, note = _cold.validate(ans, {a["name"] for a in agents if a.get("live")}, _ho_same, exclude,
                                        desc_limits=_description_limits() if _bullets_on() else None, gate=(lambda t: _gate_description(t, "outcome_text")) if _bullets_on() else None, stall=stall)
-        with _ITEM_LOCK:               # the check and the write are one step: nothing writes the item between them
+        with _writes.ITEM_LOCK:               # the check and the write are one step: nothing writes the item between them
             cur = _load(gid)
             r = _ho.record_of(cur)
             why = ""
@@ -9327,7 +9198,7 @@ def _stall_cold_kept(gid: str, cold_at: float, mover: str, reason: str) -> None:
     try:
         now = time.time()
         why = _clip_line(reason, 140)
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
             r = _ho.record_of(item)
             if item.get("status") != "open" or not r or not isinstance(r.get("cold"), dict) or r["cold"].get("at") != cold_at:
@@ -9335,7 +9206,7 @@ def _stall_cold_kept(gid: str, cold_at: float, mover: str, reason: str) -> None:
             _ho.end_cold(item, "done", now, "the cold call named its mover as the one to keep it" + (f": {why}" if why else ""))
             meta = item.setdefault("metadata", {})
             _stall.note(meta, now, "the cold call named its mover as the one to keep it" + (f" ({why})" if why else "") + ": left with it")
-            _save(gid, item, note="stall: the cold call kept it with its mover")
+            _writes.save(gid, item, note="stall: the cold call kept it with its mover")
             ver, conf = _stall_ver(item), _stall_confirm(item, mover)
             untaken = float(r.get("at") or 0) if r and not r.get("taken_at") else None
             project = str(meta.get("project") or "")
@@ -9364,14 +9235,14 @@ def _stall_cold_no_taker(gid: str, cold_at: float, why: str, failed: bool) -> No
     try:
         now = time.time()
         reason = _clip_line(why, 120)
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
             r = _ho.record_of(item)
             if item.get("status") != "open" or not r or not isinstance(r.get("cold"), dict) or r["cold"].get("at") != cold_at:
                 return
             _ho.end_cold(item, "failed" if failed else "done", now, "the cold call named no taker" + (f": {reason}" if reason else ""))
             _stall.note(item.setdefault("metadata", {}), now, "the cold call named no taker" + (f" ({reason})" if reason else "") + ": to the builder")
-            _save(gid, item, note="stall: the cold call named no taker")
+            _writes.save(gid, item, note="stall: the cold call named no taker")
         print(f"stall: {gid} cold call named no taker: to the builder", file=sys.stderr, flush=True)
         _handoff_fallback(gid, "the cold call named no taker", cold_ok=False, cold_at=cold_at)
     except Exception as e:  # noqa: BLE001
@@ -9402,7 +9273,7 @@ def _handoff_recover(gid: str, why: str) -> None:
     record; not when the item was taken since, or the request was made already. Never raises."""
     try:
         now = time.time()
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
             r = _ho.record_of(item)
             if item.get("status") != "open" or not r or r.get("taken_at") or r.get("recovery_at"):
@@ -9415,11 +9286,11 @@ def _handoff_recover(gid: str, why: str) -> None:
 
 def _handoff_cold_end(gid: str, state: str, text: str, cold_at: float | None = None) -> None:
     """The cold call's outcome on its record. With `cold_at` (the call's own stamp) only the record the call was asked about is written, as _handoff_fallback does."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if _ho.cold_target(item, cold_at) is not None:
             _ho.end_cold(item, state, time.time(), text, cold_at)
-            _save(gid, item, note=text if state == "failed" else "")
+            _writes.save(gid, item, note=text if state == "failed" else "")
 
 
 # ---- display
@@ -9697,7 +9568,7 @@ def _stall_record(item: dict[str, Any], who: str, now: float) -> dict[str, Any]:
 
 def _stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tuple[str, str, str]]) -> str:
     """Step 1: the notice goes to the mover once more (batched per recipient by the tick)."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return ""
@@ -9706,7 +9577,7 @@ def _stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tu
         # alone; the cold call and the builder, steps 2 and 3, are what cover its item.
         front = _front_keeper(who, str(meta.get("project") or ""))[0]
         _stall.note(meta, now, f"{_session_label(who)} had no turn running for {minutes:g} min" + (": no notice is sent to a front agent, the next step follows" if front else ": the notice was sent to it again"))
-        _save(gid, item, note="stall: " + ("no notice to a front agent" if front else "the notice was sent again"))
+        _writes.save(gid, item, note="stall: " + ("no notice to a front agent" if front else "the notice was sent again"))
         nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
         if not front:
             lines.append((who, gid, f"{_gh.shown(gid)}: {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")))
@@ -9717,7 +9588,7 @@ def _stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tu
 def _stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
     """Step 2: the hand-off's cold call, through the machinery that already handles its answer (_handoff_cold). The record carries `stall`, so the call never asks <owner>: with no taker
     named the item goes on to the builder (step 3) at once."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return ""
@@ -9728,7 +9599,7 @@ def _stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
         _stall_record(item, who, now)
         _ho.mark_cold(item, _ho.Step("cold", gid, why, who), now, _ho_same, _session_label)
         _stall.note(item["metadata"], now, f"{why}: the cold call was asked who takes it")
-        _save(gid, item, note="stall: the cold call was asked")
+        _writes.save(gid, item, note="stall: the cold call was asked")
         th = threading.Thread(target=_handoff_cold, args=(gid, now), daemon=True)
         _HO_COLD_THREADS.append(th)
         th.start()
@@ -9739,7 +9610,7 @@ def _stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
 def _stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
     """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff_exec`, a `recover` step), or, for a front-only project
     (anchors.front_only: no background agent on its map), the project's -main agent (`_recovery_target`)."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return ""
@@ -9748,7 +9619,7 @@ def _stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
         st = _ho.next_step({**item, "gid": gid}, r, who, why, _handoff_env(now), gid=gid, allow_return=False, cold_ok=False)
         if st.kind == "move":
             _stall.note(item["metadata"], now, f"{why}: handed to {_session_label(st.to)}, the project's builder")
-        _save(gid, item, note="stall: " + ("handed to the builder" if st.kind == "move" else "nobody can take it: recovery is requested"))      # a `recover` step writes its own History line
+        _writes.save(gid, item, note="stall: " + ("handed to the builder" if st.kind == "move" else "nobody can take it: recovery is requested"))      # a `recover` step writes its own History line
     done = _handoff_exec([st], now, verify=False)
     print(f"stall: {gid} {who} no turn: " + (f"handed to {st.to}" if st.kind == "move" else f"nobody can take it ({st.why}); recovery requested"), file=sys.stderr, flush=True)
     return "builder" if done else ""
@@ -9779,7 +9650,7 @@ def _alive_path() -> Path:
 def _alive_load() -> dict[str, float]:
     """When the stall pass first saw each open item due (not waiting, not the owner's move) in its current stretch of being alive: {gid: epoch}. The hand-up of an item that is not moving counts from the
     later of its last progress and this (`progress.due`), so an item parked for a day and then alive again is not handed up for the park. The pass keeps it: the phase sweep writes the stored phase around
-    `_save` and writes the two keys only, so it cannot restart the progress clock itself."""
+    `writes.save` and writes the two keys only, so it cannot restart the progress clock itself."""
     try:
         with open(_alive_path(), encoding="utf-8") as f:
             d = json.load(f)
@@ -9817,13 +9688,13 @@ def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> boo
     is for this silence alone (`act`, the item's activity clock now): activity ends it. → whether an entry was written (False: the item is not open, not the mover's, not due, or already on the ladder
     for this silence). A History line says it; nothing is sent here."""
     from stackshot.audit import silence as _silence
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
             return False
         clock = _silence.clock(item, who)
         _stall.note(item.setdefault("metadata", {}), now, f"{_session_label(who)} was asked for news ({_clip_line(detail, 120) or 'no activity'}): the ladder goes on from here")
-        _save(gid, item, note="ladder: asked for news")
+        _writes.save(gid, item, note="ladder: asked for news")
         ver, conf = _stall_ver(item), _stall_confirm(item, who)
     with _STALL_LOCK:
         cur = _stall_load()
@@ -9841,7 +9712,7 @@ def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
     not described: a background agent's is busy or showing a background shell nearly always, so the notice says what the item shows (nothing written for N minutes, N from its last write) and no more.
     → whether the rung was taken."""
     from stackshot.audit import silence as _silence
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return False
@@ -9849,7 +9720,7 @@ def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
         front = _front_keeper(who, str(meta.get("project") or ""))[0]
         span = _silence.minutes(now - _silence.clock(item, who))
         _stall.note(meta, now, f"{_session_label(who)}: nothing was written to it for {span}" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
-        _save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
+        _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
         subject = str(item.get("subject") or "")
     if not front:
         tail = "" if _stall_background(who) else (f" If nothing is written to it and your pane stays quiet for {minutes:g} more minutes, a fresh session is asked who takes it.")
@@ -9885,7 +9756,7 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
     With `rows` (the stall tick gives it) the notice is not sent here: the item's (-main agent, gid, line) is added to `rows` and the tick sends ONE notice per -main agent for all its items due in the pass
     (`_ladder_main_tell`, as the resend path batches with `_ho.batch`), `info` keeping what a lone item's wording needs; without it the notice for this one item goes at once. → the rung taken."""
     from stackshot.audit import silence as _silence
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
             return ""
@@ -9901,7 +9772,7 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
         data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
         meta[_PROGRESS_UP] = now      # one hand-up per stretch: the no-progress path (`_ladder_stuck`) leaves the item alone for its interval after this notice too
         _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else _ladder_no_main(gid, who)))
-        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
+        _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
     if to:
         line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no write since {since} ({span})" + (f", told before {told}" if told else "")
         if rows is not None and info is not None:
@@ -9947,7 +9818,7 @@ def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, st
     from stackshot.audit import silence as _silence
     hours = _ladder_main_hours()
     behind = _queued_behind(gid, who, now)
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.setdefault("metadata", {})
         if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
@@ -9963,7 +9834,7 @@ def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, st
         data = {"kind": "progress", "subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told, "behind": behind}
         meta[_PROGRESS_UP] = now
         _stall.note(meta, now, f"{_session_label(who)} has not moved it for {span} (no step done or dropped, no state change, no merge): " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else _ladder_no_main(gid, who)))
-        _save(gid, item, note="ladder: " + (f"{_session_label(to)} told that it is not moving" if to else "it is not moving, " + ("its mover is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
+        _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that it is not moving" if to else "it is not moving, " + ("its mover is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
     if to:
         line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no progress since {since} ({span}), queued behind {behind}" + (f", told before {told}" if told else "")
         rows.append((to, gid, line)); info[gid] = data
@@ -10034,7 +9905,7 @@ def _ladder_enter(item: dict[str, Any], st: "_ho.Step", now: float) -> dict[str,
 
 def _ladder_ask(gid: str, who: str, now: float, act: str) -> str:
     """The ask (and the look) of an item the hand-off audit brought: the hand-off's own notice goes to the mover once more, as it was worded (a front agent gets the History line alone: no item notice wakes one)."""
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         r = _ho.record_of(item)
         if item.get("status") != "open" or not r or not _ho_same(_stall_mover(gid, item), who):
@@ -10042,7 +9913,7 @@ def _ladder_ask(gid: str, who: str, now: float, act: str) -> str:
         meta = item.setdefault("metadata", {})
         front = _front_keeper(who, str(meta.get("project") or ""))[0]
         _stall.note(meta, now, f"{_session_label(who)} has not taken it" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
-        _save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
+        _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
         text = "" if front else _handoff_text(gid, item, r)
     if text:
         _tell_woken(gid, _session_id(who) or who, text, tag="handoff")
@@ -11337,7 +11208,7 @@ def _create_item(
     item["state_updated"] = item["updated"]  # state clock: only a state change moves it (the page-owed badge reads it)
     item["confirmed"] = item["updated"]      # last confirmed true: a create, a state change or the confirm tool
     writer = by or owner
-    _save(gid, item, writer=writer)
+    _writes.save(gid, item, writer=writer)
     if request_id:
         _remember_request(request_id, gid)
     stew, role = _pilot_charge(meta.get("project", ""), writer)
@@ -11815,16 +11686,16 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     comments, via github with the comment's id and url; no session's tool writes there), and the server copies the quote from that entry. The entry must
     read as a park (waiting.park_words: "Approve" or "sent" is his but no park), must stand behind the current wake (waiting.entry_pairs: given since the move that set it, or the last thing before it, no state move between them by the store's git history, else within 24 hours), the item must be open with a wake, and `quote`, when the caller sends
     it, must be the entry's text (a stale pick is refused). `commit` (the store commit that first held the entry) is kept as provenance. The record
-    is a filing edit made under the item lock through _save: no clock moves, History gets one line (the store's git, render.Board.item_log). → {"item", "wake", "quote", "source", "action": set | already}; refusals raise ToolError."""
+    is a filing edit made under the item lock through `writes.save`: no clock moves, History gets one line (the store's git, render.Board.item_log). → {"item", "wake", "quote", "source", "action": set | already}; refusals raise ToolError."""
     by = _script_sender(spec, machine)
     gid = _norm_id(str(spec.get("item") or ""))
     # The cheap gates first, on a read taken before the lock: the entry must be his and read as a park. Only then the store's history is read (a
-    # subprocess that can take seconds, never while holding _ITEM_LOCK, which every other write waits on); the result is checked again under the lock.
+    # subprocess that can take seconds, never while holding the item lock, which every other write waits on); the result is checked again under the lock.
     item0 = _load(gid)
     wake0, hit0 = _cap_words_entry(gid, spec, item0)
     read_prior = not _wt.entry_current(item0, hit0.get("ts"), time.time())
     prior = _wt.prior_state_ts(gid, wake0) if read_prior else None
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = dict(item.get("metadata") or {})
         wake, hit = _cap_words_entry(gid, spec, item)
@@ -11854,7 +11725,7 @@ def _record_cap_words(spec: dict[str, Any], machine: str) -> dict[str, Any]:
         item["updated"] = time.time()          # the item's own clock; the state clock and the confirm stay (a filing edit): the cap runs from the last move, and his words lift it
         # Bookkeeping, not activity (no kind, no writer): this copies words the store already holds from his entry in metadata.answers, which moved the clock when it arrived; a script's filing edit that
         # moved no clock, so counting it would make an old answer read as new work whenever the job runs.
-        _save(gid, item, note=f"his words recorded for the wake {wake}: {_no_ping(_clip_line(text, 200))} ({_no_ping(src)}), by {_no_ping(by)}")
+        _writes.save(gid, item, note=f"his words recorded for the wake {wake}: {_no_ping(_clip_line(text, 200))} ({_no_ping(src)}), by {_no_ping(by)}")
         _publish()
     return {"item": _gh.shown(gid), "wake": wake, "quote": text, "source": src, "action": "set"}
 
@@ -11877,7 +11748,7 @@ def _rebullet_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     old, new = spec.get("old"), spec.get("description")
     if not isinstance(old, str) or not isinstance(new, str) or not new.strip():
         raise ToolError("Refused: old (the description the rewrite was made from) and description (the rewrite) are required strings")
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         item = _load(gid)
         if item.get("status") != "open":
             raise ToolError(f"Refused: {_gh.shown(gid)} is not open; a closed item is left alone")
@@ -11907,7 +11778,7 @@ def _state_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
 
 # ----------------------------------------------------------------------------- the migration onto the item model (migration.py, tools/migrate_model.py)
 # tools/migrate_model.py PLANS (the items, the guards' residue, the cold call's reads); this is where the plan is APPLIED, so the server stays the one writer: POST /client/migrate, the
-# machine token's route like /client/state. Each planned write is a filing edit made under the item lock through _save, author `migration`, so the History,
+# machine token's route like /client/state. Each planned write is a filing edit made under the item lock through `writes.save`, author `migration`, so the History,
 # the search and the For you list update as for any write, and no clock moves. It is not `_update`: it records no hand-off (the author is a script's), tells nobody (no needs notice, no
 # page debt) and sends nothing. While the pass runs the server holds the board-wide pause itself (watchers.hold: in this process, renewed by every batch, gone after a few minutes if the
 # script dies), so no wake fires, no wait ends, no hand-off clock runs and the checks and the For you ticks stand still; `end` lifts it and runs one wake pass, so
@@ -11972,7 +11843,7 @@ def _migrate_backfill(gid: str, shown: str, w: dict[str, Any]) -> dict[str, Any]
     if not (isinstance(sig, list) and len(sig) == 2 and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in sig)):
         return _migrate_refuse(shown, "expect_sig is required: [how many answers the item held, 0] when it was planned, so an answer made since is never overwritten")
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
             if item.get("status") != "open":
                 return _migrate_refuse(shown, f"the item is {item.get('status')}: a closed item is left as it is")
@@ -11986,7 +11857,7 @@ def _migrate_backfill(gid: str, shown: str, w: dict[str, Any]) -> dict[str, Any]
                 return {"item": shown, "action": "already", "why": ""}
             item["metadata"] = meta
             note = f"his past decisions filled in as done steps ({added})"
-            _save(gid, item, note=note, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=bool(_gh.issue_of(gid)))
+            _writes.save(gid, item, note=note, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=bool(_gh.issue_of(gid)))
         return {"item": shown, "action": "set", "why": note, "added": added}
     except ToolError as e:
         return _migrate_refuse(shown, str(e))
@@ -12025,7 +11896,7 @@ def _migrate_one(w: dict[str, Any]) -> dict[str, Any]:
     note = _clip_line(str(w.get("note") or w.get("kind") or "migrated onto the item model"), 300)
     sets = dict(sets)
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             item = _load(gid)
             if abs(float(item.get("updated") or 0) - exp) > 1e-6:
                 return {"item": shown, "action": "moved", "why": "the item was written since it was planned: planned again, never overwritten"}
@@ -12105,7 +11976,7 @@ def _migrate_one(w: dict[str, Any]) -> dict[str, Any]:
             if json.dumps(meta, sort_keys=True, default=str) == was:
                 return {"item": shown, "action": "already", "why": ""}
             item["metadata"] = meta                    # a filing edit: `updated`, the state clock and the confirm stay where they were
-            _save(gid, item, note=note, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=bool(_gh.issue_of(gid)))     # an item with no issue is never mirrored: a job for it would create one
+            _writes.save(gid, item, note=note, author=(_mig.AUTHOR, _mig.AUTHOR), mirror=bool(_gh.issue_of(gid)))     # an item with no issue is never mirrored: a job for it would create one
         return {"item": shown, "action": "set", "why": note}
     except ToolError as e:
         return _migrate_refuse(shown, str(e))
@@ -12318,7 +12189,7 @@ def _stamp_pair(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _stamp_commit(p: Path, tmp: Path, h0: str) -> bool:
-    """The last step of a stamp: the file is read once more and replaced only if it is the bytes the stamp was worked out from (`h0`, their sha256). A writer that does not take _ITEM_LOCK (the old wake pass
+    """The last step of a stamp: the file is read once more and replaced only if it is the bytes the stamp was worked out from (`h0`, their sha256). A writer that does not take the item lock (the old wake pass
     reads and saves without it) may have written the item since; its change is never overwritten: the temporary file is dropped and False comes back (the answer is `moved`, the next run stamps it)."""
     try:
         now = _stamp_sha(p.read_bytes())
@@ -12332,7 +12203,7 @@ def _stamp_commit(p: Path, tmp: Path, h0: str) -> bool:
 
 
 def _stamp_write(p: Path, raw: dict[str, Any], h0: str, edits: dict[str, Any]) -> bool:
-    """Write `raw` (the item as its file holds it) with the two stamped keys set to `edits` (None drops a key): nothing else in the file changes, and none of _save's other work is done (no activity seed, no mover
+    """Write `raw` (the item as its file holds it) with the two stamped keys set to `edits` (None drops a key): nothing else in the file changes, and none of `writes.save`'s other work is done (no activity seed, no mover
     settled, no hand-off record, no for-you or landed row, no search or GitHub job: a stamp is not an event on the item). The metadata keeps its order; a new key goes last. → False when the file moved (_stamp_commit)."""
     _ro.guard("item write")
     meta = raw["metadata"]
@@ -12352,7 +12223,7 @@ def _stamp_write(p: Path, raw: dict[str, Any], h0: str, edits: dict[str, Any]) -
 
 def _stamp_open(gid: str, shown: str, closed_ok: bool = False) -> tuple[Path, bytes, dict[str, Any], dict[str, Any] | None]:
     """(the file, its bytes, the item as the file holds it, None) for an open item, or (…, a refusal) for one that is missing, closed or damaged (`closed_ok`: a closed item is returned like an open one: the
-    project-id pass writes every item). Read under _ITEM_LOCK by the caller."""
+    project-id pass writes every item). Read under the item lock by the caller."""
     p = _path(gid)
     if not p.exists():
         return p, b"", {}, _migrate_refuse(shown, "no such item")
@@ -12370,13 +12241,13 @@ def _stamp_open(gid: str, shown: str, closed_ok: bool = False) -> tuple[Path, by
 
 def _stamp_one(gid: str, dry: bool = False) -> dict[str, Any]:
     """Stamp one open item with the phase and the wait's kind the board shows it as now (metadata.phase, metadata.waits_on): → {"item", "action": set | same | moved | refused, "why", "before", "after", "sha256_before"}
-    (before and after = {phase, waits_on}, None = the key is absent). The values are worked out HERE, under _ITEM_LOCK, from the item's fields as they stand and the clock now (never carried from a plan, so none
+    (before and after = {phase, waits_on}, None = the key is absent). The values are worked out HERE, under the item lock, from the item's fields as they stand and the clock now (never carried from a plan, so none
     is stale), by the same reading as every save's stamp (_stamp_values). `same`: the item already stores them, nothing is written. `moved`: a writer that takes no lock wrote the item between the read and
     the replace (_stamp_commit); its write stands. `refused`: a closed or missing item. Only the two keys are written (_stamp_write); `wait_kind` is never touched.
     `dry`: nothing is written, and an item that would be stamped answers `would_set` (the plan the script shows before it writes)."""
     shown = _gh.shown(gid)
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             p, data, raw, refusal = _stamp_open(gid, shown)
             if refusal is not None:
                 return refusal
@@ -12405,7 +12276,7 @@ _PHASE_SWEEP_LOCK = threading.Lock()                 # the counters only: the ti
 
 def _phase_sweep() -> list[str]:
     """Keep the stored phase and waits_on true as the clock moves: recompute every open item's pair (_stamp_values: the reading the board shows, at the clock now) WITHOUT the item lock, compare it with what the
-    item stores, and call _stamp_one only for a difference. _stamp_one works the pair out again under _ITEM_LOCK and re-checks the file bytes before it replaces them, so the write is the stamp pass's own: the two
+    item stores, and call _stamp_one only for a difference. _stamp_one works the pair out again under the item lock and re-checks the file bytes before it replaces them, so the write is the stamp pass's own: the two
     keys only (no `updated`, no `written_by`, no activity or hand-off record, no For you row, no GitHub job, no notice, no History line). The edges a stored value falls behind at are in the PR3 design: a dated
     wait's wake coming within [waiting] dated_wait_min_hours, a wait_basis wake, the instance's midnight for a dated step, an `after` item closing for an item with no stored state, an anchor scoped to the project, a change
     of config. A writer that took no lock between the read and the replace makes the answer `moved`: its write stands, and the next sweep stamps it. A warm standby copy sweeps nothing and writes nothing.
@@ -12472,7 +12343,7 @@ def _stamp_state(v: Any, key: str) -> bool:
 
 
 def _unstamp_one(w: Any) -> dict[str, Any]:
-    """Put one item's two stamped keys back: `w` = {item, before, after} (the keys as they were, and as the stamp left them; None = absent). Under _ITEM_LOCK, if the item holds `after` it gets `before` (a key
+    """Put one item's two stamped keys back: `w` = {item, before, after} (the keys as they were, and as the stamp left them; None = absent). Under the item lock, if the item holds `after` it gets `before` (a key
     that was absent is dropped) → `set`; if it already holds `before` → `same`; if it holds anything else (a later save restamped it) → `kept`, untouched. A closed item → `refused`. Running it again is a no-op."""
     if not isinstance(w, dict):
         return _migrate_refuse("?", "an entry is an object {item, before, after}")
@@ -12493,7 +12364,7 @@ def _unstamp_one(w: Any) -> dict[str, Any]:
             return _migrate_refuse(shown, f"{side} holds a value no stamp writes")
         sides[side] = d
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             p, data, raw, refusal = _stamp_open(gid, shown)
             if refusal is not None:
                 return refusal
@@ -12612,12 +12483,12 @@ def _retire_holds(item: dict[str, Any]) -> bool:
 
 def _retire_one(gid: str, dry: bool = False) -> dict[str, Any]:
     """Take the stored state word and the carry fields out of one open item (retire_fields.plan_for): → {"item", "action": set | same | moved | refused | would_set, "why", "before", "after", "held", "sha256_before"}
-    (before and after = the keys the plan touches as the item holds them, None = absent; `description` is the top-level field). Worked out HERE under _ITEM_LOCK from the file as it stands, written like a stamp
+    (before and after = the keys the plan touches as the item holds them, None = absent; `description` is the top-level field). Worked out HERE under the item lock from the file as it stands, written like a stamp
     (_stamp_write: nothing else in the file changes, no event on the item). An item whose phase, kind of wait, mover or watched status would read differently is `refused` and left as it is. `same`: nothing to retire.
     `moved`: a writer that takes no lock wrote the item between the read and the replace; its write stands. `dry`: nothing is written (`would_set`)."""
     shown = _gh.shown(gid)
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             p, data, raw, refusal = _stamp_open(gid, shown)
             if refusal is not None:
                 return refusal
@@ -12644,7 +12515,7 @@ def _retire_one(gid: str, dry: bool = False) -> dict[str, Any]:
 
 
 def _unretire_one(w: Any) -> dict[str, Any]:
-    """Put one item's retired keys back: `w` = {item, before, after} (retire_fields.entry_for). Under _ITEM_LOCK, if the item holds `after` for every key it names it gets `before` (None drops the key) → `set`; if it
+    """Put one item's retired keys back: `w` = {item, before, after} (retire_fields.entry_for). Under the item lock, if the item holds `after` for every key it names it gets `before` (None drops the key) → `set`; if it
     already holds `before` → `same`; anything else (a later save changed a key) → `kept`, untouched. A closed item → `refused`. Running it again is a no-op."""
     if not isinstance(w, dict):
         return _migrate_refuse("?", "an entry is an object {item, before, after}")
@@ -12665,7 +12536,7 @@ def _unretire_one(w: Any) -> dict[str, Any]:
         return _migrate_refuse(shown, "before and after name the same keys")
     keys = list(before)
     try:
-        with _ITEM_LOCK:
+        with _writes.ITEM_LOCK:
             p, data, raw, refusal = _stamp_open(gid, shown)
             if refusal is not None:
                 return refusal
@@ -13484,12 +13355,7 @@ def _update_unlocked(
         item["state_updated"] = item["updated"]   # filing edits (owner/project/priority/subject, and the ask line) leave the state clock alone
         item["confirmed"] = item["updated"]       # a state change confirms the item; a filing edit does not
     named = name_commit()                  # every gate has passed: the naming is stored as its own save, then this write's
-    was_no_settle = getattr(_NO_SETTLE, "on", False)
-    _NO_SETTLE.on = "quiet" if (filing_only or getattr(_REFORMAT, "on", False)) else ("named" if mover_named else False)
-    try:
-        _save(gid, item, writer=debtor)
-    finally:
-        _NO_SETTLE.on = was_no_settle
+    _writes.save(gid, item, writer=debtor, ctx=_writes.QUIET if (filing_only or getattr(_REFORMAT, "on", False)) else (_writes.NAMED if mover_named else _writes.PLAIN))
     now_held = _is_held(item)
     now_parked = now_held or _date_parked(item)
     if wake or clear_wake or hold or clear_hold or item.get("status") != was or now_parked != was_parked:
@@ -13592,7 +13458,7 @@ def _update_locked(*args: Any, **kwargs: Any) -> str:
     """_update_unlocked under the item lock (a failed delivery's record writes items from another thread; an
     update reads, changes and saves, so they take turns)."""
     _evwait_preread(kwargs.get("wait_kind"), kwargs.get("wait_event"))      # an event wait's facts (GitHub, git) are read before the lock, not under it
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         try:
             return _update_unlocked(*args, **kwargs)
         finally:
@@ -13762,12 +13628,9 @@ def stackshot_confirm(item_id: str, sender: str = "") -> str:
     gid = _norm_id(item_id, bare=True)
     item = _load(gid)
     item["confirmed"] = time.time()
-    was_no_settle = getattr(_NO_SETTLE, "on", False)
-    _NO_SETTLE.on = "quiet"         # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
-    try:
-        _save(gid, item, writer=_session_id(sender) if sender.strip() else _holder(item), activity=_activity.CONFIRM)      # a bare confirm moves `confirmed` only, never `activity`
-    finally:
-        _NO_SETTLE.on = was_no_settle
+    # a bare confirm moves `confirmed` only, never `activity`
+    # a confirm changes nothing but its clock: no mover is settled and no hand-off record ended by it
+    _writes.save(gid, item, writer=_session_id(sender) if sender.strip() else _holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
     _publish()
     item["gid"] = gid
     at = _rmod.when_words(dt.datetime.fromtimestamp(item["confirmed"], ZONE))
@@ -14028,8 +13891,8 @@ def _builder_report(target: str, raw: str, sender: str, idx: dict[str, dict[str,
                 return ""
         line = f"{sname} reported to {target} (not sent to it: a plain status report): {_clip_line(body, 1500)}"
         for gid in gids:
-            with _ITEM_LOCK:
-                _save(gid, _load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
+            with _writes.ITEM_LOCK:
+                _writes.save(gid, _load(gid), note=line, activity=_activity.AUDIT if _activity.audit_writer([sender, sname], _writes.audit_writer_names()) else _activity.MESSAGE)      # a background agent's report written onto the item is a message about the work, unless the audit sent it
         shown = ", ".join(_gh.shown(g) for g in gids)
         try:
             MSG_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -14305,7 +14168,7 @@ def stackshot_route(notice: str, ruling: str, to: str = "", reason: str = "", se
 
 # ----------------------------------------------------------------------------- project anchors
 _ANCHORS_DESC = (
-    f"A project's anchors: the external things the anchor watcher watches for it — a Slack channel or DM, a Drive file or folder, a Gmail thread or gmail:q: query (it reads every mailbox the anchors service reads; gmail:q@<mailbox>:<query>, several as gmail:q@a,b:<query> with no spaces, reads only the mailboxes named, and the list shows the mailboxes each Gmail anchor reads), a Notion page or database (any row added or edited, or a comment on a row), a GitHub issue/PR (its comments, state and CI results), a repo's …/releases, or a repo root (what {OWNER}'s GitHub account is notified of there) (optionally #mention=<text>). "
+    f"A project's anchors: the external things the anchor watcher watches for it — a Slack channel or DM, a Drive file or folder, a Gmail thread or gmail:q: query (it reads every mailbox the anchors service reads; gmail:q@<mailbox>:<query>, several as gmail:q@a,b:<query> with no spaces, reads only the mailboxes named, and the list shows the mailboxes each Gmail anchor reads; its terms are from:, to:, cc:, subject: or person: (from, to or cc) with a value, or plain text for the subject, joined by a space or AND (both must match) and OR, AND before OR, with parentheses and key:(a OR b) for one key over several values, e.g. gmail:q:from:(a@x.com OR b@x.com) subject:invoice; OR and AND in capitals, text with a parenthesis or colon in quotation marks; no negation and no other Gmail operator, and a query the matcher cannot evaluate is refused when added, saying what is wrong; a query stored before the grammar is read by it and can read differently), a Notion page or database (any row added or edited, or a comment on a row), a GitHub issue/PR (its comments, state and CI results), a repo's …/releases, or a repo root (what {OWNER}'s GitHub account is notified of there) (optionally #mention=<text>). "
     "Right calls: list: anchors(project=\"projects/widgets\"); add one for the project: anchors(project=\"projects/widgets\", add=[\"https://github.com/acme/widgets/pull/12\"]); "
     "scope it to an open item: anchors(project=\"projects/widgets\", add=[\"https://github.com/acme/widgets/pull/12\"], items=[\"board#N\"]); remove: anchors(project=\"projects/widgets\", remove=[\"https://github.com/acme/widgets/pull/12\"]). "
     "Anchor anything you create on GitHub (an issue, a PR, a fork branch you keep re-fitting) in the same turn, project-wide when it is the project's thread (a repo's issues or releases). "
@@ -14320,7 +14183,7 @@ _ANCHORS_DESC = (
 
 @mcp.tool(name="anchors", description=_lead(_ANCHORS_DESC))
 def stackshot_anchors(project: Annotated[str, Field(description="The project page: projects/<slug> or infra/<slug>.")],
-                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
+                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it), whose query joins from:/to:/cc:/subject:/person: terms with AND, OR and parentheses (from:(a OR b) for one key over several values; see the tool description); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
                       items: Annotated[list[str] | None, Field(description="Open items of this project the added URLs are about, items=[\"board#N\"]; omit for a project-wide anchor. Every URL in add is scoped to every id in items (several URLs with several ids give each URL all the items).")] = None,
                       remove: Annotated[list[str] | None, Field(description="URLs to stop watching, or machine:<name> to drop a machine anchor.")] = None) -> str:
     return _anchors(project, add, items, remove, _who())
@@ -14344,6 +14207,10 @@ def _gmail_key(u: str, boxes: dict[str, str]) -> str:
     return _anc.gmail_canonical(base.strip(), boxes) + (("#" + frag) if frag else "")
 
 
+_GMAIL_TERMS = ("Terms are from:, to:, cc:, subject: and person: (or plain text, a subject term), joined by AND, OR and parentheses (capitals), "
+                "key:(a OR b) for one key over several values; put text that holds a parenthesis, a colon or the word OR in quotation marks")
+
+
 def _gmail_scope_args(urls: list[str] | None, boxes: dict[str, str], refuse: bool, stored: list[str] | None = None) -> list[str]:
     """The URLs of an anchors call with every scoped Gmail query (`gmail:q@<mailbox>[,<mailbox>]:<query>`) written with its mailbox names as the anchors service spells them, so one anchor is one entry however it was typed.
     With `refuse` (an add), a scope that names no mailbox or one the anchors service does not read is refused with the valid names, and so is a scope with a space in it (the names are separated by commas alone);
@@ -14359,6 +14226,9 @@ def _gmail_scope_args(urls: list[str] | None, boxes: dict[str, str], refuse: boo
                 raise ToolError(f"Refused: {u!r} is not a Gmail query scope: the mailbox names sit between gmail:q@ and the next colon, separated by commas with no spaces (gmail:q@a,b:<query>)")
             out.append(u)
             continue
+        why = _anc.gmail_query_problem(u) if refuse and q is not None else ""
+        if why:
+            raise ToolError(f"Refused: the Gmail query in {u!r} is not one the matcher can evaluate: {why}. {_GMAIL_TERMS}")
         if q is None or q[0] is None:
             out.append(u)
             continue
@@ -14419,7 +14289,7 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
                             + (f"; {stale[0]} still holds anchors, which can be listed and removed, not added to" if len(stale) == 1 else ""))
         key = stale[0]
         if remove:
-            _anc.remove(store, key, remove)
+            _anc.remove(store, key, _gmail_scope_args(remove, _gmail_boxes(), False, [e.get("url", "") for e in store.get(key, [])]))
             _anc.save(store)
             _publish()
         return (f"{key} names no page any more (renamed or removed): its anchors notify nobody and can only be listed and removed.\n"
@@ -14482,9 +14352,10 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         if q is not None:
             names = ", ".join(_anc.gmail_mailboxes(_anc.split_fragment(u)[0].strip(), boxes)[0]) or "none the anchors service has named yet"
             out += f"\nGmail query {q[1]!r} reads the mailboxes: {names}" + ("" if q[0] is not None else " (every mailbox the anchors service reads; gmail:q@<mailbox>:<query> reads only the one named)") + "."
+            out += f"\nIt matches a mail when: {_anc.gmail_query_reading(u)}."
     if add:
-        out += ("\nanchor-hub reads each new anchor within two minutes: one it cannot read (not shared with it, a mailbox it has no access to, a wrong link) "
-                "is reported once to the project's keeper and marked UNREADABLE in this list. A line without a name after the scope has not been read yet.")
+        out += ("\nThe anchors service reads each new anchor within two minutes: one it cannot read (not shared with it, a mailbox it has no access to, a wrong link) "
+                "is reported once to the project's keeper and marked UNREADABLE in this list. A line with no name after the scope, other than a Gmail query (named by its mailboxes at once), has not been read yet.")
     if mach_add:
         out += (f"\nmachine anchor{'s' if len(mach_add) > 1 else ''} added: {', '.join(mach_add)}. Nothing is told for a check-in that is past; the mover of each item in scope is told at the machine's next check-in "
                 "(offline to online), once per check-in, naming the machine. The item is not turned and not saved: park it with a wait only when nothing else is open.")
@@ -15194,7 +15065,7 @@ def _recycled(machine: str, kind: str = "recycle", started: float = 0.0, result:
         else:
             it["updated"] = time.time()      # a filing edit: the state clock and the confirm stay as they were
         it["metadata"] = meta
-        _save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
+        _writes.save(gid, it, note=f"the {what} it waited for has run ({machine}, {when})"   # phase 2 prep: the note is the History line, written by the server
               + (": released from hold" if freed else "; still on hold, waiting on its wake or after" if _is_held(it) or _date_parked(it) else ""))
         for sid, _why in _notice_to(meta) or [(owner, "")]:   # the sessions in its needs, else its mover
             to = (sid, "") if sid == owner else (sid, _session_label(owner) or owner)
@@ -15621,8 +15492,8 @@ def _handover_down(name: str) -> str:
 def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[str, Any] | None:
     """A step of the item is done (ticked by its proof, or marked by hand) and the item is still open: when the next open step opens with another session, the item's mover becomes that session and it is told, with the step's text
     (handover.py has the rules). That session down or unknown: the item stays with its mover, who is told the step and why. The owner, a front agent and a name that is no session: nothing moves. Idempotent by the record
-    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes _ITEM_LOCK itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed."""
-    with _ITEM_LOCK:
+    `metadata.handover` (the step's hash and what was done). `done` = the first lines of the steps just done. Takes the item lock itself. → the row {action: moved | fallback | left | none, to, step, why, told}, None when the item is closed."""
+    with _writes.ITEM_LOCK:
         it = _load(gid)
         if it.get("status") != "open":
             return None
@@ -15642,7 +15513,7 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
         if plan["action"] == "fallback":
             _hv.mark(meta, h, _hv.FALLBACK, to, now, plan["why"])
             it["metadata"] = meta
-            _save(gid, it, note=f"step hand-over: the next step is {_session_label(to)}'s but it cannot take the item now ({_clip_line(plan['why'], 100)}), so the item stays with {_session_label(frm) or 'its mover'}: {step}")
+            _writes.save(gid, it, note=f"step hand-over: the next step is {_session_label(to)}'s but it cannot take the item now ({_clip_line(plan['why'], 100)}), so the item stays with {_session_label(frm) or 'its mover'}: {step}")
             row.update(action="fallback")
             if frm and not _model.is_owner(frm) and not _front_keeper(frm, project)[0]:
                 _tell_woken(gid, _session_id(frm), f"[stackshot] {_gh.shown(gid)}: the next step is {_session_label(to)}'s ({step}), but {_session_label(to)} cannot take the item now ({_clip_line(plan['why'], 100)}), "
@@ -15655,7 +15526,7 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
             meta["mover"] = to
         _hv.mark(meta, h, _hv.MOVED, to, now)
         it["metadata"] = meta
-        _save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, so the item moved from {_session_label(frm) or 'its mover'} to {_session_label(to)}: {step}")
+        _writes.save(gid, it, note=f"step hand-over: {did} is done and the next step is {_session_label(to)}'s, so the item moved from {_session_label(frm) or 'its mover'} to {_session_label(to)}: {step}")
         text = (f"[stackshot] {_gh.shown(gid)} is yours: {did} is done, and the next step is yours: {step}. {subject} ({project}). Do your part and close it or hand it back"
                 + (f" (sender={_session_label(frm)!r})" if frm else "") + f"; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_notice_link(gid)}")
         _tell_woken(gid, _session_id(to) or to, text, tag="handoff")
@@ -15682,7 +15553,7 @@ def _handover_by_hand(gid: str, done: list[str]) -> str:
 def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: bool, now: float, kind: str = _sp.PR_RELEASED, dead: str = "") -> dict[str, Any] | None:
     """Settle one open item for the event `kind` (pr_released: the pull request `key` (#`n`) is live; pr_merged: it is merged); `live` says when and at which commit. → the row for the reply,
     or None when the item is not one this event settles (closed, no open step that names the PR as its proof). The step is ticked by the server when it is the proof's pure step (or its explicit
-    proof); when no open step is left the item closes; otherwise the mover gets one notice naming the next open step. Under _ITEM_LOCK (the caller's)."""
+    proof); when no open step is left the item closes; otherwise the mover gets one notice naming the next open step. Under the item lock (the caller's)."""
     it = _load(gid)
     meta = dict(it.get("metadata") or {})
     if it.get("status") != "open":
@@ -15715,7 +15586,7 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
         meta[_RELEASED_TOLD] = [*told_before, dstamp][-20:]
         it["metadata"] = meta
         it["updated"] = now
-        _save(gid, it, note=f"{NAME}: {ref} was closed without being merged, so the step \"{step}\" cannot be ticked by it" + ("" if mover else " (no mover to tell)"), activity=_activity.EVENT)
+        _writes.save(gid, it, note=f"{NAME}: {ref} was closed without being merged, so the step \"{step}\" cannot be ticked by it" + ("" if mover else " (no mover to tell)"), activity=_activity.EVENT)
         if mover:
             _tell_woken(gid, _session_id(mover), f"[stackshot] {_gh.shown(gid)}: {ref} was closed without being merged, so its step \"{step}\" will never be ticked by it. "
                         f"Reword or drop the step, or give it another proof. {it.get('subject') or ''} → {_notice_link(gid)}", tag="release")
@@ -15739,7 +15610,7 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
             meta["outcome"], meta["reason"] = "done", reason
             it["status"] = "completed"; it["metadata"] = meta
             it["updated"] = it["state_updated"] = it["confirmed"] = now
-            _save(gid, it, note=(f"closed by {NAME}: {ref} is live{tests}, and its only open step was that release" if kind == _sp.PR_RELEASED
+            _writes.save(gid, it, note=(f"closed by {NAME}: {ref} is live{tests}, and its only open step was that release" if kind == _sp.PR_RELEASED
                                  else f"closed by {NAME}: {ref} is merged, and its only open step was waiting on that merge"), activity=_activity.EVENT)   # the server's act: no session turn, no page owed; the anchor's event is activity
         finally:
             _CLOSE_WAS.item = None
@@ -15771,7 +15642,7 @@ def _proof_item(gid: str, n: int, key: str, live: str, anchored: set[str], dry: 
     if pure or due:
         it["metadata"] = meta
         it["updated"] = now
-        _save(gid, it, note=(f"step done: {step} ({ref} is {word}{tests}; ticked by {NAME})" if pure
+        _writes.save(gid, it, note=(f"step done: {step} ({ref} is {word}{tests}; ticked by {NAME})" if pure
                              else f"{NAME}: told its mover {ref} is {word}{tests}"), activity=_activity.EVENT)
     note = (f"[stackshot] {_gh.shown(gid)}: {ref} is {word}; its step is " + ("ticked" if pure else "not ticked (it names a follow-up)") + "; the item's other open steps remain. "
             + (f"Next step: {nxt}. " if nxt else "") + f"{it.get('subject') or ''} → {_notice_link(gid)}")
@@ -15839,7 +15710,7 @@ def _released(pr: str, sha: str = "", dry: bool = False) -> dict[str, Any]:
     when = f"merged at {msha[:7]} on {_stall_when(mct)}, " + (f"in the checkout at {head[:7]}" if foreign else f"in the last-good commit {good[:7]}")
     anchors = _released_anchors()
     rows = []
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         for gid, _p in _item_files():
             try:
                 r = _released_item(gid, n, key, when, anchors.get(gid, set()), dry, now)
@@ -15870,7 +15741,7 @@ def _sweep_released(dry: bool = False) -> dict[str, Any]:
     rx = re.compile(r"\brelease\s+(?:(?:PR|pull request)\s*)?#(\d+)(?!\d)|\brelease\s+(?:(?:PR|pull request)\s+)?(https?://github\.com/\S+)", re.I)
     now = time.time()
     rows = []
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         for gid, _p in _item_files():
             try:
                 it = _load(gid)
@@ -16085,7 +15956,7 @@ def _sweep_proofs(dry: bool = False, only: set[str] | None = None, tick: bool = 
     if save if save is not None else not dry:
         _proof_gh_save(gh_st, seen)
     rows: list[dict[str, Any]] = []
-    with _ITEM_LOCK:
+    with _writes.ITEM_LOCK:
         for gid, ev in todo:
             for kind, n, key in ev:
                 state, why = facts.get((kind, key), ("no", ""))
@@ -16144,7 +16015,7 @@ def _proof_tick(now: float | None = None) -> list[str]:
 # (that is the settle path's, `_proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
 # reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
 # body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
-# naming the pull request. The pass stores the key in `metadata.merged_seen` through `_save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
+# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
 _MERGE_PROG_KEEP = 20       # keys kept in an item's merged_seen (as released_told keeps its last 20)
 
 
@@ -16267,7 +16138,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
     for row, key, tied in ties:
         for gid, how in tied.items():
             try:
-                with _ITEM_LOCK:
+                with _writes.ITEM_LOCK:
                     it = _load(gid)
                     meta = it.get("metadata")
                     if it.get("status") != "open" or not isinstance(meta, dict):
@@ -16280,7 +16151,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
                     _stall.note(meta, now, what)      # the History line
                     it["metadata"] = meta
                     it["updated"] = now      # as the event save of the settle path does (_proof_item)
-                    _save(gid, it, note=f"{NAME}: {what}", activity=_activity.EVENT)
+                    _writes.save(gid, it, note=f"{NAME}: {what}", activity=_activity.EVENT)
                     if gid not in saved:
                         saved.append(gid)
                     print(f"merge progress: {gid} moved by {key} ({how})", file=sys.stderr, flush=True)
@@ -16291,7 +16162,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 
 
 # ----------------------------------------------------------------------------- the last-activity record: events on a tied pull request
-# `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity`, in `_save`) and, here, the events the hub saw on a pull request
+# `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity` in `service/writes.py`, run by `writes.save`) and, here, the events the hub saw on a pull request
 # tied to the item: a CI result, a comment by a person, a review, a merge (anchors/event_log.py: `Hub.emit` appends one line each, as it does for a merge, from what the event holds). The ties are
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
 # ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and
@@ -16348,11 +16219,11 @@ def _event_activity_tick(now: float | None = None) -> list[str]:
             for gid, (sigs, key) in per_item.items():
                 newest = _lastact.record(None, sigs, now)      # the newest of the item's signals (the last given of those at the same time)
                 try:
-                    with _ITEM_LOCK:
+                    with _writes.ITEM_LOCK:
                         it = _load(gid)
                         # read again under the lock: the item may have closed, been put on hold or begun a wait since the tie was made (the same test as _merge_tied)
                         if it.get("status") == "open" and _event_item_live(it, now) and newest is not None and _lastact.apply(it, [newest], now):
-                            _save(gid, it, activity=_activity.BOOKKEEPING)
+                            _writes.save(gid, it, activity=_activity.BOOKKEEPING)
                             saved.append(gid)
                 except Exception as e:  # noqa: BLE001  — one item never stops the others
                     print(f"last activity: {gid} not saved for {key}: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
@@ -17508,7 +17379,7 @@ def _keep_note(gid: str, item: dict[str, Any], note: str, code: str, pick: str =
     prior = meta.get("answers") if isinstance(meta.get("answers"), list) else []
     meta["answers"] = [*prior, rec]
     item["metadata"], item["updated"] = meta, now
-    _save(gid, item, note=_answer_note(rec), author=(OWNER, "board"))
+    _writes.save(gid, item, note=_answer_note(rec), author=(OWNER, "board"))
     item["gid"] = gid
     told = [t for t in _answer_deliver(gid, item, rec) if t]
     print(f"answer: {gid} {code}: his note kept as a comment, told {', '.join(told) or 'nobody'}", file=sys.stderr, flush=True)
@@ -17524,7 +17395,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
     choice, text, act = str(choice or "").strip(), str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip(), str(act or "").strip()
     if len(text) > _ANSWER_TEXT_MAX:
         return "toolong"
-    with _ITEM_LOCK, _ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
+    with _writes.ITEM_LOCK, _ANSWER_LOCK:      # the order every writer takes (an update holds the item lock and then acks here): the item first, the pending answers second
         item = _load(gid)
         if item.get("status") != "open":
             return _keep_note(gid, item, text, "closednote", choice, "the item is closed") if text else "closed"      # a note on a closed item is kept as his comment
@@ -17643,7 +17514,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
             meta["ask"], meta["options"] = _watch.ask_back(meta, asked_note, _pages.zone_now().date())
         item["metadata"] = meta
         item["updated"] = now
-        _save(gid, item, note=_answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
+        _writes.save(gid, item, note=_answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
             _WAKE_EVENT.set()           # the minute loop takes the new wake in
         if kind == "decision" and eff["do"] == "drop":

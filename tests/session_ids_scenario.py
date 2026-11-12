@@ -74,6 +74,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr; from stackshot.anchors import anchors as A; from stackshot.fleet import inbox; from stackshot.fleet import push
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.web import server
+from stackshot.service import writes
 from stackshot.projects import project_registry as _projects_registry
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
@@ -216,7 +217,7 @@ try: create("home-sparrow-docs", needs=["home-twin"]); r = ""
 except Exception as e: r = str(e)
 check("a name two live sessions carry is not resolved: the gate refuses it as it refused an unknown name", "not a background agent" in r or "Refused" in r, r)
 # an owner the registry cannot tell: written straight (as an old item) and read back
-gk = create("home-sparrow-docs").split()[1]; it = item(gk); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-twin"; server._save(gk, it)
+gk = create("home-sparrow-docs").split()[1]; it = item(gk); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-twin"; writes.save(gk, it)
 check("an owner the registry cannot tell is shown as stored", "mover: home-twin" in server.stackshot_get(gk), server.stackshot_get(gk))
 check("update by the owner as the sala id (the session writes under its permanent id) passes", "Refused" not in server._update(g1, next="home-sparrow: the next step", sender=S["main"]))
 check("update by the old name passes too", "Refused" not in server._update(g1, next="home-sparrow: the next step again", sender="home-sparrow"))
@@ -239,7 +240,7 @@ check("rename: an update with the old name as owner= keeps the stored id, no cha
 put_registry(); put_fleet(FLEET)
 
 # ---- 5. a fresh start left the owner pointing at a finished transcript
-gt = create("home-sparrow-docs").split()[1]; it = item(gt); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; server._save(gt, it)       # an old item: owner stored as the first transcript of home-sparrow-main
+gt = create("home-sparrow-docs").split()[1]; it = item(gt); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; writes.save(gt, it)       # an old item: owner stored as the first transcript of home-sparrow-main
 check("old transcript owner: shown as the session's name", "mover: home-sparrow-main" in server.stackshot_get(gt), server.stackshot_get(gt))
 check("old transcript owner: found by the session's current transcript, which is another one", gt in {i["gid"] for i in json.loads(server._client_items(Tr["main_b"])[2])["items"]})
 check("old transcript owner: compared by sala id (the update by the session's id is its owner's)", "Refused" not in server._update(gt, next="home-sparrow: mine", sender=S["main"]))
@@ -340,10 +341,10 @@ import threading; from stackshot.fleet import session_ids as sid
 # an open item that stores a transcript id, one a name, a closed item, an ambiguous name, a cloud id, a person
 mig = {}
 mig["tr"] = create("home-sparrow-docs").split()[1]; it = item(mig["tr"]); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; it["metadata"]["needs"] = ["decision", "site-builder", "home-twin", "cse_0123456789abcdefghijklmn", "some-outsider"]
-it["metadata"]["observers"] = ["home-sparrow-docs", S["docs"]]; server._save(mig["tr"], it)
-mig["name"] = create("home-sparrow-docs").split()[1]; it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["owner_name"] = "kept as it is"; server._save(mig["name"], it)
+it["metadata"]["observers"] = ["home-sparrow-docs", S["docs"]]; writes.save(mig["tr"], it)
+mig["name"] = create("home-sparrow-docs").split()[1]; it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["owner_name"] = "kept as it is"; writes.save(mig["name"], it)
 mig["closed"] = create("home-sparrow-docs").split()[1]; server._update(mig["closed"], status="completed", sender="home-sparrow-docs", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
-it = item(mig["closed"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["needs"] = ["site-builder"]; server._save(mig["closed"], it)
+it = item(mig["closed"]); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-sparrow-main"; it["metadata"]["needs"] = ["site-builder"]; writes.save(mig["closed"], it)
 mig["good"] = g1
 files = {k: server._path(g) for k, g in mig.items()}
 digest = lambda: {k: hashlib.sha256(f.read_bytes()).hexdigest() for k, f in files.items()}
@@ -375,7 +376,7 @@ check("migrate --request writes the request file and nothing else", r.returncode
 # the pass holds the item lock too: a thread holding it keeps the pass waiting (the pass is safe because it runs before any writer thread starts)
 held = threading.Event(); free = threading.Event(); done = []
 def holder():
-    with server._ITEM_LOCK: held.set(); free.wait(5)
+    with writes.ITEM_LOCK: held.set(); free.wait(5)
 th = threading.Thread(target=holder); th.start(); held.wait(2)
 runner = threading.Thread(target=lambda: done.append(server._session_ids_pass())); runner.start(); time.sleep(0.4)
 check("the pass waits for a thread that holds the item lock", not done and digest() == d0)
@@ -401,7 +402,7 @@ check("no request file: the pass does nothing and says nothing", server._session
 # rollback through the same door
 sid.main(["rollback", str(uf[0])])
 check("rollback: the request names the undo file", sid.read_request() == ("rollback", str(uf[0])))
-it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["docs"]; server._save(mig["name"], it)         # changed since: must be left
+it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["docs"]; writes.save(mig["name"], it)         # changed since: must be left
 line3 = server._session_ids_pass()
 back = {k: hashlib.sha256(f.read_bytes()).hexdigest() for k, f in files.items()}
 check("rollback: the fields go back to what they were; a field changed since is left and said so", item(mig["tr"])["metadata"]["owner"] == Tr["main_a"] and item(mig["tr"])["metadata"]["needs"] == ["decision", "site-builder", "home-twin", "cse_0123456789abcdefghijklmn", "some-outsider"]
@@ -464,7 +465,7 @@ rc, out = clear("alpha")
 check("pages clear: …and does not clear another session's", rc == 3 and S["docs"] in led().get("projects/alpha", {}), (rc, out))
 put_registry(); _projects_registry._roles_sync(now=time.time() + 10000)
 LEDGER.write_text("{}", encoding="utf-8")
-it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["main"]; server._save(mig["name"], it)      # as the migration left it, for section 9
+it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["main"]; writes.save(mig["name"], it)      # as the migration left it, for section 9
 
 # ---- 9. a registry that disappears again: everything reads as stored, nothing raises
 SALA.unlink()

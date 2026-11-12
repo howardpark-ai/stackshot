@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import writes
 from stackshot.core import instance as _core_instance
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -2147,12 +2148,12 @@ check("confirm: owes no page and tells no keeper on a pilot project", json.dumps
 check("confirm: publishes", pubs == [1], pubs)
 check("confirm: a bad id is refused", refusal(lambda: server.stackshot_confirm("zz9")).startswith("bad item id"))
 # with the GitHub mirror off (the default here), a tool write without a sender is still the owner's, as before
-_save_, saved = server._save, []
-server._save = lambda gid, item, writer="", note="", **kw: (saved.append((gid, writer)), _save_(gid, item, writer=writer, note=note, **kw))[1]
+_save_, saved = writes.save, []
+writes.save = lambda gid, item, writer="", note="", **kw: (saved.append((gid, writer)), _save_(gid, item, writer=writer, note=note, **kw))[1]
 res = mk(); g_ns = gid_of(res); own_ns = server._session_id(server._holder(rd(g_ns))); saved.clear()
 server.stackshot_confirm(g_ns); server.stackshot_update(g_ns, next="home-beta: take the owner's step")
 server.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- Goal: The test item's work is in place")
-server._save = _save_
+writes.save = _save_
 check("mirror off: update, confirm and complete without a sender go through, written as the item's mover", rd(g_ns)["status"] == "completed"
       and rd(g_ns)["metadata"].get("outcome") == "done" and [server._session_id(w) for g, w in saved if g == g_ns] == [own_ns] * 3 and own_ns, (own_ns, saved))
 # the wake pass leaves confirmed alone; an item without one keeps the reading it had
@@ -3041,7 +3042,7 @@ server._message("work-osprey-main", f"{MK} {h4} needs your look", "home-beta"); 
 server._message("work-osprey-x", f"{h4} failed its run", "cron", auth="machine:testbox", origin="testbox"); wait_push(n0 + 4); time.sleep(0.3)
 check("auto-name: a message to a front agent, to the keeper or to the project page names nobody; nor does a script's message", "needs" not in rd(h4)["metadata"], rd(h4)["metadata"])
 d1 = mk46(owner="home-beta"); n0 = len(wait_push(0))
-_d1 = rd(d1); _d1["metadata"]["project"] = "projects/alpha"; server._save(d1, _d1)   # home-beta's create is refiled to projects/beta ("Refile itself"): an item filed before the rule
+_d1 = rd(d1); _d1["metadata"]["project"] = "projects/alpha"; writes.save(d1, _d1)   # home-beta's create is refiled to projects/beta ("Refile itself"): an item filed before the rule
 res = server._message("work-osprey-x", f"take {d1}", "work-osprey-main"); p = wait_push(n0 + 2)
 ow = [m for m in p[n0:] if m[0] == B]
 check("auto-name: a plain first naming tells the owner in one line (an owner that is not a front agent, directly)", needs46(d1) == ["work-osprey-x"] and len(ow) == 1

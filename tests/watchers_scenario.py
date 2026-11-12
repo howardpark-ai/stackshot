@@ -67,7 +67,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -518,7 +518,7 @@ class _Spy:
     def __init__(self, inner): self.inner, self.n, self.bad = inner, 0, []
     def __enter__(self):
         self.n += 1
-        if not server._ITEM_LOCK._is_owned(): self.bad.append("took the answer lock without the item lock")
+        if not writes.ITEM_LOCK._is_owned(): self.bad.append("took the answer lock without the item lock")
         return self.inner.__enter__()
     def __exit__(self, *a): return self.inner.__exit__(*a)
 item(58, wait_kind="relay", wait_event="the badge", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] lock order, arrived")
@@ -619,16 +619,16 @@ check("review 9: an item that reads as due outside the lock but is not due under
 
 # --- 12. a due item that keeps failing is backed off, not retried in a loop
 item(92, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, needs=[], subject="[home] fails to turn")
-_save0, _fails = server._save, []
+_save0, _fails = writes.save, []
 def _flaky(gid, it, *a, **k):
     if gid == "a92" and not ((it.get("metadata") or {}).get("watch") or {}).get("failed_at"):
         _fails.append(1); raise RuntimeError("disk")
     return _save0(gid, it, *a, **k)
-server._save = _flaky
+writes.save = _flaky
 try:
     reset(); moved = server._watch_pass(); n1 = len(_fails); moved2 = server._watch_pass()
 finally:
-    server._save = _save0
+    writes.save = _save0
 check("review 12: a turn that fails is noted on the item (watch.failed_at) and is not retried in the same minute; nobody is told of it", "a92" not in moved and n1 >= 1 and len(_fails) == n1 and "a92" not in moved2
       and mt(92).get("watch", {}).get("failed_at", 0) >= now0 and mt(92).get("wait_kind") == "time" and not any("a92" in x[0] for x in sent("watch")), (mt(92), len(_fails), sent()))
 check("review 12: …and its next moment is after the back-off, so the wake loop does not spin on it", wk.next_moment(mt(92)) > time.time() + wk.BACKOFF - 60, wk.next_moment(mt(92)))
@@ -636,17 +636,17 @@ reset(); moved = server._watch_pass(time.time() + wk.BACKOFF + 5)
 check("review 12: …after the back-off it turns, and the failure note goes", "a92" in moved and mt(92).get("mover") == BACK and "failed_at" not in (mt(92).get("watch") or {}), mt(92))
 
 item(24, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, needs=[], subject="[home] fails to turn, and to note it")
-_save1 = server._save
+_save1 = writes.save
 _tries = []
 def _dead(gid, it, *a, **k):
     if gid == "a24": _tries.append(1); raise RuntimeError("disk")
     return _save1(gid, it, *a, **k)
-server._save = _dead
+writes.save = _dead
 try:
     reset(); server._watch_pass(); n1 = len(_tries); server._watch_pass(); n2 = len(_tries)
     at_a = [at for g, _p, _i, at in server._wakes() if g == "a24"]
 finally:
-    server._save = _save1
+    writes.save = _save1
 check("review 2nd: a turn that fails and cannot even be noted on the item is not retried in the next pass (the back-off is kept in memory)", n1 >= 1 and n2 == n1 and "failed_at" not in (mt(24).get("watch") or {}), (n1, n2, mt(24)))
 check("review 2nd: …and the wake loop's next moment for it is after the back-off", bool(at_a) and at_a[0] > server._pages.zone_now(), at_a)
 server._WATCH_BACKOFF.pop("a24", None)

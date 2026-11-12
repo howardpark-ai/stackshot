@@ -63,7 +63,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S
+from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S
 REAL_MERGED_PRS, REAL_GIT_COMMIT = server._merged_prs, server._git_commit      # before the checks below swap them for tables
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -361,7 +361,7 @@ server._merged_prs = lambda head, limit=3000: {}
 # ================================================================ review fixes: the write gate reads before the lock and not on GitHub under it
 LOCKED_CALLS = []
 def spy_pr_merged(ref, now, gh_st):
-    LOCKED_CALLS.append(server._ITEM_LOCK._is_owned()); return fake_pr_merged(ref, now, gh_st)
+    LOCKED_CALLS.append(writes.ITEM_LOCK._is_owned()); return fake_pr_merged(ref, now, gh_st)
 server._pr_merged = spy_pr_merged
 item(63, mover=BACK, subject="[home] will wait for a merge")
 server._EVW_GH.clear()

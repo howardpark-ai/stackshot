@@ -2,10 +2,9 @@
 and the text of a write with a bare store id (g7) written as the item's shown id (board#N).
 
 The store's path (`STORE`), the list of its item files, the next item id and the write of an item file are core/store.py's (the owner of `STORE`; a suite that points the server at a copy of the
-store sets it there). What is left here stays above core/ because it reads through github/ghsync (a moved item's old id) and model/ (the project a stored item is read through, the stored forms of
-needs and hold), and core/ imports neither. `_save`, the one writer, stays in server.py because it calls the hand-off, the For you list, the landed list and the search, which are server.py's still
-(a module here cannot import server.py). server.py imports each function back, so `server._load`, `server._path`, `server._shown_ids`, `server._legacy_hold` and `server._legacy_needs` stay the
-names the writes, the tools and the tests use."""
+store sets it there). The reads of one item are here, in the service layer, because they resolve a moved item's old id through github/ghsync and read the item through model/ (the project it
+is read through, the stored forms of needs and hold), both layers above core/, which imports neither. The one writer of an item is `save` in service/writes.py, which reads the file through `_path`.
+server.py imports `_load`, `_path`, `_shown_ids`, `_legacy_hold` and `_legacy_needs` for its own use."""
 from __future__ import annotations
 
 import json

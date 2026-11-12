@@ -86,7 +86,7 @@ _OUTSIDE_RX = re.compile(r"(?:\bouter\b|\boutside\s+(?:party|the\s+perimeter)\b|
 
 
 def _last_write(item: dict[str, Any]) -> float:
-    """When a session or the owner last wrote the item, as an epoch (0.0 = unknown). `written_at` is the stamp only such a write sets (server._record_writer: a wake, an idle mark or a server save leaves it alone); a stamp of the
+    """When a session or the owner last wrote the item, as an epoch (0.0 = unknown). `written_at` is the stamp only such a write sets (`writes.record_writer` in service/writes.py: a wake, an idle mark or a server save leaves it alone); a stamp of the
     migration or a script is no session's write, so for those, and for an item with no stamp, the item's own clock `updated` stands in (a server save can move it, which can only hide an idle item, never invent one)."""
     who = str(item.get("written_by") or "").lower()
     ts = _nr._float(item.get("written_at"))

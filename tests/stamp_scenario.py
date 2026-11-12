@@ -7,7 +7,7 @@ writes them on the items nobody has saved since, without being an event on the i
   1  kind_stamped_per_case      waits_on equals the kind the board shows for all 23 cases (event too); an alive item has none; phase is right; model.stamp_values says the same
   2  wait_kind_never_added      wait_kind, watches, can_end, basis_wait and derive are identical before and after, per case
   3  only_two_keys_move         each item's JSON without the two keys deep-equals the original (an item with no activity clock gets none)
-  4  no_side_effects            no GitHub job, no notice, no For you or landed row, no hand-off record, no search touch, _save never called; written_by unchanged; the state folder unchanged
+  4  no_side_effects            no GitHub job, no notice, no For you or landed row, no hand-off record, no search touch, writes.save never called; written_by unchanged; the state folder unchanged
   5  closed_untouched           a closed item is byte-identical and answers `refused`, a stale stamp on it included
   6  idempotent                 a second stamp answers `same` for all and rewrites no file
   7  stale_fixed                a stored waiting the fields no longer read is a `fix`: a read shows the stored waiting before and the fields' alive after
@@ -72,7 +72,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
 from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -189,20 +189,20 @@ for i, name, *_ in CASES:
 for n in (51, 52, 53):
     put(n, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5)) if n != 53 else put(n, needs=[BACK], state="doing")
 calls = []
-real = {k: getattr(server, k) for k in ("_save", "_foryou_on_save", "_landed_on_save", "_handoff_on_save", "_tell_woken")}
-real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch
+real = {k: getattr(server, k) for k in ("_foryou_on_save", "_landed_on_save", "_handoff_on_save", "_tell_woken")}
+real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name); return None
     return f
 for k in real:
     setattr(server, k, spy(k))
-server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch")
+server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing(); b0 = {n: bytes_of(n) for n in (51, 52, 53)}
 try:
     res = [server._stamp_one(f"g{n}") for n in (51, 52, 53)]
 finally:
     for k, v in real.items(): setattr(server, k, v)
-    server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch
+    server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch; writes.save = real_save
 check("4 a stamp calls no save, no GitHub job, no notice, no For you or landed row, no hand-off, no search touch", calls == [] and [r["action"] for r in res] == ["set"] * 3, (calls, res))
 check("4 …no writer is recorded, no hand-off record is made, no clock moves", all("written_by" not in raw(n) and "handoff" not in mt(n) and raw(n)["updated"] == json.loads(b0[n])["updated"] for n in (51, 52, 53)), [raw(n) for n in (51,)])
 check("4 …and the state folder is as it was", state_listing() == state0, (state0, state_listing()))

@@ -27,7 +27,7 @@ from stackshot.model.ids import _item_url
 from stackshot.model.said import _owner_words
 from stackshot.web.publish import _publish
 from stackshot.core.store import _item_files
-from stackshot.web.store import _load
+from stackshot.service.store import _load
 
 
 # A notice for the owner is a row in the For you list (foryou.py: the board's section, `client.py get for-you` for the fleet tool's web server), never a front
@@ -35,7 +35,7 @@ from stackshot.web.store import _load
 # that can never pass, and a due date within 24 h (the pass below). A failed release makes no row (_client_post `message`). Watched by default: an item with
 # his words on it (a `said` entry, a board or GitHub answer, a quote in the text; there is no separate creator field, and an item he asked
 # for carries his words) and an item that needs his decision. His own setting on the item's page wins: Mute stops its rows, Watch adds an
-# item that is not watched. The rows are made where the change is saved (`_save` compares the file before and after, so every path that
+# item that is not watched. The rows are made where the change is saved (`writes.save` compares the file before and after, so every path that
 # changes an item counts: a session's write, the server's own pass, his board answer), never where a session's message is sent: a message a
 # session sends on purpose with [for <owner>] (a decision or a go-ahead asked for) is not touched. A decision row goes when the decision
 # leaves the item's needs (answered, or closed). The urgent rows (a due date within 24 h) are also posted once to Slack
@@ -100,7 +100,7 @@ def _foryou_make(gid: str, item: dict[str, Any], kind: str, what: str, disc: Any
 
 
 def _foryou_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str = "", own: bool = False) -> None:
-    """Called by _save with the item as the file held it (`before`, None for a create) and as it is now: the rows for what changed.
+    """Called by writes.save with the item as the file held it (`before`, None for a create) and as it is now: the rows for what changed.
     `own` = his own answer from the board, which makes no row (he did it) but still takes a decision row off the list."""
     b = before or {}
     bm, am = b.get("metadata") or {}, item.get("metadata") or {}
@@ -131,7 +131,7 @@ def _foryou_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any
 
 
 def _landed_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str = "", own: bool = False) -> None:
-    """The Landed list (every close is a count to a page), called by _save beside _foryou_on_save. A close of an open item to outcome done
+    """The Landed list (every close is a count to a page), called by writes.save beside _foryou_on_save. A close of an open item to outcome done
     or dropped that the owner did not make is a record, unseen: whoever the writer is (a session, or no one for the server's own done check). The owner's own close is
     `own` (his answer on the board, e.g. "drop it" on a watcher's ask) or a write whose sender is he (the tools refuse that sender, _sender_not_owner, but a server path may
     write as him); it lands nothing and takes any record of the item off. A reopen takes the record off too: the item has not landed any more, and its next close is a new record."""
