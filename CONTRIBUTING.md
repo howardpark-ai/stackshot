@@ -209,6 +209,25 @@ does both (its docstring has the rules in full):
   by a variable name and then reads its docstring is not selected by it. The tripwire in `tests/suitemap_scenario.py` selects nothing; it only
   makes a new use of the common docstring-reading and docstring-registering forms fail that scenario until its author has looked at it and
   pinned it on the allow list (forms with no use here, such as `vars(fn)["__doc__"]`, `attrgetter` or an `eval` string, are not scanned).
+  An edit that only ADDS names to the imports of a file binds only the added names (`from typing import Any` to `from typing import Any, Iterable` no longer
+  reaches the readers of `Any`, nor does a line rewritten with the same names, parenthesised or split). Any other import edit binds every name on the
+  changed line, as before: a name removed (the importer may fail with a NameError at import), renamed, taken from another module, imported twice, swapped
+  with another import of the same name or moved below other code. An import the file gains that may not resolve (a name added to an import from one of our
+  modules that the module does not bind (a bare annotation, a name only under `if TYPE_CHECKING:` and a deleted name are no binding), a star import, a relative import to nothing of ours) takes the file whole; an import from the stdlib or an installed
+  package cannot be looked up and keeps the narrowing. In a file with `from __future__ import annotations`,
+  a name used only in an annotation is no read when the annotation is on a parameter or the return of a def with no decorator (or only a wrapping one:
+  `property`, `staticmethod`, `classmethod`, `lru_cache`, `cache`, `cached_property`, `contextmanager`, `asynccontextmanager`, `abstractmethod`, `overload`) whose name is only ever called
+  anywhere in the checkout (a script with a python or `uv run` shebang counts; so does a use under another name, `from m import f as h`, followed across
+  files), or on a local variable inside a function. The import statement keeps its own dependency, though: a name taken from another of
+  our modules and used only in such an annotation still reaches the suites that run the importing file when that module's name changes (the import fails).
+  These count as before: a def whose name is used as a value anywhere (passed on,
+  assigned, decorated with, read as an attribute without calling, or a string), an annotation of a class body (a dataclass or model field), of a
+  module-level variable or of a def with another decorator (`@mcp.tool` evaluates them), a default value, a decorator, the parameters of a class's
+  `__init__`, `__call__`, `__new__` and `__post_init__` while the class is used as a value (`inspect.signature(Cls)`, a base class, `isinstance`), and every annotation in a file
+  without postponed annotations. Turning postponed annotations on or off takes the file whole. The limit, as for docstrings: a function fetched by a
+  variable name and handed to `typing.get_type_hints` or a registry is not seen; the annotation tripwire in `tests/suitemap_scenario.py` pins the
+  number of uses of those forms (`get_type_hints`, `__annotations__`, `__annotate__`, `eval_str`, `wraps`, …) per file, so a new use fails that scenario until it is
+  looked at. `SUITEMAP_IMPORT_RULE=I1` and `SUITEMAP_ANNOTATION_RULE=N1` give the old rules; `tests/suitemap.py`'s docstring (*Imports and annotations*) has them in full.
   A new file (added, or a rename's new path) reaches the suites that listed its directory; in a
   directory no measured suite lists, every suite, since code may look it up by a name nobody tried before (the checkout and
   `tests/` are listed by every suite: the import machinery lists the directories on `sys.path`). No map, a change to the harness (`.github/`, `tests/run-suite`, `pyproject.toml`, `uv.lock`,

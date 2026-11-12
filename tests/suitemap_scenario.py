@@ -37,6 +37,7 @@ write("mod.py", '''
     import functools
     import cfgmod as _c
     from typing import Annotated
+    from typing import Iterable
     from pydantic import Field
     LIMIT = 3
     ANN = str
@@ -68,6 +69,9 @@ write("mod.py", '''
 
     def typed(x: ANN) -> ANN:
         return x
+
+    def typed2(x: Iterable[int]) -> int:
+        return 0
 
     def h():
         return "h"
@@ -104,6 +108,112 @@ write("mod.py", '''
         return 5
 ''')
 write("cfgmod.py", 'NAME = "x"\n\ndef configure(v):\n    return v\n')
+# a module with postponed annotations (Imports and annotations, Thu Nov 12th 2026). Each typing name is annotation-only in one place, so an edit of the import line
+# tells which kind of annotation counts: Iterable (a parameter), Sequence (a return), Mapping (a local variable), Collection (a method's parameter), Iterator
+# (a parameter of pg, which z hands to typing.get_type_hints: the def's name is used as a value), Optional (a class-level field, which stays a read). Counter is
+# only re-exported (z reads pmod.Counter), deque and OrderedDict are read in code (pq run by b, pa run by a), json in pj (z); `chain` is read by pu in code
+# that tolerates its absence (a suite runs it), so adding the name to an import line must reach that suite; CAP is a default, SIZE a decorator argument,
+# ANN2 an annotation-only constant.
+write("pmod.py", '''
+    """a module with postponed annotations"""
+    from __future__ import annotations
+    import json
+    from collections import Counter, OrderedDict, deque
+    from functools import lru_cache
+    from typing import Collection
+    from typing import Container
+    from typing import Deque
+    from typing import Hashable
+    from typing import Iterable
+    from typing import Iterator
+    from typing import Mapping
+    from typing import Optional
+    from typing import Reversible
+    from typing import Sequence
+
+    CAP = 5
+    SIZE = 8
+    ANN2 = str
+
+    def pa(items: Iterable[int], opt: Optional[str] = None) -> int:
+        return len(OrderedDict(enumerate(items)))
+
+    def pr(x: int) -> Sequence[int]:
+        return [x]
+
+    def pl(x: int):
+        seen: Mapping[str, int] = {}
+        return seen
+
+    def pd(n: int = CAP, kind: ANN2 = "k"):
+        return n
+
+    @lru_cache(maxsize=SIZE)
+    def pc(x: int) -> int:
+        return x
+
+    def pq():
+        return deque([1])
+
+    def pj():
+        return json.dumps({})
+
+    def pg(x: Iterator[int]) -> int:
+        return 1
+
+    def pu():
+        try:
+            return list(chain([1], [2]))
+        except NameError:
+            return []
+
+    class PK:
+        note: Optional[int] = None
+        def pm(self, x: Collection[str]) -> int:
+            return 1
+
+    def pk():
+        class Inner:
+            f: Hashable = None
+        return Inner
+
+    REG = []
+
+    def register(fn):
+        REG.append(fn)
+        return fn
+
+    @register
+    def pt(x: Deque[int]) -> int:
+        return 1
+
+    class PI:
+        def __init__(self, x: Reversible):
+            self.x = x
+
+    class PN:
+        def __init__(self, x: Container):
+            self.x = x
+''')
+write("tmod.py", "Tag = int\n")
+write("imod.py", '''
+    from __future__ import annotations
+    from tmod import Tag
+
+    def ia(x: Tag) -> int:
+        return 1
+''')
+write("qmod.py", '''
+    from os.path import join
+    from posixpath import join
+    import os; QX = 1
+
+    def qj():
+        return join("a", "b")
+
+    def qx():
+        return QX
+''')
 # a manual check (no suite runs it): its import-time call into cfgmod reads mod.LIMIT, which must not take cfgmod.py whole
 write("tests/w_check.py", '''
     import os, sys
@@ -122,15 +232,20 @@ write(".gitignore", "__pycache__/\n")   # as the checkout's: the bytecode measur
 write("tests/a_scenario.py", '''
     import os, sys
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, ROOT)
-    import mod
-    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2
+    import mod, pmod
+    assert mod.f() == 4 and mod.K().m() == 2 and mod.K.s() == 7 and mod.handler() == 5 and mod.typed('t') == 't' and mod.inline() == 2 and mod.typed2([1]) == 0
+    assert pmod.pa([1]) == 1 and pmod.pr(1) == [1] and pmod.pl(1) == {} and pmod.pd() == 5 and pmod.pc(2) == 2 and pmod.pu() == [] and pmod.PK().pm([]) == 1
+    import qmod
+    assert pmod.pk().f is None and pmod.pt(1) == 1 and pmod.PN(1).x == 1 and qmod.qj() == 'a/b' and qmod.qx() == 1
     assert open(os.path.join(ROOT, "data.txt")).read()
 ''')
 write("tests/b_scenario.py", '''
     import os, subprocess, sys
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, ROOT)
-    import mod
-    assert mod.g() == "g" and mod._c.NAME == "x" and mod.reg.list_tools()
+    import mod, pmod
+    assert mod.g() == "g" and mod._c.NAME == "x" and mod.reg.list_tools() and list(pmod.pq()) == [1]
+    import imod
+    assert imod.ia(None) == 1
     assert subprocess.run([sys.executable, "-c", "import mod; assert mod.h() == 'h'"], cwd=ROOT).returncode == 0
     assert subprocess.run(["sh", os.path.join(ROOT, "helper.sh")], capture_output=True).returncode == 0
     os._exit(0)
@@ -139,8 +254,10 @@ write("tests/b_scenario.py", '''
 write("tests/z_scenario.py", '''
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import mod
+    import inspect, mod, pmod, typing
     assert mod.documented.__doc__
+    assert pmod.pj() == "{}" and pmod.Counter and pmod.pg(iter([])) == 1 and typing.get_type_hints(pmod.pg)["return"] is int
+    assert list(inspect.signature(pmod.PI).parameters) == ["x"]
 ''')
 write("tests/c_scenario.py", '''
     import os
@@ -310,6 +427,220 @@ check("DOC13 a suite that reads names wide is not chosen for a docstring by that
       r.stdout.split() == ["w3"], (r.stdout, r.stderr[-600:]))
 r = tool("list", env={"SUITEMAP_DOCSTRING_RULE": "x"})
 check("DOC12 a value that is not a rule is an error at once", r.returncode != 0 and "SUITEMAP_DOCSTRING_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
+# ---- Imports and annotations (Thu Nov 12th 2026): see the base pmod.py above for what each name is. I1 and N1 are the old rules: each case that narrows says what
+# the old rule chose, so it fails if the rule is reverted; the cases after them are the ones that must NOT narrow.
+def rm(n): return lambda: sub("pmod.py", f"from typing import {n}\n", "")   # an edit that removes the one-name import line of n
+CO = "from collections import Counter, OrderedDict, deque"
+I1, N1 = {"SUITEMAP_IMPORT_RULE": "I1"}, {"SUITEMAP_ANNOTATION_RULE": "N1"}
+def old_rule(head, env): return tool("select", "--map", str(MAP), "--to", head, env=env).stdout.split()
+def narrows(tag, what, edit, old_env, old_out, msg):
+    out, err, head = sel_after(edit, msg)
+    check(f"{tag} {what}: nothing is selected", out == "", (out, err))
+    check(f"{tag} ...and the old rule (reverting it) chose {old_out}", old_rule(head, old_env) == old_out, old_rule(head, old_env))
+def same_as_old(tag, what, edit, msg):
+    out, err, head = sel_after(edit, msg)
+    old = old_rule(head, I1)
+    check(f"{tag} {what}: it chooses what the old rule chose, and not nothing", out.split() == old and old != [], (out, old, err))
+narrows("IMP1", "a name added to an import line that no code reads leaves the names already on the line alone", lambda: sub("pmod.py", CO, CO + ", defaultdict"), I1, ["a", "b", "z"], "imp add")
+narrows("IMP2", "a line rewritten with the same names (parenthesised, one a line) changes no binding", lambda: sub("pmod.py", CO, "from collections import (\n    Counter,\n    OrderedDict,\n    deque,\n)"), I1, ["a", "b", "z"], "imp reformat")
+narrows("IMP3", "a name moved to a line of its own is the same binding", lambda: sub("pmod.py", CO, "from collections import Counter, OrderedDict\nfrom collections import deque"), I1, ["a", "b", "z"], "imp split")
+same_as_old("IMP4", "a name removed from an import line (read in code by pq: b) keeps every name on the line bound, so the readers of the others too (OrderedDict: a, Counter: z)", lambda: sub("pmod.py", CO, "from collections import Counter, OrderedDict"), "imp remove, read in code")
+same_as_old("IMP5", "a name removed and only re-exported (z reads pmod.Counter)", lambda: sub("pmod.py", CO, "from collections import OrderedDict, deque"), "imp remove, re-exported")
+out, err, head = sel_after(lambda: sub("pmod.py", CO, "from collections import OrderedDict, deque"), "imp remove, re-exported")
+check("IMP5b ...which is a, b and z: the suites that import the file all fail with a name missing", out.split() == ["a", "b", "z"], (out, err))
+same_as_old("IMP6", "a name renamed (json → js) is a name removed and one added", lambda: sub("pmod.py", "import json\n", "import json as js\n"), "imp rename")
+out, err, _ = sel_after(lambda: sub("pmod.py", "import json\n", "import json\nfrom itertools import chain, islice\n"), "imp add, read in code")
+check("IMP7 a name added to an import line and read in code (pu: a suite runs it, tolerating the missing name) reaches that suite, and only it", out.split() == ["a"], (out, err))
+same_as_old("IMP9", "a name kept on the line but imported from another module (deque) is a changed binding", lambda: sub("pmod.py", CO, "from collections import Counter, OrderedDict\nfrom queue import deque"), "imp resourced")
+same_as_old("D1", "the server.py shape: a name removed from an import line of a file with import-time readers (mod.py registers tools at import)", lambda: sub("mod.py", "from typing import Annotated\n", ""), "imp remove annotated")
+# D3: an import edit that is not a pure addition of a name keeps the old selection: two imports of one name swapped, an import moved below other code
+same_as_old("D3a", "two imports of the same name swapped (the last one wins)", lambda: sub("qmod.py", "from os.path import join\nfrom posixpath import join\n", "from posixpath import join\nfrom os.path import join\n"), "swap imports")
+same_as_old("D3b", "an import moved below module-level code", lambda: sub("qmod.py", "from os.path import join\nfrom posixpath import join\n", "from posixpath import join\nVAL = 1\nfrom os.path import join\n"), "move import")
+same_as_old("D3c", "a name imported twice from the same module", lambda: sub("pmod.py", CO, CO + "\nfrom collections import deque"), "imp twice")
+# D2: a name taken from another of our modules and used only in an annotation of a postponed file is still needed by the import statement
+out, err, _ = sel_after(lambda: sub("tmod.py", "Tag = int", "Tag2 = int"), "annotation-only import renamed in its source")
+check("D2 renaming Tag in tmod.py, which imod.py imports and uses only in an annotation (postponed), reaches the suite that imports imod (b): the import fails", out.split() == ["b"], (out, err))
+narrows("ANN1", "a name used only in a parameter annotation of a plain def in a postponed file is no read", rm("Iterable"), N1, ["a"], "ann param")
+narrows("ANN2", "...a return annotation", rm("Sequence"), N1, ["a"], "ann return")
+narrows("ANN3", "...the annotation of a local variable", rm("Mapping"), N1, ["a"], "ann local")
+narrows("ANN4", "...a method's parameter annotation", rm("Collection"), N1, ["a"], "ann method")
+narrows("ANN5", "an annotation-only constant (ANN2 = str → int)", lambda: sub("pmod.py", "ANN2 = str", "ANN2 = int"), N1, ["a"], "ann constant")
+out, err, _ = sel_after(rm("Iterator"), "ann escaped")
+check("ANN6 a def whose name is used as a value (z: typing.get_type_hints(pmod.pg)) keeps its annotation names as reads: the suite that does so (z), not a", out.split() == ["z"], (out, err))
+out, err, _ = sel_after(rm("Optional"), "ann field")
+check("ANN7 a name in a class-level annotation (a field a dataclass or a model reads) stays a read: the suite that uses the class (a)", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "from typing import Iterable\n", ""), "ann runtime")
+check("ANN8 a name used in an annotation of a file WITHOUT postponed annotations is a read (the def evaluates it): the suite that calls the def (a) and the text reader", out.split() == ["a", "c"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "CAP = 5", "CAP = 6"), "ann default")
+check("ANN9 a constant a default value reads is a read", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "SIZE = 8", "SIZE = 9"), "ann decorator")
+check("ANN10 a constant a decorator reads is a read", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "from functools import lru_cache\n", ""), "ann decorator import")
+check("ANN11 the import of a name a decorator reads is a read", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "def pr(x: int) -> Sequence[int]:", "def pr(x: int) -> Sequence[str]:"), "ann signature")
+check("ANN12 a change to the def line (an annotation edited) still reaches the suites that call the def", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(lambda: sub("pmod.py", "from __future__ import annotations\n", ""), "future import removed")
+check("ANN13 postponed annotations turned off takes the file whole (every annotation of it changes meaning)", out.split() == ["a", "b", "z"] and "pmod.py: whole (pmod.py)" in err, (out, err))
+out, err, _ = sel_after(lambda: sub("mod.py", "def f", "from __future__ import annotations\ndef f"), "future import added")
+check("ANN14 postponed annotations turned ON takes the file whole as well (mod.py: every suite that ran it, so all four)", out == "all" and "mod.py: whole (mod.py)" in err, (out, err))
+out, err, _ = sel_after(rm("Hashable"), "annotation of a field of a class inside a function")
+check("ANN15 a name in the field annotation of a class defined inside a function is a read (a dataclass there reads it): the suite that calls the function (a)", out.split() == ["a"], (out, err))
+out, err, _ = sel_after(rm("Deque"), "registry decorator")
+check("ANN16 a def with a decorator that is not a plain wrapper (a registry in the file) keeps its annotation names as reads: every suite that imports the file", out.split() == ["a", "b", "z"], (out, err))
+out, err, _ = sel_after(rm("Reversible"), "class used as a value")
+check("ANN17 the __init__ annotations of a class used as a value (z: inspect.signature(pmod.PI)) are reads, through the class's name: z", out.split() == ["z"], (out, err))
+narrows("ANN18", "a name used only in the __init__ annotations of a class that is only ever called (PN) is no read", rm("Container"), N1, ["a"], "class only called")
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("docs/broken", "#!/usr/bin/env python3\nthis is ( not python\n")
+rm("Iterable")()
+head_b = commit("ann param, a script that does not parse")
+r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(N.blind)", head_b], capture_output=True, text=True, env=ENV, cwd=str(R))
+out_b = tool("select", "--map", str(MAP), "--to", head_b).stdout.split()
+check("BLIND a script that does not parse makes every def count as reached by it (blind): the removal of Iterable (ANN1) selects a again (c is the new file in the directory it lists)", r.stdout.strip() == "True" and out_b == ["a", "c"], (r.stdout, r.stderr[-400:], out_b))
+for v in ("I", "N"):
+    r = tool("list", env={f"SUITEMAP_{'IMPORT' if v == 'I' else 'ANNOTATION'}_RULE": "x"})
+    check(f"IMP8 a value that is not a rule is an error at once ({v})", r.returncode != 0 and "_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
+# the escapes the names rule sees: a def used as a value anywhere (an alias, a decorator, an attribute not called, a string, a script with a python shebang) keeps its annotations
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pa as alias\nuse = [alias]\n")
+write("tests/w2_scenario.py", "import pmod\nreg = {}\nreg['k'] = pmod.pr\n")
+write("tests/w3_scenario.py", "names = ['pl']\n")
+write("tests/w4_scenario.py", "import pmod\n@pmod.pd\ndef x(): pass\n")
+write("bin/runner", "#!/usr/bin/env python3\nimport pmod\nf = pmod.pc\n")
+esc_head = commit("escapes")
+r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
+                    esc_head, "pa", "pr", "pl", "pd", "pc", "pg", "pq", "pj", "pu", "pm", "pdd"], capture_output=True, text=True, env=ENV, cwd=str(R))
+check("ESC1 a def used as a value (alias, attribute, string, decorator, a script's shebang, get_type_hints argument) escapes; one only called does not",
+      r.stdout.split("|")[0].split() == ["pa", "pc", "pd", "pg", "pl", "pr"] and r.stdout.split("|")[1].strip() == "False", (r.stdout, r.stderr[-600:]))
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pa as alias\nuse = [alias]\n"); rm("Iterable")(); head2 = commit("ann param, escaped by an alias")
+out3 = tool("select", "--map", str(MAP), "--to", head2).stdout.split()
+check("ESC2 the same removal of Iterable that selected nothing (ANN1) selects a once pa is used as a value (w1: an alias of it; w1 has no measurement and runs anyway)",
+      out3 == ["a", "w1"], out3)
+# ---- the review of the import and annotation rules (Thu Nov 12th 2026). OLD: both old rules (what the PR before the rules chose).
+OLD = {**I1, **N1}
+# an import the file gains that does not resolve fails every importer at import; no annotation-only name shows it. imod.py imports Tag from tmod.py and uses it only in an annotation (b runs it).
+def tmod_bind(): sub("tmod.py", "Tag = int", "Tag = int\nTagg = int")
+out, err, head = sel_after(lambda: sub("imod.py", "from tmod import Tag\n", "from tmod import Tag, Tagg\n"), "name added, missing in its module")
+check("IMP10 a name ADDED to an import from one of our modules that does not bind it takes the importing file whole: the suite that imports it (b), as the old rule had it",
+      out.split() == ["b"] and "imod.py: whole (imod.py)" in err and old_rule(head, OLD) == ["b"], (out, err, old_rule(head, OLD)))
+def add_and_define(): sub("imod.py", "from tmod import Tag\n", "from tmod import Tag, Tagg\n"); tmod_bind()
+out, err, head = sel_after(add_and_define, "name added, and bound in its module")
+check("IMP11 ...but one the module binds (here in the same change) is a pure addition: nothing is selected (the old rule chose b through Tag)", out == "" and old_rule(head, OLD) == ["b"], (out, err, old_rule(head, OLD)))
+out, err, head = sel_after(lambda: sub("imod.py", "from tmod import Tag\n", "from tmod import Tagg\n"), "name renamed to a missing one")
+check("IMP12 a name renamed to one the module does not bind (not a pure addition) takes the file whole too: b", out.split() == ["b"] and "imod.py: whole (imod.py)" in err and old_rule(head, OLD) == ["b"], (out, err, old_rule(head, OLD)))
+out, err, head = sel_after(lambda: sub("qmod.py", "from os.path import join\n", "from os.path import join, split\n"), "name added from the stdlib")
+check("IMP13 a name added from the stdlib or an installed package cannot be looked up: it keeps the narrowing (a pure addition, nothing selected; the old rule chose a through join)", out == "" and old_rule(head, I1) == ["a"], (out, err, old_rule(head, I1)))
+# the cases that cannot be a suite's measured file here (a package, a star import, import a.b): py_change on two commits, with the new files marked as run by b
+def whole_of(a, b, path, ran=(), env=None):
+    code = ("import sys, json; sys.path.insert(0, 'tests'); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
+            "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
+            "print(json.dumps(sorted(s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[3])))")
+    r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("rp/__init__.py", ""); write("rp/b.py", "T = int\nimport collections\n")
+write("rp/a.py", "from __future__ import annotations\nfrom .b import T\n\ndef g(x: T):\n    return x\n")
+pkg_base = commit("a package with a relative import")
+RAN = ("rp/a.py", "rp/b.py", "rp/__init__.py")
+def rp(old, new, extra=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", pkg_base); sub("rp/a.py", old, new)
+    if extra: extra()
+    return whole_of(pkg_base, commit("relative import edit"), "rp/a.py", RAN)
+check("IMP14 a relative import added for a name the module binds (T2 here) narrows; one for a name it does not bind takes the file whole",
+      rp("from .b import T\n", "from .b import T, T2\n", lambda: sub("rp/b.py", "T = int\n", "T = int\nT2 = int\n")) == [] and rp("from .b import T\n", "from .b import T, U\n") == ["rp/a.py"],
+      (rp("from .b import T\n", "from .b import T, T2\n", lambda: sub("rp/b.py", "T = int\n", "T = int\nT2 = int\n")), rp("from .b import T\n", "from .b import T, U\n")))
+check("IMP15 a name that is a module below the package (from . import b), or one the module itself imports (collections in rp/b.py), is bound; a module that is not there is not",
+      rp("from .b import T\n", "from .b import T\nfrom . import b\n") == [] and rp("from .b import T\n", "from .b import T, collections\n") == []
+      and rp("from .b import T\n", "from .b import T\nfrom . import nothing\n") == ["rp/a.py"] and rp("from .b import T\n", "from .nothing import T\n") == ["rp/a.py"])
+check("IMP16 a star import added is unchecked (the names it brings are not on the line): the file whole, from a module of ours or from a library",
+      rp("from .b import T\n", "from .b import T\nfrom .b import *\n") == ["rp/a.py"] and rp("from .b import T\n", "from .b import T\nfrom os.path import *\n") == ["rp/a.py"])
+check("IMP17 `import a.b` added: a missing module of ours takes the file whole; a module of ours that is there, the stdlib's and an installed package's keep the narrowing",
+      rp("from .b import T\n", "from .b import T\nimport rp.nothing\n") == ["rp/a.py"] and rp("from .b import T\n", "from .b import T\nimport rp.b\n") == []
+      and rp("from .b import T\n", "from .b import T\nimport os.path\n") == [] and rp("from .b import T\n", "from .b import T\nimport nopkg.sub\n") == [])
+check("IMP18 a module whose names are not all known (a star import in it) does not vouch for a name: the file whole",
+      rp("from .b import T\n", "from .b import T, V\n", lambda: sub("rp/b.py", "import collections\n", "from os.path import *\n")) == ["rp/a.py"])
+rp("from .b import T\n", "from .b import T, U\n")
+check("IMP19 under the old import rule (I1) that unresolved addition is no whole-file case: the rule is the new one, switching it off brings the old selection back",
+      whole_of(pkg_base, git("rev-parse", "HEAD").strip(), "rp/a.py", RAN, I1) == [])
+# the second round of the review: names that fail at runtime are no binding, two `as` imports of one local, a plain statement beside an import
+def pc_of(a, b, path, ran=(), env=None):
+    """the whole py_change result for one file, as sorted strings: (fns, bound, own, whole)"""
+    code = ("import sys, json; sys.path.insert(0, 'tests'); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
+            "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
+            "print(json.dumps([sorted(map(str, x)) for x in s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[:4]]))")
+    r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+RQ = ("rq/__init__.py", "rq/src.py", "rq/imp.py", "rq/c.py", "rq/d.py")
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("rq/__init__.py", ""); write("rq/src.py", "Tag = int\n")
+write("rq/imp.py", "from __future__ import annotations\nfrom .src import Tag\n\ndef g(x: Tag):\n    return x\n")
+write("rq/c.py", "import os; os = 1\n"); write("rq/d.py", "from .src import Tag; Tag = Tag + 1\n")
+rq_base = commit("a package for the second review round")
+def rq(src_text, old="from .src import Tag\n", new="from .src import Tag, Tagg\n", env=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", rq_base); write("rq/src.py", src_text); sub("rq/imp.py", old, new)
+    return pc_of(rq_base, commit("import edit"), "rq/imp.py", RQ, env)
+chk = lambda r: r[3] if isinstance(r, list) else r
+narrowed = lambda r: isinstance(r, list) and r[3] == [] and r[1] == ["('rq.imp', 'Tagg')"]   # only the added name is bound, the file is not whole
+check("IMP20 a name the source module only declares fails at import and is no binding: a bare annotation, a name under `if TYPE_CHECKING:` and a deleted name all take the file whole; a real one narrows (binds only the added name)",
+      chk(rq("Tag = int\nTagg: int\n")) == ["rq/imp.py"] and chk(rq("from typing import TYPE_CHECKING\nTag = int\nif TYPE_CHECKING:\n    Tagg = int\n")) == ["rq/imp.py"]
+      and chk(rq("Tag = int\nTagg = 1\ndel Tagg\n")) == ["rq/imp.py"] and narrowed(rq("Tag = int\nTagg = int\n")),
+      [rq("Tag = int\nTagg: int\n"), rq("Tag = int\nTagg = 1\ndel Tagg\n"), rq("Tag = int\nTagg = int\n")])
+check("IMP21 ...and a name bound in the else branch of `if TYPE_CHECKING:`, or by a bare annotation that also has a value, is bound (narrows); under the old import rule (I1) none of them is whole",
+      narrowed(rq("import typing\nTag = int\nif typing.TYPE_CHECKING:\n    pass\nelse:\n    Tagg = int\n")) and narrowed(rq("Tag = int\nTagg: int = 1\n"))
+      and chk(rq("Tag = int\nTagg: int\n", env=I1)) == [] and chk(rq("Tag = int\nTagg = 1\ndel Tagg\n", env=I1)) == [])
+# a plain statement on the same line as an import that rebinds an imported name is changed on its own
+def line_edit(path, old, new, env=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", rq_base); sub(path, old, new)
+    return pc_of(rq_base, commit("line edit"), path, RQ, env)
+r_new, r_old = line_edit("rq/c.py", "os = 1", "os = 2"), line_edit("rq/c.py", "os = 1", "os = 2", I1)
+check("MS3 `import os; os = 1` to `os = 2` binds os (the plain statement is no import: it is not narrowed to the names the import added); same as the old rule",
+      r_new[1] != [] and r_new == r_old, (r_new, r_old))
+r_new, r_old = line_edit("rq/d.py", "Tag + 1", "Tag + 2"), line_edit("rq/d.py", "Tag + 1", "Tag + 2", I1)
+check("MS4 `from .src import Tag; Tag = Tag + 1` to `Tag + 2` binds Tag (and reads src, which is not a change of its own); same as the old rule",
+      r_new[1] != [] and r_new == r_old, (r_new, r_old))
+# several statements on one line (import os; QX = 1, qmod.py): the second is a changed statement too, and the unchanged import binds nothing
+out, err, head = sel_after(lambda: sub("qmod.py", "import os; QX = 1", "import os; QX = 2"), "two statements on one line")
+check("MS1 the value changed on a line that also holds an import (`import os; QX = 1`) reaches the code that reads it: a (qx)", out.split() == ["a"], (out, err))
+out, err, head = sel_after(lambda: sub("qmod.py", "import os; QX = 1", "import os, re; QX = 1"), "two statements on one line, an import added")
+check("MS2 ...and an import edited on that line takes the other statement with it (the line changed): a, as the old rule had it, never nothing", out.split() == ["a"] and old_rule(head, I1) == ["a"], (out, err, old_rule(head, I1)))
+# a .py file that does not parse: reach() reads the imports of every file
+out, err, _ = sel_after(lambda: (write("cfgmod.py", "def configure(v:\n"), sub("mod.py", "LIMIT = 3", "LIMIT = 4")), "a file that does not parse, and a constant")
+r = tool("select", "--map", str(MAP), "--to", git("rev-parse", "HEAD").strip())
+check("UNP1 a .py file that does not parse (cfgmod.py, which suite b ran) does not stop the selection with an error, and is taken whole (every suite here: b ran it, a and c read mod.py)",
+      r.returncode == 0 and "Traceback" not in r.stderr and r.stdout.split() in (["a", "b", "c"], ["all"]), (r.returncode, r.stdout, r.stderr[-500:]))
+# a name escapes through a rename chain across files, and a uv shebang is a script too
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pr as h\n")
+write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n")
+chain_head = commit("rename chain")
+def escaped(rev, names, shebang=None):
+    r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
+                        rev, *names], capture_output=True, text=True, env=ENV, cwd=str(R))
+    return r.stdout.split("|")[0].split(), r.stdout.split("|")[-1].strip(), r.stderr[-400:]
+check("ESC3 a def re-exported under another name (w1: `from pmod import pr as h`) and used as a value in another file (w2: get_type_hints(h)) escapes with it: h and pr",
+      escaped(chain_head, ["h", "pr", "pl"])[:2] == (["h", "pr"], "False"), escaped(chain_head, ["h", "pr", "pl"]))
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "from pmod import pr as h\n")
+write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n"); rm("Sequence")()
+out3 = tool("select", "--map", str(MAP), "--to", commit("return annotation of pr, escaped through a rename chain")).stdout.split()
+check("ESC4 so removing Sequence (the return annotation of pr, ANN2: nothing) now selects a, the suite that calls pr (w1 and w2 have no measurement and run anyway)", out3 == ["a", "w1", "w2"], out3)
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("bin/uvrunner", "#!/usr/bin/env -S uv run --script\nimport pmod\nf = pmod.pq\n")
+uv_head = commit("a uv script")
+check("UV1 a script with a `uv run` shebang counts as a use of a def as a value: pq escapes, and the scripts were listed (not blind)", escaped(uv_head, ["pq", "pj"])[:2] == (["pq"], "False"), escaped(uv_head, ["pq", "pj"]))
+write("bin/uvbroken", "#!/usr/bin/env -S uv run --script\nthis is ( not python\n")
+uvb_head = commit("a uv script that does not parse")
+check("UV2 ...and one that does not parse stays blind (any def may be reached)", escaped(uvb_head, ["pq"])[1] == "True", escaped(uvb_head, ["pq"]))
+# two `as` imports of one local name: every source name escapes with it
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "try:\n    from pmod import pr as h\nexcept ImportError:\n    from pmod import pl as h\n")
+write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n")
+tr_head = commit("a try/except fallback import of one local")
+check("ESC5 two `from … import x as h` for one local (a try/except ImportError fallback) both escape when h is used as a value: pr and pl, not only the last", escaped(tr_head, ["h", "pr", "pl"])[:2] == (["h", "pl", "pr"], "False"), escaped(tr_head, ["h", "pr", "pl"]))
+write("tests/w1_scenario.py", "from pmod import pr as h\nfrom pmod import pl as h\n")
+tl_head = commit("two lines import one local")
+check("ESC6 ...and so do two plain lines of one file", escaped(tl_head, ["h", "pr", "pl"])[:2] == (["h", "pl", "pr"], "False"), escaped(tl_head, ["h", "pr", "pl"]))
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")
@@ -1124,6 +1455,72 @@ check("TRIPWIRE a removed use fails too, so the pinned count is never stale (one
       doc_uses({real_q: scan[real_q].replace("help_text = client.__doc__", "help_text = ''", 1)}))
 check("TRIPWIRE stays quiet on the listed uses and on a bare module __doc__ (print(__doc__))",
       doc_uses({f: scan[f] for f, _ in DOCUSE_ALLOW}) == [] and doc_uses({"tests/new_scenario.py": "print(__doc__)"}) == [])
+
+# ---- the annotation tripwire (Thu Nov 12th 2026). The names of a plain def's annotations are no read in a file with postponed annotations while that def's name is
+# only ever called (tests/suitemap.py, *Imports and annotations*): nothing then evaluates them. That holds while nothing fetches a function by a variable name and hands
+# it to a reader of annotations. The scan above lists the Python of the checkout; the forms that evaluate or carry annotations are pinned per file below, so a new use
+# fails this scenario until its author has looked at whether the def it reaches keeps its annotations as reads. The tripwire selects nothing.
+# Not covered: an eval or exec string, an annotations subscript by a computed key, a framework that evaluates annotations of a plain function it finds by a variable name.
+ANN_NAMES = ("get_type_hints", "get_annotations", "__annotations__", "annotationlib", "TypeAdapter", "create_model", "validate_call", "update_wrapper", "__wrapped__", "wraps", "__annotate__")
+def ann_forms(src):
+    """the forms that evaluate, copy or inspect annotations a Python source uses, each with the number of its uses"""
+    out = collections.Counter()
+    for n in ast.walk(ast.parse(src)):
+        if isinstance(n, ast.Attribute) and n.attr in ANN_NAMES:
+            out[n.attr] += 1
+        elif isinstance(n, ast.Name) and n.id in ANN_NAMES:
+            out[n.id] += 1
+        elif isinstance(n, ast.Import):
+            out["annotationlib"] += sum(a.name.split(".")[0] == "annotationlib" for a in n.names)
+        elif isinstance(n, ast.ImportFrom):
+            out["annotationlib"] += (n.module or "").split(".")[0] == "annotationlib"
+            for a in n.names:
+                if a.name in ANN_NAMES:
+                    out[a.name] += 1
+        elif isinstance(n, ast.keyword) and n.arg == "eval_str":
+            out["eval_str"] += 1
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("getattr", "hasattr", "setattr") \
+                and any(isinstance(a, ast.Constant) and a.value in ("__annotations__", "__annotate__", "__wrapped__") for a in n.args):
+            out["getattr of __annotations__ or __wrapped__"] += 1
+        elif isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Constant) and n.slice.value in ("__annotations__", "__annotate__"):
+            out["subscript of __annotations__"] += 1   # f.__dict__["__annotations__"], vars(f)["__annotations__"]
+    return +out
+ANNUSE_ALLOW = {
+    ("stackshot/web/server.py", "wraps"): (2, "functools.wraps twice: a decorator's wrapper, and the update tool's own signature kept visible; the function it copies from (_update_unlocked) is used as a value there, so its annotation names stay reads"),
+    ("tests/read_only_scenario.py", "getattr of __annotations__ or __wrapped__"): (2, "hasattr(endpoint, '__wrapped__') twice: whether a route is wrapped, nothing is evaluated"),
+}
+def ann_uses(files):
+    """(file, form, uses found, uses pinned) for every form of {path: source} whose number of uses is not the number the allow list pins"""
+    out = []
+    for f, src in sorted(files.items()):
+        found = ann_forms(src)
+        for x in sorted(set(found) | {x for (g, x) in ANNUSE_ALLOW if g == f}):
+            pinned = ANNUSE_ALLOW.get((f, x), (0, ""))[0]
+            if found.get(x, 0) != pinned:
+                out.append((f, x, found.get(x, 0), pinned))
+    return out
+drift = ann_uses(scan)
+check("TRIPWIRE the use of every form that evaluates, copies or inspects annotations is the pinned number on the allow list (ANNUSE_ALLOW): a changed count "
+      "(" + "; ".join(f"{f}: {x} used {n}x, pinned {k}" for f, x, n, k in drift) + ") is a new or a removed use: look at it, can it reach a plain function by a variable name that "
+      "the names rule (tests/suitemap.py, *Imports and annotations*) took to be only called? Then pin the new count with a one-line reason", not drift, drift)
+check("TRIPWIRE every annotation allow list entry names a file the scan reads", all(f in scan for f, _ in ANNUSE_ALLOW), [f for f, _ in ANNUSE_ALLOW if f not in scan])
+for what, code, form in (("typing.get_type_hints", "import typing\nh = typing.get_type_hints(f)", "get_type_hints"), ("from typing import get_type_hints", "from typing import get_type_hints\nh = get_type_hints(f)", "get_type_hints"),
+                         ("inspect.get_annotations", "import inspect\nh = inspect.get_annotations(f)", "get_annotations"), ("fn.__annotations__", "a = fns[name].__annotations__", "__annotations__"),
+                         ("inspect.signature(eval_str=True)", "import inspect\ns = inspect.signature(f, eval_str=True)", "eval_str"), ("annotationlib", "import annotationlib\nannotationlib.get_annotations(f)", "annotationlib"),
+                         ("from annotationlib import X", "from annotationlib import get_annotations\nget_annotations(f)", "annotationlib"), ("a pydantic TypeAdapter", "from pydantic import TypeAdapter\nTypeAdapter(f)", "TypeAdapter"),
+                         ("create_model", "from pydantic import create_model\ncreate_model('M')", "create_model"), ("validate_call", "from pydantic import validate_call\nvalidate_call(f)", "validate_call"),
+                         ("functools.update_wrapper", "import functools\nfunctools.update_wrapper(g, f)", "update_wrapper"), ("functools.wraps", "import functools\nh = functools.wraps(f)(g)", "wraps"),
+                         ("g.__wrapped__", "x = g.__wrapped__", "__wrapped__"), ("getattr(f, '__annotations__')", "a = getattr(f, '__annotations__')", "getattr of __annotations__ or __wrapped__"),
+                         ("f.__annotate__", "a = f.__annotate__", "__annotate__"), ("f.__dict__['__annotations__']", "a = f.__dict__['__annotations__']", "subscript of __annotations__"),
+                         ("vars(f)['__annotations__']", "a = vars(f)['__annotations__']", "subscript of __annotations__")):
+    flagged = [x for _f, x, _n, _k in ann_uses({"tests/new_scenario.py": code})]
+    check(f"TRIPWIRE fires on a new use of an annotation reader: {what} in a new suite", form in flagged, flagged)
+real_s = "stackshot/web/server.py"
+check("TRIPWIRE a new use in a file that already has an entry for that form fails (one more functools.wraps appended to server.py)",
+      ann_uses({real_s: scan[real_s]}) == [] and ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}) == [(real_s, "wraps", 3, 2)],
+      ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}))
+check("TRIPWIRE stays quiet on the listed uses and on a bare function def (def f(x: int) -> int)",
+      ann_uses({f: scan[f] for f, _ in ANNUSE_ALLOW}) == [] and ann_uses({"tests/new_scenario.py": "def f(x: int) -> int:\n    return x"}) == [])
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
