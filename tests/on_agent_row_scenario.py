@@ -48,7 +48,7 @@ def item(i, subject, act=None, since=3 * H, **meta):
 
 # the three rows of the approved mockup, as fixture data (the times are the mockup's)
 item(101, "[work] cut the suites per change", (104 * M, "audit", "fix commit on PR 124"), since=8 * H)
-item(102, "[work] retire the check-back wake", (46 * M, "audit", "fix commit on PR 122"), since=4 * H)
+item(102, "[work] retire the polling wake", (46 * M, "audit", "fix commit on PR 122"), since=4 * H)
 item(103, "[work] install the new release", (162 * M, "step_done", "step 2 done"), since=2 * H)
 # the bands at their boundaries
 for i, secs in ((111, 44 * M + 59), (112, 45 * M), (113, 59 * M + 59), (114, 60 * M), (115, 61 * M), (116, 30)):
@@ -165,7 +165,7 @@ check("a row of the same list with a record and one without sit together, each d
 h = h_all
 agents = h[h.find('<section id="agents-at-work">'):h.find("</section>", h.find('<section id="agents-at-work">'))]
 check("the home page's On agent list holds the activity lines of the 20 rows with a record (the held row has none), and none for the three without", agents.count('class="ir-actl"') == 20, agents.count('class="ir-actl"'))
-check("the home page's script redraws them: the script has the lact function, and a swap calls it", "function lact()" in h and "tick();lact();rcv()" in h)
+check("the home page's script redraws them: the script has the lact function, and a swap calls it, in its own listener, so the receivers script keeps its shape", "function lact()" in h and "document.addEventListener('stackshot:swapped',lact)" in h and "tick();rcv()});})();" in h)
 check("the Your move list has no activity line at all", 'class="ir-actl"' not in h[h.find('<section id="your-move">'):h.find("</section>", h.find('<section id="your-move">'))])
 
 # ---- the live update ----
@@ -191,7 +191,7 @@ check("the item page's band follows the age: 46m is amber, quiet", re.search(r'd
 # ---- the page script, run against the same numbers ----
 node = shutil.which("node")
 if node:
-    stub = ("var out=[];var W=%s;window={};document={querySelectorAll:function(){return els}};global.window=window;global.document=document;var T=%s;SST=window.SST=function(k,f){var s=T[k];return f?s.replace(/\\{(\\w+)\\}/g,function(m,x){return f[x]}):s};"
+    stub = ("var out=[];var W=%s;window={};document={querySelectorAll:function(){return els},addEventListener:function(){}};global.window=window;global.document=document;var T=%s;SST=window.SST=function(k,f){var s=T[k];return f?s.replace(/\\{(\\w+)\\}/g,function(m,x){return f[x]}):s};"
             "function mk(at,pill){var a={};return {classList:{contains:function(c){return pill&&c==='ir-pill'}},getAttribute:function(k){return k==='data-at'?String(at):W[k]},setAttribute:function(k,v){a[k]=v},get textContent(){return this._t},set textContent(v){this._t=v},attr:a}}"
             "var els=[];setInterval=function(){};Date.now=function(){return %d};"
             "[%s].forEach(function(s){var age=mk(%d-s,false),pill=mk(%d-s,true);els=[age,pill];%s;out.push([s,age._t,age.attr['data-b'],pill._t,pill.attr['data-b']])});console.log(JSON.stringify(out))")

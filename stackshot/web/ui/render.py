@@ -893,7 +893,7 @@ _LACT_JS = ("function lact(){var n=Date.now()/1000;document.querySelectorAll('[d
             "b=m>=%d?'bad':m>=%d?'warn':'ok';e.setAttribute('data-b',b);"
             "e.textContent=e.classList.contains('ir-pill')?e.getAttribute('data-w-'+b):"
             "m<1?SST('age.span_now'):m<60?SST('age.span_min',{m:m}):m<1440?SST('age.span_hour',{h:Math.floor(m/60),m:m%%60}):SST('age.span_day',{d:Math.floor(m/1440),h:Math.floor(m%%1440/60)})})}"
-            "lact();setInterval(lact,30000);") % (_lastact.BAND_BAD_S // 60, _lastact.BAND_WARN_S // 60)
+            "lact();setInterval(lact,30000);document.addEventListener('stackshot:swapped',lact);") % (_lastact.BAND_BAD_S // 60, _lastact.BAND_WARN_S // 60)
 _APP_HEAD = _SST_HEAD + ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
              f'<link rel="apple-touch-icon" href="{icon_href("apple-touch-icon.png")}">'          # 180 px, opaque (signin.py _APP_ICONS)
              '<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)">'   # the app's title bar: each theme's --bg
@@ -4472,7 +4472,7 @@ var h=c.querySelector('.st');if(h){{h.className='lbl st '+k;h.title=raw;h.textCo
 if(v.ok&&+v.stale>0){{var sw=SST('js.rcv.stale',{{age:dur(+v.stale)}}),sn=String(v.stale_note||sw);c.classList.remove('ok','bad');c.classList.add('warn');c.title=SST('js.rcv.title',{{raw:sn,checked:v.checked,tz:'{_cfg.tz_abbr()}'}});if(h){{h.className='lbl st warn';h.title=sn;h.textContent=sw}}}}
 var t=c.querySelector('[data-ts]');if(t&&v.ts){{t.setAttribute('data-ts',v.ts);t.setAttribute('data-tip',v.checked+' {_cfg.tz_abbr()}')}}
 var y=c.querySelector('.rtype');if(y&&v.type)y.textContent=v.type}});tick()}}).catch(function(){{}})}}
-rcv();setInterval(rcv,60000);document.addEventListener('stackshot:swapped',function(){{tick();lact();rcv()}});}})();
+rcv();setInterval(rcv,60000);document.addEventListener('stackshot:swapped',function(){{tick();rcv()}});}})();
 {_AUDIT_JS}
 {_FORYOU_JS if _SHOW_FOR_YOU else ''}
 {_LIVE_JS}
