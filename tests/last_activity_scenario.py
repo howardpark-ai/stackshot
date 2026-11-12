@@ -19,9 +19,12 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
      stranger's comment on an anchored pull request and on an issue the item's words name; a fork's, a deleted fork's and a nameless CI result); a merge is not filtered
   10 the line's time is the event's own when it can be read and is within the window (a backlog is not now); absent or unreadable falls back to the hub's; outside the window writes no line
   11 History: a confirm and a last-activity stamp saved in one window still show the `confirm` line (both renderers)
+  12 the time of a notifications thread is its vouched items', and a CI result's is its check runs' own
+  13 a commit: the head sha of an anchored pull request changing is one extra read and one `commit` event at the committer date; a first sight, an unchanged sha and a 304 read nothing and record nothing; a force-push to an
+     older commit, a date ahead of the clock, an unreadable date and a fork's pull request; the event is logged and told to no session; the pass stamps "commit on PR n" and the record never goes back
 
     tests/run-suite last_activity       -> exit 0 / 1"""
-import json, os, re, sys, pathlib, time, logging, io, math
+import json, os, re, sys, pathlib, time, logging, io, math, hashlib
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 tmp = _scratch.mkdtemp(prefix="lastact-"); T = pathlib.Path(tmp)
@@ -138,7 +141,7 @@ check("1 apply: stores the record with its kind; the same again, an older one an
       LA.apply(item_, [S_(10)]) and item_["metadata"]["last_activity"] == {"at": 10.0, "kind": "comment", "what": "x"} and not LA.apply(item_, [S_(10)]) and not LA.apply(item_, [S_(5, "y")]) and not LA.apply(item_, [None, {"at": "z"}])
       and LA.apply(item_, [S_(11, "y", "review")]) and item_["metadata"]["last_activity"] == {"at": 11.0, "kind": "review", "what": "y"} and not LA.apply({"metadata": "not a dict"}, [S_(1, "z")]), item_)
 check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today",
-      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS - {"update", "audit"}, sorted(LA.KINDS))
+      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS - {"update", "audit"}, sorted(LA.KINDS))
 check("1 save_signals: each save signal has its kind: step_done, step_dropped, state_change, pr_merged, and created is a state_change",
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
@@ -563,16 +566,24 @@ check("8 …and without the mark it writes one", len(EL.read(0)[0]) == 1, EL.rea
 # ================================================================ 9. who counts: only the repository's own side is activity; a CI result counts from a branch of the repository itself
 class GH:
     """The GitHub receiver on a fake `gh`: `ghd` maps an API path to its answer (a "404" string is a refusal); the receiver's events are kept in `evs` instead of being routed."""
-    def __init__(self, ghd, anchors):
-        self.ghd, self.caught, self.evs = ghd, [], []
-        self.hub = HUB.Hub(); self.hub.write_status = lambda: None; self.hub.emit = self.evs.append; self.hub.bindings = {a: {"home-peer"} for a in anchors}
+    def __init__(self, ghd, anchors, etags=False, saved=None):
+        self.ghd, self.caught, self.evs, self.calls, self.etags, self.not_modified = ghd, [], [], [], etags, []      # calls: (path, conditional) of every read; etags: the fake answers 304 to a matching If-None-Match, as GitHub does
+        self.hub = HUB.Hub()
+        if saved is not None: self.hub.saved = saved
+        self.hub.write_status = lambda: None; self.hub.emit = self.evs.append; self.hub.bindings = {a: {"home-peer"} for a in anchors}
     def __enter__(self):
         self.old = (ghr.subprocess, ghr.threading, ghr.time)
         def fake(args, capture_output=True, text=True, timeout=30):
             a = [x for x in args[2:] if x != "-i" and x != "-H" and not x.startswith("If-None-Match")]; path = a[0]; cond = "-i" in args
+            self.calls.append((path, cond))
             ans = self.ghd.get(path, [])
             if ans == "404": return types.SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
-            body = json.dumps(ans); return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
+            body = json.dumps(ans)
+            if self.etags and cond:
+                tag = '"' + hashlib.sha1(body.encode()).hexdigest()[:12] + '"'
+                if f"If-None-Match: {tag}" in args: self.not_modified.append(path); return types.SimpleNamespace(returncode=0, stdout="HTTP/2.0 304 Not Modified\n\n", stderr="")
+                return types.SimpleNamespace(returncode=0, stdout=f"HTTP/2.0 200 OK\netag: {tag}\n\n" + body, stderr="")
+            return types.SimpleNamespace(returncode=0, stdout=("HTTP/2.0 200 OK\netag: \"x\"\n\n" + body) if cond else body, stderr="")
         ghr.subprocess = types.SimpleNamespace(run=fake, TimeoutExpired=subprocess.TimeoutExpired)
         ghr.threading = types.SimpleNamespace(Thread=lambda target, daemon=True: types.SimpleNamespace(start=lambda: self.caught.append(target)))
         ghr.time = types.SimpleNamespace(time=time.time, sleep=_no_sleep)
@@ -790,6 +801,121 @@ hub_.bindings["github:acme/widgets#34"] = {"home-peer"}
 hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
+
+# ================================================================ 13. a commit: the head sha of an anchored pull request changing
+# pure: the signal, its words, the committer date's rule (a date up to five minutes ahead of the clock reads as now, one further ahead or unreadable records nothing) and the filter
+check("13 pr_candidate: a commit of a tied pull request is the signal `commit`, worded `commit on PR n`, at the time given; it is one of the stamped kinds",
+      LA.pr_candidate("commit", 9, 5, 50) == {"at": 5.0, "kind": "commit", "what": "commit on PR 9"} and "commit" in LA.STAMPED and LA.pr_what("commit", 9) == "commit on PR 9" and LA.pr_what("commit", 0) == ""
+      and LA.pr_candidate("commit", 9, 80, 50)["at"] == 50.0 and LA.pr_candidate("commit", 9, "x", 50) is None and LA.clean({"at": 5, "kind": "commit", "what": ""}) is None, None)
+tn = 1_800_000_000.0
+for label, d, want in (("a minute ago", tn - 60, tn - 60), ("a day ago", tn - 86400, tn - 86400), ("two minutes ahead (clock skew)", tn + 120, tn), ("exactly five minutes ahead", tn + 300, tn), ("five minutes and a second ahead", tn + 301, None),
+                       ("two hours ahead", tn + 7200, None), ("garbage", "yesterday-ish", None), ("absent", None, None), ("a list", ["x"], None), ("a bool", True, None), ("zero", 0, None)):
+    got = EL.commit_time(iso_at(d) if isinstance(d, float) else d, tn)
+    check(f"13 commit_time: {label}", got == want, (d, got, want))
+A13 = "github:acme/widgets#140"
+check("13 lines_for: a commit is a line only when the source vouched for it (a fork's pull request writes none), at its own time; one older than a day or more than an hour ahead writes none; the line has no ids",
+      [r["kind"] for r in lines(A13, "", "pr_commit", "x", vouched="commit", now=100.0, ts=90.0)] == ["commit"] and lines(A13, "", "pr_commit", "x", vouched="", now=100.0, ts=90.0) == []
+      and lines(A13, "", "pr_commit", "x", vouched="comment+ci_failed", now=100.0, ts=90.0) == [] and lines(A13, "", "pr_commit", "x", vouched="commit", now=200000.0, ts=10.0) == []
+      and lines(A13, "", "pr_commit", "x", vouched="commit", now=100.0, ts=100.0 + 7200) == [] and lines(A13, "", "pr_commit", "x", vouched=["commit"], now=100.0, ts=90.0, refs=[BID(5)])[0]["refs"] == []
+      and lines(A13, "", "pr_commit+comment", "x", vouched="commit", now=100.0, ts=90.0)[0]["kind"] == "commit", None)
+check("13 normal: a commit line is read, its ids dropped", EL.normal({"ts": 1, "repo": "a/b", "n": 3, "kind": "commit", "refs": [BID(1)]}) == {"ts": 1.0, "repo": "a/b", "n": 3, "kind": "commit", "refs": []}, None)
+
+# the receiver on a fake `gh` that answers 304 to a matching If-None-Match
+SHAS = iter("abcdefghijklmnopqrstuvwxyz")
+def sha13(): return next(SHAS) * 40
+def commit_path(sha): return f"{RP}/git/commits/{sha}"
+def push13(G, g, n, sha, answer, fork=False):
+    """One pass after the pull request's head moved to `sha` (its commit answers `answer`, as the API holds it): → (the commit events the receiver handed the hub, the reads of a commit, the paths answered 304)."""
+    g.update(pr9(n, head="evil/widgets" if fork else "acme/widgets", sha=sha))
+    if answer is not None: g[commit_path(sha)] = answer
+    mark, m304 = len(G.calls), len(G.not_modified)
+    evs_ = [e for e in G.one() if e.etype == "pr_commit"]
+    return evs_, [p for p, _ in G.calls[mark:] if "/git/commits/" in p], G.not_modified[m304:]
+def cdate(back): return {"committer": {"date": iso_at(time.time() - back)}}
+SA = sha13()
+g13 = {"/user": {"login": "hubaccount"}, **pr9(140, sha=SA)}
+with GH(g13, [A13], etags=True) as G:
+    G.hub.status.setdefault("anchors", {})
+    first = G.one()
+    check("13 first sight of a pull request: the sha is kept, nothing is recorded and no commit is read", not [e for e in first if e.etype == "pr_commit"] and not [p for p, _ in G.calls if "/git/commits/" in p] and G.hub.gh_state["ci"][A13]["sha"] == SA, (G.calls, G.hub.gh_state["ci"]))
+    mark = len(G.calls)
+    again = G.one()
+    check("13 an unchanged sha: no commit event, no commit read, and the pull request's own read is answered 304 (nothing added to the poll)",
+          not [e for e in again if e.etype == "pr_commit"] and not [p for p, _ in G.calls[mark:] if "/git/commits/" in p] and f"{RP}/pulls/140" in G.not_modified and G.calls[mark:].count((f"{RP}/pulls/140", True)) == 1, (G.calls[mark:], G.not_modified))
+    SB = sha13(); t0_ = time.time()
+    evs_, reads, nm = push13(G, g13, 140, SB, cdate(600))
+    check("13 the head sha changed: exactly one extra read (that commit) and one commit event, stamped at the committer date (ten minutes ago, not now), vouched, on the pull request",
+          reads == [commit_path(SB)] and len(evs_) == 1 and evs_[0].vouched == "commit" and abs(EL._epoch(evs_[0].ts) - (t0_ - 600)) < 3 and evs_[0].anchor == A13 and evs_[0].url == f"{W_}/pull/140" and evs_[0].who == "someone"
+          and evs_[0].etype == "pr_commit" and f"{RP}/pulls/140" not in nm and G.hub.gh_state["ci"][A13]["sha"] == SB, (reads, [(e.etype, e.ts, e.vouched) for e in evs_]))
+    ev_B = evs_[0]
+    evs_, reads, nm = push13(G, g13, 140, SB, None)
+    check("13 the next pass with the same sha (the pull request read answers 304): no commit event and no commit read", evs_ == [] and reads == [] and f"{RP}/pulls/140" in nm, (reads, nm))
+    SC = sha13()
+    evs_, reads, nm = push13(G, g13, 140, SC, cdate(3 * H))
+    check("13 a force-push to an older commit: the sha changed, one read, one event at that older commit's own time (three hours ago), never ahead of now",
+          reads == [commit_path(SC)] and len(evs_) == 1 and abs(EL._epoch(evs_[0].ts) - (time.time() - 3 * H)) < 3 and EL._epoch(evs_[0].ts) <= time.time(), (reads, [e.ts for e in evs_]))
+    ev_C = evs_[0]
+    SD = sha13()
+    evs_, reads, nm = push13(G, g13, 140, SD, cdate(-2 * H))
+    check("13 a commit dated two hours ahead of the clock: read once, recorded as nothing", reads == [commit_path(SD)] and evs_ == [], (reads, [e.ts for e in evs_]))
+    evs_, reads, nm = push13(G, g13, 140, SD, None)
+    check("13 …and the sha is kept all the same: the next pass reads no commit again", reads == [] and evs_ == [], reads)
+    SE = sha13()
+    evs_, reads, nm = push13(G, g13, 140, SE, cdate(-120))
+    check("13 a commit dated two minutes ahead (clock skew) is recorded at now, never later", len(evs_) == 1 and time.time() - 5 <= EL._epoch(evs_[0].ts) <= time.time(), [e.ts for e in evs_])
+    for label, ans in (("a date that is not a date", {"committer": {"date": "tomorrow"}}), ("no committer", {"sha": "x"}), ("a committer that is null", {"committer": None}), ("an answer that is a list", ["x"]), ("a refused read (404)", "404")):
+        sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, ans)
+        check(f"13 {label}: one read, nothing recorded", reads == [commit_path(sx)] and evs_ == [], (reads, evs_))
+        evs_, reads, nm = push13(G, g13, 140, sx, None)
+        check(f"13 …and it is not read again on the next pass", reads == [] and evs_ == [], reads)
+    SK = sha13()
+    evs_, reads, nm = push13(G, g13, 140, SK, cdate(60))
+    check("13 a commit after all of those is recorded as usual (one failure does not stop the next)", len(evs_) == 1 and reads == [commit_path(SK)], (reads, evs_))
+
+# a fork's pull request: its head branch is not the repository's, so a commit there is nobody's activity: the read is not even made
+FA = sha13(); g13f = {"/user": {"login": "hubaccount"}, **pr9(141, head="evil/widgets", sha=FA)}
+with GH(g13f, ["github:acme/widgets#141"], etags=True) as Gf:
+    Gf.hub.status.setdefault("anchors", {}); Gf.one()
+    evs_, reads, nm = push13(Gf, g13f, 141, sha13(), cdate(60), fork=True)
+    check("13 a fork's pull request: its head moved, and no commit is read and nothing is recorded", evs_ == [] and reads == [], (reads, evs_))
+
+# a restart: the kept sha is in the hub's saved state, so a commit made while the hub was down is seen at the time it was made
+SR0, SR1 = sha13(), sha13(); A142 = "github:acme/widgets#142"
+g13r = {"/user": {"login": "hubaccount"}, **pr9(142, sha=SR1), commit_path(SR1): cdate(45 * MIN)}
+saved13 = {"github": {"me": "hubaccount", "state": {A142: {"state": "open", "comments": 0, "updated": iso9(0), "pr": True, "merged": False}}, "ci": {A142: {"pr": True, "sha": SR0, "key": None}}}}
+with GH(g13r, [A142], etags=True, saved=saved13) as Gr:
+    Gr.hub.status.setdefault("anchors", {})
+    got = [e for e in Gr.one() if e.etype == "pr_commit"]
+    check("13 after a restart the head that changed during the downtime is a commit, stamped at its committer date (forty-five minutes ago), not at the restart", len(got) == 1 and abs(EL._epoch(got[0].ts) - (time.time() - 45 * MIN)) < 3, [e.ts for e in got])
+
+# the hub: a commit event is logged for the last-activity record and told to no session; the merge log is untouched
+sent13 = []
+hub_.send = lambda *a, **k: sent13.append(a); hub_.emit_direct = lambda *a, **k: sent13.append(a)
+hub_.bindings[A13] = {"home-peer"}; hub_.pending.clear()
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True); ML.path().unlink(missing_ok=True)
+hub_.emit(ev_B)
+rows13, _ = EL.read(0)
+check("13 the hub: a commit event writes its line (kind commit, the pull request, the committer date) and tells no session; nothing is held for a follow-up and the merge log has no line",
+      len(rows13) == 1 and rows13[0]["kind"] == "commit" and rows13[0]["n"] == 140 and abs(rows13[0]["ts"] - (t0_ - 600)) < 3 and sent13 == [] and not hub_.pending and ML.read(0)[0] == [], (rows13, sent13, hub_.pending))
+hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="alice", text="did it", url=f"{W_}/pull/140", ts=ISO_NOW(), etype="comment", vouched="comment"))
+check("13 …while a comment on the same anchor is delivered as before (the harness sees a delivery)", len(sent13) == 1, sent13)
+
+# the pass: the commit stamps the item anchored to the pull request; an older one never moves the record back; a later event of another kind does
+put(600); (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/140", "items": ["a600"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.emit(ev_B)
+saved = ev_pass_now()
+check("13 the pass: the item anchored to the pull request is stamped `commit on PR 140`, kind commit, at the committer date", saved == ["a600"] and la(600)["what"] == "commit on PR 140" and lk(600) == "commit" and abs(la(600)["at"] - (t0_ - 600)) < 3, (saved, la(600)))
+at13 = la(600)["at"]
+hub_.emit(ev_C)      # the force-push to the older commit, three hours old
+saved = ev_pass_now()
+check("13 …a force-push to an older commit does not move the record back (nothing is saved)", saved == [] and la(600)["at"] == at13 and lk(600) == "commit", (saved, la(600)))
+hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="CI", text="failed", url=f"{W_}/pull/140/checks", ts=time.time() - 120, etype="ci_failed", vouched="ci_failed"))
+saved = ev_pass_now()
+check("13 …and a later event of another kind replaces it, so the commit kind is not sticky", saved == ["a600"] and lk(600) == "ci_result" and la(600)["at"] > at13, (saved, la(600)))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="alice", text="new commit", url=f"{W_}/pull/140", ts=time.time() - 30, etype="pr_commit", vouched=""))
+check("13 a commit event the source did not vouch for (a fork's) writes no line", EL.read(0)[0] == [], EL.read(0)[0])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
