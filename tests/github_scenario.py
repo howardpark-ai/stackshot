@@ -1834,6 +1834,26 @@ try:
     check("anchor-hub: …and logs the cap once for the state, not once a pass", len([w for w in warned if "cut short" in w]) == 1, warned)
     set_reads(100000); one_pass()
     check("anchor-hub: with room again the pass runs, health is True and last_pass moves", hub.status["receivers"]["github"]["ok"] is True and hub.status["github"]["last_pass"] > lp, (hub.status["receivers"]["github"], lp))
+    # CI on a watched pull request: a new head that is green counts, after a green head as after a failed one; first sight stays silent
+    AN2 = "github:example-owner/stackshot#27"
+    def head(n, sha, conclusion):
+        GHD[f"{RP}/pulls/{n}"] = {"head": {"sha": sha, "ref": "x/y"}, "user": {"login": "example-owner"}, "base": {"repo": {"id": 7}}}
+        GHD[f"{RP}/commits/{sha}/check-runs?per_page=100"] = {"check_runs": [{"name": "suites", "status": "completed", "conclusion": conclusion}, {"name": "lint", "status": "completed", "conclusion": "success"}]}
+    GHD[f"{RP}/issues/27"] = {**GHD[f"{RP}/issues/26"], "html_url": "https://github.com/example-owner/stackshot/pull/27"}
+    head(27, "1" * 40, "success"); head(26, "2" * 40, "success")
+    cievs = []; hub.emit = cievs.append; hub.bindings = {AN: {OWNER}, AN2: {OWNER}}; ghcli["304"] = False; set_reads(100000)
+    def ci_texts(anchor): return [(e.etype, e.text) for e in cievs if e.anchor == anchor and e.etype.startswith("ci_")]
+    one_pass()
+    check("anchor-hub CI: first sight of a pull request's head seeds silently, whatever its result; a new green head on one already seen is one ci_passed",
+          ci_texts(AN2) == [] and ci_texts(AN) == [("ci_passed", "passing on 2222222 (2 checks)")], (ci_texts(AN2), ci_texts(AN)))
+    del cievs[:]; one_pass()
+    check("anchor-hub CI: …and a pass that finds the same head again says nothing more", ci_texts(AN) == [] and ci_texts(AN2) == [], (ci_texts(AN), ci_texts(AN2)))
+    head(27, "3" * 40, "success"); one_pass()
+    check("anchor-hub CI: a green head after the green head that seeded the anchor is one ci_passed",
+          ci_texts(AN2) == [("ci_passed", "passing on 3333333 (2 checks)")] and ci_texts(AN) == [] and all(e.who == "CI" for e in cievs if e.etype.startswith("ci_")), (ci_texts(AN2), [(e.etype, e.who) for e in cievs]))
+    del cievs[:]; head(27, "4" * 40, "failure"); one_pass(); head(27, "5" * 40, "success"); one_pass(); head(27, "6" * 40, "success"); one_pass()
+    check("anchor-hub CI: a failed head is one ci_failed, the green after it keeps its words (passing again), the green after that is passing",
+          ci_texts(AN2) == [("ci_failed", "failed on 4444444: 1 of 2 checks — suites"), ("ci_passed", "passing again on 5555555 (2 checks)"), ("ci_passed", "passing on 6666666 (2 checks)")], ci_texts(AN2))
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
     ahc.log.removeHandler(_caph)

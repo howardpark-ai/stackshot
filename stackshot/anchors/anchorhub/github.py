@@ -265,7 +265,8 @@ def run(hub: Hub):
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (cancelled ones counted, not a trigger); a later
-        commit that passes after a failure gets one "passing again". First sight seeds silently."""
+        commit that passes after a failure gets one "passing again", and one that passes after a passing commit gets one "passing on"
+        (a green result is activity on the item whatever the head before it was). First sight seeds silently."""
         c = ci_st.setdefault(key or a_id, {"pr": None, "sha": None, "key": None})
         if c["pr"] is False: return
         try: p = gh(f"/repos/{repo}/pulls/{n}", conditional=True)
@@ -298,7 +299,7 @@ def run(hub: Hub):
         elif prev[1]:
             text = f"passing again on {c['sha'][:7]} ({len(runs)} checks)"
         else:
-            return
+            text = f"passing on {c['sha'][:7]} ({len(runs)} checks)"      # a new head that is green after a green one: the same ci_passed, so it reaches the event log (and the item's last activity); routine_own keeps it log-only on the fleet's own repositories
         fin = max((x["completed_at"] for x in runs if _ts(x.get("completed_at"))), key=_ts, default=None)      # when the last check run finished: a result seen after downtime keeps its own time; one outside the event log's window (a day old, an hour ahead) is the hub's, as before
         hub.event(a_id, {"title": title, "who": "CI", "text": text, "url": url, "ts": fin if fin and _events.event_time(fin, time.time()) is not None else now_iso(), "etype": "ci_failed" if bad else "ci_passed", "repo_id": rid(repo), "vouched": ("ci_failed" if bad else "ci_passed") if c.get("own_branch") else "", **pr_meta(c)}, kind="github-state")
     def snap(i):

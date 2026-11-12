@@ -143,7 +143,7 @@ check("1 save_signals: each save signal has its kind: step_done, step_dropped, s
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
       and K(base, after(mover="n", merged_seen=["a/b#1"])) == ["state_change", "pr_merged"] and K(base, after(work=[{"id": "x"}])) == [], K(base, after(mover="n", merged_seen=["a/b#1"])))
-check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing again), review, comment and pr_merged",
+check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing), review, comment and pr_merged",
       [(LA.pr_candidate(k, 9, 5, 50) or {}).get("kind") for k in ("ci_failed", "ci_passed", "review", "comment", "merged")] == ["ci_result", "ci_result", "review", "comment", "pr_merged"], None)
 # update and audit: defined and tested, stamped by nothing yet
 check("1 update_signal: a status write whose text differs from the previous one is an update, the words the text itself; the same text again (case and spacing aside), a blank one and a torn time are not",
@@ -157,7 +157,7 @@ LA.apply(it_, [LA.update_signal("", "wired the thing", 10)]); first_ = dict(it_[
 LA.apply(it_, [LA.audit_signal("subagent running", 20)])
 check("1 update and audit signals take part in newest-wins like the rest: an audit line later than an update replaces it, an older update after it does not", first_["kind"] == "update" and it_["metadata"]["last_activity"] == {"at": 20.0, "kind": "audit", "what": "subagent running"}
       and not LA.apply(it_, [LA.update_signal("", "older", 15)]), it_)
-check("1 pr_what: the words for each kind of event (a comment is on #n: the hub does not say whether the anchor is a pull request); a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing again on PR 123", "comment on #123", "review on PR 123", "PR 123 merged"]
+check("1 pr_what: the words for each kind of event (a comment is on #n: the hub does not say whether the anchor is a pull request); a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing on PR 123", "comment on #123", "review on PR 123", "PR 123 merged"]
       and LA.pr_what("pr_closed", 5) == "" and LA.pr_what("comment", 0) == "" and LA.pr_candidate("pr_closed", 5, 100, 200) is None and LA.pr_candidate("comment", 5, 100, 200) == {"at": 100.0, "kind": "comment", "what": "comment on #5"}, None)
 closed_ = {"status": "completed", "metadata": {"steps": [step("a", "done", 9)]}}
 check("1 stamp: only an open item has a record", not LA.stamp(closed_, {"status": "open", "metadata": {"steps": [step("a", "open")]}}, 50.0) and "last_activity" not in closed_["metadata"], closed_)
@@ -790,6 +790,26 @@ hub_.bindings["github:acme/widgets#34"] = {"home-peer"}
 hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
+
+# ================================================================ 13. a green head after a green head is activity on the item the pull request is anchored to (it was dropped: only a pass after a failure was reported)
+put(484)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/40", "items": ["a484"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+g13 = {"/user": {"login": "hubaccount"}, **pr9(40)}
+with GH(g13, ["github:acme/widgets#40"]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()      # seeds the first green head: silent
+    g13.update(pr9(40, sha="41" * 20))      # a new head, green as the one before
+    ci13 = [e for e in G.one() if e.etype.startswith("ci_")]
+    ci13b = [e for e in G.one() if e.etype.startswith("ci_")]
+check("13 a new green head after a green one is one ci_passed event, vouched for; the pass after it adds none",
+      [(e.etype, e.who, e.vouched, e.text) for e in ci13] == [("ci_passed", "CI", "ci_passed", "passing on 4141414 (1 checks)")] and ci13b == [], ([(e.etype, e.text) for e in ci13], ci13b))
+hub_.bindings["github:acme/widgets#40"] = {"home-peer"}
+for e in ci13: hub_.emit(e)
+rows13, _ = EL.read(0)
+saved = ev_pass_now()
+check("13 …it writes a ci_passed line for the pull request and stamps the item anchored to it: ci_result, 'CI passing on PR 40'",
+      [(r["kind"], r["n"]) for r in rows13] == [("ci_passed", 40)] and saved == ["a484"] and la(484)["what"] == "CI passing on PR 40" and lk(484) == "ci_result", (rows13, saved, la(484)))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
