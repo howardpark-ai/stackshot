@@ -2302,7 +2302,7 @@ class Board:
         body = " · ".join((f"<b>{esc(a)}</b>: " if a else "") + esc(t) for a, t in shown) + (f' <span class="dim">+{more}</span>' if more > 0 else "")
         return f' <span class="iwork" title="{esc(tip)}">{body}</span>'
     def work_html(self, r):
-        """The old Work field of the sidebar, for an item that still carries the old `work` list (read-compat until tools/migrate_work_to_steps.py has run; the lines live on the steps
+        """The old Work field of the sidebar, for an item that still carries the old `work` list (read-compat: a closed item keeps the list it was closed with; the lines live on the steps
         otherwise and the field is not drawn): every line with its state, its agent and when it last changed; "" with none."""
         ls = _work.legacy_lines(r["metadata"])
         if not ls: return ""
