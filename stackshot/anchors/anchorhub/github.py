@@ -8,6 +8,7 @@ FIRST_PASS = 600   # s; how long the first pass after a start may take before th
 BACKOFF = 600   # s; the wait after GitHub refuses a read for its rate limit (announced to the board with hub.hold, so it is not shown stale)
 FINISHED_EVERY = 10   # a closed or merged anchor is looked at once in this many passes (staggered by anchor), not every pass
 LATE_MERGE_S = _events.FLOOR_H * 3600   # s; an anchor first read on a pull request that merged this recently still writes the merge line (the event log's own window: older is no news)
+LATE_TRIES = 3   # a late merge line that cannot be written is tried again on the next pass this many times in all; then the anchor is seeded without it (each try is a counted read of the issue)
 LATE_SKEW = 120   # s; how far ahead of the hub's clock a merge time may be and still be read as now (GitHub's clock against this one); further ahead is a torn time and writes nothing
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
 def run(hub: Hub):
@@ -318,6 +319,7 @@ def run(hub: Hub):
         if "merged" not in st: return "issue"
         if not (st["merged"] or not st["pr"]): return "full"
         return "full" if (passno + zlib.crc32(a_id.encode())) % FINISHED_EVERY == 0 else "skip"
+    late_failed: dict[str, int] = {}                  # anchor id → tries of its late merge line that failed (memory only: a restart gives a few more, no more)
     def logged_merge(repo, n):
         """Has the merge of this pull request its line in the event log already (written by another anchor on it, the repository's notifications, an earlier start)? Read from the file's start: a merge found late is rare. The event log is
         the one asked: `Hub.emit` writes both logs, and a late line that failed between the two (the merge log's written, the event log's not) is written again whole."""
@@ -357,6 +359,8 @@ def run(hub: Hub):
             st = state.get(a_id)
             if st is None:                                # first sight seeds; a merge of the last day gets its merge line before the seed, and a line that could not be written leaves the anchor unseeded and its ETag dropped, so the next pass reads it again
                 if late_merge(a_id, repo, n, i): state[a_id] = snap(i)
+                elif late_failed.__setitem__(a_id, late_failed.get(a_id, 0) + 1) or late_failed[a_id] >= LATE_TRIES:
+                    state[a_id] = snap(i); log.warning("github %s: the late merge line could not be written in %d tries; dropped, the anchor is seeded without it", a_id, LATE_TRIES)
                 else: etags.pop(f"/repos/{repo}/issues/{n}", None)
                 return
             if (i["state"], i["comments"], i["updated_at"]) != (st["state"], st["comments"], st["updated"]): resolved.pop(a_id, None)      # the saved label of a finished anchor is made again at the next start
