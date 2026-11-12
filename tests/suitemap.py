@@ -218,10 +218,12 @@ most of them running other methods of Board). Now (C2):
     `object`). The old tree is read too, so a removed or renamed attribute binds its old name as well; a private name `__x` also binds `_Cls__x`.
   * The readers of `.x` are the suites that run code that reads it: any attribute access `.x` (a load, a store, a delete, an augmented assignment and a
     `case C(x=...)` pattern all read the class value), and any string that names it (`"x"`, as getattr(obj, "x") and a registry do) or holds it as a token
-    (a format string `"{x}"`, a dotted string up to 160 characters). A module-level statement that runs at import and reads it takes its file whole, as for a name.
+    (a format string `"{x}"`, a dotted string such as `"Cfg.x"`, of any length: a script a suite hands to a subprocess is scanned whole). A string with
+    neither a `.` nor a `{` that merely contains the name is not scanned (a limit). A module-level statement that runs at import and reads it takes its file whole, as for a name.
   * The key (".*") is read by every dynamic access to attributes: getattr / setattr / hasattr / delattr / inspect.getattr_static with a name that is not a
     literal (or an argument with `*` or `**`), vars, dir, inspect.getmembers, operator.attrgetter / methodcaller with a non-literal, `.__dict__`,
-    `.__getattribute__`, a builtin of that list handed over as a value (map(getattr, ...)), a non-literal eval or exec. It matches every attribute edit.
+    `.__getattribute__`, a builtin of that list handed over as a value (map(getattr, ...)), a non-literal eval or exec, `patch.multiple(Cls, **kw)`. It matches every attribute edit.
+    The keywords of `patch.multiple(Cls, K=1)` read `.K`.
   * NOT narrowed, the class is bound as before (over-selection is the safe side): a decorated class or one with bases or keywords; a class that defines
     `__getattr__`, `__getattribute__`, `__init_subclass__`, `__set_name__`, `__class_getitem__` or `__slots__`; a class that calls locals / vars / dir /
     globals / eval / exec in its body; a name that is read as a bare Name in the class body (a derived attribute: `B = A + 1`, a decorator, a default, a
@@ -234,7 +236,8 @@ most of them running other methods of Board). Now (C2):
   * Limits, kept honest: code that reads an attribute by name from the text of a file (a template, a C extension) is not seen (none in the checkout today);
     a method that receives a class as its `self` by hand is taken for an instance; a `self.__dict__` in a class body of its own is the same case. Where
     a use looks like neither, it is a dynamic read.
-SUITEMAP_CLASS_RULE=C1 (C2 by default; any other value is an error, checked when a command starts) gives the old selection: the whole class is bound.
+SUITEMAP_CLASS_RULE=C1 (C2 by default; any other value is an error, checked when a command starts) binds the whole class for every edit inside its body, as
+every edit did before C2. It is not simply a superset of C2: the plain `.x` readers in other modules that C2 adds are not looked for under C1.
 `audit` applies the same rule on both maps.
 
 Shards (Mon Nov 2nd 2026). Main's measured run was one job on one runner (60 to 80 min) while the pool's other runners sat idle,
@@ -297,7 +300,8 @@ def route_rule():
 
 def class_rule():
     """C2 (default): an edit of a literal assignment in the body of a plain class binds the attribute (module, ".name"), and only the readers of that attribute
-    match it; C1: it binds the class, as every edit inside a class did, so every suite that ran any scope of the class matches it (see *Class attributes*)"""
+    match it; C1: it binds the class, as every edit inside a class did before C2, so every suite that ran any scope of the class matches it (the plain `.attr`
+    readers in other modules that C2 adds are not looked for) (see *Class attributes*)"""
     v = os.environ.get("SUITEMAP_CLASS_RULE", "C2").strip().upper()
     if v not in ("C1", "C2"):
         raise SystemExit(f"suitemap: SUITEMAP_CLASS_RULE={os.environ.get('SUITEMAP_CLASS_RULE')!r} is not a rule: the allowed values are C1 and C2")
@@ -851,11 +855,12 @@ class ModNames:
                         self.self_ok.add(id(n))
 
     def narrowable(self, tree):
-        """narrow[line] = the attribute names bound by the class-body assignment(s) that hold the line, for each line a class-body edit may narrow to those
-        attributes (see *Class attributes*). Only a direct Assign in the body of a top-level class that is plain (no decorator, keyword or base but `object`, no
-        method or name the interpreter reads without naming it, no read of the class's namespace as a whole), whose targets are plain names (no dunder), whose
-        value is a literal, and whose names the class body does not read bare (a derived attribute: `B = A + 1`, a default `def f(self, x=A)`). A line that holds
-        any other statement as well (`X = 1; def …`), or the class line itself, is not narrowed: the class is bound as before"""
+        """sets self.narrow: line -> the attribute names bound by the class-body assignment(s) that hold the line, for each line whose edit may bind those
+        attributes and not the class (see *Class attributes*). A line is in it only if every statement on it is such an assignment: a direct Assign in the
+        body of a top-level class that is plain (no decorator, keyword or base but `object`; none of ATTR_NEVER defined; no call of ATTR_BODY_CALLS in the
+        body or in a method header), whose targets are plain names (no dunder), whose value is a literal, and whose names the class body does not read bare
+        (a derived attribute: `B = A + 1`, a default `def f(self, x=A)`). A line that holds any other statement as well (`X = 1; def …`), or the class line
+        itself, is not narrowed: the class is bound as before"""
         holds, plain = collections.Counter(), collections.Counter()
         for cls in tree.body:
             if not isinstance(cls, ast.ClassDef) or cls.decorator_list or cls.keywords \
@@ -907,10 +912,11 @@ class ModNames:
         return out
 
     def attr_keys(self, node):
-        """the keys of the attributes one node reads under class rule C2: ("*", ".name") for an attribute access `.name`, a string that is the name, and a short
-        string with a `.` or `{` in it that holds it as a token (a format string "{a.name}", an attrgetter path); ATTR_ANY for an access by a name we cannot
-        see: getattr and its kin with a name that is a value, vars, dir, inspect.getmembers, `.__dict__` (an instance's own `self.__dict__` and a module's are
-        no read of a class attribute). A match class pattern reads its keyword attributes (see *Class attributes*)"""
+        """the keys of the attributes one node reads under class rule C2: ("*", ".name") for an attribute access `.name`, a string that is the name, and a
+        string of any length with a `.` or `{` in it that holds it as a whole token (a format string "{a.name}", an attrgetter path, a script handed to a
+        subprocess); ATTR_ANY for an access by a name we cannot see: getattr and its kin with a name that is a value, vars, dir, inspect.getmembers,
+        `.__dict__` (an instance's own `self.__dict__` and a module's are no read of a class attribute). A match class pattern reads its keyword attributes
+        (see *Class attributes*)"""
         if isinstance(node, ast.Attribute):
             ks = {("*", "." + node.attr)}
             if node.attr in ATTR_DICT and id(node) not in self.self_ok and not self.is_module(node.value):
@@ -920,7 +926,7 @@ class ModNames:
             v = node.value
             if v.isidentifier():
                 return {("*", "." + v)} | ({ATTR_ANY} if v in ATTR_DICT else set())
-            if ("{" in v or "." in v) and len(v) <= 160:
+            if "{" in v or "." in v:
                 return {("*", "." + t) for t in ATTR_TOKEN.findall(v)}
             return set()
         if isinstance(node, ast.Name):
@@ -942,6 +948,8 @@ class ModNames:
             return set() if not star and (not a or id(node) in self.self_ok or self.is_module(a[0])) else {ATTR_ANY}
         if fl in ATTR_NAMES:
             return set() if not star and all(lit(x) for x in a) else {ATTR_ANY}
+        if fl == "multiple" and isinstance(f, ast.Attribute):   # mock.patch.multiple(Cls, K=1): each keyword names an attribute it replaces; **kw is a name we cannot see
+            return {ATTR_ANY} if any(k.arg is None for k in node.keywords) else {("*", "." + k.arg) for k in node.keywords}
         if fl in ("eval", "exec") and isinstance(f, ast.Name):
             return set() if not star and a and lit(a[0]) else {ATTR_ANY}   # the code in a literal string is read as a string: its tokens
         return set()

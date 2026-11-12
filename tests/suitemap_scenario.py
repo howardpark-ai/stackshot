@@ -1745,6 +1745,9 @@ write("cmod.py", '''
             return dict(self.__dict__)
         def dump(self, other):
             return other.__dict__
+        def rebind(self, other):
+            self = other
+            return vars(self), self.__dict__
 
     class Pv:
         __P = 1
@@ -1806,9 +1809,43 @@ write("cmod.py", '''
         SNAP = dict(vars())
         def other(self):
             return 1
+
+    class Meta(type):
+        pass
+
+    class Kw(metaclass=Meta):
+        KK = 1
+        def other(self):
+            return 1
+
+    class Mt:
+        __match_args__ = ("x", "y")
+        def swap(self):
+            match self:
+                case Mt(p, q):
+                    return q, p
+
+    class Sl:
+        SL = 1; SQ = len("ab")
+        def other(self):
+            return 1
+
+    class Hdr:
+        HK = 1
+        def other(self, ns=vars()):
+            return 1
+
+    LIM2 = Cfg.LIMIT * 2
+    def use_lim2():
+        return LIM2
+    def dflt(x=Cfg.LIMIT):
+        return x
 ''')
 INIT = ["", "Cfg.__init__"]
 OTHER = ["", "Cfg.other"]
+# a script a suite hands to a subprocess: over 160 characters, so over the old cap on a string that is scanned for the names it holds
+LONG_SCRIPT = "import json, sys\nsys.path.insert(0, '.')\n" + "# padding padding\n" * 12 + "import cmod\nprint(json.dumps(cmod.Cfg.{name}))\n"
+assert len(LONG_SCRIPT.format(name="K")) > 200
 CSUITES = {
     "ra": ("import cmod\nprint(cmod.Cfg.K)\n", [""]),
     "rst": ("import cmod\ncmod.Cfg.K = {}\n", [""]),
@@ -1826,14 +1863,54 @@ CSUITES = {
     "rn": ("import cmod\nc = cmod.Cfg()\nc.LIMIT\n", INIT),
     "rmj": ("import cmod, json\nvars(json)\ngetattr(json, input())\n", OTHER),
     "rmi": ("import cmod, importlib\nm = importlib.import_module('json')\nvars(m)\ngetattr(m, input())\n", OTHER),
+    # more dynamic readers of an attribute by a name that is a value: setattr, hasattr, delattr, inspect.getattr_static, inspect.getmembers, operator.attrgetter,
+    # operator.methodcaller, obj.__getattribute__(name), getattr(obj, "__dict__"), eval(name), getattr handed over as a value (map(getattr, objs, names)), and rrb: a method
+    # that rebinds `self` and then reads self.__dict__ and vars(self) (the parameter is no longer the instance the method was called on)
+    "rsa": ("import cmod\nc = cmod.Cfg()\nsetattr(c, input(), 1)\n", INIT),
+    "rha": ("import cmod\nc = cmod.Cfg()\nhasattr(c, input())\n", INIT),
+    "rda": ("import cmod\nc = cmod.Cfg()\ndelattr(c, input())\n", INIT),
+    "rgs": ("import cmod, inspect\ninspect.getattr_static(cmod.Cfg, input())\n", INIT),
+    "rgm": ("import cmod, inspect\ninspect.getmembers(cmod.Cfg)\n", INIT),
+    "rag": ("import cmod, operator\noperator.attrgetter(input())(cmod.Cfg())\n", INIT),
+    "rmcl": ("import cmod, operator\noperator.methodcaller(input())(cmod.Cfg())\n", INIT),
+    "rga": ("import cmod\ncmod.Cfg().__getattribute__(input())\n", INIT),
+    "rsd": ("import cmod\ngetattr(cmod.Cfg, '__dict__')\n", INIT),
+    "rev": ("import cmod\neval(input())\n", INIT),
+    "rgv": ("import cmod\nc = cmod.Cfg()\nlist(map(getattr, [c], [input()]))\n", INIT),
+    "rrb": ("import cmod\n", ["", "Cfg.rebind"]),
+    # a module object is no class: vars() and getattr() of a module made by __import__, sys.modules[...], or either written in place are no read of a class attribute
+    "rmn": ("import cmod\nm = __import__('json')\nvars(m)\ngetattr(m, input())\n", OTHER),
+    "rms": ("import cmod, sys\nm = sys.modules['json']\nvars(m)\ngetattr(m, input())\n", OTHER),
+    "rmp": ("import cmod\nvars(__import__('json'))\ngetattr(__import__('json'), input())\n", OTHER),
+    # a keyword of a class pattern reads that attribute of the matched object (case Cfg(LIMIT=5)); a module-level statement and a def header of cmod itself read it at import
+    "rmc": ("import cmod\nmatch cmod.Cfg():\n    case cmod.Cfg(LIMIT=5):\n        pass\n", INIT),
+    "rml": ("import cmod\ncmod.use_lim2()\n", ["", "use_lim2"]),
+    "rdf": ("import cmod\ncmod.dflt()\n", ["", "dflt"]),
+    # a script longer than the string cap that a suite hands to a subprocess: rlong reads Cfg.K in it, rlongn reads another attribute (Cfg.other) of the same length
+    "rlong": ("import subprocess, sys\nsubprocess.run([sys.executable, '-c', " + repr(LONG_SCRIPT.format(name="K")) + "])\n", INIT),
+    "rlongn": ("import subprocess, sys\nsubprocess.run([sys.executable, '-c', " + repr(LONG_SCRIPT.format(name="other")) + "])\n", INIT),
+    # mock.patch.multiple(Cfg, K=1) replaces K (rpm); with **kw it replaces names we cannot see (rpmk)
+    "rpm": ("import cmod\nfrom unittest import mock\nwith mock.patch.multiple(cmod.Cfg, K=1):\n    pass\n", INIT),
+    "rpmk": ("import cmod\nfrom unittest import mock\nkw = {}\nwith mock.patch.multiple(cmod.Cfg, **kw):\n    pass\n", INIT),
     # Pv: rpv reads the mangled name from outside, rpg runs the method that reads self.__P, rpo runs the method that does not
     "rpv": ("import cmod\nprint(cmod.Pv._Pv__P)\n", [""]),
     "rpg": ("import cmod\n", ["", "Pv.get"]),
     "rpo": ("import cmod\n", ["", "Pv.other"]),
 }
-WHOLE = {"Dec": "DK = 1", "Bas": "BK = 1", "Slt": "SK = 1", "Gat": "GK = 1", "Der": "A = 1", "Dfl": "DF = 1", "Nlt": 'NK = len("ab")', "Ann": "AK: int = 1", "Loc": "LK = 1"}
-for cls_ in WHOLE:
-    CSUITES[f"w{cls_.lower()}"] = ("import cmod\n", ["", f"{cls_}.other"])
+# the classes whose literal edit stays whole-class: class -> (the line, its edit, the method a suite ran, why it is not narrowed)
+def bump(l): return l.replace("1", "2").replace('"ab"', '"abc"')
+WHOLE = {cls_: (line_, bump(line_), "other", why_) for cls_, line_, why_ in [
+    ("Dec", "DK = 1", "decorated"), ("Bas", "BK = 1", "based"), ("Slt", "SK = 1", "defined with __slots__"), ("Gat", "GK = 1", "defined with __getattr__"),
+    ("Der", "A = 1", "read bare in its own body (B = A + 1)"), ("Dfl", "DF = 1", "read bare in a method's default (def other(self, x=DF))"),
+    ("Nlt", 'NK = len("ab")', "given a value that is not a literal (len('ab'))"), ("Ann", "AK: int = 1", "an annotated assignment (AK: int = 1)"),
+    ("Loc", "LK = 1", "reading its own namespace in the body (vars(): a call that is no pure one, so the class is an effect and the file goes whole)"),
+    ("Kw", "KK = 1", "given a keyword (class Kw(metaclass=Meta): the metaclass may read the attributes of the class)"),
+    ("Sl", 'SL = 1; SQ = len("ab")', "holding a literal and a call on one line (SL = 1; SQ = len('ab'): the line edit may be the call's)"),
+    ("Hdr", "HK = 1", "reading its namespace in a method's default (def other(self, ns=vars()): the default runs in the class body)")]}
+WHOLE["Mt"] = ('__match_args__ = ("x", "y")', '__match_args__ = ("y", "x")', "swap",
+               "naming its positional pattern attributes in __match_args__ (a dunder: case Mt(p, q) reads x and y without naming them)")
+for cls_, (_l, _n, meth_, _w) in WHOLE.items():
+    CSUITES[f"w{cls_.lower()}"] = ("import cmod\n", ["", f"{cls_}.{meth_}"])
 for s, (body, _ran) in CSUITES.items(): write(f"tests/{s}_scenario.py", body)
 shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
 base5 = commit("base of the class cases")
@@ -1847,36 +1924,40 @@ def class_sel(edit, msg, env=None):
     r = tool("select", "--map", str(CM), "--to", head, env={"SUITEMAP_ROOT": str(R), **(env or {})})
     return sorted(r.stdout.split()), r.stderr
 OLD_C = {"SUITEMAP_CLASS_RULE": "C1"}
-CFG_ALL = {"ra", "rst", "rs", "rf", "rd", "rv", "ri", "rj", "rm", "rdump", "rmx", "ro", "rsnap", "rn", "rmj", "rmi"}
-K_READERS = {"ra", "rst", "rs", "rf", "rd", "rv", "ri", "rj", "rm", "rdump", "rmx"}
+# the suites that read an attribute by a name they compute: every attribute edit of the module reaches them
+DYN = {"rd", "rv", "ri", "rj", "rdump", "rmx", "rrb", "rsa", "rha", "rda", "rgs", "rgm", "rag", "rmcl", "rga", "rsd", "rev", "rgv", "rpmk"}
+MODS = {"rmj", "rmi", "rmn", "rms", "rmp"}   # suites that vars() / getattr() a module object
+CFG_ALL = {"ra", "rst", "rs", "rf", "rm", "ro", "rsnap", "rn", "rmc", "rml", "rdf", "rlong", "rlongn", "rpm"} | DYN | MODS
+K_READERS = {"ra", "rst", "rs", "rf", "rm", "rlong", "rpm"} | DYN
 k_edit = lambda: sub("cmod.py", 'K = {"a": 1}', 'K = {"a": 2}')
 out, err = class_sel(k_edit, "Cfg.K")
 check("CLASS 1 an edit of a literal class attribute selects the suites that read it: by attribute (ra, rst: a load and a store; rm: a method that reads self.K), by a string (rs), "
-      "by a format token (rf) and by every dynamic access (rd getattr with a variable, rv vars, ri dir, rj .__dict__, rdump other.__dict__ in a method, rmx vars() of a name that is no module)",
+      "by a format token (rf), by a token in a script string that is longer than 160 characters (rlong) and by every dynamic access (rd getattr with a variable, rv vars, ri dir, rj .__dict__, "
+      "rdump other.__dict__ in a method, rmx vars() of a name that is no module, rsa setattr, rha hasattr, rda delattr, rgs inspect.getattr_static, rgm inspect.getmembers, rag operator.attrgetter, "
+      "rpm mock.patch.multiple(Cfg, K=1), rpmk patch.multiple(Cfg, **kw), rmcl operator.methodcaller, rga .__getattribute__(name), rsd getattr(obj, '__dict__'), rev eval(name), rgv getattr handed over as a value, rrb vars(self) / self.__dict__ in a method that rebinds self)",
       set(out) == K_READERS, (out, err))
 check("CLASS 2 ... and not the suites that ran another method of the class (ro, rsnap: self.__dict__ is an instance's), nor one that reads only another attribute (rn: .LIMIT), "
-      "nor one that vars() / getattr()s a module (rmj: an import, rmi: importlib.import_module), nor a suite of another class",
-      not (set(out) & {"ro", "rsnap", "rn", "rmj", "rmi"}) and not any(s.startswith("w") for s in out), (out, err))
+      "nor one that vars() / getattr()s a module (rmj: an import, rmi: importlib.import_module, rmn: __import__, rms: sys.modules[...], rmp: either written in place), "
+      "nor a long script that reads another attribute (rlongn), nor a suite of another class",
+      not (set(out) & ({"ro", "rsnap", "rn", "rlongn"} | MODS)) and not any(s.startswith("w") for s in out), (out, err))
 out_old, err_old = class_sel(k_edit, "Cfg.K, old rule", OLD_C)
 check("CLASS 3 under SUITEMAP_CLASS_RULE=C1 the same edit binds the class: every suite that ran any scope of it (and the readers of the class), the old answer, a superset of the new one",
       set(out_old) == CFG_ALL and set(out) <= set(out_old), (out_old, err_old))
 out, err = class_sel(lambda: sub("cmod.py", "LIMIT = 5", "LIMIT = 6"), "Cfg.LIMIT")
-check("CLASS 4 another attribute of the class selects its own readers: rn (.LIMIT) and the dynamic readers, not the readers of K (ra, rs, rf, rm)",
-      set(out) == {"rn", "rd", "rv", "ri", "rj", "rdump", "rmx"}, (out, err))
+check("CLASS 4 another attribute of the class selects its own readers: rn (.LIMIT), rmc (case Cfg(LIMIT=5): a keyword of a class pattern reads the attribute), rml (a function that reads a "
+      "module-level LIM2 = Cfg.LIMIT * 2), rdf (a function whose default is Cfg.LIMIT) and the dynamic readers, not the readers of K (ra, rs, rf, rm, rlong)",
+      set(out) == {"rn", "rmc", "rml", "rdf"} | DYN, (out, err))
 out, err = class_sel(lambda: sub("cmod.py", "    LIMIT = 5\n", ""), "Cfg.LIMIT removed")
 check("CLASS 5 a removed attribute binds its old name too (the old tree is read): rn is selected", "rn" in out and not (set(out) & {"ro", "rsnap", "ra", "rs"}), (out, err))
 out, err = class_sel(lambda: sub("cmod.py", "__P = 1", "__P = 2"), "Pv.__P")
 check("CLASS 6 a private attribute (__P) is read inside the class as __P and outside as _Pv__P: the suite that reads the mangled name (rpv) and the one that runs the reader (rpg) are selected, "
-      "the one that ran another method (rpo) is not", set(out) == {"rpv", "rpg", "rd", "rv", "ri", "rj", "rdump", "rmx"} and "rpo" not in out, (out, err))
-for cls_, line_ in WHOLE.items():
-    ed = lambda l=line_: sub("cmod.py", l, l.replace("1", "2").replace('"ab"', '"abc"'))
+      "the one that ran another method (rpo) is not", set(out) == {"rpv", "rpg"} | DYN and "rpo" not in out, (out, err))
+for cls_, (line_, new_, meth_, why_) in WHOLE.items():
+    ed = lambda l=line_, n=new_: sub("cmod.py", l, n)
     out, err = class_sel(ed, f"{cls_}")
     out_old, err_old = class_sel(ed, f"{cls_}, old rule", OLD_C)
-    check(f"CLASS 7 {cls_}: an edit of a literal in a class that is "
-          + {"Dec": "decorated", "Bas": "based", "Slt": "defined with __slots__", "Gat": "defined with __getattr__", "Der": "read bare in its own body (B = A + 1)",
-             "Dfl": "read bare in a method's default (def other(self, x=DF))", "Nlt": "given a value that is not a literal (len('ab'))", "Ann": "an annotated assignment (AK: int = 1)",
-             "Loc": "reading its own namespace in the body (vars(): a call that is no pure one, so the class is an effect and the file goes whole)"}[cls_]
-          + " stays whole-class: the suite that ran another method of the class is selected (Loc: every suite, the file is whole), the same answer as C1",
+    check(f"CLASS 7 {cls_}: an edit of a literal in a class that is {why_} stays whole-class: the suite that ran another method of the class is selected "
+          "(Loc: every suite, the file is whole), the same answer as C1",
           (f"w{cls_.lower()}" in out or (cls_ == "Loc" and out == ["all"])) and out == out_old, (out, out_old, err))
 bad = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_CLASS_RULE": "c3"})
 check("CLASS 8 a class rule that is not C1 or C2 is an error", bad.returncode != 0 and "SUITEMAP_CLASS_RULE" in bad.stderr, (bad.returncode, bad.stderr[-300:]))
