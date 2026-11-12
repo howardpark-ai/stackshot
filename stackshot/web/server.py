@@ -5836,7 +5836,7 @@ def _evwait_hook(kind: str, repo: str, n: int, what: str = "", told: dict[str, s
         print(f"event wait: {kind} #{n} not reported: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-_ANCHOR_SHAPES = "Slack channel/DM, Drive file/folder, Gmail thread or gmail:q:, Notion page or database, GitHub issue/PR, …/releases or a repo root"
+_ANCHOR_SHAPES = "Slack channel/DM, Drive file/folder, Gmail thread, gmail:q:<query> or gmail:q@<mailbox>:<query>, Notion page or database, GitHub issue/PR, …/releases or a repo root"
 
 
 def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", creating: bool = False) -> None:
@@ -14301,7 +14301,7 @@ def stackshot_route(notice: str, ruling: str, to: str = "", reason: str = "", se
 
 # ----------------------------------------------------------------------------- project anchors
 _ANCHORS_DESC = (
-    f"A project's anchors: the external things the anchor watcher watches for it — a Slack channel or DM, a Drive file or folder, a Gmail thread or gmail:q: query, a Notion page or database (any row added or edited, or a comment on a row), a GitHub issue/PR (its comments, state and CI results), a repo's …/releases, or a repo root (what {OWNER}'s GitHub account is notified of there) (optionally #mention=<text>). "
+    f"A project's anchors: the external things the anchor watcher watches for it — a Slack channel or DM, a Drive file or folder, a Gmail thread or gmail:q: query (it reads every mailbox the anchors service reads; gmail:q@<mailbox>:<query>, several as gmail:q@a,b:<query> with no spaces, reads only the mailboxes named, and the list shows the mailboxes each Gmail anchor reads), a Notion page or database (any row added or edited, or a comment on a row), a GitHub issue/PR (its comments, state and CI results), a repo's …/releases, or a repo root (what {OWNER}'s GitHub account is notified of there) (optionally #mention=<text>). "
     "Right calls: list: anchors(project=\"projects/widgets\"); add one for the project: anchors(project=\"projects/widgets\", add=[\"https://github.com/acme/widgets/pull/12\"]); "
     "scope it to an open item: anchors(project=\"projects/widgets\", add=[\"https://github.com/acme/widgets/pull/12\"], items=[\"board#N\"]); remove: anchors(project=\"projects/widgets\", remove=[\"https://github.com/acme/widgets/pull/12\"]). "
     "Anchor anything you create on GitHub (an issue, a PR, a fork branch you keep re-fitting) in the same turn, project-wide when it is the project's thread (a repo's issues or releases). "
@@ -14316,10 +14316,60 @@ _ANCHORS_DESC = (
 
 @mcp.tool(name="anchors", description=_lead(_ANCHORS_DESC))
 def stackshot_anchors(project: Annotated[str, Field(description="The project page: projects/<slug> or infra/<slug>.")],
-                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
+                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
                       items: Annotated[list[str] | None, Field(description="Open items of this project the added URLs are about, items=[\"board#N\"]; omit for a project-wide anchor. Every URL in add is scoped to every id in items (several URLs with several ids give each URL all the items).")] = None,
                       remove: Annotated[list[str] | None, Field(description="URLs to stop watching, or machine:<name> to drop a machine anchor.")] = None) -> str:
     return _anchors(project, add, items, remove, _who())
+
+
+def _gmail_boxes() -> dict[str, str]:
+    """{name: address} of the mailboxes the anchors service reads (its status file's google.mailboxes), the names a Gmail query anchor can scope itself to; {} when the anchors service has not said (not running, or no Google account)."""
+    try:
+        d = json.load(open(_cfg.state("anchor-hub", "status.json"), encoding="utf-8")).get("google") or {}
+        return {str(k): str(v) for k, v in (d.get("mailboxes") or {}).items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _gmail_key(u: str, boxes: dict[str, str]) -> str:
+    """The identity of a scoped Gmail query URL: its mailbox names as the labels spell them, its #mention fragment kept; "" for any other URL."""
+    base, frag = _anc.split_fragment(u)
+    q = _anc.gmail_query(base.strip())
+    if q is None or q[0] is None:
+        return ""
+    return _anc.gmail_canonical(base.strip(), boxes) + (("#" + frag) if frag else "")
+
+
+def _gmail_scope_args(urls: list[str] | None, boxes: dict[str, str], refuse: bool, stored: list[str] | None = None) -> list[str]:
+    """The URLs of an anchors call with every scoped Gmail query (`gmail:q@<mailbox>[,<mailbox>]:<query>`) written with its mailbox names as the anchors service spells them, so one anchor is one entry however it was typed.
+    With `refuse` (an add), a scope that names no mailbox or one the anchors service does not read is refused with the valid names, and so is a scope with a space in it (the names are separated by commas alone);
+    the name check is skipped while the service has named no mailbox (it reports a scope it cannot read once it runs). `stored` is the project's stored URLs: an anchor stored in another spelling of the same scope (typed
+    before the service had named its mailboxes) is the one added to, so a second spelling never makes a second entry (add, `refuse`), and a removal also takes every stored spelling of the scope it names (remove)."""
+    out: list[str] = []
+    same = lambda u: [e for e in stored or [] if _gmail_key(u, boxes) and _gmail_key(e, boxes) == _gmail_key(u, boxes)]
+    for u in urls or []:
+        base, frag = _anc.split_fragment(u)
+        q = _anc.gmail_query(base.strip())
+        if q is None and base.strip().startswith("gmail:q@"):
+            if refuse:
+                raise ToolError(f"Refused: {u!r} is not a Gmail query scope: the mailbox names sit between gmail:q@ and the next colon, separated by commas with no spaces (gmail:q@a,b:<query>)")
+            out.append(u)
+            continue
+        if q is None or q[0] is None:
+            out.append(u)
+            continue
+        if refuse and not q[0]:
+            raise ToolError(f"Refused: {u!r} names no mailbox after gmail:q@; the form is gmail:q@<mailbox>:<query> (several: gmail:q@a,b:<query>), or gmail:q:<query> for every mailbox"
+                            + (f" (the mailboxes are {', '.join(boxes)})" if boxes else ""))
+        _good, bad = _anc.gmail_resolve(q[0], boxes) if boxes else ([], [])
+        if refuse and bad:
+            raise ToolError(f"Refused: {', '.join(repr(b) for b in bad)} is no mailbox the anchors service reads; the mailboxes are {', '.join(boxes)}. The form is gmail:q@<mailbox>:<query>, or gmail:q:<query> for every mailbox")
+        canon = _anc.gmail_canonical(base.strip(), boxes) + (("#" + frag) if frag else "") if boxes else u
+        if refuse:
+            out.append(next(iter(same(canon)), canon))
+        else:
+            out.extend(dict.fromkeys([u, canon, *same(canon)]))
+    return out
 
 
 def _machine_args(add: list[str] | None, remove: list[str] | None) -> tuple[list[str], list[str]]:
@@ -14393,6 +14443,9 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         base, _ = _anc.split_fragment(u)
         if not _anc.anchor_id(base):
             raise ToolError(f"Refused: {u!r} is not an anchor shape ({_ANCHOR_SHAPES})")
+    boxes = _gmail_boxes()
+    held = [e.get("url", "") for e in store.get(key, [])]
+    add, remove = _gmail_scope_args(add, boxes, True, held), _gmail_scope_args(remove, boxes, False, held)
     if add:
         _anc.add(store, key, add, scope, by=who)
     if remove:
@@ -14419,7 +14472,12 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         hub = {}
     kp = _page_keeper(key)                               # its keeper, not the retired name-line session
     who_gets = f"router: rules this project; keeper: {kp or 'none: no page, hub or scope general agent lists a -main agent'}{kept}"
-    out = f"{key} anchors ({who_gets}):\n" + (_anc.fmt(store.get(key, []), hub) if store.get(key) or not mstore.get(key) else "") + _machine_listing(mstore.get(key, []))
+    out = f"{key} anchors ({who_gets}):\n" + (_anc.fmt(store.get(key, []), hub, boxes) if store.get(key) or not mstore.get(key) else "") + _machine_listing(mstore.get(key, []))
+    for u in add or []:
+        q = _anc.gmail_query(_anc.split_fragment(u)[0].strip())
+        if q is not None:
+            names = ", ".join(_anc.gmail_mailboxes(_anc.split_fragment(u)[0].strip(), boxes)[0]) or "none the anchors service has named yet"
+            out += f"\nGmail query {q[1]!r} reads the mailboxes: {names}" + ("" if q[0] is not None else " (every mailbox the anchors service reads; gmail:q@<mailbox>:<query> reads only the one named)") + "."
     if add:
         out += ("\nanchor-hub reads each new anchor within two minutes: one it cannot read (not shared with it, a mailbox it has no access to, a wrong link) "
                 "is reported once to the project's keeper and marked UNREADABLE in this list. A line without a name after the scope has not been read yet.")

@@ -181,7 +181,7 @@ def watches_save(w): json.dump(w, open(WATCHES, "w"), indent=1)
 @dataclass
 class Event:
     """One change on one anchor: what every receiver hands the hub, whatever its source."""
-    anchor: str            # anchors.anchor_id form — slack:<channel> · notion:<page or database> · drive:<file or folder> · gmail:<thread> | gmail:q:<terms> · github:<repo>#<n> | <repo>@releases | <repo>@notifications
+    anchor: str            # anchors.anchor_id form — slack:<channel> · notion:<page or database> · drive:<file or folder> · gmail:<thread> | gmail:q:<terms> | gmail:q@<mailboxes>:<terms> · github:<repo>#<n> | <repo>@releases | <repo>@notifications
     kind: str              # slack · slack-edit · gmail · drive · notion · notion-edit · github · github-state · github-release
     title: str             # the anchor's own name at its source, without its type: "#team-news" · "DM <person>" · "\"<page, file or subject>\"" · "<repo>#<n> \"<issue>\""
     who: str               # who did it: a person, a login, "CI"
