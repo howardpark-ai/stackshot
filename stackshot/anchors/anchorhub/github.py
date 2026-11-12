@@ -6,7 +6,11 @@ from stackshot.core import ghbudget as _gb   # the host's one hourly ledger of G
 GHPOLL = 60   # s; conditional GETs — a 304 does not count against the API budget
 FIRST_PASS = 600   # s; how long the first pass after a start may take before the board counts the silence (announced with hub.hold, cleared by the pass's own check)
 BACKOFF = 600   # s; the wait after GitHub refuses a read for its rate limit (announced to the board with hub.hold, so it is not shown stale)
+COMMIT_DOWNTIME = 600   # s; a pull request last looked at longer ago than this (or never) was missed by the hub: a new head found then is stamped at its committer date, a new head found live at the time it was seen
 FINISHED_EVERY = 10   # a closed or merged anchor is looked at once in this many passes (staggered by anchor), not every pass
+LATE_MERGE_S = _events.FLOOR_H * 3600   # s; an anchor first read on a pull request that merged this recently still writes the merge line (the event log's own window: older is no news)
+LATE_TRIES = 3   # a late merge line that cannot be written is tried again on the next pass this many times in all; then the anchor is seeded without it (each try is a counted read of the issue)
+LATE_SKEW = 120   # s; how far ahead of the hub's clock a merge time may be and still be read as now (GitHub's clock against this one); further ahead is a torn time and writes nothing
 PER_ANCHOR_ETAGS = 6  # ETags kept in the saved file per anchor (pull request, check runs of the newest commit, issue: three in use)
 def run(hub: Hub):
     etags: dict[str, str] = {}
@@ -262,6 +266,22 @@ def run(hub: Hub):
     def pr_meta(c):
         """The head branch and author of the watched pull request, from the CI state `c` of its anchor (its last read of the PR; {} until it has been read): added to every event on the PR."""
         return {k: c[k] for k in ("head_ref", "author") if (c or {}).get(k)}
+    def commit_seen(a_id, repo, n, c, down, title=None):
+        """The head commit of a watched pull request changed (a push, or a force-push to another commit, an old commit included): record it as the item's last activity. GitHub sends no push notification, so this is the only
+        place it is seen. Found live, it is stamped at the time the hub saw it, with no request: the push is what happened now, whenever the commit was made. Found after the hub was away (`down`: its last look at this pull
+        request is older than COMMIT_DOWNTIME or unknown), the commit is read once for its committer date (never later than now, never older than the event log's window); a read that fails (the hourly cap, a refusal, an
+        unreadable date) stamps the time seen instead, so the signal is not lost. Only a branch of the repository itself counts (nothing is read or recorded for a fork's pull request). The event is record_only: written to the event log and told to no one (Hub.emit)."""
+        if not c.get("own_branch"): return
+        now = time.time(); when = now
+        if down:
+            try: cm = gh(f"/repos/{repo}/git/commits/{c['sha']}")
+            except Exception as e: log.warning("github %s: commit %s: %s", a_id, c["sha"][:7], str(e)[:100])
+            else:
+                t = _events.commit_time(((cm.get("committer") or {}) if isinstance(cm, dict) else {}).get("date"), now)
+                if t is not None: when = t
+        if not title:
+            with hub.lock: title = ((hub.status.get("anchors") or {}).get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
+        hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", "record_only": True, **pr_meta(c)}, kind="github-state")
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
         commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later
@@ -275,13 +295,16 @@ def run(hub: Hub):
         except Exception as e:
             if "404" in str(e) or "Not Found" in str(e): c["pr"] = False
             return
+        last, c["looked"] = c.get("looked"), time.time()      # when this pull request was last looked at (kept with the CI state, so it survives a restart): a head that changed after a gap was missed, not seen live
         if p is not None:
             c["pr"] = True
             learn(repo, (p.get("base") or {}).get("repo"))
+            was = c.get("sha")
             if (p.get("head") or {}).get("sha"): c["sha"] = p["head"]["sha"]
             c["head_ref"], c["author"] = str((p.get("head") or {}).get("ref") or ""), str((p.get("user") or {}).get("login") or "")      # whose pull request it is (a builder's branch is prefixed with its name); kept with the CI state, so a 304 later still knows
             hr, br = (str((((p.get(k) or {}).get("repo")) or {}).get("full_name") or "").lower() for k in ("head", "base"))
             c["own_branch"] = bool(hr) and hr == br      # the head branch is in the repository itself, not a fork's (a deleted fork has no head repo, and a payload that does not say names none): only then is a CI result the repository's own side moving
+            if was and c["sha"] != was: commit_seen(a_id, repo, n, c, last is None or c["looked"] - last > COMMIT_DOWNTIME, title)      # the head commit changed since the last read of this pull request (a first sight has no earlier sha and records nothing; a 304 has no payload and records nothing)
         if not c["sha"]: return
         try: r = gh(f"/repos/{repo}/commits/{c['sha']}/check-runs?per_page=100", conditional=True)
         except Exception: return
@@ -322,6 +345,38 @@ def run(hub: Hub):
         if "merged" not in st: return "issue"
         if not (st["merged"] or not st["pr"]): return "full"
         return "full" if (passno + zlib.crc32(a_id.encode())) % FINISHED_EVERY == 0 else "skip"
+    late_failed: dict[str, int] = {}                  # anchor id → tries of its late merge line that failed (memory only: a restart gives a few more, no more)
+    def logged_merge(repo, n):
+        """Which logs hold this pull request's merge already (written by another anchor on it, the repository's notifications, an earlier try or start)? → (merge log, event log). Each is read from its start: a merge found late is rare.
+        Only a `merged` line of the event log counts (a comment's or a CI result's line is no merge)."""
+        key = (_cfg.canon_repo(repo), int(n)); out = []
+        for rows, kind in ((_merges.read(0)[0], None), (_events.read(0)[0], "merged")):
+            found = False
+            for r in rows:
+                try:
+                    if (kind is None or r.get("kind") == kind) and (_cfg.canon_repo(r.get("repo")), int(r.get("n"))) == key: found = True; break
+                except Exception: continue
+            out.append(found)
+        return tuple(out)
+    def late_merge(a_id, repo, n, i):
+        """The anchor was first read (the seed in `watch`) on a pull request that has merged already. A merge within LATE_MERGE_S, at most LATE_SKEW ahead of the hub's clock, gets its merge line now in each log that does not hold it, so an anchor added
+        after the merge still counts it (the item it is scoped to is credited by the same tie as for any merge: an anchor scoped to items ties them, a project-wide one none). Recorded only (Hub.record): the sessions
+        of the anchor are not told. The event log's line is stamped at the time it merged, and so is the merge log's (the server's merge pass skips a merge older than its floor, so a merge of 20 hours ago credits
+        last activity but moves no progress clock). The body's refs are not read: it can be edited long after the merge, and the anchor's own scope is the tie here. A pull request still open, closed unmerged, merged
+        longer ago or at an unreadable or future time is a silent seed, as before. → False when the line could not be written: the caller does not seed, so the next pass reads the pull request again."""
+        try:
+            merged = (i.get("pull_request") or {}).get("merged_at")
+            at, now = _ts(merged), time.time()      # one reading: the window here and the event log's own window are the same test
+            if not merged or at <= 0 or at > now + LATE_SKEW or now - at > LATE_MERGE_S: return True
+            has_merge, has_event = logged_merge(repo, n)
+            if has_merge and has_event: return True      # nothing to write: the logs hold it (a try that failed between the two writes writes only the log that lacks it)
+            if not hub.record(a_id, {"title": f"{repo.split('/')[1]}#{n} \"{str(i.get('title') or '')[:50]}\"", "who": (i.get("closed_by") or {}).get("login") or "someone", "text": "merged it", "url": i.get("html_url") or f"https://github.com/{repo}/pull/{n}",
+                                     "ts": merged, "etype": "pr_merged", "repo_id": rid(repo), **pr_meta(ci_st.get(a_id))}, kind="github-state", now=now, at=min(at, now), merge_log=not has_merge, event_log=not has_event):
+                return False
+            log.info("github %s: merged %d min ago, before the anchor was added: merge line written", a_id, int(now - at) // 60)
+            return True
+        except Exception as e:
+            log.warning("github %s: late merge line not written: %s", a_id, str(e)[:120]); return False
     def watch(a_id, with_ci=True):
         """One look at an issue or pull request anchor: its CI (unless `with_ci` is off), then the issue itself (state, comments)."""
         repo, n = split(a_id)
@@ -333,7 +388,14 @@ def run(hub: Hub):
             if i is None: return                         # 304: nothing changed
             learn(repo, i.get("repository"))
             st = state.get(a_id)
-            if st is None: state[a_id] = snap(i); return
+            if st is None:                                # first sight seeds; a merge of the last day gets its merge line before the seed, and a line that could not be written leaves the anchor unseeded and its ETag dropped, so the next pass reads it again
+                if late_merge(a_id, repo, n, i): state[a_id] = snap(i)
+                else:
+                    late_failed[a_id] = late_failed.get(a_id, 0) + 1      # per anchor
+                    if late_failed[a_id] >= LATE_TRIES:
+                        state[a_id] = snap(i); log.warning("github %s: the late merge line could not be written in %d tries; dropped, the anchor is seeded without it", a_id, LATE_TRIES)
+                    else: etags.pop(f"/repos/{repo}/issues/{n}", None)
+                return
             if (i["state"], i["comments"], i["updated_at"]) != (st["state"], st["comments"], st["updated"]): resolved.pop(a_id, None)      # the saved label of a finished anchor is made again at the next start
             title = f"{repo.split('/')[1]}#{n} \"{i['title'][:50]}\""
             if i["comments"] > st["comments"]:

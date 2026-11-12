@@ -69,7 +69,7 @@ def direct() -> dict[str, str]:
 # CI, a reopen, an unclassified event, an event on any other repository, a route outside the pilot and a session bound by
 # extra.json are delivered as before.
 GH_TYPES = ("pr_opened", "pr_reopened", "pr_synchronize", "pr_merged", "pr_closed", "issue_reopened", "issue_closed",
-            "ci_passed", "ci_failed", "ci_activity", "comment", "review", "review_comment")
+            "ci_passed", "ci_failed", "ci_activity", "comment", "review", "review_comment", "pr_commit")
 ROUTINE = frozenset({"pr_opened", "pr_synchronize", "pr_merged", "pr_closed", "ci_passed"})
 def own_repos() -> list[str]:
     """[pilot] own_repos: the fleet's own GitHub repositories, each entry "owner/repo", "owner/*" (every repository of that owner) or a numeric
@@ -379,12 +379,38 @@ class Hub:
                 r = subprocess.run([*_interp.resilient(PUSH), "--flush", name], capture_output=True, text=True, env={**os.environ, "ANCHOR_PUSH_SOURCE": src})
                 if r.returncode == 0 and r.stdout.strip(): log.info(r.stdout.strip())
 
+    def _event_of(self, anchor: str, summary: dict, kind: str) -> "Event":
+        return Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
+                     url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
+                     full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
+                     repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or ""), record_only=bool(summary.get("record_only")))
+
     def event(self, anchor: str, summary: dict, kind: str = "slack"):
         """A receiver's report: summary = {title, who, text, url, ts[, body]} — the anchor's own title, never its type."""
-        self.emit(Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
-                        url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
-                        full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
-                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or ""), record_only=bool(summary.get("record_only"))))
+        self.emit(self._event_of(anchor, summary, kind))
+
+    def record(self, anchor: str, summary: dict, kind: str = "github-state", *, now: float | None = None, at: float | None = None, merge_log: bool = True, event_log: bool = True) -> bool:
+        """A receiver's report that is only recorded: the merge log and the event log get their line (log_activity), and no session is told, nothing is held or routed. `Hub.emit` writes the same two lines first, then routes.
+        For what the receiver finds out late (a pull request that merged before its anchor was added), which the sessions of the anchor have no use for as news. `now` is the one clock reading the lines and the
+        receiver's window check share; `at` is the time the merge log gets (when it happened, not when the hub found out); `merge_log` and `event_log` off leave that log alone (it holds the line already).
+        → whether every log asked for was written."""
+        return self.log_activity(self._event_of(anchor, summary, kind), now=now, at=at, strict=True, merge_log=merge_log, event_log=event_log)
+
+    def log_activity(self, ev: "Event", *, now: float | None = None, at: float | None = None, strict: bool = False, merge_log: bool = True, event_log: bool = True) -> bool:
+        """The hub's two records of an event, each a line in a file the server reads: the merge log and the event log. A failure is logged and goes no further. `now`: the clock reading both lines are made at (default:
+        the time of the call); `at`: the time the merge log's line carries (default `now`, when the hub saw the event; the server's merge pass skips a line older than its floor, so an event found late passes the time it
+        happened); `strict`: stop at the first write that raised, for a caller that tries the whole again; `merge_log` / `event_log` off: that log is not written. → False when a write raised."""
+        now = time.time() if now is None else now
+        ok = True
+        if merge_log:
+            try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), now if at is None else at)      # first, before any lane: a merge is recorded whatever happens to its notice
+            except Exception as e:
+                ok = False; log.warning("merge log: %s", str(e)[:120])
+                if strict: return False
+        if event_log:
+            try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), now, ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
+            except Exception as e: ok = False; log.warning("event log: %s", str(e)[:120])
+        return ok
 
     def emit(self, ev: "Event"):
         """Route one event to the sessions bound to its anchor. The first event on (anchor, session) is delivered at once;
@@ -395,10 +421,7 @@ class Hub:
         An anchor in [anchor_hub] direct takes the direct lane instead (emit_direct).
         A routine event on the fleet's own pull request (routine_own) is logged instead of delivered to a session whose every
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
-        try: _merges.note(ev.anchor, ev.url, ev.etype, (ev.meta or {}).get("refs"), time.time())      # first, before any lane: a merge is recorded whatever happens to its notice
-        except Exception as e: log.warning("merge log: %s", str(e)[:120])
-        try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
-        except Exception as e: log.warning("event log: %s", str(e)[:120])
+        self.log_activity(ev)      # first, before any lane: a merge is recorded whatever happens to its notice
         if ev.record_only:                  # the event log has it (above); nothing else is told, on any repository: a green on every push must not wake a builder, nor release an item held on the anchor
             log.info("%s: %s, recorded in the event log only", ev.anchor, ev.etype); return
         to = direct().get(ev.anchor)

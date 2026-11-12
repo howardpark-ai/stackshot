@@ -1,11 +1,11 @@
 """event_log.py: the hub's record of the events on pull requests it saw, read by the server's last-activity pass (`server._event_activity_tick`).
 
 The same idea as merge_log.py (a file of the hub's own, one small line per event, nothing for a session to receive, no read of GitHub of its own), for the other events that are visible activity
-on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), and a merge. `Hub.emit`, the
-funnel every event passes, appends the line. The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
+on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), a merge, and a commit (a new head commit of the pull request). `Hub.emit`, the
+funnel every event passes, appends the line (and `Hub.record`, for a merge the receiver finds out late: an anchor first read on a pull request that merged within the last day). The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
 another kind as a merge.
 
-One line per kind of event: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "kind": ci_failed | ci_passed | comment | review | merged,
+One line per kind of event: {"ts": when the hub saw it, "repo": "owner/repo" as the anchor names it, "n": the pull request's number, "kind": ci_failed | ci_passed | comment | review | merged | commit,
 "refs": ["board#N", ...] the board ids the pull request's body names (at most 10), kept for a merge only}. The pass reads it from a byte offset it keeps and ties each line to the open items
 with merge_tie, as a merge is tied. A burst that joins several types in one event (a merge and a comment) is one line for each kind.
 
@@ -25,8 +25,13 @@ The line's time is the event's own (`Event.ts`) when it is there and sane, else 
 cannot stamp as now. A time older than FLOOR_H or more than AHEAD_S ahead of the hub's clock is dropped (the rule the server's pass has always had for a line: a stale event is not news, a far-future one
 is a torn clock); a time that is absent or cannot be read falls back to the hub's.
 
+A commit is not a GitHub notification (a push sends none), so the receiver (`github.py`) finds it in the pull request read it already makes for every anchored pull request: when the head sha differs from the
+one it kept for that pull request, it hands the hub an event of type `pr_commit` stamped at the time it saw the new head (no extra request). Only when the hub was away (its last look at that pull request is older than
+ten minutes, or unknown) is the commit read once more for its committer date, which `commit_time` clamps to the window; a read that fails stamps the time the hub saw it. Such an event is `record_only`: recorded here and never delivered
+to a session (`Hub.emit` returns after the logs). It counts only from a branch of the repository itself (vouched as a CI result is).
+
 Left out on purpose: a comment or review by a bot (a login ending in "[bot]", or an account the payload types as Bot; the hub drops its own account's comments upstream, so a comment made under that account is never seen), a CI event on a repository's notifications with no pull request, and any
-event the hub cannot name a pull request for. Not here: a commit or push, which the hub does not emit (a later part adds it).
+event the hub cannot name a pull request for.
 
 Pure apart from the files: no server import, no clock read (the caller passes `now`)."""
 from __future__ import annotations
@@ -42,13 +47,14 @@ from stackshot.anchors import merge_log as _ml
 from stackshot.core import config as _cfg
 
 # The hub's event types (core.GH_TYPES) that are activity, and the kind each is filed as.
-KIND_OF = {"ci_failed": "ci_failed", "ci_passed": "ci_passed", "comment": "comment", "review": "review", "review_comment": "review", "pr_merged": "merged"}
+KIND_OF = {"ci_failed": "ci_failed", "ci_passed": "ci_passed", "comment": "comment", "review": "review", "review_comment": "review", "pr_merged": "merged", "pr_commit": "commit"}
 KINDS = frozenset(KIND_OF.values())
 PERSONS_ONLY = frozenset({"comment", "review"})      # the kinds a bot's login is dropped from
 MAX_REFS = _ml.MAX_REFS
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})      # GitHub's author_association values that are the repository's own side; every other value and a missing one is a stranger's
 FLOOR_H = 24.0       # an event older than this is not activity (a day of downtime, or a file read again from its start): the record would only fill with old news
 AHEAD_S = 3600.0     # …nor one more than this ahead of the clock (a skew of minutes is allowed; the server's pass reads a line that far ahead as a torn one)
+COMMIT_FLOOR_S = FLOOR_H * 3600.0 - 180.0     # after downtime a commit is stamped at its committer date, but never older than this: three minutes inside the window above, more than the server pass's minute plus the time a line waits to be read, so a clamped line is not dropped as old news by the pass's own floor
 
 
 def path() -> Path:
@@ -121,6 +127,15 @@ def event_time(ts: Any, now: float) -> float | None:
     if own is None:
         return float(now)
     return own if now - FLOOR_H * 3600.0 <= own <= now + AHEAD_S else None
+
+
+def commit_time(date: Any, now: float) -> float | None:
+    """When a commit is stamped, after downtime: the committer date the repository holds (`date`, an ISO string) as epoch seconds, never later than `now` (a committer's clock ahead of ours reads as now) and never
+    older than COMMIT_FLOOR_S before `now` (inside the window of `event_time`). None only when the date cannot be read: the caller then stamps the time it saw the commit."""
+    own = _epoch(date)
+    if own is None:
+        return None
+    return max(min(own, float(now)), float(now) - COMMIT_FLOOR_S)
 
 
 def lines_for(anchor: str, url: str, etype: Any, who: Any, body_refs: Any, now: float, bot: bool = False, *, vouched: Any = (), ts: Any = None) -> list[dict[str, Any]]:
