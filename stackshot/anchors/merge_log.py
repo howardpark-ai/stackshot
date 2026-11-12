@@ -23,8 +23,12 @@ from stackshot.core import config as _cfg
 BOARD_REF = re.compile(r"(?<![\w/#-])board#([1-9]\d*)\b", re.I)      # the board's own id form, the fallback when model/ids.py cannot be imported; a bare "#n" in a body is a pull request or an issue of the repository
 _REF_OK = re.compile(r"[\w#-]{2,80}")      # what a stored ref may look like: an item id as written, never free text
 _IDS: list[Any] = []      # model/ids.py, imported at the first body read (it brings fastmcp: the hub that never reads a merged pull request's body never pays for it)
-_GITHUB_PATH = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/(?:pull|issues)/(\d+)", re.I)
-_ANCHOR = re.compile(r"^github:([\w.-]+/[\w.-]+)#(\d+)$", re.I)
+MAX_REPO = 140      # GitHub's longest "owner/repo": 39 + 1 + 100 (the writers and `normal` share it: a line the reader would refuse is never written)
+MAX_NUMBER = 10**9      # a pull request number past a billion is no number of GitHub's: it would only ride into merged_seen and a History line
+_DIGITS = len(str(MAX_NUMBER))      # the longest run of digits a number may be written with (the bound is checked in `_bounded`)
+_PART = rf"[\w.-]{{1,{MAX_REPO}}}"      # one side of "owner/repo", bounded like the whole (`_bounded` checks the sum)
+_GITHUB_PATH = re.compile(rf"github\.com/({_PART}/{_PART})/(?:pull|issues)/(\d{{1,{_DIGITS}}})(?!\d)", re.I)
+_ANCHOR = re.compile(rf"^github:({_PART}/{_PART})#(\d{{1,{_DIGITS}}})$", re.I)
 MAX_REFS = 10
 
 
@@ -61,14 +65,20 @@ def refs(body: Any) -> list[str]:
     return out[:MAX_REFS]
 
 
+def _bounded(repo: str, n: int) -> tuple[str, int]:
+    """(repo, n) when `normal` would accept them on read (a repository of at most MAX_REPO characters, a number from 1 to MAX_NUMBER), else ("", 0): the writers never write a line the reader refuses."""
+    return (repo, n) if len(repo) <= MAX_REPO and 0 < n <= MAX_NUMBER else ("", 0)
+
+
 def pull_of(anchor: str, url: str = "") -> tuple[str, int]:
     """The pull request an event is about, as ("owner/repo", n): the anchor's own id (`github:owner/repo#n`), else the repository and number in the event's link (a pull request's page, or a
-    comment on it); ("", 0) when neither says (a release, a repository's notifications with no thread link)."""
+    comment on it); ("", 0) when neither says (a release, a repository's notifications with no thread link) or when what it names is past the caps `normal` applies on read (a repository longer than
+    MAX_REPO, a number above MAX_NUMBER): such an event is no line, never one the reader would refuse."""
     m = _ANCHOR.match(str(anchor or "").strip())
     if m:
-        return m.group(1).lower(), int(m.group(2))
+        return _bounded(m.group(1).lower(), int(m.group(2)))
     m = _GITHUB_PATH.search(str(url or ""))
-    return (m.group(1).lower(), int(m.group(2))) if m else ("", 0)
+    return _bounded(m.group(1).lower(), int(m.group(2))) if m else ("", 0)
 
 
 def is_merge(etype: Any) -> bool:
@@ -114,10 +124,6 @@ def size() -> int:
         return path().stat().st_size
     except OSError:
         return 0
-
-
-MAX_REPO = 140      # GitHub's longest "owner/repo": 39 + 1 + 100
-MAX_NUMBER = 10**9      # a pull request number past a billion is no number of GitHub's: it would only ride into merged_seen and a History line
 
 
 def normal(row: dict[str, Any]) -> dict[str, Any]:
