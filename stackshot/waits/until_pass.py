@@ -227,7 +227,7 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
     closed. `moved`: a writer that takes no lock wrote the item between the read and the replace; its write stands. `dry`: nothing is written."""
     shown = S._gh.shown(gid)
     try:
-        with S._ITEM_LOCK:
+        with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown)
             if refusal is not None:
                 return refusal
@@ -309,7 +309,7 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
         return S._migrate_refuse(shown, "before and after name the same keys")
     keys = list(before)
     try:
-        with S._ITEM_LOCK:
+        with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown, closed_ok=True)
             if refusal is not None:
                 return refusal

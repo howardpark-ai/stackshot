@@ -68,7 +68,7 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage
+from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -78,11 +78,11 @@ server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 server._tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
 NOTES: list[tuple[str, str]] = []
-_real_save = server._save
+_real_save = writes.save
 def spy_save(gid, item, writer="", note="", *a, **kw):
     if note: NOTES.append((gid, note))
     return _real_save(gid, item, writer, note, *a, **kw)
-server._save = spy_save
+writes.save = spy_save
 ST = T / "state/waiting.json"
 ST.parent.mkdir(parents=True, exist_ok=True); ST.write_text(json.dumps({"baseline": now0 - 56 * DAY, "seen": {}, "reported": []}))
 ZONE_OFFSET = 4 * 3600      # the instance zone is Asia/Dubai: UTC+4, no daylight saving

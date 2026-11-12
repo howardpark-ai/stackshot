@@ -2,7 +2,7 @@
 and the ids named in a free text: the matchers that blank what is not plain text before an id is read (`_CODE_FENCE`, `_CODE_SPAN`, `_QUOTED`, the merge queue's group numbers `_MQ_GROUP` with `_without_mq_groups`,
 and `_plain_text`), and the matcher of an id written as a plain word (`_ID_FORM`, `_ID_END`, `_ITEM_REF`).
 
-A domain module: it takes text and ids in and gives ids and text out, with no store and no clock (what asks the store whether an item exists stays with the store's readers: `_shown_ids` in web/store.py,
+A domain module: it takes text and ids in and gives ids and text out, with no store and no clock (what asks the store whether an item exists stays with the store's readers: `_shown_ids` in service/store.py,
 `_item_refs` in server.py). `_item_url` reads the board's URL, which core/instance.py holds."""
 from __future__ import annotations
 

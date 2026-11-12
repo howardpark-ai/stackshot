@@ -76,7 +76,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model; from stackshot.model import model_guards as mg
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -458,10 +458,10 @@ check("6c mover: an item that never stood in his state keeps a mover Oliver a wr
 # the server's own saves: an idle raise adds decision to needs and saves, with no update behind it
 item(29, needs=[BACK], mover=BACK)
 it_b = server._load("a29"); it_b["metadata"]["needs"] = ["decision", BACK]; it_b["metadata"]["ask"] = ASK
-server._save("a29", it_b)
+writes.save("a29", it_b)
 check("6c mover: a save the server makes itself on an item that waits on him settles it too: he is the mover, the agent in then", mt(29)["mover"] == OWN and mt(29)["then"] == BACK, mt(29))
 it_b = server._load("a29"); it_b["metadata"]["needs"] = [BACK]; it_b["metadata"].pop("ask")
-server._save("a29", it_b)
+writes.save("a29", it_b)
 check("6c mover: …and when his wait ends in the server's own save, the agent has it back", mt(29)["mover"] == BACK and "then" not in mt(29), mt(29))
 # his answer on the board
 item(30, needs=[BACK], mover=BACK)
@@ -481,7 +481,7 @@ check("6c mover: a wait that replaces his state hands the agent in then the pick
 set_cfg(guards=False)
 item(32, needs=[BACK], mover=BACK)
 it_c = server._load("a32"); it_c["metadata"]["needs"] = ["decision", BACK]; it_c["metadata"]["ask"] = ASK
-server._save("a32", it_c)
+writes.save("a32", it_c)
 check("6c mover: [model] guards = false: the save leaves the stored mover as it is", mt(32)["mover"] == BACK and "then" not in mt(32), mt(32))
 set_cfg()
 item(33, needs=["decision", BACK], mover=BACK, ask=ASK)
@@ -512,7 +512,7 @@ GH_CALLS = []
 real_enabled, real_on_change = server._gh.enabled, server._gh.on_change
 server._gh.enabled = lambda: True; server._gh.on_change = lambda *a, **k: GH_CALLS.append(a[0])
 try:
-    item(37, needs=[BACK]); server._save("a37", server._load("a37"))
+    item(37, needs=[BACK]); writes.save("a37", server._load("a37"))
     check("6c migration: (probe) the mirror stub sees an ordinary save", GH_CALLS == ["a37"], GH_CALLS)
     GH_CALLS.clear()
     done = server._migrate_owner_mover()
@@ -545,9 +545,9 @@ check("6c migration: …and with no then at all the mover just drops", "a39" in 
 # a live save where a wait replaces his state: then survives, not only the mover
 item(40, needs=[BACK], mover=BACK)
 it_d = server._load("a40"); it_d["metadata"]["needs"] = ["decision", BACK]; it_d["metadata"]["ask"] = ASK
-server._save("a40", it_d)
+writes.save("a40", it_d)
 it_d = server._load("a40"); it_d["metadata"].update(needs=[BACK], wait_kind="relay", wait_event="Robin relays the quote", ask_by=day(5)); it_d["metadata"].pop("ask")
-server._save("a40", it_d)
+writes.save("a40", it_d)
 check("6c mover: a save where a wait replaces his state makes the agent in then the mover who picks it up, and then goes", mt(40).get("mover") == BACK and "then" not in mt(40), mt(40))
 set_cfg(guards=False, handoff=False)
 item(157, needs=["decision", BACK], mover=BACK, ask=ASK)
@@ -620,7 +620,7 @@ check("9 next wait: …get shows the flag", "flag: next uses when, after" in ser
 upd(87, next="home-front: ship it now")
 check("9 next wait: …a next with none shows no flag", "model_flags" not in mt(87) and "flag: next uses" not in server.stackshot_get("a87"), mt(87))
 item(97, needs=[BACK], next="home-front: ship it when the build is green")
-server._save("a97", {**rd(97), "metadata": {**mt(97), "model_flags": {"next_wait_words": ["when"]}}})      # an item stored before the flag was removed
+writes.save("a97", {**rd(97), "metadata": {**mt(97), "model_flags": {"next_wait_words": ["when"]}}})      # an item stored before the flag was removed
 upd(97, next="home-front: ship it after the review")
 check("9 next wait: …a write that sets next drops a flag an older write stored", "model_flags" not in mt(97), mt(97))
 upd(87, description="- A thing\n- It lives here, edited\n- Done when done")

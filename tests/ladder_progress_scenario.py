@@ -1,6 +1,6 @@
 """Scenario test for the hand-up of an item that is not moving: with `[ladder] enabled`, an alive item (open, a session moves it, not waiting, not the owner's move) with NO PROGRESS for `[ladder] main_hours`
 (4) goes up to its project's -main agent in the ladder's one notice (`server._ladder_stuck`, `_ladder_main_tell`), whatever its mover answers meanwhile. Progress is the item's own clock (model/progress.py, stamped by
-`server._save`): a step marked done or dropped, a state change, a pull request merged for the item. A status line, a note, a reply and a confirm are not. Fixture items, panes that are files in a temp folder,
+`writes.save`): a step marked done or dropped, a state change, a pull request merged for the item. A status line, a note, a reply and a confirm are not. Fixture items, panes that are files in a temp folder,
 messages recorded by a fake push, a fake clock (every pass is given its `now`, and the saves are stamped from a fake `time`), no live store, no network, no model call.
 
   1  pure: progress.moved (each kind, and what is none), at, stamp, due
@@ -75,7 +75,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
@@ -153,11 +153,11 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK
+CLK = _Clock(); server.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
-    """A real `server._save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp the progress clock takes is the one a live write takes."""
+    """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp the progress clock takes is the one a live write takes."""
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
-    try: server._save(f"a{i}", d_, writer=writer, **kw)
+    try: writes.save(f"a{i}", d_, writer=writer, **kw)
     finally: CLK.t = None
 ladder_cfg(True, True, main_hours=4)
 cli_row("home-peer", "busy", now0 - 20 * MIN); cli_row("home-peer2", "busy", now0 - 20 * MIN)
@@ -453,7 +453,7 @@ close(214, 215)
 for i in (216, 217, 218): fixture(i, project="projects/alpha")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/54", "items": ["a216", "a217", "a218"]}]}))
 ML.append(line(54, at=-60))
-_real_save, _real_load = server._save, server._load
+_real_save, _real_load = writes.save, server._load
 def _bad_save(gid, *a, **kw):
     if gid == "a216": raise OSError("disk full")
     return _real_save(gid, *a, **kw)
@@ -461,14 +461,14 @@ def _bad_load(gid, *a, **kw):
     if gid == "a218" and _bad_load.on: raise OSError("unreadable")
     return _real_load(gid, *a, **kw)
 _bad_load.on = False
-server._save, server._load = _bad_save, _bad_load
+writes.save, server._load = _bad_save, _bad_load
 import io as _io, contextlib as _cl
 errs = _io.StringIO()
 try:
     _bad_load.on = True
     with _cl.redirect_stderr(errs): saved = merge_pass(now0)
 finally:
-    server._save, server._load = _real_save, _real_load
+    writes.save, server._load = _real_save, _real_load
 check("14 an item whose save fails (a216) or whose read fails (a218) is logged and skipped; the other (a217) is saved, and the offset is stored so the pass does not repeat",
       saved == ["a217"] and "merged_seen" not in mt(216) and "merged_seen" not in mt(218) and mt(217).get("merged_seen") == ["acme/widgets#54"] and "a216 not saved" in errs.getvalue() and server._merge_progress_offset() == ML.size(),
       (saved, errs.getvalue()[-300:], server._merge_progress_offset(), ML.size()))

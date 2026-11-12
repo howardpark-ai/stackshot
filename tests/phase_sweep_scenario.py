@@ -59,7 +59,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
 from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -179,7 +179,7 @@ check("2 the start runs the sweep after the wake pass and before the runner star
 res = {}
 def worker():
     res["done"] = sweep(TL)
-with server._ITEM_LOCK:
+with writes.ITEM_LOCK:
     th = threading.Thread(target=worker, daemon=True); th.start(); th.join(10)
     check("3 a sweep with nothing to stamp finishes while another thread holds the item lock", not th.is_alive() and res.get("done") == [], res)
     d = raw(10); d["metadata"]["phase"] = "waiting"; d["metadata"]["waits_on"] = "time"
@@ -193,19 +193,19 @@ put(60, needs=[BACK], state="doing", hold=True, wake=local_str(TL + 3 * H)); swe
 d = raw(60); d["metadata"]["phase"] = "alive"; d["metadata"].pop("waits_on")
 (T / "store/g/60.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))                     # stale: the fields read waiting
 calls = []
-real = {k: getattr(server, k) for k in ("_save", "_foryou_on_save", "_landed_on_save", "_handoff_on_save", "_tell_woken", "_push_noted", "_wake_tell")}
-real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch
+real = {k: getattr(server, k) for k in ("_foryou_on_save", "_landed_on_save", "_handoff_on_save", "_tell_woken", "_push_noted", "_wake_tell")}
+real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name)
     return f
 for k in real: setattr(server, k, spy(k))
-server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch")
+server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing()
 try:
     done = sweep(TL)
 finally:
     for k, v in real.items(): setattr(server, k, v)
-    server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch
+    server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch; writes.save = real_save
 check("4 a sweep that stamps calls no save, no GitHub job, no notice, no For you or landed row, no hand-off, no search touch", done == ["g60"] and calls == [], (done, calls))
 check("4 …no writer is recorded, no clock moves, the state folder is as it was, no temporary file is left", "written_by" not in raw(60) and raw(60)["updated"] == T0 - 10 * DAY and state_listing() == state0 and not list((T / "store/g").glob(".*")), raw(60))
 from stackshot.web import render as root_render

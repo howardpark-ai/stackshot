@@ -80,6 +80,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import writes
 from stackshot.model import last_activity as LA, progress as PG, activity as ACT
 from stackshot.anchors import event_log as EL, merge_log as ML
 from stackshot.anchors.anchorhub import core as HUB
@@ -91,11 +92,11 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK
+CLK = _Clock(); server.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
-    """A real `server._save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first."""
+    """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first."""
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
-    try: server._save(f"a{i}", d_, writer=writer, **kw)
+    try: writes.save(f"a{i}", d_, writer=writer, **kw)
     finally: CLK.t = None
 class _Err:
     """stderr of the server's prints, kept for a check."""
@@ -179,7 +180,7 @@ save_at(now0 + 11 * MIN, 300, lambda d_: d_.update(confirmed=now0 + 11 * MIN), a
 save_at(now0 + 12 * MIN, 300, lambda d_: None, note="still on it", activity=ACT.MESSAGE)
 check("2 a status line, a \"no change\" reply, a confirm and a note do not move it", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"}, la(300))
 d_ = server._load("a300"); server._stall.note(d_["metadata"], now0 + 13 * MIN, "it has not moved for 4 hours: handed up"); CLK.t = now0 + 13 * MIN
-try: server._save("a300", d_, activity=ACT.BOOKKEEPING)
+try: writes.save("a300", d_, activity=ACT.BOOKKEEPING)
 finally: CLK.t = None
 check("2 the ladder's own History line (a save of the server's, no writer) does not move it, and the History line is on the item", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and any("handed up" in x.get("text", "") for x in server._stall.log_of(mt(300))), mt(300).get("stall") or mt(300).keys())
 save_at(now0 + 20 * MIN, 300, lambda d_: d_["metadata"].update(mover="home-peer2", needs=["home-peer2"]))
@@ -333,14 +334,14 @@ check("5 an event older than a day is not read (the record of an item without on
 put(420); put(421)
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/60", "items": ["a420", "a421"]}]}))
 emit(60, "comment", "alice", 60 * MIN)
-real_save = server._save
+real_save = writes.save
 def flaky(gid, item, *a, **kw):
     if gid == "a420": raise RuntimeError("disk " + "z" * 90000)
     return real_save(gid, item, *a, **kw)
-server._save = flaky
+writes.save = flaky
 try:
     with _Err() as e_: saved = ev_pass(now0 + 61 * MIN)
-finally: server._save = real_save
+finally: writes.save = real_save
 check("5 one item that cannot be saved is logged (bounded) and skipped, the other is saved, the offset is stored", saved == ["a421"] and la(421) == {"at": now0 + 60 * MIN, "what": "comment on #60"} and la(420) is None
       and "a420 not saved" in e_.text and max(len(l) for l in e_.text.splitlines()) < 500 and EL.load_offset() == EL.path().stat().st_size, (saved, e_.text[:300]))
 # nothing raises out of the pass
@@ -521,12 +522,12 @@ t8 = now0 + 100 * MIN
 emit(100, "comment", "alice", 101 * MIN); emit(100, "review", "bob", 104 * MIN); emit(100, "ci_failed", "CI", 102 * MIN); emit(100, "comment", "carol", 103 * MIN)      # the log is in the hub's order, not the events'
 emit(100, "review", "dan", 95 * MIN)
 saves_ = []
-real_save = server._save
+real_save = writes.save
 def counting(gid, item, *a, **kw):
     saves_.append(gid); return real_save(gid, item, *a, **kw)
-server._save = counting
+writes.save = counting
 try: saved = ev_pass(t8 + 10 * MIN)
-finally: server._save = real_save
+finally: writes.save = real_save
 check("8 five lines for one item are one save, and the newest of them is the record", saves_ == ["a470"] and saved == ["a470"] and la(470) == {"at": t8 + 4 * MIN, "what": "review on PR 100"} and lk(470) == "review", (saves_, saved, la(470)))
 # a stored time later than the clock must not block every later signal
 put(471, last_activity={"at": t8 + 500 * H, "kind": "comment", "what": "comment on #1"})

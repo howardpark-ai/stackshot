@@ -68,10 +68,10 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
 server._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
-_real_save = server._save
+_real_save = writes.save
 INV_BAD = []; INV_SAVES = [0]
 NOTES = []
 def _save_inv(gid, item, *a, **kw):
@@ -80,7 +80,7 @@ def _save_inv(gid, item, *a, **kw):
     INV_SAVES[0] += 1
     if H.stale(item, H.mover_of(item, lambda it: server._ho_derive({**it, "gid": gid})), server._ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
     return out
-server._save = _save_inv
+writes.save = _save_inv
 server._refuse_if_owing = lambda debtor: None
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")

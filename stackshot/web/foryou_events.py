@@ -27,7 +27,7 @@ from stackshot.model.ids import _item_url
 from stackshot.model.said import _owner_words
 from stackshot.web.publish import _publish
 from stackshot.core.store import _item_files
-from stackshot.web.store import _load
+from stackshot.service.store import _load
 
 
 # A notice for the owner is a row in the For you list (foryou.py: the board's section, `client.py get for-you` for the fleet tool's web server), never a front

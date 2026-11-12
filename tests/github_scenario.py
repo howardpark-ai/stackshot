@@ -243,7 +243,7 @@ def check(name, cond, got=None):
 def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
-from stackshot.web import server; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import writes; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
 from stackshot.core import instance as _core_instance
 from stackshot.web.ui import render as ui_render
 server._publish = lambda: None
@@ -448,14 +448,14 @@ check("body_of: no section for an open item (a reopen), for a close with no outc
 server.stackshot_complete("s22", outcome="dropped", reason="no longer needed", outcome_text="- Not needed after the redesign", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("dropped closes as not planned", issue(6)["state"] == "closed" and issue(6)["state_reason"] == "not_planned" and not comments(6), issue(6))
 # the server's own act: a wake that has come releases the hold. The hold and the wake are not on the issue: nothing is sent
-it = server._load("g3"); it["metadata"]["wake"] = "2020-01-01"; server._save("g3", it)
+it = server._load("g3"); it["metadata"]["wake"] = "2020-01-01"; writes.save("g3", it)
 log0 = len(F.log)
 woke = server._wake_pass()
 G.drain(GH, STORE, say=lambda s: None)
 check("the wake pass released g3 (the hold is stored away); nothing went to GitHub: no job, no comment, no label", woke and rd("g", 3)["metadata"].get("hold") is None
       and qlen() == 0 and len(F.log) == log0 and not comments(3) and issue(3)["labels"] == [], (woke, qlen(), F.log[log0:]))
 # a filing-only rewrite says nothing
-it = server._load("g1"); it["metadata"]["idle"] = {"poked": now}; server._save("g1", it)
+it = server._load("g1"); it["metadata"]["idle"] = {"poked": now}; writes.save("g1", it)
 check("a write that changes nothing a person would call a change (an idle mark) queues no job", qlen() == 0, G.pending())
 
 # ---- 3b. the server's other passes (the item phase 2 prep) change fields the issue does not carry: a release from hold, an after-release, an anchor release and a recycle done send nothing; the closing item's own PATCH is the only write

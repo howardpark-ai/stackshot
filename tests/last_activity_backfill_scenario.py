@@ -63,7 +63,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server; from stackshot.service import writes; from stackshot.model import last_activity as LA, last_activity_pass as LP, progress as PROG; from stackshot.tools import last_activity_backfill as BF; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
 from stackshot.anchors import event_log as ELOG, merge_log as MLOG
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -192,7 +192,7 @@ check("2 …a merge recorded is a pr_merged signal naming the pull request", (dr
 orig = {i: raw(i) for i in OPEN}; orig_bytes = {i: bytes_of(i) for i in OPEN}
 held = []; orig_sw = server._stamp_write
 def spying_write(*a, **k):
-    held.append(server._ITEM_LOCK._is_owned()); return orig_sw(*a, **k)
+    held.append(writes.ITEM_LOCK._is_owned()); return orig_sw(*a, **k)
 server._stamp_write = spying_write
 PID = "20260101-000000-abcdef"
 st_, d_ = call(op="lastact", items=[f"g{i}" for i in OPEN], pass_id=PID)
@@ -236,10 +236,10 @@ check("6 every write was made with the item lock held", held and all(held) and l
 write_file(24, version(now0 - 4 * HR, now0 - 4 * HR)); subprocess.run(["git", "-C", str(T / "store"), "add", "-A"], env=GENV); git("commit", "-q", "-m", "24", ct=now0 - 4 * HR)
 done = []
 def runner(): done.append(LP.one(server, "g24", dry=True))
-server._ITEM_LOCK.acquire()
+writes.ITEM_LOCK.acquire()
 th = threading.Thread(target=runner); th.start(); th.join(0.5)
 waited = not done
-server._ITEM_LOCK.release(); th.join(10)
+writes.ITEM_LOCK.release(); th.join(10)
 check("6 an item locked by another writer makes the pass wait, then it reads the item as the writer left it", waited and done and done[0]["action"] == "would_set", (waited, done))
 (T / "store/g/24.json").unlink()      # the script section below plans over every open item of the store
 

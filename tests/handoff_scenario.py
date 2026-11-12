@@ -84,11 +84,11 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 # section 15's invariant, checked after every save of the run: an OPEN record never names someone but the item's mover (handoff.stale)
-_real_save = server._save
+_real_save = writes.save
 INV_BAD = []; INV_SAVES = [0]
 def _save_inv(gid, item, *a, **kw):
     out = _real_save(gid, item, *a, **kw)
@@ -99,7 +99,7 @@ def _save_inv(gid, item, *a, **kw):
     except Exception as e:
         INV_BAD.append((gid, "checker failed", repr(e)))
     return out
-server._save = _save_inv
+writes.save = _save_inv
 # the push: a fake script. A uuid listed in push-fail.txt fails, one in push-inbox.txt waits (inbox), the rest are delivered; every call is logged
 PUSHLOG, FAIL, INBOX = T / "push.log", T / "push-fail.txt", T / "push-inbox.txt"
 QUEUED, PAUSED = T / "push-queued.txt", T / "push-paused.txt"
@@ -726,13 +726,13 @@ check("11 told: …and so is a writer charge's (the writer hears the write in it
 # 11.4 writes that are no session's: Oliver's board answer, a script, the server's own save
 item(17, needs=["decision"], ask=ASK, next=f"{OWN}: decide")
 it_ag = rd(17); it_ag["gid"] = "a17"; it_ag["metadata"].pop("needs"); it_ag["metadata"]["mover"] = "home-peer"; it_ag["metadata"]["next"] = "home-peer: carry it out"; it_ag.pop("gid")
-server._save("a17", it_ag, note="answered on the board", author=(server.OWNER, "board"))
+writes.save("a17", it_ag, note="answered on the board", author=(server.OWNER, "board"))
 check("11 no record: Oliver's board answer (author) creates no hand-off record, whoever the answer makes the mover", "handoff" not in mt(17) and not pushes_to("home-peer", "a17"), (mt(17), pushes()))
 item(18); it_ah = rd(18); it_ah["metadata"]["mover"] = "home-peer"; it_ah["metadata"]["next"] = "home-peer: do the thing"
-server._save("a18", it_ah, writer="home-send via a script on testbox")
+writes.save("a18", it_ah, writer="home-send via a script on testbox")
 check("11 no record: a script's write (\"<sender> via a script on <machine>\": cap-words, state_from_fields --apply) records no hand-off and pushes nothing", "handoff" not in mt(18) and not pushes_to("home-peer", "a18"), (mt(18), pushes()))
 item(24); it_ai = rd(24); it_ai["metadata"]["mover"] = "home-peer"; it_ai["metadata"]["next"] = "home-peer: do the thing"
-server._save("a24", it_ai)
+writes.save("a24", it_ai)
 check("11 follow: the server's own save (no writer: a wake, an idle pass) that changes the mover records the hand-off, from the server, not delivered (no notice went out: the notice that does marks it); it pushes nothing itself",
       (mt(24).get("handoff") or {}).get("to") == "home-peer" and (mt(24).get("handoff") or {}).get("from") == "stackshot" and not (mt(24).get("handoff") or {}).get("delivered_at") and not pushes_to("home-peer", "a24"), (mt(24), pushes()))
 refusal_ok = True
@@ -785,10 +785,10 @@ server._github_comment("a28", {"id": 68, "ts": now0 - 7200, "text": "an old comm
 check("12 his hand-off: …a comment made before the hand-off does not", not ho(28).get("taken_at"), ho(28))
 to_him(29)
 it_am = server._load("a29"); it_am["metadata"]["state"] = "your-step"; it_am["metadata"]["step"] = "gh pr merge 1"; it_am["metadata"].pop("needs"); it_am["metadata"].pop("ask", None)
-server._save("a29", it_am)
+writes.save("a29", it_am)
 check("12 his hand-off: it stays while the item stays his to move, whoever saves it (the server's own save, no writer)", not ho(29).get("taken_at") and mt(29)["mover"] == OWN, (mt(29), ho(29)))
 it_am = server._load("a29"); it_am["metadata"].update(needs=["team-back"]); it_am["metadata"].pop("state", None); it_am["metadata"].pop("step", None)
-server._save("a29", it_am)
+writes.save("a29", it_am)
 check("12 his hand-off: …and ends when the server's own save leaves it not his (no writer: a wake, an idle pass), the mover back on the agent", isinstance(ho(29).get("taken_at"), float) and mt(29)["mover"] == "team-back", (mt(29), ho(29)))
 set_cfg(handoff=False)
 to_him(166)
@@ -1091,22 +1091,22 @@ check("15 reopen: reopened with a new mover, the record names it", rd(95)["statu
 # 15.7 the owner's board answer, a script's save and the server's own save (no session wrote)
 item(96); hand(96, "home-peer"); drain()
 it96 = rd(96); it96["metadata"]["mover"] = "team-back"; it96["metadata"]["next"] = "team-back: carry out"
-server._save("a96", it96, note="answered on the board", author=(server.OWNER, "board"))
+writes.save("a96", it96, note="answered on the board", author=(server.OWNER, "board"))
 check("15 owner answer: the owner's answer that makes another the mover ends the record to the one left and makes none", "handoff" not in mt(96) and hist(96)[-1] == "home-peer" and not stale_now(96), mt(96))
 item(97); hand(97, "home-peer"); drain()
 it97 = rd(97); it97["metadata"]["mover"] = "team-back"; it97["metadata"]["next"] = "team-back: carry out"
-server._save("a97", it97, writer="home-send via a script on testbox")
+writes.save("a97", it97, writer="home-send via a script on testbox")
 check("15 script: a script's save ends the record to the mover it took the item from, and records none", "handoff" not in mt(97) and not stale_now(97), mt(97))
 item(98); hand(98, "home-peer"); drain()
 it98 = rd(98); it98["metadata"]["mover"] = "team-back"; it98["metadata"]["next"] = "team-back: carry out"
-server._save("a98", it98)
+writes.save("a98", it98)
 check("15 server save: the server's own save moves the record to the new mover, from the server", ho(98).get("to") == "team-back" and ho(98).get("from") == "stackshot" and hist(98)[-1] == "home-peer" and not stale_now(98), mt(98))
 item(99); hand(99, "home-peer"); drain(); rec99 = dict(ho(99))
-it99 = rd(99); server._save("a99", it99)
+it99 = rd(99); writes.save("a99", it99)
 check("15 server save: a save that leaves the mover alone changes nothing about the record", ho(99) == rec99, (ho(99), rec99))
 # 15.8 a record that carries the recovery request of an open item stays (a closed item's is ended with the close) (the item goes to the owner's state)
 item(100, handoff=rec("home-peer", recovery_at=now0 - 100, recovery_reason="nobody could take it", stall=True), mover="home-peer")
-it_ad = rd(100); it_ad["metadata"].pop("mover"); it_ad["metadata"]["needs"] = ["decision"]; it_ad["metadata"]["ask"] = ASK; server._save(f"a{100}", it_ad)
+it_ad = rd(100); it_ad["metadata"].pop("mover"); it_ad["metadata"]["needs"] = ["decision"]; it_ad["metadata"]["ask"] = ASK; writes.save(f"a{100}", it_ad)
 check("15 recovery: a record with the recovery request stays while the item is open (the item goes to the owner's state)", bool(ho(100).get("recovery_at")) and not stale_now(100), ho(100))
 # 15.9 delivery on the other notice paths
 item(102, mover="home-peer", handoff=rec("home-peer", delivered_at=None)); server._handoff_told_text("home-peer", f"[board] a{102} needs a look", "delivered → x")
@@ -1151,7 +1151,7 @@ check("15 wake after a take: a wake to a mover who already holds a TAKEN record 
 check("15 wake after a take: …marked no_clock, and the wake notice delivered it", r_wake.get("no_clock") is True and isinstance(r_wake.get("delivered_at"), float), r_wake)
 check("15 no clock: the take clock never runs on a server-made record (a day on, nothing fires; the stall pass keeps the timing)", tick(time.time() + 86400, 116, 93) == [] and ho(116).get("to") == "team-back" and ho(93).get("no_clock") is True, (ho(116), ho(93)))
 check("15 no clock: …and a session's hand-off keeps its clock (no_clock is not on it)", not ho(90).get("no_clock") and not ho(1).get("no_clock"), (ho(90), ho(1)))
-item(117, mover="home-peer", handoff=rec("home-peer", taken_at=now0 - 900)); it_ae = rd(117); server._save(f"a{117}", it_ae)
+item(117, mover="home-peer", handoff=rec("home-peer", taken_at=now0 - 900)); it_ae = rd(117); writes.save(f"a{117}", it_ae)
 check("15 no clock: a server save that leaves the mover alone makes no record over a taken one (the same mover, no hand-off)", ho(117).get("taken_at") and "handoff_history" not in mt(117), mt(117))
 
 # 15.12 a server-made record is not marked delivered until a notice actually reaches the mover: a front agent, a held notice, or a notice that goes to another session in needs
@@ -1167,7 +1167,7 @@ clear_pushes(); woke = server._wake_pass(); drain()
 check("15 undelivered: a record to a front agent is made, no_clock, and is delivered only if a notice reached it", f"a{120}" in woke and ho(120).get("to") == "home-front" and ho(120).get("no_clock") is True
       and bool(ho(120).get("delivered_at")) == bool(pushes_to("home-front", f"a{120}")), (woke, ho(120), pushes()))
 item(121, mover="home-peer", needs=["home-docs"], handoff=rec("home-peer", taken_at=now0 - 900))
-it_af = rd(121); it_af["metadata"]["mover"] = "team-back"; server._save(f"a{121}", it_af)          # the server's own save moves it on; the notice goes to the session in needs, not to the mover
+it_af = rd(121); it_af["metadata"]["mover"] = "team-back"; writes.save(f"a{121}", it_af)          # the server's own save moves it on; the notice goes to the session in needs, not to the mover
 clear_pushes(); server._tell_woken(f"a{121}", "home-docs", f"[stackshot] a{121} changed → {server._notice_link(f'a{121}')}"); drain()
 check("15 undelivered: a server save that moves the item on records the hand-off to the new mover, no_clock, and a notice that goes to a session in needs other than that mover marks nothing",
       ho(121).get("to") == "team-back" and ho(121).get("from") == "stackshot" and ho(121).get("no_clock") is True and not ho(121).get("delivered_at") and [x for x in pushes() if x[0] == "home-docs"] and not pushes_to("team-back", f"a{121}"), (mt(121), pushes()))
@@ -1193,7 +1193,7 @@ check("15 told: the link of one item is no link of an item whose id it begins (t
 raw = {"id": "125", "subject": "[home] item 125", "description": DESC, "status": "open", "updated": now0 - 3600, "state_updated": now0 - 3600, "confirmed": now0 - 3600,
        "metadata": {"owner": U["home-front"], "project": "projects/alpha", "agent": "home-peer", "next": "home-peer: do the thing"}}      # the linked agent (metadata.agent), no needs
 (T / "store/a/125.json").write_text(json.dumps(raw))
-loaded = server._load(f"a{125}"); server._save(f"a{125}", loaded)
+loaded = server._load(f"a{125}"); writes.save(f"a{125}", loaded)
 check("15 legacy: a server save of an item stored in an older form makes no hand-off out of the conversion (before is read through the same readers as the item)", "handoff" not in mt(125), mt(125))
 
 # 15.15 the cold call's outcome is written only on the record that call was asked about
@@ -1271,15 +1271,15 @@ check("15 strict: …once it reads again the repair ends it as before", f"a{150}
 
 # 15.19 a record with the recovery request stays while the item stays with its mover or goes to the owner; a server save that moves it on to another session ends it and records the new mover
 item(151, mover="home-peer", handoff=rec("home-peer", recovery_at=now0 - 100, stall=True, recovery_reason="nobody could take it"))
-it_ak = rd(151); it_ak["metadata"]["next"] = "home-peer: a line"; server._save(f"a{151}", it_ak)
+it_ak = rd(151); it_ak["metadata"]["next"] = "home-peer: a line"; writes.save(f"a{151}", it_ak)
 check("15 recovery: a server save that leaves the mover alone keeps the record", bool(ho(151).get("recovery_at")) and ho(151).get("to") == "home-peer", mt(151))
-it_ak = rd(151); it_ak["metadata"]["mover"] = "team-back"; it_ak["metadata"]["next"] = "team-back: take over"; server._save(f"a{151}", it_ak)
+it_ak = rd(151); it_ak["metadata"]["mover"] = "team-back"; it_ak["metadata"]["next"] = "team-back: take over"; writes.save(f"a{151}", it_ak)
 h_ac = (mt(151).get("handoff_history") or [{}])[-1]
 check("15 recovery: …a server save that moves the item to another session ends the record as handed on and records the new mover (no_clock, from the server)",
       ho(151).get("to") == "team-back" and ho(151).get("from") == "stackshot" and ho(151).get("no_clock") is True and not ho(151).get("recovery_at") and h_ac.get("to") == "home-peer" and bool(h_ac.get("recovery_at"))
       and h_ac.get("ended") == "handed on" and not stale_now(151), mt(151))
 item(152, mover="home-peer", handoff=rec("home-peer", recovery_at=now0 - 100, stall=True))
-it_al = rd(152); it_al["metadata"]["mover"] = "team-back"; it_al["metadata"]["next"] = "team-back: take over"; server._save(f"a{152}", it_al, writer="home-send")
+it_al = rd(152); it_al["metadata"]["mover"] = "team-back"; it_al["metadata"]["next"] = "team-back: take over"; writes.save(f"a{152}", it_al, writer="home-send")
 check("15 recovery: …a session's own write is the session path's, as before (a hand-off record to the new mover through apply)", ho(152).get("to") == "team-back" and not ho(152).get("recovery_at"), mt(152))
 
 # ================================================================ 16. a background agent that did not take a hand-off is reminded first

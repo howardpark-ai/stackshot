@@ -235,7 +235,7 @@ def one(S: Any, gid: str, dry: bool = False, tied: dict[str, list[dict[str, Any]
             except ValueError:
                 rel = ""
             committed, why = git_versions(store, rel) if rel else ([], "the item file is outside the store")      # before the lock: git is slow, the History only grows, and the file on disk is read again under the lock
-        with S._ITEM_LOCK:
+        with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown)
             if refusal is not None:
                 return {**refusal, **blank}
@@ -298,7 +298,7 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
     if set(before) != set(after):
         return S._migrate_refuse(shown, "before and after name the same keys")
     try:
-        with S._ITEM_LOCK:
+        with S._writes.ITEM_LOCK:
             p, data, raw, refusal = S._stamp_open(gid, shown, closed_ok=True)
             if refusal is not None:
                 return refusal

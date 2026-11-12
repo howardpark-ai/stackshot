@@ -56,7 +56,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
 from stackshot.core import store as _core_store
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -95,7 +95,7 @@ def bare(it):
     out = copy.deepcopy(it); out.get("metadata", {}).pop("phase", None); return out
 def save(i, letter="g"):
     gid = f"{letter}{i}"
-    server._save(gid, server._load(gid))
+    writes.save(gid, server._load(gid))
     return raw(i, letter)
 def shown(i, letter="g"): return dict(raw(i, letter), gid=f"{letter}{i}")
 
