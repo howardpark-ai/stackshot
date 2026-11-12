@@ -1,7 +1,7 @@
 """Project anchors (an anchor is a property of a project, never of an item).
 
 An anchor is an external thing anchor-hub watches — a Slack channel or DM, a Drive file or folder, a Gmail thread or
-gmail:q: query, a Notion page or database, a GitHub issue/PR or a repo's releases feed. It belongs to a project (the gbrain page,
+gmail:q: query (optionally scoped to mailboxes: gmail:q@<mailbox>:), a Notion page or database, a GitHub issue/PR or a repo's releases feed. It belongs to a project (the gbrain page,
 `projects/<slug>` or `infra/<slug>`), which keeps it, and carries a scope: project-wide, or a list of the items it is about. An anchor counts
 for a scoped item from whichever project's page holds it (anchor_scope.py is the one reader of that: the server, the board and the model guards use it).
 Sessions are derived, never stored on the anchor: the project's name-line session (the page's `display-name:`; pages.py reads it with
@@ -157,7 +157,7 @@ def same_url_key(u: str) -> str:
 
 
 def anchor_id(url: str) -> str | None:
-    """URL (or raw id) → slack:<channel> | drive:<id> | gmail:<threadIdHex> | gmail:q:<terms> | notion:<pageId32>
+    """URL (or raw id) → slack:<channel> | drive:<id> | gmail:<threadIdHex> | gmail:q:<terms> | gmail:q@<mailboxes>:<terms> | notion:<pageId32>
     | github:<owner/repo>#<n> | github:<owner/repo>@releases | github:<owner/repo>@notifications (a repo root URL). Unknown shapes → None. A #mention=<text> fragment is
     not part of the id (see split_fragment). A GitHub repo named in [github.moved] is given by its current name, so the id is the same
     for the old and the new URL of a transferred repository (the identity of an anchor; the stored URL is never rewritten)."""
@@ -178,6 +178,77 @@ def anchor_id(url: str) -> str | None:
         if m:
             return f"{kind}:{m.group(1)}"
     return None
+
+
+# ---------- Gmail query anchors and their mailboxes ----------
+# `gmail:q:<query>` reads every mailbox the hub reads. A mailbox scope goes between `q` and the colon: `gmail:q@work:<query>`, or
+# `gmail:q@work,home:<query>` for several. Why there: the query after `gmail:q:` is Gmail operator text in which `name:` is ordinary
+# (`subject:`, a bare `work:` in a subject), so a mailbox written inside it (`gmail:q:work:<query>`) could not be told from a query word;
+# and no stored id has a character after `q` but the colon, so no existing anchor changes meaning. A mailbox is named by the label the
+# instance configures ([anchor_hub] gmail_names), or by its address when it has none.
+_GMAIL_Q = re.compile(r"^gmail:q(?:@([^:\s]*))?:(.*)$", re.S)
+
+
+def gmail_query(aid: str) -> tuple[list[str] | None, str] | None:
+    """A `gmail:q:` id → (mailbox names or None, query): None for no scope (every mailbox), a list (possibly empty) for `gmail:q@a,b:`.
+    Any other id (a thread, another type) → None."""
+    m = _GMAIL_Q.match(str(aid or ""))
+    if not m:
+        return None
+    names = None if m.group(1) is None else [x for x in (y.strip() for y in m.group(1).split(",")) if x]
+    return names, m.group(2)
+
+
+def gmail_resolve(names: list[str], boxes: dict[str, str]) -> tuple[list[str], list[str]]:
+    """The mailbox names of a scope against `boxes` ({label: address} of the mailboxes the hub reads): → (the labels they mean, in order and
+    without repeats, the names that mean none). A name is a label or an address, in any case."""
+    low = {k.lower(): k for k in boxes}
+    low.update({v.lower(): k for k, v in boxes.items()})
+    good: list[str] = []
+    bad: list[str] = []
+    for n in names:
+        k = low.get(n.lower())
+        if k is None:
+            if n not in bad:
+                bad.append(n)
+        elif k not in good:
+            good.append(k)
+    return good, bad
+
+
+def gmail_mailboxes(aid: str, boxes: dict[str, str]) -> tuple[list[str], list[str]]:
+    """The mailboxes a Gmail query anchor reads: → (labels, unknown names). An unscoped anchor reads all of `boxes`; a scoped one only the
+    mailboxes it names, so a name that is no longer one of `boxes` reads nothing."""
+    q = gmail_query(aid)
+    if q is None:
+        return [], []
+    return (list(boxes), []) if q[0] is None else gmail_resolve(q[0], boxes)
+
+
+def gmail_reads(aid: str, address: str, boxes: dict[str, str]) -> bool:
+    """Whether the Gmail query anchor `aid` reads the mailbox at `address`."""
+    labels, _bad = gmail_mailboxes(aid, boxes)
+    return any(boxes.get(k, "").lower() == address.lower() for k in labels)
+
+
+def gmail_title(aid: str, boxes: dict[str, str]) -> str:
+    """`<query> · <mailboxes>` for a Gmail query anchor (a name that is no mailbox now is marked), else ""."""
+    q = gmail_query(aid)
+    if q is None:
+        return ""
+    labels, bad = gmail_mailboxes(aid, boxes)
+    named = ", ".join(labels + [f"{b} (no such mailbox)" for b in bad])
+    return f"{q[1]} · {named}" if named else q[1]
+
+
+def gmail_canonical(aid: str, boxes: dict[str, str]) -> str:
+    """A scoped Gmail query id with its mailbox names as the labels spell them (the same anchor is one entry however it was typed); any other id,
+    an unscoped one and a name that means no mailbox as given."""
+    q = gmail_query(aid)
+    if q is None or q[0] is None:
+        return aid
+    labels, bad = gmail_resolve(q[0], boxes)
+    return aid if bad or not labels else "gmail:q@" + ",".join(labels) + ":" + q[1]
 
 
 def split_fragment(url: str) -> tuple[str, str]:
@@ -708,14 +779,18 @@ def remove(store: dict, project: str, urls: list[str]) -> list[dict[str, Any]]:
     return lst
 
 
-def fmt(entries: list[dict[str, Any]], status: dict[str, dict[str, Any]] | None = None) -> str:
+def fmt(entries: list[dict[str, Any]], status: dict[str, dict[str, Any]] | None = None, boxes: dict[str, str] | None = None) -> str:
     """A project's anchors, one per line. With anchor-hub's per-anchor status (status.json "anchors") each line also says
-    what the hub made of it: its name there, or that the hub cannot read it and why."""
+    what the hub made of it: its name there, or that the hub cannot read it and why. With `boxes` ({label: address} of the mailboxes the
+    hub reads) a Gmail query line names the mailboxes it reads (`Gmail from:x · work, home`), also before the hub has named it."""
     def hub(e: dict[str, Any]) -> str:
-        st = (status or {}).get(anchor_id(split_fragment(e.get("url", ""))[0]) or "") or {}
+        aid = anchor_id(split_fragment(e.get("url", ""))[0]) or ""
+        st = (status or {}).get(aid) or {}
         u = st.get("unreadable")
         if u:
             return f" — UNREADABLE by anchor-hub since {u.get('since')} {_cfg.tz_abbr()}: {u.get('why')}" + ("" if u.get("warned") else " (being asked once more before the keeper is warned)")
+        if boxes and gmail_query(aid) is not None:
+            return f" — Gmail {gmail_title(aid, boxes)}"
         return f" — {st['label']}" if st.get("title") else ""
     return "\n".join(f"- {e.get('url')}  [{'project-wide' if not e.get('items') else 'items: ' + ', '.join(e['items'])}]{hub(e)}" for e in entries) or "(none)"
 

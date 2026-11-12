@@ -1148,6 +1148,7 @@ RESTART_ONLY: dict[str, str] = {
     "anchor_hub.slack_team": "",                  # read when the receivers start (Slack's permalink host, the owner's Notion ids)
     "anchor_hub.self_emails": "",
     "anchor_hub.gmail_topics": "",                # a Gmail watch keeps the topic it was registered with; a restart re-registers it
+    "anchor_hub.gmail_names": "",                 # the mailbox names a Gmail anchor can scope itself to are read when the Google receiver starts
     "anchor_hub.enabled": "after ./install.sh units",   # these four decide which units install.sh installs, and when
     "audit.enabled": "after ./install.sh units",
     "audit.at": "after ./install.sh units",
