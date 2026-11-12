@@ -1854,6 +1854,31 @@ try:
     del cievs[:]; head(27, "4" * 40, "failure"); one_pass(); head(27, "5" * 40, "success"); one_pass(); head(27, "6" * 40, "success"); one_pass()
     check("anchor-hub CI: a failed head is one ci_failed, the green after it keeps its words (passing again), the green after that is passing",
           ci_texts(AN2) == [("ci_failed", "failed on 4444444: 1 of 2 checks — suites"), ("ci_passed", "passing again on 5555555 (2 checks)"), ("ci_passed", "passing on 6666666 (2 checks)")], ci_texts(AN2))
+    check("anchor-hub CI: only the green that follows no failure is record_only (written to the event log, delivered to no one); a failure and the green after it are delivered as before",
+          [(e.etype, e.record_only) for e in cievs if e.anchor == AN2] == [("ci_failed", False), ("ci_passed", False), ("ci_passed", True)], [(e.etype, e.text, e.record_only) for e in cievs if e.anchor == AN2])
+    def runs_(*pairs, status="completed"): return {"check_runs": [{"name": nm, "status": status if c_ != "none" else "in_progress", "conclusion": c_} for nm, c_ in pairs]}
+    del cievs[:]; GHD[f"{RP}/pulls/27"] = {**GHD[f"{RP}/pulls/27"], "head": {"sha": "7" * 40, "ref": "x/y"}}
+    GHD[f"{RP}/commits/{'7' * 40}/check-runs?per_page=100"] = runs_(("suites", "success"), ("lint", "success"), ("docs", "cancelled")); one_pass()
+    check("anchor-hub CI: canceled runs are counted in the green text, as in the failed text", ci_texts(AN2) == [("ci_passed", "passing on 7777777 (3 checks, 1 cancelled)")], ci_texts(AN2))
+    # CI still running when the pull request is first looked at: nothing is seeded, the first finished result is reported once; CI finished at first sight seeds silently
+    AN3 = "github:example-owner/stackshot#28"
+    GHD[f"{RP}/issues/28"] = {**GHD[f"{RP}/issues/26"], "html_url": "https://github.com/example-owner/stackshot/pull/28"}
+    GHD[f"{RP}/pulls/28"] = {"head": {"sha": "8" * 40, "ref": "x/y"}, "user": {"login": "example-owner"}, "base": {"repo": {"id": 7}}}
+    GHD[f"{RP}/commits/{'8' * 40}/check-runs?per_page=100"] = runs_(("suites", "none"), ("lint", "success"))
+    hub.bindings[AN3] = {OWNER}; del cievs[:]; one_pass(); one_pass()
+    check("anchor-hub CI: first sight with CI still running reports nothing and seeds no key (a pending marker only)", ci_texts(AN3) == [] and hub.gh_state["ci"][AN3]["key"] is None and hub.gh_state["ci"][AN3].get("pending") is True, (ci_texts(AN3), hub.gh_state["ci"][AN3]))
+    GHD[f"{RP}/commits/{'8' * 40}/check-runs?per_page=100"] = runs_(("suites", "success"), ("lint", "success")); one_pass()
+    check("anchor-hub CI: …the first finished result then is one ci_passed (record_only), the marker is gone, and a pass after it adds none",
+          ci_texts(AN3) == [("ci_passed", "passing on 8888888 (2 checks)")] and [e.record_only for e in cievs if e.anchor == AN3] == [True] and "pending" not in hub.gh_state["ci"][AN3], (ci_texts(AN3), hub.gh_state["ci"][AN3]))
+    del cievs[:]; one_pass()
+    check("anchor-hub CI: …and a pass after it adds none", ci_texts(AN3) == [], ci_texts(AN3))
+    AN4 = "github:example-owner/stackshot#29"
+    GHD[f"{RP}/issues/29"] = {**GHD[f"{RP}/issues/26"], "html_url": "https://github.com/example-owner/stackshot/pull/29"}
+    GHD[f"{RP}/pulls/29"] = {"head": {"sha": "9" * 40, "ref": "x/y"}, "user": {"login": "example-owner"}, "base": {"repo": {"id": 7}}}
+    GHD[f"{RP}/commits/{'9' * 40}/check-runs?per_page=100"] = runs_(("suites", "none"), ("lint", "success"))
+    hub.bindings[AN4] = {OWNER}; del cievs[:]; one_pass()
+    GHD[f"{RP}/commits/{'9' * 40}/check-runs?per_page=100"] = runs_(("suites", "failure"), ("lint", "success")); one_pass()
+    check("anchor-hub CI: a first finished result that failed is one ci_failed (delivered: not record_only)", [(e.etype, e.record_only) for e in cievs if e.anchor == AN4] == [("ci_failed", False)], [(e.etype, e.text) for e in cievs if e.anchor == AN4])
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
     ahc.log.removeHandler(_caph)

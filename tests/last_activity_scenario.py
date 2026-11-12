@@ -811,5 +811,22 @@ saved = ev_pass_now()
 check("13 …it writes a ci_passed line for the pull request and stamps the item anchored to it: ci_result, 'CI passing on PR 40'",
       [(r["kind"], r["n"]) for r in rows13] == [("ci_passed", 40)] and saved == ["a484"] and la(484)["what"] == "CI passing on PR 40" and lk(484) == "ci_result", (rows13, saved, la(484)))
 
+# a fork's pull request: the same green after green is not the repository's own side, so it is not vouched for and writes no line
+put(485)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/42", "items": ["a485"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+g13f = {"/user": {"login": "hubaccount"}, **pr9(42, head="mallory/widgets")}
+with GH(g13f, ["github:acme/widgets#42"]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()
+    g13f.update(pr9(42, head="mallory/widgets", sha="43" * 20))
+    ci13f = [e for e in G.one() if e.etype.startswith("ci_")]
+check("13 a fork's pull request: a green head after a green one is the same record_only ci_passed event, not vouched for", [(e.etype, e.vouched, e.record_only) for e in ci13f] == [("ci_passed", "", True)], [(e.etype, e.vouched, e.record_only) for e in ci13f])
+hub_.bindings["github:acme/widgets#42"] = {"home-peer"}
+for e in ci13f: hub_.emit(e)
+rows13f, _ = EL.read(0)
+saved = ev_pass_now()
+check("13 …it writes no line to the event log and stamps nothing (a fork's CI is not the repository's own side)", rows13f == [] and saved == [] and la(485) is None, (rows13f, saved, la(485)))
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
