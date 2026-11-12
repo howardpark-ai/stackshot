@@ -35,9 +35,8 @@ import _scratch
 from _release_harness import *
 check("release.sh parses", subprocess.run(["bash", "-n", os.path.join(STACK, "release.sh")]).returncode == 0)
 # a measured run sets COVERAGE_PROCESS_START for this process; what release.sh and its stubs start must not inherit it (every Python start would load coverage: a measured run took three times a plain one)
-_probe = subprocess.run([sys.executable, "-S", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import _release_harness as h; print(sorted(k for k in h.ENV0 if k.startswith('COVERAGE_')), 'PATH' in h.ENV0)", SCR],
-                        env={**os.environ, "COVERAGE_PROCESS_START": "/nonexistent", "COVERAGE_FILE": "/nonexistent"}, capture_output=True, text=True)
-check("harness: the environment release.sh runs in has no COVERAGE_ variable of a measured run, and keeps the rest", _probe.stdout.strip() == "[] True", (_probe.stdout, _probe.stderr[-300:]))
+check("harness: the environment release.sh runs in has no COVERAGE_ variable of a measured run, and keeps the rest",
+      without_coverage({"COVERAGE_PROCESS_START": "x", "COVERAGE_FILE": "y", "PATH": "p", "RT_X": "1"}) == {"PATH": "p", "RT_X": "1"} and not any(k.startswith("COVERAGE_") for k in ENV0) and "PATH" in ENV0, sorted(ENV0))
 R ="example-owner/stackshot"
 ENQUEUE = f"id=PRNODE23 h={HEADSHA}"   # the enqueue mutation the stub saw: the PR's node id and the head it is pinned to
 MERGE_SHORT = "0106c0d"

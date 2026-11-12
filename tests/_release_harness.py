@@ -17,7 +17,8 @@ fails = []; ran = []; dirs = []
 # release.sh is a shell script whose stubs (gh, git, salamander, config ...) are many short Python and shell starts outside the checkout, which coverage does not measure
 # (include = the checkout); but every Python start would still load coverage and write a data file, so a measured run took three times a plain one and set main's wall time.
 # This process itself stays measured (the variables are only left out of what it starts); strace follows the children all the same, so the files release.sh touches are still recorded.
-ENV0 = {k: v for k, v in os.environ.items() if not k.startswith("COVERAGE_")}
+def without_coverage(env): return {k: v for k, v in env.items() if not k.startswith("COVERAGE_")}
+ENV0 = without_coverage(os.environ)
 NOTLIVE = "ba5e0000000000000000000000000000000000ba"   # RT_LIVE for an old-path release that fails on main: a checkout at a commit older than the merge (the git stub says "in it" for HEAD when RT_LIVE is unset)
 def check(name, cond, got=None):
     ran.append(name)
