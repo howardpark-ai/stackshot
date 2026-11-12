@@ -4,7 +4,7 @@ Items stored before the until writers carry a wait in the old fields: `wake`, `a
 imply one. This pass gives a stored item the form the writers would give the same wait today, through their own `fold` (until_write.py), and nothing else: it is not a second mapping.
 
 What a stored item gets (`plan_for`; the server's `one` refuses any item whose reading would change):
-  wake (+ hold)        until = the wake, the hold flag and its stamp gone (a wait on the date alone, or the stored kind time); a hold that waits on an anchor scoped to the item or on a pane recycle keeps its flag
+  wake (+ hold)        until = the wake, the hold flag gone (a wait on the date alone, or the stored kind time); its stamp (hold_set: who set the hold, and when) stays on the item; a hold that waits on an anchor scoped to the item or on a pane recycle keeps its flag
   ask_by, wait_kind    until = the ask-by day (a relay), or the earlier of ask_by and wake (an anchor, item or event wait); the kind stays
   ask_by / wake beside an after link with no kind    until = the date, wait_kind = item (as create and update store it)
   a bare wake (no hold, no kind, no wait_basis, no after link)    kept as it is: it is a backstop (a hand-off's, or one stored before until), not a wait, and as `until` it would park the item
@@ -13,7 +13,8 @@ What a stored item gets (`plan_for`; the server's `one` refuses any item whose r
                        As until the watchers act on it. A date already past is NOT migrated (it would wake the item on the next tick): it is listed as "already due" for a person to re-save with the date meant;
                        a future one is migrated and listed as "newly watched", with the day it wakes and how it was read before (never watched, or only a notice). An item with a wake and a hold is not in
                        this class: the old wake pass released it at the date, as the watchers do.
-A rewritten item also gets one History line (metadata.stall.log, shown as "stackshot: ..."), which says the wait was rewritten as until; no other key changes, no clock moves, nobody is told.
+A rewritten item also gets one History line (metadata.stall.log, shown as "stackshot: ..."), which says the wait was rewritten as until; no other key changes (the other keys of `stall` stay; a `stall` that is not an object with a plain log is left alone and the item gets no line), no clock moves, nobody is told.
+A hold + wake whose release differs from the old wake pass's (release_differs) is migrated and listed with the reason; an item whose reading would change, its model conflicts included, is refused.
 
 Pure functions of a metadata dict and callbacks: no server import. `entry_for` builds the undo entry (the keys before and after), `apply_edits` the new item."""
 from __future__ import annotations
@@ -90,13 +91,13 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
     if not u:
         out["kept"] = "no date to fold"
         return out
-    if (meta.get("wait_basis") or meta.get("cap_ok")) and clean(wake_before) != u:
-        out.update(kept="a reason or an approval is bound to another date than the one the wait is stored as: left as it is", listed=True)
+    if (meta.get("wait_basis") or meta.get("cap_ok")) and wake_before != u:      # compared as stored, not cleaned: a reason bound to a date with spaces around it would read as bound to another date once the clean one is stored (basis_of compares as written)
+        out.update(kept="a reason or an approval is bound to another date than the one the wait is stored as (or to the date with spaces around it): left as it is", listed=True)
         return out
     if keeps_hold and meta.get("hold"):
         work["hold"] = True
-        if hold_set is not None:
-            work["hold_set"] = hold_set
+    if hold_set is not None:
+        work["hold_set"] = hold_set                 # who set the hold and when stays on the item (the writers drop it with the hold; the pass drops no record of a person): the wait began then (audit_run.wait_since reads it)
     edits: dict[str, Any] = {}
     for k in KEYS:
         if work.get(k) != meta.get(k) and (k in work or k in meta):
@@ -110,22 +111,54 @@ def plan_for(meta: dict[str, Any], keeps_hold: bool = False) -> dict[str, Any]:
     return out
 
 
+def release_differs(meta: dict[str, Any], is_owner: Any) -> str:
+    """Words for a hold with a wake that the old wake pass released one way and the watchers release another, "" when they agree. Only a hold with a dated wake (the old wake pass's), and only the two shapes that
+    differ: `needs` names the owner (the old release put the item back in the owner's lane with no new ask; the watchers give it an owner step and an ask), and a `post_wake_mover` that is not the one
+    session in `needs` (the old release and its message went to `needs`; the watchers hand it to the post_wake_mover and rewrite `needs` as [it]). Past or future wake alike. `is_owner(name)`: the instance's
+    owner name test (the model's)."""
+    if not meta.get("hold") or not _dated(meta.get("wake")):
+        return ""
+    raw = meta.get("needs")
+    needs = [clean(x) for x in (raw if isinstance(raw, list) else [raw]) if clean(x)]
+    pwm = clean(meta.get("post_wake_mover"))
+    out = []
+    if any(is_owner(n) for n in needs):
+        out.append("needs names the owner: the old wake pass put it back in his lane with no new ask, the watchers give it an owner step and an ask")
+    if needs and pwm and [n.lower() for n in needs] != [pwm.lower()]:
+        out.append(f"post_wake_mover {pwm} is not its needs {needs}: the old release and its message went to needs, the watchers hand it to {pwm} and rewrite needs as [{pwm}]")
+    return "; ".join(out)
+
+
 def history_line(plan: dict[str, Any]) -> str:
     """The History line of a rewritten wait: that it was rewritten as until, from which fields, and that nothing else changed."""
     return f"the stored wait was rewritten as {plan['new']} (it was {plan['form']}); nothing else on the item changed"[:HISTORY_MAX]
 
 
+def _stall_plain(meta: dict[str, Any]) -> bool:
+    """Is the item's `stall` one the pass can add its History line to without losing anything: absent, or an object whose `log` (when there is one) is a list of objects? Anything else (a hand edit) is left alone."""
+    s = meta.get("stall")
+    if s is None:
+        return True
+    if not isinstance(s, dict):
+        return False
+    log = s.get("log")
+    return log is None or (isinstance(log, list) and all(isinstance(x, dict) for x in log))
+
+
 def with_history(meta: dict[str, Any], plan: dict[str, Any], now: float) -> dict[str, Any]:
-    """The plan with the History line added to its edits (the `stall` log as it will stand). A plan with no edits is returned as it is."""
+    """The plan with the History line added to its edits (the `stall` value as it will stand: the log with the new line at its end, every other key of `stall` as it was). A plan with no edits is returned as it is;
+    so is one on an item whose `stall` is not an object with a plain log (nothing is written to it, the plan carries no History line, and an undo does not touch it)."""
     if not plan["edits"]:
         return plan
-    probe = copy.deepcopy(meta)
-    old = _stall.log_of(probe)
+    if not _stall_plain(meta):
+        return {**plan, "history": "", "dropped": []}
+    old = _stall.log_of(meta)
     line = history_line(plan)
-    _stall.note(probe, now, line)
-    kept = _stall.log_of(probe)
-    dropped = [x for x in old if x not in kept]            # the lines the new one pushed out of the log (the log keeps LOG_KEEP): an undo puts them back
-    return {**plan, "edits": {**plan["edits"], "stall": probe["stall"]}, "history": line, "dropped": dropped}
+    log = (old + [{"at": now, "text": " ".join(line.split())[:240]}])[-LOG_KEEP:]
+    stall = dict(meta["stall"]) if isinstance(meta.get("stall"), dict) else {}
+    stall["log"] = log
+    dropped = [x for x in old if x not in log]             # the lines the new one pushed out of the log (the log keeps LOG_KEEP): an undo puts them back
+    return {**plan, "edits": {**plan["edits"], "stall": stall}, "history": line, "dropped": dropped}
 
 
 def apply_edits(item: dict[str, Any], plan: dict[str, Any]) -> dict[str, Any]:
@@ -164,14 +197,20 @@ def entry_problem(side: Any) -> str:
 
 def reading(S: Any, gid: str, item: dict[str, Any]) -> dict[str, Any]:
     """What the item reads as, for the check that the pass changes no reading: the phase, kind of wait, mover and watched status (server._retire_reading), the board's held flag, the phase and wait kind a save
-    would store, and the date the wait ends on."""
+    would store, the date the wait ends on, and the model's conflicts (a new one is a difference)."""
     probe = {**copy.deepcopy(item), "gid": gid}
-    return {**S._retire_reading(gid, item), "held": bool(S._rmod.is_held(probe)), "stamp": list(S._stamp_values(gid, probe)), "date": _wt.until_of(probe.get("metadata") or {})}
+    seen = copy.deepcopy(probe)
+    S._legacy_hold(seen); S._legacy_needs(seen)                    # as _retire_reading reads it
+    return {**S._retire_reading(gid, item), "held": bool(S._rmod.is_held(probe)), "stamp": list(S._stamp_values(gid, probe)), "date": _wt.until_of(probe.get("metadata") or {}),
+            "conflicts": sorted(S._model_of(seen).conflicts)}
 
 
 def same(r0: dict[str, Any], r1: dict[str, Any]) -> str:
     """"" when two readings are the same, else what differs, in words."""
     diffs = [f"{k} {r0[k]} -> {r1[k]}" for k in ("pair", "mover", "held", "stamp", "date") if r0[k] != r1[k]]
+    new_conflicts = [c for c in r1.get("conflicts") or [] if c not in (r0.get("conflicts") or [])]
+    if new_conflicts:            # the model's own complaints about the fields (such as a wait_kind stored on an item whose state is alive): one the item did not show before is a new reading, not a rewrite
+        diffs.append("conflicts: " + " | ".join(c[:160] for c in new_conflicts))
     if r0["watched"] and not r1["watched"]:            # a wait the watchers did not own yet (a hold with a wake: the wake pass's) becomes theirs when it is stored as until, as a writer stores it; one they own never stops being theirs
         diffs.append(f"watched {r0['watched']} -> {r1['watched']}")
     return "; ".join(diffs)
@@ -197,10 +236,10 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             keeps = bool({"anchor", "recycle"} & set(S._hold_held_by(gid, meta))) if meta.get("hold") else False
             plan = plan_for(meta, keeps)
             if not plan["edits"]:
-                return {"item": shown, "action": "kept" if plan["listed"] else "same", "why": plan["kept"], "form": plan["form"], "new": "", "before": {}, "after": {}, "due": False, "newly": "", "how": "", "sha256_before": h0}
+                return {"item": shown, "action": "kept" if plan["listed"] else "same", "why": plan["kept"], "form": plan["form"], "new": "", "before": {}, "after": {}, "due": False, "newly": "", "how": "", "differs": "", "sha256_before": h0}
             plan = with_history(meta, plan, time.time())
             new = apply_edits(raw, plan)
-            out = {"item": shown, "form": plan["form"], "new": plan["new"], **entry_for(raw, plan), "due": False, "newly": "", "how": "", "sha256_before": h0}
+            out = {"item": shown, "form": plan["form"], "new": plan["new"], **entry_for(raw, plan), "due": False, "newly": "", "how": "", "differs": "", "sha256_before": h0}
             r0, r1 = reading(S, gid, raw), reading(S, gid, new)
             why = same(r0, r1)
             if why:
@@ -215,8 +254,10 @@ def one(S: Any, gid: str, dry: bool = False) -> dict[str, Any]:
             if how:                                     # a date the old code did not act on as the watchers will: nothing read it, or the old pass only sent a notice
                 ep = _wt.wake_epoch(plan["until"])
                 if ep is not None and ep <= time.time():
-                    return {"item": shown, "action": "kept", "why": due_why(how), "form": plan["form"], "new": "", "before": {}, "after": {}, "due": True, "newly": "", "how": how, "sha256_before": h0}
+                    return {"item": shown, "action": "kept", "why": due_why(how), "form": plan["form"], "new": "", "before": {}, "after": {}, "due": True, "newly": "", "how": how, "differs": "", "sha256_before": h0}
                 out["newly"], out["how"] = plan["until"], how
+            if not r0["watched"]:                       # a wait the watchers already own releases the same way after the pass
+                out["differs"] = release_differs(meta, S._model.is_owner)
             if dry:
                 return {**out, "action": "would_set", "why": "the wait would be rewritten as until"}
             if not S._stamp_write(p, raw, h0, plan["edits"]):
@@ -238,8 +279,8 @@ def _log_without(meta: dict[str, Any], history: str, dropped: list[dict[str, Any
             break
     log = (dropped + log)[-LOG_KEEP:]
     rest = {k: v for k, v in (stall.items() if isinstance(stall, dict) else []) if k != "log"}
-    if not log and not rest:
-        return None
+    if not log:
+        return rest or None             # the keys of `stall` other than the log stay exactly as they were; nothing else left: the key goes
     return {**rest, "log": log}
 
 
@@ -269,12 +310,14 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
     keys = list(before)
     try:
         with S._ITEM_LOCK:
-            p, data, raw, refusal = S._stamp_open(gid, shown)
+            p, data, raw, refusal = S._stamp_open(gid, shown, closed_ok=True)
             if refusal is not None:
                 return refusal
             h0 = S._stamp_sha(data)
             now = snapshot(raw, keys)
             out = {"item": shown, "before": before, "after": after, "history": history, "dropped": dropped, "sha256_before": h0}
+            if raw.get("status") != "open":          # closed since the pass: a close ended the wait and cleared its keys, and the item is left as it is, like one a later save changed
+                return {**out, "action": "kept", "why": f"it was closed since the pass ({raw.get('status')}): left as it is", "now": now}
             if now == before:
                 return {**out, "action": "same", "why": "it already holds the keys it had"}
             if now != after:
