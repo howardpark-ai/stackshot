@@ -1,6 +1,6 @@
 """Scenario test for the mailbox scope of a Gmail query anchor — fixture data, a fake Google API, no network, no server socket.
 
-`gmail:q:<query>` reads every mailbox anchor-hub reads; `gmail:q@<mailbox>[,<mailbox>]:<query>` reads only the mailboxes named. Covered:
+`gmail:q:<query>` reads every mailbox the anchors service reads; `gmail:q@<mailbox>[,<mailbox>]:<query>` reads only the mailboxes named. Covered:
 
   * the reader (anchorhub/gworkspace.py, run on a fake Google with two mailboxes that both receive the same mail): an anchor scoped to one mailbox hears
     the mail of that mailbox and not the same mail in the other; an unscoped anchor (every anchor stored before the scope existed) hears both; a scope of
@@ -60,7 +60,7 @@ check("labels: a configured label names its address (any case), an unconfigured 
       gw.mailbox_labels([ADA, BO, CY]) == {"home": BO, "work": ADA, CY: CY}, gw.mailbox_labels([ADA, BO, CY]))
 
 # ---- the reader, on a fake Google with two accounts that receive the same mail
-(T / "secrets/anchor-hub/google").mkdir(parents=True, exist_ok=True)
+pathlib.Path(gw.GDIR).mkdir(parents=True, exist_ok=True)
 pathlib.Path(core.ADIR).mkdir(parents=True, exist_ok=True)
 pathlib.Path(core.ENVF).write_text(f"GMAIL_ACCOUNTS={ADA},{BO}\n")
 for em in (ADA, BO, CY): pathlib.Path(gw.GDIR, f"{em}.json").write_text("{}")
