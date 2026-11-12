@@ -1860,7 +1860,7 @@ def _owner_steps_on_save(item: dict[str, Any], before: dict[str, Any] | None, wr
 #   6  needs decision put back within an hour of the owner's last answer on the item with the ask line unchanged is refused
 #   7  (gone: an owner's item with no stored state was once told what storing it took; no call stores a state now)
 _REPARK_FIELDS = ("needs", "after", "state", "mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")     # the structured fields a re-park may not change (status and hold beside them)
-_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
+_REPARK_QUIET = (_sf.MARK, _sf.DECLINED, "wake", "end", "hold", "hold_set", "cap_ok", "said", "idle", "waiting", "wait_failed", "undelivered", "repark", "next_stale", "refiled", "recycle", "recycle_at", "stall", "front_quiet", "hourly_audit", "stuck_since", "stuck_moved", "stuck_landed")     # [model] guards = false: today's test
 _DECISION_AGAIN_S = 3600.0        # a decision is not asked again within this long after the owner's last answer on the item unless the ask line changed
 
 
@@ -5744,6 +5744,8 @@ def _anchor_wait_gate(old: dict[str, Any], meta: dict[str, Any], gid: str = "", 
     if not _anc.anchor_id(_anc.split_fragment(url)[0]):
         raise ToolError(f"Refused: wait_anchor {url!r} is not an anchor shape the anchors tool accepts, so it can never be on the list ({_ANCHOR_SHAPES}). "
                         "Set wait_anchor to a link of one of those shapes, add it to the anchors list, then set the wait")
+    if _anc.gmail_query_problem(url):
+        raise ToolError(f"Refused: wait_anchor {url!r} is a Gmail query the matcher cannot evaluate ({_anc.gmail_query_problem(url)}), so it can never be on the list. {_GMAIL_TERMS}")
     if creating:
         fix = (f"add it project-wide first: anchors(project=\"{project}\", add=[\"{url}\"]); or create the item without the wait, "
                f"then anchors(project=\"{project}\", add=[\"{url}\"], items=[<its id>]), then set the wait")
@@ -6079,6 +6081,20 @@ def _silence_env() -> Any:
 
 
 def _silence_tick() -> "dict[str, Any] | None":
+    """The ten-minute silence tick: the silence pass with its backstop (`_silence_pass_tick`), and, whatever that did (even a ladder view that could not be built), the hourly audit line (`_hourly_tick`, off by
+    default). Stands still when the audit is off or runs in agent mode."""
+    if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
+        return None
+    try:
+        return _silence_pass_tick()
+    finally:
+        try:
+            _hourly_tick()
+        except Exception as e:  # noqa: BLE001  — the hourly line is an extra (off by default): the silence pass above has run
+            print(f"audit: hourly line not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+
+
+def _silence_pass_tick() -> "dict[str, Any] | None":
     """The ten-minute silence pass (silence.silence_pass): an open item on an agent with no real activity for 45 minutes goes to its mover once per silence episode, in the daily audit's `stale`
     wording, whatever the mover's pane is doing (a busy pane hides nothing), unless the stall ladder is already on the item (`_silence_skip`). Stands still when the audit is off or runs in agent
     mode (the rollback), like the filing and dates passes. A ladder view that cannot be built sends nothing."""
@@ -6097,6 +6113,44 @@ def _silence_tick() -> "dict[str, Any] | None":
     except Exception as e:  # noqa: BLE001  — the backstop is an extra: the pass above has run
         print(f"silence: backstop not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return res
+
+
+def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
+    """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
+    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one an hour for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
+    `metadata.stall.log`; kind `audit` or `audit_idle`).
+    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
+    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so; none is stamped as the item's last-activity record (a busy pane would keep every silent item looking fresh, and a recorded event is in the record already). The save is
+    the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
+    passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
+    from stackshot.audit import hourly as _hourly
+    from stackshot.audit import hourly_log as _hlog
+    from stackshot.tools import next_report as _nr
+    if not _hourly.enabled() or _ro.is_read_only():
+        return []
+    now = time.time() if now is None else now
+    items = items if items is not None else _nr.load_all(None)
+    env = env if env is not None else _silence_env()
+    if pane is None:
+        idx = _sessions_index()
+        pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
+    written: list[str] = []
+    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same):
+        try:
+            with _ITEM_LOCK:
+                item = _load(gid)
+                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
+                if line is None:
+                    continue
+                _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
+                _save(gid, item, note="audit: hourly line")
+            written.append(gid)
+            print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"audit: {gid} hourly line not written: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    if written:
+        _publish()
+    return written
 
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
@@ -7876,7 +7930,7 @@ def _wait_end_facts() -> "_we.Facts":
 
     def takes(url: str) -> bool:
         try:
-            return bool(_anc.anchor_id(_anc.split_fragment(url)[0]))
+            return bool(_anc.anchor_id(_anc.split_fragment(url)[0])) and not _anc.gmail_query_problem(url)
         except Exception:  # noqa: BLE001
             return False
     return _we.Facts(machines={k: f for k, (f, _r) in boxes.items()}, online=frozenset(f.lower() for f, r in boxes.values() if r and _lv.puller_online(r)),
@@ -10203,6 +10257,9 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
     if idle.get("poked"):                    # what the idle pass did; the audit skips an item it poked after its last confirm. The idle pass only ever asked the fleet's builder (no code writes `recovery` now; the line reads the record it left), so this line keeps that wording: the hand-off and stall ladders, which can ask a front-only project's -main agent, write their own lines ("handoff:", "stall:")
         w = lambda k: _rmod.when_words(dt.datetime.fromtimestamp(float(idle[k]), ZONE))
         out.append(f"idle: poked {idle.get('to') or '?'} {w('poked')}" + (f", the fleet's builder was asked to recover it {w('recovery')}" if idle.get("recovery") else ""))
+    from stackshot.audit import hourly_log as _hlog
+    for x in _hlog.log_of(m)[-1:]:           # the newest hourly audit line (audit/hourly.py), with its own prefix: it is no step of the stall pass
+        out.append(f"audit: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), ZONE))} {x.get('text') or ''}")
     for x in _stall.log_of(m)[-3:]:          # what the stall pass did (its mover's pane had no turn running), the last three, oldest first
         out.append(f"stall: {_rmod.when_words(dt.datetime.fromtimestamp(float(x.get('at') or 0), ZONE))} {x.get('text') or ''}")
     if _rmod.waits_recycle(item):            # waits for a pane recycle, since when
@@ -10415,7 +10472,8 @@ _STALL_FORM = (
     f"recovery (nobody could take it: one message goes to the project's -main agent when the project lists no background agent, to the fleet's builder otherwise, and the item stays with its mover). When a step is wrong: (1) undo it on the item with update: mover and next back; status=open with a new next for a close; "
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
-    f"and no pause lasts longer than 24 hours."
+    f"and no pause lasts longer than 24 hours. "
+    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), once an hour for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
 )
 
 
@@ -14108,7 +14166,7 @@ def stackshot_route(notice: str, ruling: str, to: str = "", reason: str = "", se
 
 # ----------------------------------------------------------------------------- project anchors
 _ANCHORS_DESC = (
-    f"A project's anchors: the external things the anchor watcher watches for it — a Slack channel or DM, a Drive file or folder, a Gmail thread or gmail:q: query (it reads every mailbox the anchors service reads; gmail:q@<mailbox>:<query>, several as gmail:q@a,b:<query> with no spaces, reads only the mailboxes named, and the list shows the mailboxes each Gmail anchor reads), a Notion page or database (any row added or edited, or a comment on a row), a GitHub issue/PR (its comments, state and CI results), a repo's …/releases, or a repo root (what {OWNER}'s GitHub account is notified of there) (optionally #mention=<text>). "
+    f"A project's anchors: the external things the anchor watcher watches for it — a Slack channel or DM, a Drive file or folder, a Gmail thread or gmail:q: query (it reads every mailbox the anchors service reads; gmail:q@<mailbox>:<query>, several as gmail:q@a,b:<query> with no spaces, reads only the mailboxes named, and the list shows the mailboxes each Gmail anchor reads; its terms are from:, to:, cc:, subject: or person: (from, to or cc) with a value, or plain text for the subject, joined by a space or AND (both must match) and OR, AND before OR, with parentheses and key:(a OR b) for one key over several values, e.g. gmail:q:from:(a@x.com OR b@x.com) subject:invoice; OR and AND in capitals, text with a parenthesis or colon in quotation marks; no negation and no other Gmail operator, and a query the matcher cannot evaluate is refused when added, saying what is wrong; a query stored before the grammar is read by it and can read differently), a Notion page or database (any row added or edited, or a comment on a row), a GitHub issue/PR (its comments, state and CI results), a repo's …/releases, or a repo root (what {OWNER}'s GitHub account is notified of there) (optionally #mention=<text>). "
     "Right calls: list: anchors(project=\"projects/widgets\"); add one for the project: anchors(project=\"projects/widgets\", add=[\"https://github.com/acme/widgets/pull/12\"]); "
     "scope it to an open item: anchors(project=\"projects/widgets\", add=[\"https://github.com/acme/widgets/pull/12\"], items=[\"board#N\"]); remove: anchors(project=\"projects/widgets\", remove=[\"https://github.com/acme/widgets/pull/12\"]). "
     "Anchor anything you create on GitHub (an issue, a PR, a fork branch you keep re-fitting) in the same turn, project-wide when it is the project's thread (a repo's issues or releases). "
@@ -14123,7 +14181,7 @@ _ANCHORS_DESC = (
 
 @mcp.tool(name="anchors", description=_lead(_ANCHORS_DESC))
 def stackshot_anchors(project: Annotated[str, Field(description="The project page: projects/<slug> or infra/<slug>.")],
-                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
+                      add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it), whose query joins from:/to:/cc:/subject:/person: terms with AND, OR and parentheses (from:(a OR b) for one key over several values; see the tool description); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
                       items: Annotated[list[str] | None, Field(description="Open items of this project the added URLs are about, items=[\"board#N\"]; omit for a project-wide anchor. Every URL in add is scoped to every id in items (several URLs with several ids give each URL all the items).")] = None,
                       remove: Annotated[list[str] | None, Field(description="URLs to stop watching, or machine:<name> to drop a machine anchor.")] = None) -> str:
     return _anchors(project, add, items, remove, _who())
@@ -14147,6 +14205,10 @@ def _gmail_key(u: str, boxes: dict[str, str]) -> str:
     return _anc.gmail_canonical(base.strip(), boxes) + (("#" + frag) if frag else "")
 
 
+_GMAIL_TERMS = ("Terms are from:, to:, cc:, subject: and person: (or plain text, a subject term), joined by AND, OR and parentheses (capitals), "
+                "key:(a OR b) for one key over several values; put text that holds a parenthesis, a colon or the word OR in quotation marks")
+
+
 def _gmail_scope_args(urls: list[str] | None, boxes: dict[str, str], refuse: bool, stored: list[str] | None = None) -> list[str]:
     """The URLs of an anchors call with every scoped Gmail query (`gmail:q@<mailbox>[,<mailbox>]:<query>`) written with its mailbox names as the anchors service spells them, so one anchor is one entry however it was typed.
     With `refuse` (an add), a scope that names no mailbox or one the anchors service does not read is refused with the valid names, and so is a scope with a space in it (the names are separated by commas alone);
@@ -14162,6 +14224,9 @@ def _gmail_scope_args(urls: list[str] | None, boxes: dict[str, str], refuse: boo
                 raise ToolError(f"Refused: {u!r} is not a Gmail query scope: the mailbox names sit between gmail:q@ and the next colon, separated by commas with no spaces (gmail:q@a,b:<query>)")
             out.append(u)
             continue
+        why = _anc.gmail_query_problem(u) if refuse and q is not None else ""
+        if why:
+            raise ToolError(f"Refused: the Gmail query in {u!r} is not one the matcher can evaluate: {why}. {_GMAIL_TERMS}")
         if q is None or q[0] is None:
             out.append(u)
             continue
@@ -14222,7 +14287,7 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
                             + (f"; {stale[0]} still holds anchors, which can be listed and removed, not added to" if len(stale) == 1 else ""))
         key = stale[0]
         if remove:
-            _anc.remove(store, key, remove)
+            _anc.remove(store, key, _gmail_scope_args(remove, _gmail_boxes(), False, [e.get("url", "") for e in store.get(key, [])]))
             _anc.save(store)
             _publish()
         return (f"{key} names no page any more (renamed or removed): its anchors notify nobody and can only be listed and removed.\n"
@@ -14285,9 +14350,10 @@ def _anchors(project: str, add: list[str] | None = None, items: list[str] | None
         if q is not None:
             names = ", ".join(_anc.gmail_mailboxes(_anc.split_fragment(u)[0].strip(), boxes)[0]) or "none the anchors service has named yet"
             out += f"\nGmail query {q[1]!r} reads the mailboxes: {names}" + ("" if q[0] is not None else " (every mailbox the anchors service reads; gmail:q@<mailbox>:<query> reads only the one named)") + "."
+            out += f"\nIt matches a mail when: {_anc.gmail_query_reading(u)}."
     if add:
-        out += ("\nanchor-hub reads each new anchor within two minutes: one it cannot read (not shared with it, a mailbox it has no access to, a wrong link) "
-                "is reported once to the project's keeper and marked UNREADABLE in this list. A line without a name after the scope has not been read yet.")
+        out += ("\nThe anchors service reads each new anchor within two minutes: one it cannot read (not shared with it, a mailbox it has no access to, a wrong link) "
+                "is reported once to the project's keeper and marked UNREADABLE in this list. A line with no name after the scope, other than a Gmail query (named by its mailboxes at once), has not been read yet.")
     if mach_add:
         out += (f"\nmachine anchor{'s' if len(mach_add) > 1 else ''} added: {', '.join(mach_add)}. Nothing is told for a check-in that is past; the mover of each item in scope is told at the machine's next check-in "
                 "(offline to online), once per check-in, naming the machine. The item is not turned and not saved: park it with a wait only when nothing else is open.")

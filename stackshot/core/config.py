@@ -320,6 +320,11 @@ def audit_wait_end_settle_minutes() -> float:
     return n if n >= 0 and n == n and n != float("inf") else AUDIT_WAIT_END_SETTLE_MINUTES
 
 
+def audit_hourly_line() -> bool:
+    """[audit] hourly_line: the hourly audit line (audit/hourly.py): an item on an agent with no write for an hour gets one line saying what the audit verified. Default false; only a TOML true switches it on."""
+    return get("audit", "hourly_line", default=False) is True
+
+
 def audit_orphan_handover() -> str:
     """[audit] orphan_handover: what the audit does with an open item whose mover is gone (successor.py): "report" (the default for the first week of use) only lists it, "apply" hands it to the closest live agent, "off" makes no check.
     A value that is none of these reads as the default."""
@@ -699,13 +704,13 @@ def kw_rx(name: str, build, specs: tuple[tuple[str, str], ...], flags: int = 0):
 
 
 GMAIL_LABEL = re.compile(r"[A-Za-z0-9._-]+$")       # a mailbox name a Gmail anchor can scope itself to ([anchor_hub] gmail_names): no space, "@", "," or ":"
-_GMAIL_ADDR = re.compile(r"[^@\s,:]+@[^@\s,:]+$")
+GMAIL_ADDR = re.compile(r"[^@\s,:]+@[^@\s,:]+$")
 
 
 def gmail_names_notes(cfg: dict[str, Any] | None = None) -> list[str]:
     """notes() lines for [anchor_hub] gmail_names ({ work = "user@example.com" }): an entry the Gmail reader skips without a word is said here, at
     the start and on a reload (the key itself is read when the Google receiver starts): an address that is no email address, a name with a
-    space, "@", "," or ":" (or none), two names that differ only in case (a scope matches names in any case, so the last one wins), and two names
+    space, "@", "," or ":" (or none), two names that differ only in case (a scope matches the exact spelling first, then any case, and another case of the two is the one that sorts first), and two names
     for one address (the last one wins)."""
     gn = get("anchor_hub", "gmail_names", cfg=cfg)
     if gn is None or gn == {}:
@@ -720,11 +725,12 @@ def gmail_names_notes(cfg: dict[str, Any] | None = None) -> list[str]:
         if not GMAIL_LABEL.match(name):
             out.append(f"[anchor_hub] gmail_names name {name!r} is skipped: a mailbox name is letters, digits, \".\", \"_\" and \"-\" only (no space or \"@\")")
             continue
-        if not _GMAIL_ADDR.match(addr):
+        if not GMAIL_ADDR.match(addr):
             out.append(f"[anchor_hub] gmail_names {name} = {addr!r} is skipped: the value is the mailbox's email address, user@example.com")
             continue
         if name.lower() in names:
-            out.append(f"[anchor_hub] gmail_names names {names[name.lower()]!r} and {name!r} differ only in case, so they are one name and the last one wins: give each mailbox its own name")
+            first, second = sorted((names[name.lower()], name))
+            out.append(f"[anchor_hub] gmail_names names {first!r} and {second!r} differ only in case: a scope that spells one exactly reads that mailbox, any other case of them reads {first!r}; give each mailbox a name that differs by more than case")
         if addr.lower() in addrs:
             out.append(f"[anchor_hub] gmail_names gives {addr!r} two names, {addrs[addr.lower()]!r} and {name!r}: the last one wins, give each mailbox one name")
         names[name.lower()] = name

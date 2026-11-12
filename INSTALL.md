@@ -310,7 +310,7 @@ journal (`journalctl --user -u stackshot.service`, lines starting `config reload
   allowed_client_redirect_uris, portal_identity), every `[paths]` entry, `[ids] letter`, the text written
   into the tool descriptions (`[instance]` name, owner, board_url, timezone, `[subject] prefixes`,
   `[fleet] operator_label`, `[freshness]`) and anchor-hub's receiver setup (`[anchor_hub]` hook_url, hook_port,
-  slack_team, self_emails, gmail_topics). `[server] port`, `[instance] timezone`, `[anchor_hub] enabled`,
+  slack_team, self_emails, gmail_topics, gmail_names). `[server] port`, `[instance] timezone`, `[anchor_hub] enabled`,
   `[audit] enabled` and `at`, and `[portal]` also need `./install.sh units` first, since the units carry
   them. The list is `RESTART_ONLY` in `stackshot/core/config.py`; `systemctl --user restart stackshot.service` (and
   `anchor-hub.service`) applies them.
