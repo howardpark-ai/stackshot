@@ -3440,6 +3440,34 @@ res = server._route(ln["id"], "passed", to="work-osprey-main", reason="Kim asks"
 check("release: a delivered notice the keeper passes releases it too, its anchor id matched to the store's URL",
       "(a54 waited on this anchor and is released from hold)" in res and not server._is_held(rd("a54")), res)
 wait_push(0)
+# a green head that follows no failure is record_only: the event log has it and nothing else does, whatever [pilot] own_repos says (no notice, no routing line, no release of the item held on the anchor)
+from stackshot.anchors import event_log as _el48
+server._update("a54", hold=True, wake="2099-01-01", sender="work-osprey-main"); time.sleep(0.05)
+item48(59, wait_kind="anchor", wait_anchor=PR48, wait_event="a review", needs=[], next="work-osprey-main: read the review", watch={"set_at": 1.0})      # a stored anchor wait: any notice on the anchor turns it, except a routine auto line for a merge-like event
+_i59 = rd("a59"); _i59["updated"] = _i59["state_updated"] = _i59["confirmed"] = time.time(); _i59["metadata"]["watch"] = {"set_at": time.time()}      # its wait starts now: the lines logged before it are not its news
+(T / "store/a/59.json").write_text(json.dumps(_i59)); time.sleep(0.05)
+def green48(**extra):
+    hub48.pending.clear(); out48.clear(); k0 = len(lines48("projects/alpha", A48)); n0_ = len(_el48.read(0)[0])
+    hub48.event(A48, {"title": "stackshot#116 \"a change\"", "who": "CI", "text": "passing on abc1234 (3 checks)", "url": PR48 + "/checks", "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                      "etype": "ci_passed", "vouched": "ci_passed", **extra}, kind="github-state")
+    return list(out48), len(lines48("projects/alpha", A48)) - k0, len(_el48.read(0)[0]) - n0_
+for label, own in (("own_repos set", ["example-owner/stackshot", "example-org/*"]), ("own_repos empty", [])):
+    server._cfg.CFG["pilot"]["own_repos"] = own
+    got, newlines, newrows = green48(record_only=True)
+    check(f"record_only green head, {label}: one line in the event log, nothing delivered, no routing line, nothing held for a follow-up", got == [] and newlines == 0 and newrows == 1 and not hub48.pending, (got, newlines, newrows, hub48.pending))
+    check(f"record_only green head, {label}: the item held on the anchor stays held (no automatic release)", server._anchor_pass() == [] and server._is_held(rd("a54")))
+    check(f"record_only green head, {label}: the stored anchor wait on it does not turn either (no routing-log line for the minute pass to replay)", rd("a59")["metadata"].get("wait_kind") == "anchor" and "woke" not in rd("a59")["metadata"] and server._anchor_pass() == [], rd("a59")["metadata"])
+server._cfg.CFG["pilot"]["own_repos"] = []
+got, newlines, newrows = green48()
+check("the same event without record_only (own_repos empty): delivered with its routing line, as a CI result was before", len(got) == 1 and got[0][0] == S and newlines == 1 and newrows == 1, (got, newlines, newrows))
+for n in routing.read("projects/alpha"):
+    if n.get("pilot") and not n.get("ruling"): routing.rule(n["id"], "dropped", reason="control for the record_only checks", by="work-osprey")
+server._cfg.CFG["pilot"]["own_repos"] = ["example-owner/stackshot"]
+got, newlines, newrows = green48(); turned_ = server._anchor_pass()
+check("the same green on an own repository without record_only (control): a log-only line, ruled merged automatically, and it turns the stored anchor wait and releases the hold, which is what record_only prevents",
+      got == [] and newlines == 1 and "a59" in turned_ and "wait_kind" not in rd("a59")["metadata"], (got, newlines, turned_, rd("a59")["metadata"]))
+server._cfg.CFG["pilot"]["own_repos"] = "example-owner/stackshot, example-org/*"
+server._update("a54", hold=False, sender="work-osprey-main")
 # an item whose done check is pr_merged, and the item after it: untouched by the log-only path, closed by the check as before
 item48(57, check="pr_merged example-owner/stackshot#116", next="work-osprey-x: merge PR #116"); item48(58, after=["a57"], next="after the merge")
 got, ln = ev48(A48, "pr_merged", "merged it"); auto48.append(ln["id"])
