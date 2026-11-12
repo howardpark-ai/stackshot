@@ -15,7 +15,7 @@ The record is the newest of them; of two at the same time the later given wins. 
 What it leaves alone: an item that already has a record (one that reads; a torn one, or one stamped further ahead of the clock than last_activity.SKEW_S, is no record and is replaced, its old value kept in the undo
 entry), a closed item, an item with no History to read.
 
-The refused class (`CLASS_HISTORY`): the History cannot be read (the store is outside git, git did not answer, a version does not parse or is missing) or holds a time ahead of the clock (more than SKEW_S: a clock that
+The refused class (`CLASS_HISTORY`): the History cannot be read (the store is outside git, git did not answer, a version does not parse or is missing; an item file git saw deleted and then added back is such a case, as no version of it stands at the deleting commit) or holds a time ahead of the clock (more than SKEW_S: a clock that
 jumped; a time inside it is read as now, as everywhere). Those items are refused, named in the output with the reason, and left as they are: the record is not guessed from a History that cannot be trusted. A hub log
 line stamped more than SKEW_S ahead is dropped as the live pass drops it (a torn line), and says nothing against the item.
 
@@ -206,7 +206,13 @@ def ties(S: Any, now: float) -> tuple[dict[str, list[dict[str, Any]]], str]:
         rows, problems = pr_rows(S, now)
         if problems:
             return {}, "; ".join(problems)
-        return (tie_signals(rows, S._merge_tied(rows, now), now) if rows else {}), ""
+        if not rows:
+            return {}, ""
+        tied = S._merge_tied(rows, now)
+        problem = getattr(tied, "problem", "")      # the anchors that could not be read: the ties by anchor are missing, so an item would be filled without them (the live pass logs it and carries on)
+        if problem:
+            return {}, problem
+        return tie_signals(rows, tied, now), ""
     except Exception as e:  # noqa: BLE001
         return {}, f"the events could not be tied to the items ({e.__class__.__name__}: {str(e)[:120]})"
 

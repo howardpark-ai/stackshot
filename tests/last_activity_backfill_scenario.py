@@ -15,6 +15,13 @@ item lock, an undo file and a backup written before the first write, a refused c
   8  events          the hub's logged events tied to an item can be the newest signal; a line stamped ahead of the clock is dropped
   9  script          tools/last_activity_backfill.py: --apply plans first, backs up every touched file byte for byte and writes the undo file before the first write, ends 3 for the refused items; a second apply writes nothing;
                      --undo puts the records back (the key goes when it had none) and keeps one a later save changed; twice is a no-op; the dry run over a copy writes nothing live
+  15 logs            the hub's logs, or the anchors that tie them, cannot be read: the dry run warns and the real pass refuses
+  16 anchors         `server._merge_tied` reports an anchors-read error as a problem of the answer (the live passes still tie the rest); the ties come back as a problem, the route refuses, apply writes nothing
+  17 plan read twice the plan read twice is the same plan; --apply reads it twice, right before the write
+  18 dry run exit 1 a dry run whose second pass on the copy would still change something exits 1 (a refusal in the History is exit 0)
+  19 renames         the store's log is made with --no-renames: a moved file shows under both names, and the new one holds only its own History
+  20 delete, re-add  an item file git saw deleted and added back is refused (the deleting commit holds no version of it)
+  21 undo closed     --undo leaves an item closed since the pass alone and names it
   10 gate            refused while [model] migration is off, for a sender or machine outside the lists, for a body naming another key, for an undo entry naming a key the pass does not write
 
     tests/run-suite last_activity_backfill        -> exit 0 / 1"""
@@ -494,6 +501,123 @@ CFGM["migration"] = False
 pw = subprocess.run([sys.executable, str(wrap)], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
 check("15 the dry run prints the warning in its summary (and at the top) and says --apply refuses; it still reads the History and writes nothing", pw.returncode == 0 and pw.stdout.count("WARNING") == 2 and "forced for the test" in pw.stdout and "--apply refuses until" in pw.stdout
       and "items the pass would write: 8 of" in pw.stdout and snapshot() == snapT, (pw.returncode, pw.stdout[-900:], pw.stderr[-500:]))
+
+# ---- 16. the anchors cannot be read: reported as a ties problem, so the real pass refuses
+CFGM["migration"] = True
+reset(); snapA = snapshot()
+def broken(*a, **k): raise RuntimeError("the anchors cannot be read")
+sample = [{"ts": now0 - HR, "repo": "owner/repo", "n": 9, "kind": "comment", "refs": []}]
+# the anchors file read as a whole fails (the first read of `_merge_tied`: it raises, and `ties` reports it); or the anchors are read but the pages of the repository cannot be made from them (the read `_merge_tied` used to log and
+# go on from, with no ties by anchor: now the answer carries the problem)
+for label, owner_, attr, raises in (("the anchors file", server._anc, "load", True), ("the pages made from the anchors", server._mtie, "repo_pages", False)):
+    keep = getattr(owner_, attr)
+    RUNA = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-runa-"))
+    setattr(owner_, attr, broken)
+    try:
+        try: res_tied, raised = server._merge_tied(sample, now0), False
+        except RuntimeError: res_tied, raised = None, True
+        tied_a, why_a = LP.ties(server, now0)
+        st_dry, d_dry = call(op="lastact", items=["g11"], dry=True)
+        st_real, d_real = call(op="lastact", items=["g11"], pass_id="20260101-000000-abcdeb")
+        rcA, outA, errA = cli(BF.apply, run_dir=str(RUNA))
+    finally: setattr(owner_, attr, keep)
+    check(f"16 {label} cannot be read: `_merge_tied` " + ("raises (as it always did)" if raises else "still answers (the live passes tie the rest) and says why in its answer's `problem`"),
+          raised if raises else (not raised and isinstance(res_tied, list) and len(res_tied) == 1 and "anchors could not be read" in getattr(res_tied, "problem", "")), (raised, res_tied, getattr(res_tied, "problem", None)))
+    check(f"16 …the ties come back empty with the reason (a ties problem), {label}", tied_a == {} and why_a != "" and ("anchors could not be read" in why_a or "could not be tied" in why_a) and "RuntimeError" in why_a, (tied_a, why_a))
+    check(f"16 …the route's dry run still answers with `ties_problem` set; the real pass is refused whole (400) and writes nothing, {label}", st_dry == 200 and d_dry["ties_problem"] and d_dry["results"][0]["action"] == "would_set"
+          and st_real == 400 and "could not be read" in d_real["error"] and snapshot() == snapA, (st_dry, d_dry.get("ties_problem"), st_real, d_real))
+    check(f"16 …--apply refuses before it backs anything up or writes: exit 1, no pass folder, no file changed, {label}", rcA == 1 and "plan is refused" in errA and snapshot() == snapA
+          and not [x for x in RUNA.iterdir() if UM.PASS_DIR_RX.fullmatch(x.name)], (rcA, errA[-400:]))
+check("16 with the anchors readable `_merge_tied` has no problem, and the same call is served", getattr(server._merge_tied(sample, now0), "problem", None) == "" and call(op="lastact", items=["g11"], dry=True)[1].get("ties_problem") is None, None)
+
+# ---- 17. the plan read twice is the same plan
+reset(); snapR = snapshot()
+plan_a = call(op="lastact", items=[f"g{i}" for i in OPEN], dry=True)[1]["results"]
+plan_b = call(op="lastact", items=[f"g{i}" for i in OPEN], dry=True)[1]["results"]
+check("17 the plan read twice is the same plan: the same signature (items, times, kinds, refused ones), the same action and words for every item, and no file written", len(plan_a) == len(OPEN) and BF.signature(plan_a) == BF.signature(plan_b)
+      and [(r["item"], r["action"], r.get("kind"), r.get("what")) for r in plan_a] == [(r["item"], r["action"], r.get("kind"), r.get("what")) for r in plan_b] and snapshot() == snapR, (BF.signature(plan_a), BF.signature(plan_b)))
+RUN7 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run7-"))
+app7 = DirectApp()
+rc7, out7, err7 = cli(BF.apply, app=app7, run_dir=str(RUN7))
+check("17 --apply reads the plan twice before its first write (two dry calls, then the writes), and the two readings agree so it writes", rc7 == 3 and app7.log[:2] == ["lastact-dry", "lastact-dry"] and "lastact" in app7.log[2:] and "differ" not in err7 and "changed while" not in err7
+      and out7["results"] == {"set": 8}, (rc7, app7.log, err7[-300:]))
+
+# ---- 18. a dry run that cannot end clean exits 1
+reset(); snapX = snapshot()
+wrap2 = T / "lactfill-dry-wrapper2.py"
+wrap2.write_text(f"""import importlib.abc, importlib.util, sys
+sys.path.insert(0, {STACK!r})
+class Patch(importlib.abc.MetaPathFinder):      # the dry run loads the pass module after it has switched to its copy; this makes the third pass over each item (its second pass on the copy) still write
+    def find_spec(self, name, path, target=None):
+        if name != "stackshot.model.last_activity_pass": return None
+        sys.meta_path.remove(self)
+        spec = importlib.util.find_spec(name); load = spec.loader.exec_module
+        def exec_module(mod):
+            load(mod); real = mod.one; calls = {{}}
+            def one(S, gid, **kw):
+                r = real(S, gid, **kw); calls[gid] = calls.get(gid, 0) + 1
+                return {{**r, "action": "set"}} if calls[gid] == 3 else r
+            mod.one = one
+        spec.loader.exec_module = exec_module
+        return spec
+sys.meta_path.insert(0, Patch())
+from stackshot.tools import last_activity_backfill as BF
+sys.exit(BF.main(['--store', {str(T / 'store')!r}]))
+""", encoding="utf-8")
+CFGM["migration"] = False
+px = subprocess.run([sys.executable, str(wrap2)], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
+check("18 a dry run whose second pass on the copy would still change something exits 1 (it still prints its summary and writes nothing live)", px.returncode == 1 and "a second pass: " in px.stdout and "set " in px.stdout.split("a second pass: ")[-1].split("\n")[0]
+      and snapshot() == snapX, (px.returncode, px.stdout[-500:], px.stderr[-500:]))
+pn = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/last_activity_backfill.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
+check("18 …while the same dry run with refused items in the store (two of them) and a pass that settles exits 0: a refusal is not a failure of the dry run", pn.returncode == 0 and "refused: 2" in pn.stdout, (pn.returncode, pn.stdout[-400:]))
+
+# ---- 19. the store's log is made with --no-renames: a moved file is not hidden
+T3 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-mv-"))
+assert git("init", "-q", cwd=T3).returncode == 0
+def commit3(rel, d, ct):
+    f = T3 / rel; f.parent.mkdir(parents=True, exist_ok=True); f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    assert git("add", "-A", cwd=T3).returncode == 0
+    r = git("commit", "-q", "-m", rel, ct=ct, cwd=T3); assert r.returncode == 0, r.stderr
+commit3("g/30.json", {"id": "30", **version(now0 - 5 * HR, now0 - 5 * HR, steps=STEPS0)}, now0 - 5 * HR)
+commit3("g/30.json", {"id": "30", **version(now0 - 4 * HR, now0 - 4 * HR, steps=STEPS1)}, now0 - 4 * HR)
+assert git("mv", "g/30.json", "g/31.json", cwd=T3).returncode == 0      # the same bytes under another name: what git's rename detection pairs
+assert git("commit", "-q", "-m", "move", ct=now0 - 3 * HR, cwd=T3).returncode == 0
+plain_log = git("log", "--name-only", "--format=", cwd=T3).stdout.split()
+nr_log = git("log", "--no-renames", "--name-only", "--format=", cwd=T3).stdout.split()
+log3, why3 = LP.store_log(T3)
+check("19 the fixture is one git's own rename detection pairs (plain `git log --name-only` names the old path once, the move commit only under the new name; --no-renames names both)", plain_log.count("g/30.json") == 2 and nr_log.count("g/30.json") == 3 and nr_log.count("g/31.json") == 1, (plain_log, nr_log))
+check("19 the store's log shows the moved file under both names: the move is a commit of the old path (its deletion) and of the new one (its creation)", why3 == "" and len(log3.get("g/30.json", [])) == 3 and len(log3.get("g/31.json", [])) == 1
+      and log3["g/30.json"][-1][0] == log3["g/31.json"][0][0], (why3, {k: len(v) for k, v in log3.items()}))
+vs31, why31 = LP.git_versions(T3, "g/31.json")
+check("19 …and the moved file has the History it has under its present name: one version at the move, nothing of the old name's two (git log --follow would bring them in)", why31 == "" and [t for t, _v in vs31] == [float(int(now0 - 3 * HR))], (why31, [t for t, _v in vs31]))
+
+# ---- 20. an item file deleted and added back is refused
+commit(25, version(now0 - 6 * HR, now0 - 6 * HR), now0 - 6 * HR)
+assert git("rm", "-q", "g/25.json").returncode == 0 and git("commit", "-q", "-m", "delete 25", ct=now0 - 5 * HR).returncode == 0
+commit(25, version(now0 - 4 * HR, now0 - 4 * HR, mover=BACK), now0 - 4 * HR)
+vs25, why25 = LP.git_versions(T / "store", "g/25.json")
+r25 = LP.one(server, "g25", dry=True, now=now0)
+check("20 an item file git saw deleted and then added back has no readable History: the version at the deleting commit is missing", vs25 == [] and "missing from the store's git" in why25, (vs25, why25))
+check("20 …so the pass refuses the item with the History class and the reason, and the file is left as it is", r25["action"] == "refused" and r25["class"] == LP.CLASS_HISTORY and "missing from the store's git" in r25["why"] and "last_activity" not in mt(25), r25)
+CFGM["migration"] = True
+snap25 = bytes_of(25); st25, d25 = call(op="lastact", items=["g25"])
+check("20 …and the real pass writes nothing for it", st25 == 200 and d25["results"][0]["action"] == "refused" and bytes_of(25) == snap25, d25)
+(T / "store/g/25.json").unlink()      # the sections below plan over every open item of the store
+
+# ---- 21. --undo leaves an item closed since the pass alone
+reset(); snapC = snapshot()
+RUN8 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run8-"))
+rc8, out8, err8 = cli(BF.apply, run_dir=str(RUN8))
+undo8 = pathlib.Path(out8["undo"]) if isinstance(out8, dict) else pathlib.Path("/nonexistent")
+d12c = raw(12); d12c["status"] = "completed"; write_file(12, without(d12c, "id"))      # a session closed it after the pass
+closed_bytes = bytes_of(12)
+rc9, out9, err9 = cli(BF.undo, undo=str(undo8))
+check("21 --undo puts back the seven open items and leaves the closed one alone: its file is byte for byte as it was when it was closed, the record stays, and the answer names it", rc9 == 0 and out9["results"] == {"set": 7, "kept": 1}
+      and out9["kept_because_closed_since_the_pass"] == [BOARD + "12"] and out9["kept_because_a_later_save_changed_them"] == [] and bytes_of(12) == closed_bytes and rec_of(12) is not None
+      and all(rec_of(i) is None for i in (11, 13, 19, 20, 22)) and rec_of(16) == FUTURE, (rc9, out9, err9[-300:]))
+st_c, d_c = call(op="unlastact", items=[{"item": "g12", "before": {"last_activity": None}, "after": {"last_activity": rec_of(12)}}])
+check("21 …the route says why: kept, `it was closed since the pass`, and the file is untouched", d_c["results"][0]["action"] == "kept" and "closed since the pass" in d_c["results"][0]["why"] and bytes_of(12) == closed_bytes, d_c)
+CFGM["migration"] = False
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

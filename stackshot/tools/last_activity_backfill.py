@@ -20,9 +20,13 @@ changes nothing the second time. The plan a person was shown includes each item'
 from the plan read a moment before, nothing is written. The time written is worked out once more under the item lock, so an event landing in that last moment is in the undo file's `after`. When the hub's logs of pull
 request events cannot be read, the dry run prints a warning in its summary and --apply refuses: without them an item is filled from its History alone.
 
-Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole or got no answer, an item could not be written, the plan differs from the one shown (the items, their times or the refused ones), the hub's logs of pull request events cannot be read, another
---apply or --undo holds the run directory, or the dry run's second pass would still change something) · 3 the pass was applied and some items were left as they are (refused, kept, or closed between the plan and the write): not a
-failure, a person has items to look at. The apply prints the refused list before it writes. Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
+Exit codes. 0: --apply wrote every item it planned and no item is left as it is (or there was nothing to fill and none is left as it is); the dry run finished and its second pass on the copy would change nothing (it exits 0
+whether or not it lists items to fill, refused or kept, so read what it prints; the hub's logs not reading is a warning there, not an exit code); --undo put every entry back or found it already as it should be. 1: a failure (the plan
+could not be made, a batch was refused as a whole or got no answer, an item could not be written, the plan differs from the one shown (the items, their times or the refused ones), the hub's logs of pull request events or the anchors cannot
+be read, another --apply or --undo holds the run directory, the undo file cannot be used or an entry or batch of it was refused, or the dry run could not make its copy or its second pass would still change something).
+3: --apply only, not a failure: some items are left as they are and a person has them to look at (refused, kept because their History holds no activity, written by someone else meanwhile, or closed between the plan and the write);
+also when there was nothing to fill. The apply prints the refused list before it writes. An item file that git saw deleted and added back is a refused item: git lists the deleting commit for it, no version of the file stands at that commit, so its History cannot be read
+(the time is not guessed). Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
 from __future__ import annotations
 import os as _os, sys as _sys
 if not __package__:   # started as a script (python3 stackshot/<area>/<name>.py): the checkout must be importable
@@ -278,7 +282,7 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
                       "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"], "closed_since_the_plan": closed_now}, indent=1))
     moved = [e["shown"] for e in entries.values() if e.get("result") == "moved"]
     if counts.get("refused") or counts.get("batch refused") or counts.get("batch unanswered"):
-        say("the pass could not write every item it planned (the answers are above): a failure, exit 1")
+        say("the pass did not get every item it planned written, or never heard how a batch went (the answers are above; the items of a batch with no answer may have been written, and --undo reads the server's pass record for them): a failure, exit 1")
         return 1
     left_over = sorted({*refused, *listed, *moved, *closed_now})
     if left_over:
