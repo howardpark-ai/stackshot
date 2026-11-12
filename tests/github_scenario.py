@@ -1878,8 +1878,8 @@ try:
     try:
         one_pass()      # first sight of #30: seeds
         n_el0 = len(ahc._events.read(0)[0]); own_head("f" * 40); one_pass(); rows_ = ahc._events.read(0)[0][n_el0:]
-        check("anchor-hub CI, through the real Hub.emit: a green after a green (a repository outside own_repos) is exactly one event-log line, a ci_passed on #30",
-              not ahc.own_repos() and len(rows_) == 1 and rows_[0]["kind"] == "ci_passed" and rows_[0]["n"] == 30, (ahc.own_repos(), rows_))
+        check("anchor-hub CI, through the real Hub.emit: a green after a green (a repository outside own_repos) is one ci_passed event-log line on #30 (beside the commit line the new head itself writes)",
+              not ahc.own_repos() and sorted(r["kind"] for r in rows_) == ["ci_passed", "commit"] and all(r["n"] == 30 for r in rows_), (ahc.own_repos(), rows_))
         check("…and no notice, no delivery, no routing-log line or ruling", ghr_calls == {"send": 0, "deliver": 0, "record": 0, "record_auto": 0} and not hub.pending, (ghr_calls, hub.pending))
         ahc.Hub.emit(hub, ahc.Event(anchor=AN5, kind="github-state", title="stackshot#30", who="CI", text="passing on fffffff (2 checks)", url="https://github.com/example-owner/stackshot/pull/30/checks", etype="ci_passed", vouched="ci_passed"))
         check("…the same event without record_only goes down the notice path (control)", ghr_calls["send"] + ghr_calls["deliver"] >= 1, ghr_calls)
