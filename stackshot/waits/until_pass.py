@@ -126,9 +126,10 @@ def snapshot(item: dict[str, Any], keys: list[str]) -> dict[str, Any]:
 
 
 def entry_for(item: dict[str, Any], plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The undo entry for the plan: the wait keys it changes, as they were and as the pass leaves them (never the History log, which later writes add to), the History line it adds and the older
-    lines that pushed out. Nothing in it depends on the clock, so the entry planned by a dry run is the one the write makes."""
-    keys = [k for k in plan["edits"] if k != "stall"]
+    """The undo entry for the plan: ALL the wait keys (KEYS), changed or not, as they were and as the pass leaves them (never the History log, which later writes add to), the History line it adds and the
+    older lines that pushed out. All of them, so an undo sees a later save that changed a neighbouring wait key (a kind, a hold) and leaves the item alone. Nothing in it depends on the clock, so the entry
+    planned by a dry run is the one the write makes."""
+    keys = list(KEYS)
     return {"before": snapshot(item, keys), "after": snapshot(apply_edits(item, plan), keys), "history": plan.get("history", ""), "dropped": plan.get("dropped", [])}
 
 
@@ -244,7 +245,7 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
                 return {**out, "action": "same", "why": "it already holds the keys it had"}
             if now != after:
                 return {**out, "action": "kept", "why": "it holds other values than the pass left (a later save changed them): left as it is", "now": now}
-            edits = dict(before)
+            edits = {k: before[k] for k in keys if before[k] != after[k]}         # only the keys the pass changed go back
             if history:
                 edits["stall"] = _log_without(raw["metadata"], history, dropped)
             if not S._stamp_write(p, raw, h0, edits):

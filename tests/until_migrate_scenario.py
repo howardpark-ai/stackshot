@@ -108,6 +108,7 @@ CASES = {
 }
 for i, (_w, m) in CASES.items():
     put(i, **m)
+put(12, needs=[BACK], ask_by=day(5))                        # an ask_by alone: a backstop, not a wait (not in OPEN: the route calls below name the OPEN items)
 OPEN = list(CASES)
 
 # ---- 1. the plan, pure
@@ -233,7 +234,8 @@ CFGM["migration"] = False
 snapD = snapshot()
 p = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/until_migrate.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
 check("7 the dry run over a copy writes nothing live, prints old and new per item and the totals, and exits 0", p.returncode == 0 and snapshot() == snapD and "old: " in p.stdout and "new: " in p.stdout and "History line: stackshot:" in p.stdout
-      and "items the pass would write:" in p.stdout and "a second pass: " in p.stdout, (p.returncode, p.stdout[-900:], p.stderr[-600:]))
+      and "items the pass would write:" in p.stdout and "a second pass: " in p.stdout
+      and "a bare ask_by is a backstop" in p.stdout and "a refused item keeps its old fields untouched" in p.stdout and "update(until=...)" in p.stdout and UM.alias_date() in p.stdout, (p.returncode, p.stdout[-900:], p.stderr[-600:]))
 
 # ---- 8. the gate
 put(51, needs=["external"], hold=True, wake=day(3), wait_kind="time")
@@ -285,20 +287,28 @@ except RuntimeError as ex:
 undo2 = sorted(RUN2.glob("*/undo.json"))
 rec2 = json.loads(undo2[0].read_text()) if undo2 else {"items": [], "pass_id": ""}
 check("9 the call failed after the server wrote the batch: six files are rewritten and every undo entry still has no result", died and sum(1 for k in snapshot() if snapshot()[k] != snapC0[k]) == 6 and [e["result"] for e in rec2["items"]] == [None] * 6, (died, [e["result"] for e in rec2["items"]]))
-check("9 a new apply finds nothing to rewrite and names the unfinished undo file", cli(UM.apply)[1] == {"rewritten": 0} and UM.unfinished(RUN2) == undo2, UM.unfinished(RUN2))
+check("9 a new apply finds nothing to rewrite, and the crashed pass is not named any more: its results are taken from the server's record and written into its undo file", cli(UM.apply)[1] == {"rewritten": 0} and UM.unfinished(RUN2) == []
+      and [e["result"] for e in json.loads(undo2[0].read_text())["items"]] == ["set"] * 6, (UM.unfinished(RUN2), [e["result"] for e in json.loads(undo2[0].read_text())["items"]]))
 rc9, out9 = cli(UM.undo, undo=str(undo2[0]))
 check("9 the undo of the crashed pass puts back all six (the entries are taken from the server's pass record)", rc9 == 0 and out9["results"] == {"set": 6} and snapshot().keys() == snapC0.keys() and all({k: v for k, v in mt(i).items()} == {k: v for k, v in json.loads(snapC0[f"{i}.json"])["metadata"].items()} for i in (1, 2, 3, 4, 5, 10)), (rc9, out9))
 fresh(OPEN)
+seen2 = set(RUN2.glob("*/undo.json"))
 try:
     cli(UM.apply, app=DyingApp())
 except RuntimeError:
     pass
-undo3 = sorted(RUN2.glob("*/undo.json"))[-1]
+undo3 = (set(RUN2.glob("*/undo.json")) - seen2).pop()          # the file this run made (pass ids sort by the second, so "the last" is not reliable)
 pid3 = json.loads(undo3.read_text())["pass_id"]
 (pathlib.Path(_cfg_.state("migration", f"{pid3}.json"))).unlink()          # the server's record is gone too: the planned entries stand
+check("9 with no pass record the crashed pass stays unfinished, and a later apply says to undo the later pass files first", UM.unfinished(RUN2) == [undo3], UM.unfinished(RUN2))
+_err = io.StringIO()
+with contextlib.redirect_stderr(_err), contextlib.redirect_stdout(io.StringIO()):
+    UM.apply(argparse.Namespace(**vars(args)), DirectApp())
+check("9 …and says that undoing it alone reverts items a later apply wrote", "undo the later pass files first" in _err.getvalue() and str(undo3) in _err.getvalue(), _err.getvalue()[-400:])
 rc9, out9 = cli(UM.undo, undo=str(undo3))
 check("9 …and with no pass record either, the planned entries (which hold no clock value) put back all six", rc9 == 0 and out9["results"] == {"set": 6} and all(wk(mt(i)) == wk(json.loads(snapC0[f"{i}.json"])["metadata"]) and "stall" not in mt(i) for i in (1, 2, 3, 4, 5, 10)), (rc9, out9))
 
+check("9 an undone pass is no longer named as unfinished", UM.unfinished(RUN2) == [] and json.loads(undo3.read_text()).get("undone"), UM.unfinished(RUN2))
 # an unrelated History line added after the pass does not make the undo answer kept; it stays, the pass's own line goes
 fresh(OPEN)
 rc, outA = cli(UM.apply)
@@ -364,6 +374,49 @@ src = {f: pathlib.Path(os.path.join(STACK, f)).read_text() for f in ("stackshot/
 lines = {f: [l.strip() for l in t.splitlines() if "backstop" in l and "ev.append" in l] for f, t in src.items()}
 check("11 both renderers print the backstop and wake lines from wait_date_of (an old-form relay's ask_by logs the same line in both)", all(len(v) == 1 and v[0].startswith("w = wait_date_of(v);") for v in lines.values()) and
       all(any(l.strip().startswith("w = wait_date_of(v);") and ("wake_set" in l or "wake {" in l) for l in t.splitlines()) for t in src.values()), lines)
+CFGM["migration"] = False
+
+# ---- 12. an undo sees a later save of a neighbouring wait key; an item edited between the plan and the write, then a crash
+CFGM["migration"] = True
+put(91, needs=[BACK], wait_kind="time", hold=True, wake=day(3))
+st_, d_ = call(op="until", items=["g91"])
+ent91 = {k: d_["results"][0][k] for k in ("item", "before", "after", "history", "dropped")}
+check("12 the entry names every wait key, changed or not", d_["results"][0]["action"] == "set" and set(ent91["before"]) == set(UP.KEYS) == set(ent91["after"]), ent91)
+server.stackshot_update("g91", sender=BACK, after=["g31"], wait_kind="item")          # a session changes the kind, a key the pass did not change
+neighbour = wk(mt(91))
+st_, d_ = call(op="ununtil", items=[ent91])
+check("12 a later save that changed a key the pass left alone makes the undo answer kept, and the item is untouched (no hold beside the after link)", d_["results"][0]["action"] == "kept" and wk(mt(91)) == neighbour and "hold" not in mt(91) and "wake" not in mt(91), (d_["results"][0]["action"], wk(mt(91))))
+check("12 the entry's sides carry no key the dry-run row would print as changed beyond the pass's own", [k for k in ent91["after"] if ent91["after"][k] != ent91["before"][k]] == ["until", "wake", "hold"] or sorted(k for k in ent91["after"] if ent91["after"][k] != ent91["before"][k]) == ["hold", "until", "wake"], ent91)
+
+class EditingDyingApp(DirectApp):
+    """A session edits the item after the plan was made and before the write; then the call fails after the server wrote."""
+    def __init__(self, gid, **meta): super().__init__(); self.gid, self.meta = gid, meta
+    def call(self, body):
+        if body["op"] == "until" and not body.get("dry"):
+            put(int(self.gid[1:]), **self.meta)
+        out = super().call(body)
+        if body["op"] == "until" and not body.get("dry"):
+            raise RuntimeError("the connection dropped after the batch was written")
+        return out
+def crashed(gid, drop_record):
+    put(int(gid[1:]), needs=[BACK], hold=True, wake=day(3))
+    args2 = argparse.Namespace(sender=SENDER, run_dir=str(RUN2), undo="")
+    seen = set(RUN2.glob("*/undo.json"))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            UM.apply(args2, EditingDyingApp(gid, needs=[BACK], hold=True, wake=day(9)))
+    except RuntimeError:
+        pass
+    f = (set(RUN2.glob("*/undo.json")) - seen).pop()
+    if drop_record:
+        pathlib.Path(_cfg_.state("migration", f"{json.loads(f.read_text())['pass_id']}.json")).unlink()
+    return f
+f1 = crashed("g92", False)
+rc, o1 = cli(UM.undo, undo=str(f1))
+check("12 an item edited between the plan and the write, then a crash: the undo takes the real entry from the server's record and puts the edited item's own wake back", not o1["kept_because_a_later_save_changed_them"] and mt(92).get("wake") == day(9) and mt(92).get("hold") is True and "until" not in mt(92), (o1, wk(mt(92))))
+f2 = crashed("g93", True)
+rc, o2 = cli(UM.undo, undo=str(f2))
+check("12 …and with the record gone the planned entry no longer matches the item: kept, and the item is left as the pass wrote it", o2["kept_because_a_later_save_changed_them"] == [BOARD + "93"] and mt(93).get("until") == day(9) and "wake" not in mt(93), (o2, wk(mt(93))))
 CFGM["migration"] = False
 
 import shutil

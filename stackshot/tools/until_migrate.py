@@ -66,7 +66,7 @@ def history_of(row: dict[str, Any]) -> str:
 
 
 def print_row(r: dict[str, Any]) -> None:
-    keys = list(r.get("after") or {})
+    keys = [k for k, v in (r.get("after") or {}).items() if v != (r.get("before") or {}).get(k)]      # the keys the pass changes (an entry carries all the wait keys)
     print(f"{r['item']}  {r.get('form') or '-'}  ->  {r.get('new') or '-'}   [{r['action']}]")
     print(f"    old: {show({k: (r.get('before') or {}).get(k) for k in keys})}")
     print(f"    new: {show({k: (r.get('after') or {}).get(k) for k in keys})}")
@@ -143,7 +143,8 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
     cands = sorted((g for g, it in snap.items() if it.get("status") == "open" and any(k in (it.get("metadata") or {}) for k in ("wake", "ask_by"))), key=SP.num)
     say(f"{len(cands)} open items store a wake or an ask_by, of {len(snap)} items read from {store}")
     for f in unfinished(run_dir):
-        say(f"an earlier pass did not finish recording: {f} has entries with no result; this run does not cover them. --undo {f} puts back what that pass wrote")
+        say(f"an earlier pass did not finish recording its results ({f}): its entries with no result are not known to have been written. Undoing it alone also reverts items a later --apply wrote, "
+            f"so undo the later pass files first, then this one: --undo {f}")
     plan: list[dict[str, Any]] = []
     for ch in SP.chunks(cands):
         st, d = app.call({"op": "until", "items": ch, "dry": True})
@@ -191,7 +192,7 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
     return 1 if counts.get("refused") or counts.get("batch refused") or refused else 0
 
 
-def resolve_unrecorded(rec: dict[str, Any]) -> int:
+def resolve_unrecorded(rec: dict[str, Any], quiet: bool = False) -> int:
     """An entry whose result is still None is one the run died on, between the server writing its batch and the script recording the answer. The server keeps every batch's real results in its pass record
     (<state>/migration/<pass id>.json): for such an entry the record's action and keys are taken in place of the planned ones, in memory. An entry the record does not name (the run died before the server's
     write, or no record is here) keeps its planned values, which the undo checks against the item as it stands: the item holds `before` (nothing to put back) or `after` (put back). → how many were resolved."""
@@ -202,7 +203,8 @@ def resolve_unrecorded(rec: dict[str, Any]) -> int:
         from stackshot.core import config as _cfg
         srv = json.loads(_cfg.state("migration", f"{rec.get('pass_id')}.json").read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001  — no record, or one that does not read: the planned values stand
-        say(f"{len(pend)} entries have no recorded result and the server's pass record could not be read ({e.__class__.__name__}): their planned values are used")
+        if not quiet:
+            say(f"{len(pend)} entries have no recorded result and the server's pass record could not be read ({e.__class__.__name__}): their planned values are used")
         return 0
     by_shown = {r.get("item"): r for r in srv.get("items") or [] if isinstance(r, dict)}
     n = 0
@@ -214,16 +216,23 @@ def resolve_unrecorded(rec: dict[str, Any]) -> int:
         if r["action"] in ("set", "same"):
             e["before"], e["after"], e["history"], e["dropped"] = r["before"], r["after"], r.get("history", e.get("history", "")), r.get("dropped", e.get("dropped", []))
         n += 1
-    say(f"{len(pend)} entries had no recorded result: {n} taken from the server's pass record, {len(pend) - n} keep their planned values")
+    if not quiet:
+        say(f"{len(pend)} entries had no recorded result: {n} taken from the server's pass record, {len(pend) - n} keep their planned values")
     return n
 
 
 def unfinished(run_dir: Path) -> list[Path]:
-    """The undo files of earlier passes in the run directory that have an entry with no recorded result (a run that died): each is still undoable, and a new run does not cover its items."""
+    """The undo files of earlier passes in the run directory that have an entry with no recorded result (a run that died) and have not been undone. An entry the server's pass record names is resolved
+    here and the real result written into the file (so a pass that died after writing, or one a later run completed, stops being listed); the files left are those with entries the record does not name."""
     out: list[Path] = []
     for f in sorted(run_dir.glob("*/undo.json")) if run_dir.is_dir() else []:
         try:
-            if any(e.get("result") is None for e in json.loads(f.read_text(encoding="utf-8")).get("items", [])):
+            rec = json.loads(f.read_text(encoding="utf-8"))
+            if rec.get("undone") or not any(e.get("result") is None for e in rec.get("items", [])):
+                continue
+            if resolve_unrecorded(rec, quiet=True):
+                SP.write_atomic(f, rec)
+            if any(e.get("result") is None for e in rec.get("items", [])):
                 out.append(f)
         except (OSError, ValueError):
             continue
@@ -233,6 +242,8 @@ def unfinished(run_dir: Path) -> list[Path]:
 def undo(a: argparse.Namespace, app: Any = None) -> int:
     rec = json.loads(Path(a.undo).expanduser().read_text(encoding="utf-8"))
     resolve_unrecorded(rec)
+    if any(e.get("result") is None for e in rec["items"]):
+        say("some entries have no recorded result: they are put back from their planned values, which also reverts an item a LATER pass wrote; undo the later pass files first, then this one")
     todo = [e for e in rec["items"] if e.get("result") not in ("moved", "refused", "same")]
     say(f"{len(todo)} of {len(rec['items'])} entries to put back (pass {rec.get('pass_id')})")
     app = app or MM.LiveApplier(a.sender)
@@ -248,6 +259,9 @@ def undo(a: argparse.Namespace, app: Any = None) -> int:
             counts[r["action"]] += 1
             if r["action"] == "kept":
                 kept.append(e.get("shown") or e["item"])
+    if not counts.get("batch refused"):
+        rec["undone"] = dt.datetime.now().strftime("%Y%m%d-%H%M%S")        # recorded in the pass file, so a later --apply stops naming it as unfinished
+        SP.write_atomic(Path(a.undo).expanduser(), rec)
     print(json.dumps({"results": dict(counts), "kept_because_a_later_save_changed_them": kept}, indent=1))
     return 1 if counts.get("refused") or counts.get("batch refused") else 0
 
