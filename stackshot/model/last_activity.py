@@ -24,7 +24,9 @@ Newest wins: a candidate replaces the stored record only when it is strictly lat
 is skipped. The caller passes `now`; a candidate time after it is read as `now`.
 
 How a page reads the record (the On agent rows and the item page, model/last_activity.py `age_s`, `band`): the age is the time since `at`, taken at render and by the page script after; a band by that age: `ok` under
-BAND_WARN_S (45 minutes), `warn` from there to BAND_BAD_S (1 hour), `bad` from an hour on. An item with no record has no age here and nothing is made up for it.
+BAND_WARN_S (45 minutes), `warn` from there up to and including BAND_BAD_S (1 hour: exactly an hour is still amber), `bad` only past an hour (strictly more than 60 minutes). An item with no record has no age here and nothing is made up for it.
+A stored time ahead of the reader's clock by more than SKEW_S (the window an event's own time is allowed, anchors/event_log.py AHEAD_S) is not a time that happened: the reader (`read`, `at`, `age_s` given a `now`) treats it as
+no record, never as "0 minutes ago"; one ahead by less is a skew of clocks and reads as just now. A time that is not a number (a bool, a string) is torn, whatever it spells.
 
 A `commit` is the pull request's head commit changing: GitHub sends no push notification, so the hub's GitHub receiver notices the new head sha in the pull request read it already makes. Seen live it is stamped at the time
 the hub saw it (a push of an old commit, or a commit whose author clock is off, still happened now); seen after the hub was away it is stamped at the commit's committer date, so downtime does not shift it, and at the time seen
@@ -43,7 +45,8 @@ MAX_WHAT = 80         # characters of the words kept
 MAX_STEPS_NAMED = 3   # steps named in one save's words
 MAX_AT = 32503680000.0  # the latest time kept (the start of year 3000): a time past it (a count of milliseconds, say) is torn, because no clock and no date reader can take it
 BAND_WARN_S = 45 * 60   # the age from which a row's activity reads "quiet" (amber)
-BAND_BAD_S = 60 * 60    # the age from which it reads "idle over 1 h" (red)
+BAND_BAD_S = 60 * 60    # the age past which it reads "idle over 1 h" (red): strictly more than this; exactly this is still amber
+SKEW_S = 3600.0         # how far ahead of the reader's clock a stored time may stand and still read as just now (anchors/event_log.py AHEAD_S, the window a hub event's own time is allowed); further ahead it is no record
 OK, WARN, BAD = "ok", "warn", "bad"
 
 # The named kinds of signal. STAMPED ones are what the server stamps today; the last two are defined here for the parts that come later.
@@ -71,12 +74,16 @@ def _words(v: Any) -> str:
 
 
 def clean(c: Any, now: float | None = None) -> dict[str, Any] | None:
-    """A signal as {"at": float, "kind": str, "what": str}, None for one that is torn: not a dict, a kind that is none of KINDS, no finite positive time no later than MAX_AT, no words. A time after `now` (when given) is read as `now`."""
+    """A signal as {"at": float, "kind": str, "what": str}, None for one that is torn: not a dict, a kind that is none of KINDS, a time that is not a number (a bool or a string is none, whatever it spells), no finite positive
+    time no later than MAX_AT, no words. A time after `now` (when given) is read as `now`."""
     if not isinstance(c, dict):
         return None
+    raw = c.get("at")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):      # True is 1.0 and "123" is 123.0 to float(): neither is a time that was written
+        return None
     try:
-        at = float(c.get("at"))
-    except (TypeError, ValueError, OverflowError):
+        at = float(raw)
+    except (OverflowError, ValueError):
         return None
     what = _words(c.get("what"))
     kind = c.get("kind")
@@ -85,26 +92,29 @@ def clean(c: Any, now: float | None = None) -> dict[str, Any] | None:
     return {"at": min(at, now) if now is not None else at, "kind": kind, "what": what}
 
 
-def read(item: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The stored record of an item, None when it has none or it is torn."""
-    return clean(_meta(item).get(FIELD))
+def read(item: dict[str, Any] | None, now: float | None = None) -> dict[str, Any] | None:
+    """The stored record of an item, None when it has none or it is torn. With `now`, a record stamped more than SKEW_S ahead of it is none too (a time that did not happen; a clock that jumped)."""
+    r = clean(_meta(item).get(FIELD))
+    return None if r is not None and now is not None and r["at"] > now + SKEW_S else r
 
 
-def at(item: dict[str, Any] | None) -> float:
-    """When the item last had visible activity, 0 when no record is stored (an item from before the record, or one with none yet)."""
-    r = read(item)
+def at(item: dict[str, Any] | None, now: float | None = None) -> float:
+    """When the item last had visible activity, 0 when no record is stored (an item from before the record, or one with none yet; with `now`, one stamped further ahead than SKEW_S counts as none)."""
+    r = read(item, now)
     return r["at"] if r else 0.0
 
 
 def age_s(item: dict[str, Any] | None, now: float) -> float | None:
-    """Seconds since the item's last activity, None when it has no record (the caller keeps its old age and draws no activity line). A record stamped ahead of `now` is read as just now."""
-    r = read(item)
+    """Seconds since the item's last activity, None when it has no record (the caller keeps its old age and draws no activity line), and none when the record is stamped more than SKEW_S ahead of `now`. A record
+    ahead by no more than that is a skew of clocks and reads as just now (0)."""
+    r = read(item, now)
     return max(0.0, now - r["at"]) if r else None
 
 
 def band(seconds: float) -> str:
-    """The colour band of an age: OK under 45 minutes, WARN from 45 minutes to an hour, BAD from an hour on (both bounds belong to the worse band)."""
-    return BAD if seconds >= BAND_BAD_S else WARN if seconds >= BAND_WARN_S else OK
+    """The color band of an age: OK under 45 minutes, WARN from 45 minutes up to and including an hour, BAD only past an hour (strictly more than 60 minutes: exactly an hour is amber). The lower bound belongs to the
+    worse band (45 minutes is amber). The page script (ui/render.py _LACT_JS) reads the same two bounds in seconds."""
+    return BAD if seconds > BAND_BAD_S else WARN if seconds >= BAND_WARN_S else OK
 
 
 def signal(kind: str, at: Any, what: Any = "") -> dict[str, Any] | None:
