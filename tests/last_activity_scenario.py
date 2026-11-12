@@ -742,5 +742,54 @@ for label, mod_ in (("ui/render.py", ui_render), ("render.py", root_render)):
     k500 = events11(bd, "a500")
     check(f"11 {label}: …and a stamp alone adds no line (the record shows nothing)", k500.count("confirm") == 1 and len(k500) == len(events11(bd, "a501")) , k500)
 
+# ================================================================ 12. the time of a notifications thread is its vouched items', and a CI result's is its check runs' own
+# a: owner-side comment early, a stranger's later in the same batch: the stamp is the owner side's, not the thread's updated_at (which the stranger's comment moved)
+NP12 = NP9
+def cm12(login, assoc, at, i): return {"user": {"login": login, "type": "User"}, "body": "x", "html_url": f"{W_}/pull/5#issuecomment-{i}", "created_at": iso9(at), "author_association": assoc}
+def batch12(comments, reviews=(), rcomments=(), tag=0):
+    n12 = {"/user": {"login": "hubaccount"}, NP12: [thread9(iso9(0))], f"{RP}/issues/5": {"state": "open", "comments": 1, "updated_at": iso9(0), "title": "t", "html_url": f"{W_}/pull/5", "body": "", "pull_request": {"merged_at": None}}}
+    with GH(n12, [NA9]) as G:
+        G.one()      # seeds the thread at iso9(0)
+        n12[NP12] = [thread9(iso9(1000), 12 + tag)]
+        n12[f"{RP}/issues/5/comments?since={iso9(0)}&per_page=50"] = list(comments)
+        n12[f"{RP}/pulls/5/reviews?per_page=100"] = list(reviews)
+        n12[f"{RP}/pulls/5/comments?since={iso9(0)}&per_page=50"] = list(rcomments)
+        return [e for e in G.one() if e.anchor == NA9]
+ev_a = batch12([cm12("kim", "MEMBER", 500, 1), cm12("mallory", "NONE", 700, 2)], tag=1)
+check("12 a thread with an owner-side comment (early) and a stranger's (later): the event carries the owner side's own time, not the thread's", len(ev_a) == 1 and ev_a[0].vouched == "comment" and ev_a[0].ts == iso9(500), [(e.ts, e.vouched) for e in ev_a])
+ev_b = batch12([cm12("mallory", "NONE", 300, 1), cm12("kim", "COLLABORATOR", 400, 2), cm12("lee", "OWNER", 600, 3), cm12("mallory", "FIRST_TIMER", 800, 4)], tag=2)
+check("12 …the newest of the vouched items wins (owner and collaborator comments, strangers on both sides ignored)", len(ev_b) == 1 and ev_b[0].ts == iso9(600), [(e.ts, e.vouched) for e in ev_b])
+ev_c = batch12([cm12("mallory", "NONE", 300, 1)], reviews=[{"user": {"login": "lee", "type": "User"}, "state": "APPROVED", "html_url": f"{W_}/pull/5#pullrequestreview-3", "submitted_at": iso9(550), "author_association": "MEMBER"}], tag=3)
+check("12 …a member's review counts with its submitted_at, a stranger's comment beside it does not move the time", len(ev_c) == 1 and ev_c[0].vouched == "review" and ev_c[0].ts == iso9(550), [(e.ts, e.vouched) for e in ev_c])
+ev_d = batch12([cm12("mallory", "NONE", 300, 1)], tag=4)
+check("12 …a batch no vouched item is in falls back to the thread's time (and writes no comment line)", len(ev_d) == 1 and ev_d[0].vouched == "" and ev_d[0].ts == iso9(1000), [(e.ts, e.vouched) for e in ev_d])
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.bindings[NA9] = {"home-peer"}
+hub_.emit(ev_a[0])
+rows12, _ = EL.read(0)
+check("12 end to end: the log line of that batch is stamped at the owner side's comment", len(rows12) == 1 and rows12[0]["kind"] == "comment" and abs(rows12[0]["ts"] - (tb_ + 500)) < 2, rows12)
+
+# b: a CI result seen after downtime is stamped at its check runs' completed_at, when that is inside the log's window
+def ci12(n, runs):
+    sha = f"{n:02d}" * 20
+    g = {"/user": {"login": "hubaccount"}, **pr9(n)}
+    with GH(g, [f"github:acme/widgets#{n}"]) as G:
+        G.hub.status.setdefault("anchors", {})
+        G.one()      # seeds the passing state
+        g[f"{RP}/commits/{sha}/check-runs?per_page=100"] = {"check_runs": runs}
+        return [e for e in G.one() if e.etype == "ci_failed"]
+def run12(done, conclusion="failure", name="suites"): return {"name": name, "status": "completed", "conclusion": conclusion, **({"completed_at": done} if done else {})}
+t12 = time.time()
+ci_old = ci12(34, [run12(iso_at(t12 - 3 * H), "success", "lint"), run12(iso_at(t12 - 2 * H))])
+check("12 a CI result seen after downtime carries the newest check run's completed_at (two hours ago), not the hub's now", len(ci_old) == 1 and ci_old[0].ts == iso_at(t12 - 2 * H), [e.ts for e in ci_old])
+for label, n, done in (("a time a day and more old", 35, iso_at(t12 - 30 * H)), ("a time more than an hour ahead", 36, iso_at(t12 + 3 * H)), ("no completed_at", 37, "")):
+    got = ci12(n, [run12(done)])
+    check(f"12 …{label} falls back to the hub's own time, as before", len(got) == 1 and abs(EL._epoch(got[0].ts) - time.time()) < 10, [e.ts for e in got])
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+hub_.bindings["github:acme/widgets#34"] = {"home-peer"}
+hub_.emit(ci_old[0])
+rows12b, _ = EL.read(0)
+check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

@@ -17,8 +17,8 @@ not a wait, and stays as it is; so does an item with no old date. The server ref
 differently. No item is closed or woken, nobody is told, no clock moves, nothing but the wait keys and the History line changes (the file is replaced whole under the item lock, with a sha256 check, as the stamp and
 retire passes do). Running it twice changes nothing the second time. The pass itself wakes nothing; the watchers act on the newly watched future dates it lists, when they come.
 
-Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole, an item could not be written, the plan differs from the one shown, or the dry run's second pass
-would still change something) · 3 the pass was applied and some items were left as they are (refused, listed or already due): not a failure, a person has items to look at. A date that is already past and was never
+Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole, an item could not be written, the plan differs from the one shown, another --apply or --undo holds the run directory, or the dry run's second pass
+would still change something) · 3 the pass was applied and some items were left as they are (refused, listed, already due, or closed between the plan and the write): not a failure, a person has items to look at. A date that is already past and was never
 watched (an after link and a date, no kind) is NOT migrated and is listed: as until the watchers would wake the item on the next tick. A future one is migrated and listed as newly watched, with the day it wakes. The
 apply prints both lists before it writes, plans again right before the first write, and refuses to write when the lists changed since (or differ from the dry run's --json given with --plan) unless --allow-changed-plan. Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
 from __future__ import annotations
@@ -31,13 +31,17 @@ import argparse
 import collections
 import datetime as dt
 import fcntl
+import contextlib
 import json
 import os
+import re
 import shutil
 import sys
+import time
 import tomllib
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 HERE = Path(__file__).resolve().parents[2]
 from stackshot.tools import compare_pair_reads as CP  # noqa: E402  — the private copy and the live config
@@ -56,27 +60,57 @@ def show(d: dict[str, Any]) -> str:
 
 def refused_note(date: str) -> str:
     return (f"a refused item keeps its old fields untouched (such as a hold beside an open after item or one held by needs external: anything that would read differently as until): they are still read as before; "
-            f"the next write that touches its wait stores it as until, and a person re-saves it with update(until=...) before {date}, when the old parameters wake, ask_by and hold stop being accepted in writes")
+            f"the next write that touches its wait stores it as until, and a person re-saves it with update(until=...) before {human_date(date)}, when the old parameters wake, ask_by and hold stop being accepted in writes")
 
 
 HOW_NEVER = "never watched"      # until_pass.HOW_NEVER (not imported: until_pass loads the config, which the dry run must not do before it switches to its copy)
 EXIT_LEFT_OVER = 3          # the pass was applied and some items were left as they are (refused, listed or already due): not a failure, but a person has items to look at
 
 
+KST = ZoneInfo("Asia/Seoul")      # the zone the stamps of a run are written in (the owner's); a machine field stays ISO
+
+
+def human_date(iso: Any) -> str:
+    """A stored date (YYYY-MM-DD, or YYYY-MM-DDTHH:MM) in the rulebook's form for a date a person reads: "Tue Nov 24th", with the time of day after it when the date has one ("Tue Nov 24th 14:30").
+    Anything that is not a date is returned as it is. Machine fields (the JSON rows, the signature, the stored keys) keep the ISO form."""
+    s = str(iso or "").strip()
+    try:
+        t = dt.datetime.fromisoformat(s)
+    except ValueError:
+        return s
+    d = t.day
+    suffix = "th" if 11 <= d % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(d % 10, "th")
+    return f"{t:%a %b} {d}{suffix}" + (f" {t:%H:%M}" if "T" in s or " " in s else "")
+
+
+def kst_stamp() -> str:
+    """The time now for a stamp in a pass or undo file: "Thu Nov 12th 15:30 KST" (Asia/Seoul, the zone named)."""
+    n = dt.datetime.now(KST)
+    return f"{human_date(n.strftime('%Y-%m-%dT%H:%M'))} KST"
+
+
 def watch_lines(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(the items already due and left unmigrated, "<item> wakes on <date>" for each item the pass would newly hand to the watchers) of a list of plan rows."""
     due = [r["item"] for r in rows if r.get("due")]
-    newly = [f"{r['item']} wakes on {r['newly']} ({r.get('how') or HOW_NEVER})" for r in rows if r.get("newly") and r.get("action") in ("would_set", "set")]
+    newly = [f"{r['item']} wakes on {human_date(r['newly'])} ({r.get('how') or HOW_NEVER})" for r in rows if r.get("newly") and r.get("action") in ("would_set", "set")]
     return due, newly
 
 
+def differ_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """"<item>: <how its release differs>" for each item the pass would rewrite (or has) whose release at its date is not the one the old wake pass made (until_pass.release_differs)."""
+    return [f"{r['item']}: {r['differs']}" for r in rows if r.get("differs") and r.get("action") in ("would_set", "set")]
+
+
 def signature(rows: list[dict[str, Any]]) -> list[list[Any]]:
-    """What a person was shown to decide on: the due items and the newly watched dates, sorted. A plan that differs from the one shown is not applied without --allow-changed-plan."""
-    return sorted([r["item"], bool(r.get("due")), r.get("newly") or "", r.get("how") or ""] for r in rows if r.get("due") or (r.get("newly") and r.get("action") in ("would_set", "set")))
+    """What a person was shown to decide on: the due items, the newly watched dates and the releases that differ, sorted. A plan that differs from the one shown is not applied without --allow-changed-plan."""
+    return sorted([r["item"], bool(r.get("due")), r.get("newly") or "", r.get("how") or "", r.get("differs") or ""] for r in rows
+                  if r.get("due") or (r.get("newly") and r.get("action") in ("would_set", "set")) or (r.get("differs") and r.get("action") in ("would_set", "set")))
 
 
 def say_watch(rows: list[dict[str, Any]]) -> None:
     due, newly = watch_lines(rows)
+    differs = differ_lines(rows)
+    say(f"release differs: {len(differs)} items are rewritten whose release at their date is not the old wake pass's (listed, not held back)" + (f" ({'; '.join(differs)})" if differs else ""))
     say(f"newly watched: {len(newly)} items get a date the watchers act on that the old code did not (never watched, or only a notice)" + (f" ({'; '.join(newly)})" if newly else ""))
     say(f"already due, not migrated: {len(due)} items" + (f" ({', '.join(due)}): their date is past and as until it would act on them on the next tick; re-save them with the date you mean" if due else ""))
 
@@ -98,7 +132,9 @@ def print_row(r: dict[str, Any]) -> None:
     if history_of(r):
         print(f"    History line: stackshot: {history_of(r)}")
     if r.get("newly") and r["action"] in ("would_set", "set"):
-        print(f"    newly watched: wakes on {r['newly']} ({r.get('how') or HOW_NEVER}: the watchers act on this date from now on)")
+        print(f"    newly watched: wakes on {human_date(r['newly'])} ({r.get('how') or HOW_NEVER}: the watchers act on this date from now on)")
+    if r.get("differs") and r["action"] in ("would_set", "set"):
+        print(f"    release differs: {r['differs']}")
     if r["action"] in ("refused", "kept"):
         print(f"    why: {r.get('why')}")
 
@@ -151,6 +187,8 @@ def dry_run(a: argparse.Namespace) -> int:
         due, newly = watch_lines(rows)
         print(f"items already due, not migrated (their date is past and the old code did not act on it: as until the watchers would act on it at once; re-save them with the date you mean): {len(due)}" + (f" {due}" if due else ""))
         print(f"items newly watched (a date the old code did not act on: never watched, or only a notice; the watchers act on it): {len(newly)}" + (f" {newly}" if newly else ""))
+        differs = differ_lines(rows)
+        print(f"items whose release at their date differs from the old wake pass's (they are rewritten and listed: the watchers release them as described): {len(differs)}" + (f" {differs}" if differs else ""))
         print(f"items the pass would write: {by_result.get('set', 0)} of {len(rows)}")
         if a.json:
             Path(a.json).write_text(json.dumps(rows, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
@@ -163,11 +201,74 @@ def dry_run(a: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the real pass and its undo
+PASS_DIR_RX = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")      # a pass folder's name (stamp_phase.new_pass_id)
+PRUNE_DAYS = 60            # a pass folder older than this is removed …
+PRUNE_KEEP = 5             # … unless it is one of the newest this many
+
+
+class RunLocked(Exception):
+    """Another --apply or --undo holds the run directory."""
+
+
+@contextlib.contextmanager
+def run_lock(run_dir: Path):
+    """An exclusive flock in the run directory (its `.lock` file; the directory itself is left to systemd-tmpfiles' and the test scratch's own shared lock) for the length of one --apply or --undo (two at once would both
+    read the same plan and write the same items twice). A second one waits for nothing: RunLocked."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    fd = os.open(run_dir / ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RunLocked(str(run_dir)) from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def prune_runs(run_dir: Path, store: Path, now: float | None = None, days: int = PRUNE_DAYS, keep: int = PRUNE_KEEP) -> list[str]:
+    """Remove the pass folders of the run directory (<run-dir>/<pass id>/: the backup and the undo file) that are older than `days` days, keeping the newest `keep` whatever their age. → the names removed.
+    Only a real folder (never a link) that sits directly in `run_dir` and is named like a pass id is a candidate; one that is, or holds, or lies inside the live store is never touched; so is nothing else in the
+    run directory. The age is the pass id's own time."""
+    now = time.time() if now is None else now
+    out: list[str] = []
+    try:
+        names = sorted(d.name for d in run_dir.iterdir() if PASS_DIR_RX.fullmatch(d.name) and d.is_dir() and not d.is_symlink())
+    except OSError:
+        return out
+    live = store.resolve()
+    for name in names[:-keep] if keep > 0 else names:
+        try:
+            at = time.mktime(time.strptime(name[:15], "%Y%m%d-%H%M%S"))
+        except (ValueError, OverflowError):
+            continue
+        d = run_dir / name
+        r = d.resolve()
+        if now - at < days * 86400 or r == live or live in r.parents or r in live.parents:
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+        out.append(name)
+    return out
+
+
 def apply(a: argparse.Namespace, app: Any = None) -> int:
-    """The real pass. `app` (tests only) answers app.call(body) → (status, answer) in place of the live server."""
+    """The real pass, under the run directory's lock. `app` (tests only) answers app.call(body) → (status, answer) in place of the live server."""
+    run_dir = Path(a.run_dir).expanduser()
+    try:
+        with run_lock(run_dir):
+            return _apply(a, app)
+    except RunLocked:
+        say(f"another --apply or --undo is running on {run_dir} (it holds the run directory's lock): nothing is done; run this again when it has ended")
+        return 1
+
+
+def _apply(a: argparse.Namespace, app: Any = None) -> int:
     from stackshot.core import config as _cfg
     store = _cfg.path("paths", "store")
     run_dir = Path(a.run_dir).expanduser()
+    gone = prune_runs(run_dir, store)
+    if gone:
+        say(f"removed {len(gone)} pass folders older than {PRUNE_DAYS} days (the newest {PRUNE_KEEP} are always kept): {', '.join(gone)}")
     app = app or MM.LiveApplier(a.sender)
     def candidates() -> list[str]:
         snap = SP.load_dir(store)
@@ -229,35 +330,46 @@ def apply(a: argparse.Namespace, app: Any = None) -> int:
         shutil.copy2(src, base / "items" / f"{g}.json")          # the item's file, byte for byte, before the first write
     say(f"backup of {len(todo)} items written: {base / 'items'}")
     undo_path = base / "undo.json"
-    undo = {"pass_id": pass_id, "by": a.sender, "when": dt.datetime.now(_cfg.tz()).strftime("%a %b %d %H:%M %Z"), "store": str(store), "backup": str(base / "items"),
+    undo = {"pass_id": pass_id, "by": a.sender, "when": kst_stamp(), "store": str(store), "backup": str(base / "items"),
             "items": [{"item": g, "shown": r["item"], "before": r["before"], "after": r["after"], "history": r.get("history", ""), "dropped": r.get("dropped", []), "sha256_before": r["sha256_before"], "result": None} for g, r in todo]}
     SP.write_atomic(undo_path, undo)      # on disk, whole, before the first write
     say(f"undo file written: {undo_path}")
     entries = {e["item"]: e for e in undo["items"]}
     counts: collections.Counter[str] = collections.Counter()
+    closed_now: list[str] = []
     for ch in SP.chunks([g for g, _ in todo]):
         st, d = app.call({"op": "until", "items": ch, "pass_id": pass_id})
         if st != 200:
             say(f"a batch was refused as a whole: [{st}] {d.get('error') if isinstance(d, dict) else d}")
             counts["batch refused"] += len(ch)
+            for g in ch:
+                entries[g]["result"] = "batch refused"            # the server wrote none of it: the entry is final, not an unrecorded one a later --apply would name as unfinished
+            SP.write_atomic(undo_path, undo)
             continue
         for g, r in zip(ch, d["results"]):
-            counts[r["action"]] += 1
             e = entries[g]
+            if r["action"] == "refused" and str(r.get("why") or "").startswith("closed"):
+                counts["closed since the plan"] += 1                # a session closed it between the plan and the write: the item is done, not a failure of the pass
+                e["result"] = "refused"
+                closed_now.append(e["shown"])
+                continue
+            counts[r["action"]] += 1
             e["result"] = r["action"]
             if r["action"] in ("set", "same"):
                 e["before"], e["after"], e["history"], e["dropped"], e["sha256_before"] = r["before"], r["after"], r.get("history", ""), r.get("dropped", []), r["sha256_before"]
         SP.write_atomic(undo_path, undo)      # the real result of each item, kept as it comes
     print(json.dumps({"pass_id": pass_id, "undo": str(undo_path), "backup": str(base / "items"), "results": dict(counts), "refused_in_the_plan": refused, "listed_in_the_plan": listed,
-                      "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"], "left_by_the_write": [e["shown"] for e in entries.values() if e.get("result") == "kept"]}, indent=1))
+                      "moved_run_again_for_these": [e["shown"] for e in entries.values() if e.get("result") == "moved"], "left_by_the_write": [e["shown"] for e in entries.values() if e.get("result") == "kept"],
+                      "closed_since_the_plan": closed_now}, indent=1))
     moved = [e["shown"] for e in entries.values() if e.get("result") == "moved"]
     skipped = [e["shown"] for e in entries.values() if e.get("result") == "kept"]      # left by the write itself: a planned newly watched date came due between the plan and the write
     if counts.get("refused") or counts.get("batch refused"):
         say("the pass could not write every item it planned (the answers are above): a failure, exit 1")
         return 1
-    left_over = sorted({*refused, *listed, *moved, *skipped})
+    left_over = sorted({*refused, *listed, *moved, *skipped, *closed_now})
     if left_over:
-        say(f"applied with items left over: {counts.get('set', 0)} items rewritten, {len(left_over)} left as they are (refused, listed, already due, or written by someone else meanwhile): exit {EXIT_LEFT_OVER}, not a failure" + (f"; left by the write itself (its date came due after the plan): {skipped}" if skipped else ""))
+        say(f"applied with items left over: {counts.get('set', 0)} items rewritten, {len(left_over)} left as they are (refused, listed, already due, closed since the plan, or written by someone else meanwhile): exit {EXIT_LEFT_OVER}, not a failure"
+            + (f"; left by the write itself (its date came due after the plan): {skipped}" if skipped else "") + (f"; closed since the plan: {closed_now}" if closed_now else ""))
         return EXIT_LEFT_OVER
     return 0
 
@@ -310,15 +422,28 @@ def unfinished(run_dir: Path) -> list[Path]:
 
 
 def undo(a: argparse.Namespace, app: Any = None) -> int:
+    """Put the keys of an undo file back, under the lock of the run directory the file lives in (<run-dir>/<pass id>/undo.json)."""
+    undo_path = Path(a.undo).expanduser()
+    run_dir = undo_path.resolve().parent.parent
+    try:
+        with run_lock(run_dir):
+            return _undo(a, app)
+    except RunLocked:
+        say(f"another --apply or --undo is running on {run_dir} (it holds the run directory's lock): nothing is done; run this again when it has ended")
+        return 1
+
+
+def _undo(a: argparse.Namespace, app: Any = None) -> int:
     rec = json.loads(Path(a.undo).expanduser().read_text(encoding="utf-8"))
     resolve_unrecorded(rec)
     if any(e.get("result") is None for e in rec["items"]):
         say("some entries have no recorded result: they are put back from their planned values, which also reverts an item a LATER pass wrote; undo the later pass files first, then this one")
-    todo = [e for e in rec["items"] if e.get("result") not in ("moved", "refused", "same")]
+    todo = [e for e in rec["items"] if e.get("result") not in ("moved", "refused", "same", "batch refused")]
     say(f"{len(todo)} of {len(rec['items'])} entries to put back (pass {rec.get('pass_id')})")
     app = app or MM.LiveApplier(a.sender)
     counts: collections.Counter[str] = collections.Counter()
     kept: list[str] = []
+    closed: list[str] = []
     for ch in SP.chunks(todo):
         st, d = app.call({"op": "ununtil", "items": [{"item": e["item"], "before": e["before"], "after": e["after"], "history": e.get("history", ""), "dropped": e.get("dropped", [])} for e in ch]})
         if st != 200:
@@ -328,11 +453,14 @@ def undo(a: argparse.Namespace, app: Any = None) -> int:
         for e, r in zip(ch, d["results"]):
             counts[r["action"]] += 1
             if r["action"] == "kept":
-                kept.append(e.get("shown") or e["item"])
-    if not counts.get("batch refused"):
-        rec["undone"] = dt.datetime.now().strftime("%Y%m%d-%H%M%S")        # recorded in the pass file, so a later --apply stops naming it as unfinished
+                (closed if str(r.get("why") or "").startswith("it was closed") else kept).append(e.get("shown") or e["item"])
+    unfinished_n = sum(counts.get(k, 0) for k in ("refused", "batch refused", "moved"))      # an item not put back and not final: a later run still has work, so the file is not marked undone
+    if not unfinished_n:
+        rec["undone"] = dt.datetime.now(KST).strftime("%Y%m%d-%H%M%S KST")        # recorded in the pass file (Asia/Seoul, the zone named), so a later --apply stops naming it as unfinished
         SP.write_atomic(Path(a.undo).expanduser(), rec)
-    print(json.dumps({"results": dict(counts), "kept_because_a_later_save_changed_them": kept}, indent=1))
+    else:
+        say(f"{unfinished_n} items were not put back (refused, written by someone else meanwhile, or a batch refused): the undo file is not marked undone; run --undo again")
+    print(json.dumps({"results": dict(counts), "kept_because_a_later_save_changed_them": kept, "kept_because_closed_since_the_pass": closed}, indent=1))
     return 1 if counts.get("refused") or counts.get("batch refused") else 0
 
 
@@ -350,6 +478,8 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     if (a.apply or a.undo) and not a.sender.strip():
         ap.error("--apply and --undo need --sender <the session that runs the pass>")
+    if (a.apply or a.undo) and a.store:
+        ap.error("--store is for the dry run only: --apply and --undo work on the live server's store, so the option would be ignored; leave it out")
     if a.apply:
         return apply(a)
     if a.undo:

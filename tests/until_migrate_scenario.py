@@ -61,7 +61,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._tell_woken = lambda gid, owner, note, tag="wake": None
@@ -94,7 +94,7 @@ server._tell = lambda *a, **k: sent.append(("tell", a))
 BASIS = {"text": f"the vendor ships {day(4)}", "wake": day(4), "by": BACK, "at": now0}
 put(31, needs=[BACK])
 CASES = {
-    1:  ("hold + wake with the kind time", dict(needs=[BACK], wait_kind="time", hold=True, wake=day(3))),
+    1:  ("hold + wake with the kind time", dict(needs=[BACK], wait_kind="time", hold=True, wake=day(3), state="parked")),      # a hold stored the state word parked with it: without the word the item would read as doing once the hold is gone (a new model conflict: case 14 of section 16)
     2:  ("hold + wake + a reason",         dict(needs=[BACK], hold=True, wake=day(4), hold_set={"at": now0 - DAY, "by": BACK}, wait_basis=BASIS)),
     3:  ("ask_by beside an after link",    dict(needs=[BACK], after=["g31"], ask_by=day(5))),
     4:  ("a relay's ask_by",               dict(needs=["external"], wait_kind="relay", wait_event="the vendor's reply", ask_by=day(6), post_wake_mover=BACK)),
@@ -114,7 +114,7 @@ OPEN = list(CASES)
 # ---- 1. the plan, pure
 P = {i: UP.plan_for(mt(i)) for i in OPEN}
 check("1 hold + wake with the kind time: until = the wake, the wake and the hold go, the kind stays", P[1]["edits"] == {"until": day(3), "wake": None, "hold": None} and P[1]["form"] == "hold + wake", P[1])
-check("1 hold + wake + a reason: until = the wake, hold and its stamp go, the reason stays", P[2]["edits"] == {"until": day(4), "wake": None, "hold": None, "hold_set": None} and P[2]["form"] == "hold + wake", P[2])
+check("1 hold + wake + a reason: until = the wake, the hold goes, its stamp (who set it, and when) and the reason stay", P[2]["edits"] == {"until": day(4), "wake": None, "hold": None} and P[2]["form"] == "hold + wake", P[2])
 check("1 ask_by beside an after link with no kind: until = the ask-by day and the kind is item (as create and update store it)", P[3]["edits"] == {"until": day(5), "ask_by": None, "wait_kind": "item"} and P[3]["new"] == f"until={day(5)}, wait_kind=item", P[3])
 check("1 a relay's ask_by becomes until, the kind stays", P[4]["edits"] == {"until": day(6), "ask_by": None}, P[4])
 check("1 an anchor's wake and ask_by: until is the earlier of the two (the backstop)", P[5]["edits"] == {"until": day(5), "wake": None, "ask_by": None}, P[5])
@@ -154,7 +154,7 @@ check("3 only the wait keys and the stall log changed in each rewritten file (cl
       all({k: v for k, v in raw(i).items() if k != "metadata"} == {k: v for k, v in orig[i].items() if k != "metadata"}
           and {k: v for k, v in mt(i).items() if k not in (*WAITKEYS, "stall")} == {k: v for k, v in orig[i]["metadata"].items() if k not in (*WAITKEYS, "stall")} for i in (1, 2, 3, 4, 5, 10)), None)
 check("3 the files of the items left as they are are byte for byte the same", all(bytes_of(i) == json.dumps(orig[i], ensure_ascii=False, indent=1).encode() for i in (6, 7, 8, 9)), None)
-check("3 each rewritten item stores until and none of wake, ask_by, hold, hold_set", all(W.stored_until(mt(i)) and not any(k in mt(i) for k in ("wake", "ask_by", "hold", "hold_set")) for i in (1, 2, 3, 4, 5, 10)), {i: wk(mt(i)) for i in (1, 2, 3, 4, 5, 10)})
+check("3 each rewritten item stores until and none of wake, ask_by, hold; the hold's stamp stays on the one that had it", all(W.stored_until(mt(i)) and not any(k in mt(i) for k in ("wake", "ask_by", "hold")) and ("hold_set" in mt(i)) == (i == 2) for i in (1, 2, 3, 4, 5, 10)), {i: wk(mt(i)) for i in (1, 2, 3, 4, 5, 10)})
 check("3 the kinds: the stored kind stays (time, relay, anchor), an after link with a date stores item, hold + wake stores none", mt(1)["wait_kind"] == "time" and mt(4)["wait_kind"] == "relay" and mt(5)["wait_kind"] == "anchor"
       and mt(3)["wait_kind"] == "item" and "wait_kind" not in mt(2) and "wait_kind" not in mt(10), {i: mt(i).get("wait_kind") for i in (1, 2, 3, 4, 5, 10)})
 check("3 the reason stays beside its date (the same date it was written for)", W.basis_of(mt(2)) == BASIS["text"], mt(2))
@@ -168,7 +168,7 @@ check("3 nothing was closed, woken or told", all(raw(i)["status"] == "open" for 
 put(41, needs=[BACK]); put(42, needs=[BACK], after=["g31"])
 server.stackshot_update("g41", sender=BACK, hold=True, wake=day(4), wait_basis=BASIS["text"])
 server.stackshot_update("g42", sender=BACK, ask_by=day(5), wait_reason="the vendor replies only after that date")
-strip = lambda m: {k: v for k, v in m.items() if k in ("until", "wait_kind", "wake", "ask_by", "hold", "hold_set")}
+strip = lambda m: {k: v for k, v in m.items() if k in ("until", "wait_kind", "wake", "ask_by", "hold")}      # the pass also keeps the hold's stamp (hold_set); update drops it with the hold
 check("4 hold + wake + a reason: update stores the wait keys the pass left", strip(mt(41)) == strip(mt(2)) and W.basis_of(mt(41)) == W.basis_of(mt(2)), (strip(mt(41)), strip(mt(2))))
 check("4 an after link with ask_by: update stores until and the kind item, as the pass did", strip(mt(42)) == strip(mt(3)), (strip(mt(42)), strip(mt(3))))
 
@@ -235,7 +235,7 @@ snapD = snapshot()
 p = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/until_migrate.py"), "--store", str(T / "store")], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
 check("7 the dry run over a copy writes nothing live, prints old and new per item and the totals, and exits 0", p.returncode == 0 and snapshot() == snapD and "old: " in p.stdout and "new: " in p.stdout and "History line: stackshot:" in p.stdout
       and "items the pass would write:" in p.stdout and "a second pass: " in p.stdout
-      and "a bare ask_by is a backstop" in p.stdout and "a refused item keeps its old fields untouched" in p.stdout and "update(until=...)" in p.stdout and UM.alias_date() in p.stdout, (p.returncode, p.stdout[-900:], p.stderr[-600:]))
+      and "a bare ask_by is a backstop" in p.stdout and "a refused item keeps its old fields untouched" in p.stdout and "update(until=...)" in p.stdout and UM.human_date(UM.alias_date()) in p.stdout, (p.returncode, p.stdout[-900:], p.stderr[-600:]))
 
 # ---- 8. the gate
 put(51, needs=["external"], hold=True, wake=day(3), wait_kind="time")
@@ -378,7 +378,7 @@ CFGM["migration"] = False
 
 # ---- 12. an undo sees a later save of a neighbouring wait key; an item edited between the plan and the write, then a crash
 CFGM["migration"] = True
-put(91, needs=[BACK], wait_kind="time", hold=True, wake=day(3))
+put(91, needs=[BACK], wait_kind="time", hold=True, wake=day(3), state="parked")
 st_, d_ = call(op="until", items=["g91"])
 ent91 = {k: d_["results"][0][k] for k in ("item", "before", "after", "history", "dropped")}
 check("12 the entry names every wait key, changed or not", d_["results"][0]["action"] == "set" and set(ent91["before"]) == set(UP.KEYS) == set(ent91["after"]), ent91)
@@ -432,7 +432,7 @@ st_, d_ = call(op="until", items=["g95", "g96", "g98"], dry=True)
 r13 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
 check("13 a past ask_by beside an after link and no kind (never watched) is listed as already due and not rewritten", r13[95]["action"] == "kept" and r13[95]["due"] is True and "already due" in r13[95]["why"] and not r13[95]["after"], r13[95])
 check("13 …so does a past wake in that form", r13[98]["action"] == "kept" and r13[98]["due"] is True, r13[98])
-check("13 a future ask_by in that form is rewritten (the decided one-date model) and listed as newly watched, with its day", r13[96]["action"] == "would_set" and r13[96]["newly"] == day(6) and UM.watch_lines(list(r13.values())) == ([BOARD + "95", BOARD + "98"], [f"{BOARD}96 wakes on {day(6)} (never watched)"]) and r13[98]["how"] == "previously only a notice", UM.watch_lines(list(r13.values())))
+check("13 a future ask_by in that form is rewritten (the decided one-date model) and listed as newly watched, with its day", r13[96]["action"] == "would_set" and r13[96]["newly"] == day(6) and UM.watch_lines(list(r13.values())) == ([BOARD + "95", BOARD + "98"], [f"{BOARD}96 wakes on {UM.human_date(day(6))} (never watched)"]) and r13[98]["how"] == "previously only a notice", UM.watch_lines(list(r13.values())))
 st_, d_ = call(op="until", items=["g95", "g96", "g98"])
 check("13 the write leaves the due items byte for byte and rewrites the future one", bytes_of(95) == b95 and {i: bytes_of(i) for i in (95, 98)} == snap_before and mt(96).get("until") == day(6) and mt(96).get("wait_kind") == "item" and "ask_by" not in mt(96), (wk(mt(96))))
 before_ticks = {i: bytes_of(i) for i in (95, 96, 98)}
@@ -458,7 +458,7 @@ snap13 = snapshot()
 _e = io.StringIO()
 with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
     rcA = UM.apply(argparse.Namespace(**vars(args)), ChangingApp())
-check("13 the apply prints the newly watched and the already due lists before it writes", "newly watched:" in _e.getvalue() and "already due, not migrated:" in _e.getvalue() and f"{BOARD}101 wakes on {day(7)}" in _e.getvalue(), _e.getvalue()[-500:])
+check("13 the apply prints the newly watched and the already due lists before it writes", "newly watched:" in _e.getvalue() and "already due, not migrated:" in _e.getvalue() and f"{BOARD}101 wakes on {UM.human_date(day(7))}" in _e.getvalue(), _e.getvalue()[-500:])
 check("13 an already due item that appeared after the first plan stops the write: exit 1, no file changed, no undo file", rcA == 1 and "changed while the plan was being read" in _e.getvalue() and {k: v for k, v in snapshot().items() if k != "99.json"} == snap13 and not list(run4.glob("*/undo.json")), (rcA, _e.getvalue()[-300:]))
 _e = io.StringIO()
 with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
@@ -494,7 +494,7 @@ sent.clear()
 st_, d_ = call(op="until", items=[f"g{i}" for i in (102, 103, 104, 105)], dry=True)
 r14 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
 check("14 a hold kept by a recycle with a past ask_by and no kind (nothing read that date) is listed as already due and not rewritten", r14[102]["action"] == "kept" and r14[102]["due"] is True and r14[102]["how"] == "never watched" and "already due" in r14[102]["why"], r14[102])
-check("14 …with a future ask_by it is rewritten and listed as newly watched, never watched before", r14[103]["action"] == "would_set" and r14[103]["newly"] == day(8) and r14[103]["how"] == "never watched" and UM.watch_lines([r14[103]])[1] == [f"{BOARD}103 wakes on {day(8)} (never watched)"], r14[103])
+check("14 …with a future ask_by it is rewritten and listed as newly watched, never watched before", r14[103]["action"] == "would_set" and r14[103]["newly"] == day(8) and r14[103]["how"] == "never watched" and UM.watch_lines([r14[103]])[1] == [f"{BOARD}103 wakes on {UM.human_date(day(8))} (never watched)"], r14[103])
 check("14 a hold with a wake is consumed by the old wake pass: it is neither listed as due nor as newly watched, whatever the date", r14[104]["action"] in ("would_set", "refused") and not r14[104]["due"] and not r14[104]["newly"], r14[104])
 check("14 a wake beside an after link is listed as previously only a notice", r14[105]["action"] == "would_set" and r14[105]["newly"] == day(5) and r14[105]["how"] == "previously only a notice", r14[105])
 st_, d_ = call(op="until", items=["g102", "g103"])
@@ -544,6 +544,153 @@ with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(_o):
 check("15 an item the write leaves because its planned date came due is left over: exit 3, named, the file unchanged", rcP == 3 and f"{BOARD}150" in _e.getvalue() and mt(150).get("until") is None and mt(150).get("ask_by") == day(-3) and '"left_by_the_write"' in _o.getvalue(), (rcP, _e.getvalue()[-400:]))
 shutil.rmtree(run6, ignore_errors=True)
 CFGM["migration"] = False
+
+# ---- 16. the review lows: left-over class, undo of a closed item, stall, hold_set, padded dates, differing releases, dates in words, the run's lock, prune, watch_reason, conflicts
+CFGM["migration"] = True
+for f in (T / "store").glob("*/*.json"): f.unlink()
+import fcntl
+def new_run(tag): return pathlib.Path(_scratch.mkdtemp(prefix=f"untilmig-{tag}-"))
+def run_args(run, **kw): return argparse.Namespace(sender=SENDER, run_dir=str(run), undo="", plan="", allow_changed_plan=False, store="", **kw)
+def quiet(fn, a, app=None):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = fn(a, app or DirectApp())
+    try: return rc, json.loads(out.getvalue()), err.getvalue()
+    except ValueError: return rc, out.getvalue(), err.getvalue()
+def close_file(i):
+    d = raw(i); d["status"] = "completed"; d["metadata"] = {k: v for k, v in d["metadata"].items() if k not in ("wake", "until", "hold", "hold_set", "wait_kind")}
+    (T / f"store/g/{i}.json").write_text(json.dumps(d, ensure_ascii=False, indent=1))
+
+# 16.1 an item that closes between the plan and the write joins the left-over class
+put(201, needs=[BACK], hold=True, wake=day(3)); put(202, needs=[BACK], hold=True, wake=day(3)); put(205, needs=[BACK], hold=True, wake=day(3))
+class ClosingApp(DirectApp):
+    """A session closes item 202 after the plan was made and before the write."""
+    def call(self, body):
+        if body["op"] == "until" and not body.get("dry") and not getattr(self, "closed", False):
+            self.closed = True; close_file(202)
+        return super().call(body)
+run16 = new_run("r16")
+rc, o, e = quiet(UM.apply, run_args(run16), ClosingApp())
+check("16.1 an item closed between the plan and the write is left over, not a failure: exit 3, named, the others rewritten", rc == 3 and o["closed_since_the_plan"] == [BOARD + "202"] and o["results"] == {"set": 2, "closed since the plan": 1}
+      and mt(201).get("until") == day(3) and mt(205).get("until") == day(3) and raw(202)["status"] == "completed" and "closed since the plan" in e, (rc, o, e[-300:]))
+check("16.1 …its undo entry is final (refused), so the pass is not named unfinished and an undo skips it", [x["result"] for x in json.loads(pathlib.Path(o["undo"]).read_text())["items"] if x["shown"] == BOARD + "202"] == ["refused"] and UM.unfinished(run16) == [], None)
+
+# 16.2 the undo of an item that closed since: kept (exit 0), and the file is marked undone only when no item is unfinished
+put(206, needs=[BACK], hold=True, wake=day(3)); put(207, needs=[BACK], hold=True, wake=day(3))
+rc, o, _ = quiet(UM.apply, run_args(run16))
+undo16 = o["undo"]
+close_file(207)
+rc, u, _ = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run16)), "undo": undo16}))
+check("16.2 an item closed since the pass is kept like one a later save changed: exit 0, listed apart, the others put back", rc == 0 and u["results"] == {"set": 1, "kept": 1} and u["kept_because_closed_since_the_pass"] == [BOARD + "207"] and not u["kept_because_a_later_save_changed_them"]
+      and mt(206).get("wake") == day(3) and "until" not in mt(206) and raw(207)["status"] == "completed", (rc, u))
+check("16.2 …and the undo file is marked undone, in Seoul time with the zone named", json.loads(pathlib.Path(undo16).read_text()).get("undone", "").endswith(" KST"), json.loads(pathlib.Path(undo16).read_text()).get("undone"))
+put(208, needs=[BACK], hold=True, wake=day(3))
+rc, o, _ = quiet(UM.apply, run_args(run16)); undo_b = o["undo"]
+(T / "store/g/208.json").unlink()
+rc, u, e = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run16)), "undo": undo_b}))
+check("16.2 an entry the server refuses (no such item) is a failure: exit 1, and the undo file is NOT marked undone while it is unfinished", rc == 1 and u["results"].get("refused") == 1 and not json.loads(pathlib.Path(undo_b).read_text()).get("undone") and "not marked undone" in e, (rc, u, e[-200:]))
+
+# 16.3 stall: the keys of stall other than the log stay, a stall that is not an object is left alone, and the undo gives back the exact value
+STALL3 = {"log": [{"at": now0 - 50, "text": "an earlier step"}], "paused_by": "a session", "marks": {"k": 1}}
+put(209, needs=[BACK], hold=True, wake=day(3), stall=copy.deepcopy(STALL3)); put(211, needs=[BACK], hold=True, wake=day(3), stall="not an object")
+run_s = new_run("stall")
+rc, o, _ = quiet(UM.apply, run_args(run_s))
+st209, st211 = mt(209)["stall"], mt(211).get("stall")
+check("16.3 the pass keeps the other keys of stall and adds its one line to the log", st209["paused_by"] == "a session" and st209["marks"] == {"k": 1} and [x["text"] for x in st209["log"]][0] == "an earlier step" and len(st209["log"]) == 2 and "rewritten as until" in st209["log"][-1]["text"], st209)
+check("16.3 a stall that is not an object is not touched, and the wait is still rewritten (no History line for it)", st211 == "not an object" and mt(211).get("until") == day(3), (st211, wk(mt(211))))
+quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run_s)), "undo": o["undo"]}))
+check("16.3 the undo gives back the exact stall value of each (the extra keys, the string)", mt(209).get("stall") == STALL3 and mt(211).get("stall") == "not an object" and mt(209).get("wake") == day(3), (mt(209).get("stall"), mt(211).get("stall")))
+
+# 16.4 hold_set stays on a hold + wake item (who set the hold, and when), through the pass and the undo
+HS = {"at": now0 - 3 * DAY, "by": BACK}
+put(212, needs=[BACK], hold=True, wake=day(3), hold_set=HS)
+rc, o, _ = quiet(UM.apply, run_args(run_s))
+check("16.4 the pass keeps hold_set when it removes the hold", mt(212).get("hold_set") == HS and "hold" not in mt(212) and mt(212).get("until") == day(3), wk(mt(212)))
+quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run_s)), "undo": o["undo"]}))
+check("16.4 …and the undo leaves it as it was", mt(212).get("hold_set") == HS and mt(212).get("hold") is True and "until" not in mt(212), wk(mt(212)))
+
+# 16.5 a reason bound to a date with spaces around it would be orphaned once the clean date is stored: listed, not rewritten; with no reason the padded date is rewritten
+PAD = f" {day(4)} "
+put(213, needs=[BACK], hold=True, wake=PAD, wait_basis={"text": "the vendor ships then", "wake": PAD, "by": BACK, "at": now0}); b213 = bytes_of(213)
+put(214, needs=[BACK], hold=True, wake=PAD)
+st_, d_ = call(op="until", items=["g213", "g214"])
+r5 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
+check("16.5 a reason bound to a padded date is kept and listed (the file is untouched)", r5[213]["action"] == "kept" and "spaces around" in r5[213]["why"] and bytes_of(213) == b213, (r5[213]["action"], r5[213].get("why")))
+check("16.5 …a padded date with no reason is rewritten to the clean date", r5[214]["action"] == "set" and mt(214).get("until") == day(4), (r5[214]["action"], r5[214].get("why"), wk(mt(214))))
+OKB = UP.plan_for({"hold": True, "wake": day(4), "wait_basis": {"text": "x", "wake": day(4), "by": BACK, "at": now0}})
+check("16.5 …and a reason bound to the very clean date still migrates (no regression)", OKB["edits"].get("until") == day(4) and not OKB["listed"], OKB)
+
+# 16.6 a hold + wake whose release differs from the old wake pass's is listed in the plan (migrated, not held back), past or future
+put(215, needs=[OWN], hold=True, wake=day(3)); put(216, needs=[BACK], hold=True, wake=day(3), post_wake_mover="home-other"); put(217, needs=[BACK], hold=True, wake=day(3))
+st_, d_ = call(op="until", items=["g215", "g216", "g217"], dry=True)
+r6 = {int(r["item"].split("#")[1]): r for r in d_["results"]}
+check("16.6 needs naming the owner, and a post_wake_mover that is not the one session in needs, are listed with how the release differs; a plain hold + wake is not", r6[215]["action"] == "would_set" and "owner" in r6[215]["differs"] and r6[216]["action"] == "would_set" and "post_wake_mover home-other" in r6[216]["differs"]
+      and r6[217]["differs"] == "", {i: (r6[i]["action"], r6[i]["differs"]) for i in r6})
+check("16.6 …the plan lists them (one line each), and the signature carries them so a change stops the apply", len(UM.differ_lines(list(r6.values()))) == 2 and UM.signature(list(r6.values())) != UM.signature([{**r, "differs": ""} for r in r6.values()]), UM.differ_lines(list(r6.values())))
+check("16.6 …past or future alike: the pure test does not read the date's side", UP.release_differs({"hold": True, "wake": day(-4), "needs": [OWN]}, server._model.is_owner) != "" and UP.release_differs({"wake": day(3), "needs": [OWN]}, server._model.is_owner) == "", None)
+_e = io.StringIO()
+with contextlib.redirect_stderr(_e), contextlib.redirect_stdout(io.StringIO()):
+    UM.say_watch(list(r6.values()))
+check("16.6 the apply says so before it writes", "release differs: 2 items" in _e.getvalue(), _e.getvalue())
+
+# 16.7 dates a person reads are in the rulebook's form; machine fields stay ISO
+check("16.7 human_date: weekday, three-letter month, ordinal day (st, nd, rd, th and the teens), the time of day when the date has one", [UM.human_date(x) for x in ("2026-11-24", "2026-11-01", "2026-11-12", "2026-11-23", "2026-11-13", "2026-11-11", "2026-11-24T14:30")]
+      == ["Tue Nov 24th", "Sun Nov 1st", "Thu Nov 12th", "Mon Nov 23rd", "Fri Nov 13th", "Wed Nov 11th", "Tue Nov 24th 14:30"] and UM.human_date("not a date") == "not a date", None)
+check("16.7 the lists a person reads use it; the signature and the JSON rows keep the ISO date", UM.watch_lines([{"item": BOARD + "1", "action": "would_set", "newly": "2026-11-24", "how": "never watched"}])[1] == [BOARD + "1 wakes on Tue Nov 24th (never watched)"]
+      and UM.signature([{"item": BOARD + "1", "action": "would_set", "newly": "2026-11-24", "how": "never watched"}])[0][2] == "2026-11-24", None)
+check("16.7 the stamps of a run are Seoul time with the zone named", UM.kst_stamp().endswith(" KST") and re.fullmatch(r"[A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th) \d\d:\d\d KST", UM.kst_stamp()) is not None
+      and json.loads(pathlib.Path(o["undo"]).read_text())["when"].endswith(" KST"), (UM.kst_stamp(), json.loads(pathlib.Path(o["undo"]).read_text())["when"]))
+
+# 16.8 the run directory's lock, a refused whole batch, the prune of old pass folders, --store with --apply
+for f in (T / "store").glob("*/*.json"): f.unlink()      # only this item is a candidate below
+run_l = new_run("lock"); put(218, needs=[BACK], hold=True, wake=day(3)); b218 = bytes_of(218)
+os.makedirs(run_l, exist_ok=True); lock_fd = os.open(run_l / ".lock", os.O_RDWR | os.O_CREAT, 0o600); fcntl.flock(lock_fd, fcntl.LOCK_EX)
+rc, o, e = quiet(UM.apply, run_args(run_l))
+check("16.8 a second --apply on a locked run directory does nothing: exit 1, says why, no file changed", rc == 1 and "another --apply or --undo is running" in e and bytes_of(218) == b218 and not list(run_l.glob("*/undo.json")), (rc, e[-200:]))
+fcntl.flock(lock_fd, fcntl.LOCK_UN); os.close(lock_fd)
+class RefusingApp(DirectApp):
+    def call(self, body):
+        if body["op"] == "until" and not body.get("dry"): return 400, {"error": "Refused: the whole batch"}
+        return super().call(body)
+rc, o, e = quiet(UM.apply, run_args(run_l), RefusingApp())
+uf = json.loads(pathlib.Path(o["undo"]).read_text())
+check("16.8 a refused whole batch is recorded in the undo file (the server wrote none of it): exit 1, no entry left without a result, the pass not named unfinished", rc == 1 and [x["result"] for x in uf["items"]] == ["batch refused"] and UM.unfinished(run_l) == [] and bytes_of(218) == b218, (rc, uf["items"]))
+rc, u, _ = quiet(UM.undo, argparse.Namespace(**{**vars(run_args(run_l)), "undo": o["undo"]}))
+check("16.8 …and its undo has nothing to put back", rc == 0 and u["results"] == {}, (rc, u))
+rc, o, e = quiet(UM.apply, run_args(run_l))
+check("16.8 the lock is let go at the end: the next --apply works", rc == 0 and o["results"] == {"set": 1} and mt(218).get("until") == day(3), (rc, o))
+run_p = new_run("prune"); fake_store = new_run("fakestore")
+old_names = [f"2020010{n}-000000-aaaaa{n}" for n in range(1, 9)]
+for n in old_names: (run_p / n / "items").mkdir(parents=True)
+(run_p / "notes").mkdir(); (run_p / "20200101-000000-zzzzzz").mkdir(); os.symlink(str(fake_store), str(run_p / "20190101-000000-bbbbbb"))      # a folder not named like a pass, one with a wrong name, and a link
+recent = SP.new_pass_id(); (run_p / recent).mkdir()
+gone = UM.prune_runs(run_p, T / "store")
+check("16.8 the prune removes the pass folders older than 60 days beyond the newest five, and only those", gone == old_names[:4] and sorted(p.name for p in run_p.iterdir() if UM.PASS_DIR_RX.fullmatch(p.name) and not p.is_symlink() and p.name != "20200101-000000-zzzzzz") == sorted(old_names[4:] + [recent]), gone)
+check("16.8 …nothing else in the run directory is touched (a folder with another name, the link and what it points at)", (run_p / "notes").is_dir() and (run_p / "20190101-000000-bbbbbb").is_symlink() and (run_p / "20200101-000000-zzzzzz").is_dir() and fake_store.is_dir(), None)
+inside = new_run("prune2"); (inside / "20200101-000000-cccccc").mkdir()
+check("16.8 …and a folder that is, holds or lies inside the live store is never removed", UM.prune_runs(inside, inside / "20200101-000000-cccccc") == [] and UM.prune_runs(inside, inside) == [] and (inside / "20200101-000000-cccccc").is_dir()
+      and UM.prune_runs(new_run("prune3"), T / "store") == [], None)
+for opt in ("--apply", "--undo=x.json"):
+    pr = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/until_migrate.py"), opt, "--sender", "x", "--store", str(T / "store")], capture_output=True, text=True)
+    check(f"16.8 --store with {opt.split('=')[0]} is refused with a message (it would be ignored)", pr.returncode == 2 and "--store is for the dry run only" in pr.stderr, (pr.returncode, pr.stderr[-200:]))
+
+# 16.9 a front agent's watch_reason goes with the wake when the watchers end the wait (the old wake pass dropped it)
+REASON = "no push reaches this session for the vendor"
+put(219, needs=[BACK], wait_kind="time", until=day(-1), watch_reason=REASON)
+put(221, needs=["external"], wait_kind="relay", until=day(-1), watch_reason=REASON, post_wake_mover=BACK)
+woke16 = server._wake_pass()
+check("16.9 the watchers end a time wait and a relay's ask-by day and take watch_reason with them", {"g219", "g221"} <= set(woke16) and "watch_reason" not in mt(219) and "watch_reason" not in mt(221) and "until" not in mt(219), (woke16, wk(mt(219)), wk(mt(221))))
+check("16.9 …the list of what the end of a wait clears names it (one list for the watcher's arrival and the owner's Done)", "watch_reason" in WK_.LIVE_DROP and "watch_reason" in WK_.DATE_DROP, None)
+
+# 16.10 the reading check compares the model's conflicts: a hold + wake + kind time with no stored state would show a new conflict once the hold is gone, so it is refused and left
+put(222, needs=[BACK], wait_kind="time", hold=True, wake=day(3)); b222 = bytes_of(222)
+st_, d_ = call(op="until", items=["g222"])
+check("16.10 hold + wake + wait_kind time on an item that reads as doing without the hold is refused for the conflict it would show, and left untouched", d_["results"][0]["action"] == "refused" and "conflicts:" in d_["results"][0]["why"] and "which is alive" in d_["results"][0]["why"] and bytes_of(222) == b222, d_["results"][0])
+r0_, r1_ = {"pair": 1, "mover": "", "held": False, "stamp": [], "date": "", "watched": False, "conflicts": ["a"]}, {"pair": 1, "mover": "", "held": False, "stamp": [], "date": "", "watched": False, "conflicts": ["a", "b"]}
+check("16.10 same(): a new conflict is a difference; the same ones, or fewer, are not", "conflicts" in UP.same(r0_, r1_) and UP.same(r1_, r0_) == "" and UP.same(r0_, r0_) == "", UP.same(r0_, r1_))
+CFGM["migration"] = False
+CFGM["migration"] = False
 shutil.rmtree(tmp, ignore_errors=True); shutil.rmtree(RUN, ignore_errors=True); shutil.rmtree(RUN2, ignore_errors=True)
+for d in (run16, run_s, run_l, run_p, fake_store, inside): shutil.rmtree(d, ignore_errors=True)
 print(f"ok: until migrate scenario, {len(ran)} checks" if not fails else f"FAILED: {len(fails)} of {len(ran)}")
 sys.exit(1 if fails else 0)
