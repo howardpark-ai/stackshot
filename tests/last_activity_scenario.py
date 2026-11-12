@@ -19,7 +19,7 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
      stranger's comment on an anchored pull request and on an issue the item's words name; a fork's, a deleted fork's and a nameless CI result); a merge is not filtered
   10 the line's time is the event's own when it can be read and is within the window (a backlog is not now); absent or unreadable falls back to the hub's; outside the window writes no line
   11 History: a confirm and a last-activity stamp saved in one window still show the `confirm` line (both renderers)
-  13 what counts as a time (a number: a bool or a string is torn), the band at the hour (exactly 60 minutes is amber), a stored time ahead of the reader's clock (no record), the one-second boundary
+  14 what counts as a time (a number: a bool or a string is torn), the band at the hour (exactly 60 minutes is amber), a stored time ahead of the reader's clock (no record), the one-second boundary
 
     tests/run-suite last_activity       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging, io, math
@@ -792,27 +792,43 @@ hub_.emit(ci_old[0])
 rows12b, _ = EL.read(0)
 check("12 end to end: the CI line is stamped at the check run's completion, so a backlog is not now", len(rows12b) == 1 and rows12b[0]["kind"] == "ci_failed" and abs(rows12b[0]["ts"] - (t12 - 2 * H)) < 2, rows12b)
 
-# ================================================================ 13. what counts as a time: a number only; the band at the hour; a stored time ahead of the reader's clock
-SIG13 = {"kind": "comment", "what": "x"}
-check("13 clean: a bool, a string (digits or not), a list, bytes and a dict are no time; an int and a float are", all(LA.clean({"at": v, **SIG13}) is None for v in (True, False, "123", "1e9", " 5 ", [5], (5,), b"5", None, {"x": 1}))
-      and LA.clean({"at": 5, **SIG13})["at"] == 5.0 and LA.clean({"at": 5.5, **SIG13})["at"] == 5.5, [LA.clean({"at": v, **SIG13}) for v in (True, "123")])
-check("13 record, read, apply and the signal builders skip a bool or a string as the time, as for any torn candidate",
-      LA.record({"metadata": {}}, [{"at": True, **SIG13}, {"at": "123", **SIG13}]) is None and LA.read({"metadata": {"last_activity": {"at": True, **SIG13}}}) is None and LA.read({"metadata": {"last_activity": {"at": "123", **SIG13}}}) is None
+# ================================================================ 13. the item's own words include a step's status tag: a merge whose pull request is named only there ties, and the tick records pr_merged
+def tagged(text): return step("home-peer: do the thing", "open") | {"tag": {"text": text, "state": "in progress", "ts": now0}}
+put(460, steps=[tagged("PR 260 released; PR 261 in review")])
+put(461, next="home-peer: land PR #262 and check it")
+put(462, project="projects/beta", steps=[tagged("PR 263 in review")])      # the number alone in a tag, in a project that holds no anchor in the repository: not tied
+put(463, steps=[step("home-peer: do the thing", "open"), step("home-peer: an earlier step", "done") | {"tag": {"text": "PR 264 released", "state": "done", "ts": now0}}])      # a finished step keeps its tag: stale, ties nothing
+put(464, steps=[tagged("PR 264 released")])      # the same tag on an open step ties
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/9999"}]}))      # an anchor in the repository for no item: a bare number in an item of the project speaks of that repository
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+emit(261, "pr_merged", "alice", 100 * MIN); emit(262, "pr_merged", "alice", 101 * MIN); emit(263, "pr_merged", "alice", 102 * MIN); emit(264, "pr_merged", "alice", 103 * MIN)
+saved = ev_pass(now0 + 110 * MIN)
+check("13 a merge whose pull request is named only in a step's tag (a460, PR 261) or on a line of the item's next (a461, PR 262) is tied: the tick records pr_merged at the merge, with the pull request in the words",
+      sorted(saved) == ["a460", "a461", "a464"] and lk(460) == "pr_merged" and la(460) == {"at": now0 + 100 * MIN, "what": "PR 261 merged"} and lk(461) == "pr_merged" and la(461) == {"at": now0 + 101 * MIN, "what": "PR 262 merged"}, (saved, la(460), la(461)))
+check("13 …and a bare number in a tag of an item whose project holds no anchor in that repository (a462, PR 263) is not tied: nothing is recorded", la(462) is None, la(462))
+check("13 …nor is a tag on a done step (a463, PR 264): only the tag of an open step counts, as the same tag on an open step (a464) ties", la(463) is None and lk(464) == "pr_merged" and la(464)["what"] == "PR 264 merged", (la(463), la(464)))
+
+# ================================================================ 14. what counts as a time: a number only; the band at the hour; a stored time ahead of the reader's clock
+SIG14 = {"kind": "comment", "what": "x"}
+check("14 clean: a bool, a string (digits or not), a list, bytes and a dict are no time; an int and a float are", all(LA.clean({"at": v, **SIG14}) is None for v in (True, False, "123", "1e9", " 5 ", [5], (5,), b"5", None, {"x": 1}))
+      and LA.clean({"at": 5, **SIG14})["at"] == 5.0 and LA.clean({"at": 5.5, **SIG14})["at"] == 5.5, [LA.clean({"at": v, **SIG14}) for v in (True, "123")])
+check("14 record, read, apply and the signal builders skip a bool or a string as the time, as for any torn candidate",
+      LA.record({"metadata": {}}, [{"at": True, **SIG14}, {"at": "123", **SIG14}]) is None and LA.read({"metadata": {"last_activity": {"at": True, **SIG14}}}) is None and LA.read({"metadata": {"last_activity": {"at": "123", **SIG14}}}) is None
       and LA.signal("comment", True, "x") is None and LA.signal("comment", "9", "x") is None and LA.pr_candidate("comment", 3, True, 100.0) is None and LA.pr_candidate("comment", 3, "9", 100.0) is None and LA.update_signal("a", "b", True) is None and LA.audit_signal("a pane in a turn", "9") is None, None)
-st13 = {"status": "open", "metadata": {"last_activity": {"at": True, **SIG13}}}
-check("13 apply: a stored record whose time is a bool is replaced by the next real signal, whatever its time", LA.apply(st13, [{"at": 3, **SIG13}]) and st13["metadata"]["last_activity"]["at"] == 3.0, st13)
-check("13 band at the hour: 44m 59.999s ok, 45m warn, exactly 1h warn, 1h and a millisecond bad (strictly more than 60 minutes); the constants are 45 and 60 minutes",
+st14 = {"status": "open", "metadata": {"last_activity": {"at": True, **SIG14}}}
+check("14 apply: a stored record whose time is a bool is replaced by the next real signal, whatever its time", LA.apply(st14, [{"at": 3, **SIG14}]) and st14["metadata"]["last_activity"]["at"] == 3.0, st14)
+check("14 band at the hour: 44m 59.999s ok, 45m warn, exactly 1h warn, 1h and a millisecond bad (strictly more than 60 minutes); the constants are 45 and 60 minutes",
       LA.band(2699.999) == LA.OK and LA.band(2700) == LA.WARN and LA.band(3599.999) == LA.WARN and LA.band(3600) == LA.WARN and LA.band(3600.001) == LA.BAD and LA.band(0) == LA.OK and LA.BAND_WARN_S == 2700 and LA.BAND_BAD_S == 3600,
       [LA.band(x) for x in (2699.999, 2700, 3600, 3600.001)])
-NOW13 = 1_000_000.0
-rec13 = lambda at_: {"metadata": {"last_activity": {"at": at_, **SIG13}}}
-check("13 the reader: a stored time ahead of now by more than the skew is no record in read, at and age_s; exactly the skew ahead, and a second less, read as just now; without a `now` the record reads as stored",
-      LA.read(rec13(NOW13 + LA.SKEW_S + 1), NOW13) is None and LA.at(rec13(NOW13 + LA.SKEW_S + 1), NOW13) == 0.0 and LA.age_s(rec13(NOW13 + LA.SKEW_S + 1), NOW13) is None
-      and LA.age_s(rec13(NOW13 + LA.SKEW_S), NOW13) == 0.0 and LA.age_s(rec13(NOW13 + 1), NOW13) == 0.0 and LA.age_s(rec13(NOW13 - 90), NOW13) == 90.0 and LA.read(rec13(NOW13 + LA.SKEW_S + 1))["at"] == NOW13 + LA.SKEW_S + 1, None)
-check("13 the skew is the window an event's own time is allowed (event_log.AHEAD_S), one number for both", LA.SKEW_S == EL.AHEAD_S == 3600.0, (LA.SKEW_S, EL.AHEAD_S))
-check("13 the one-second boundary: a candidate one second after now is read as now, one at now is kept; a stored record one second after now is ignored, one at now is kept (the newest wins only against a record that happened)",
-      LA.record({"metadata": {}}, [{"at": NOW13 + 1, **SIG13}], NOW13)["at"] == NOW13 and LA.record({"metadata": {}}, [{"at": NOW13, **SIG13}], NOW13)["at"] == NOW13
-      and LA.record(rec13(NOW13 + 1), [{"at": NOW13 - 5, **SIG13}], NOW13)["at"] == NOW13 - 5 and LA.record(rec13(NOW13), [{"at": NOW13 - 5, **SIG13}], NOW13)["at"] == NOW13, None)
+NOW14 = 1_000_000.0
+rec14 = lambda at_: {"metadata": {"last_activity": {"at": at_, **SIG14}}}
+check("14 the reader: a stored time ahead of now by more than the skew is no record in read, at and age_s; exactly the skew ahead, and a second less, read as just now; without a `now` the record reads as stored",
+      LA.read(rec14(NOW14 + LA.SKEW_S + 1), NOW14) is None and LA.at(rec14(NOW14 + LA.SKEW_S + 1), NOW14) == 0.0 and LA.age_s(rec14(NOW14 + LA.SKEW_S + 1), NOW14) is None
+      and LA.age_s(rec14(NOW14 + LA.SKEW_S), NOW14) == 0.0 and LA.age_s(rec14(NOW14 + 1), NOW14) == 0.0 and LA.age_s(rec14(NOW14 - 90), NOW14) == 90.0 and LA.read(rec14(NOW14 + LA.SKEW_S + 1))["at"] == NOW14 + LA.SKEW_S + 1, None)
+check("14 the skew is the window an event's own time is allowed (event_log.AHEAD_S), one number for both", LA.SKEW_S == EL.AHEAD_S == 3600.0, (LA.SKEW_S, EL.AHEAD_S))
+check("14 the one-second boundary: a candidate one second after now is read as now, one at now is kept; a stored record one second after now is ignored, one at now is kept (the newest wins only against a record that happened)",
+      LA.record({"metadata": {}}, [{"at": NOW14 + 1, **SIG14}], NOW14)["at"] == NOW14 and LA.record({"metadata": {}}, [{"at": NOW14, **SIG14}], NOW14)["at"] == NOW14
+      and LA.record(rec14(NOW14 + 1), [{"at": NOW14 - 5, **SIG14}], NOW14)["at"] == NOW14 - 5 and LA.record(rec14(NOW14), [{"at": NOW14 - 5, **SIG14}], NOW14)["at"] == NOW14, None)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
