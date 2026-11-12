@@ -34,7 +34,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import reprlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -61,11 +60,8 @@ def offset_path() -> Path:
 
 
 def shown(x: Any) -> str:
-    """A bounded look at anything for a log line (reprlib limits the depth and each part, so a huge or hostile line never builds a huge string); never raises."""
-    try:
-        return reprlib.repr(x)[:160]
-    except Exception:  # noqa: BLE001
-        return f"<{x.__class__.__name__}>"
+    """A bounded look at anything for a log line: merge_log.shown with this log's longer cap (160)."""
+    return _ml.shown(x, 160)
 
 
 def kinds_of(etype: Any) -> list[str]:
