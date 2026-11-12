@@ -1,9 +1,12 @@
 """anchorhub.gworkspace — Google Drive and Gmail: push channels (Drive changes.watch, Gmail Pub/Sub) with cursor polling behind them."""
-import json, os, re, glob, hmac, queue, threading, time, uuid
+import json, os, glob, hmac, queue, threading, time, uuid
+from stackshot.anchors import gmail_query as _gq
 from .core import Hub, HEALTH, HOOK_URL, WATCHES, _anc, _cfg, _ts, guarded_loop, log, now_iso, now_iso_at, read_env, transient
 
 GDIR = str(_cfg.secrets("anchor-hub", "google"))
 ROUTES = ("/hook/drive", "/hook/gmail")   # the webhooks this receiver registers in run(); anchor-hub answers them 503, not 404, while its start is being retried
+HISTORY_PAGE = 500    # records asked of Gmail's history.list per call (its largest page)
+HISTORY_PAGES = 10    # calls per mailbox per poll: 5000 records; a busier mailbox is read on in the next poll from where this one stopped
 GPOLL = 5   # s; fallback only — used while push for that account is unavailable
 def _gmail_poll() -> int: return int(_cfg.get("anchor_hub", "gmail_poll_seconds") or 300)  # s; a mailbox whose watch Google refuses is polled for good (an account with no Pub/Sub topic
                                                                          # to push to), so not at the fallback's pace
@@ -11,7 +14,7 @@ def mailbox_labels(emails) -> dict:
     """{label: address} of the mailboxes given by address: a mailbox is named by the label [anchor_hub] gmail_names gives its address
     ({ work = "ada@example.com" }), else by the address itself. A Gmail anchor scopes itself to mailboxes by these names (gmail:q@work:from:x)."""
     cfg = _cfg.get("anchor_hub", "gmail_names") or {}
-    given = {str(v).strip().lower(): str(k).strip() for k, v in cfg.items() if _cfg.GMAIL_LABEL.match(str(k).strip()) and str(v).strip()} if isinstance(cfg, dict) else {}
+    given = {str(v).strip().lower(): str(k).strip() for k, v in cfg.items() if _cfg.GMAIL_LABEL.match(str(k).strip()) and _cfg.GMAIL_ADDR.match(str(v).strip())} if isinstance(cfg, dict) else {}   # the entries gmail_names_notes says are skipped
     return dict(sorted((given.get(e.lower(), e), e) for e in emails))      # by name: the anchors service's status file and the server's text agree on the order
 def query_hits(q_anchors, address: str, hdr: dict, boxes: dict) -> list:
     """The Gmail query anchors (`gmail:q:` and `gmail:q@…:` ids) that a mail with the headers `hdr`, which arrived in the mailbox at `address`, matches: the mailbox must
@@ -90,8 +93,9 @@ def run(hub: Hub):
         q = _anc.gmail_query(a_id)
         if q is not None:      # a query: named by its terms and the mailboxes it reads; a scope naming a mailbox that is gone reads nothing and says so
             bx = boxes(); labels, bad = _anc.gmail_mailboxes(a_id, bx)
-            if bad and not labels:
-                return {"title": _anc.gmail_title(a_id, bx), "url": "", "unreadable": "no mailbox of that name is read by the anchors service (" + ", ".join(bx) + ")"}
+            if q[0] is not None and not labels:       # a scope that reads nothing: its names are all gone, or it names none (a hand-made `gmail:q@:`)
+                return {"title": _anc.gmail_title(a_id, bx), "url": "",
+                        "unreadable": ("no mailbox of that name is read by the anchors service (" + ", ".join(bx) + ")") if bad else "its scope names no mailbox, so it reads nothing"}
             return {"title": _anc.gmail_title(a_id, bx), "url": ""}
         tid = a_id[6:]; refused = True
         for a in accounts:
@@ -151,15 +155,21 @@ def run(hub: Hub):
 
     def poll_gmail(a):
         if a["gmail"] is None: return
+        history, token = [], None
         try:
-            r = a["gmail"].users().history().list(userId="me", startHistoryId=a["hist"], historyTypes=["messageAdded"], maxResults=100).execute()
+            for _page in range(HISTORY_PAGES):       # history.list is paged: the first page alone loses the mail of a busy mailbox, whose cursor then jumps past it
+                r = a["gmail"].users().history().list(userId="me", startHistoryId=a["hist"], historyTypes=["messageAdded"], maxResults=HISTORY_PAGE,
+                                                      **({"pageToken": token} if token else {})).execute()
+                history += r.get("history", [])
+                token = r.get("nextPageToken")
+                if not token: break
         except Exception as e:
             if "404" in str(e):   # history expired → resync cursor
                 a["hist"] = a["gmail"].users().getProfile(userId="me").execute()["historyId"]
             else: raise
             return
         seen = set()
-        for h in r.get("history", []):
+        for h in history:
             for m in h.get("messagesAdded", []):
                 mid = m["message"]["id"]; tid = m["message"]["threadId"]
                 if mid in seen: continue
@@ -177,7 +187,10 @@ def run(hub: Hub):
                         "text": (msg.get("snippet") or "")[:140], "url": url, "ts": msg.get("internalDate")}
                 if hit_thread: hub.event(f"gmail:{tid}", summ, kind="gmail")
                 for qa in query_hits(q_anchors, a["email"], hdr, boxes()): hub.event(qa, summ, kind="gmail")
-        a["hist"] = r.get("historyId", a["hist"])
+        if token and history:      # more pages than one poll reads: go on from the last record read, and read the rest at once
+            a["hist"] = history[-1]["id"]
+            hub.triggers.put(("gmail", a["email"]))
+        else: a["hist"] = r.get("historyId", a["hist"])
 
     watches = {}
     try: watches = json.load(open(WATCHES))
@@ -323,15 +336,5 @@ def verify_google_oidc(token: str, audience: str) -> bool:
         log.warning("gmail hook: oidc verify failed: %s", str(e)[:120]); return False
 
 def header_match(q: str, hdr: dict) -> bool:
-    """gmail:q:<terms> — terms are from:<x> to:<x> cc:<x> subject:<x> person:<x> (person = from OR to OR cc).
-    A value runs until the next key:, so `subject:anchor test person:sam@x` is two terms; quotes are optional.
-    All terms must match (substring, case-insensitive). A bare word with no key matches the subject."""
-    terms = re.findall(r'\s*(?:(from|to|cc|subject|person):)?\s*("[^"]*"|[^\s"][^"]*?)(?=\s+(?:from|to|cc|subject|person):|$)', q.strip())
-    if not terms: return False
-    for k, v in terms:
-        v = v.strip().strip('"').lower(); k = k or "subject"
-        if not v: continue
-        if k == "person":
-            if not any(v in hdr.get(h, "").lower() for h in ("from", "to", "cc")): return False
-        elif v not in hdr.get(k, "").lower(): return False
-    return True
+    """gmail:q:<terms> against a mail's lower-cased headers: the grammar (terms, AND, OR, parentheses, key:(a OR b)) is stackshot/anchors/gmail_query.py's."""
+    return _gq.matches(q, hdr)

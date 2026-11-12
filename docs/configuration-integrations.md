@@ -48,7 +48,7 @@ The keys are grouped in three pages by what they set: [Configuration](configurat
 | `anchor_hub.quiet_max_hold` | `10800` | A burst that never goes quiet still reports this often (s). | |
 | `anchor_hub.gmail_poll_seconds` | `300` | How often a mailbox Google will not push for is read. | |
 | `anchor_hub.gmail_topics` | `{}` | Per account, the Pub/Sub topic in its OAuth client's own Cloud project. | if used |
-| `anchor_hub.gmail_names` | `{}` | Per mailbox, the short name a Gmail anchor scopes itself by (`gmail:q@work:from:x`), `{ work = "user@example.com" }`; a mailbox with no name is scoped by its address and is left out of an anchor's title. A name is letters, digits, `.`, `_` and `-`; the mailbox names of a scope are separated by commas with no space (`gmail:q@work,home:from:x`, a space is refused when the anchor is added). A skipped entry, two names that differ only in case and two names for one address are logged at the start and on a reload. | |
+| `anchor_hub.gmail_names` | `{}` | Per mailbox, the short name a Gmail anchor scopes itself by (`gmail:q@work:from:x`), `{ work = "user@example.com" }`. A mailbox with no name is scoped by its address. An unscoped anchor's title names the mailboxes only when every mailbox has a name; a scoped anchor's title shows the names (or addresses) it was written with. A name is letters, digits, `.`, `_` and `-`; the names of a scope are separated by commas with no space (`gmail:q@work,home:from:x`, a space is refused when the anchor is added), and a scope is a set: `work,home` and `home,work` are one anchor. A skipped entry, two names that differ only in case (a scope that spells one exactly reads that mailbox) and two names for one address (the last one wins) are logged at the start and on a reload. | |
 | `anchor_hub.google_oauth_envs` | `{}` | For `stackshot/anchors/anchor_hub_google_auth.py`: label to an `oauth.env` with the Google client id and secret. | if used |
 | `pilot.waiting_minutes` | `60` | A notice without a ruling this long is flagged on the board. | |
 | (no key) | | Since an earlier change there is no digest of automatic rulings and no `pilot.digest_hour`. A green `release.sh` result, which is logged and not delivered (the turn rule's second build): a routing-log line with no recipient and `"log_only": true`, ruled `merged` at once, and a server comment on the open items anchored to the PR. Only `release.sh`'s own report takes that path: the sender exactly `release` and a PR of the checkout's own repository (its `origin` remote). A green flag from any other sender, or with no PR, a malformed one or another repository's, is delivered as before. Only the automatic rulings are log-only: a red release, a page debt, a board relay and every other notice keep their own path and timing. An item waiting on the PR is closed by its `pr_merged` check, which releases the items `after` it, as before. Always on, and kept on the project's routing page. | |
@@ -97,3 +97,27 @@ The keys are grouped in three pages by what they set: [Configuration](configurat
 | `client.recycle_env_prefix` | `""` | `stackshot/fleet/client.py recycled` (the fleet tool's end-of-recycle hook) reads a flag it is not given from `<prefix>KIND`, `STARTED`, `FLAG_AT`, `RESULT` and `SKIPPED` in the environment (sala's: `"SALA_RECYCLE_"`; sala calls the hook once per cleared recycle flag, and `FLAG_AT`, that flag's time, makes the call cover the items flagged at or before it). `""`: the flags only. Contract: [4, Post-recycle hook](https://github.com/howardpark-ai/salamander/blob/main/docs/stackshot-contracts.md#4-post-recycle-hook). | if used |
 | `client.session_ttl_hours` | `12` | A session registered by a hook on a machine with no puller is forgotten after this long without a sign of life. | |
 | `server.host`, `.port`, `.path` | `"127.0.0.1"`, `8020`, `"/mcp"` | Where the server listens and where the connector is served. | |
+
+## Gmail query anchors: the query
+
+An anchor `gmail:q:<query>` (every mailbox the anchors service reads) or `gmail:q@<mailbox>[,<mailbox>]:<query>` (only those) tells a project's agents about each new mail whose headers match the query. The mailbox scope is described under `anchor_hub.gmail_names` above; this section is the query.
+
+**Terms.** A term is `key:value` with a key of `from`, `to`, `cc`, `subject` or `person` (`person` is from, to or cc), or a bare value, which is a subject term. A value is a quoted phrase or the words up to the next key, operator or parenthesis, so `subject:anchor test person:sam@example.com` is two terms and `subject:quarterly numbers` looks for the phrase "quarterly numbers". A term matches when the header contains the value, in any case. Keys are lowercase.
+
+**Combining terms.**
+
+| Write | Meaning |
+|---|---|
+| `from:a subject:b` or `from:a AND subject:b` | both must match (a space is an AND wherever a key, a quoted phrase or a parenthesis starts a new term; plain words run together are one phrase) |
+| `from:a OR from:b` | either |
+| `( ... )` | grouping |
+| `from:(a OR b)` | the key applies to every term in the group: the same as `from:a OR from:b` (no other key may appear inside) |
+| `"a b"` | a quoted phrase, for text that holds a parenthesis, a colon, a quotation mark or the words OR and AND |
+
+AND binds tighter than OR: `from:a OR from:b subject:x` is `from:a OR (from:b AND subject:x)`. Write parentheses when it matters; the add reply shows how the query was read. `OR` and `AND` are operators only in capitals (Gmail's rule); `or` and `and` are ordinary words. There is no negation (a leading `-`) and no other Gmail operator (`label:`, `has:`, `after:`, `in:`, ...); `{a b}` is not supported either, write `a OR b`.
+
+**An unsupported query is refused when it is added**, with one line naming what is wrong, and nothing is stored: a parenthesis or quotation mark that is never closed, a closing parenthesis with no opening one, `OR` or `AND` with nothing on one side, empty parentheses or an empty quoted phrase, a key with no value, a key inside `key:( )`, negation, `{ }`, a Gmail operator the matcher cannot read, any other `word:value` that is not one of the five keys (put it in quotation marks to match it as text), and a parenthesis or quotation mark glued to a word. An anchor stored before the grammar whose text the grammar refuses keeps the meaning it always had (every term must match, a value runs to the next key).
+
+Examples: `gmail:q:from:(billing@example.com OR accounts@example.com) subject:invoice`, `gmail:q@work:(subject:report OR subject:summary) cc:sam@example.com`, `gmail:q:subject:("quarterly numbers" OR "q3 numbers")`.
+
+**Reading the mailbox.** The reader asks Gmail for the mail added since its last position, page by page (500 records a page, up to 10 pages a poll); a busier mailbox is read on from where the poll stopped, straight away.

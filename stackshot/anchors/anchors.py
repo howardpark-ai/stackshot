@@ -1,7 +1,7 @@
 """Project anchors (an anchor is a property of a project, never of an item).
 
 An anchor is an external thing anchor-hub watches — a Slack channel or DM, a Drive file or folder, a Gmail thread or
-gmail:q: query (optionally scoped to mailboxes: gmail:q@<mailbox>:), a Notion page or database, a GitHub issue/PR or a repo's releases feed. It belongs to a project (the gbrain page,
+gmail:q: query (optionally scoped to mailboxes: gmail:q@<mailbox>:; its terms: gmail_query.py), a Notion page or database, a GitHub issue/PR or a repo's releases feed. It belongs to a project (the gbrain page,
 `projects/<slug>` or `infra/<slug>`), which keeps it, and carries a scope: project-wide, or a list of the items it is about. An anchor counts
 for a scoped item from whichever project's page holds it (anchor_scope.py is the one reader of that: the server, the board and the model guards use it).
 Sessions are derived, never stored on the anchor: the project's name-line session (the page's `display-name:`; pages.py reads it with
@@ -31,6 +31,7 @@ import time
 from typing import Any
 
 from stackshot.core import config as _cfg  # noqa: E402  (stackshot.toml; next to this module)
+from stackshot.anchors import gmail_query as _gq  # noqa: E402  (the terms of a Gmail query anchor: the grammar an add checks)
 from stackshot.projects import project_registry as _pr  # noqa: E402  (the project record's entries: read first, the page lines are the fallback)
 from stackshot.model import item_project as _iproj  # noqa: E402  (an item's project by its permanent id: the page key it reads through the id)
 from stackshot.core import readonly as _ro  # noqa: E402  (a warm standby copy writes nothing)
@@ -201,13 +202,16 @@ def gmail_query(aid: str) -> tuple[list[str] | None, str] | None:
 
 def gmail_resolve(names: list[str], boxes: dict[str, str]) -> tuple[list[str], list[str]]:
     """The mailbox names of a scope against `boxes` ({label: address} of the mailboxes the anchors service reads): → (the labels they mean, in order and
-    without repeats, the names that mean none). A name is a label or an address, in any case."""
-    low = {k.lower(): k for k in boxes}
-    low.update({v.lower(): k for k, v in boxes.items()})
+    without repeats, the names that mean none). A name is a label or an address. A label is matched as spelled first, then in any case; labels that differ
+    only in case (a configuration the start warns about) are told apart by their exact spelling, and another case of them means the one that sorts first."""
+    folded: dict[str, str] = {}
+    for k in sorted(boxes):
+        folded.setdefault(k.lower(), k)
+    folded.update({v.lower(): k for k, v in boxes.items()})
     good: list[str] = []
     bad: list[str] = []
     for n in names:
-        k = low.get(n.lower())
+        k = n if n in boxes else folded.get(n.lower())
         if k is None:
             if n not in bad:
                 bad.append(n)
@@ -243,17 +247,32 @@ def gmail_title(aid: str, boxes: dict[str, str]) -> str:
     if q[0] is None and not all(k.lower() != boxes[k].lower() for k in labels):
         labels = []
     named = ", ".join(labels + [f"{b} (no such mailbox)" for b in bad])
+    if q[0] is not None and not q[0]:
+        named = "no mailbox named"           # a hand-made `gmail:q@:` reads nothing: never shown as the plain anchor that reads them all
     return f"{q[1]} · {named}" if named else q[1]
 
 
 def gmail_canonical(aid: str, boxes: dict[str, str]) -> str:
-    """A scoped Gmail query id with its mailbox names as the labels spell them (the same anchor is one entry however it was typed); any other id,
-    an unscoped one and a name that means no mailbox as given."""
+    """A scoped Gmail query id with its mailbox names as the labels spell them, each once and in label order (a scope is a set of mailboxes: the same anchor is
+    one entry however it was typed); any other id, an unscoped one and a name that means no mailbox as given."""
     q = gmail_query(aid)
     if q is None or q[0] is None:
         return aid
     labels, bad = gmail_resolve(q[0], boxes)
-    return aid if bad or not labels else "gmail:q@" + ",".join(labels) + ":" + q[1]
+    return aid if bad or not labels else "gmail:q@" + ",".join(sorted(labels, key=lambda x: (x.lower(), x))) + ":" + q[1]
+
+
+def gmail_query_problem(url: str) -> str:
+    """"" unless `url` (an anchor URL or id, a #mention fragment allowed) is a Gmail query anchor whose terms the matcher cannot evaluate; then one line naming
+    what is wrong (gmail_query.problem), so an add can refuse it instead of storing an anchor that never matches."""
+    q = gmail_query(split_fragment(str(url or ""))[0].strip())
+    return "" if q is None else _gq.problem(q[1])
+
+
+def gmail_query_reading(url: str) -> str:
+    """A Gmail query anchor's terms as the matcher reads them, one line (gmail_query.describe), "" for any other anchor or a query it cannot read."""
+    q = gmail_query(split_fragment(str(url or ""))[0].strip())
+    return "" if q is None else _gq.describe(q[1])
 
 
 def split_fragment(url: str) -> tuple[str, str]:
