@@ -298,4 +298,25 @@ c20 = F.calls("no-state-pass1", lambda p: p == "/repos/o/r/issues/17"); c1 = F.c
 check("…the first look at the one with no state is a full read (a 200) that seeds it, and the others go on as 304s", [c[1] for c in c20] == [200] and all(c[1] == 304 for c in c1), (c20, c1))
 check("…and it is seeded (state saved again, nothing reported)", aid(OPEN_ISSUE) in saved_state(hub12) and not events[n_ev:], events[n_ev:])
 
+# ---- 12. a green head saved before a restart: the key comes back from the file as a list, and a head read again (no ETag) is not reported as new
+n12 = OPEN_PR; F.set_state(n12, "open"); F.issues[n12]["pull_request"]["merged_at"] = None; F.ci[n12] = "success"; i12 = F.issues[n12]
+doc = json.load(open(core.CURSORS)); g = doc["github"]; g["state"][aid(n12)] = {"state": "open", "comments": i12["comments"], "updated": i12["updated_at"], "pr": True, "merged": False}
+g["ci"][aid(n12)] = {"pr": True, "sha": f"{n12:040x}", "key": [f"{n12:040x}", []], "head_ref": "x/y", "author": "kim", "own_branch": True}      # a green head, as the file keeps it: the key a list
+g["etags"] = {a_: {p_: t_ for p_, t_ in e_.items() if "check-runs" not in p_} for a_, e_ in g["etags"].items()}      # the check runs are asked in full again after the restart
+open(core.CURSORS, "w").write(json.dumps(doc)); n_ev = len(events)
+hub13 = boot("green-restart"); passes(2, phase="green-restart-pass")
+ck = [c for c in F.counted("green-restart") + F.counted("green-restart-pass") if c[0] == f"/repos/o/r/commits/{n12:040x}/check-runs?per_page=100"]
+check("restart over a saved green head (its key a list in the file): the check runs are read in full again and the same head is not reported as a new green",
+      bool(ck) and not [e for e in events[n_ev:] if e[0] == aid(n12) and e[1] in ("ci_passed", "ci_failed")] and isinstance(hub13.gh_state["ci"][aid(n12)]["key"], tuple), (ck, events[n_ev:], hub13.gh_state["ci"].get(aid(n12))))
+
+# ---- 13. a pending marker saved before a restart (CI was still running when the pull request was first looked at): after the restart the first finished result is reported once
+doc = json.load(open(core.CURSORS)); g = doc["github"]
+g["ci"][aid(n12)] = {"pr": True, "sha": f"{n12:040x}", "key": None, "pending": True, "head_ref": "x/y", "author": "kim", "own_branch": True}
+g["etags"] = {a_: {p_: t_ for p_, t_ in e_.items() if "check-runs" not in p_} for a_, e_ in g["etags"].items()}
+open(core.CURSORS, "w").write(json.dumps(doc)); n_ev = len(events)
+hub14 = boot("pending-restart"); passes(3, phase="pending-restart-pass")
+got13 = [(e[0], e[1], e[3]) for e in events[n_ev:] if e[0] == aid(n12) and e[1] in ("ci_passed", "ci_failed")]
+check("restart over a saved pending marker: the first finished result is reported once (a green: passing on), the marker is gone, and the passes after add none",
+      got13 == [(aid(n12), "ci_passed", "passing on " + f"{n12:040x}"[:7] + " (1 checks)")] and "pending" not in hub14.gh_state["ci"][aid(n12)] and isinstance(hub14.gh_state["ci"][aid(n12)]["key"], tuple), (got13, hub14.gh_state["ci"].get(aid(n12))))
+
 print(("ok" if not fails else "FAILED") + f": anchor-hub restart scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
