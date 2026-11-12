@@ -136,6 +136,7 @@ from stackshot.model import bullet_text as _bt  # noqa: E402  — how a line rea
 from stackshot.model import close_repair as _cr  # noqa: E402  — the descriptions that a close replaced, found in the store's git (close_repair.py; tools/restore_close_descriptions.py)
 from stackshot.waits import stall as _stall  # noqa: E402  — the stall pass: a mover whose pane has no turn running for 10 minutes; the pure half (stall.py)
 from stackshot.waits import server_fixes as _sf  # noqa: E402  — the server's facts-only fixes of a write and what records them: a wake that is the whole of a wait, a front agent as mover, a loose wait reason, a settled pick (server_fixes.py)
+from stackshot.model import last_activity_pass as _lact_pass  # noqa: E402  — the data change that fills metadata.last_activity for the open items that have none, from their History, and puts it back (last_activity_pass.py; the ops lastact and unlastact)
 from stackshot.waits import until_pass as _until_pass  # noqa: E402  — the data change that rewrites the waits stored as wake, ask_by and hold as until: the plan, the ops of the migration route and the undo (until_pass.py)
 from stackshot.waits import wait_end as _we  # noqa: E402  — a next line that waits in words for something nothing tells the item has happened, and the fix the filing pass makes of it (wait_end.py)
 from stackshot.waits import until_write as _uw  # noqa: E402  — the write side of the one `until` date of a wait: the old fields folded into it, a kind with no date (until_write.py)
@@ -12463,7 +12464,7 @@ def _stamp_pass_keep(pass_id: str, by: str, op: str, results: list[dict[str, Any
                 rec = _pass_load(pass_id)
             except ToolError:
                 rec = {"pass_id": pass_id, "by": by, "kind": "stamp", "begun": time.time(), "ended": None, "owners": {}, "items": [], "undone": []}
-            rec.setdefault("items" if op in ("stamp", "retire", "project_id", "until") else "undone", []).extend(results)
+            rec.setdefault("items" if op in ("stamp", "retire", "project_id", "until", "lastact") else "undone", []).extend(results)
             _pass_save(rec)
     except Exception as e:  # noqa: BLE001
         print(f"stamp: the results of pass {pass_id} not kept: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -12672,6 +12673,7 @@ def _migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
       stamp / unstamp   the stamp pass (tools/stamp_phase.py): metadata.phase and metadata.waits_on written on the open items, and put back; no begin, no hold, nothing else written (_stamp_write_op)
       retire / unretire the retire pass (tools/retire_fields_report.py --apply / --undo): the stored state words and carry fields taken out of the open items, each moved to its home, and put back (_retire_write_op)
       until / ununtil   the until pass (tools/until_migrate.py --apply / --undo): the waits stored as wake, ask_by and hold rewritten as `until` (until_pass.py), one History line each, and put back (until_pass.write_op)
+      lastact / unlastact the last-activity pass (tools/last_activity_backfill.py --apply / --undo): metadata.last_activity filled from the History for the open items that have none, nothing else written, and put back (last_activity_pass.write_op)
       project_id / unproject_id the project-id pass (tools/project_id_report.py --apply / --undo): the permanent id of the item's project stored on every item, open or closed, and put back (_pid_write_op)
       begin   holds the board-wide pause for the pass (for at most an hour, whatever renews it) and says what the server's switches are ({guards, pause, switchover, handoff, held}); the pass stops
               when the guards are off, since it must be judged by them; a second caller's begin while another's pass holds the board is refused
@@ -12687,8 +12689,8 @@ def _migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     op = str(spec.get("op") or "apply")
     state = lambda: {"guards": _model_guards_on(), "pause": bool(_cfg.get("model", "pause", default=False)), "switchover": _switchover_on(), "handoff": _handoff_on(),
                      "watchers": _watch.enabled(), "held": _watch.holding(), "by": by}
-    if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil"):
-        raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil")
+    if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil", "lastact", "unlastact"):
+        raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil | lastact | unlastact")
     if op in ("stamp", "unstamp"):
         return _stamp_write_op(spec, op, by)
     if op in ("retire", "unretire"):
@@ -12697,6 +12699,8 @@ def _migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
         return _pid_write_op(spec, op, by)
     if op in ("until", "ununtil"):
         return _until_pass.write_op(sys.modules[__name__], spec, op, by)
+    if op in ("lastact", "unlastact"):
+        return _lact_pass.write_op(sys.modules[__name__], spec, op, by)
     if op == "wake_text":
         return _migrate_wake_text(spec)
     if op == "send_wake":
