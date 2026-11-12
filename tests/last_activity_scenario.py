@@ -1,0 +1,372 @@
+"""Scenario test for the item's last-activity record, `metadata.last_activity = {"at", "kind", "what"}` (model/last_activity.py, anchors/event_log.py, `server._stamp_last_activity`,
+`server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It only records; nothing reads it, so every other clock must be
+exactly as it was. Fixture items, a fake clock (the passes are given their `now`, the saves are stamped from a fake `time`), no live store, no network, no model call.
+
+  1  pure: the words for each signal (a step done or dropped, a state change, a merge, created), and what is no activity (a status line, a reply, a note, a confirm, a new or reworded step, a description edit,
+     the server's own bookkeeping); newest wins; a torn candidate is skipped; a time in the future reads as now; the record never goes back
+  2  a real `_save`: a session's step mark and state change stamp it at the save's time; a status line, a reply and the ladder's own History line (a bookkeeping save) do not; the merge pass's save says "PR n merged"
+  3  the event log: kinds, a burst is one line per kind, a bot's comment is left out, a line is never written for what names no pull request; `Hub.emit` writes it for a CI result, a comment, a review and a merge
+     and for nothing else; the merge log is untouched by a line of another kind
+  4  the pass: each kind of event of a tied pull request stamps the right words at the event's time; the same tie rules as a merge (anchored, the body, the item's own words; a project-wide anchor, a waiting item,
+     a held one and a closed one are left alone); the other clocks (activity, progress, updated, History, merged_seen) are as they were
+  5  the pass's care: newest wins; a torn, malformed or oversized line is skipped and bounded in the log; a restart resumes from the offset; a replaced file is read from its start; an old event is not read; one
+     item that cannot be saved stops no other; nothing raises out of the pass; a standby and a held board run nothing
+
+    tests/run-suite last_activity       -> exit 0 / 1"""
+import json, os, re, sys, pathlib, time, logging, io, math
+SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
+import _scratch, _instance
+tmp = _scratch.mkdtemp(prefix="lastact-"); T = pathlib.Path(tmp)
+toml = _instance.apply(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
+toml = toml.replace('session_links = "~/.local/state/salamander/fleet"', 'session_links = ""', 1); assert 'session_links = ""' in toml
+for key, val in (("repo", tmp), ("store", f"{tmp}/store"), ("markdown", f"{tmp}/board.md"), ("brain", f"{tmp}/brain"),
+                 ("state", f"{tmp}/state"), ("secrets", f"{tmp}/secrets"), ("project_touch", f"{tmp}/touch"), ("rules", f"{tmp}/RULES.md"), ("timezone", "Asia/Dubai")):
+    toml, n = re.subn(rf'(?m)^{key} = "[^"]*"', f'{key} = "{val}"', toml); assert n == 1, key
+toml, n = re.subn(r'(?m)^prefixes = .*$', 'prefixes = ["[work] ", "[home] "]', toml); assert n == 1
+toml, n = re.subn(r'(?m)^transcripts = .*$', f'transcripts = ["{tmp}/no-such-root", "{tmp}/transcripts"]', toml); assert n == 1   # never the host's transcripts
+toml, n = re.subn(r'(?m)^owner = "the owner"', 'owner = "Oliver"', toml); assert n == 1
+toml, n = re.subn(r"(?m)^require_marks = true", "require_marks = false", toml); assert n == 1
+(T / "stackshot.toml").write_text(toml, encoding="utf-8")
+(T / "RULES.md").write_text("# rules\n\n" + "- a rule the connector serves, long enough to count as a rulebook.\n" * 20, encoding="utf-8")
+os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
+for d in ("store/a", "fleet/a", "state", "brain/projects", "transcripts/-home-x", "cli"): (T / d).mkdir(parents=True)
+NAMES = ("home-front", "team-back", "home-peer", "home-peer2", "home-stew")
+U = {n: f"00000000-0000-4000-8000-0000000000{i:02d}" for i, n in enumerate(NAMES, 1)}
+now0 = float(int(time.time()))      # whole seconds: the event log keeps a time to the millisecond, so the sums below compare exactly
+(T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": "2026-01-01T00:00:00Z"}}))
+(T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a"} for n, u in U.items()}))
+ALPHA = {"home-front": "the front", "team-back": "builds, merges and releases the code"}
+(T / "store/projects.json").write_text(json.dumps({"pages": {"projects/alpha": {"title": "x", "name": "x", "org": "home", "tags": [], "type": "project", "session": "home-stew", "status": "active", "board": [], "board_open": 0,
+                                                                                  "agents": ALPHA, "back_agents": {"team-back": ALPHA["team-back"]}}}}))
+(T / "brain/projects/alpha.md").write_text("---\ntitle: alpha\ndisplay-name: home-stew\nagents:\n  home-front: the front\n  background:\n    team-back: builds, merges and releases the code\n---\n\n# alpha\n\n## Current state\n\nx\n\n<!-- timeline -->\n\n## Timeline\n", encoding="utf-8")
+(T / "store/next-id").write_text("1"); (T / "store/anchors.json").write_text("{}")
+DESC = "- A thing\n- It lives here\n- Done when done"
+MIN = 60.0; H = 3600.0
+W_ = "https://github.com/acme/widgets"
+
+def put(i, mover="home-peer", status="open", act=30, **meta):
+    """An open doing item on `mover`, last written and last active `act` minutes before now0."""
+    base = {"owner": U["home-front"], "project": "projects/alpha", "next": f"{mover}: do the thing", "state": "doing", "needs": [mover], "mover": mover}
+    base.update(meta)
+    at = now0 - act * MIN
+    (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": at, "state_updated": at, "confirmed": at,
+                                                       "activity": at, "progress": at, "written_at": at, "written_by": "home-front", "metadata": base}))
+def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
+def mt(i): return rd(i)["metadata"]
+def wr(i, d): (T / f"store/a/{i}.json").write_text(json.dumps(d))
+def la(i):
+    r = mt(i).get("last_activity")
+    return {k: v for k, v in r.items() if k != "kind"} if isinstance(r, dict) else r      # the time and the words; the kind is lk
+def lk(i): return (mt(i).get("last_activity") or {}).get("kind")
+def step(text, status, at=0): return {"text": text, "status": status, "by": "x", "at": at}
+fails = []; ran = []
+def check(name, cond, got=None):
+    ran.append(name)
+    if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
+sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
+from stackshot.web import server
+from stackshot.model import last_activity as LA, progress as PG, activity as ACT
+from stackshot.anchors import event_log as EL, merge_log as ML
+from stackshot.anchors.anchorhub import core as HUB
+server._publish = lambda: None
+server._refuse_if_owing = lambda debtor: None
+server._PUSH = [sys.executable, "-c", "pass"]
+class _Clock:
+    """The server's `time` module for the saves below: the clocks are stamped from the server's own clock, which a scenario with a fake `now` must be able to set."""
+    t = None
+    def __getattr__(self, n): return getattr(time, n)
+    def time(self): return time.time() if self.t is None else self.t
+CLK = _Clock(); server.time = CLK
+def save_at(ts, i, mutate, writer="home-peer", **kw):
+    """A real `server._save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first."""
+    d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
+    try: server._save(f"a{i}", d_, writer=writer, **kw)
+    finally: CLK.t = None
+class _Err:
+    """stderr of the server's prints, kept for a check."""
+    def __enter__(self): self.old, self.buf = sys.stderr, io.StringIO(); sys.stderr = self.buf; return self
+    def __exit__(self, *a): sys.stderr = self.old
+    @property
+    def text(self): return self.buf.getvalue()
+
+# ================================================================ 1. pure: last_activity.py
+def W(b, a, real=True): return "; ".join(x["what"] for x in LA.save_signals(b, a, 100.0, real))
+def K(b, a, real=True): return [x["kind"] for x in LA.save_signals(b, a, 100.0, real)]
+def doc(**kw): return {"status": "open", "metadata": {"mover": "m", "state": "doing", "needs": ["m"], "phase": "alive", "steps": [step("a", "open"), step("b", "done", 5), step("c", "open")], **kw}}
+base = doc()
+def after(**kw): return doc(**kw)
+check("1 save_words: a step marked done is named by its place on the checklist; one marked dropped likewise",
+      W(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == "step 1 done" and W(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == "step 3 dropped", None)
+check("1 save_words: several steps marked in one save are one phrase, the first three named",
+      W(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "dropped", 9)])) == "step 1 done, step 3 dropped", W(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "dropped", 9)])))
+check("1 save_words: a state change says which: the phase (and the kind of a wait), the state, the mover, the needs",
+      W(base, after(phase="waiting", waits_on="time")) == "state: waiting (time)" and W(base, after(state="verifying")) == "state: verifying"
+      and W(base, after(mover="n")) == "mover changed" and W(base, after(needs=["m", "n"])) == "needs changed"
+      and W(base, {**base, "status": "completed"}) == "state: completed", [W(base, after(phase="waiting", waits_on="time")), W(base, after(mover="n"))])
+check("1 save_words: a merge recorded names the pull request (merged_seen, or the merged entry of released_told); a created item says created",
+      W(base, after(merged_seen=["acme/widgets#7"])) == "PR 7 merged" and W(base, after(released_told=["merged acme/widgets#8"])) == "PR 8 merged" and W(None, base) == "created", None)
+check("1 save_words: no activity in a status line, a reply, a note, a confirm, a new or reworded step, a description edit",
+      all(W(base, a) == "" for a in (after(work=[{"id": "x", "text": "building", "state": "in progress"}]), after(next="m: do it (no change)"), after(note="still on it"), {**base, "confirmed": 5},
+                                                  after(steps=[step("a", "open"), step("b", "done", 5), step("c", "open"), step("d", "open")]), after(steps=[step("a2", "open"), step("b", "done", 5), step("c", "open")]),
+                                                  {**base, "description": "- another"}, after(steps=[step("a", "open"), step("b", "done", 7), step("c", "open")]))), None)
+check("1 save_words: a save that is no one's write (real=False) records no step mark, mover or merge, only a status or phase change, as progress counts it",
+      W(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")]), False) == "" and W(base, after(mover="n"), False) == "" and W(base, after(merged_seen=["a/b#1"]), False) == ""
+      and W(base, after(phase="waiting", waits_on="time"), False) == "state: waiting (time)", None)
+cands = [{"at": 100, "kind": "step_done", "what": "step 1 done"}, {"at": 300, "kind": "ci_result", "what": "CI failed on PR 5"}, {"at": 200, "kind": "review", "what": "review on PR 5"}]
+check("1 record: the newest candidate wins whatever the order they come in; none gives None", LA.record({"metadata": {}}, cands) == {"at": 300.0, "kind": "ci_result", "what": "CI failed on PR 5"} and LA.record({"metadata": {}}, reversed(cands)) == {"at": 300.0, "kind": "ci_result", "what": "CI failed on PR 5"}
+      and LA.record({"metadata": {}}, []) is None and LA.record(None, None) is None, None)
+held_ = {"metadata": {"last_activity": {"at": 250, "kind": "state_change", "what": "state: waiting"}}}
+check("1 record: a candidate replaces the stored record only when strictly later: an older one and one at the same time leave it, a later one replaces it",
+      LA.record(held_, [{"at": 200, "kind": "comment", "what": "x"}])["what"] == "state: waiting" and LA.record(held_, [{"at": 250, "kind": "comment", "what": "x"}])["what"] == "state: waiting" and LA.record(held_, [{"at": 251, "kind": "comment", "what": "x"}]) == {"at": 251.0, "kind": "comment", "what": "x"}, None)
+check("1 record: of candidates at the same time the last given wins", LA.record({"metadata": {}}, [{"at": 5, "kind": "comment", "what": "first"}, {"at": 5, "kind": "review", "what": "second"}])["what"] == "second", None)
+torn = [None, "x", 5, {}, {"at": None, "kind": "comment", "what": "x"}, {"at": "soon", "kind": "comment", "what": "x"}, {"at": float("nan"), "kind": "comment", "what": "x"}, {"at": float("inf"), "kind": "comment", "what": "x"}, {"at": -3, "kind": "comment", "what": "x"}, {"at": 0, "kind": "comment", "what": "x"}, {"at": 9, "kind": "comment", "what": ""}, {"at": 9, "kind": "comment", "what": "   "}, {"at": 9, "kind": "comment"}, {"at": 9, "what": "no kind"}, {"at": 9, "kind": "push", "what": "an unknown kind"}]
+check("1 record: a torn candidate (not a dict, no time, a time that is no number or not finite or not positive, no words) is skipped, and does not stop the good one after it",
+      LA.record({"metadata": {}}, torn) is None and LA.record({"metadata": {}}, [*torn, {"at": 7, "kind": "review", "what": "review on PR 1"}]) == {"at": 7.0, "kind": "review", "what": "review on PR 1"} and LA.read({"metadata": {"last_activity": "garbage"}}) is None and LA.at({"metadata": {"last_activity": {"at": "x", "kind": "comment", "what": "y"}}}) == 0 and LA.read({"metadata": {"last_activity": {"at": 5, "what": "no kind"}}}) is None, None)
+check("1 record: a time after now reads as now; the words are one line of at most 80 characters", LA.record({"metadata": {}}, [{"at": 999, "kind": "comment", "what": "x"}], now=500)["at"] == 500.0 and LA.clean({"at": 1, "kind": "audit", "what": "a\n  b\n" + "w" * 200})["what"].startswith("a b w") and len(LA.clean({"at": 1, "kind": "audit", "what": "w" * 200})["what"]) == 80, None)
+item_ = {"status": "open", "metadata": {}}
+S_ = lambda at, what="x", kind="comment": {"at": at, "kind": kind, "what": what}
+check("1 apply: stores the record with its kind; the same again, an older one and a torn one change nothing (no write); a later one replaces it",
+      LA.apply(item_, [S_(10)]) and item_["metadata"]["last_activity"] == {"at": 10.0, "kind": "comment", "what": "x"} and not LA.apply(item_, [S_(10)]) and not LA.apply(item_, [S_(5, "y")]) and not LA.apply(item_, [None, {"at": "z"}])
+      and LA.apply(item_, [S_(11, "y", "review")]) and item_["metadata"]["last_activity"] == {"at": 11.0, "kind": "review", "what": "y"} and not LA.apply({"metadata": "not a dict"}, [S_(1, "z")]), item_)
+check("1 kinds: the five of the progress signals and the pull request's events are known from day one, with update and audit; STAMPED is what is stamped today",
+      LA.KINDS == frozenset({"step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "update", "audit"}) and set(LA.STAMPED) == LA.KINDS - {"update", "audit"}, sorted(LA.KINDS))
+check("1 save_signals: each save signal has its kind: step_done, step_dropped, state_change, pr_merged, and created is a state_change",
+      K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
+      and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
+      and K(base, after(mover="n", merged_seen=["a/b#1"])) == ["state_change", "pr_merged"] and K(base, after(work=[{"id": "x"}])) == [], K(base, after(mover="n", merged_seen=["a/b#1"])))
+check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing again), review, comment and pr_merged",
+      [(LA.pr_candidate(k, 9, 5, 50) or {}).get("kind") for k in ("ci_failed", "ci_passed", "review", "comment", "merged")] == ["ci_result", "ci_result", "review", "comment", "pr_merged"], None)
+# update and audit: defined and tested, stamped by nothing yet
+check("1 update_signal: a status write whose text differs from the previous one is an update, the words the text itself; the same text again (case and spacing aside), a blank one and a torn time are not",
+      LA.update_signal("building the fix", "tests pass, opening the pull request", 40) == {"at": 40.0, "kind": "update", "what": "tests pass, opening the pull request"}
+      and LA.update_signal("building the fix", "  Building   the FIX ", 40) is None
+      and LA.update_signal("x", "", 40) is None and LA.update_signal("x", None, 40) is None and LA.update_signal("x", "y", "soon") is None and LA.update_signal(None, "first line", 40)["what"] == "first line", LA.update_signal("a", "b", 40))
+check("1 audit_signal: a line the audit wrote saying what it verified is an audit signal, the words that text; one that verified nothing is none",
+      LA.audit_signal("pane in a turn; commit on PR 4 an hour ago", 40) == {"at": 40.0, "kind": "audit", "what": "pane in a turn; commit on PR 4 an hour ago"} and LA.audit_signal("", 40) is None and LA.audit_signal("   ", 40) is None and LA.audit_signal("x", None) is None, None)
+it_ = {"status": "open", "metadata": {}}
+LA.apply(it_, [LA.update_signal("", "wired the thing", 10)]); first_ = dict(it_["metadata"]["last_activity"])
+LA.apply(it_, [LA.audit_signal("subagent running", 20)])
+check("1 update and audit signals take part in newest-wins like the rest: an audit line later than an update replaces it, an older update after it does not", first_["kind"] == "update" and it_["metadata"]["last_activity"] == {"at": 20.0, "kind": "audit", "what": "subagent running"}
+      and not LA.apply(it_, [LA.update_signal("", "older", 15)]), it_)
+check("1 pr_what: the words for each kind of event; a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing again on PR 123", "comment on PR 123", "review on PR 123", "PR 123 merged"]
+      and LA.pr_what("pr_closed", 5) == "" and LA.pr_what("comment", 0) == "" and LA.pr_candidate("pr_closed", 5, 100, 200) is None and LA.pr_candidate("comment", 5, 100, 200) == {"at": 100.0, "kind": "comment", "what": "comment on PR 5"}, None)
+closed_ = {"status": "completed", "metadata": {"steps": [step("a", "done", 9)]}}
+check("1 stamp: only an open item has a record", not LA.stamp(closed_, {"status": "open", "metadata": {"steps": [step("a", "open")]}}, 50.0) and "last_activity" not in closed_["metadata"], closed_)
+
+# ================================================================ 2. a real _save
+ASTEP = lambda text, status, at=0: step(text, status, at)
+put(300); put(301); put(302); put(303)
+save_at(now0 + 5 * MIN, 300, lambda d_: d_["metadata"].update(steps=[ASTEP("home-peer: do the thing", "done", now0 + 5 * MIN), ASTEP("home-peer: more", "open")], next="home-peer: more"))
+check("2 a session marks a step done: the record is stamped at the save, in words, with its kind", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and lk(300) == "step_done", la(300))
+save_at(now0 + 9 * MIN, 300, lambda d_: d_["metadata"].update(work=[{"id": "build", "text": "building the fix", "state": "in progress", "agent": "home-peer", "ts": now0 + 9 * MIN}]))
+save_at(now0 + 10 * MIN, 300, lambda d_: d_["metadata"].update(next="home-peer: more (no change)"))
+save_at(now0 + 11 * MIN, 300, lambda d_: d_.update(confirmed=now0 + 11 * MIN), activity=ACT.CONFIRM)
+save_at(now0 + 12 * MIN, 300, lambda d_: None, note="still on it", activity=ACT.MESSAGE)
+check("2 a status line, a \"no change\" reply, a confirm and a note do not move it", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"}, la(300))
+d_ = server._load("a300"); server._stall.note(d_["metadata"], now0 + 13 * MIN, "it has not moved for 4 hours: handed up"); CLK.t = now0 + 13 * MIN
+try: server._save("a300", d_, activity=ACT.BOOKKEEPING)
+finally: CLK.t = None
+check("2 the ladder's own History line (a save of the server's, no writer) does not move it, and the History line is on the item", la(300) == {"at": now0 + 5 * MIN, "what": "step 1 done"} and any("handed up" in x.get("text", "") for x in server._stall.log_of(mt(300))), mt(300).get("stall") or mt(300).keys())
+save_at(now0 + 20 * MIN, 300, lambda d_: d_["metadata"].update(mover="home-peer2", needs=["home-peer2"]))
+check("2 a session's state change (a new mover) moves it, newest wins", la(300) == {"at": now0 + 20 * MIN, "what": "mover changed"} and lk(300) == "state_change", la(300))
+save_at(now0 + 30 * MIN, 300, lambda d_: d_["metadata"].update(released_told=["merged acme/widgets#12"]), writer="", activity=ACT.EVENT)
+check("2 a merge recorded by the server's event save says which pull request merged", la(300) == {"at": now0 + 30 * MIN, "what": "PR 12 merged"} and lk(300) == "pr_merged", la(300))
+save_at(now0 + 31 * MIN, 301, lambda d_: d_["metadata"].update(wake="2999-01-01T00:00", state="waiting", needs=["decision"]), writer="")
+check("2 an item no one has acted on keeps no record (the field is absent until there is something to say)", la(302) is None and la(303) is None, None)
+d_ = rd(303); d_["status"] = "completed"; wr(303, d_)
+save_at(now0 + 32 * MIN, 303, lambda d_: d_["metadata"].update(steps=[ASTEP("x", "done", now0)]))
+check("2 a closed item gets no record", la(303) is None, la(303))
+save_at(now0 + 33 * MIN, 302, lambda d_: d_["metadata"].update(steps=[ASTEP("y", "open")]), writer="home-peer", activity=ACT.WRITE)
+check("2 the other clocks are as they were: a save that records nothing leaves progress and activity to their own rules (a step added moves neither the record nor progress)", la(302) is None and rd(302)["progress"] == now0 - 30 * MIN, (la(302), rd(302)["progress"]))
+
+# ================================================================ 3. the event log and the hub
+def lines(anchor, url, etype, who="alice", refs=(), now=10.0): return EL.lines_for(anchor, url, etype, who, list(refs), now)
+A_ = "github:acme/widgets#40"
+check("3 kinds_of: a CI result, a comment, a review (a review comment is one), a merge; several joined with + are each once; others (closed, opened, a push, unclassified) are none",
+      EL.kinds_of("ci_failed") == ["ci_failed"] and EL.kinds_of("review_comment") == ["review"] and EL.kinds_of("comment+review+review_comment+pr_merged") == ["comment", "review", "merged"]
+      and EL.kinds_of("pr_closed") == [] and EL.kinds_of("pr_synchronize") == [] and EL.kinds_of("pr_opened+ci_activity") == [] and EL.kinds_of("") == [] and EL.kinds_of(None) == [], None)
+check("3 lines_for: one line per kind, with the pull request, the time and the body's board ids; a burst writes each kind",
+      lines(A_, "", "ci_failed", "CI", ["board#9"]) == [{"ts": 10.0, "repo": "acme/widgets", "n": 40, "kind": "ci_failed", "refs": ["board#9"]}]
+      and [r["kind"] for r in lines(A_, "", "comment+pr_merged")] == ["comment", "merged"], lines(A_, "", "comment+pr_merged"))
+check("3 lines_for: the pull request comes from the anchor, else the link (a notification thread); a repository's thread with no pull request, a release and a bare repository write none",
+      lines("github:acme/widgets@notifications", f"{W_}/pull/41#issuecomment-1", "comment")[0]["n"] == 41 and lines("github:acme/widgets@notifications", f"{W_}/actions", "ci_failed") == [] and lines("github:acme/widgets@releases", "", "pr_merged") == [] and lines("slack:C1", "", "comment") == [], None)
+check("3 lines_for: a comment or review by a bot is left out (every login a bot's), one with a person among them is kept; CI and a merge are kept whoever did them",
+      lines(A_, "", "comment", "ci-helper[bot]") == [] and lines(A_, "", "review", "a[bot], b[bot]") == [] and len(lines(A_, "", "comment", "a[bot], carol")) == 1 and len(lines(A_, "", "ci_failed", "ci-helper[bot]")) == 1
+      and len(lines(A_, "", "pr_merged", "merge-bot[bot]")) == 1 and len(lines(A_, "", "comment", "someone")) == 1, None)
+def raises(fn):
+    try: fn()
+    except (ValueError, TypeError, KeyError): return True
+    return False
+check("3 normal: a good line is read as merge_log reads one, with its kind", EL.normal({"ts": 1, "repo": "A/b", "n": 3, "kind": "review", "refs": ["board#1", "bad ref"]}) == {"ts": 1.0, "repo": "a/b", "n": 3, "kind": "review", "refs": ["board#1"]}, None)
+check("3 normal: a line of the wrong shape is refused (no kind, a kind that is none, a bad repository, a number that is no number, no number, a time that is not a number)",
+      all(raises(lambda r=r: EL.normal(r)) for r in ({"ts": 1, "repo": "a/b", "n": 3}, {"ts": 1, "repo": "a/b", "n": 3, "kind": "pr_closed"}, {"ts": 1, "repo": "nope", "n": 3, "kind": "comment"},
+                                                    {"ts": 1, "repo": "a/b", "n": "x", "kind": "comment"}, {"ts": 1, "repo": "a/b", "n": 0, "kind": "comment"}, {"ts": float("nan"), "repo": "a/b", "n": 1, "kind": "comment"})), None)
+hub_ = HUB.Hub(); hub_.deliver = lambda anchor, session, text: None; hub_.write_status = lambda: None; hub_.persist = lambda: "saved"
+hub_.bindings = {"github:acme/widgets#60": {"home-peer"}}
+EL.path().unlink(missing_ok=True); ML.path().unlink(missing_ok=True)
+def hub_event(etype, who="alice", refs=None, url=f"{W_}/pull/60"):
+    summary = {"title": "widgets#60", "who": who, "text": "did it", "url": url, "ts": "2026-11-12T00:00:00Z", "etype": etype}
+    if refs is not None: summary["meta"] = {"refs": refs}
+    hub_.event("github:acme/widgets#60", summary, kind="github-state")
+for et in ("pr_closed", "pr_synchronize", "pr_opened", "ci_activity", ""): hub_event(et)
+hub_event("comment", "ci-helper[bot]")
+check("3 the hub: a closed or opened pull request, a push, an unclassified event and a bot's comment write no line", EL.read(0)[0] == [], EL.read(0)[0])
+for et in ("ci_failed", "ci_passed", "comment", "review", "review_comment"): hub_event(et, "CI" if et.startswith("ci_") else "alice")
+hub_event("pr_merged", "alice", ["board#7"])
+rows_, off_ = EL.read(0)
+check("3 the hub: a CI result, a comment, a review (twice: a review and a review comment) and a merge each write a line, the merge with the board ids its body names",
+      [r["kind"] for r in rows_] == ["ci_failed", "ci_passed", "comment", "review", "review", "merged"] and rows_[-1]["refs"] == ["board#7"] and all(r["n"] == 60 and r["repo"] == "acme/widgets" for r in rows_), rows_)
+mrows, _ = ML.read(0)
+check("3 the merge log is as before: it holds the merge alone, and no line of the event log is read as a merge", [r["n"] for r in mrows] == [60] and "kind" not in mrows[0] and EL.path() != ML.path(), mrows)
+ML.append({"ts": 1, "repo": "acme/widgets", "n": 1, "refs": []}); check("3 merge_log.append and read keep their one-argument form", ML.read(0)[0][-1]["n"] == 1, None)
+
+# ================================================================ 4. the pass: each kind of event of a tied pull request
+anchors_ = {"projects/alpha": [{"url": f"{W_}/pull/{n}", "items": [f"a{400 + n - 31}"]} for n in (31, 32, 33, 34, 35)] + [{"url": f"{W_}/pull/36"}]}      # the project-wide anchor on 36 names no item
+(T / "store/anchors.json").write_text(json.dumps(anchors_))
+for i in range(400, 405): put(i)
+put(410); put(411, wake="2999-01-01T00:00", phase="waiting", waits_on="time", hold=True); put(412); put(413, project="projects/alpha"); d_ = rd(413); d_["status"] = "completed"; wr(413, d_)
+d_ = rd(410); d_["description"] = f"- Waits on {W_}/pull/50\n- Done when it lands"; wr(410, d_)
+shown = lambda i: f"board#{i}"
+def ev_pass(now, **kw):
+    gh_ = server._cfg.CFG.setdefault("github", {}); had = gh_.get("issues_letter"); gh_["issues_letter"] = "a"; CLK.t = now
+    try: return server._event_activity_tick(now)
+    finally:
+        CLK.t = None
+        if had is None: gh_.pop("issues_letter", None)
+        else: gh_["issues_letter"] = had
+EL.path().unlink(missing_ok=True); (EL.offset_path()).unlink(missing_ok=True)
+def emit(n, etype, who="alice", at=10 * MIN, refs=(), url=None):
+    EL.note(f"github:acme/widgets#{n}", url or "", etype, who, list(refs), now0 + at)
+emit(31, "ci_failed", "CI", 10 * MIN); emit(32, "ci_passed", "CI", 11 * MIN); emit(33, "comment", "alice", 12 * MIN); emit(34, "review_comment", "bob", 13 * MIN); emit(35, "pr_merged", "alice", 14 * MIN)
+emit(36, "comment", "alice", 15 * MIN)                                   # a project-wide anchor: names no item
+emit(37, "comment", "alice", 15 * MIN, [shown(401)])                      # the pull request's body names the item (a401), no anchor does
+emit(50, "review", "bob", 16 * MIN)                                      # the item's own words name it (a410: its description holds the URL)
+emit(38, "comment", "alice", 17 * MIN, [shown(411), shown(413), shown(9999)])   # named: a held item, a closed one, an item that does not exist
+before_all = {i: rd(i) for i in (400, 401, 402, 403, 404, 410, 411, 412, 413)}
+saved = ev_pass(now0 + 20 * MIN)
+check("4 the pass saves exactly the items an event is tied to: anchored (a400..a404), the body naming the item (a401), the item's own words (a410); not a project-wide anchor, a held item, a closed one",
+      sorted(saved) == ["a400", "a401", "a402", "a403", "a404", "a410"], saved)
+check("4 each kind has its own words, kind and time, the event's own: a400 (anchored to 31) CI failed at 10, a401 (anchored to 32 and named by 37) comment on 37 at 15 is the later, a402 comment on 33, a403 review on 34, a404 merged 35",
+      la(400) == {"at": now0 + 10 * MIN, "what": "CI failed on PR 31"} and la(401) == {"at": now0 + 15 * MIN, "what": "comment on PR 37"} and la(402) == {"at": now0 + 12 * MIN, "what": "comment on PR 33"}
+      and la(403) == {"at": now0 + 13 * MIN, "what": "review on PR 34"} and la(404) == {"at": now0 + 14 * MIN, "what": "PR 35 merged"} and la(410) == {"at": now0 + 16 * MIN, "what": "review on PR 50"}
+      and [lk(i) for i in (400, 401, 402, 403, 404, 410)] == ["ci_result", "comment", "comment", "review", "pr_merged", "review"], [la(i) for i in (400, 401, 402, 403, 404, 410)])
+check("4 the ones not tied are untouched, file for file", all(rd(i) == before_all[i] for i in (411, 412, 413)), None)
+check("4 the other clocks are as they were: activity, progress, updated, written_by, the History and merged_seen of every item saved",
+      all(all(rd(i).get(k) == before_all[i].get(k) for k in ("activity", "progress", "updated", "written_by", "written_at", "confirmed", "state_updated")) and mt(i).get("merged_seen") == before_all[i]["metadata"].get("merged_seen")
+          and mt(i).get("stall") == before_all[i]["metadata"].get("stall") for i in (400, 401, 402, 403, 404, 410)) and not any("last_activity" in str(before_all[i]) for i in before_all), None)
+d1 = {k: v for k, v in rd(404)["metadata"].items() if k not in ("last_activity", "phase")}; check("4 …and nothing else of the metadata changed (the phase every save of the server stores aside)", d1 == before_all[404]["metadata"], d1)
+check("4 the offset is stored at the end of the log it read", EL.load_offset() == EL.path().stat().st_size, EL.load_offset())
+check("4 a second pass with nothing new reads nothing, saves nothing", ev_pass(now0 + 21 * MIN) == [] and rd(400) == rd(400), None)
+
+# ================================================================ 5. the pass's care
+# newest wins: a later event, then an older event that arrives afterwards (the log is in the hub's order, not the event's)
+emit(31, "review", "bob", 30 * MIN); emit(31, "comment", "alice", 25 * MIN)
+ev_pass(now0 + 31 * MIN)
+check("5 newest wins: a later event replaces the record, an older one that arrives after it does not", la(400) == {"at": now0 + 30 * MIN, "what": "review on PR 31"}, la(400))
+emit(31, "comment", "alice", 30 * MIN)
+check("5 …an event at the same time as the record leaves it", ev_pass(now0 + 32 * MIN) == [] and la(400)["what"] == "review on PR 31", la(400))
+# a time in the future reads as now
+emit(32, "comment", "alice", 50 * MIN)
+ev_pass(now0 + 40 * MIN)
+check("5 an event stamped a little later than the pass (a skew of the clocks) reads as the time of the pass", la(401) == {"at": now0 + 40 * MIN, "what": "comment on PR 32"}, la(401))
+emit(32, "review", "bob", 600 * MIN)
+ev_pass(now0 + 41 * MIN)
+check("5 …one stamped hours ahead is a torn line and is not read", la(401) == {"at": now0 + 40 * MIN, "what": "comment on PR 32"}, la(401))
+# torn, malformed and oversized lines are skipped, the good ones around them are read, and the log line is bounded
+off_before = EL.load_offset()
+with open(EL.path(), "ab") as f_:
+    f_.write(b'{"ts": 5, "repo": "acme/widgets", "n": 33, "kind":\n')                       # torn mid-object, with a newline after it
+    f_.write(b'[' * 200000 + b"\n")
+    f_.write(b'{"ts": 5, "repo": "acme/widgets", "n": ' + b"9" * 6000 + b', "kind": "comment"}\n')
+    f_.write(b'\xff\xfe{"repo": "acme/widgets", "n": 33, "kind": "comment"}\n')
+    f_.write(json.dumps({"ts": now0 + 41 * MIN, "repo": "acme/widgets", "n": 33, "kind": "x" * 100000, "refs": []}).encode() + b"\n")      # a kind that is none: refused, and huge
+    f_.write(json.dumps({"ts": now0 + 41 * MIN, "repo": "acme/widgets", "n": 33, "kind": "review", "refs": ["y" * 90000]}).encode() + b"\n")      # an oversized ref: dropped, the line read
+    f_.write(b'{"ts": "' + b"7" * 400 + b'", "repo": "acme/widgets", "n": 33, "kind": "comment"}\n')      # a time that overflows into infinity
+    f_.write(b'{"ts": 1, "repo": "acme/widgets", "n": 33, "kind": "comment"')                # the last line is still being written: no newline
+with _Err() as e_:
+    saved = ev_pass(now0 + 42 * MIN)
+check("5 a torn, deep, oversized, bad-byte and unknown-kind line is each skipped; the good line among them is read; the one still being written waits", saved == ["a402"] and la(402) == {"at": now0 + 41 * MIN, "what": "review on PR 33"}, (saved, la(402)))
+check("5 …each skip is logged in a bounded line (never the whole row)", "line skipped" in e_.text and max(len(l) for l in e_.text.splitlines()) < 500, [len(l) for l in e_.text.splitlines()])
+with open(EL.path(), "ab") as f_: f_.write(b"\n")
+ev_pass(now0 + 43 * MIN)
+check("5 …and the line that was being written is read whole next time (its event is older than the record, so it changes nothing)", EL.load_offset() == EL.path().stat().st_size and la(402)["what"] == "review on PR 33", (EL.load_offset(), EL.path().stat().st_size))
+# restart: a fresh read of the offset file resumes there; nothing is read twice
+d_ = rd(403); d_["metadata"].pop("last_activity"); wr(403, d_)
+ev_pass(now0 + 44 * MIN)
+check("5 a restart resumes from the offset: lines already read are not applied again (an item whose record was cleared stays clear)", la(403) is None, la(403))
+emit(34, "ci_failed", "CI", 45 * MIN)
+ev_pass(now0 + 46 * MIN)
+check("5 …and a line written after it is read", la(403) == {"at": now0 + 45 * MIN, "what": "CI failed on PR 34"}, la(403))
+# a replaced (shorter) file reads from its start
+big = EL.load_offset(); EL.path().unlink()
+emit(35, "comment", "alice", 50 * MIN)
+check("5 the new file is shorter than the offset", EL.path().stat().st_size < big, None)
+ev_pass(now0 + 51 * MIN)
+check("5 an offset past the end of the file (it was replaced) reads from the start", la(404) == {"at": now0 + 50 * MIN, "what": "comment on PR 35"}, la(404))
+# an old event is not read; a day of downtime does not fill the record with old news
+emit(32, "review", "bob", -30 * H)
+emit(33, "comment", "alice", 55 * MIN)
+d_ = rd(401); d_["metadata"].pop("last_activity"); wr(401, d_)
+ev_pass(now0 + 56 * MIN)
+check("5 an event older than a day is not read (the record of an item without one is not set from it)", la(401) is None, la(401))
+# one item that cannot be saved stops no other; the offset is stored
+put(420); put(421)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/60", "items": ["a420", "a421"]}]}))
+emit(60, "comment", "alice", 60 * MIN)
+real_save = server._save
+def flaky(gid, item, *a, **kw):
+    if gid == "a420": raise RuntimeError("disk " + "z" * 90000)
+    return real_save(gid, item, *a, **kw)
+server._save = flaky
+try:
+    with _Err() as e_: saved = ev_pass(now0 + 61 * MIN)
+finally: server._save = real_save
+check("5 one item that cannot be saved is logged (bounded) and skipped, the other is saved, the offset is stored", saved == ["a421"] and la(421) == {"at": now0 + 60 * MIN, "what": "comment on PR 60"} and la(420) is None
+      and "a420 not saved" in e_.text and max(len(l) for l in e_.text.splitlines()) < 500 and EL.load_offset() == EL.path().stat().st_size, (saved, e_.text[:300]))
+# nothing raises out of the pass
+emit(60, "review", "bob", 62 * MIN)
+real_read = EL.read
+EL.read = lambda off=0: (_ for _ in ()).throw(OSError("log gone"))
+try:
+    with _Err() as e_: out = server._event_activity_tick(now0 + 63 * MIN)
+finally: EL.read = real_read
+check("5 a failure of the read is logged and the pass returns, raising nothing", out == [] and "pass failed" in e_.text, e_.text[:200])
+real_tied = server._merge_tied
+server._merge_tied = lambda rows, now: (_ for _ in ()).throw(RuntimeError("items unreadable"))
+off_ = EL.load_offset()
+try:
+    with _Err() as e_: out = ev_pass(now0 + 64 * MIN)
+finally: server._merge_tied = real_tied
+check("5 items that cannot be read at all: nothing is saved and the offset stays, so the lines are read again", out == [] and EL.load_offset() == off_ and "items not read" in e_.text, (out, EL.load_offset(), off_))
+saved = ev_pass(now0 + 65 * MIN)
+check("5 …and the next pass applies them", sorted(saved) == ["a420", "a421"] and la(420) == {"at": now0 + 62 * MIN, "what": "review on PR 60"}, (saved, la(420)))
+# a read-only standby copy and a held board run nothing, and keep the offset
+emit(60, "comment", "alice", 70 * MIN)
+off_ = EL.load_offset()
+real_ro, real_hold = server._ro.is_read_only, server._watch.holding
+server._ro.is_read_only = lambda: True
+try: out_ro = ev_pass(now0 + 71 * MIN)
+finally: server._ro.is_read_only = real_ro
+server._watch.holding = lambda *a: True
+try: out_hold = ev_pass(now0 + 71 * MIN)
+finally: server._watch.holding = real_hold
+check("5 a read-only standby copy and a held board run nothing and keep the offset", out_ro == [] and out_hold == [] and EL.load_offset() == off_ and la(420)["at"] == now0 + 62 * MIN, (out_ro, out_hold))
+saved = ev_pass(now0 + 72 * MIN)
+check("5 …the pass runs when they let go", sorted(saved) == ["a420", "a421"] and la(420)["at"] == now0 + 70 * MIN, saved)
+# the merge pass and the event pass together: a merge ties the same, the merge pass still records it, the words agree
+ML.path().unlink(missing_ok=True); (T / "state/merge-progress.json").unlink(missing_ok=True)
+put(430, mover="home-peer"); d_ = rd(430); d_["progress"] = now0 - 3 * H; wr(430, d_)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/70", "items": ["a430"]}]}))
+ML.append({"ts": now0 + 80 * MIN, "repo": "acme/widgets", "n": 70, "refs": []}); emit(70, "pr_merged", "alice", 80 * MIN)
+CLK.t = now0 + 81 * MIN
+gh_ = server._cfg.CFG.setdefault("github", {}); gh_["issues_letter"] = "a"
+try: moved = server._merge_progress_tick(now0 + 81 * MIN)
+finally: CLK.t = None
+check("5 the merge pass is as before: it records the merge in merged_seen and moves progress, and the record says which pull request merged", moved == ["a430"] and mt(430).get("merged_seen") == ["acme/widgets#70"] and rd(430)["progress"] == now0 + 81 * MIN
+      and la(430) == {"at": now0 + 81 * MIN, "what": "PR 70 merged"}, (moved, la(430), rd(430).get("progress")))
+d_ = rd(430); progress_, activity_ = d_["progress"], d_["activity"]
+saved = ev_pass(now0 + 82 * MIN)
+check("5 …and the event pass finds its merge event older than the record: nothing is written", saved == [] and rd(430)["progress"] == progress_ and rd(430)["activity"] == activity_ and la(430)["at"] == now0 + 81 * MIN, (saved, la(430)))
+
+print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
+sys.exit(1 if fails else 0)
