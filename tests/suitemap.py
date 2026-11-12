@@ -243,7 +243,9 @@ most of them running other methods of Board). Now (C2):
     a method that receives a class as its `self` by hand is taken for an instance; a `self.__dict__` in a class body of its own is the same case. A stdlib
     function that reads an attribute by a name it gets as data, from a place no suite of ours shows, is not seen: `parser.parse_args([], namespace=Cfg())` with a
     `--K` option sets `Cfg.K` and our code names neither `K` nor a dynamic accessor. An alias made any other way than an import or an assignment of a
-    dotted name (a parameter, a call result, a container) is not followed. Where a use looks like neither, it is a dynamic read.
+    dotted name (a parameter, a call result, a container) is not followed. `vars(self)` / `self.__dict__` in a method of a metaclass (`class Meta(type)`),
+    whose `self` is a class, is taken for an instance's (exempt) and under-selects; and `mock.patch.object(Cls, name)` with a name that is a variable
+    (a literal name is a string we see) replaces an attribute we do not match. Where a use looks like neither, it is a dynamic read.
 SUITEMAP_CLASS_RULE=C1 (C2 by default; any other value is an error, checked when a command starts) binds the whole class for every edit inside its body, as
 every edit did before C2. It is not simply a superset of C2: the plain `.x` readers in other modules that C2 adds are not looked for under C1.
 `audit` applies the same rule on both maps.

@@ -1833,6 +1833,12 @@ write("cmod.py", '''
                 case Mt(p, q):
                     return q, p
 
+    class Eff:
+        EK = 1
+        open(__file__)
+        def other(self):
+            return 1
+
     class Sl:
         SL = 1; SQ = len("ab")
         def other(self):
@@ -1993,6 +1999,8 @@ CSUITES = {
     "rali_ev": ("import cmod\nfrom builtins import eval as ev\nev(input())\n", INIT),
     "rali_gv": ("import cmod\nfrom builtins import getattr as ga\nlist(map(ga, [cmod.Cfg()], [input()]))\n", INIT),
     "rali_pm": ("import cmod\nfrom unittest import mock\npm = mock.patch.multiple\nkw = {}\nwith pm(cmod.Cfg, **kw):\n    pass\n", INIT),
+    # a chain of three links through an import alias, written so that one pass over the edges does not close it (the deepest edge is met last): h -> g -> ag -> attrgetter
+    "rali_ch": ("import cmod\ndef run():\n    h = g\n    h(input())(cmod.Cfg())\nif True:\n    if True:\n        from operator import attrgetter as ag\n    g = ag\nrun()\n", INIT),
     "rshd": ("import cmod\ndef a(vars):\n    return vars\ndef b(objs):\n    return list(map(vars, objs))\nb([cmod.Cfg()])\n", INIT),
     "rshn": ("import cmod\ndef a(vars, objs):\n    return list(map(vars, objs))\na(len, [cmod.Cfg()])\n", INIT),
     # a format token with a letter outside ASCII: '{c.\u00f1ame}'
@@ -2034,6 +2042,7 @@ WHOLE = {cls_: (line_, bump(line_), "other", why_) for cls_, line_, why_ in [
     ("Nlt", 'NK = len("ab")', "given a value that is not a literal (len('ab'))"), ("Ann", "AK: int = 1", "an annotated assignment (AK: int = 1)"),
     ("Loc", "LK = 1", "reading its own namespace in the body (vars(): a call that is no pure one, so the class is an effect and the file goes whole)"),
     ("Kw", "KK = 1", "given a keyword (class Kw(metaclass=Meta): the metaclass may read the attributes of the class)"),
+    ("Eff", "EK = 1", "running a call in its body (open(__file__): the class statement is an effect, whatever its literal lines hold, so the file goes whole)"),
     ("Sl", 'SL = 1; SQ = len("ab")', "holding a literal and a call on one line (SL = 1; SQ = len('ab'): the line edit may be the call's)"),
     ("Hdr", "HK = 1", "reading its namespace in a method's default (def other(self, ns=vars()): the default runs in the class body)"),
     ("HdrL", "X_HL = 1", "reading its namespace in a method's default (ns=locals())"), ("HdrD", "X_HD = 1", "reading its namespace in a method's default (ns=dir())"),
@@ -2068,7 +2077,7 @@ def class_sel(edit, msg, env=None):
 OLD_C = {"SUITEMAP_CLASS_RULE": "C1"}
 # the suites that read an attribute by a name they compute: every attribute edit of the module reaches them
 DYN = {"rd", "rv", "ri", "rj", "rdump", "rmx", "rrb", "rsa", "rha", "rda", "rgs", "rgm", "rag", "rmcl", "rga", "rsd", "rev", "rgv", "rpmk", "rgms", "rhsetattr", "rhhasattr", "rhdelattr", "rhvars", "rhdir",
-       "rali_ga", "rali_ag", "rali_gm", "rali_ev", "rali_gv", "rali_pm", "rshd"}
+       "rali_ga", "rali_ag", "rali_gm", "rali_ev", "rali_gv", "rali_pm", "rali_ch", "rshd"}
 XDYN = {"rcm", "rsm", "rfs", "rshc"}   # methods of other classes that read self.__dict__ where self may be a class: they read any attribute, so any attribute edit of the module reaches them (C1 does not: they ran no scope of the edited class)
 MODS = {"rmj", "rmi", "rmn", "rms", "rmp"}   # suites that vars() / getattr() a module object
 CFG_ALL = {"ra", "rst", "rs", "rf", "rm", "ro", "rsnap", "rn", "rmc", "rml", "rdf", "rlong", "rlongn", "rpm", "rshn"} | DYN | MODS
@@ -2080,7 +2089,7 @@ check("CLASS 1 an edit of a literal class attribute selects the suites that read
       "rdump other.__dict__ in a method, rmx vars() of a name that is no module, rsa setattr, rha hasattr, rda delattr, rgs inspect.getattr_static, rgm inspect.getmembers, rag operator.attrgetter, "
       "rpm mock.patch.multiple(Cfg, K=1), rpmk patch.multiple(Cfg, **kw), rmcl operator.methodcaller, rga .__getattribute__(name), rsd getattr(obj, '__dict__'), rev eval(name), rgv getattr handed over as a value, rrb vars(self) / self.__dict__ in a method that rebinds self), "
       "and the same readers under another name: rali_ga (from builtins import getattr as ga), rali_ag (operator.attrgetter as ag), rali_gm (inspect.getmembers as gm), rali_ev (eval as ev), "
-      "rali_gv (the aliased getattr handed over as a value), rali_pm (pm = mock.patch.multiple), rshd (list(map(vars, objs)) in a function that binds no vars, next to another that has a parameter vars), rshc (the same in a method of a class that binds vars in its body: the class scope is not the method's)",
+      "rali_gv (the aliased getattr handed over as a value), rali_pm (pm = mock.patch.multiple), rali_ch (h = g, g = ag, ag = attrgetter, met deepest-last: the alias closure takes more than one pass), rshd (list(map(vars, objs)) in a function that binds no vars, next to another that has a parameter vars), rshc (the same in a method of a class that binds vars in its body: the class scope is not the method's)",
       set(out) == K_READERS | XDYN, (out, err))
 check("CLASS 2 ... and not the suites that ran another method of the class (ro, rsnap: self.__dict__ is an instance's), nor one that reads only another attribute (rn: .LIMIT), "
       "nor one that vars() / getattr()s a module (rmj: an import, rmi: importlib.import_module, rmn: __import__, rms: sys.modules[...], rmp: either written in place), "
@@ -2103,8 +2112,8 @@ for cls_, (line_, new_, meth_, why_) in WHOLE.items():
     out, err = class_sel(ed, f"{cls_}")
     out_old, err_old = class_sel(ed, f"{cls_}, old rule", OLD_C)
     check(f"CLASS 7 {cls_}: an edit of a literal in a class that is {why_} stays whole-class: the suite that ran another method of the class is selected "
-          "(Loc: every suite, the file is whole), the same answer as C1",
-          (f"w{cls_.lower()}" in out or (cls_ == "Loc" and out == ["all"])) and out == out_old, (out, out_old, err))
+          "(Loc, Eff: every suite, the file is whole), the same answer as C1",
+          (f"w{cls_.lower()}" in out or (cls_ in ("Loc", "Eff") and out == ["all"])) and out == out_old, (out, out_old, err))
 out, err = class_sel(lambda: sub("cmod.py", "CK = 1", "CK = 2"), "Cm.CK")
 check("CLASS 9 a classmethod's first parameter is the class, whatever it is called, and a staticmethod's is whatever the caller passes: self.__dict__ in either reads a class's attributes, so the suites that ran them (rcm, rsm) are selected "
       "and the one that ran another method (rco) is not", {"rcm", "rsm"} <= set(out) and "rco" not in out, (out, err))
