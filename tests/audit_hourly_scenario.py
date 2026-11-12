@@ -202,9 +202,11 @@ clean_pane(); panes["home-peer"] = "busy"
 for i in range(1, 12): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 put(1, act=90)
 first = tick()
-second = tick(now0 + 10 * MIN); third = tick(now0 + 59 * MIN)
-check("4 a second and a third pass inside the hour write nothing: one line", first == ["a1"] and second == [] and third == [] and len(lines(1)) == 1, (first, second, third, lines(1)))
+second = tick(now0 + 10 * MIN); third = tick(now0 + 54 * MIN)
+check("4 a second and a third pass inside the hour (10 and 54 minutes after the line) write nothing: one line", first == ["a1"] and second == [] and third == [] and len(lines(1)) == 1, (first, second, third, lines(1)))
 check("4 an hour after the first line, an item still silent gets the next", tick(now0 + 60 * MIN) == ["a1"] and len(lines(1)) == 2 and lines(1)[1]["at"] == now0 + 60 * MIN)
+put(9, act=90); tick(); b1 = tick(now0 + 54 * MIN + 59); b2 = tick(now0 + 55 * MIN)
+check("4 the gap is judged with five minutes of slack (tick jitter): 54 minutes 59 seconds after the line nothing, 55 minutes the next line", "a9" not in b1 and "a9" in b2 and [e["at"] for e in lines(9)] == [now0, now0 + 55 * MIN], (b1, b2, lines(9)))
 put(2, act=90); tick(); d2 = rd(2); d2["activity"] = now0 + 5 * MIN; (T / "store/a/2.json").write_text(json.dumps(d2))
 r62, r66 = tick(now0 + 62 * MIN), tick(now0 + 66 * MIN)
 check("4 a write by the mover after the line starts the hour again: 57 minutes after it nothing, 61 minutes after it (and 66 after the line) the next line",
@@ -212,13 +214,13 @@ check("4 a write by the mover after the line starts the hour again: 57 minutes a
 put(3, act=90); tick(now0 + 130 * MIN); tick(now0 + 131 * MIN)
 check("4 two passes close together write one line", len([e for e in lines(3) if e["at"] == now0 + 130 * MIN]) == 1 and not any(e["at"] == now0 + 131 * MIN for e in lines(3)), lines(3))
 # the stale view: a pass whose list was made before another pass wrote the line
-put(4, act=90); stale_items = {"a4": rd(4)}
+put(4, act=90); put(8, act=90); stale_items = {"a4": rd(4), "a8": rd(8)}      # the view the slower pass made: both open, no line yet
 tick()
 with _Err():
     real_pass = HR.pass_
     put(8, act=90, status="completed", outcome="done")
     HR.pass_ = lambda items, now, env=None, pane=None, same=None: [("a4", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"}), ("a8", {"text": "stale", "verified": [], "recorded": [], "kind": "audit_idle"})]      # the list a slower pass made before the line was written, and an item that closed since
-    try: stale = server._hourly_tick(now=now0 + 5 * MIN)
+    try: stale = server._hourly_tick(now=now0 + 5 * MIN, items=stale_items)
     finally: HR.pass_ = real_pass
 check("4 an item read again under the lock that is no longer due (a line written since, or closed since) is left alone", stale == [] and len(lines(4)) == 1 and lines(8) == [], (stale, lines(4), lines(8)))
 
@@ -366,9 +368,48 @@ put(3, act=90); off()
 check("12 with the key absent from the loaded config the pass is off and writes nothing", "hourly_line" not in server._cfg.CFG["audit"] and HR.enabled() is False and tick() == [] and lines(3) == [])
 on()
 
+# ================================================================ 14. tick jitter: an hour on the grid is an hour
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+import random
+rng = random.Random(7)
+put(1, act=90)                                                      # silent from 90 minutes before now0
+t_ = now0; stamps14 = []
+while t_ <= now0 + 3 * 24 * H:
+    if tick(t_ + rng.uniform(0, 8)): stamps14.append(t_ + 0.0)      # the ten-minute tick reads its clock 0 to 8 seconds late, a different amount each time
+    t_ += 10 * MIN
+# (the stamp is the grid time; the line itself is dated by the jittered clock)
+gaps14 = [b_ - a_ for a_, b_ in zip(stamps14, stamps14[1:])]
+first_day = [a_ for a_ in stamps14 if a_ - (now0 - 90 * MIN) < 24 * H]
+check("14 on a ten-minute grid with 0 to 8 seconds of jitter an item silent for 3 days gets 23 lines in the first 24 hours of silence, as on an exact grid, not 20", len(first_day) == 23, (len(first_day), len(stamps14)))
+check("14 …one an hour on the grid: every gap in the first day is exactly 60 minutes (never 70), then one every 6 hours (never 6 hours 10 minutes)", gaps14[:22] == [H] * 22 and gaps14[22:] and all(g == 6 * H for g in gaps14[22:]), (gaps14[:3], gaps14[20:25]))
+
+# ================================================================ 15. a torn entry in the log never raises
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+good = {"at": now0 - 600, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}
+torn = [{"at": "bad", "text": "x", "kind": "audit"}, {"at": float("inf"), "text": "x", "kind": "audit"}, {"at": 1e30, "text": "x", "kind": "audit"}, {"at": float("nan"), "text": "x", "kind": "audit"},
+        {"at": now0 - 300, "kind": "audit"}, {"at": now0 - 200, "text": 7, "kind": "audit"}, {"at": None, "text": "x", "kind": "audit"}, "not a dict", {"at": True, "text": "x", "kind": "audit"}]
+put(1, act=90, hourly_audit={"log": [good] + torn})
+txt15 = server._fmt(server._load("a1"))
+check("15 `get` on an item whose log holds torn entries (a time that is no number, inf, 1e30, nan, no text, a text that is no string, not a dict) does not raise and prints the one good line", sum(1 for l in txt15.splitlines() if l.startswith("audit: ")) == 1 and "Audit 10:00: idle, nothing verified" in txt15, [l for l in txt15.splitlines() if l.startswith("audit:")])
+check("15 …the torn entries are left out of the log, not read", HL.log_of(mt(1)) == [good] and HR.last_line(mt(1))["at"] == good["at"])
+put(2, act=90); base15 = rd(2)
+for label, mod in (("the board's renderer", board_render), ("the signed-in UI's renderer", ui_render)):
+    bd = mod.Board(str(T / "store")); row = bd.item("a1") if hasattr(bd, "item") else next(r for r in bd.rows if r["gid"] == "a1")
+    bd.item_versions = lambda r: [(now0 - 500, base15), (now0 - 400, rd(1))]
+    try: evs15, _m = bd.item_events(row); err15 = None
+    except Exception as e_: evs15, err15 = [], e_
+    got15 = [x for x in evs15 if "Audit " in x[2]]
+    check(f"15 {label} shows the one good line and does not raise on the torn ones", err15 is None and len(got15) == 1, (err15, evs15))
+# a good entry that repeats the text of an older one a day later is a new line, not a re-read
+m_d = {}; HL.note(m_d, 100.0, "Audit 10:00: idle, nothing verified", "audit_idle")
+m_e = json.loads(json.dumps(m_d)); HL.note(m_e, 100.0 + 86400, "Audit 10:00: idle, nothing verified", "audit_idle")
+check("15 new_entries: the same words a day later are a new History line", [e["at"] for e in HL.new_entries(m_d, m_e)] == [100.0 + 86400], HL.new_entries(m_d, m_e))
+
 # ================================================================ 9. the pure parts
 clean_pane(); put(1, act=90); put(2, act=90)
-meta = {"hourly_audit": {"log": [{"at": 5.0, "text": "plain", "kind": "other"}, {"at": 9.0, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}, {"at": 7.0, "text": "Audit 09:00: verified x", "kind": "audit"}, {"at": "bad", "text": "x", "kind": "audit"}, {"at": True, "text": "x", "kind": "audit"}]}}
+meta = {"hourly_audit": {"log": [{"at": 20.0, "text": "plain", "kind": "other"}, {"at": 9.0, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}, {"at": 7.0, "text": "Audit 09:00: verified x", "kind": "audit"}, {"at": "bad", "text": "x", "kind": "audit"}, {"at": True, "text": "x", "kind": "audit"}]}}
 check("9 last_line is the newest audit entry by time, skipping an entry of another kind and a torn one", HR.last_line(meta)["at"] == 9.0 and HR.idle_marked(meta) and HR.last_line({}) is None and HR.last_line(None) is None and not HR.idle_marked({"hourly_audit": {"log": [{"at": 1, "text": "x", "kind": "audit"}]}}))
 check("9 the stall ladder's own log is not read: an entry there with an audit kind is no audit line", HR.last_line({"stall": {"log": [{"at": 9.0, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}]}}) is None)
 m9b = {}

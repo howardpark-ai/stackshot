@@ -9,14 +9,21 @@ from typing import Any
 
 KEY = "hourly_audit"
 KEEP = 8                    # the lines an item keeps (the History keeps every one it has shown: it reads the item's revisions)
+MAX_AT = 1e11                # a time past the year 5000 is no time (datetime cannot print 1e30 or inf)
 CLIP = 240                  # one line's text
 KIND_OK, KIND_IDLE = "audit", "audit_idle"
 
 
+def _well_formed(x: Any) -> bool:
+    """An entry the renderers can print: a dict with a finite time a date can be made of (not a bool) and a text that is a string. A torn one (a bad write, a hand edit) is left out, never raised on."""
+    at = x.get("at") if isinstance(x, dict) else None
+    return isinstance(x.get("text") if isinstance(x, dict) else None, str) and isinstance(at, (int, float)) and not isinstance(at, bool) and abs(at) < MAX_AT      # NaN fails the comparison too
+
+
 def log_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """The lines written on an item (metadata.hourly_audit.log), oldest first."""
+    """The lines written on an item (metadata.hourly_audit.log), oldest first; a torn entry (no text, a time that is not a number or no date) is left out."""
     s = (meta or {}).get(KEY)
-    return [x for x in ((s or {}).get("log") or []) if isinstance(x, dict)] if isinstance(s, dict) else []
+    return [x for x in ((s or {}).get("log") or []) if _well_formed(x)] if isinstance(s, dict) else []
 
 
 def note(meta: dict[str, Any], now: float, text: str, kind: str, keep: int = KEEP) -> None:

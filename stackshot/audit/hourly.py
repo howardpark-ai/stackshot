@@ -49,6 +49,7 @@ from stackshot.waits import waiting as _wt
 EVERY = 3600.0           # an item on an agent is owed a line after this long without activity, and again this long after the last line
 LONG_AFTER = 24 * 3600.0     # …until it has been silent this long; then the lines thin out to one every SLOW_EVERY
 SLOW_EVERY = 6 * 3600.0
+SLACK = 300.0            # the ten-minute tick reads its clock a few seconds later or earlier each time: a line is owed once this much less than the gap has passed, so an hour on the tick grid is never missed by seconds and pushed a whole tick on (half a tick)
 PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:05: verified …`
 KIND_OK, KIND_IDLE = _log.KIND_OK, _log.KIND_IDLE      # the `kind` of the log entry of a line that verified something, and of one that did not
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
@@ -118,8 +119,8 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     if not (last > 0 and now - last >= EVERY):
         return None
     prior = last_line(meta, now)
-    if prior is not None and now - prior["at"] < (SLOW_EVERY if now - last >= LONG_AFTER else EVERY):
-        return None      # a line was written lately (a clock that went backwards lands here too: the next line is only delayed)
+    if prior is not None and now - prior["at"] < (SLOW_EVERY if now - last >= LONG_AFTER else EVERY) - SLACK:
+        return None      # a line was written lately, within the gap less the slack (a clock that went backwards lands here too: the next line is only delayed)
     what, recorded = verified(it, meta, mover, now, pane, same)
     return {"text": text(now, what, recorded), "verified": what, "recorded": recorded, "kind": KIND_OK if what else KIND_IDLE}
 
