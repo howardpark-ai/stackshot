@@ -237,6 +237,15 @@ def import_rule():
     return v
 
 
+def route_rule():
+    """R2 (default): a route (@mcp.custom_route) binds its own key and only the readers of the routes match it; R1: a route binds <enumerate>, as every
+    registered function did, so every reader of any listing attribute matches it (see *Route registrations*)"""
+    v = os.environ.get("SUITEMAP_ROUTE_RULE", "R2").strip().upper()
+    if v not in ("R1", "R2"):
+        raise SystemExit(f"suitemap: SUITEMAP_ROUTE_RULE={os.environ.get('SUITEMAP_ROUTE_RULE')!r} is not a rule: the allowed values are R1 and R2")
+    return v
+
+
 def annotation_rule():
     """N2 (default): in a file with postponed annotations, a name used only in the annotations of a plain function that is only ever called, or of a
     local variable, is not a read; N1: every annotation name is a read (see *Imports and annotations*)"""
@@ -372,6 +381,8 @@ PLAIN_DECORATORS = {"property", "staticmethod", "classmethod", "abc.abstractmeth
 # A decorator on one of the module's own objects (@mcp.tool, @mcp.custom_route) registers the function there: its name,
 # signature and description are read by whoever calls it (it ran the body: measured) and by whatever lists the registry.
 # Listing is a call of one of these, on any object (a suite lists tools through its MCP client): the key (*, <enumerate>).
+# A route (@mcp.custom_route) is none of tool, resource or prompt: it binds its own key, <enumerate-routes>, and only a reader of the routes
+# (ROUTE_ATTRS) matches it (see *Route registrations*). A decorator with both (@mcp.tool and @mcp.custom_route on one function) binds both keys.
 # Code that reads a function's docstring, or hands the function to a registry that does (a tool server builds its description from it): a
 # docstring-only change reaches every suite that ran such code (see *Docstrings*). None of it exists in the checkout's own code today.
 DOC_CALLS = {"getdoc", "get_docstring", "render_doc", "help", "add_tool", "from_function", "add_resource", "add_prompt"}
@@ -379,6 +390,11 @@ DOC_REGISTER = {"tool", "resource", "prompt"}   # mcp.tool(...)(fn) called as a 
 ENUMERATE = "<enumerate>"
 ENUMERATE_ATTRS = {"list_tools", "get_tools", "_list_tools", "list_resources", "get_resources", "list_prompts", "get_prompts",
                    "list_resource_templates", "_tool_manager", "http_app", "routes"}
+ENUMERATE_R = "<enumerate-routes>"
+# what reads or serves the route list: the attributes that hand out the ASGI app (http_app; streamable_http_app and sse_app of earlier FastMCP releases), the list
+# itself (routes; _additional_http_routes and its getter) and the calls that build the app and serve it (run_async, run_http_async: a suite that starts the server
+# as a process and asks it for a page reads every route). http_app and routes are in ENUMERATE_ATTRS too: the app lists the tools as well
+ROUTE_ATTRS = {"http_app", "routes", "streamable_http_app", "sse_app", "_additional_http_routes", "_get_additional_http_routes", "run_async", "run_http_async"}
 
 
 def modname(path):
@@ -639,6 +655,8 @@ class ModNames:
             sc, ks = self.scope(node), (self.keys(node) if dotted(node) else set())
             if node.attr in ENUMERATE_ATTRS:
                 ks = ks | {("*", ENUMERATE)}
+            if node.attr in ROUTE_ATTRS and route_rule() == "R2":
+                ks = ks | {("*", ENUMERATE_R)}
         elif isinstance(node, ast.Call):
             f = dotted(node.func)
             ks = set()
@@ -755,7 +773,8 @@ class ModNames:
 
     def decorators(self, st, reads):
         """('bind', extra names) when every decorator only wraps (PURE_DECORATORS) or registers on one of this module's
-        own objects (@mcp.tool: extra = <enumerate>); ('effect', set()) for any other"""
+        own objects (@mcp.tool: extra = <enumerate>; @mcp.custom_route: extra = <enumerate-routes>, or <enumerate> under route rule R1);
+        ('effect', set()) for any other"""
         extra = set()
         for d in st.decorator_list:
             for x in ast.walk(d):
@@ -765,7 +784,7 @@ class ModNames:
             if f in PURE_DECORATORS:
                 continue
             if f and "." in f and f.split(".")[0] in self.toplevel:
-                extra.add(ENUMERATE)
+                extra.add(ENUMERATE_R if f.endswith(".custom_route") and route_rule() == "R2" else ENUMERATE)
                 continue
             return "effect", set()
         return "bind", extra
@@ -1994,6 +2013,7 @@ def main():
     docstring_rule()
     import_rule()
     annotation_rule()
+    route_rule()
     if args.cmd == "list":
         print("\n".join(suites()))
         return 0
