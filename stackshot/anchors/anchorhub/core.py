@@ -61,7 +61,7 @@ def direct() -> dict[str, str]:
     if not isinstance(v, dict): return {}
     return {(_anc.anchor_id(str(k).strip()) or str(k).strip()): str(x).strip() for k, x in v.items() if str(k).strip() and str(x).strip()}   # a GitHub key by its current name ([github.moved]), as the events are keyed
 # The fleet's own PR events (the turn rule's third build): on a repository listed
-# in [pilot] own_repos (by owner/repo, owner/*, or the repository's numeric ID, Event.repo_id), a pull request opened, merged, closed or given new commits, and CI passing again, is routine. For a
+# in [pilot] own_repos (by owner/repo, owner/*, or the repository's numeric ID, Event.repo_id), a pull request opened, merged, closed or given new commits, and CI passing again after a failure, is routine. For a
 # project in the pilot it is logged and not delivered: a routing-log line with no recipient, marked log_only and ruled
 # `merged` by stackshot (auto) at once, which stays on the project's routing page and which still
 # releases an item held on the anchor (the server's _anchor_pass). Decided by the event's type at its source (Event.etype),
@@ -200,6 +200,7 @@ class Event:
     bot: bool = False      # GitHub only: the comment's author is an account of type Bot (the payload says so; no read is made for it): the event log leaves a bot's comment out
     vouched: str = ""      # GitHub only: the kinds of this event (event_log.KINDS, "+"-joined) the payload vouches for as the repository's own side: a comment or review whose author_association is OWNER, MEMBER or
                            # COLLABORATOR, a CI result from a branch of the repository itself. The event log writes no line for a comment, review or CI result that is not vouched for
+    record_only: bool = False  # GitHub only: written to the event log (and so to the item's last activity) and to no one else: no notice, no routing line, no release of a held item, whatever [pilot] own_repos says. Set on a new green head that follows no failure (github.ci)
 
     @property
     def type(self) -> str:
@@ -383,12 +384,14 @@ class Hub:
         self.emit(Event(anchor=anchor, kind=kind, title=summary["title"], who=summary["who"], text=summary["text"],
                         url=summary["url"], ts=summary.get("ts"), body=summary.get("body") or "",
                         full=summary.get("full") or "", meta=dict(summary.get("meta") or {}), etype=str(summary.get("etype") or ""),
-                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or "")))
+                        repo_id=_repo_id(summary.get("repo_id")), head=str(summary.get("head_ref") or ""), author=str(summary.get("author") or ""), bot=bool(summary.get("bot")), vouched=str(summary.get("vouched") or ""), record_only=bool(summary.get("record_only"))))
 
     def emit(self, ev: "Event"):
         """Route one event to the sessions bound to its anchor. The first event on (anchor, session) is delivered at once;
         further events are collapsed into one follow-up notice: after DEBOUNCE s for most kinds, after QUIET[kind] s of
         silence for a kind that comes in editing sessions (Drive), at the latest QUIET_MAX s after the first.
+        An event marked record_only (a new green head that follows no failure) stops right after the event log: no notice, no routing line, no release of
+        an item held on the anchor, whatever [pilot] own_repos says.
         An anchor in [anchor_hub] direct takes the direct lane instead (emit_direct).
         A routine event on the fleet's own pull request (routine_own) is logged instead of delivered to a session whose every
         route for the anchor is in the pilot (log_routine): no notice, nothing held for a follow-up."""
@@ -396,7 +399,8 @@ class Hub:
         except Exception as e: log.warning("merge log: %s", str(e)[:120])
         try: _events.note(ev.anchor, ev.url, ev.etype, ev.who, (ev.meta or {}).get("refs"), time.time(), ev.bot, vouched=ev.vouched, ts=ev.ts)      # the same funnel, the same rule: recorded whatever happens to the notice, from what the event already holds, at the event's own time
         except Exception as e: log.warning("event log: %s", str(e)[:120])
-        if ev.etype == "pr_commit": return      # a new head commit of a pull request: recorded for the item's last activity above, and tells no session
+        if ev.record_only:                  # the event log has it (above); nothing else is told, on any repository: a green on every push must not wake a builder, nor release an item held on the anchor
+            log.info("%s: %s, recorded in the event log only", ev.anchor, ev.etype); return
         to = direct().get(ev.anchor)
         if to: return self.emit_direct(ev, to)
         why = routine_own(ev)

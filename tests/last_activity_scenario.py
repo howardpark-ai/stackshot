@@ -21,7 +21,8 @@ exactly as it was. Fixture items, a fake clock (the passes are given their `now`
   11 History: a confirm and a last-activity stamp saved in one window still show the `confirm` line (both renderers)
   12 the time of a notifications thread is its vouched items', and a CI result's is its check runs' own
   13 a merge whose pull request is named only in a step's status tag or on a line of the item's next ties (an open step's tag only; a project with no anchor in that repository does not)
-  14 a commit: the head sha of an anchored pull request changing is one `commit` event, stamped when the hub saw it (no request), or after downtime read once and stamped at the committer date (clamped; the time seen when the read fails); a first sight, an unchanged sha and a 304 read nothing and record nothing; a force-push to an
+  14 a green head after a green head is activity on the item the pull request is anchored to
+  15 a commit: the head sha of an anchored pull request changing is one `commit` event, stamped when the hub saw it (no request), or after downtime read once and stamped at the committer date (clamped; the time seen when the read fails); a first sight, an unchanged sha and a 304 read nothing and record nothing; a force-push to an
      older commit, a date ahead of the clock, an unreadable date and a fork's pull request; the event is logged and told to no session; the pass stamps "commit on PR n" and the record never goes back
 
     tests/run-suite last_activity       -> exit 0 / 1"""
@@ -147,7 +148,7 @@ check("1 save_signals: each save signal has its kind: step_done, step_dropped, s
       K(base, after(steps=[step("a", "done", 9), step("b", "done", 5), step("c", "open")])) == ["step_done"] and K(base, after(steps=[step("a", "open"), step("b", "done", 5), step("c", "dropped", 9)])) == ["step_dropped"]
       and K(base, after(phase="waiting", waits_on="time")) == ["state_change"] and K(base, after(merged_seen=["a/b#1"])) == ["pr_merged"] and K(None, base) == ["state_change"]
       and K(base, after(mover="n", merged_seen=["a/b#1"])) == ["state_change", "pr_merged"] and K(base, after(work=[{"id": "x"}])) == [], K(base, after(mover="n", merged_seen=["a/b#1"])))
-check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing again), review, comment and pr_merged",
+check("1 pr_candidate: the events of a tied pull request are the signals ci_result (failed or passing), review, comment and pr_merged",
       [(LA.pr_candidate(k, 9, 5, 50) or {}).get("kind") for k in ("ci_failed", "ci_passed", "review", "comment", "merged")] == ["ci_result", "ci_result", "review", "comment", "pr_merged"], None)
 # update and audit: defined and tested, stamped by nothing yet
 check("1 update_signal: a status write whose text differs from the previous one is an update, the words the text itself; the same text again (case and spacing aside), a blank one and a torn time are not",
@@ -161,7 +162,7 @@ LA.apply(it_, [LA.update_signal("", "wired the thing", 10)]); first_ = dict(it_[
 LA.apply(it_, [LA.audit_signal("subagent running", 20)])
 check("1 update and audit signals take part in newest-wins like the rest: an audit line later than an update replaces it, an older update after it does not", first_["kind"] == "update" and it_["metadata"]["last_activity"] == {"at": 20.0, "kind": "audit", "what": "subagent running"}
       and not LA.apply(it_, [LA.update_signal("", "older", 15)]), it_)
-check("1 pr_what: the words for each kind of event (a comment is on #n: the hub does not say whether the anchor is a pull request); a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing again on PR 123", "comment on #123", "review on PR 123", "PR 123 merged"]
+check("1 pr_what: the words for each kind of event (a comment is on #n: the hub does not say whether the anchor is a pull request); a kind that is no activity has none", [LA.pr_what(k, 123) for k in ("ci_failed", "ci_passed", "comment", "review", "merged")] == ["CI failed on PR 123", "CI passing on PR 123", "comment on #123", "review on PR 123", "PR 123 merged"]
       and LA.pr_what("pr_closed", 5) == "" and LA.pr_what("comment", 0) == "" and LA.pr_candidate("pr_closed", 5, 100, 200) is None and LA.pr_candidate("comment", 5, 100, 200) == {"at": 100.0, "kind": "comment", "what": "comment on #5"}, None)
 closed_ = {"status": "completed", "metadata": {"steps": [step("a", "done", 9)]}}
 check("1 stamp: only an open item has a record", not LA.stamp(closed_, {"status": "open", "metadata": {"steps": [step("a", "open")]}}, 50.0) and "last_activity" not in closed_["metadata"], closed_)
@@ -823,9 +824,46 @@ check("13 a merge whose pull request is named only in a step's tag (a460, PR 261
 check("13 …and a bare number in a tag of an item whose project holds no anchor in that repository (a462, PR 263) is not tied: nothing is recorded", la(462) is None, la(462))
 check("13 …nor is a tag on a done step (a463, PR 264): only the tag of an open step counts, as the same tag on an open step (a464) ties", la(463) is None and lk(464) == "pr_merged" and la(464)["what"] == "PR 264 merged", (la(463), la(464)))
 
-# ================================================================ 14. a commit: the head sha of an anchored pull request changing
+# ================================================================ 14. a green head after a green head is activity on the item the pull request is anchored to (it was dropped: only a pass after a failure was reported)
+put(484)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/40", "items": ["a484"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+g13 = {"/user": {"login": "hubaccount"}, **pr9(40)}
+with GH(g13, ["github:acme/widgets#40"]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()      # seeds the first green head: silent
+    g13.update(pr9(40, sha="41" * 20))      # a new head, green as the one before
+    ci13 = [e for e in G.one() if e.etype.startswith("ci_")]
+    ci13b = [e for e in G.one() if e.etype.startswith("ci_")]
+check("14 a new green head after a green one is one ci_passed event, vouched for; the pass after it adds none",
+      [(e.etype, e.who, e.vouched, e.text) for e in ci13] == [("ci_passed", "CI", "ci_passed", "passing on 4141414 (1 checks)")] and ci13b == [], ([(e.etype, e.text) for e in ci13], ci13b))
+hub_.bindings["github:acme/widgets#40"] = {"home-peer"}
+for e in ci13: hub_.emit(e)
+rows13, _ = EL.read(0)
+saved = ev_pass_now()
+check("14 …it writes a ci_passed line for the pull request and stamps the item anchored to it: ci_result, 'CI passing on PR 40'",
+      [(r["kind"], r["n"]) for r in rows13] == [("ci_passed", 40)] and saved == ["a484"] and la(484)["what"] == "CI passing on PR 40" and lk(484) == "ci_result", (rows13, saved, la(484)))
+
+# a fork's pull request: the same green after green is not the repository's own side, so it is not vouched for and writes no line
+put(485)
+(T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/42", "items": ["a485"]}]}))
+EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
+g13f = {"/user": {"login": "hubaccount"}, **pr9(42, head="mallory/widgets")}
+with GH(g13f, ["github:acme/widgets#42"]) as G:
+    G.hub.status.setdefault("anchors", {})
+    G.one()
+    g13f.update(pr9(42, head="mallory/widgets", sha="43" * 20))
+    ci13f = [e for e in G.one() if e.etype.startswith("ci_")]
+check("14 a fork's pull request: a green head after a green one is the same record_only ci_passed event, not vouched for", [(e.etype, e.vouched, e.record_only) for e in ci13f] == [("ci_passed", "", True)], [(e.etype, e.vouched, e.record_only) for e in ci13f])
+hub_.bindings["github:acme/widgets#42"] = {"home-peer"}
+for e in ci13f: hub_.emit(e)
+rows13f, _ = EL.read(0)
+saved = ev_pass_now()
+check("14 …it writes no line to the event log and stamps nothing (a fork's CI is not the repository's own side)", rows13f == [] and saved == [] and la(485) is None, (rows13f, saved, la(485)))
+
+# ================================================================ 15. a commit: the head sha of an anchored pull request changing
 # pure: the signal, its words, the committer date's rule (after downtime: never later than now, never older than the window, None only when unreadable) and the filter
-check("14 pr_candidate: a commit of a tied pull request is the signal `commit`, worded `commit on PR n`, at the time given; it is one of the stamped kinds",
+check("15 pr_candidate: a commit of a tied pull request is the signal `commit`, worded `commit on PR n`, at the time given; it is one of the stamped kinds",
       LA.pr_candidate("commit", 9, 5, 50) == {"at": 5.0, "kind": "commit", "what": "commit on PR 9"} and "commit" in LA.STAMPED and LA.pr_what("commit", 9) == "commit on PR 9" and LA.pr_what("commit", 0) == ""
       and LA.pr_candidate("commit", 9, 80, 50)["at"] == 50.0 and LA.pr_candidate("commit", 9, "x", 50) is None and LA.clean({"at": 5, "kind": "commit", "what": ""}) is None, None)
 tn = 1_800_000_000.0
@@ -833,18 +871,18 @@ for label, d, want in (("a minute ago", tn - 60, tn - 60), ("twenty hours ago", 
                        ("two minutes ahead (a committer's clock a little fast)", tn + 120, tn), ("ten minutes ahead", tn + 600, tn), ("two hours ahead", tn + 7200, tn),
                        ("garbage", "yesterday-ish", None), ("absent", None, None), ("a list", ["x"], None), ("a bool", True, None), ("zero", 0, None)):
     got = EL.commit_time(iso_at(d) if isinstance(d, float) else d, tn)
-    check(f"14 commit_time: {label}", got == want, (d, got, want))
-check("14 commit_time and MAX_AT: a committer date in the year 3500, or a count of milliseconds, is read as now (so never past what the record keeps); the signal itself refuses a time past MAX_AT",
+    check(f"15 commit_time: {label}", got == want, (d, got, want))
+check("15 commit_time and MAX_AT: a committer date in the year 3500, or a count of milliseconds, is read as now (so never past what the record keeps); the signal itself refuses a time past MAX_AT",
       EL.commit_time("3500-01-01T00:00:00Z", tn) == tn and EL.commit_time(1.8e12, tn) == tn and LA.pr_candidate("commit", 9, LA.MAX_AT * 2, LA.MAX_AT * 4) is None and LA.pr_candidate("commit", 9, LA.MAX_AT, LA.MAX_AT * 4) is not None, None)
 A13 = "github:acme/widgets#140"
-check("14 lines_for: a commit is a line only when the source vouched for it (a fork's pull request writes none), at its own time; one older than a day or more than an hour ahead writes none; the line has no ids",
+check("15 lines_for: a commit is a line only when the source vouched for it (a fork's pull request writes none), at its own time; one older than a day or more than an hour ahead writes none; the line has no ids",
       [r["kind"] for r in lines(A13, "", "pr_commit", "x", vouched="commit", now=100.0, ts=90.0)] == ["commit"] and lines(A13, "", "pr_commit", "x", vouched="", now=100.0, ts=90.0) == []
       and lines(A13, "", "pr_commit", "x", vouched="comment+ci_failed", now=100.0, ts=90.0) == [] and lines(A13, "", "pr_commit", "x", vouched="commit", now=200000.0, ts=10.0) == []
       and lines(A13, "", "pr_commit", "x", vouched="commit", now=100.0, ts=100.0 + 7200) == [] and lines(A13, "", "pr_commit", "x", vouched=["commit"], now=100.0, ts=90.0, refs=[BID(5)])[0]["refs"] == []
       and lines(A13, "", "pr_commit+comment", "x", vouched="commit", now=100.0, ts=90.0)[0]["kind"] == "commit"
       and lines(A13, "", "pr_commit", "x", vouched="commit", now=tn, ts=tn - EL.COMMIT_FLOOR_S) != [], None)
-check("14 the clamp to the window keeps a margin of at least two minutes (a pass runs once a minute, and reads a line some time after it was written), so a clamped line is not dropped by the pass's own floor", EL.FLOOR_H * 3600.0 - EL.COMMIT_FLOOR_S >= 120.0, EL.COMMIT_FLOOR_S)
-check("14 normal: a commit line is read, its ids dropped", EL.normal({"ts": 1, "repo": "a/b", "n": 3, "kind": "commit", "refs": [BID(1)]}) == {"ts": 1.0, "repo": "a/b", "n": 3, "kind": "commit", "refs": []}, None)
+check("15 the clamp to the window keeps a margin of at least two minutes (a pass runs once a minute, and reads a line some time after it was written), so a clamped line is not dropped by the pass's own floor", EL.FLOOR_H * 3600.0 - EL.COMMIT_FLOOR_S >= 120.0, EL.COMMIT_FLOOR_S)
+check("15 normal: a commit line is read, its ids dropped", EL.normal({"ts": 1, "repo": "a/b", "n": 3, "kind": "commit", "refs": [BID(1)]}) == {"ts": 1.0, "repo": "a/b", "n": 3, "kind": "commit", "refs": []}, None)
 
 # the receiver on a fake `gh` that answers 304 to a matching If-None-Match
 import itertools
@@ -874,74 +912,75 @@ try:
   with GH(g13, [A13], etags=True) as G:
     G.hub.status.setdefault("anchors", {})
     first = G.one()
-    check("14 first sight of a pull request: the sha is kept, nothing is recorded and no commit is read", not [e for e in first if e.etype == "pr_commit"] and not [p for p, _ in G.calls if "/git/commits/" in p] and G.hub.gh_state["ci"][A13]["sha"] == SA, (G.calls, G.hub.gh_state["ci"]))
+    check("15 first sight of a pull request: the sha is kept, nothing is recorded and no commit is read", not [e for e in first if e.etype == "pr_commit"] and not [p for p, _ in G.calls if "/git/commits/" in p] and G.hub.gh_state["ci"][A13]["sha"] == SA, (G.calls, G.hub.gh_state["ci"]))
     mark = len(G.calls)
     again = G.one()
-    check("14 an unchanged sha: no commit event, no commit read, and the pull request's own read is answered 304 (nothing added to the poll)",
+    check("15 an unchanged sha: no commit event, no commit read, and the pull request's own read is answered 304 (nothing added to the poll)",
           not [e for e in again if e.etype == "pr_commit"] and not [p for p, _ in G.calls[mark:] if "/git/commits/" in p] and f"{RP}/pulls/140" in G.not_modified and G.calls[mark:].count((f"{RP}/pulls/140", True)) == 1, (G.calls[mark:], G.not_modified))
     g13[f"{RP}/pulls/140"] = {**g13[f"{RP}/pulls/140"], "title": "retitled"}      # the pull request changed in some other way (a title, a label): its read is a 200 with the same head sha
     mark, m304 = len(G.calls), len(G.not_modified)
     ev200 = [e for e in G.one() if e.etype == "pr_commit"]
-    check("14 the pull request read answered 200 with the same head sha (a retitle): no commit event and no commit read", ev200 == [] and (f"{RP}/pulls/140" not in G.not_modified[m304:]) and not [p for p, _ in G.calls[mark:] if "/git/commits/" in p], (G.calls[mark:], G.not_modified[m304:]))
+    check("15 the pull request read answered 200 with the same head sha (a retitle): no commit event and no commit read", ev200 == [] and (f"{RP}/pulls/140" not in G.not_modified[m304:]) and not [p for p, _ in G.calls[mark:] if "/git/commits/" in p], (G.calls[mark:], G.not_modified[m304:]))
     # live: the hub looked a minute ago, so a changed head is a push it sees now, whenever the commit was made, and costs no request
     SB = sha13()
     evs_, reads, nm = push13(G, g13, 140, SB, cdate(90 * MIN))
-    check("14 a commit made ninety minutes ago and pushed now, seen live: no request at all, one commit event stamped now (not ninety minutes ago), vouched, on the pull request",
+    check("15 a commit made ninety minutes ago and pushed now, seen live: no request at all, one commit event stamped now (not ninety minutes ago), vouched, on the pull request",
           reads == [] and len(evs_) == 1 and near(evs_[0]) and evs_[0].vouched == "commit" and evs_[0].anchor == A13 and evs_[0].url == f"{W_}/pull/140" and evs_[0].who == "someone"
           and evs_[0].etype == "pr_commit" and f"{RP}/pulls/140" not in nm and G.hub.gh_state["ci"][A13]["sha"] == SB, (reads, [(e.etype, e.ts, e.vouched) for e in evs_]))
     ev_B = evs_[0]
+    check("15 the commit event is marked record_only, so Hub.emit stops after the logs by that one mechanism", ev_B.record_only is True and all(e.record_only for e in evs_), ev_B)
     evs_, reads, nm = push13(G, g13, 140, SB, None)
-    check("14 the next pass with the same sha (the pull request read answers 304): no commit event and no commit read", evs_ == [] and reads == [] and f"{RP}/pulls/140" in nm, (reads, nm))
+    check("15 the next pass with the same sha (the pull request read answers 304): no commit event and no commit read", evs_ == [] and reads == [] and f"{RP}/pulls/140" in nm, (reads, nm))
     SC = sha13()
     evs_, reads, nm = push13(G, g13, 140, SC, cdate(40 * 86400))
-    check("14 a force-push of an old commit (made forty days ago), seen live: stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
+    check("15 a force-push of an old commit (made forty days ago), seen live: stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
     SD = sha13()
     evs_, reads, nm = push13(G, g13, 140, SD, cdate(-10 * MIN))
-    check("14 a committer date ten minutes in the future, seen live: stamped now (a wrong clock on the committer's machine does not matter), no request", reads == [] and len(evs_) == 1 and near(evs_[0]) and EL._epoch(evs_[0].ts) <= time.time(), (reads, [e.ts for e in evs_]))
+    check("15 a committer date ten minutes in the future, seen live: stamped now (a wrong clock on the committer's machine does not matter), no request", reads == [] and len(evs_) == 1 and near(evs_[0]) and EL._epoch(evs_[0].ts) <= time.time(), (reads, [e.ts for e in evs_]))
     # after downtime (the last look is old): the commit is read once, for its committer date
     SE = sha13()
     evs_, reads, nm = push13(G, g13, 140, SE, cdate(90 * MIN), down=True)
-    check("14 after downtime the changed head is read once and stamped at the commit's committer date (ninety minutes ago)", reads == [commit_path(SE)] and len(evs_) == 1 and near(evs_[0], 90 * MIN) and evs_[0].vouched == "commit", (reads, [e.ts for e in evs_]))
+    check("15 after downtime the changed head is read once and stamped at the commit's committer date (ninety minutes ago)", reads == [commit_path(SE)] and len(evs_) == 1 and near(evs_[0], 90 * MIN) and evs_[0].vouched == "commit", (reads, [e.ts for e in evs_]))
     ev_E = evs_[0]
     evs_, reads, nm = push13(G, g13, 140, SE, None)
-    check("14 …and the next pass reads nothing more (the look is current again)", reads == [] and evs_ == [], reads)
+    check("15 …and the next pass reads nothing more (the look is current again)", reads == [] and evs_ == [], reads)
     SF = sha13()
     evs_, reads, nm = push13(G, g13, 140, SF, cdate(-10 * MIN), down=True)
-    check("14 after downtime a committer date ten minutes ahead is stamped now, never later", len(evs_) == 1 and reads == [commit_path(SF)] and near(evs_[0]) and EL._epoch(evs_[0].ts) <= time.time(), (reads, [e.ts for e in evs_]))
+    check("15 after downtime a committer date ten minutes ahead is stamped now, never later", len(evs_) == 1 and reads == [commit_path(SF)] and near(evs_[0]) and EL._epoch(evs_[0].ts) <= time.time(), (reads, [e.ts for e in evs_]))
     SG = sha13()
     evs_, reads, nm = push13(G, g13, 140, SG, cdate(30 * H), down=True)
-    check("14 after downtime a committer date older than the log's window is stamped at the window's edge, so the line is kept and not dropped as old news",
+    check("15 after downtime a committer date older than the log's window is stamped at the window's edge, so the line is kept and not dropped as old news",
           len(evs_) == 1 and abs(EL._epoch(evs_[0].ts) - (time.time() - EL.COMMIT_FLOOR_S)) < 5 and EL.event_time(evs_[0].ts, time.time()) is not None, [e.ts for e in evs_])
     SH = sha13()
     evs_, reads, nm = push13(G, g13, 140, SH, cdate(3 * H), down=True)
-    check("14 after downtime a force-push to an older commit is stamped at that commit's own date (three hours ago): an older stamp, never ahead of now", len(evs_) == 1 and near(evs_[0], 3 * H), [e.ts for e in evs_])
+    check("15 after downtime a force-push to an older commit is stamped at that commit's own date (three hours ago): an older stamp, never ahead of now", len(evs_) == 1 and near(evs_[0], 3 * H), [e.ts for e in evs_])
     ev_C = evs_[0]
     for label, ans in (("a date that is not a date", {"committer": {"date": "tomorrow"}}), ("no committer", {"sha": "x"}), ("a committer that is null", {"committer": None}), ("an answer that is a list", ["x"]),
                        ("a refused read (404)", "404"), ("a refused read (403, the rate limit)", "403")):
         sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, ans, down=True)
-        check(f"14 after downtime, {label}: one read, and the commit is not lost: stamped at the time the hub saw it", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
+        check(f"15 after downtime, {label}: one read, and the commit is not lost: stamped at the time the hub saw it", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
         evs_, reads, nm = push13(G, g13, 140, sx, None)
-        check("14 …and it is not read again on the next pass", reads == [] and evs_ == [], reads)
+        check("15 …and it is not read again on the next pass", reads == [] and evs_ == [], reads)
     for label, ans in (("a timeout of gh", "timeout"), ("an answer that is not JSON", "badjson")):
         sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, ans, down=True)
-        check(f"14 after downtime, {label} (an error of another type than a refused read): one read, and the commit is stamped at the time seen", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
+        check(f"15 after downtime, {label} (an error of another type than a refused read): one read, and the commit is stamped at the time seen", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
     sx = sha13(); cap13["armed"] = True
     evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN), down=True)
-    check("14 after downtime with the hourly cap spent: no commit request goes out, and the commit is stamped at the time seen", reads == [] and len(evs_) == 1 and near(evs_[0]) and not cap13["armed"], (reads, [e.ts for e in evs_]))
+    check("15 after downtime with the hourly cap spent: no commit request goes out, and the commit is stamped at the time seen", reads == [] and len(evs_) == 1 and near(evs_[0]) and not cap13["armed"], (reads, [e.ts for e in evs_]))
     SK = sha13()
     evs_, reads, nm = push13(G, g13, 140, SK, cdate(60))
-    check("14 a commit after all of those is recorded as usual (one failure does not stop the next)", len(evs_) == 1 and near(evs_[0]) and reads == [], (reads, evs_))
+    check("15 a commit after all of those is recorded as usual (one failure does not stop the next)", len(evs_) == 1 and near(evs_[0]) and reads == [], (reads, evs_))
     # the ten-minute line (COMMIT_DOWNTIME): a look 598 s ago is live, one 602 s ago is a gap
     sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN), looked_ago=598)
-    check("14 the last look 598 seconds ago (inside ten minutes): seen live, stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
+    check("15 the last look 598 seconds ago (inside ten minutes): seen live, stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0]), (reads, [e.ts for e in evs_]))
     sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN), looked_ago=602)
-    check("14 the last look 602 seconds ago (past ten minutes): a gap, the commit is read once and stamped at its committer date (fifty minutes ago)", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0], 50 * MIN), (reads, [e.ts for e in evs_]))
+    check("15 the last look 602 seconds ago (past ten minutes): a gap, the commit is read once and stamped at its committer date (fifty minutes ago)", reads == [commit_path(sx)] and len(evs_) == 1 and near(evs_[0], 50 * MIN), (reads, [e.ts for e in evs_]))
     # a quiet pull request: passes answered 304 for longer than ten minutes keep the look current, so a push after them is live
     G.one(); G.skew += 250.0; G.one(); G.skew += 250.0; G.one(); G.skew += 250.0; G.one()      # four passes (the first re-reads the last push), three of them 250 s apart: 750 s of the receiver's clock, all 304
     m304 = len(G.not_modified); G.skew += 250.0; G.one()
-    check("14 the passes just before were answered 304 (the pull request is quiet) across more than ten minutes of the receiver's clock", len(G.not_modified) > m304 and G.skew >= 1000.0, (m304, len(G.not_modified), G.skew))
+    check("15 the passes just before were answered 304 (the pull request is quiet) across more than ten minutes of the receiver's clock", len(G.not_modified) > m304 and G.skew >= 1000.0, (m304, len(G.not_modified), G.skew))
     sx = sha13(); evs_, reads, nm = push13(G, g13, 140, sx, cdate(50 * MIN))
-    check("14 a push after more than ten minutes of 304 passes is still seen live (a 304 refreshes the look): stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0], 0, G.skew), (reads, [e.ts for e in evs_], G.skew))
+    check("15 a push after more than ten minutes of 304 passes is still seen live (a 304 refreshes the look): stamped now, no request", reads == [] and len(evs_) == 1 and near(evs_[0], 0, G.skew), (reads, [e.ts for e in evs_], G.skew))
 
   # a fork's pull request, and one whose fork was deleted (no head repository): the head branch is not the repository's, so a commit there is nobody's activity: nothing is read or recorded, live or after downtime
   for label, n_, head_ in (("a fork's", 141, "evil/widgets"), ("a deleted fork's (no head repository)", 143, None)):
@@ -950,7 +989,7 @@ try:
         Gf.hub.status.setdefault("anchors", {}); Gf.one()
         evs_, reads, nm = push13(Gf, g13f, n_, sha13(), cdate(60), head=head_)
         evs2, reads2, nm2 = push13(Gf, g13f, n_, sha13(), cdate(60), head=head_, down=True)
-        check(f"14 {label} pull request: its head moved, live and after downtime, and no commit is read and nothing is recorded", evs_ == [] and reads == [] and evs2 == [] and reads2 == [], (reads, evs_, reads2, evs2))
+        check(f"15 {label} pull request: its head moved, live and after downtime, and no commit is read and nothing is recorded", evs_ == [] and reads == [] and evs2 == [] and reads2 == [], (reads, evs_, reads2, evs2))
 
   # a restart: the kept sha and the time of the last look are in the hub's saved state
   SR0, SR1, SR2 = sha13(), sha13(), sha13(); A142 = "github:acme/widgets#142"; A144 = "github:acme/widgets#144"
@@ -959,13 +998,13 @@ try:
   with GH(g13r, [A142], etags=True, saved=saved13) as Gr:
     Gr.hub.status.setdefault("anchors", {})
     got = [e for e in Gr.one() if e.etype == "pr_commit"]
-    check("14 after a restart (no look on record) the head that changed during the downtime is a commit, stamped at its committer date (forty-five minutes ago), not at the restart", len(got) == 1 and near(got[0], 45 * MIN), [e.ts for e in got])
+    check("15 after a restart (no look on record) the head that changed during the downtime is a commit, stamped at its committer date (forty-five minutes ago), not at the restart", len(got) == 1 and near(got[0], 45 * MIN), [e.ts for e in got])
   g13s = {"/user": {"login": "hubaccount"}, **pr9(144, sha=SR2), commit_path(SR2): cdate(45 * MIN)}
   saved13 = {"github": {"me": "hubaccount", "state": {A144: {"state": "open", "comments": 0, "updated": iso9(0), "pr": True, "merged": False}}, "ci": {A144: {"pr": True, "sha": SR0, "key": None, "looked": time.time() - 30}}}}
   with GH(g13s, [A144], etags=True, saved=saved13) as Gs:
     Gs.hub.status.setdefault("anchors", {})
     got = [e for e in Gs.one() if e.etype == "pr_commit"]
-    check("14 after a restart that looked at the pull request thirty seconds before it, the new head is seen live: stamped now, no request", len(got) == 1 and near(got[0]) and not [p for p, _ in Gs.calls if "/git/commits/" in p], ([e.ts for e in got], Gs.calls))
+    check("15 after a restart that looked at the pull request thirty seconds before it, the new head is seen live: stamped now, no request", len(got) == 1 and near(got[0]) and not [p for p, _ in Gs.calls if "/git/commits/" in p], ([e.ts for e in got], Gs.calls))
 finally:
   ghr._gb.wait = _wait13
 
@@ -976,11 +1015,11 @@ hub_.bindings[A13] = {"home-peer"}; hub_.pending.clear()
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True); ML.path().unlink(missing_ok=True)
 hub_.emit(ev_B)
 rows13, _ = EL.read(0)
-check("14 the hub: a commit event writes its line (kind commit, the pull request, the time seen) and tells no session; nothing is held for a follow-up and the merge log has no line",
+check("15 the hub: a commit event writes its line (kind commit, the pull request, the time seen) and tells no session; nothing is held for a follow-up and the merge log has no line",
       len(rows13) == 1 and rows13[0]["kind"] == "commit" and rows13[0]["n"] == 140 and abs(rows13[0]["ts"] - EL._epoch(ev_B.ts)) < 1 and sent13 == [] and not hub_.pending and ML.read(0)[0] == [], (rows13, sent13, hub_.pending))
 comment13 = HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="alice", text="did it", url=f"{W_}/pull/140", ts=ISO_NOW(), etype="comment", vouched="comment")
 hub_.emit(comment13)
-check("14 …while a comment on the same anchor is delivered as before (the harness sees a delivery)", [x[0] for x in sent13] == ["send"], sent13)
+check("15 …while a comment on the same anchor is delivered as before (the harness sees a delivery)", [x[0] for x in sent13] == ["send"], sent13)
 del sent13[:]
 anch13 = HUB._cfg.CFG.setdefault("anchor_hub", {}); had13 = anch13.get("direct")
 anch13["direct"] = {A13: "home-peer"}      # [anchor_hub] direct: this anchor's events go straight to a session
@@ -988,7 +1027,10 @@ try:
     hub_.emit(comment13)
     went = [x[0] for x in sent13]; del sent13[:]
     hub_.emit(ev_B)
-    check("14 on the direct lane ([anchor_hub] direct names the anchor) a comment goes straight to the session and a commit event does not: it is logged and sent nowhere", went == ["direct"] and sent13 == [] and EL.read(0)[0][-1]["kind"] == "commit", (went, sent13, EL.read(0)[0][-1:]))
+    check("15 on the direct lane ([anchor_hub] direct names the anchor) a comment goes straight to the session and a commit event does not: it is logged and sent nowhere", went == ["direct"] and sent13 == [] and EL.read(0)[0][-1]["kind"] == "commit", (went, sent13, EL.read(0)[0][-1:]))
+    del sent13[:]
+    hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="CI", text="passing", url=f"{W_}/pull/140/checks", ts=time.time(), etype="ci_passed", vouched="ci_passed", record_only=True))
+    check("15 on the direct lane an event marked record_only (here a CI result, not a commit) is logged and goes to no session either", sent13 == [] and EL.read(0)[0][-1]["kind"] == "ci_passed", (sent13, EL.read(0)[0][-1:]))
 finally:
     if had13 is None: anch13.pop("direct", None)
     else: anch13["direct"] = had13
@@ -998,17 +1040,17 @@ put(600); (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
 hub_.emit(ev_B)
 saved = ev_pass_now()
-check("14 the pass: the item anchored to the pull request is stamped `commit on PR 140`, kind commit, at the time the hub saw the push", saved == ["a600"] and la(600)["what"] == "commit on PR 140" and lk(600) == "commit" and abs(la(600)["at"] - EL._epoch(ev_B.ts)) < 1, (saved, la(600)))
+check("15 the pass: the item anchored to the pull request is stamped `commit on PR 140`, kind commit, at the time the hub saw the push", saved == ["a600"] and la(600)["what"] == "commit on PR 140" and lk(600) == "commit" and abs(la(600)["at"] - EL._epoch(ev_B.ts)) < 1, (saved, la(600)))
 at13 = la(600)["at"]
 hub_.emit(ev_E); hub_.emit(ev_C)      # commits read after downtime, stamped at their committer dates, ninety minutes and three hours old
 saved = ev_pass_now()
-check("14 …a commit stamped earlier (found after downtime) does not move the record back (nothing is saved)", saved == [] and la(600)["at"] == at13 and lk(600) == "commit", (saved, la(600)))
+check("15 …a commit stamped earlier (found after downtime) does not move the record back (nothing is saved)", saved == [] and la(600)["at"] == at13 and lk(600) == "commit", (saved, la(600)))
 hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="CI", text="failed", url=f"{W_}/pull/140/checks", ts=time.time(), etype="ci_failed", vouched="ci_failed"))
 saved = ev_pass_now()
-check("14 …and a later event of another kind replaces it, so the commit kind is not sticky", saved == ["a600"] and lk(600) == "ci_result" and la(600)["at"] > at13, (saved, la(600)))
+check("15 …and a later event of another kind replaces it, so the commit kind is not sticky", saved == ["a600"] and lk(600) == "ci_result" and la(600)["at"] > at13, (saved, la(600)))
 EL.path().unlink(missing_ok=True); EL.offset_path().unlink(missing_ok=True)
 hub_.emit(HUB.Event(anchor=A13, kind="github-state", title="widgets#140", who="alice", text="new commit", url=f"{W_}/pull/140", ts=time.time() - 30, etype="pr_commit", vouched=""))
-check("14 a commit event the source did not vouch for (a fork's) writes no line", EL.read(0)[0] == [], EL.read(0)[0])
+check("15 a commit event the source did not vouch for (a fork's) writes no line", EL.read(0)[0] == [], EL.read(0)[0])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

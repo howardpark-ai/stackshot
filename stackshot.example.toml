@@ -433,7 +433,7 @@ require_sender = false                              # stackshot/fleet/push.py re
                                                     # a page with no agent of its own falls to its hub page's -main agent, else to the scope's general -main agent ([router] general_*)
 waiting_minutes = 60                                # a notice left without a ruling this long is flagged on the board ("N waiting")
 own_repos = []                                      # private repositories only; the fleet's own GitHub repositories, each "owner/repo", "owner/*" or a numeric repository ID (an int or a digit string, e.g. 123456789, from `gh api /repos/<owner>/<repo> --jq .id`: the form that survives a transfer to another owner, matched against the event's repository.id; an event without an ID matches by name only): on these, a PR opened, merged, closed or given
-                                                    # new commits, and CI passing again, is logged by anchor-hub and not delivered, ruled merged by `stackshot (auto)` and kept on the
+                                                    # new commits, and CI passing again after a failure, is logged by anchor-hub and not delivered, ruled merged by `stackshot (auto)` and kept on the
                                                     # project's routing page; it still releases an item held on the anchor.
                                                     # A comment, a review, failing CI and every event on another repository are delivered as before.
                                                     # [] = none (everything delivered). Read at each event: a reload applies it

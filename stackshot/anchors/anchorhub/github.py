@@ -267,7 +267,7 @@ def run(hub: Hub):
         """The head commit of a watched pull request changed (a push, or a force-push to another commit, an old commit included): record it as the item's last activity. GitHub sends no push notification, so this is the only
         place it is seen. Found live, it is stamped at the time the hub saw it, with no request: the push is what happened now, whenever the commit was made. Found after the hub was away (`down`: its last look at this pull
         request is older than COMMIT_DOWNTIME or unknown), the commit is read once for its committer date (never later than now, never older than the event log's window); a read that fails (the hourly cap, a refusal, an
-        unreadable date) stamps the time seen instead, so the signal is not lost. Only a branch of the repository itself counts (nothing is read or recorded for a fork's pull request). The event is recorded and told to no session (Hub.emit)."""
+        unreadable date) stamps the time seen instead, so the signal is not lost. Only a branch of the repository itself counts (nothing is read or recorded for a fork's pull request). The event is record_only: written to the event log and told to no one (Hub.emit)."""
         if not c.get("own_branch"): return
         now = time.time(); when = now
         if down:
@@ -278,11 +278,14 @@ def run(hub: Hub):
                 if t is not None: when = t
         if not title:
             with hub.lock: title = ((hub.status.get("anchors") or {}).get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
-        hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", **pr_meta(c)}, kind="github-state")
+        hub.event(a_id, {"title": title, "who": c.get("author") or "someone", "text": f"new commit {c['sha'][:7]}", "url": f"https://github.com/{repo}/pull/{n}", "ts": when, "etype": "pr_commit", "repo_id": rid(repo), "vouched": "commit", "record_only": True, **pr_meta(c)}, kind="github-state")
     def ci(a_id, repo, n, key=None, title=None):
         """CI on a watched pull request (a failed run can otherwise go unnoticed). One notice per head
-        commit once all its check runs have finished, naming the failed ones (cancelled ones counted, not a trigger); a later
-        commit that passes after a failure gets one "passing again". First sight seeds silently."""
+        commit once all its check runs have finished, naming the failed ones (canceled ones counted, not a trigger); a later
+        commit that passes after a failure gets one "passing again", and one that passes after a passing commit gets one "passing on"
+        (a green result is activity on the item whatever the head before it was): that one is record_only, written to the event log and
+        delivered to no one, so a green on every push wakes nothing. First sight seeds silently when CI has already finished; when it was
+        still running, the first finished result is reported (c["pending"])."""
         c = ci_st.setdefault(key or a_id, {"pr": None, "sha": None, "key": None})
         if c["pr"] is False: return
         try: p = gh(f"/repos/{repo}/pulls/{n}", conditional=True)
@@ -304,23 +307,26 @@ def run(hub: Hub):
         except Exception: return
         if r is None: return
         runs = r.get("check_runs") or []
-        if not runs or any(x.get("status") != "completed" for x in runs): return      # still running: wait for the whole set
+        if not runs or any(x.get("status") != "completed" for x in runs):      # still running: wait for the whole set
+            if c["key"] is None: c["pending"] = True      # first sight with CI still running: nothing is seeded, so the first finished result is reported, not swallowed as a seed
+            return
         bad = sorted(x["name"] for x in runs if x.get("conclusion") in FAIL)
         canc = sum(1 for x in runs if x.get("conclusion") == "cancelled")
         key = (c["sha"], tuple(bad))
         prev, c["key"] = c["key"], key
-        if prev is None or key == prev: return
+        waited = bool(c.pop("pending", None)) and prev is None      # CI was running when the pull request was first looked at: this is its first finished result
+        if (prev is None and not waited) or key == prev: return
         if not title:
             with hub.lock: title = (hub.status["anchors"].get(a_id) or {}).get("title") or f"{repo.split('/')[1]}#{n}"
         url = f"https://github.com/{repo}/pull/{n}/checks"
         if bad:
-            text = f"failed on {c['sha'][:7]}: {len(bad)} of {len(runs)} checks — " + ", ".join(bad[:6]) + (" …" if len(bad) > 6 else "") + (f" ({canc} cancelled)" if canc else "")
-        elif prev[1]:
-            text = f"passing again on {c['sha'][:7]} ({len(runs)} checks)"
+            text = f"failed on {c['sha'][:7]}: {len(bad)} of {len(runs)} checks — " + ", ".join(bad[:6]) + (" …" if len(bad) > 6 else "") + (f" ({canc} canceled)" if canc else "")
+        elif prev and prev[1]:
+            text = f"passing again on {c['sha'][:7]} ({len(runs)} checks{f', {canc} canceled' if canc else ''})"
         else:
-            return
+            text = f"passing on {c['sha'][:7]} ({len(runs)} checks{f', {canc} canceled' if canc else ''})"      # a new head that is green after a green one, or the first finished result: ci_passed for the event log (and the item's last activity), record_only so nothing is delivered
         fin = max((x["completed_at"] for x in runs if _ts(x.get("completed_at"))), key=_ts, default=None)      # when the last check run finished: a result seen after downtime keeps its own time; one outside the event log's window (a day old, an hour ahead) is the hub's, as before
-        hub.event(a_id, {"title": title, "who": "CI", "text": text, "url": url, "ts": fin if fin and _events.event_time(fin, time.time()) is not None else now_iso(), "etype": "ci_failed" if bad else "ci_passed", "repo_id": rid(repo), "vouched": ("ci_failed" if bad else "ci_passed") if c.get("own_branch") else "", **pr_meta(c)}, kind="github-state")
+        hub.event(a_id, {"title": title, "who": "CI", "text": text, "url": url, "ts": fin if fin and _events.event_time(fin, time.time()) is not None else now_iso(), "etype": "ci_failed" if bad else "ci_passed", "repo_id": rid(repo), "vouched": ("ci_failed" if bad else "ci_passed") if c.get("own_branch") else "", **({"record_only": True} if not bad and not (prev and prev[1]) else {}), **pr_meta(c)}, kind="github-state")
     def snap(i):
         """What is saved of an issue or pull request between looks (`merged` and `pr`, kept to tell a finished anchor from a closed pull request that can still be reopened and merged)."""
         pr = i.get("pull_request")

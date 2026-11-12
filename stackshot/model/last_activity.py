@@ -8,7 +8,7 @@ The one definition of activity. Something visible happened to the item when:
   a save moved the item's progress (model/progress.py `moved`, the same test, so this adds no second opinion): a step marked done or dropped, a state change (status, phase, the kind
   of a wait, mover, state, needs), a pull request recorded as merged, the item created. A save that is no one's write about the work (progress.moved with real=False) is the server's
   own bookkeeping and counts only by a status or phase change, as it does for progress; or
-  a pull request tied to the item had an event: a CI result (failed, or passing again), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
+  a pull request tied to the item had an event: a CI result (failed, or a new head passing), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
 
 What is not activity: a status line (`work`), a reply or a "no change" answer, a note, a message, a bare confirm, a new or reworded step, a description edit; and the server's own
 writes about the item, which are not in progress either: a History line (the ladder's, the silence pass's, a merge pass's reason), the ask itself, the step a session or the server
@@ -54,7 +54,7 @@ KINDS = frozenset(STAMPED) | {UPDATE, AUDIT}
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
 PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT}
-PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing again on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged", "commit": "commit on PR {n}"}
+PR_WORDS = {"ci_failed": "CI failed on PR {n}", "ci_passed": "CI passing on PR {n}", "comment": "comment on #{n}", "review": "review on PR {n}", "merged": "PR {n} merged", "commit": "commit on PR {n}"}
 
 _PR_NUMBER = re.compile(r"#(\d+)\s*$")
 

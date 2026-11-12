@@ -1,7 +1,7 @@
 """event_log.py: the hub's record of the events on pull requests it saw, read by the server's last-activity pass (`server._event_activity_tick`).
 
 The same idea as merge_log.py (a file of the hub's own, one small line per event, nothing for a session to receive, no read of GitHub of its own), for the other events that are visible activity
-on a pull request: a CI result (a failure, or passing again after one: what the hub already reports), a comment by a person, a review (a review or a review comment), a merge, and a commit (a new head commit of the pull request). `Hub.emit`, the
+on a pull request: a CI result (a failure, or a new head that passes, after a failure or after a green head: what the hub already reports), a comment by a person, a review (a review or a review comment), a merge, and a commit (a new head commit of the pull request). `Hub.emit`, the
 funnel every event passes, appends the line. The merge log stays as it is and keeps its own readers; this is a second file, `events.jsonl`, so a server that predates it never reads a line of
 another kind as a merge.
 
@@ -27,7 +27,7 @@ is a torn clock); a time that is absent or cannot be read falls back to the hub'
 
 A commit is not a GitHub notification (a push sends none), so the receiver (`github.py`) finds it in the pull request read it already makes for every anchored pull request: when the head sha differs from the
 one it kept for that pull request, it hands the hub an event of type `pr_commit` stamped at the time it saw the new head (no extra request). Only when the hub was away (its last look at that pull request is older than
-ten minutes, or unknown) is the commit read once more for its committer date, which `commit_time` clamps to the window; a read that fails stamps the time the hub saw it. Such an event is recorded here and never delivered
+ten minutes, or unknown) is the commit read once more for its committer date, which `commit_time` clamps to the window; a read that fails stamps the time the hub saw it. Such an event is `record_only`: recorded here and never delivered
 to a session (`Hub.emit` returns after the logs). It counts only from a branch of the repository itself (vouched as a CI result is).
 
 Left out on purpose: a comment or review by a bot (a login ending in "[bot]", or an account the payload types as Bot; the hub drops its own account's comments upstream, so a comment made under that account is never seen), a CI event on a repository's notifications with no pull request, and any
