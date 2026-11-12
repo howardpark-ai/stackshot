@@ -64,13 +64,13 @@ def esc(x) -> str:
 
 # ----------------------------------------------------------------------------- the row
 def row(*, tag_html: str = "", href: str, rid: str, title: str, age_html: str = "", who_html: str = "", detail_html: str = "", actions_html: str = "",
-        li_id: str = "", li_class: str = "", data: str = "", title_attr: str = "", new_tab: bool = True, title_html: str = "", project_html: str = "", edge: str = "") -> str:
+        li_id: str = "", li_class: str = "", data: str = "", title_attr: str = "", new_tab: bool = True, title_html: str = "", project_html: str = "", edge: str = "", act_html: str = "") -> str:
     """One item as the row every list draws, as an `<li>` for a `<ul class="ir-rows">`.
 
     `project_html` (home and Closed: the project's name as a link to its page, then the item's owner; a project page: the owner alone; already escaped) is drawn as a small quiet line above the title (`.ir-proj`); `edge` is the state kind (EDGES) whose color the card's left edge takes, empty for the plain edge.
     Line one: the state tag (only where the list mixes states), `#id` and the title in one link (the id in the title's color and size, weight 400), the age at the right. The title
     wraps; the page never cuts it. The id sits outside `.hgoal` (the title's own span), which the page script reads when it names a row.
-    Then, each only when it has something to say: the who line (`.ir-who`), the detail behind its guide line (`.ir-det`), the actions at the text's left edge (`.ir-act`).
+    Then, each only when it has something to say: the who line (`.ir-who`), the activity line (`.ir-actl`: On agent rows, the pill and what happened last; `act_html`, already escaped), the detail behind its guide line (`.ir-det`), the actions at the text's left edge (`.ir-act`).
     `title_html` (Search: the typed words marked, already escaped) stands for the escaped `title`; `new_tab=False` (Search) keeps the title's link in the page's own tab. `tag_html`, `age_html`, `who_html`, `detail_html` and `actions_html` are HTML the caller has already escaped; `rid` and `title` are plain text."""
     link = (f'<a class="ir-link" href="{esc(href)}"{' target="_blank" rel="noopener"' if new_tab else ""}{f" title={chr(34)}{esc(title_attr)}{chr(34)}" if title_attr else ""}>'
             f'<span class="ir-id">{esc(rid)}</span> <span class="hgoal">{title_html or esc(title)}</span></a>')
@@ -78,6 +78,7 @@ def row(*, tag_html: str = "", href: str, rid: str, title: str, age_html: str = 
             + (f'<div class="ir-proj">{project_html}</div>' if project_html else "")
             + f'<div class="ir-top"><span class="ir-title">{tag_html + " " if tag_html else ""}{link}</span>{age_html}</div>'
             + (f'<div class="ir-who">{who_html}</div>' if who_html else "")
+            + (f'<div class="ir-actl">{act_html}</div>' if act_html else "")
             + (f'<div class="ir-det">{detail_html}</div>' if detail_html else "")
             + (f'<div class="ir-act">{actions_html}</div>' if actions_html else "") + '</li>')
 
@@ -120,6 +121,13 @@ li.irow:target{background:color-mix(in srgb,var(--acc) 8%,var(--card));box-shado
 .ir-id{font-weight:400;font-variant-numeric:tabular-nums}
 .ir-age{flex:none;font-size:13px;line-height:18px;color:var(--mut);white-space:nowrap}
 .ir-age.amber{color:var(--amber);font-weight:600}.ir-age.red{color:var(--red);font-weight:600}
+/* the last activity of an On agent row: the age on the title line and the pill and words under the mover take one of three bands (data-b: ok green under 45 minutes, warn amber to an hour, bad red past it; the page script moves them as time passes) */
+.ir-age[data-b=ok],.ir-pill[data-b=ok]{color:var(--t-done)}.ir-age[data-b=warn],.ir-pill[data-b=warn]{color:var(--amber)}.ir-age[data-b=bad],.ir-pill[data-b=bad]{color:var(--red)}
+.ir-age[data-b]{font-weight:600;font-variant-numeric:tabular-nums}
+.ir-actl{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:13px;line-height:18px;margin-top:2px;min-width:0}
+.ir-pill{flex:none;font-size:12px;line-height:16px;font-weight:600;padding:0 7px;border:1px solid currentColor;border-radius:999px;white-space:nowrap}
+.ir-lbl,.ir-lwhat{color:var(--mut);min-width:0;overflow-wrap:anywhere}
+.istat .ir-actl{flex:1 1 100%;margin-top:0}
 .ir-who{font-size:13px;line-height:18px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere}
 .ir-who .attn{color:var(--t-you);font-weight:600}.ir-who a{color:var(--mut)}.ir-who a:hover{color:var(--acc)}.ir-who .own{color:var(--t-you);font-weight:600}
 .ir-det{margin-top:6px;padding-left:10px;border-left:2px solid var(--line);min-width:0;overflow-wrap:anywhere}
