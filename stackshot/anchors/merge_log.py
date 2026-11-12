@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import reprlib
 from pathlib import Path
 from typing import Any
 
@@ -117,17 +118,28 @@ def size() -> int:
 
 def normal(row: dict[str, Any]) -> dict[str, Any]:
     """A line as the server uses it: {"ts": float, "repo": "owner/repo", "n": int > 0, "refs": [str]}. Raises ValueError or TypeError for a line of the wrong shape (a hand edit, a torn write that
-    still parsed): the caller skips it, logs it and moves on."""
+    still parsed): the caller skips it, logs it and moves on. A ref that is not a string is left out, so a line whose refs nest deeper than str() can follow costs nothing; `repo` is turned into text, so a
+    line whose repo does is raised as RecursionError, and the caller logs that too (`shown`, never `str`)."""
     repo, n, ts = str(row["repo"]).strip().lower(), int(row["n"]), float(row.get("ts") or 0)
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or n <= 0 or ts != ts or ts in (float("inf"), float("-inf")):
         raise ValueError(f"not a merge line: repo={repo!r} n={n} ts={ts}")
     rs = row.get("refs")
-    return {"ts": ts, "repo": repo, "n": n, "refs": [str(r) for r in rs if _REF_OK.fullmatch(str(r))][:MAX_REFS] if isinstance(rs, list) else []}
+    return {"ts": ts, "repo": repo, "n": n, "refs": [r for r in rs if isinstance(r, str) and _REF_OK.fullmatch(r)][:MAX_REFS] if isinstance(rs, list) else []}      # a ref is a string: anything else (a number, a nested list or object, however deep) is no ref and is never turned into text
+
+
+def shown(x: Any, cap: int = 80) -> str:
+    """A look at anything for a log line, at most `cap` characters, that cannot raise or recurse: reprlib limits the depth and the size of each part, and if even that fails (an object whose repr
+    raises, a structure too deep for it) the class name stands in. Never `str(row)` for a line read from the file: a hand-made line can nest deeper than str() can follow."""
+    try:
+        return reprlib.repr(x)[:cap]
+    except Exception:  # noqa: BLE001  — RecursionError and a hostile __repr__ included
+        return f"<{x.__class__.__name__}>"[:cap]
 
 
 def read(offset: int = 0, file: Path | None = None) -> tuple[list[dict[str, Any]], int]:
     """The lines from byte `offset` on, and the offset after the last whole line read. A file that is shorter than `offset` (replaced) is read from its start; a missing one reads as nothing.
-    A line that is not a JSON object, or cannot be parsed, is skipped and the rest are read. `file`: another log of the same shape (event_log.py), default the merge log."""
+    A line that is not JSON, is nested too deep to parse (RecursionError) or is not an object with a repository and a number is skipped without a log line (the offset still moves past it) and the rest are read; a line
+    that parses but is of the wrong shape is found later, by `normal`, and logged by the caller. `file`: another log of the same shape (event_log.py), default the merge log."""
     try:
         with open(file or path(), "rb") as f:
             size = f.seek(0, 2)
