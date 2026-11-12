@@ -199,12 +199,13 @@ list the tools; a route is no tool. Now (R2):
     run_async and run_http_async are in the set because a suite that starts the server (`mcp.run_async(transport="http")`, the way _serve does, or a
     subprocess that runs it) serves every route over real HTTP, whether or not it names http_app. list_tools, get_tools and every other attribute of
     ENUMERATE_ATTRS read only "<enumerate>": a suite that lists the tools does not see a route.
-  * What stays wide: a reader that names the route's own function (`server.health`) or its path string is selected by name or by the string, as before. Any
-    wildcard reader of a module (getattr(mod, name) with a name that is not a literal, vars(mod), dir(mod), `from m import *`) reads every name of that
-    module, the route's function included, so it is selected as before. An attribute read of a name in neither set is not an enumeration, as before.
+  * What stays wide: a reader that names the route's own function (`server.health`) is selected by that name, one that reads the file as text by the map's file half,
+    and a function that builds or serves the app (reads one of ROUTE_ATTRS) reaches every suite that ran it by the map, as before. Any
+    wildcard reader of a module (getattr(mod, name) with a name that is not a literal, vars(mod), dir(mod), inspect.getmembers(mod), a module loaded by a path) reads
+    every name of that module, the route's function included, so it is selected as before. An attribute read of a name in neither set is not an enumeration, as before.
   * Limits, kept honest: `getattr(mcp, name)` with a name that is not a literal, or vars(mcp) / dir(mcp), on an object that is not a module of ours, gives
     no key today for tools either (177 non-literal getattr calls in the checkout, most of them forwarders); a literal `getattr(x, "list_tools")` gives
-    none either. `.routes` also matches any other object's `.routes` (a false positive, wider). A decorator on a method inside a class body is not
+    none either; `from m import *` is no wildcard read (no star import of our modules exists in the checkout). `.routes` also matches any other object's `.routes` (a false positive, wider). A decorator on a method inside a class body is not
     examined, for tools too.
 SUITEMAP_ROUTE_RULE=R1 (R2 by default; any other value is an error, checked when a command starts) gives the old selection: a custom_route binds
 "<enumerate>" and ROUTE_ATTRS adds nothing. `audit` applies the same rule on both maps.
@@ -414,7 +415,7 @@ ENUMERATE_ATTRS = {"list_tools", "get_tools", "_list_tools", "list_resources", "
 ENUMERATE_R = "<enumerate-routes>"
 # what reads or serves the route list: the attributes that hand out the ASGI app (http_app; streamable_http_app and sse_app of earlier FastMCP releases), the list
 # itself (routes; _additional_http_routes and its getter) and the calls that build the app and serve it (run_async, run_http_async: a suite that starts the server
-# as a process and asks it for a page reads every route). http_app and routes are in ENUMERATE_ATTRS too: the app lists the tools as well
+# as a process and asks it for a page reads every route). Each of them reads BOTH keys (the app and the server serve the tools too, so a tool edit reaches them as well)
 ROUTE_ATTRS = {"http_app", "routes", "streamable_http_app", "sse_app", "_additional_http_routes", "_get_additional_http_routes", "run_async", "run_http_async"}
 
 
@@ -674,9 +675,10 @@ class ModNames:
                 ks = ks | {(self.mod, "*")}
         elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             sc, ks = self.scope(node), (self.keys(node) if dotted(node) else set())
-            if node.attr in ENUMERATE_ATTRS:
+            routes_ = node.attr in ROUTE_ATTRS and route_rule() == "R2"
+            if node.attr in ENUMERATE_ATTRS or routes_:
                 ks = ks | {("*", ENUMERATE)}
-            if node.attr in ROUTE_ATTRS and route_rule() == "R2":
+            if routes_:
                 ks = ks | {("*", ENUMERATE_R)}
         elif isinstance(node, ast.Call):
             f = dotted(node.func)
