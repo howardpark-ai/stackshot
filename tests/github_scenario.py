@@ -1863,6 +1863,21 @@ try:
     check("anchor-hub: a second pass writes nothing more", (len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0])) == (n_m, n_e), (n_m, n_e))
     h13b = fresh_hub([60, 65]); pass_of(h13b)
     check("anchor-hub: a hub that starts with nothing saved reads the anchor first again and writes no second line for the merge (the logs hold it already)", (len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0])) == (n_m, n_e), (len(ahc._merges.read(0)[0]), len(ahc._events.read(0)[0]), n_m, n_e))
+    # a line that could not be written: the anchor is not seeded and its ETag is dropped, so the next pass reads the pull request again and writes it; the merge log carries the time it merged
+    ahc._merges.path().unlink(missing_ok=True); ahc._events.path().unlink(missing_ok=True); add_pr(67, 2 * LH)
+    real_note = ahc._merges.note; boom = [True]
+    def failing_note(*a, **k):
+        if boom[0]: raise OSError("disk full")
+        return real_note(*a, **k)
+    ahc._merges.note = failing_note
+    try:
+        h13d = fresh_hub([67]); pass_of(h13d); K67 = "github:example-owner/stackshot#67"
+        check("anchor-hub: a merge line that could not be written leaves the anchor unseeded, its issue ETag dropped, and no line in the event log", K67 not in h13d.gh_state["state"] and f"{RP}/issues/67" not in h13d.gh_state["etags"] and lines13(67)[1] == [], (list(h13d.gh_state["state"]), list(h13d.gh_state["etags"])))
+        boom[0] = False; ghcli["304"] = True; pass_of(h13d)
+    finally:
+        ahc._merges.note = real_note; ghcli["304"] = False
+    m67, e67 = lines13(67)
+    check("anchor-hub: …the next pass reads it again, writes the merge line (the merge log stamped at the time it merged) and seeds", K67 in h13d.gh_state["state"] and len(m67) == 1 and abs(m67[0]["ts"] - (time.time() - 2 * LH)) < 5 and len(e67) == 1, (m67, e67))
 finally:
     ghr.subprocess, ghr.threading, ghr.time = _sub, _thr, _tim
     ahc.log.removeHandler(_caph)
