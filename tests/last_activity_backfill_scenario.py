@@ -97,6 +97,22 @@ def snapshot(): return {p.name: p.read_bytes() for p in sorted((T / "store/g").g
 def head(): return git("rev-parse", "HEAD").stdout.strip()
 def rec_of(i): return mt(i).get("last_activity")
 def without(d, *keys): return {k: v for k, v in d.items() if k not in keys}
+def canon(b):
+    """A file's bytes with the lines of its `last_activity` block taken out (and the comma a trailing key leaves on the line before a closing brace): what is left is every other byte of the item. Two files
+    equal under it differ in that one block and nowhere else, byte for byte."""
+    lines = b.decode("utf-8").split("\n"); out = []; i = 0
+    while i < len(lines):
+        l = lines[i]
+        if l.lstrip().startswith('"last_activity":'):
+            ind = len(l) - len(l.lstrip())
+            if l.rstrip().endswith("{"):
+                i += 1
+                while not (lines[i].lstrip().startswith("}") and len(lines[i]) - len(lines[i].lstrip()) == ind): i += 1
+            i += 1; continue
+        out.append(l); i += 1
+    for k in range(len(out) - 1):
+        if out[k + 1].lstrip().startswith(("}", "]")): out[k] = out[k].rstrip(",")
+    return "\n".join(out).encode("utf-8")
 
 # 11: a step marked by a real write at -3 h, then a bookkeeping save that changes nothing visible at -2 h
 STEPS0 = [{"text": "build it", "status": "open"}]; STEPS1 = [{"text": "build it", "status": "done"}]
@@ -148,6 +164,15 @@ check("1 a mover change by a real write is a state change; the same change by th
 check("1 a version dated ahead of the clock by more than the skew makes the History untrusted; inside the skew it is read as now",
       LP.replay([(0, version(now0 + 2 * DAY, now0))], now0)[1] != "" and LP.replay([(0, version(now0 + 10 * MIN, now0))], now0)[0][0]["at"] == now0, None)
 check("1 a version with no time of its own takes its commit's time; one with neither is a problem", LP.replay([(now0 - HR, {"status": "open", "metadata": {}})], now0)[0][0]["at"] == now0 - HR and LP.replay([(0, {"status": "open", "metadata": {}})], now0)[1] != "", None)
+nan, inf = float("nan"), float("inf")
+check("1 a time that is a bool, a numeric string, NaN or infinity is no time (vtime and the clock read), as the record's own reader has it; numbers stand",
+      LP.vtime({"updated": True}) == 0.0 and LP.vtime({"updated": "123"}) == 0.0 and LP.vtime({"updated": nan, "confirmed": inf}) == 0.0 and LP.vtime({"updated": None, "confirmed": [5]}) == 0.0
+      and LP._num(True) == 0.0 and LP._num("7") == 0.0 and LP._num(nan) == 0.0 and LP._num(-inf) == 0.0 and LP.vtime({"updated": 5, "confirmed": 7.5}) == 7.5 and LP._num(3) == 3.0, None)
+sg_, bd_ = LP.replay([(now0 - HR, {"status": "open", "updated": True, "confirmed": "999", "activity": "x", "metadata": {}})], now0)
+sg2_, bd2_ = LP.replay([(now0 - HR, {"status": "open", "updated": nan, "metadata": {}})], now0)
+check("1 …so a version whose own times are such takes its commit's time, and a version with only such times and no commit time is a problem", not bd_ and sg_[0]["at"] == now0 - HR and not bd2_ and sg2_[0]["at"] == now0 - HR
+      and LP.replay([(0, {"status": "open", "updated": True, "confirmed": "5", "metadata": {}})], now0)[1] != "", (sg_, bd_, sg2_, bd2_))
+check("1 …and a string as the activity clock is no clock (it does not make a version real)", [s["what"] for s in LP.replay([(now0 - 2 * HR, version(now0 - 2 * HR, now0 - 2 * HR, steps=STEPS0)), (now0 - HR, version(now0 - HR, "999999999999", steps=STEPS1))], now0)[0]] == ["created"], None)
 check("1 the skew is the one an event's own time is allowed", LA.SKEW_S == ELOG.AHEAD_S, (LA.SKEW_S, ELOG.AHEAD_S))
 
 # ---- 2. the dry run
@@ -175,8 +200,9 @@ server._stamp_write = orig_sw
 res = {int(r["item"].split("#")[1]): r for r in d_["results"]} if st_ == 200 else {}
 check("3 the pass fills the eight, leaves the one with a record, and refuses the two whose History does not read and the one dated ahead", [res[i]["action"] for i in (11, 12, 13, 14, 16, 19, 20, 22)] == ["set"] * 8
       and res[15]["action"] == "same" and [res[i]["action"] for i in (17, 18)] == ["refused"] * 2, {i: res[i]["action"] for i in res})
-check("3 only metadata.last_activity changed in each filled file: every other byte of the item (top-level fields and every other metadata key) is the same",
-      all(without(raw(i), "metadata") == without(orig[i], "metadata") and without(mt(i), "last_activity") == without(orig[i]["metadata"], "last_activity") for i in (11, 12, 13, 14, 16, 19, 20, 22)), None)
+check("3 only metadata.last_activity changed in each filled file: every other byte of the item is the same (the file bytes compared, with the record's own lines taken out of both; the record is in the new file)",
+      all(canon(bytes_of(i)) == canon(orig_bytes[i]) and b'"last_activity"' in bytes_of(i) and bytes_of(i) != orig_bytes[i] for i in (11, 12, 13, 14, 16, 19, 20, 22)), [i for i in (11, 12, 13, 14, 16, 19, 20, 22) if canon(bytes_of(i)) != canon(orig_bytes[i])])
+check("3 …the canon check sees a change elsewhere in the file (a byte of the description) and a changed record is no change to it", canon(bytes_of(11).replace(b"A thing", b"A thinG")) != canon(orig_bytes[11]) and canon(bytes_of(11).replace(b"step 1 done", b"step 2 done")) == canon(orig_bytes[11]), None)
 check("3 …the files of the items left as they are are byte for byte the same", all(bytes_of(i) == orig_bytes[i] for i in (15, 17, 18)), None)
 check("3 …no clock moved (updated, confirmed, activity, state_updated, written_at), no commit was made, nobody was told, nothing was held", all(all(raw(i).get(k) == orig[i].get(k) for k in ("updated", "confirmed", "activity", "state_updated", "written_at", "written_by")) for i in OPEN)
       and head() == H0 and sent == [] and not server._watch.holding(), sent)
@@ -234,9 +260,10 @@ reset_files = lambda: [write_file(i, {k: v for k, v in json.loads(orig_bytes[i])
 reset_files()      # the eight as the History left them (no record), for the events to be the newest signal
 orig_tied = server._merge_tied
 server._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]      # the live tie is merge_tie's, covered by its own suite; here the lines are tied to one item
-rows_ = LP.pr_rows(server, now0)
-check("8 the two logs are read whole, each line on its own (a merge-log line is a merge)", sorted((r["kind"], r["n"]) for r in rows_) == [("ci_failed", 99), ("comment", 9), ("merged", 9), ("review", 9)], rows_)
-tied = LP.ties(server, now0)
+rows_, probs_ = LP.pr_rows(server, now0)
+check("8 the two logs are read whole, each line on its own (a merge-log line is a merge)", not probs_ and sorted((r["kind"], r["n"]) for r in rows_) == [("ci_failed", 99), ("comment", 9), ("merged", 9), ("review", 9)], (rows_, probs_))
+tied, tie_why = LP.ties(server, now0)
+check("8 …the ties read without a problem", tie_why == "", tie_why)
 check("8 a tied event is a signal at the time the hub saw it, of its kind; a line stamped days ahead of the clock is dropped", [(s["kind"], s["what"], s["at"]) for s in tied.get("g19", [])] == [("pr_merged", "PR 9 merged", now0 - 3 * HR), ("comment", "comment on #9", newer)], tied)
 r19 = LP.one(server, "g19", dry=True, tied=tied, now=now0)
 check("8 …the newest of the History and the events is the record (a comment 20 minutes ago over a creation 8 hours ago)", r19["action"] == "would_set" and (r19["kind"], r19["at"]) == ("comment", newer), r19)
@@ -284,7 +311,7 @@ check("9 …the backup holds every touched file byte for byte as it was, and onl
       and all((bk / f"g{i}.json").read_bytes() == snapS0[f"{i}.json"] for i in (11, 12, 13, 14, 16, 19, 20, 22)), sorted(p.name for p in bk.glob("*")))
 uj = json.loads(undo_file.read_text()) if undo_file.is_file() else {"items": []}
 check("9 …the undo file names each item with its record before and after and the real result", {"pass_id", "by", "when", "store", "backup", "items"} <= set(uj) and all({"item", "before", "after", "sha256_before", "result"} <= set(e) and e["result"] == "set" for e in uj["items"]), uj["items"][:1])
-check("9 the files the script wrote differ from the History's only in last_activity", all(without(mt(i), "last_activity") == without(json.loads(snapS0[f"{i}.json"])["metadata"], "last_activity") for i in (11, 12, 13, 14, 16, 19, 20, 22)), None)
+check("9 the files the script wrote differ from the History's only in last_activity, byte for byte", all(canon(bytes_of(i)) == canon(snapS0[f"{i}.json"]) for i in (11, 12, 13, 14, 16, 19, 20, 22)), None)
 rc2, out2, _e = cli(BF.apply)
 check("9 a second apply writes nothing", rc2 == 3 and out2["filled"] == 0 and set(out2["left_over"]) == {BOARD + "17", BOARD + "18"}, (rc2, out2))
 # a later save changes the record of one item (the event pass wrote a newer one): the undo keeps it
@@ -294,7 +321,7 @@ rc3, out3, _e = cli(BF.undo, undo=str(undo_file))
 back = all(rec_of(i) is None for i in (11, 12, 13, 19, 20, 22)) and rec_of(16) == FUTURE
 check("9 --undo puts the records back value for value on the items still as the pass left them (the key goes when it had none, the old value returns when it had one) and keeps the one a later write changed",
       rc3 == 0 and back and out3["results"] == {"set": 7, "kept": 1} and out3["kept_because_a_later_save_changed_them"] == [BOARD + "14"] and rec_of(14) == newer_rec, (rc3, out3, [rec_of(i) for i in (11, 16, 14)]))
-check("9 …every other byte is back too: the files of the undone items are what they were before the pass", all(bytes_of(i) == snapS0[f"{i}.json"] or json.loads(bytes_of(i)) == json.loads(snapS0[f"{i}.json"]) for i in (11, 12, 13, 16, 19, 20, 22)), None)
+check("9 …every other byte is back too: the files of the undone items are what they were before the pass, byte for byte", all(bytes_of(i) == snapS0[f"{i}.json"] for i in (11, 12, 13, 16, 19, 20, 22)), [i for i in (11, 12, 13, 16, 19, 20, 22) if bytes_of(i) != snapS0[f"{i}.json"]])
 rc4, out4, e4 = cli(BF.undo, undo=str(undo_file))
 check("9 …undo twice is a no-op (the file is marked undone and says so)", rc4 == 0 and "already put back" in e4 and rec_of(14) == newer_rec, (rc4, out4, e4))
 check("9 --apply and --undo need --sender", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/last_activity_backfill.py"), "--apply"], capture_output=True, text=True).returncode != 0
@@ -326,6 +353,147 @@ check("10 …dry goes with lastact only; an empty list is refused", st_ == 400 a
 st_, d_ = call(op="lastact", items=["g11"])
 check("10 …a fill needs no begin and holds nothing", st_ == 200 and d_["results"][0]["action"] == "set" and not server._watch.holding(), (st_, d_))
 CFGM["migration"] = False
+
+# ---- 11. a partial apply, then --undo: a batch whose answer was lost after the server wrote it
+CFGM["migration"] = True
+reset(); snapP = snapshot()
+class LossyApp(DirectApp):
+    """The route, but the answer of the second real batch is lost after the server has written it (a connection that dropped)."""
+    def __init__(self): super().__init__(); self.real = 0
+    def call(self, body):
+        st, d = super().call(body)
+        if body["op"] == "lastact" and not body.get("dry"):
+            self.real += 1
+            if self.real == 2: return 0, "connection lost"
+        return st, d
+orig_chunks = SP.chunks; SP.chunks = lambda xs, n=3: orig_chunks(xs, 3)      # eight items to fill, three to a batch: the second batch is the lost one
+RUN2 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run2-"))
+try: rcL, outL, errL = cli(BF.apply, app=LossyApp(), run_dir=str(RUN2))
+finally: SP.chunks = orig_chunks
+undoL = pathlib.Path(outL["undo"]) if isinstance(outL, dict) else pathlib.Path("/nonexistent")
+ujL = json.loads(undoL.read_text()) if undoL.is_file() else {"items": []}
+filled = (11, 12, 13, 14, 16, 19, 20, 22)
+check("11 a batch with a lost answer: the apply ends 1, names the unanswered batch, and the undo file keeps no result for its three entries (the other five are final)",
+      rcL == 1 and "no answer that says what it wrote" in errL and sorted(str(e["result"]) for e in ujL["items"]) == ["None"] * 3 + ["set"] * 5 and outL["results"] == {"set": 5, "batch unanswered": 3}, (rcL, errL[-400:], [e["result"] for e in ujL["items"]]))
+check("11 …the server did write all eight (the lost answer came after the write)", all(bytes_of(i) != snapP[f"{i}.json"] for i in filled) and all(rec_of(i) is not None for i in filled), None)
+rcU, outU, errU = cli(BF.undo, undo=str(undoL))
+check("11 --undo takes the three entries with no result from the server's pass record and puts all eight items back", rcU == 0 and "taken from the server's pass record" in errU and outU["results"] == {"set": 8}
+      and "put them back from their planned values" not in errU, (rcU, outU, errU[-500:]))
+check("11 …every item is byte for byte as it was before the apply, and the file is marked undone", all(bytes_of(i) == snapP[f"{i}.json"] for i in filled) and json.loads(undoL.read_text()).get("undone"), [i for i in filled if bytes_of(i) != snapP[f"{i}.json"]])
+
+# ---- 12. the `moved` path: a writer that takes no lock lands between the read and the replace
+reset(); snapM = snapshot(); writer = {}; HM = head()
+orig_sw2 = server._stamp_write
+def racing_write(p_, raw_, h0_, edits_):
+    if p_.name == "11.json" and not writer:
+        d_w = json.loads(p_.read_bytes()); d_w["description"] = "- Edited by a writer that takes no lock"
+        p_.write_text(json.dumps(d_w, ensure_ascii=False, indent=1), encoding="utf-8"); writer["bytes"] = p_.read_bytes()
+    return orig_sw2(p_, raw_, h0_, edits_)
+server._stamp_write = racing_write
+try: r_m = LP.one(server, "g11")
+finally: server._stamp_write = orig_sw2
+check("12 a write that lands between the read and the replace: the item is `moved`, the writer's file stands byte for byte, nothing of the pass is in it, no temp file is left", r_m["action"] == "moved" and bytes_of(11) == writer["bytes"]
+      and "last_activity" not in mt(11) and not list((T / "store/g").glob(".*tmp")) and head() == HM, (r_m["action"], r_m["why"], bytes_of(11) == writer["bytes"], head() == HM))
+r_m2 = LP.one(server, "g11")
+check("12 …the next run fills it from its History and keeps the writer's text", r_m2["action"] == "set" and rec_of(11) is not None and raw(11)["description"] == "- Edited by a writer that takes no lock", r_m2)
+reset(); writer.clear()
+RUN3 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run3-"))
+server._stamp_write = racing_write
+try: rcM, outM, errM = cli(BF.apply, run_dir=str(RUN3))
+finally: server._stamp_write = orig_sw2
+check("12 through the script: seven filled, the one moved is named to run again and its entry is `moved`, the exit is 3 (not a failure), and the writer's file stands", rcM == 3 and outM["results"] == {"set": 7, "moved": 1} and outM["moved_run_again_for_these"] == [BOARD + "11"]
+      and bytes_of(11) == writer["bytes"] and [e["result"] for e in json.loads(pathlib.Path(outM["undo"]).read_text())["items"]].count("moved") == 1, (rcM, outM))
+rcM2, outM2, _e = cli(BF.apply, run_dir=str(RUN3))
+check("12 …and the next apply fills it (one set), keeping the writer's text", outM2["results"] == {"set": 1}, outM2)
+check("12 …the record is there and the writer's description is kept", rec_of(11) is not None and raw(11)["description"] == "- Edited by a writer that takes no lock", None)
+
+# ---- 13. a store that is a subdirectory of the repository (as the live board-data is)
+T2 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-sub-"))
+def commit2(rel, d, ct):
+    f = T2 / rel; f.parent.mkdir(parents=True, exist_ok=True); f.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    assert git("add", "-A", cwd=T2).returncode == 0
+    r = git("commit", "-q", "-m", rel, ct=ct, cwd=T2); assert r.returncode == 0, r.stderr
+assert git("init", "-q", cwd=T2).returncode == 0
+commit2("README", {"x": 1}, now0 - 9 * HR)      # a file at the repository's root
+V11 = [(now0 - 5 * HR, version(now0 - 5 * HR, now0 - 5 * HR, steps=STEPS0)), (now0 - 3 * HR, version(now0 - 3 * HR, now0 - 3 * HR, steps=STEPS1)), (now0 - 2 * HR, version(now0 - 2 * HR, now0 - 3 * HR, steps=STEPS1))]
+for ct_, v_ in V11: commit2("board-data/g/11.json", {"id": "11", **v_}, ct_)
+commit2("other/g/11.json", {"id": "11", **version(now0 - MIN, now0 - MIN, mover="home-other")}, now0 - MIN)                  # the same file name in a sibling folder, newer
+commit2("board-data-old/g/11.json", {"id": "11", **version(now0 - MIN, now0 - MIN, mover="home-other")}, now0 - MIN)        # a folder whose name starts with the store's own
+SUB = T2 / "board-data"
+log_, why_ = LP.store_log(SUB)
+check("13 the store's log from a subdirectory of the repository holds only the files of that folder, named relative to it (no prefix, no file of a sibling folder or of the repository's root), each with its path in the repository",
+      why_ == "" and list(log_) == ["g/11.json"] and len(log_["g/11.json"]) == 3 and {x[2] for x in log_["g/11.json"]} == {"board-data/g/11.json"}, (why_, {k: [x[2] for x in v] for k, v in log_.items()}))
+vs_, why2_ = LP.git_versions(SUB, "g/11.json")
+check("13 …its versions are the three of the item, at their commit times, oldest first", why2_ == "" and [t for t, _v in vs_] == [float(int(t)) for t, _v in V11], (why2_, [t for t, _v in vs_]))
+reset()
+in_sub = LP.one(server, "g11", dry=True, git_store=SUB, now=now0)
+in_flat = LP.one(server, "g11", dry=True, git_store=T / "store", now=now0)
+check("13 …and the pass over the subdirectory store gives the record the flat store gives (step 1 done at the real write), not the newer file of the sibling folders", in_sub["action"] == "would_set" and (in_sub["kind"], in_sub["what"], in_sub["at"]) == ("step_done", "step 1 done", now0 - 3 * HR)
+      and (in_sub["kind"], in_sub["what"], in_sub["at"]) == (in_flat["kind"], in_flat["what"], in_flat["at"]), (in_sub, in_flat))
+deeper = LP.store_log(T2 / "board-data" / "g")
+check("13 a folder one level deeper reads the same way (its prefix is longer), and a folder that does not exist is a problem, not an empty History", deeper[1] == "" and list(deeper[0]) == ["11.json"] and LP.store_log(T2 / "no-such-folder")[1] != "", (deeper[1], list(deeper[0])))
+
+# ---- 14. the plan compares the times
+rowA = {"item": BOARD + "1", "action": "would_set", "class": "", "at": 100.0, "kind": "comment"}
+check("14 the plan's signature carries each item's time and kind: a different time or kind is a different plan; a refused row has none", BF.signature([rowA]) != BF.signature([{**rowA, "at": 101.0}]) and BF.signature([rowA]) != BF.signature([{**rowA, "kind": "pr_merged"}])
+      and BF.signature([rowA]) == BF.signature([{**rowA, "action": "set"}]) and BF.signature([{**rowA, "action": "refused", "class": "unreadable_history", "at": 1.0}]) == BF.signature([{**rowA, "action": "refused", "class": "unreadable_history", "at": 2.0}]), None)
+check("14 …except a time that is `now` (clamped), which moves with the clock by itself", BF.signature([{**rowA, "clamped": True, "at": 5.0}]) == BF.signature([{**rowA, "clamped": True, "at": 9.0}]) and BF.signature([{**rowA, "clamped": True}]) != BF.signature([rowA]), None)
+check("14 the pass marks a record that is `now` as clamped (the version ten minutes ahead) and no other", dry[20]["clamped"] is True and all(dry[i]["clamped"] is False for i in (11, 12, 13, 14, 16, 19, 22)), {i: dry[i].get("clamped") for i in dry})
+reset(); snapQ = snapshot()
+server._merge_tied = lambda rows, now: [(r, f"{r['repo']}#{r['n']}", {"g19": "anchored"}) for r in rows if r["n"] == 9]
+st_, d_ = call(op="lastact", items=[f"g{i}" for i in OPEN], dry=True)
+planf = T / "lactfill-plan.json"; planf.write_text(json.dumps(d_["results"], default=str), encoding="utf-8")
+RUN4 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run4-"))
+rcP, outP, errP = cli(BF.apply, run_dir=str(RUN4), plan=str(planf))
+check("14 an apply whose plan is the dry run's goes ahead (the version a little ahead of the clock is `now` in both and does not make the plan differ)", rcP == 3 and outP["results"] == {"set": 8} and rec_of(19)["at"] == newer, (rcP, errP[-300:]))
+reset(); snapQ = snapshot()
+elog_before = ELOG.path().read_text(encoding="utf-8")
+with open(ELOG.path(), "a", encoding="utf-8") as f_: f_.write(json.dumps({"ts": now0 - 2 * MIN, "repo": "owner/repo", "n": 9, "kind": "comment", "refs": []}) + "\n")      # an event lands after the dry run: item 19's time is now another
+rcQ, outQ, errQ = cli(BF.apply, run_dir=str(RUN4), plan=str(planf))
+check("14 an event that arrived after the dry run changes an item's time: the apply says the times differ and writes nothing (no file, no new pass folder)", rcQ == 1 and "times they would get" in errQ and snapshot() == snapQ
+      and len([x for x in RUN4.iterdir() if UM.PASS_DIR_RX.fullmatch(x.name)]) == 1, (rcQ, errQ[-400:]))
+rcQ2, outQ2, errQ2 = cli(BF.apply, run_dir=str(RUN4), plan=str(planf), allow_changed_plan=True)
+check("14 …and --allow-changed-plan applies it, with the newer time", rcQ2 == 3 and rec_of(19)["at"] == now0 - 2 * MIN, (rcQ2, errQ2[-300:], rec_of(19)))
+ELOG.path().write_text(elog_before, encoding="utf-8"); server._merge_tied = orig_tied; reset()
+
+# ---- 15. the hub's logs cannot be read: the dry run warns and the real pass refuses
+snapT = snapshot()
+orig_read = MLOG.read
+def broken_read(*a, **k): raise RuntimeError("the log cannot be read")
+MLOG.read = broken_read
+RUN5 = pathlib.Path(_scratch.mkdtemp(prefix="lactfill-run5-"))
+try:
+    tied_x, why_x = LP.ties(server, now0)
+    st_dry, d_dry = call(op="lastact", items=["g11"], dry=True)
+    st_real, d_real = call(op="lastact", items=["g11"], pass_id="20260101-000000-abcdea")
+    rcT, outT, errT = cli(BF.apply, run_dir=str(RUN5))
+finally: MLOG.read = orig_read
+check("15 a log that cannot be read is not swallowed: the ties come back empty with the reason", tied_x == {} and "merge log was not read" in why_x and "RuntimeError" in why_x, (tied_x, why_x))
+check("15 the route's dry run still answers, with `ties_problem` set; the real pass is refused whole (400) and writes nothing", st_dry == 200 and "merge log" in d_dry["ties_problem"] and d_dry["results"][0]["action"] == "would_set"
+      and st_real == 400 and "could not be read" in d_real["error"] and snapshot() == snapT, (st_dry, d_dry.get("ties_problem"), st_real, d_real))
+check("15 --apply refuses before it backs anything up or writes: exit 1, the reason named, no pass folder, no file changed", rcT == 1 and "plan is refused" in errT and "merge log" in errT and snapshot() == snapT
+      and not [x for x in RUN5.iterdir() if UM.PASS_DIR_RX.fullmatch(x.name)], (rcT, errT[-400:]))
+check("15 …and with the logs readable again the same call is served", call(op="lastact", items=["g11"], dry=True)[1].get("ties_problem") is None, None)
+wrap = T / "lactfill-dry-wrapper.py"
+wrap.write_text(f"""import importlib.abc, importlib.util, sys
+sys.path.insert(0, {STACK!r})
+class Patch(importlib.abc.MetaPathFinder):      # the dry run loads the pass module after it has switched to its copy; this makes its ties read fail when it does
+    def find_spec(self, name, path, target=None):
+        if name != "stackshot.model.last_activity_pass": return None
+        sys.meta_path.remove(self)
+        spec = importlib.util.find_spec(name); load = spec.loader.exec_module
+        def exec_module(mod):
+            load(mod); mod.ties = lambda S, now: ({{}}, 'forced for the test')
+        spec.loader.exec_module = exec_module
+        return spec
+sys.meta_path.insert(0, Patch())
+from stackshot.tools import last_activity_backfill as BF
+sys.exit(BF.main(['--store', {str(T / 'store')!r}]))
+""", encoding="utf-8")
+CFGM["migration"] = False
+pw = subprocess.run([sys.executable, str(wrap)], capture_output=True, text=True, env={**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml"})
+check("15 the dry run prints the warning in its summary (and at the top) and says --apply refuses; it still reads the History and writes nothing", pw.returncode == 0 and pw.stdout.count("WARNING") == 2 and "forced for the test" in pw.stdout and "--apply refuses until" in pw.stdout
+      and "items the pass would write: 8 of" in pw.stdout and snapshot() == snapT, (pw.returncode, pw.stdout[-900:], pw.stderr[-500:]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

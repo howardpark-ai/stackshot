@@ -23,6 +23,7 @@ Pure functions of dicts and the git store, and `one` / `undo_one` / `write_op`, 
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import threading
@@ -44,10 +45,14 @@ GIT_TIMEOUT_S = 20
 
 
 def _num(v: Any) -> float:
-    try:
-        return float(v or 0)
-    except (TypeError, ValueError):
+    """A stored time or clock as a number: 0.0 for anything that is not one. A bool (True is 1.0 to float()), a numeric string ("123" is 123.0), NaN and infinity are no time, as `last_activity.clean` reads them."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
         return 0.0
+    try:
+        f = float(v)
+    except (OverflowError, ValueError):
+        return 0.0
+    return f if math.isfinite(f) else 0.0
 
 
 def vtime(v: dict[str, Any]) -> float:
@@ -173,14 +178,16 @@ def newest(signals: list[dict[str, Any]], now: float) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the server's side: the ops `lastact` and `unlastact`
-def pr_rows(S: Any, now: float) -> list[dict[str, Any]]:
-    """The hub's two logs read whole, each line on its own (a line of the wrong shape is skipped, as the live pass skips it): the merge log's merges and the event log's events, as `_merge_tied` takes them."""
+def pr_rows(S: Any, now: float) -> tuple[list[dict[str, Any]], list[str]]:
+    """The hub's two logs read whole, each line on its own (a line of the wrong shape is skipped, as the live pass skips it): the merge log's merges and the event log's events, as `_merge_tied` takes them
+    → (the rows, the problems): a log that could not be read at all is a problem (a missing log reads as no lines, not a problem)."""
     rows: list[dict[str, Any]] = []
-    for source, normal, kind in ((S._mlog, S._mlog.normal, "merged"), (S._elog, S._elog.normal, "")):
+    problems: list[str] = []
+    for name, source, normal, kind in (("merge log", S._mlog, S._mlog.normal, "merged"), ("event log", S._elog, S._elog.normal, "")):
         try:
             got, _off = source.read(0)
-        except Exception as e:  # noqa: BLE001  — a log that cannot be read adds nothing; the History of the items still stands
-            print(f"last activity pass: a log was not read: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — a log that cannot be read is reported; the caller decides (the dry run warns, the real pass refuses)
+            problems.append(f"the {name} was not read ({e.__class__.__name__}: {str(e)[:120]})")
             continue
         for r in got:
             try:
@@ -188,17 +195,20 @@ def pr_rows(S: Any, now: float) -> list[dict[str, Any]]:
             except Exception:  # noqa: BLE001  — a line of the wrong shape
                 continue
             rows.append({**n, "kind": n.get("kind") or kind})
-    return rows
+    return rows, problems
 
 
-def ties(S: Any, now: float) -> dict[str, list[dict[str, Any]]]:
-    """The logged pull request events tied to the open items, signals by item id (the server's `_merge_tied`: anchors scoped to the item, a merge's body, the item's own words; an item that waits or is held is not on the ladder and gets none). {} when the logs or the items cannot be read."""
+def ties(S: Any, now: float) -> tuple[dict[str, list[dict[str, Any]]], str]:
+    """The logged pull request events tied to the open items → (signals by item id, "") or ({}, why the logs or the items could not be read). The server's `_merge_tied`: anchors scoped to the item, a merge's body, the
+    item's own words; an item that waits or is held is not on the ladder and gets none. Not swallowed: without the ties an item is filled from its History alone, and a pull request event newer than that would be
+    left out of its record, so the dry run warns and the real pass refuses (`write_op`) until they read."""
     try:
-        rows = pr_rows(S, now)
-        return tie_signals(rows, S._merge_tied(rows, now), now) if rows else {}
+        rows, problems = pr_rows(S, now)
+        if problems:
+            return {}, "; ".join(problems)
+        return (tie_signals(rows, S._merge_tied(rows, now), now) if rows else {}), ""
     except Exception as e:  # noqa: BLE001
-        print(f"last activity pass: events not tied: {e.__class__.__name__}: {str(e)[:120]}", file=sys.stderr, flush=True)
-        return {}
+        return {}, f"the events could not be tied to the items ({e.__class__.__name__}: {str(e)[:120]})"
 
 
 def has_record(meta_item: dict[str, Any], now: float) -> bool:
@@ -207,7 +217,7 @@ def has_record(meta_item: dict[str, Any], now: float) -> bool:
 
 
 def one(S: Any, gid: str, dry: bool = False, tied: dict[str, list[dict[str, Any]]] | None = None, now: float | None = None, git_store: Path | None = None) -> dict[str, Any]:
-    """Fill the record of one open item → {"item", "action": set | same | kept | moved | refused | would_set, "why", "class", "before", "after", "history", "dropped", "sha256_before", "kind", "what", "at"}
+    """Fill the record of one open item → {"item", "action": set | same | kept | moved | refused | would_set, "why", "class", "before", "after", "history", "dropped", "sha256_before", "kind", "what", "at", "clamped"}
     (before and after = {"last_activity": value}, None = absent). Worked out HERE under the item lock from the file as it stands. `same`: the item already has a record. `kept`: no signal in its History (listed, nothing
     made up). `refused`: closed or unreadable (`class` is CLASS_HISTORY for a History that cannot be read or is ahead of the clock). `moved`: a writer that takes no lock wrote the item between the read and the
     replace; its write stands. `dry`: nothing is written. `tied`: the logged events by item (`ties`; computed when omitted). `git_store`: the folder whose git holds the History (default: the server's store)."""
@@ -246,7 +256,7 @@ def one(S: Any, gid: str, dry: bool = False, tied: dict[str, list[dict[str, Any]
             if rec is None:
                 return {"item": shown, "action": "kept", "why": "its History holds no activity to record (nothing is made up)", **blank, "sha256_before": h0}
             meta = raw["metadata"]
-            out = {"item": shown, "before": {KEY: meta.get(KEY)}, "after": {KEY: rec}, "history": "", "dropped": [], "class": "", "sha256_before": h0, "kind": rec["kind"], "what": rec["what"], "at": rec["at"]}
+            out = {"item": shown, "before": {KEY: meta.get(KEY)}, "after": {KEY: rec}, "history": "", "dropped": [], "class": "", "sha256_before": h0, "kind": rec["kind"], "what": rec["what"], "at": rec["at"], "clamped": rec["at"] >= now}      # clamped: the time is "now" (a version a little ahead of the clock reads as now), so it moves with the clock and a plan does not compare it
             if rec["at"] > now + _la.SKEW_S:      # cannot happen (every signal is read no later than `now`); the pass states it, so a future time is never written whatever a later edit does
                 return {**out, "action": "refused", "why": "the time found is ahead of the clock: not written", "class": CLASS_HISTORY}
             if dry:
@@ -311,7 +321,7 @@ def undo_one(S: Any, w: Any) -> dict[str, Any]:
 
 def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
     """op lastact {items: [id, …], pass_id?, dry?} | unlastact {items: [{item, before, after}, …], pass_id?} (at most S._MIGRATE_BATCH): the last-activity pass over the open items. No begin and no hold: each item
-    is worked out and written under its own lock (`one`). `dry` (lastact only) writes nothing and answers what each item would get. One publish at the end when anything was written. → {"op", "results": [...]}."""
+    is worked out and written under its own lock (`one`). `dry` (lastact only) writes nothing and answers what each item would get. One publish at the end when anything was written. A real `lastact` is refused whole when the hub's logs cannot be read (`ties`); a dry one answers with `ties_problem` set. → {"op", "results": [...]}."""
     extra = [k for k in spec if k not in S._STAMP_BODY]
     if extra:
         raise ToolError(f"Refused: {op} takes op, sender, items, pass_id and dry only (got {', '.join(sorted(map(str, extra)))}): it writes metadata.last_activity and nothing else")
@@ -326,7 +336,9 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         raise ToolError("Refused: dry goes with lastact only")
     results: list[dict[str, Any]] = []
     now = time.time()
-    tied = ties(S, now) if op == "lastact" else {}      # the logs read once for the batch
+    tied, tie_problem = ties(S, now) if op == "lastact" else ({}, "")      # the logs read once for the batch
+    if tie_problem and not dry:
+        raise ToolError(f"Refused: the hub's logs of pull request events could not be read ({tie_problem}): without them an item is filled from its History alone and a newer event would be left out of its record. Nothing is written; run it again when they read")
     for it in items:
         if op == "unlastact":
             results.append(undo_one(S, it))
@@ -341,4 +353,4 @@ def write_op(S: Any, spec: dict[str, Any], op: str, by: str) -> dict[str, Any]:
         S._publish()
     if pid and not dry:
         S._stamp_pass_keep(pid, by, op, results)
-    return {"op": op, "results": results}
+    return {"op": op, "results": results, **({"ties_problem": tie_problem} if tie_problem else {})}

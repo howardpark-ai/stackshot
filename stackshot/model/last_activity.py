@@ -110,7 +110,7 @@ def age_s(item: dict[str, Any] | None, now: float) -> float | None:
 
 
 def band(seconds: float) -> str:
-    """The colour band of an age: OK under 45 minutes, WARN from 45 minutes up to and including an hour, BAD only past an hour (strictly more than 60 minutes: exactly an hour is amber). The lower bound belongs to the
+    """The color band of an age: OK under 45 minutes, WARN from 45 minutes up to and including an hour, BAD only past an hour (strictly more than 60 minutes: exactly an hour is amber). The lower bound belongs to the
     worse band (45 minutes is amber). The page script (ui/render.py _LACT_JS) reads the same two bounds in seconds."""
     return BAD if seconds > BAND_BAD_S else WARN if seconds >= BAND_WARN_S else OK
 

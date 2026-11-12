@@ -16,9 +16,11 @@ What the pass does per open item with no record: it works out the newest visible
 the merge and event logs of the hub, tied as the live pass ties them) and stores it in `metadata.last_activity`, and writes nothing else: no clock, no mover, no needs, no state, no step, no History line, nobody told. The
 file is replaced whole under the item lock, with a sha256 check, as the stamp and until passes do. An item that already has a record is left as it is. A record is never dated after the clock. An item whose History cannot
 be read (the refused class: the store outside git, a version missing or torn, a time ahead of the clock by more than an hour) is refused and listed with the reason, and left as it is: the time is not guessed. Running it twice
-changes nothing the second time.
+changes nothing the second time. The plan a person was shown includes each item's time and kind: --apply asks the server for the plan again, and when an item's time (or the set of items) differs from the dry run's --plan, or
+from the plan read a moment before, nothing is written. The time written is worked out once more under the item lock, so an event landing in that last moment is in the undo file's `after`. When the hub's logs of pull
+request events cannot be read, the dry run prints a warning in its summary and --apply refuses: without them an item is filled from its History alone.
 
-Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole or got no answer, an item could not be written, the plan differs from the one shown, another
+Exit codes: 0 done (apply) or nothing to change (dry run) · 1 a failure (the plan could not be made, a batch was refused as a whole or got no answer, an item could not be written, the plan differs from the one shown (the items, their times or the refused ones), the hub's logs of pull request events cannot be read, another
 --apply or --undo holds the run directory, or the dry run's second pass would still change something) · 3 the pass was applied and some items were left as they are (refused, kept, or closed between the plan and the write): not a
 failure, a person has items to look at. The apply prints the refused list before it writes. Python 3.12 or later; it runs itself in the tests' uv environment when fastmcp is missing."""
 from __future__ import annotations
@@ -81,9 +83,12 @@ def say_refused(rows: list[dict[str, Any]]) -> None:
 
 
 def signature(rows: list[dict[str, Any]]) -> list[list[Any]]:
-    """What a person was shown to decide on: the items that would be filled and the refused ones, sorted (not the times: a pull request event that arrives meanwhile moves a time, and a time found inside the clock's
-    skew is read as now). A plan that differs from the one shown is not applied without --allow-changed-plan."""
-    return sorted([r["item"], "would_set" if r.get("action") in ("would_set", "set") else r.get("action"), r.get("class") or ""] for r in rows if r.get("action") in ("would_set", "set") or r.get("class"))
+    """What a person was shown to decide on: the items that would be filled, each with the time it would get (and its kind), and the refused ones, sorted. A pull request event or a save that arrives meanwhile moves a
+    time, and that is a plan that differs from the one shown: it is not applied without --allow-changed-plan. The one time left out is a clamped one (`clamped`: a version a little ahead of the clock reads as
+    now, so it moves with the clock by itself). The time written is worked out once more under the item lock (an event landing in that last moment is in the undo file's `after`, which records what was written)."""
+    return sorted([r["item"], "would_set" if r.get("action") in ("would_set", "set") else r.get("action"), r.get("class") or "",
+                   ("now" if r.get("clamped") else r.get("at")) if r.get("action") in ("would_set", "set") else None,
+                   r.get("kind") if r.get("action") in ("would_set", "set") else None] for r in rows if r.get("action") in ("would_set", "set") or r.get("class"))
 
 
 def dry_run(a: argparse.Namespace) -> int:
@@ -118,12 +123,14 @@ def dry_run(a: argparse.Namespace) -> int:
         items = SP.load_dir(d)
         opens = sorted((g for g, it in items.items() if it.get("status") == "open"), key=SP.num)
         now = time.time()
-        tied = LP.ties(server, now)
+        tied, tie_problem = LP.ties(server, now)
         planned = {g: LP.one(server, g, dry=True, tied=tied, now=now, git_store=store) for g in opens}
         wrote = {g: LP.one(server, g, tied=tied, now=now, git_store=store) for g in opens}
         again = {g: LP.one(server, g, tied=tied, now=now, git_store=store) for g in opens}
         rows = [{**planned[g], "result": wrote[g]["action"], "again": again[g]["action"]} for g in opens]
         print(f"{len(opens)} open items read from {store}; the pass run on a copy of it (the History read from its git)\n")
+        if tie_problem:
+            print(f"WARNING: the hub's logs of pull request events were not read ({tie_problem}): the records below are worked out from the History alone, and --apply refuses until the logs read\n")
         for r in rows:
             if r["action"] in ("would_set", "refused", "kept"):
                 print_row(r)
@@ -140,6 +147,7 @@ def dry_run(a: argparse.Namespace) -> int:
         kinds = collections.Counter(r.get("kind") for r in rows if r["action"] == "would_set")
         print("kinds of the records to write: " + (", ".join(f"{k} {n}" for k, n in sorted(kinds.items())) or "none"))
         print(f"items the pass would write: {by_result.get('set', 0)} of {len(rows)}")
+        print("hub's logs of pull request events: " + (f"WARNING, not read ({tie_problem}); --apply refuses until they read" if tie_problem else "read"))
         if a.json:
             Path(a.json).write_text(json.dumps(rows, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
         return 1 if any(r["again"] == "set" for r in rows) else 0
@@ -189,6 +197,9 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
             if st != 200:
                 say(f"the plan could not be made: [{st}] {d.get('error') if isinstance(d, dict) else d}")
                 return None
+            if d.get("ties_problem"):
+                say(f"the plan is refused: the hub's logs of pull request events could not be read ({d['ties_problem']}). Without them an item is filled from its History alone and a newer event would be left out of its record. Nothing is written; run it again when they read")
+                return None
             out += d["results"]
         return out
     plan = make_plan()
@@ -203,14 +214,14 @@ def _apply(a: argparse.Namespace, app: Any = None) -> int:
     if seen_plan:
         shown = json.loads(Path(seen_plan).expanduser().read_text(encoding="utf-8"))
         if signature(shown) != signature(plan) and not getattr(a, "allow_changed_plan", False):
-            say("the items to fill and the refused ones differ from the dry run in --plan; nothing is written. Run the dry run again, or pass --allow-changed-plan to apply this plan")
+            say("the items to fill, the times they would get or the refused ones differ from the dry run in --plan; nothing is written. Run the dry run again, or pass --allow-changed-plan to apply this plan")
             return 1
     if todo:
         again = make_plan()           # right before the write: an item may have changed since the plan was made
         if again is None:
             return 1
         if signature(again) != signature(plan) and not getattr(a, "allow_changed_plan", False):
-            say("the items to fill or the refused ones changed while the plan was being read; nothing is written. Run it again, or pass --allow-changed-plan")
+            say("the items to fill, the times they would get or the refused ones changed while the plan was being read; nothing is written. Run it again, or pass --allow-changed-plan")
             return 1
         plan = again
         todo = [(g, r) for g, r in zip(cands, plan) if r.get("action") == "would_set"]
@@ -339,8 +350,8 @@ def main(argv: list[str]) -> int:
     mode.add_argument("--undo", default="", metavar="FILE", help="put back the records the undo file of a real pass names (needs --sender)")
     ap.add_argument("--store", help="the dry run: a store directory to read (default: [paths] store of the live config)")
     ap.add_argument("--json", help="the dry run: write the rows to this file")
-    ap.add_argument("--plan", default="", metavar="FILE", help="--apply: the dry run's --json file; the items to fill and the refused ones must be the ones it showed")
-    ap.add_argument("--allow-changed-plan", action="store_true", help="--apply: apply even when the items to fill or the refused ones differ from the dry run or from the plan read a moment before")
+    ap.add_argument("--plan", default="", metavar="FILE", help="--apply: the dry run's --json file; the items to fill, the times they would get and the refused ones must be the ones it showed")
+    ap.add_argument("--allow-changed-plan", action="store_true", help="--apply: apply even when the items to fill, their times or the refused ones differ from the dry run or from the plan read a moment before")
     ap.add_argument("--sender", default="", help="the session that runs the pass (one of [model] migration_senders); needed with --apply and --undo")
     ap.add_argument("--run-dir", default=str(DEFAULT_RUN), help="the real pass: where the backup and the undo file are kept (<run-dir>/<pass id>/)")
     a = ap.parse_args(argv)
