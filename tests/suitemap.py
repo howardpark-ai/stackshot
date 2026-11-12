@@ -159,9 +159,10 @@ annotations). Now:
     `if TYPE_CHECKING:` and a deleted name are no binding). A name that is not there, a module whose names are not
     all known (a star import, __getattr__, globals()), a star import added, a relative import that leads to nothing of ours and `import a.b` of a missing
     module of ours are unchecked. A library import is looked up as far as it can be without side effects: a stdlib module must have the name added (as an
-    attribute, or as a submodule), a top-level package that is neither the stdlib's nor installed is unchecked, a stdlib module that does something at
-    import (antigravity, tkinter, ...) is never imported and its import is unchecked, and so is any probe that fails. A name from an installed package cannot be
-    looked up: it keeps the I2 narrowing.
+    attribute, or as a submodule), a stdlib module this platform does not have (`import msvcrt` on Linux) is unchecked, a top-level package that is neither
+    the stdlib's nor installed is unchecked, a stdlib module that does something at import (antigravity, tkinter, ...) and any `__main__` below a package
+    (`import unittest.__main__`) are never imported, bare or with `from`, and their import is unchecked, and so is any probe that fails. A bare `import X`
+    is only looked up (importlib.util.find_spec), never run. A name from an installed package cannot be looked up: it keeps the I2 narrowing.
   * N2: in a file with `from __future__ import annotations`, the names of an annotation are no read when it annotates (a) a parameter or the return of
     a def with no decorator, or only a decorator that wraps (property, staticmethod, classmethod, abstractmethod, lru_cache, cache, cached_property,
     contextmanager, asynccontextmanager, overload), whose name is only ever CALLED in the whole checkout (a bare identifier used as a value anywhere, in a .py file or a script
@@ -169,7 +170,10 @@ annotations). Now:
     annotations read as before: that function object may reach typing.get_type_hints, functools.wraps, a registry; a name imported under another name
     (`from m import f as h`, followed across files) carries it to f; a script that does not parse makes every def count), or (b) a local variable inside a function (never evaluated). The parameters of a class's __init__, __call__, __new__ and __post_init__ are
     read through the class (inspect.signature(Cls), a framework that builds its fields), so they escape with the CLASS's name; a method name of those three (or __post_init__) used as a value anywhere (get_type_hints(C(1).__init__), get_type_hints(OBJ.__call__),
-    a class decorator or an __init_subclass__ doing it to cls.__init__) makes every class-keyed name escape. Everything else that
+    a class decorator or an __init_subclass__ doing it to cls.__init__) makes every class-keyed name escape. In this repository that
+    escape is ON for good: stackshot/cli.py reads `argparse.ArgumentParser.__init__` as a value (line 1007) and tests/package_layout_scenario.py does too
+    (line 156), so all the class-keyed names (30, in 20 files) always count as reads, which errs toward more suites; the negative control of the scenario
+    (ESC7, a class only called) describes a state this checkout never reaches. Everything else that
     annotates keeps counting: the annotations of a def with another decorator (@mcp.tool: the registry evaluates them), of a class body (a dataclass,
     NamedTuple or pydantic model field, a class inside a function included), of a module-level variable, a default value, a decorator, and every
     annotation of a file without postponed annotations (they run at import). A change of the `from __future__ import annotations` line itself takes the
@@ -1566,22 +1570,24 @@ def unchecked_imports(N, m, items):
     return False
 
 
-# stdlib modules whose import does something (opens a browser, prints, starts a GUI toolkit, runs a demo): never imported here, the import is unchecked
-NO_PROBE = {"antigravity", "this", "idlelib", "turtledemo", "tkinter", "turtle", "__main__", "__hello__", "__phello__", "test", "lib2to3", "pydoc_data"}
+# stdlib modules whose import does something (opens a browser, prints, starts a GUI toolkit, runs a demo): never imported or looked up here, the import is
+# unchecked. __hello__, __phello__, lib2to3 and test are not in the stdlib_module_names of 3.14 (they never get this far there, a top-level name that is
+# neither the stdlib's nor installed is unchecked anyway) and stay for an older interpreter; a __main__ below a package is refused by name (library_unresolved)
+NO_PROBE = {"antigravity", "this", "idlelib", "turtledemo", "tkinter", "turtle", "__hello__", "__phello__", "test", "lib2to3", "pydoc_data"}
 _LIB = {}
 
 
 def library_unresolved(module, name, as_module=False):
-    """True when `from module import name` (`import module.name` with as_module) of a library may fail at import, or cannot be told: a top-level package
-    that is neither the stdlib's nor installed (a suite could not import it either; name None is `import module` alone), a stdlib module that has the
-    name neither as an attribute nor as a submodule (as a submodule only, with as_module), and any failure of the probe. Only a stdlib module is ever
-    imported, and not one in NO_PROBE; an installed package keeps the narrowing (I2)"""
+    """True when `from module import name` (`import module.name` with as_module, `import module` alone with name None) of a library may fail at import, or
+    cannot be told: a top-level package that is neither the stdlib's nor installed (a suite could not import it either), a stdlib module that is not there
+    (find_spec finds no `import msvcrt` on Linux; the module is not run), a stdlib module that has the name neither as an attribute nor as a submodule (as a
+    submodule only, with as_module), and any failure of the probe. A stdlib module in NO_PROBE and any name with a __main__ in it (`import unittest.__main__`
+    would run unittest, `import venv.__main__` would make a directory) is never imported or looked up: unchecked. Only a stdlib module is ever imported;
+    an installed package keeps the narrowing (I2)"""
     top = module.split(".")[0]
     if top not in sys.stdlib_module_names:
         return top not in shadowable()
-    if name is None:
-        return False
-    if top in NO_PROBE:
+    if top in NO_PROBE or "__main__" in module.split(".") or name == "__main__":
         return True
     key = (module, name, as_module)
     if key not in _LIB:
@@ -1594,7 +1600,9 @@ def library_unresolved(module, name, as_module=False):
                 raise
             except BaseException:
                 return False
-        if as_module:
+        if name is None:
+            ok = tries(lambda: importlib.util.find_spec(module))   # `import msvcrt`: where the module is is all that is asked, it is not run
+        elif as_module:
             ok = tries(lambda: importlib.import_module(f"{module}.{name}"))   # `import os.path`: a stdlib module, no side effect at import
         else:
             ok = tries(lambda: hasattr(importlib.import_module(module), name)) or tries(lambda: importlib.util.find_spec(f"{module}.{name}"))

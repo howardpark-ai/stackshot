@@ -578,6 +578,27 @@ check("IMP23 a top-level package that is neither the stdlib's nor installed (`fr
 check("IMP24 a stdlib module that does something at import (antigravity opens a browser, tkinter loads a toolkit) is never imported: the file whole; and under the old import rule (I1) none of these is whole",
       rl("from antigravity import geohash\n") == W and rl("from tkinter import Tk\n") == W
       and rl("from typing import Annoted\n", I1) == [] and rl("import nopkg\n", I1) == [])
+# the fourth round: a bare `import X` of a stdlib module that is not on this platform (msvcrt on Linux) fails at import like the `from` form, and a __main__ below a package
+# runs a program when imported. The fixtures are on PYTHONPATH, ahead of the stdlib, in the suite's own scratch folder: fx_exit/colorsys.py exits at import, fx_main/colorsys/__main__.py leaves a marker
+FX_EXIT, FX_MAIN, MARK_MAIN = T / "fx_exit", T / "fx_main", T / "main_ran"
+FX_EXIT.mkdir(); (FX_EXIT / "colorsys.py").write_text("raise SystemExit(3)\n")
+(FX_MAIN / "colorsys").mkdir(parents=True); (FX_MAIN / "colorsys" / "__init__.py").write_text("")
+(FX_MAIN / "colorsys" / "__main__.py").write_text(f"import pathlib\npathlib.Path({str(MARK_MAIN)!r}).write_text('ran')\n")
+check("IMP25 a bare `import msvcrt`, `import winreg` (stdlib modules the CI platform does not have) take the file whole, like `from msvcrt import getch`; `import os`, `import json` and `import collections.abc` keep the narrowing",
+      rl("import msvcrt\n") == W and rl("import winreg\n") == W and rl("from msvcrt import getch\n") == W
+      and rl("import os\n") == [] and rl("import json\n") == [] and rl("import collections.abc\n") == [],
+      [rl("import msvcrt\n"), rl("import winreg\n"), rl("import os\n"), rl("import json\n")])
+check("IMP26 ...a bare import of a stdlib module that does something at import (tkinter, antigravity) is unchecked too, and under the old import rule (I1) none of these is whole",
+      rl("import tkinter\n") == W and rl("import antigravity\n") == W and rl("import msvcrt\n", I1) == [] and rl("import tkinter\n", I1) == [])
+fx = {"PYTHONPATH": str(FX_EXIT)}
+check("IMP27 a probe that exits at import (SystemExit, not an Exception) is no crash of the selector and no proof that the name is there: the file whole; a bare import only looks the module up and keeps the narrowing",
+      rl("from colorsys import rgb_to_hls\n", fx) == W and rl("import colorsys.nothing\n", fx) == W and rl("import colorsys\n", fx) == [],
+      [rl("from colorsys import rgb_to_hls\n", fx), rl("import colorsys.nothing\n", fx), rl("import colorsys\n", fx)])
+fx = {"PYTHONPATH": str(FX_MAIN)}
+check("IMP28 a __main__ below a stdlib package (`import unittest.__main__` would run unittest, `import venv.__main__` would make a directory) is never imported: the file whole, and the program does not run",
+      rl("import colorsys.__main__\n", fx) == W and rl("from colorsys.__main__ import x\n", fx) == W and rl("from colorsys import __main__\n", fx) == W
+      and rl("import unittest.__main__\n") == W and rl("import venv.__main__\n") == W and not MARK_MAIN.exists() and not (R / "venv.__main__").exists(),
+      [rl("import colorsys.__main__\n", fx), MARK_MAIN.exists(), (R / "venv.__main__").exists()])
 # the second round of the review: names that fail at runtime are no binding, two `as` imports of one local, a plain statement beside an import
 def pc_of(a, b, path, ran=(), env=None):
     """the whole py_change result for one file, as sorted strings: (fns, bound, own, whole)"""
@@ -677,6 +698,12 @@ check("ESC7 a class's __init__ annotations are no read while the class is only c
                      "class Sub(Base):\n    pass\n") is True,
       [class_read(HINTS + "c = cp.m.C(1)\n"), class_read(HINTS + "typing.get_type_hints(cp.m.C(1).__init__)\n"), class_read(HINTS + "OBJ = cp.m.C(1)\ntyping.get_type_hints(OBJ.__call__)\n"),
        class_read(HINTS + "def deco(cls):\n    typing.get_type_hints(cls.__init__)\n    return cls\n")])
+check("ESC9 a method name that getattr (or inspect.getattr_static) is asked for with a string makes the class-keyed names escape (getattr(C(1), '__init__')); any other name asked for does not",
+      class_read(HINTS + "typing.get_type_hints(getattr(cp.m.C(1), '__init__'))\n") is True
+      and class_read("import inspect\n" + HINTS + "inspect.getattr_static(cp.m.C(1), '__call__')\n") is True
+      and class_read(HINTS + "getattr(cp.m.C(1), 'x')\n") is False)
+check("ESC10 a super().__init__(...) call is a call of the method, not a read of it: a class of its own calling it makes nothing escape (T is dropped)",
+      class_read(HINTS + "class K:\n    def __init__(self, a):\n        super().__init__()\n\nk = K(1)\nc = cp.m.C(1)\n") is False)
 check("ESC8 ...and under the old annotation rule (N1) the name is a read whatever the script does", class_read(HINTS + "c = cp.m.C(1)\n", N1) is True)
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
