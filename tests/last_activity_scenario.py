@@ -1,5 +1,5 @@
 """Scenario test for the item's last-activity record, `metadata.last_activity = {"at", "kind", "what"}` (model/last_activity.py, anchors/event_log.py, `server._stamp_last_activity`,
-`server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It only records; nothing reads it, so every other clock must be
+`server._event_activity_tick`): the one place that says when something visible last happened to an item and what it was. It records; the On agent rows and the item page show it (tests/on_agent_row_scenario.py), and nothing else reads it, so every other clock must be
 exactly as it was. Fixture items, a fake clock (the passes are given their `now`, the saves are stamped from a fake `time`), no live store, no network, no model call.
 
   1  pure: the words for each signal (a step done or dropped, a state change, a merge, created), and what is no activity (a status line, a reply, a note, a confirm, a new or reworded step, a description edit,

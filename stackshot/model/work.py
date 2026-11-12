@@ -8,7 +8,7 @@ line on the page, and marking the step done (done=[n], or work with state done) 
 Pure helpers with no config and no store, shared by the server (the update tool, the get and brief replies), the renderer (a row's "engineer: migrating", the
 item page's Next and History) and the audits (a status line in progress is a build subagent at work on the item).
 
-READ-COMPAT. Before the migration (tools/migrate_work_to_steps.py) an item may still carry the old `metadata.work` list, {id, text, agent, state, ts} lines. Every reader goes
+READ-COMPAT. An item closed before the one list (a closed item is a record and was not rewritten) may still carry the old `metadata.work` list, {id, text, agent, state, ts} lines. Every reader goes
 through `lines_of`, which gives those lines as they are beside the status lines of the open steps, so a release is safe in either order; the writer never adds to the old list."""
 from __future__ import annotations
 
