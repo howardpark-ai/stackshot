@@ -155,7 +155,8 @@ annotations). Now:
     in code is read as before. Several statements on one line (`import os; X = 1`) are each a changed statement.
   * An import the file GAINS (a name added, or renamed to) that may not resolve takes the file whole, whatever the narrowing says: the importers would fail
     at import, and an annotation-only name is no read to show it. A name taken from one of our modules is looked up in that module's own bindings (a def,
-    a class, an assignment, an import there, a module of that name below it; the module must exist). A name that is not there, a module whose names are not
+    a class, an assignment, an import there, a module of that name below it; the module must exist; a bare annotation, a name bound only under
+    `if TYPE_CHECKING:` and a deleted name are no binding). A name that is not there, a module whose names are not
     all known (a star import, __getattr__, globals()), a star import added, a relative import that leads to nothing of ours and `import a.b` of a missing
     module of ours are unchecked. An import from the stdlib or an installed package cannot be looked up: it keeps the I2 narrowing.
   * N2: in a file with `from __future__ import annotations`, the names of an annotation are no read when it annotates (a) a parameter or the return of
@@ -393,12 +394,20 @@ def dotted(node):
 def module_bindings(tree):
     """(names, open): the names a module's level binds that can be seen without running it (a def, a class, an assignment, a loop or with target, an
     import alias, anywhere in its statements but inside a function, a class or a comprehension), and whether more may come from where no name shows:
-    a star import, a module-level __getattr__, a call of globals(). A name outside the set of an `open` module is not known to be missing"""
-    names, opened = set(), False
+    a star import, a module-level __getattr__, a call of globals(). A name outside the set of an `open` module is not known to be missing.
+    A name that fails at runtime is no binding: a bare annotation (`X: int`), a name bound only under `if TYPE_CHECKING:`, a name `del`eted"""
+    names, opened, deleted = set(), False, set()
+
+    def children(node):
+        if isinstance(node, ast.If) and dotted(node.test) in ("TYPE_CHECKING", "typing.TYPE_CHECKING"):
+            return [node.test, *node.orelse]   # the body never runs
+        if isinstance(node, ast.AnnAssign) and node.value is None:
+            return [node.annotation]           # `X: int` binds nothing
+        return ast.iter_child_nodes(node)
 
     def walk(node):
         nonlocal opened
-        for ch in ast.iter_child_nodes(node):
+        for ch in children(node):
             if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 names.add(ch.name)
                 if ch.name == "__getattr__":
@@ -417,6 +426,8 @@ def module_bindings(tree):
                 if isinstance(ch, ast.Name):
                     if isinstance(ch.ctx, ast.Store):
                         names.add(ch.id)
+                    elif isinstance(ch.ctx, ast.Del):
+                        deleted.add(ch.id)
                     elif ch.id == "globals":
                         opened = True
                 elif isinstance(ch, ast.ExceptHandler) and ch.name:
@@ -427,7 +438,7 @@ def module_bindings(tree):
                     names.add(ch.rest)
                 walk(ch)
     walk(tree)
-    return names, opened
+    return names - deleted, opened
 
 
 class ModNames:
@@ -444,11 +455,12 @@ class ModNames:
         self.effect_targets = {}                    # first line of an effect-mod statement → the modules it sets state in
         self.text, self.ddoc, self.pdoc, self.body_of = [], set(), {}, []
         self.docreads = set()                       # scopes that read a docstring, or hand a function to a registry that does
-        self.postponed, self.imports, self.import_firsts = False, {}, set()
+        self.postponed, self.imports, self.import_ids = False, {}, set()   # import_ids: the indexes in stmts of the Import and ImportFrom nodes (`import os; os = 1` holds an import and a plain statement on one line)
         self.annot_skip, self.ann, self.ann_stmt = {}, [], []   # see *Imports and annotations*
         self.valuse = set()                          # bare names used as a value (not just called): Names.settle
         self.import_seq, self.dropped = [], set()    # the module-level imports in order (None for another statement); (module, name) keys of repo imports whose only use was a dropped annotation
         self.aliases, self.froms, self.toplevel = {}, {}, set()   # set before the early return: reach() reads froms of every file, one that does not parse included
+        self.froms_all = collections.defaultdict(list)   # local name → every (module, name) it is imported as: a try/except fallback or a second line binds the same local twice, `froms` keeps the last
         self.repo_tops = {r.split(".")[0] for r in repo_mods}
         self.defined, self.open_names = set(), False   # the names the module level binds, statically; open_names: a name may also come from a star import, __getattr__ or globals()
         if not self.ok:
@@ -493,6 +505,7 @@ class ModNames:
                         self.aliases[local] = f"{base}.{a.name}"
                     else:
                         self.froms[local] = (base, a.name)
+                        self.froms_all[local].append((base, a.name))
             elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 m = self.literal_import(node.value)
                 if m:
@@ -502,6 +515,8 @@ class ModNames:
                 if isinstance(t, ast.Name):
                     self.toplevel.add(t.id)
         for st in tree.body:
+            if isinstance(st, (ast.Import, ast.ImportFrom)):
+                self.import_ids.add(len(self.stmts))
             self.stmts.append(self.statement(st, st is tree.body[0]))
         for node in ast.walk(tree):
             self.read(node)
@@ -544,9 +559,9 @@ class ModNames:
                 self.valuse.add(n.attr)
             elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.isidentifier():
                 self.valuse.add(n.value)
-        for local, (_, name) in self.froms.items():
+        for local, srcs in self.froms_all.items():
             if local in self.valuse:
-                self.valuse.add(name)            # from m import f as g; get_type_hints(g): f is the one that escapes
+                self.valuse.update(name for _, name in srcs)            # from m import f as g; get_type_hints(g): f is the one that escapes
 
     def literal_import(self, call):
         if isinstance(call, ast.Call) and dotted(call.func) in ("__import__", "importlib.import_module") and call.args \
@@ -570,8 +585,7 @@ class ModNames:
         out = {(self.mod, chain[0])}
         mod = None
         if chain[0] in self.froms:
-            fm, fa = self.froms[chain[0]]
-            out.add((fm, fa))
+            out.update(self.froms_all[chain[0]])
         elif chain[0] in self.aliases:
             mod = self.aliases[chain[0]]
         if mod is not None:
@@ -590,7 +604,7 @@ class ModNames:
         if isinstance(node, ast.Call):
             f = dotted(node.func)
             # a call by its last name, or by an alias made by `from inspect import getdoc as gd`; getattr(x, "__doc__")
-            hit = (f is not None and (f.split(".")[-1] in DOC_CALLS or self.froms.get(f.split(".")[0], ("", ""))[1] in DOC_CALLS)) or \
+            hit = (f is not None and (f.split(".")[-1] in DOC_CALLS or any(n in DOC_CALLS for _, n in self.froms_all.get(f.split(".")[0], ())))) or \
                 (f == "getattr" and len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and node.args[1].value == "__doc__") or \
                 (isinstance(node.func, ast.Call) and getattr(node.func.func, "attr", None) in DOC_REGISTER)
         if hit:
@@ -687,7 +701,6 @@ class ModNames:
             return a, b, "bind", {"__doc__"}, reads
         if isinstance(st, (ast.Import, ast.ImportFrom)):
             names = {(x.asname or x.name).split(".")[0] for x in st.names}
-            self.import_firsts.add((a, frozenset(names)))   # with its names: `import os; X = 1` holds an import and a plain statement on one line
             ours = [m for m in self.imported(st) if m.split(".")[0] in self.repo_tops]
             if ours:
                 # one of ours: importing it runs its module level in every importer; `selection` decides (import-repo)
@@ -746,8 +759,8 @@ class ModNames:
         return None
 
     def stmts_at(self, ln):
-        """every module-level statement that has the line (`import os; X = 1` is two)"""
-        return [st for st in self.stmts if st[0] <= ln <= st[1]]
+        """every module-level statement that has the line, with its index in stmts (`import os; X = 1` is two)"""
+        return [(i, st) for i, st in enumerate(self.stmts) if st[0] <= ln <= st[1]]
 
     def resolve_from(self, level, module):
         """the module a `from … import` names, resolved against this file's package"""
@@ -790,7 +803,7 @@ class ModNames:
             head = f.split(".")[0]
             if head in self.functions or head in self.classes:
                 return True
-            if head in self.aliases and self.aliases[head] in self.repo or head in self.froms and self.froms[head][0] in self.repo:
+            if head in self.aliases and self.aliases[head] in self.repo or any(b in self.repo for b, _ in self.froms_all.get(head, ())):
                 return True
         return False
 
@@ -852,10 +865,11 @@ class Names:
         while grew:
             grew = False
             for m in everyone:
-                for local, (_, name) in m.froms.items():
-                    if local in self.escaped and name not in self.escaped:
-                        self.escaped.add(name)
-                        grew = True
+                for local, srcs in m.froms_all.items():
+                    for _, name in srcs:
+                        if local in self.escaped and name not in self.escaped:
+                            self.escaped.add(name)
+                            grew = True
         self.blind = scripts is None   # could not list the scripts: any function may be reached by one
 
         def skippable(m, fname):
@@ -864,7 +878,7 @@ class Names:
             if not m.ok:
                 continue
             # a name taken from another of our modules is still needed by the import statement (an ImportError at import), whatever the annotation does
-            imported = {k for k in m.froms.values() if k[0] in m.repo}
+            imported = {k for srcs in m.froms_all.values() for k in srcs if k[0] in m.repo}
             for fname, sc, ks in m.ann:
                 if not skippable(m, fname):
                     m.refs[sc] |= ks
@@ -892,8 +906,8 @@ class Names:
                 if m is not None and rest[0] in m.aliases:
                     nxt = m.aliases[rest[0]]
                 elif m is not None and rest[0] in m.froms:
+                    out.update(m.froms_all[rest[0]])
                     fm, fa = m.froms[rest[0]]
-                    out.add((fm, fa))
                     nxt = f"{fm}.{fa}" if f"{fm}.{fa}" in self.repo else None
                 if nxt is None:
                     break
@@ -942,8 +956,8 @@ def reach(names_list, seeds, ran=None):
                 if SUITE_RE.match(m.path) or (ran is not None and m.path not in ran):
                     continue
                 # from x import n (as k): a name re-exported from here is the same object under (this module, k)
-                for local, src in m.froms.items():
-                    if src in hit and (m.mod, local) not in hit:
+                for local, srcs in m.froms_all.items():
+                    if any(src in hit for src in srcs) and (m.mod, local) not in hit:
                         hit.add((m.mod, local))
                         grew = True
                 if m.dropped and touches(m.dropped, hit) and m.path not in whole:
@@ -1440,7 +1454,7 @@ def py_change(names, S, a, b, old, new):
             if not sts or dyn:
                 whole.add(p)
                 continue
-            for st in sts:
+            for si, st in sts:
                 _, _, kind, bnames, extra = st
                 if kind == "import-repo" and all(quiet_import(N, S, p, mod) for mod in extra):
                     kind = "bind"
@@ -1451,7 +1465,7 @@ def py_change(names, S, a, b, old, new):
                 if kind != "bind":
                     whole.add(p)
                     continue
-                if (st[0], frozenset(bnames)) in mn.import_firsts and added is not None:
+                if si in mn.import_ids and added is not None:
                     # the two files differ in their imports by names ADDED, and by nothing else (not a removal, a rename, a name taken from another
                     # module, an order or a position): an import statement binds only the added names, a line reformatted or split included. Any
                     # other import edit keeps the old rule: every name on the line (see *Imports and annotations*)

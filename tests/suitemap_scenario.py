@@ -563,6 +563,42 @@ check("IMP18 a module whose names are not all known (a star import in it) does n
 rp("from .b import T\n", "from .b import T, U\n")
 check("IMP19 under the old import rule (I1) that unresolved addition is no whole-file case: the rule is the new one, switching it off brings the old selection back",
       whole_of(pkg_base, git("rev-parse", "HEAD").strip(), "rp/a.py", RAN, I1) == [])
+# the second round of the review: names that fail at runtime are no binding, two `as` imports of one local, a plain statement beside an import
+def pc_of(a, b, path, ran=(), env=None):
+    """the whole py_change result for one file, as sorted strings: (fns, bound, own, whole)"""
+    code = ("import sys, json; sys.path.insert(0, 'tests'); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
+            "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
+            "print(json.dumps([sorted(map(str, x)) for x in s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[:4]]))")
+    r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else (r.stdout, r.stderr[-600:])
+RQ = ("rq/__init__.py", "rq/src.py", "rq/imp.py", "rq/c.py", "rq/d.py")
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("rq/__init__.py", ""); write("rq/src.py", "Tag = int\n")
+write("rq/imp.py", "from __future__ import annotations\nfrom .src import Tag\n\ndef g(x: Tag):\n    return x\n")
+write("rq/c.py", "import os; os = 1\n"); write("rq/d.py", "from .src import Tag; Tag = Tag + 1\n")
+rq_base = commit("a package for the second review round")
+def rq(src_text, old="from .src import Tag\n", new="from .src import Tag, Tagg\n", env=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", rq_base); write("rq/src.py", src_text); sub("rq/imp.py", old, new)
+    return pc_of(rq_base, commit("import edit"), "rq/imp.py", RQ, env)
+chk = lambda r: r[3] if isinstance(r, list) else r
+narrowed = lambda r: isinstance(r, list) and r[3] == [] and r[1] == ["('rq.imp', 'Tagg')"]   # only the added name is bound, the file is not whole
+check("IMP20 a name the source module only declares fails at import and is no binding: a bare annotation, a name under `if TYPE_CHECKING:` and a deleted name all take the file whole; a real one narrows (binds only the added name)",
+      chk(rq("Tag = int\nTagg: int\n")) == ["rq/imp.py"] and chk(rq("from typing import TYPE_CHECKING\nTag = int\nif TYPE_CHECKING:\n    Tagg = int\n")) == ["rq/imp.py"]
+      and chk(rq("Tag = int\nTagg = 1\ndel Tagg\n")) == ["rq/imp.py"] and narrowed(rq("Tag = int\nTagg = int\n")),
+      [rq("Tag = int\nTagg: int\n"), rq("Tag = int\nTagg = 1\ndel Tagg\n"), rq("Tag = int\nTagg = int\n")])
+check("IMP21 ...and a name bound in the else branch of `if TYPE_CHECKING:`, or by a bare annotation that also has a value, is bound (narrows); under the old import rule (I1) none of them is whole",
+      narrowed(rq("import typing\nTag = int\nif typing.TYPE_CHECKING:\n    pass\nelse:\n    Tagg = int\n")) and narrowed(rq("Tag = int\nTagg: int = 1\n"))
+      and chk(rq("Tag = int\nTagg: int\n", env=I1)) == [] and chk(rq("Tag = int\nTagg = 1\ndel Tagg\n", env=I1)) == [])
+# a plain statement on the same line as an import that rebinds an imported name is changed on its own
+def line_edit(path, old, new, env=None):
+    git("checkout", "-q", "-B", f"t{len(ran)}", rq_base); sub(path, old, new)
+    return pc_of(rq_base, commit("line edit"), path, RQ, env)
+r_new, r_old = line_edit("rq/c.py", "os = 1", "os = 2"), line_edit("rq/c.py", "os = 1", "os = 2", I1)
+check("MS3 `import os; os = 1` to `os = 2` binds os (the plain statement is no import: it is not narrowed to the names the import added); same as the old rule",
+      r_new[1] != [] and r_new == r_old, (r_new, r_old))
+r_new, r_old = line_edit("rq/d.py", "Tag + 1", "Tag + 2"), line_edit("rq/d.py", "Tag + 1", "Tag + 2", I1)
+check("MS4 `from .src import Tag; Tag = Tag + 1` to `Tag + 2` binds Tag (and reads src, which is not a change of its own); same as the old rule",
+      r_new[1] != [] and r_new == r_old, (r_new, r_old))
 # several statements on one line (import os; QX = 1, qmod.py): the second is a changed statement too, and the unchanged import binds nothing
 out, err, head = sel_after(lambda: sub("qmod.py", "import os; QX = 1", "import os; QX = 2"), "two statements on one line")
 check("MS1 the value changed on a line that also holds an import (`import os; QX = 1`) reaches the code that reads it: a (qx)", out.split() == ["a"], (out, err))
@@ -596,6 +632,15 @@ check("UV1 a script with a `uv run` shebang counts as a use of a def as a value:
 write("bin/uvbroken", "#!/usr/bin/env -S uv run --script\nthis is ( not python\n")
 uvb_head = commit("a uv script that does not parse")
 check("UV2 ...and one that does not parse stays blind (any def may be reached)", escaped(uvb_head, ["pq"])[1] == "True", escaped(uvb_head, ["pq"]))
+# two `as` imports of one local name: every source name escapes with it
+git("checkout", "-q", "-B", f"t{len(ran)}", base)
+write("tests/w1_scenario.py", "try:\n    from pmod import pr as h\nexcept ImportError:\n    from pmod import pl as h\n")
+write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n")
+tr_head = commit("a try/except fallback import of one local")
+check("ESC5 two `from … import x as h` for one local (a try/except ImportError fallback) both escape when h is used as a value: pr and pl, not only the last", escaped(tr_head, ["h", "pr", "pl"])[:2] == (["h", "pl", "pr"], "False"), escaped(tr_head, ["h", "pr", "pl"]))
+write("tests/w1_scenario.py", "from pmod import pr as h\nfrom pmod import pl as h\n")
+tl_head = commit("two lines import one local")
+check("ESC6 ...and so do two plain lines of one file", escaped(tl_head, ["h", "pr", "pl"])[:2] == (["h", "pl", "pr"], "False"), escaped(tl_head, ["h", "pr", "pl"]))
 out, err, _ = sel_after(lambda: sub("mod.py", "return self.size", "return self.size * 1"), "method body")
 check("a method body reaches the suites that ran the method", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "    size = 2", "    size = 2\n    other = 3"), "class body")

@@ -213,7 +213,7 @@ does both (its docstring has the rules in full):
   reaches the readers of `Any`, nor does a line rewritten with the same names, parenthesised or split). Any other import edit binds every name on the
   changed line, as before: a name removed (the importer may fail with a NameError at import), renamed, taken from another module, imported twice, swapped
   with another import of the same name or moved below other code. An import the file gains that may not resolve (a name added to an import from one of our
-  modules that the module does not bind, a star import, a relative import to nothing of ours) takes the file whole; an import from the stdlib or an installed
+  modules that the module does not bind (a bare annotation, a name only under `if TYPE_CHECKING:` and a deleted name are no binding), a star import, a relative import to nothing of ours) takes the file whole; an import from the stdlib or an installed
   package cannot be looked up and keeps the narrowing. In a file with `from __future__ import annotations`,
   a name used only in an annotation is no read when the annotation is on a parameter or the return of a def with no decorator (or only a wrapping one:
   `property`, `staticmethod`, `classmethod`, `lru_cache`, `cache`, `cached_property`, `contextmanager`, `asynccontextmanager`, `abstractmethod`, `overload`) whose name is only ever called
