@@ -3,7 +3,7 @@ such a message once lived only in a session's chat).
 
 An item can carry `metadata.draft`: the text exactly as it is to be posted, sent or pasted, many lines, any language, stored and shown as written (no bullet form, no line
 cap; one size cap, MAX). The item page draws it inside the step of the Your step block that uses it, under a "Message to paste" label ("Email text to paste" for an email) with Copy beside it and the text in the page's body font, and the home row
-does the same, collapsed behind that label with the same Copy; get shows it as a `draft:` block; the GitHub mirror carries it in the issue body under "### Draft". A close drops it, and so does his Send on the step (an empty box or with a note).
+does the same, collapsed behind that label with the same Copy; get shows it as a `draft:` block; the GitHub mirror carries it in the issue body under "### Draft". A close drops it, and so does his Done or Send note on the step.
 
 The write guard (`problem`): an item that a write leaves in state your-step with the owner as the mover, whose step names text to post, send or paste (a word of STEMS, or one of [keywords.draft]), is
 refused unless it carries a draft or its step or description links the document that holds the text. Pure functions of an item and a text: no server import, so the server, the
