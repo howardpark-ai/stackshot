@@ -8816,8 +8816,9 @@ _CLOSE_REFUSAL = (      # the full close rule a refused close appends (unchanged
     f"(at most {_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters), shown in the Outcome block. "
     "A close leaves the description as it was (a description passed with a close is stored as outcome_text) and clears next, ask and needs (and any hold, wake or recycle wait); due stays as a record. "
     "Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and superseded_by. "
-    "A close also marks every step still open, by the closer (done when the outcome is done, dropped otherwise; steps marked in the same call keep their marks; "
-    "this settles a step of his too, the one case where a session's call marks it, because the item is over), and tells the mover of every other open item whose next or description names the closed item (board#N), "
+    "A close ticks only the steps that are still open and are yours (you wrote them, or they open with your name), by the closer (done when the outcome is done, dropped otherwise; steps marked in the same call keep their marks; "
+    "this settles a step of his too, the one case where a session's call marks it, because the item is over). A step that opens with another session's name stays open, so the close is refused, naming that step, and nothing changes: "
+    "ask that session to finish it, or mark it in the closing call itself (update with status=completed and done=[n] or dropped=[n]). It tells the mover of every other open item whose next or description names the closed item (board#N), "
     "one message per mover (the first 8 items, then a count); the items that wait on it through after get their own wake, and the closer is not told. "
     + _ASK_RULE
 )
@@ -8828,7 +8829,8 @@ _CLOSE_FORM = (
     f"reason (one line, the end state reached and why, at most {_CLOSE_REASON_MAX} characters (longer is refused)) and outcome_text (short `- ` bullets, at most {_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters, shown as the Outcome); "
     "it leaves the description as it was (one passed with a close is stored as outcome_text) and clears next, ask and needs (and any hold, wake or recycle wait); due stays as a record. "
     "Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and superseded_by. "
-    "A close also marks every step still open, by the closer (done when the outcome is done, dropped otherwise; this settles a step of his too), and tells the mover of every other open item whose next or description names the closed item (board#N), "
+    "A close ticks only the steps that are still open and are yours (you wrote them, or they open with your name), by the closer (done when the outcome is done, dropped otherwise; this settles a step of his too). A step that opens with another session's name stays open, "
+    "so the close is refused, naming that step, and nothing changes: ask that session to finish it, or mark it in the closing call with update (status=completed and done=[n] or dropped=[n]; complete takes no marks). It tells the mover of every other open item whose next or description names the closed item (board#N), "
     "one message per mover (the first 8 items, then a count); the items that wait on it through after get their own wake, and the closer is not told. "
     + _ASK_RULE
 )

@@ -1884,7 +1884,7 @@ check("D2: a move to needs=decision by another agent reaches the mover, with the
 server.stackshot_complete("a74", sender="work-osprey", outcome="dropped", reason="test item", description="- Goal: Dropped"); time.sleep(0.5)
 n0 = len(wait_push(0)); res = server._update(gl, next="a next step", sender="work-osprey-y"); time.sleep(0.5)
 check("D2: an ordinary edit by the agent tells the creator nothing", not [m for m in wait_push(0)[n0:] if m[0] == A], wait_push(0)[n0:])
-n0 = len(wait_push(0)); res = server.stackshot_complete(gl, sender="work-osprey-y", outcome="done", reason="Vendor A was picked", description="- Goal: Picked"); time.sleep(0.7); p = wait_push(0)
+n0 = len(wait_push(0)); res = server.stackshot_update(gl, status="completed", sender="work-osprey-y", outcome="done", reason="Vendor A was picked", description="- Goal: Picked", done=[1]); time.sleep(0.7); p = wait_push(0)      # the open step names the front agent: this close marks it itself (done=[1]), as a close no longer settles another session's step
 check("D2: a close by another session is told to the item's mover alone, never to its creator, and the reply names no keeper of record",
       not [m for m in p[n0:] if m[0] == A] and "keeper of record" not in res and not any("keeper of record" in m[1] for m in p[n0:]), (p[n0:], res))
 n0 = len(wait_push(0)); res = server._update(gl, status="open", next="look again", sender="work-osprey-y"); time.sleep(0.7); p = wait_push(0)
@@ -3182,7 +3182,8 @@ z1 = mk46(); server.stackshot_complete(z1, sender="work-osprey-main", outcome="d
 res = server._update(z1, priority="p1", sender="work-osprey-x"); res2 = server._message("work-osprey-x", f"look at {z1}", "home-beta"); time.sleep(0.3)
 check("auto-name: a closed item is never touched, by a write or by a message", "needs" not in rd(z1)["metadata"] and rd(z1)["status"] == "completed" and "(named" not in res and "(named" not in res2, (rd(z1)["metadata"], res, res2))
 x1 = mk46(); n0 = len(wait_push(0))
-res = server.stackshot_complete(x1, sender="work-osprey-x", outcome="done", reason="built", description="- Goal: Built"); p = wait_push(n0 + 2); time.sleep(0.3); p = wait_push(0)
+# the open step names the front agent: the close marks it itself (done=[1]), as a close no longer settles another session's step
+res = server.stackshot_update(x1, status="completed", sender="work-osprey-x", outcome="done", reason="built", description="- Goal: Built", done=[1]); p = wait_push(n0 + 2); time.sleep(0.3); p = wait_push(0)
 check("auto-name: a close by an unnamed background agent names it first (the record), then closes with no needs; the owner hears the close only",
       rd(x1)["status"] == "completed" and "needs" not in rd(x1)["metadata"] and f"(named work-osprey-x in {x1}'s needs: close by work-osprey-x)" in res
       and not [m for m in p[n0:] if "now names work-osprey-x" in m[1]] and any(f"{x1} (mover work-osprey-main, a front agent) was completed (done: built) by work-osprey-x" in m[1] for m in p[n0:]), (res, p[n0:]))

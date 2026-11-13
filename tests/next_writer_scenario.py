@@ -180,7 +180,7 @@ m6 = rd(g6)["metadata"]
 check("a close (update) clears next and the writers", "next" not in m6 and "next_by" not in m6, m6)
 upd(g6, ENG, status="open", next=B1)
 check("reopen: the new next is the reopener's", lines(g6) == [B1] and who(g6) == [ENG], (nx(g6), who(g6)))
-server.stackshot_complete(g6, outcome="done", reason="finished", description="- Goal: A thing\n- Done a second time", sender=MAIN)
+server.stackshot_complete(g6, outcome="done", reason="finished", description="- Goal: A thing\n- Done a second time", sender=ENG)
 check("the complete tool clears them too", "next_by" not in rd(g6)["metadata"] and "next" not in rd(g6)["metadata"], rd(g6)["metadata"])
 
 # ================================================================ get is unchanged
