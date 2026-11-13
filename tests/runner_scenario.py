@@ -308,23 +308,24 @@ ticks = server._minute_ticks()
 names = [t.name for t in ticks]
 check("3 order: the settle events come first, in order: the watchers' pass, the anchor pass, the phase sweep, the event waits, the done check, the step proof",
       names[:6] == ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick"] and {t.group for t in ticks[:6]} == {"settle"}, names)
-check("3 order: …then the hand-off tick, then the answers, then the fleet's clocks", names[6] == "handoff_tick" and ticks[6].group == "handoff" and names[7] == "answer_tick" and ticks[7].group == "answers"
-      and {t.group for t in ticks[8:14]} == {"fleet"} and names[8:14] == ["roles_sync_safe", "clients_tick", "pilot_fallback_tick", "stall_tick", "handback_tick", "fleet_publish"], names)
+check("3 order: …then the balancer and the hand-off tick (the balancer first, so a move at ten minutes comes before the hand-off tick's reminder), then the answers, then the fleet's clocks",
+      names[6:8] == ["balance_tick", "handoff_tick"] and {t.group for t in ticks[6:8]} == {"handoff"} and names[8] == "answer_tick" and ticks[8].group == "answers"
+      and {t.group for t in ticks[9:15]} == {"fleet"} and names[9:15] == ["roles_sync_safe", "clients_tick", "pilot_fallback_tick", "stall_tick", "handback_tick", "fleet_publish"], names)
 check("3 order: …then the ten-minute set last: the filing pass, the dates pass, then the wake catch-up, then the silence pass, then the archive sweep, all paced as the ten-minute set and standing still while the board is held",
-      names[14:] == ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"] and {t.group for t in ticks[14:]} == {"tenmin"} and {t.pace for t in ticks[14:]} == {"tenmin"} and all(t.board for t in ticks[14:]), names)
+      names[15:] == ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"] and {t.group for t in ticks[15:]} == {"tenmin"} and {t.pace for t in ticks[15:]} == {"tenmin"} and all(t.board for t in ticks[15:]), names)
 check("3 order: …the groups never go back (settle, handoff, answers, fleet, tenmin)", [R.GROUPS.index(t.group) for t in ticks] == sorted(R.GROUPS.index(t.group) for t in ticks))
 check("3 pace: only the watchers' pass and the anchor pass are event ticks ; the filing, dates and silence passes and the wake catch-up are the ten-minute set's; every other tick is paced",
       [t.name for t in ticks if t.pace == "event"] == ["wake_pass", "anchor_pass"] and [t.name for t in ticks if t.pace == "tenmin"] == ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"]
-      and all(t.pace == "paced" for t in ticks[2:14]))
+      and all(t.pace == "paced" for t in ticks[2:15]))
 check("3 coverage: the table is the fleet's clocks and the wake passes, the publish and the ten-minute set, nothing twice (the For-you look is the dates pass, not a tick of its own)",
-      names == ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick", "handoff_tick", "answer_tick", "roles_sync_safe", "clients_tick", "pilot_fallback_tick",
+      names == ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick", "balance_tick", "handoff_tick", "answer_tick", "roles_sync_safe", "clients_tick", "pilot_fallback_tick",
                 "stall_tick", "handback_tick", "fleet_publish", "filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"] and "foryou_tick" not in names, names)
 check("3 gone: the wake loop, the fleet watch, the old round, the flag and the old-threads status are no longer there",
       not any(hasattr(server, n) for n in ("_wake_loop", "_fleet_watch", "_run_fleet_ticks", "_runner_enabled")) and not hasattr(R, "status_off"), [n for n in dir(server) if "fleet_watch" in n or "wake_loop" in n])
 check("3 board: the clocks that read items are marked to stand still while the migration holds the board; the registry sync, the clients' tick and the publish are not",
       {t.name for t in ticks if not t.board} == {"wake_pass", "anchor_pass", "roles_sync_safe", "clients_tick", "fleet_publish"}, [(t.name, t.board) for t in ticks])
 
-TICK_FUNCS = {"wake_pass": "_wake_pass", "anchor_pass": "_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick", "handoff_tick": "_handoff_tick",
+TICK_FUNCS = {"wake_pass": "_wake_pass", "anchor_pass": "_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick", "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick",
               "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
               "stall_tick": "_stall_tick", "handback_tick": "_handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
 counts: dict[str, int] = {}

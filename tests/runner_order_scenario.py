@@ -48,12 +48,12 @@ class Clock:
     def __call__(self): return self.t
     def advance(self, s): self.t += s
 
-EXPECT = ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick", "handoff_tick", "answer_tick",
+EXPECT = ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick", "balance_tick", "handoff_tick", "answer_tick",
           "roles_sync_safe", "clients_tick", "pilot_fallback_tick", "stall_tick", "handback_tick", "fleet_publish"]
 TEN = ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"]          # the ten-minute set: right after the minute set in the round that finds it due
 ORDER = EXPECT + TEN
 SERVER_FNS = {"wake_pass": "_minute_wake_pass", "anchor_pass": "_minute_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick",
-              "handoff_tick": "_handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick",
+              "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick",
               "pilot_fallback_tick": "_pilot_fallback_tick", "stall_tick": "_stall_tick",
               "handback_tick": "_handback_tick", "fleet_publish": "_minute_fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
 clk = Clock()

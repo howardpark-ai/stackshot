@@ -56,8 +56,9 @@ def candidate(gid: str, item: dict[str, Any], mover: str, now: float) -> tuple[s
     return gid, str(mover or ""), str(meta.get("project") or ""), min(_la.at(item, now), now)
 
 
-def queue(cands: Iterable[tuple[str, str, str, float]], now: float, is_front: Callable[[str, str], bool] | None = None) -> dict[str, str]:
-    """{queued item: the item it is queued behind} over the on-agent candidates (`candidate`); {} when nothing is queued. See the module doc for the rule. `is_front(mover, project)` → True for a front agent."""
+def queue(cands: Iterable[tuple[str, str, str, float]], now: float, is_front: Callable[[str, str], bool] | None = None, window: float = WINDOW_S) -> dict[str, str]:
+    """{queued item: the item it is queued behind} over the on-agent candidates (`candidate`); {} when nothing is queued. See the module doc for the rule. `is_front(mover, project)` → True for a front agent.
+    `window` is the span of "no activity" and of "had activity" (default `WINDOW_S`, the board's reading); the balancer (audit/hand_idle.py) reads the same rule over its own, shorter window."""
     by_mover: dict[str, list[tuple[str, str, float]]] = {}
     for gid, mover, project, at in cands:
         who = str(mover or "").strip().casefold()
@@ -74,10 +75,10 @@ def queue(cands: Iterable[tuple[str, str, str, float]], now: float, is_front: Ca
         if len(rows) < 2:
             continue
         hand = max(rows, key=lambda r: (r[2], -_num(r[0])))
-        if hand[2] <= 0 or now - hand[2] > WINDOW_S:
+        if hand[2] <= 0 or now - hand[2] > window:
             continue      # the newest item is idle too: the mover is working on none of them, so every one stays on agent
         for gid, _mover, at in rows:
-            if gid != hand[0] and now - at > WINDOW_S:
+            if gid != hand[0] and now - at > window:
                 out[gid] = hand[0]
     return out
 
