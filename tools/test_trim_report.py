@@ -14,8 +14,8 @@ What it measures, per run:
                  starts with anything else are not counted. It is a size measure, not a coverage measure: stable between runs, cheap.
   * serial minutes, slowest suites   from the suite map's plain seconds per suite (`suites.<name>.seconds`, the file tests/suitemap.py
                  writes to .suitemap/map.json on main and CI keeps as the `suitemap` artifact): no second store of durations. A
-                 suite the map has no time for is counted as untimed, and a time that is negative or not a finite number is ignored
-                 with a note naming the suite. Where the map comes from, first that applies:
+                 suite the map has no time for is counted as untimed, and a time that is negative, not a finite number or above a year
+                 (31,622,400 seconds) is ignored with a note naming the suite. Where the map comes from, first that applies:
                    --fetch         the `suitemap` artifact of the newest successful push run of tests.yml on main, downloaded with
                                    `gh` into a temporary folder that is removed again (two GitHub calls; --github names the
                                    repository, default: the origin remote). CI keeps that artifact for 7 days, so a week with no
@@ -35,8 +35,8 @@ the top of the file apply to every repository, and a table named after the repos
     max_test_line_growth  test lines gained since the previous run, scaled down to a week when the gap is longer than a week
 
 A key the file names that is none of these four (a mistyped `max_suite`) is not used: a `warning: unknown key <name> in <file>` line
-goes to stderr for each, and the exit status is unchanged. A value that is not a number of at least 0 (a boolean, a string, nan) is a
-config problem, exit 2.
+goes to stderr for each, and the exit status is unchanged. A value that is not a number from 0 to 10**12 (a boolean, a string, nan, inf, a
+negative or a huge one), a file that is not UTF-8 text and one nested too deep are config problems, exit 2.
 
 The defaults are placeholders that never trigger: set the real values from the measured medians. When a value is above its limit the
 report ends with `TRIGGER: <which>` lines (one per threshold, in the order above), the same lines are kept in the state file, and the
@@ -57,7 +57,6 @@ import argparse
 import datetime as dt
 import glob
 import json
-import math
 import os
 import re
 import shutil
@@ -74,6 +73,8 @@ TEST_LINE = re.compile(r"^\s*(?:assert\b|(?:check|ck)\(|self\.assert\w*\()")
 SLOWEST = 8
 COUNT_MAX = 10 ** 12      # a count above this is not a test-line count; it would also overflow the float arithmetic
 LIST_MAX = 20            # names listed per added/deleted line of the report
+SECONDS_MAX = 366 * 86400    # a suite time above a year is no suite time; it would also run the minute sums towards infinity
+THRESHOLD_MAX = COUNT_MAX    # a limit above this is no limit anyone set; it keeps the comparisons and the state file's numbers plain
 # Placeholders that never trigger. They are replaced by the measured medians in the config file, not by editing this table.
 DEFAULTS = {"max_suites": 1_000_000, "max_serial_minutes": 1_000_000.0, "max_suite_minutes": 1_000_000.0, "max_test_line_growth": 1_000_000}
 FOLLOW_UP = "Follow-up: a deep scan for duplicate or obsolete suites (not part of this report)."
@@ -112,6 +113,8 @@ def read_map(path: str) -> tuple[dict[str, float], str, list[str]]:
             m = json.load(f)
     except OSError as e:
         raise ValueError(f"cannot read {path}: {e.strerror or e}")
+    except RecursionError:
+        raise ValueError(f"{path} is nested too deeply to read")
     except ValueError as e:
         raise ValueError(f"{path} is not JSON: {e}")
     if not isinstance(m, dict) or m.get("format") != 1 or not isinstance(m.get("suites"), dict):
@@ -120,7 +123,7 @@ def read_map(path: str) -> tuple[dict[str, float], str, list[str]]:
     bad: list[str] = []
     for name, e in m["suites"].items():
         v = e.get("seconds") if isinstance(e, dict) else None
-        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0:
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= SECONDS_MAX:     # false for nan, inf and a negative; no float() of a huge int
             secs[name] = float(v)
         elif isinstance(e, dict) and v is not None:
             bad.append(str(name))
@@ -186,6 +189,12 @@ def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
         raise Fail(f"cannot read config file {path}: {e.strerror or e}")
     except tomllib.TOMLDecodeError as e:
         raise Fail(f"config file {path} is not valid TOML: {e}")
+    except UnicodeDecodeError:
+        raise Fail(f"config file {path} is not UTF-8 text")
+    except RecursionError:
+        raise Fail(f"config file {path} is nested too deeply to read")
+    except ValueError as e:                     # tomllib's own limit on a number with thousands of digits
+        raise Fail(f"config file {path} cannot be read: {e}")
     for k, v in data.items():                   # a table is some repository's; any other key must be one of the four
         if not isinstance(v, dict) and k not in DEFAULTS:
             print(f"warning: unknown key {k} in {path}", file=sys.stderr)
@@ -196,8 +205,8 @@ def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
     for source in (data, data.get(repo) if isinstance(data.get(repo), dict) else {}):
         for k, v in source.items():
             if k in DEFAULTS:
-                if isinstance(v, bool) or not isinstance(v, (int, float)) or math.isnan(v) or v < 0:
-                    raise Fail(f"config file {path}: {k} must be a number of at least 0, got {v!r}")
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= THRESHOLD_MAX:     # false for nan, inf, a negative, a huge int
+                    raise Fail(f"config file {path}: {k} must be a number from 0 to {THRESHOLD_MAX}, got {str(v)[:40]!r}")
                 t[k] = v
     return t
 
@@ -395,7 +404,7 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
         secs, map_commit, bad = read_map(map_path)
         bad = [n for n in bad if n in suites]
         if bad:
-            notes.append(f"suite times ignored (negative or not a finite number), counted as untimed: {', '.join(bad[:LIST_MAX])}"
+            notes.append(f"suite times ignored (negative, not a finite number or above a year), counted as untimed: {', '.join(bad[:LIST_MAX])}"
                          + (f", and {len(bad) - LIST_MAX} more" if len(bad) > LIST_MAX else ""))
     except ValueError as e:
         notes.append(f"no suite times: {e}")

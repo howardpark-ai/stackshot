@@ -23,6 +23,10 @@ with HOME and the XDG folders pointed into the scratch folder, a fake `gh` on PA
      and the handler is restored
   13 a root named g[1]; the file is executable
   14 read-only: the fake repository is byte for byte as it was, and nothing outside the state folder is written
+  15 hostile input: a map nested too deep, a time beyond float range, 1e308, NaN or past a year; a config that is not UTF-8, nested too deep,
+     or holds a huge, infinite, negative or mistyped limit (all exit 2 or a note, never a traceback); no config file at all still runs
+  16 the previous record's clock and the arithmetic: a record dated in the future is clamped to age 0; LIST_MAX cuts the name lists and says
+     how many more; minutes at zero and at the rounding boundaries; the net figure comes from the previous record's test_lines
 
     tests/run-suite test_trim_report        -> exit 0 / 1"""
 import contextlib, hashlib, io, json, os, pathlib, shutil, signal, stat, subprocess, sys, tempfile, time
@@ -488,6 +492,160 @@ check("the run created nothing under the fake home but its state folder", sorted
       sorted(str(p.relative_to(HOME)) for p in HOME.rglob("*")))
 real_after = (real_state.exists(), sorted(p.name for p in real_state.glob("*")) if real_state.exists() else [])
 check("the invoking user's own state folder is untouched", real_after == real_before, (real_before, real_after))
+
+# ------------------------------------------------------------------ 15 hostile input: a map and a config that would overflow or recurse
+def clean(r):
+    return "Traceback" not in r.stderr and "Error" not in r.stderr
+
+
+def map_run(name, text, *extra):
+    f = T / f"hostile-{name}.json"; f.write_text(text)
+    return run("--map", str(f), "--dry-run", "--state-dir", str(T / "st16"), *extra)
+
+
+r = map_run("deep", "[" * 200000)
+check("a map nested deep enough to overflow the parser: one note, n/a minutes, exit 0, no traceback",
+      r.returncode == 0 and clean(r) and "no suite times:" in r.stdout and "nested too deeply" in r.stdout and "serial minutes: n/a" in r.stdout, (r.returncode, r.stdout[-300:], r.stderr[-300:]))
+r = map_run("bigint", '{"format": 1, "suites": {"s01": {"seconds": 1' + "0" * 400 + '}, "s02": {"seconds": 60}}}')
+check("a time that is an int beyond float range: ignored with a note naming the suite, no OverflowError",
+      r.returncode == 0 and clean(r) and "ignored" in r.stdout and r.stdout.count("s01") == 1 and "serial minutes: 1.0 (1 of 11 suites timed" in r.stdout, (r.returncode, r.stdout[-400:], r.stderr[-300:]))
+r = map_run("huge", '{"format": 1, "suites": {"s01": {"seconds": 1e308}, "s02": {"seconds": 1e308}, "s03": {"seconds": 60}}}', "--json")
+j = json.loads(r.stdout) if r.returncode == 0 else {}
+note = (j.get("notes") or [""])[0]
+check("times of 1e308 are ignored: the minutes stay finite and the record is plain JSON",
+      r.returncode == 0 and j.get("serial_minutes") == 1.0 and "Infinity" not in r.stdout and "s01, s02" in note, (r.returncode, r.stdout[:400], r.stderr[-300:]))
+(T / "year.json").write_text(json.dumps({"format": 1, "suites": {"a": {"seconds": TR.SECONDS_MAX}, "b": {"seconds": TR.SECONDS_MAX + 1}, "c": {"seconds": 0}}}))
+got = TR.read_map(str(T / "year.json"))
+check("the limit is a year: a year is a time, a year and a second is not, and 0 seconds is", got[0] == {"a": float(TR.SECONDS_MAX), "c": 0.0} and got[2] == ["b"], got)
+r = map_run("nan", '{"format": 1, "suites": {"s01": {"seconds": NaN}, "s02": {"seconds": Infinity}, "s03": {"seconds": -Infinity}}}')
+check("NaN, Infinity and -Infinity times are ignored with one note", r.returncode == 0 and clean(r) and r.stdout.count("note:") == 1 and "s01, s02, s03" in r.stdout, (r.stdout[-300:], r.stderr))
+
+(T / "latin.toml").write_bytes(b"max_suites = 5\n# caf\xe9 \xff\xfe\n")
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(T / "latin.toml"))
+check("a config that is not UTF-8: status 2, one clear line, nothing on stdout, no traceback",
+      r.returncode == 2 and r.stdout == "" and "is not UTF-8 text" in r.stderr and str(T / "latin.toml") in r.stderr and "Traceback" not in r.stderr, (r.returncode, r.stdout[:100], r.stderr))
+CONF.write_text("a = " + "{b = " * 500 + "1" + "}" * 500 + "\n")
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(CONF))
+check("a config nested too deep: status 2 and a message, not a traceback", r.returncode == 2 and r.stdout == "" and "Traceback" not in r.stderr and "nested too deeply" in r.stderr, (r.returncode, r.stderr[-300:]))
+CONF.write_text("max_suites = 1" + "0" * 5000 + "\n")
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(CONF))
+check("a config number with thousands of digits: status 2 and a message, not a traceback", r.returncode == 2 and r.stdout == "" and "Traceback" not in r.stderr and "cannot be read" in r.stderr, (r.returncode, r.stderr[-300:]))
+for key in ("max_suites", "max_serial_minutes", "max_suite_minutes", "max_test_line_growth"):
+    for bad in ("1" + "0" * 400, "1e400", "inf", "-inf", "-0.5", "1e13", '"5"', "[1]"):
+        CONF.write_text(f"{key} = {bad}\n")
+        r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(CONF))
+        check(f"{key} = {bad[:12]}: exit 2 naming the key, no traceback, nothing on stdout",
+              r.returncode == 2 and f"{key} must be a number from 0 to" in r.stderr and "Traceback" not in r.stderr and r.stdout == "", (r.returncode, r.stderr[-300:]))
+CONF.write_text("[fakerepo]\nmax_suites = " + "9" * 30 + "\n")
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(CONF))
+check("a huge value in the repo's table is refused too", r.returncode == 2 and "max_suites must be a number from 0 to" in r.stderr, (r.returncode, r.stderr[-300:]))
+for key, good in (("max_suites", "0"), ("max_serial_minutes", "0.5"), ("max_suite_minutes", "1000000000000"), ("max_test_line_growth", "0")):
+    CONF.write_text(f"{key} = {good}\n")
+    r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), "--config", str(CONF))
+    check(f"{key} = {good}: the edges of the range are accepted", r.returncode == 0 and "test-trim report" in r.stdout, (r.returncode, r.stderr[-300:]))
+CONF.write_text("")
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st16"), env={"XDG_CONFIG_HOME": str(T / "no-config-home")})
+check("no thresholds file at the default place (as on a fresh machine): the tool still runs, exit 0, nothing on stderr, no trigger",
+      r.returncode == 0 and r.stderr == "" and "test-trim report: fakerepo" in r.stdout and "TRIGGER" not in r.stdout and not (T / "no-config-home").exists(), (r.returncode, r.stdout[:200], r.stderr))
+
+
+# ------------------------------------------------------------------ 16 the previous record's clock and the report's arithmetic
+def baseline(folder, when, minus=0):
+    """a previous record made by the tool at `when`, with `minus` fewer test lines in s01 (so the next run grew by that much)"""
+    shutil.rmtree(folder, ignore_errors=True)
+    run("--map", str(MAP), "--state-dir", str(folder), now=when)
+    f = folder / "fakerepo.json"; d = json.loads(f.read_text())
+    d["suites"]["s01"] -= minus; d["test_lines"] -= minus
+    f.write_text(json.dumps(d))
+    return f
+
+
+# (a) a previous record dated after the clock is not trusted past now
+st17 = T / "st17"
+baseline(st17, "2026-04-01T09:00:00+00:00", minus=3)
+r = run("--map", str(MAP), "--state-dir", str(st17), "--dry-run", now="2026-03-01T09:00:00+00:00")
+check("a previous record dated in the future: its age is clamped to 0.0 days, never negative", r.returncode == 0 and "since the previous run (0.0 days ago)" in r.stdout, r.stdout + r.stderr)
+r = run("--map", str(MAP), "--state-dir", str(st17), "--dry-run", "--json", now="2026-03-01T09:00:00+00:00")
+check("a previous record dated in the future: the growth is the plain net, not scaled", json.loads(r.stdout)["growth_per_week"] == 3.0, r.stdout[:200])
+CONF.write_text("max_test_line_growth = 2\n")
+r = run("--map", str(MAP), "--state-dir", str(st17), "--dry-run", "--config", str(CONF), now="2026-03-01T09:00:00+00:00")
+check("a previous record dated in the future still triggers on its plain net growth", "TRIGGER: max_test_line_growth: +3 test lines per week > 2" in r.stdout, r.stdout)
+CONF.write_text("")
+baseline(st17, "2026-02-01T09:00:00+00:00", minus=3)
+r = run("--map", str(MAP), "--state-dir", str(st17), "--dry-run", now="2026-03-01T09:00:00+00:00")
+check("control: a previous record from the past keeps its true age (28.0 days)", "since the previous run (28.0 days ago)" in r.stdout, r.stdout)
+
+# (b) LIST_MAX: more added or deleted suites than the cap are cut and the rest counted
+many = [f"zz{i:02d}" for i in range(TR.LIST_MAX + 5)]
+for n in many:
+    suite(n, 1)
+st18 = T / "st18"; shutil.rmtree(st18, ignore_errors=True)
+run("--map", str(MAP), "--state-dir", str(st18), now="2026-03-01T09:00:00+00:00")
+for n in many:
+    (REPO / "tests" / f"{n}_scenario.py").unlink()
+r = run("--map", str(MAP), "--state-dir", str(st18), "--dry-run", now="2026-03-08T09:00:00+00:00")
+dline = [l for l in r.stdout.splitlines() if l.startswith("  deleted:")]
+check("more deleted suites than LIST_MAX: the line lists exactly LIST_MAX names and says how many more",
+      dline == ["  deleted: " + ", ".join(many[:TR.LIST_MAX]) + ", and 5 more"], dline)
+check("the cut does not touch the count in the summary line", f"{TR.LIST_MAX + 5} deleted" in r.stdout, r.stdout)
+st19 = T / "st19"; shutil.rmtree(st19, ignore_errors=True)
+run("--map", str(MAP), "--state-dir", str(st19), now="2026-03-01T09:00:00+00:00")
+for n in many[:TR.LIST_MAX]:
+    suite(n, 1)
+r = run("--map", str(MAP), "--state-dir", str(st19), "--dry-run", now="2026-03-08T09:00:00+00:00")
+aline = [l for l in r.stdout.splitlines() if l.startswith("  added:")]
+check("exactly LIST_MAX added suites are listed whole, with no 'and more'", aline == ["  added: " + ", ".join(many[:TR.LIST_MAX])], aline)
+for n in many[:TR.LIST_MAX]:
+    (REPO / "tests" / f"{n}_scenario.py").unlink()
+check("names_line: LIST_MAX + 5 names are cut to LIST_MAX and the rest counted; LIST_MAX names are not cut",
+      TR.names_line("x", many) == "  x: " + ", ".join(many[:TR.LIST_MAX]) + ", and 5 more" and TR.names_line("x", many[:TR.LIST_MAX]) == "  x: " + ", ".join(many[:TR.LIST_MAX]), TR.names_line("x", many))
+for n in many:
+    suite(n, 1)
+(T / "listmax-map.json").write_text(json.dumps({"format": 1, "suites": {n: {"seconds": -1} for n in many}}))
+r = run("--map", str(T / "listmax-map.json"), "--state-dir", str(T / "st16"), "--dry-run")
+for n in many:
+    (REPO / "tests" / f"{n}_scenario.py").unlink()
+note = [l for l in r.stdout.splitlines() if l.startswith("note:")]
+check("the note on ignored times is cut at LIST_MAX too and counts the rest", len(note) == 1 and note[0].endswith(": " + ", ".join(many[:TR.LIST_MAX]) + ", and 5 more"), note)
+
+# (c) minutes: seconds / 60 rounded to two places, added up, shown with one; zero and the half boundaries
+def minutes_of(seconds_by_suite):
+    f = T / "bound-map.json"; f.write_text(json.dumps({"format": 1, "suites": {n: {"seconds": s} for n, s in seconds_by_suite.items()}}))
+    return json.loads(run("--map", str(f), "--state-dir", str(T / "st20"), "--dry-run", "--json").stdout)
+
+
+jz = minutes_of({"s01": 0})
+check("a suite of 0 seconds is timed, at 0.0 minutes (not untimed, not dropped)", jz["serial_minutes"] == 0.0 and jz["untimed"] == jz["suite_count"] - 1 and jz["timed"] == [["s01", 0.0]], (jz["serial_minutes"], jz["untimed"], jz["timed"]))
+jz = minutes_of({"s01": 0.3})
+check("0.3 s is 0.005 min, which rounds up to 0.01 (two places, not one, not cut)", jz["timed"] == [["s01", 0.01]] and jz["serial_minutes"] == 0.01, jz["timed"])
+jz = minutes_of({"s01": 1.5, "s02": 1.5})
+check("1.5 s is 0.03 min and two of them add to 0.06", jz["timed"] == [["s01", 0.03], ["s02", 0.03]] and jz["serial_minutes"] == 0.06, (jz["timed"], jz["serial_minutes"]))
+jz = minutes_of({"s01": 89.4, "s02": 89.7})
+check("89.4 s is 1.49 min and 89.7 s is 1.495, rounded up to 1.5", jz["timed"] == [["s02", 1.5], ["s01", 1.49]], jz["timed"])
+jz = minutes_of({"s01": 30})
+check("30 s is exactly 0.5 min", jz["timed"] == [["s01", 0.5]] and jz["serial_minutes"] == 0.5, jz["timed"])
+r = run("--map", str(T / "bound-map.json"), "--state-dir", str(T / "st20"), "--dry-run")
+check("the text shows one place: 0.5 min", "serial minutes: 0.5 (1 of 11 suites timed, 10 untimed)" in r.stdout and "1. s01  0.5 min" in r.stdout, r.stdout)
+(T / "m125.json").write_text(json.dumps({"format": 1, "suites": {"s01": {"seconds": 75}}}))
+CONF.write_text("max_suite_minutes = 1.25\nmax_serial_minutes = 1.25\n")
+r = run("--map", str(T / "m125.json"), "--state-dir", str(T / "st20"), "--dry-run", "--config", str(CONF))
+check("a suite of exactly 75 s (1.25 min) is not over a limit of 1.25", "TRIGGER" not in r.stdout, r.stdout)
+CONF.write_text("max_suite_minutes = 1.24\nmax_serial_minutes = 1.24\n")
+r = run("--map", str(T / "m125.json"), "--state-dir", str(T / "st20"), "--dry-run", "--config", str(CONF))
+check("and it is over 1.24, in both minute thresholds", "TRIGGER: max_suite_minutes: s01 takes 1.2 min (1 over) > 1.2" in r.stdout and "TRIGGER: max_serial_minutes: 1.2 serial minutes > 1.2" in r.stdout, r.stdout)
+CONF.write_text("")
+
+# (d) the net figure is this run's test lines minus the previous record's test_lines, signed, with thousands separators
+st21 = T / "st21"
+suite("zbig", 2500)
+f21 = baseline(st21, "2026-03-01T09:00:00+00:00")
+d21 = json.loads(f21.read_text()); now_lines = d21["test_lines"]
+check("(the control: the baseline holds the test lines now, with the big suite)", now_lines == sum(d21["suites"].values()) and now_lines > 2500, now_lines)
+for prev_lines, expect in ((0, f"(net +{now_lines:,})"), (now_lines + 7, "(net -7)"), (now_lines, "(net +0)")):
+    d21["test_lines"] = prev_lines; f21.write_text(json.dumps(d21))
+    r = run("--map", str(MAP), "--state-dir", str(st21), "--dry-run", now="2026-03-08T09:00:00+00:00")
+    check(f"net growth is the test lines now minus the previous record's test_lines: {expect}", expect in r.stdout, r.stdout)
+(REPO / "tests" / "zbig_scenario.py").unlink()
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()
