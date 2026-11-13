@@ -1474,7 +1474,7 @@ class Board:
     def queue_map(self):
         """{item: the item it is queued behind} over the board's open rows (queued.board_queue: a mover busy on another item, `[model] queued_behind`), {} while the rule is off; read once per Board."""
         if getattr(self, "_queue", None) is None:
-            self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp())
+            self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp(), _home.front_test())
         return self._queue
 
     def mod_of(self, r):

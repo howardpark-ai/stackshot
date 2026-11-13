@@ -41,13 +41,9 @@ def configure(is_front: Callable[[str, str], bool] | None = None) -> None:
         _HOOKS["is_front"] = is_front
 
 
-def front_test() -> Callable[[str, str], bool]:
-    """The front-agent test the board's rendering uses: the server's when it installed one, else the role map's (audit_run.Env.is_front)."""
-    fn = _HOOKS["is_front"]
-    if fn is not None:
-        return fn
-    from stackshot.audit import audit_run as _ar  # noqa: PLC0415  (lazy: the audit imports the model)
-    return _ar.Env().is_front
+def front_hook() -> Callable[[str, str], bool] | None:
+    """The front-agent test the server installed (`configure`), None before it did; the board's rendering (web/home.py `front_test`) falls back to the role map when there is none."""
+    return _HOOKS["is_front"]
 
 
 def _num(gid: str) -> int:
@@ -100,9 +96,9 @@ def reason(behind: str, shown: Callable[[str], str] = str) -> str:
     return f"queued behind {shown(behind)}"
 
 
-def board_queue(rows: Iterable[dict[str, Any]], base: Callable[[dict[str, Any]], "_model.Model"], now: float) -> dict[str, str]:
+def board_queue(rows: Iterable[dict[str, Any]], base: Callable[[dict[str, Any]], "_model.Model"], now: float, is_front: Callable[[str, str], bool] | None = None) -> dict[str, str]:
     """The queue over the board's open rows (each a dict with `gid`, `metadata`, `last_activity` in its metadata) as the page reads them: `base(row)` is the reading before this rule. {} when the rule is off.
-    The candidates are the rows `base` reads alive with a session as the mover, the very rows the home page puts under On agent."""
+    The candidates are the rows `base` reads alive with a session as the mover, the very rows the home page puts under On agent. `is_front(mover, project)` says who is a front agent (the caller's: the model reads no role map)."""
     if not enabled():
         return {}
     cands = []
@@ -115,4 +111,4 @@ def board_queue(rows: Iterable[dict[str, Any]], base: Callable[[dict[str, Any]],
             continue
         if mod.state == _model.ALIVE and mod.mover and not _model.is_owner(mod.mover):
             cands.append(candidate(str(r.get("gid") or ""), r, mod.mover, now))
-    return queue(cands, now, front_test())
+    return queue(cands, now, is_front)

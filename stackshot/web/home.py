@@ -19,6 +19,7 @@ from stackshot.web import i18n as _i18n
 from stackshot.waits import handoff as _ho
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
+from stackshot.model import queued as _queued
 from stackshot.waits import waiting as _wt
 
 YOUR_MOVE, AGENTS, WAITING = "your-move", "agents", "waiting"
@@ -128,6 +129,15 @@ def end_epoch(mod: "_model.Model") -> float:
     """When a wait ends, for the sort (end_of as an epoch); far away when it has none."""
     v = end_of(mod)
     return _FAR if v is None else _wt.wake_epoch(v)
+
+
+def front_test() -> Callable[[str, str], bool]:
+    """Who is a front agent, for the board's queue rule (model/queued.py): the server's answer when it installed one, else the role map's (audit_run.Env.is_front)."""
+    fn = _queued.front_hook()
+    if fn is not None:
+        return fn
+    from stackshot.audit import audit_run as _ar  # noqa: PLC0415
+    return _ar.Env().is_front
 
 
 def classify(rows: list[dict[str, Any]], derive: Callable[[dict[str, Any]], "_model.Model"]) -> dict[str, list[tuple[dict[str, Any], "_model.Model"]]]:

@@ -3448,7 +3448,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         return m
     def queue_map(self):
         """{item: the item it is queued behind} over the open rows (queued.board_queue: a mover busy on another item, `[model] queued_behind`), {} while the rule is off; read once per Board."""
-        if getattr(self, "_queue", None) is None: self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp())
+        if getattr(self, "_queue", None) is None: self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp(), _home.front_test())
         return self._queue
     def mod_of(self, r):
         """The item as the board shows it: base_mod, then the queue rule (an item behind its mover's other item reads waiting, queued behind it), once per row."""
