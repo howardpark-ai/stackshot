@@ -814,7 +814,7 @@ check("dry run: owner_mover_rows lists the open items with the owner as mover an
 check("dry run: …the report's guard count agrees", sorted(mg.report({f"a{i}": rd(i) for i in range(18, 24)}, ctx).ids.get("owner_mover", [])) == ["a18", "a21"], None)
 env_ = {**os.environ, "STACKSHOT_CONFIG": f"{tmp}/stackshot.toml", "STACKSHOT_FLEET_DIR": f"{tmp}/fleet"}
 cd = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--owner-mover", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
-check("dry run: tools/model_guard_report.py --owner-mover --store DIR prints a count and one line per item", cd.returncode == 0 and cd.stdout.startswith("2 open item(s) with the owner as mover and no step or ask")
+check("dry run: tools/model_guard_report.py --owner-mover --store DIR prints a count and one line per item", cd.returncode == 0 and cd.stdout.startswith("2 open item(s) with the board's owner as mover and no step or ask")
       and "board#18 | [home] the owner moves a doing item | mover " + OWN + " | state doing | created by " in cd.stdout and "board#21 |" in cd.stdout and f"board#{BID_B}" not in cd.stdout and "board#22" not in cd.stdout, (cd.returncode, cd.stdout, cd.stderr[-300:]))
 cj = subprocess.run([sys.executable, os.path.join(STACK, "stackshot/tools/model_guard_report.py"), "--owner-mover", "--json", "--store", str(T / "store")], capture_output=True, text=True, env=env_)
 check("dry run: …--json is the list of records", cj.returncode == 0 and [r["id"] for r in json.loads(cj.stdout)] == ["a18", "a21"] and set(json.loads(cj.stdout)[0]) == {"id", "subject", "mover", "state", "creator", "gap"}, cj.stdout[:300])
