@@ -639,5 +639,48 @@ bullet_ = next(l for l in im_.splitlines() if l.startswith("- **A wait on a list
 check("5 …and no page says any more that the write path comes later", "a later change" not in wd_ and "a later change" not in bullet_ and "not yet written by any tool" not in bullet_ and "until a later change adds the write path" not in bullet_ and "later" not in bullet_, None)
 check("5 docs/item-model.md points to the write path and says an edit never stores a list of one", "how a list is written, and each refusal" in im_ and "never stores a list of one line" in im_, None)
 
+# ================================================================ 7. the lows round
+def arrive(i, k, what="it came"):
+    d_ = rd(i); d_["metadata"]["waits"][k]["arrived"] = {"at": now0 - 5, "what": what}; (T / f"store/a/{i}.json").write_text(json.dumps(d_))
+# ---- 7a an arrival is kept when the event line is sent again in another form
+fresh(300, [Ev("recycle"), Re("a")], until=w(6))
+arrive(300, 0)
+bupd(300, waits=[Ev("Recycle"), Re("a")], until=w(6))
+check("7a an event line that had arrived, sent again as `Recycle`, keeps its arrival and is the one line, not a new open line", mt(300)["waits"][0].get("arrived") and mt(300)["waits"][0]["event"] == "recycle" and len(mt(300)["waits"]) == 2, mt(300))
+bupd(300, waits=[Ev("recycle"), Re("a")], until=w(6))
+check("7a …and sent in its canonical form it keeps it as before (the control)", mt(300)["waits"][0].get("arrived") and not mt(300)["waits"][1].get("arrived"), mt(300))
+fresh(301, [Ev("fleet_op any"), Re("a")], until=w(6))
+arrive(301, 0)
+bupd(301, waits=[Ev("FLEET_OP   any"), Re("a")], until=w(6))
+check("7a …the same for `FLEET_OP   any` (case and spaces)", mt(301)["waits"][0].get("arrived") and mt(301)["waits"][0]["event"] == "fleet_op any", mt(301))
+fresh(302, [Ev("recycle"), Re("a")], until=w(6))
+arrive(302, 0)
+bupd(302, waits=[Re("a"), Ev(" RECYCLE ")], until=w(6))
+check("7a …in another position too, and the arrival goes with the line", mt(302)["waits"][1].get("arrived") and "arrived" not in mt(302)["waits"][0], mt(302))
+fresh(303, [Ev("recycle"), Re("the Lease")], until=w(6))
+arrive(303, 1)
+bupd(303, waits=[Ev("recycle"), Re("the lease")], until=w(6))
+check("7a a relay line that differs only in case stays a different line (its text is the owner's words, not a canonical phrase): the arrival is not carried", not mt(303)["waits"][1].get("arrived"), mt(303))
+
+# ---- 7b a backstop earlier than an open time line, whichever parameter says it
+for name_, kw_ in (("ask_by", {"ask_by": w(4)}), ("after=none and until", {"after": "none", "until": w(4)}), ("hold and until", {"hold": True, "until": w(4)}), ("clear_hold and until", {"clear_hold": True, "until": w(4)}),
+                   ("clear_after and until", {"clear_after": True, "until": w(4)}), ("after=[] and until", {"after": [], "until": w(4)})):
+    fresh(310, [Tm(w(5)), Re("a")], until=w(6))
+    refused(f"7b {name_}, earlier than an open time line, is refused as until alone is", lambda kw_=kw_: bupd(310, **kw_), "waits[1] is a date", "later than the backstop day", "an earlier date or a later until")
+    check(f"7b …and nothing changed ({name_})", mt(310)["until"] == w(6) and listed(mt(310)) and not mt(310).get("ask_by"), mt(310))
+fresh(310, [Tm(w(5)), Re("a")], until=w(6))
+bupd(310, ask_by=w(5))
+check("7b ask_by on the day of the time line is accepted, and is the backstop", mt(310)["until"] == w(5) and listed(mt(310)), mt(310))
+fresh(310, [Tm(w(5)), Re("a")], until=w(6))
+bupd(310, after="none", until=w(5))
+check("7b after=none with a backstop on the day of the time line is accepted", mt(310)["until"] == w(5) and listed(mt(310)), mt(310))
+fresh(311, [Tm(w(5)), Re("a")], until=w(6))
+d_ = rd(311); d_["metadata"]["waits"][0]["arrived"] = {"at": now0 - 5, "what": "the date came"}; (T / "store/a/311.json").write_text(json.dumps(d_))
+bupd(311, ask_by=w(4))
+check("7b a time line that has arrived holds no backstop back from ask_by either", mt(311)["until"] == w(4), mt(311))
+item(312, needs=[BACK], wait_kind="list", wait_mode="all", waits=[Tm(w(5)), Re("a")], until=w(4), post_wake_mover=BACK)      # hand-edited: a backstop in front of its time line
+out = bupd(312, description="- Goal: the list ends\n- It lives here\n- And more\n- Done when done")
+check("7b a write that does not move the backstop day is no refusal for a hand-edited list whose backstop is already in front of a time line", "more" in rd(312)["description"] and mt(312)["until"] == w(4), out[-300:])
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

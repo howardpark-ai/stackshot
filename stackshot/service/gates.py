@@ -45,8 +45,10 @@ from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
 from stackshot.projects import pages as _pages
 from stackshot.service import telling as _telling
+from stackshot.service import watching as _watching
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
+from stackshot.waits import event_waits as _ew
 from stackshot.waits import handoff as _ho
 from stackshot.waits import handover as _hv
 from stackshot.waits import self_wait as _selfwait
@@ -484,6 +486,12 @@ def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: 
         mode = _wlw.mode_of(wait_mode, stored)
     except ValueError as e:
         raise ToolError(f"Refused: {e}")
+    for ln in lines:
+        if ln["kind"] == "event":      # an event phrase in its canonical form first (`Recycle`, `FLEET_OP   any`), so the stored line it names is found, keeps its arrival and is not judged again; one that is no event is left for the gate below to refuse
+            try:
+                ln["event"] = _ew.text(_watching.event_spec(ln["event"]))
+            except _ew.EventWaitError:
+                pass
     held = Counter(_wl.line_key(ln) for ln in _wl.lines(stored))
     have = set(held)
     for i, ln in enumerate(lines, 1):

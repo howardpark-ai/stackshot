@@ -1154,6 +1154,8 @@ def update_unlocked(
             if str(meta.get("wait_kind") or "").strip().lower() == _wl.LIST and not _wl.valid(meta) and (list_set or _wl.valid(item_was.get("metadata") or {})):
                 raise ToolError(f"Refused: this write would leave {_gh.shown(gid)} with a wait on a list that does not hold ({_wl.problem(meta) or 'no backstop day'}). A list needs its backstop day: "
                                 "pass until=<date>, or clear_wait=true to end the wait")
+            if _wl.valid(meta) and str(meta.get("until") or "") != _uw.date_of(item_was.get("metadata") or {}):      # the backstop day this write leaves a list (whichever parameter gave it: until, ask_by, a clear that let it through) is judged as until alone is: no open time line later than it
+                _gates.gate_time_lines([(i, ln["until"]) for i, ln in enumerate(_wl.lines(meta), 1) if ln["kind"] == "time" and not _wl.arrived(ln)], str(meta["until"]))
         if keep_hold:
             meta["hold"] = True
             if kept_hold_set:
