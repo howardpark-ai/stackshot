@@ -1,8 +1,8 @@
-"""Home step-Send check (a manual check, CONTRIBUTING.md; not in the suite loop: CI's runner has no browser). Starts the server in-process on 127.0.0.1 with a temporary
+"""Home step-buttons check (a manual check, CONTRIBUTING.md; not in the suite loop: CI's runner has no browser). Starts the server in-process on 127.0.0.1 with a temporary
 config and fixture data (no live store, no network), signs a browser in with the board's cookie, and loads the home page in Chromium:
 
-  - a "your step" row's Send is enabled once the page script has shown the form, with the box empty (an empty Send finishes the step), and stays enabled after a note is typed
-    and after it is cleared again;
+  - a "your step" row's Done is enabled once the page script has shown the form, with the box empty (Done finishes the step with or without a note), and stays enabled after a note
+    is typed and after it is cleared again; its Send note is disabled while the box is empty, enabled once a note is typed, and disabled again when it is cleared;
   - a decision row's Send (the form with option cards) is disabled until a card is picked or a note is typed, and goes back to disabled when the note is cleared.
 
     tests/run-suite home_step_send_check     → exit 0 / 1
@@ -72,7 +72,7 @@ COOKIE = {"name": server._UI_COOKIE, "value": server._ui_sign(json.dumps({"email
 from playwright.sync_api import sync_playwright
 STATE = """() => { const q = (s) => document.querySelector(s), v = (f) => !!f && !f.hidden && f.getClientRects().length > 0;
   const st = q('li#task-a-2 form.hstep'), dc = q('li#task-a-1 form[data-cards]');
-  return {step: st && {shown: v(st), dis: st.querySelector('button[name=act]').disabled}, dec: dc && {shown: v(dc), dis: dc.querySelector('button[name=act]').disabled}}; }"""
+  return {step: st && {shown: v(st), dis: st.querySelector('button[value=done]').disabled, note: st.querySelector('button[value=note]').disabled}, dec: dc && {shown: v(dc), dis: dc.querySelector('button[name=act]').disabled}}; }"""
 try:
     with sync_playwright() as p:
         try: br = p.chromium.launch()
@@ -82,12 +82,14 @@ try:
         pg.goto(BASE + "/"); pg.wait_for_selector("li#task-a-2 form.hstep:not([hidden])", timeout=8000); pg.wait_for_selector("li#task-a-1 form[data-cards]:not([hidden])", timeout=8000); pg.wait_for_timeout(300)
         s0 = pg.evaluate(STATE)
         check("both rows are on the page with their forms shown", s0["step"] and s0["step"]["shown"] and s0["dec"] and s0["dec"]["shown"], s0)
-        check("step row: Send is enabled with the box empty", s0["step"]["dis"] is False, s0)
+        check("step row: Done is enabled and Send note is disabled with the box empty", s0["step"]["dis"] is False and s0["step"]["note"] is True, s0)
         check("decision row: Send is disabled with nothing picked and no note", s0["dec"]["dis"] is True, s0)
         pg.fill("#astep-a2", "a note on the step"); pg.wait_for_timeout(100)
-        check("step row: Send stays enabled after a note is typed", pg.evaluate(STATE)["step"]["dis"] is False, pg.evaluate(STATE))
+        check("step row: after a note is typed Done stays enabled and Send note is enabled", pg.evaluate(STATE)["step"]["dis"] is False and pg.evaluate(STATE)["step"]["note"] is False, pg.evaluate(STATE))
         pg.fill("#astep-a2", ""); pg.wait_for_timeout(100)
-        check("step row: Send stays enabled after the note is cleared", pg.evaluate(STATE)["step"]["dis"] is False, pg.evaluate(STATE))
+        check("step row: after the note is cleared Done stays enabled and Send note is disabled again", pg.evaluate(STATE)["step"]["dis"] is False and pg.evaluate(STATE)["step"]["note"] is True, pg.evaluate(STATE))
+        pg.fill("#astep-a2", "   \n  "); pg.wait_for_timeout(100)
+        check("step row: a note of spaces only leaves Send note disabled", pg.evaluate(STATE)["step"]["note"] is True, pg.evaluate(STATE))
         pg.fill("#atext-a1", "a note"); pg.wait_for_timeout(100)
         check("decision row: typing a note enables Send", pg.evaluate(STATE)["dec"]["dis"] is False, pg.evaluate(STATE))
         pg.fill("#atext-a1", ""); pg.wait_for_timeout(100)
@@ -97,4 +99,4 @@ try:
         ctx.close(); br.close()
 finally:
     srv.should_exit = True; th.join(timeout=10)
-print(f"ok: home step-send check, {len(ran)} checks" if not fails else f"{len(fails)} check(s) failed"); sys.exit(1 if fails else 0)
+print(f"ok: home step-buttons check, {len(ran)} checks" if not fails else f"{len(fails)} check(s) failed"); sys.exit(1 if fails else 0)
