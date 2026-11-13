@@ -102,6 +102,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 # ---- 3. rulings
 from stackshot.web import server
 from stackshot.service import writes
+from stackshot.service import telling
 from stackshot.core import instance as _core_instance
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))

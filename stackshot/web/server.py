@@ -13646,11 +13646,11 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
             if len(open_here) >= _ITEMOPEN_OPEN_MAX:
                 return 400, {"error": f"{key} already has {len(open_here)} open items filed by this route and the cap is {_ITEMOPEN_OPEN_MAX}: an open item must close before another is filed "
                                       "(a repeat of an open marker is always answered; a marker that changes on every run is the usual cause)"}
-            _TERMINAL_ROW.on = True  # a script's notification: it owes no page (the mover is told at the create, by the needs notice)
+            _writes.TERMINAL_ROW.on = True  # a script's notification: it owes no page (the mover is told at the create, by the needs notice)
             try:
                 gid, _reply = _create_svc.create_item(subject=subject, description=desc, project=key, owner=owner, next=step, needs=[mover], mover=mover, by=by, extra={"item_open": marker})
             finally:
-                _TERMINAL_ROW.on = False
+                _writes.TERMINAL_ROW.on = False
     except ToolError as e:
         return 400, {"error": str(e)}
     meta = _load(gid).get("metadata") or {}
