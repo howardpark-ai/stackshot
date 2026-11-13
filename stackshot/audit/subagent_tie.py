@@ -141,7 +141,7 @@ def pending_tasks(tp: Path, now: float | None = None) -> set[str]:
         return set()
     started: dict[str, float | None] = {}      # id -> the time its Monitor ends, None for one with no lifetime (or a Bash)
     ended: set[str] = set()
-    for line in t.splitlines():
+    for line in t.split("\n"):      # a record ends at a newline and nowhere else: `splitlines` also cuts at U+2028, U+0085, a form feed and the like, which JSON leaves raw inside a string, and a record cut there is torn
         if line.startswith('{"type":"api-request'):
             continue      # a request's copy of the conversation: it quotes records, it is none
         if "background" in line or "Monitor started" in line:
@@ -176,7 +176,7 @@ def read_parent(tr: Path) -> tuple[dict[str, float], set[str]]:
     out: dict[str, float] = {}
     ended: set[str] = set()
     try:
-        for line in _tail(tr, TAIL_BYTES).splitlines():
+        for line in _tail(tr, TAIL_BYTES).split("\n"):      # newline only, as above
             if line.startswith('{"type":"api-request') or not ("AgentId" in line or "<task-id>" in line):
                 continue
             try:

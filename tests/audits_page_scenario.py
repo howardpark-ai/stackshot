@@ -66,18 +66,20 @@ check("every finding category the audits can write (the FIX table and the CHECKS
       len(KINDS) >= 14 and all(ov.group_of(src, k) is not None for k in KINDS for src in ("run", "silence", "filing", "dates")), sorted(k for k in KINDS if ov.group_of("run", k) is None))
 check("a category with a sub-kind (`next rules:N3`, `board checks:why-not-now`) keeps its group", all(ov.group_of("run", f"{k}:x") == ov.group_of("run", k) for k in KINDS if k != "stale"))
 def _modes():
-    return {k: ov._mode(k) for k in ("hourly_line", "hand_idle", "balance")}
+    return {k: ov._mode(k) for k in ("hourly_line", "hand_idle", "busy_tell", "balance")}
 _saved = dict(config.CFG.get("audit", {}))
 try:
-    config.CFG["audit"].pop("hourly_line", None); config.CFG["audit"].pop("hand_idle", None); config.CFG["audit"].pop("balance", None)
+    config.CFG["audit"].pop("hourly_line", None); config.CFG["audit"].pop("hand_idle", None); config.CFG["audit"].pop("busy_tell", None); config.CFG["audit"].pop("balance", None)
     m_default = _modes()
     config.CFG["audit"]["hourly_line"] = False; m_noline = _modes()
-    config.CFG["audit"]["hourly_line"] = True; config.CFG["audit"]["hand_idle"] = False; m_nohand = _modes()
+    config.CFG["audit"]["hourly_line"] = True; config.CFG["audit"]["hand_idle"] = False; config.CFG["audit"]["busy_tell"] = False; m_nohand = _modes()
 finally:
     config.CFG["audit"].clear(); config.CFG["audit"].update(_saved)
-check("the audit modes: all three are on by default; the idle hand-over reads off without the hourly line it works from (the line off leaves the balancer on), and off when its own switch is off",
-      m_default == {"hourly_line": "on", "hand_idle": "on", "balance": "on"} and m_noline == {"hourly_line": "off", "hand_idle": "off", "balance": "on"}
-      and m_nohand == {"hourly_line": "on", "hand_idle": "off", "balance": "on"}, (m_default, m_noline, m_nohand))
+check("the audit modes: all four are on by default; the idle hand-over and the busy stretch tell read off without the hourly line they work from (the line off leaves the balancer on), and off when their own switches are off",
+      m_default == {"hourly_line": "on", "hand_idle": "on", "busy_tell": "on", "balance": "on"} and m_noline == {"hourly_line": "off", "hand_idle": "off", "busy_tell": "off", "balance": "on"}
+      and m_nohand == {"hourly_line": "on", "hand_idle": "off", "busy_tell": "off", "balance": "on"}, (m_default, m_noline, m_nohand))
+check("the Silence group lists the busy stretch tell at the ten-minute pace beside the idle hand-over (the row the tick has, in the page's own pattern: its mode key, its pace, no name of its own to translate)",
+      [(n, p_, k) for n, p_, k in ov.GROUPS[0]["audits"] if n in ("idle hand-over", "busy stretch tell")] == [("idle hand-over", ov.EVERY_TEN, "hand_idle"), ("busy stretch tell", ov.EVERY_TEN, "busy_tell")], ov.GROUPS[0]["audits"])
 check("item_path: a numbered id is /items/<n>, a temporary id keeps its prefix, any other shape is no link", ov.item_path(f"board#{12}") == "12" and ov.item_path(f"board-tmp-x#{7}") == "board-tmp-x-7"
       and ov.item_path(f"board-tmp-X#{7}") is None and ov.item_path("elsewhere#3") is None and ov.item_path("12") is None)
 
@@ -97,7 +99,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("the page: the title, an h1 'Audits' and the three paces", "<title>Audits ·" in h and h.count("<h1>Audits</h1>") == 1
           and all(x in w for x in ("Every minute", "Every 10 minutes", "05:00")), w[:400])
     check("the groups: eight folds in the catalog's order, each with its number of audits", re.findall(r'<details class="audg"><summary><span class="agn"><b>([^<]+)</b>', h) == NAMES
-          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "53 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
+          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "54 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
     nums = re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h)
     check("the groups' findings in 24 hours from the log: 1, 3, 2, 1, 1, 1, and 'not logged' (never a zero) for the two that keep no log", nums == ["1 found", "3 found", "2 found", "1 found", "1 found", "1 found", "not logged", "not logged"], nums)
     check("a group with findings is marked (hit), a group without a log is not", h.count('<span class="anum hit">') == 6 and "0 found" not in h)
@@ -149,7 +151,7 @@ with TestClient(server.mcp.http_app()) as c:
           r.status_code == 200 and "No findings in the last 24 hours." in w and "No audit has run yet." in w
           and re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h) == ["0 found"] * 6 + ["not logged"] * 2, w[:600])
     check("without findings: no error text, no finding rows, no table", not re.search(r"Traceback|[Ee]rror|[Ee]xception|undefined|\bNone\b|\bNaN\b", w) and 'class="af"' not in h and "<table>" not in h, w)
-    check("without findings: the card shows zeros for the logged groups and dashes for the others", re.findall(r'<span class="val a-n">([^<]+)</span><span class="val a-n">([^<]+)</span>', h)[:1] == [("9", "0")]
+    check("without findings: the card shows zeros for the logged groups and dashes for the others", re.findall(r'<span class="val a-n">([^<]+)</span><span class="val a-n">([^<]+)</span>', h)[:1] == [("10", "0")]
           and h.count('<span class="val a-n">–</span>') == 2)
     LOG.unlink()
     r = c.get("/audits")

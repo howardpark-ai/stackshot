@@ -3819,7 +3819,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
-    passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
+    passes within 45 minutes write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
     from stackshot.audit import hourly as _hourly
     from stackshot.audit import hourly_log as _hlog
     from stackshot.tools import next_report as _nr

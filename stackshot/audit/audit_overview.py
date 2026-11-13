@@ -39,7 +39,7 @@ RECENT_RUNS = 8              # ... and this many runs
 GROUPS: tuple[dict[str, Any], ...] = (
     {"key": "silence", "name": "Silence", "desc": "an item or its mover not moving", "log": True, "audits": (
         ("answer tick", EVERY_MIN, None), ("hand-off tick", EVERY_MIN, None), ("stall tick", EVERY_MIN, None),
-        ("hourly audit line", EVERY_TEN, "hourly_line"), ("idle hand-over", EVERY_TEN, "hand_idle"), ("balancer", EVERY_MIN, "balance"),
+        ("hourly audit line", EVERY_TEN, "hourly_line"), ("idle hand-over", EVERY_TEN, "hand_idle"), ("busy stretch tell", EVERY_TEN, "busy_tell"), ("balancer", EVERY_MIN, "balance"),
         ("the one ladder", "with the passes", "ladder"), ("unmoved digest", EACH_RUN, None), ("threshold message", EACH_RUN, None))},
     {"key": "filing", "name": "Filing", "desc": "an item's state is wrong", "log": True, "audits": (
         ("filing pass", EVERY_TEN, None), ("stuck-elsewhere", EVERY_TEN, None), ("arbitrary-hold", EVERY_TEN, None), ("mislabeled-state", EVERY_TEN, None),
@@ -99,6 +99,8 @@ def _mode(key: str | None) -> str:
             return "on" if _cfg.audit_hourly_line() else "off"
         if key == "hand_idle":
             return "on" if _cfg.audit_hand_idle() and _cfg.audit_hourly_line() else "off"      # the hand-over works from the hourly line's idle lines: with no line written there is nothing to hand on
+        if key == "busy_tell":
+            return "on" if _cfg.audit_busy_tell() and _cfg.audit_hourly_line() else "off"      # the tell reads the hourly line's lines: with no line written there is nothing to tell of
         if key == "balance":
             return "on" if _cfg.audit_balance() else "off"
         if key == "ladder":
