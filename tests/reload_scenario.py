@@ -96,6 +96,14 @@ check("retired keys: …the waiting module reads neither (its defaults hold only
 check("retired keys: …config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
 out, log = reload_with(LIVE)
 
+# a live file that still carries the one ladder's retired keys ([ladder] main_hours, the old hand-up's interval, and silence) loads as it is: nothing reads them, nothing is logged
+OLDLAD = edit(LIVE, (r"(?m)^look_minutes = 30", "look_minutes = 30\nmain_hours = 4\nsilence = true"))
+out, log = reload_with(OLDLAD)
+check("retired keys: a file that still has [ladder] main_hours and silence loads, they are only listed as changed, nothing reads them and nothing is logged",
+      sorted(out) == ["ladder.main_hours", "ladder.silence"] and log == "" and not hasattr(server, "_ladder_main_hours") and not any("main_hours" in n or "silence" in n for n in config.notes()), (out, log))
+check("retired keys: …config.py check accepts the file too", subprocess.run([sys.executable, os.path.join(STACK, "stackshot/core/config.py"), "check"], capture_output=True, text=True).returncode == 0, None)
+out, log = reload_with(LIVE)
+
 # ---- 2. an invalid file keeps the running config, and says why
 running = config.CFG
 out, log = reload_with(LIVE.replace("[publish]", "[publish", 1))

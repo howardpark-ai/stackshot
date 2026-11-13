@@ -142,7 +142,7 @@ from stackshot.waits import ladder as _ladder  # noqa: E402  — the one ladder 
 from stackshot.waits import mover_state as _mover_state  # noqa: E402  — the item's effective mover (the pane half moved to liveness.py), shared by the stall pass and the audit
 from stackshot.fleet import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
 from stackshot.model import activity as _activity  # noqa: E402  — the item's `activity` clock: when something real last happened on the work, and which saves count (activity.py)
-from stackshot.model import progress as _progress  # noqa: E402  — the item's `progress` clock: when the work last moved (a step marked, a state change, a merge), not when it was last written to (progress.py)
+from stackshot.model import progress as _progress  # noqa: E402  — what counts as the item having moved (a step marked, a state change, a merge), read by the last-activity record and the merge pass (progress.py)
 from stackshot.service import runner as _runner  # noqa: E402  — the minute tick table, the wake event and the background threads (service/runner.py)
 from stackshot.service import wakes as _wakes  # noqa: E402  — the wake pass, the anchor pass, the item and anchor release and the minute tick bodies of the wake passes (service/wakes.py)
 from stackshot.service import watching as _watching  # noqa: E402  — the waits' watchers: a wait that ends turns its item; anchor ids and the routine-line test (service/watching.py)
@@ -1606,7 +1606,7 @@ def _page_debt_pass(now: float | None = None, runner: Any = None, io: Any = None
 
 from stackshot.anchors import anchors as _anc  # noqa: E402
 from stackshot.anchors import machine_anchor as _ma  # noqa: E402  — a machine of the fleet as an anchor: its items' movers are told at each check-in (machine_anchor.py)
-from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the progress clock's merge pass
+from stackshot.anchors import merge_log as _mlog  # noqa: E402  — the hub's record of the pull requests it saw merge (merge_log.py): read by the merge pass (`_merge_progress_tick`)
 from stackshot.model import merge_tie as _mtie  # noqa: E402  — which open items a merged pull request is tied to (merge_tie.py)
 from stackshot.anchors import event_log as _elog  # noqa: E402  — the hub's record of the other activity on pull requests (CI results, comments, reviews, merges): read by the last-activity pass (event_log.py)
 from stackshot.model import last_activity as _lastact  # noqa: E402  — the item's one "last activity" record, `metadata.last_activity` (last_activity.py)
@@ -2442,7 +2442,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
-    the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
+    the server's own bookkeeping (no writer): it does not move the activity clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
     passes within 45 minutes write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
     from stackshot.audit import hourly as _hourly
     from stackshot.audit import hourly_log as _hlog
@@ -5791,40 +5791,6 @@ def _ladder_look() -> float:
         return _ladder.LOOK
 
 
-def _alive_path() -> Path:
-    return _cfg.state("progress_alive.json")
-
-
-def _alive_load() -> dict[str, float]:
-    """When the stall pass first saw each open item due (not waiting, not the owner's move) in its current stretch of being alive: {gid: epoch}. The hand-up of an item that is not moving counts from the
-    later of its last progress and this (`progress.due`), so an item parked for a day and then alive again is not handed up for the park. The pass keeps it: the phase sweep writes the stored phase around
-    `writes.save` and writes the two keys only, so it cannot restart the progress clock itself."""
-    try:
-        with open(_alive_path(), encoding="utf-8") as f:
-            d = json.load(f)
-        return {str(k): float(v) for k, v in d.items()} if isinstance(d, dict) else {}
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _alive_save(d: dict[str, float]) -> None:
-    try:
-        p = _alive_path(); p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp"); tmp.write_text(json.dumps(d, indent=1) + "\n", encoding="utf-8"); os.replace(tmp, p)
-    except Exception as e:  # noqa: BLE001
-        print(f"progress: alive record not saved: {e}", file=sys.stderr, flush=True)
-
-
-def _ladder_main_hours() -> float:
-    """`[ladder] main_hours` (4): how long an alive item may go without progress before it is handed up to the project's -main agent, and how long before the same item is handed up again; also the
-    interval of the silent-mover notice. A value that is not a positive number is 4."""
-    try:
-        v = float(_cfg.get("ladder", "main_hours", default=_ladder.MAIN_EVERY / 3600.0))
-        return v if v > 0 else _ladder.MAIN_EVERY / 3600.0
-    except (TypeError, ValueError):
-        return _ladder.MAIN_EVERY / 3600.0
-
-
 def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> bool:
     """The dates pass has sent its message to the mover, which is the ask: the item goes on the ladder at its next rung, the look (`[ladder] look_minutes` from now). The entry
     is for this quiet stretch alone (`act`, the item's activity clock now): activity ends it. → whether an entry was written (False: the item is not open, not the mover's, not due, or already on the ladder
@@ -5910,7 +5876,6 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
         before = float(rec.get("main_at") or 0)      # when -main was told about this silence last, if it was
         told = _rmod.when_words(dt.datetime.fromtimestamp(before, ZONE)) if before else ""
         data = {"subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told}
-        meta[_PROGRESS_UP] = now      # one hand-up per stretch: the no-progress path (`_ladder_stuck`) leaves the item alone for its interval after this notice too
         _stall.note(meta, now, f"{_session_label(who)} is live but wrote nothing to it for {span}: " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else _ladder_no_main(gid, who)))
         _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that its mover is silent" if to else "its mover is silent, " + ("it is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
     if to:
@@ -5923,87 +5888,12 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
     return _ladder.MAIN
 
 
-_PROGRESS_UP = "progress_up_at"      # metadata: when the item was last handed up to its -main agent (either way in); the server's own key, no session writes it
-
-
-def _hand_up_others(gid: str, who: str, now: float, limit: int = 5) -> str:
-    """What the item is queued behind, in words for the -main agent: the mover's other open items that are alive (not waiting, not the owner's move), by priority and then by age (the older id
-    first), at most `limit` of them. "no other item of its mover" when there is none, "unknown" when the store cannot be read. Read only for an item that is being handed up."""
-    try:
-        rows: list[tuple[str, int, str]] = []
-        for g, _p in _item_files():
-            if g == gid:
-                continue
-            it = _load(g)
-            if it.get("status") != "open" or _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or not _ho_same(_stall_mover(g, it), who):
-                continue
-            pr = str((it.get("metadata") or {}).get("priority") or "p2")
-            rows.append((pr, int(g[1:]) if g[1:].isdigit() else 10 ** 9, g))
-        if not rows:
-            return "no other item of its mover"
-        rows.sort()
-        shown = ", ".join(f"{_gh.shown(g)} ({pr})" for pr, _n, g in rows[:limit])
-        return shown + (f" and {len(rows) - limit} more" if len(rows) > limit else "")
-    except Exception as e:  # noqa: BLE001  — the line is context for -main; an item is never held back for it
-        print(f"ladder: {gid} queue not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return "unknown"
-
-
-def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, str]]", info: "dict[str, dict[str, str]]", alive_at: float = 0.0) -> str:
-    """The second way into the ladder's hand-up (ladder.MAIN): an alive item whose mover has not moved it for `[ladder] main_hours` (4) goes to the project's -main agent, however much the mover has
-    written meanwhile (a status line, a note and a reply are no progress: model/progress.py), in the same message as a silent live mover's item (`rows`, `info`, sent once per -main agent per pass by the
-    tick). A History line on the item says it, and `metadata.progress_up_at` keeps the item from going up again until it has made progress and not moved for the interval again, or the interval
-    has passed. Not taken ("" so it is tried again at the next tick) when the item is no longer open, alive and its mover's, or has moved or been handed up since the tick read it; taken with a History line
-    alone when the project has no -main agent to tell. → "main" when the item was handed up (or the History line written), else ""."""
-    from stackshot.audit import silence as _silence
-    hours = _ladder_main_hours()
-    behind = _hand_up_others(gid, who, now)
-    with _writes.ITEM_LOCK:
-        item = _load(gid)
-        meta = item.setdefault("metadata", {})
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
-            return ""
-        handed = float(meta.get(_PROGRESS_UP) or 0)
-        if not _progress.due(item, now, hours, handed, alive_at):
-            return ""
-        to = _ladder_main_to(gid, who)
-        last = max(_progress.at(item), alive_at)      # counted from when the item last became alive, if that is later (the notice says how long it has been alive and not moving)
-        span = _silence.minutes(now - last)
-        since = _rmod.when_words(dt.datetime.fromtimestamp(last, ZONE))
-        told = _rmod.when_words(dt.datetime.fromtimestamp(handed, ZONE)) if handed else ""
-        data = {"kind": "progress", "subject": str(item.get("subject") or ""), "project": str(meta.get("project") or ""), "mover": _session_label(who), "since": since, "span": span, "told": told, "behind": behind}
-        meta[_PROGRESS_UP] = now
-        _stall.note(meta, now, f"{_session_label(who)} has not moved it for {span} (no step done or dropped, no state change, no merge): " + (f"{_session_label(to)} was told to decide on a nudge or a different mover" if to else _ladder_no_main(gid, who)))
-        _writes.save(gid, item, note="ladder: " + (f"{_session_label(to)} told that it is not moving" if to else "it is not moving, " + ("its mover is the -main agent itself" if "is the project" in _ladder_no_main(gid, who) else "no -main agent to tell")))
-    if to:
-        line = f"{_gh.shown(gid)} \"{data['subject']}\" ({data['project']}): mover {data['mover']}, no progress since {since} ({span}), queued behind {behind}" + (f", told before {told}" if told else "")
-        rows.append((to, gid, line)); info[gid] = data
-    print(f"ladder: {gid} {who} has not moved it for {span}: " + (f"{to} told" if to else "no -main agent to tell"), file=sys.stderr, flush=True)
-    return _ladder.MAIN
-
-
 def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, dict[str, str]]") -> None:
     """ONE notice to the -main agent `to` for the items (gid, line) of silent live background movers that came due together. It goes through the gate as a notice that asks a front agent to act (tag
     "stall", kind exempt), marked for the owner as every message a front agent takes is, and says how to stop the repeats. A lone item reads as a sentence about that item, several as a list."""
     gids = [g for g, _l in items]
-    every = f"{_ladder_main_hours():g} hours"
+    every = f"{_ladder.MAIN_EVERY / 3600.0:g} hours"
     stop = f"To stop the repeats, write to the item, hold it or set its wait; it comes again in {every} while the item stays silent. "
-    if any(info[g].get("kind") == "progress" for g in gids):      # an item that is not moving (`_ladder_stuck`) is in the notice: its wording, for the silent movers' items too
-        stop_p = f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait); it comes again in {every} while it does not move. "
-        if len(items) == 1:
-            d = info[gids[0]]
-            again = f" {_session_label(to)} was told about this at {d['told']} and it has not moved since." if d["told"] else ""
-            text = (f"{_FOR_OWNER}\n[stackshot] {_gh.shown(gids[0])} \"{d['subject']}\" has not moved for {d['span']} (since {d['since']}): its mover {d['mover']} has marked no step done or dropped, changed no state and merged nothing in that time; "
-                    f"a status line, a note or a reply does not count. It is queued behind: {d['behind']}.{again} "
-                    f"Decide whether it needs a nudge or a different mover: message {d['mover']}, or hand the item on (update mover=<session>). If you do nothing it stays with {d['mover']}. {stop_p}→ {_telling.notice_link(gids[0])}")
-        else:
-            head = (f"{_FOR_OWNER}\n[stackshot] {len(items)} items have not moved (no step done or dropped, no state change, no merge; a status line, a note or a reply does not count), "
-                    "or have had no write from live background movers, and the ladder asks no one else:")
-            tail = (f"\nDecide for each whether it needs a nudge or a different mover: message its mover, or hand the item on (update mover=<session>). If you do nothing each stays with its mover. "
-                    f"To stop the repeats, get the item moving (mark a step done or dropped, change its state, set its wait) or write to it if it is silent; each comes again in {every} while it stays as it is. → {_inst.BOARD_URL}")
-            text = head + "\n" + "\n".join("- " + l for _g, l in items) + tail
-        _telling.tell_woken(",".join(gids), _session_id(to) or to, text, tag="stall")
-        return
     if len(items) == 1:
         d = info[gids[0]]
         again = f" {_session_label(to)} was told about this at {d['told']} and nothing has been written since." if d["told"] else ""
@@ -6120,10 +6010,6 @@ def _stall_tick(now: float | None = None) -> list[str]:
     idx = _sessions_index()
     keep: dict[str, dict[str, Any]] = {}
     todo: list[tuple[str, str, str, dict[str, Any]]] = []
-    alive_old = _alive_load() if ladder_on else {}
-    alive: dict[str, float] = {}      # open items due now, and since when (the first pass that saw them so; kept across passes): `_alive_load`
-    stuck: list[tuple[str, str, float]] = []      # (gid, mover) of the alive items that have not moved for `[ladder] main_hours`: handed up to -main after the rungs below (`_ladder_stuck`)
-    main_hours = _ladder_main_hours()
     queue = _queue_map(now, _nrep.load_all(None)) if _queued.enabled() else {}      # an item queued behind another of its mover's reads waiting: the ladder leaves it as it leaves a waiting one
     for gid, _p in _item_files():
         try:
@@ -6132,7 +6018,6 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 continue
             if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or gid in queue:
                 continue                 # its work is not due now (the board shows it waiting, or it is the owner's or an outsider's move): no record is kept, so its clock starts when it is due
-            alive[gid] = alive_old.get(gid) or now
             old = old_st.get(gid)
             if not ladder_on:
                 old = _ladder.unwind(old)      # the flag was turned off in the middle of a ladder: its steps are read in the old table (the builder rung stays reachable)
@@ -6141,8 +6026,6 @@ def _stall_tick(now: float | None = None) -> list[str]:
             who = _stall_mover(gid, it)
             meta = it.get("metadata") or {}
             r = _ho.record_of(it)
-            if ladder_on and who and _ho.is_session_name(who) and _progress.due(it, now, main_hours, float(meta.get(_PROGRESS_UP) or 0), alive[gid]):
-                stuck.append((gid, who, alive[gid]))      # alive, a session moves it and nothing has moved for the interval: whatever the pane or the mover's replies say, -main hears of it (below)
             if not who or not _ho.is_session_name(who) or (r and r.get("recovery_at")):
                 continue                 # no session mover, or the fleet's builder was asked already for this record
             if isinstance(r and r.get("cold"), dict) and r["cold"].get("state") == "running" and now - float(r["cold"].get("at") or 0) < _ho.COLD_STALE:
@@ -6185,7 +6068,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
             if quiet:
                 floor = 0.0              # the quiet entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
             live = bool(back and (status or not idx or not _handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
-            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live, main_every=main_hours * 3600.0) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
+            act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
             if act == "cold" and not _cold_call_on():
                 act = "builder"
             if act:
@@ -6224,17 +6107,6 @@ def _stall_tick(now: float | None = None) -> list[str]:
                     told.add(who)
         except Exception as e:  # noqa: BLE001
             print(f"stall: {gid} step {act} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    if ladder_on and alive != alive_old:
-        _alive_save(alive)      # a stretch of being alive ends when the item is not due (a hold, a wait) or closed: it is dropped, and counted again from the pass that sees it due
-    for gid, who, since_alive in stuck:      # the items that are not moving go up in the same notice as a silent live mover's (`main_rows`); one already handed up in this pass carries its mark and is left
-        try:
-            if _ladder_stuck(gid, who, now, main_rows, main_info, since_alive):
-                acted.append(gid)
-                ent = keep.get(gid)
-                if isinstance(ent, dict):
-                    ent["main_at"] = now      # the silent-mover notice counts its repeat interval from this one too
-        except Exception as e:  # noqa: BLE001
-            print(f"stall: {gid} not handed up for not moving: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     with _STALL_LOCK:
         cur = _stall_load()
         gone = {g for g in old_st if g not in cur}       # an entry forgotten while the pass ran (his answer) stays forgotten
@@ -9874,11 +9746,12 @@ def _proof_tick(now: float | None = None) -> list[str]:
 
 # ----------------------------------------------------------------------------- a merged pull request is progress for the item it is tied to
 # An item whose pull request merged has moved, whether or not the merge settles a step: a pull request that is one of several steps never wrote the "merged <ref>" entry of `released_told`
-# (that is the settle path's, `_proof_item`, and it also tells the mover), so the progress clock (model/progress.py) did not run for it and the item was handed up as not moving. The earliest
+# (that is the settle path's, `_proof_item`, and it also tells the mover), so the last-activity record (model/last_activity.py) saw no merge for it. The earliest
 # reliable signal is the hub's merge log (anchors/merge_log.py): `Hub.emit` appends one line for every merge it sees, from the read it makes anyway, with the board ids the pull request's
 # body names; nothing here reads GitHub. A merge is tied to an item (model/merge_tie.py) by an anchor scoped to it (never a project-wide one), by its body naming the item, or by the item's own words
-# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.moved` sees a merge newly recorded and stamps the clock.
+# naming the pull request. The pass stores the key in `metadata.merged_seen` through `writes.save` (activity kind `event`), so `progress.merges` sees a merge newly recorded and the last-activity record takes it.
 _MERGE_PROG_KEEP = 20       # keys kept in an item's merged_seen (as released_told keeps its last 20)
+_MERGE_BACKLOG_S = 6 * 3600.0      # a merge older than this is not recorded: the backlog of a day of downtime, or a shorter file read again from its start
 
 
 def _merge_progress_state_path() -> Path:
@@ -9910,10 +9783,10 @@ def _anchor_repo(url: str) -> str:
 
 def _merge_rows(rows: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
     """The lines worth acting on: each parsed on its own (merge_log.normal), so a line of the wrong shape (a hand edit, a torn write that still parsed) is logged and skipped and the offset moves on
-    past it; and only those younger than `main_hours` plus two hours, on every pass. A merge from the backlog of a day of downtime stamps the item's progress at the time of the save, which would be a
-    clock reset for work that happened long ago: it is no progress now, so it is not stamped."""
+    past it; and only those younger than `_MERGE_BACKLOG_S` (six hours), on every pass. A merge from the backlog of a day of downtime would be recorded at the time of the save, which would move
+    the item's clocks for work that happened long ago: it is no news now, so it is not recorded."""
     out: list[dict[str, Any]] = []
-    floor = now - (_ladder_main_hours() + 2.0) * 3600.0
+    floor = now - _MERGE_BACKLOG_S
     for row in rows:
         try:
             r = _mlog.normal(row)
@@ -9978,8 +9851,8 @@ def _merge_tied(rows: list[dict[str, Any]], now: float) -> list[tuple[dict[str, 
 
 def _merge_progress_tick(now: float | None = None) -> list[str]:
     """The pass: read the hub's merge log from where it stopped, and for each open item a merged pull request is tied to (merge_tie.tied) add the pull request to the item's `merged_seen` and save it,
-    which moves the item's progress clock (progress.moved). On every pass a line that is malformed is logged and skipped, and one older than the hand-up interval plus two hours is skipped (`_merge_rows`: the
-    backlog of a day of downtime, or a shorter file read again from its start, would stamp items for merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
+    which the last-activity record takes (progress.merges). On every pass a line that is malformed is logged and skipped, and one older than six hours is skipped (`_merge_rows`: the
+    backlog of a day of downtime, or a shorter file read again from its start, would record merges long past), a pull request an item holds already is not saved again, and an item that is closed or that the board shows waiting
     or held is left alone. An item that cannot be read or saved is logged and skipped: the others are saved and the offset is stored, so one bad item does not abort the pass every minute. → the ids saved."""
     if _watch.holding():
         return []
@@ -10027,7 +9900,7 @@ def _merge_progress_tick(now: float | None = None) -> list[str]:
 # `metadata.last_activity` (model/last_activity.py) takes what each save did that is visible activity (`_stamp_last_activity` in `service/writes.py`, run by `writes.save`) and, here, the events the hub saw on a pull request
 # tied to the item: a CI result, a comment by a person, a review, a merge (anchors/event_log.py: `Hub.emit` appends one line each, as it does for a merge, from what the event holds). The ties are
 # merge_tie's, through `_merge_tied`, the same rules and the same items as the merge pass (anchored, the pull request's body, the item's own words; open items off the stall ladder, waiting and held
-# ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it moves neither the `activity` clock nor `progress`, adds no History line and
+# ones left alone). The record only: the save is the server's own bookkeeping (no writer, activity kind `bookkeeping`), so it does not move the `activity` clock, adds no History line and
 # is no publish (the home page is kept for 30 s, so the On agent rows and the item page pick the record up on their next draw). A commit to a tied pull request comes in the same way: the hub's GitHub receiver sees the head sha change and emits it at the time it saw it (after downtime, at the commit's committer date).
 _EVENT_ACT_FLOOR_H = _elog.FLOOR_H       # an event older than this is not read (a day of downtime, or a shorter file read again from its start): the record would only fill with old news (the hub applies the same window to the event's own time when it writes the line)
 _EVENT_ACT_AHEAD_S = _elog.AHEAD_S       # …nor one stamped more than this ahead of the server's clock (a skew of minutes is allowed and read as now)

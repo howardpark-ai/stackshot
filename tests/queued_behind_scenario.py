@@ -105,7 +105,7 @@ def put(i, mover="home-peer", act=180, last=None, status="open", **meta):
     if last is not None: base["last_activity"] = {"at": now0 - last * MIN, "kind": "step_done", "what": "step 1 done"}
     at = now0 - act * MIN
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": at, "state_updated": at, "confirmed": at,
-                                                       "activity": at, "progress": at, "written_at": at, "written_by": mover, "metadata": base}))
+                                                       "activity": at, "written_at": at, "written_by": mover, "metadata": base}))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def wipe():
     for p in (T / "store/a").glob("*.json"): p.unlink()

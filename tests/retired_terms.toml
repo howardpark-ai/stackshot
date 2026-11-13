@@ -271,3 +271,14 @@ allow = []
 retired = "silence pass"
 use = "the hourly audit line (audit/hourly.py) and the idle hand-over (audit/hand_idle.py): the ten-minute silence pass is gone"
 allow = []
+
+# ---- the one ladder's four-hour hand-up of an item that was not moving: retired. `[ladder] main_hours` set how long an alive item could go with no step marked, no state change and no merge before the
+# project's -main agent was told, and the interval of the silent live mover's notice. The hand-up is gone and the notice's interval is the fixed `ladder.MAIN_EVERY` (4 hours); a long busy stretch is told by
+# `[audit] busy_tell_hours` (audit/busy_tell.py). A config file that still carries the key loads and nothing reads it.
+[[term]]
+retired = "main_hours"
+use = "nothing: the ladder's hand-up of an item that was not moving is gone; the silent live mover's notice repeats every `ladder.MAIN_EVERY` (a fixed 4 hours), and a long busy stretch is `[audit] busy_tell_hours`"
+allow = [
+    # the one sentence of docs/stall-and-ladder.md that says a config file still carrying the retired lines loads as it is (the same text names `silence`, the ladder's other retired switch)
+    "a `[ladder]` `main_hours` or `silence` line",
+]

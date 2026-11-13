@@ -17,7 +17,7 @@ panes that are files in a temp folder, messages recorded by a fake push, a fake 
      within 90 minutes holds the ladder; a live pane gets no cold call and no builder (its silence goes to -main, section 11), a pane that is not live goes on to the cold call and the builder (never the builder itself); one notice per agent per pass;
      a front agent keeps the pane rule; ladder.action for a background mover;
      only the mover's own work line holds the ladder; an empty or unreadable heartbeat is unknown (live); a gone entry reaches the cold call whatever the heartbeat shows
- 11  a live background mover that stays silent after the look is handed up: a notice to the project's -main agent `minutes` after the look (marked for the owner, naming the silence, asking for a nudge or a
+ 11  a live background mover that stays silent after the look is told to the project's -main agent: a notice to the project's -main agent `minutes` after the look (marked for the owner, naming the silence, asking for a nudge or a
      different mover and saying how to stop the repeats), the same notice again only every `ladder.MAIN_EVERY`, never one per pass; ONE notice per -main agent per pass, listing every item due for it; a front mover, a fresh work line and
      a mover whose pane is not live (the cold call, the builder) get none; a project with no -main agent gets the History line alone
 
@@ -107,8 +107,7 @@ def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
 def ladder_cfg(enabled=True, **kw):
-    # main_hours defaults to a value no scenario reaches: these sections test the quiet entry's rungs, and an item that has not moved for hours is handed up by the other way in (tests/ladder_progress_scenario.py)
-    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "main_hours": 10000, **kw}.items() if v is not None}
+    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, **kw}.items() if v is not None}
 set_cfg(); server._cfg.CFG["stall"] = {}
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
 COLD_MSGS = []
@@ -418,7 +417,7 @@ check("10j action: the first rung of a pane-triggered ladder (the ask) still wai
 # ================================================================ 11. a live background mover that stays silent after the look reaches the project's -main agent
 def main_notices(i, to="home-front"): return [p for p in pushes_to(to, f"a{i}") if "background mover" in p[1]]
 def all_main_notices(to="home-front"): return [p for p in pushes_to(to) if "background mover" in p[1]]
-ladder_cfg(True, main_hours=4); set_live("home-docs"); set_live("team-back")      # section 11 runs with the real 4 hours: the silent mover's notice and the no-progress hand-up share one mark
+ladder_cfg(True); set_live("home-docs"); set_live("team-back")
 # 11a. the incident: a silent item on a live busy background agent: ask, look, then nothing for hours; now -main hears of it, once an interval
 clear_records(); put(70, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
 enter([70]); stk(now0 + 31 * MIN)
@@ -520,6 +519,19 @@ check("11g action: …the next one is due `MAIN_EVERY` after the first, counted 
       bg(live_rec, "busy", 4000.0 + LD.MAIN_EVERY - 1, live=True) == "" and bg(live_rec, "busy", 4000.0 + LD.MAIN_EVERY, live=True) == "main" and LD.MAIN_EVERY == 4 * 3600.0, None)
 check("11g action: …a pane that stops being live still reaches the cold call, counted from the last rung", bg(live_rec, "", 4000.0 + 600, live=False) == "cold" and bg({**live_rec, "step": 3}, "", 4000.0 + 600, live=False) == "builder", None)
 check("11g action: a mover that is not a background agent never gets 'main' (the pane rule stands)", LD.action(live_rec, "busy", 1.0, 0.0, 9e9, 10.0, 30.0, live=True) == "", None)
+
+# ================================================================ 12. a config that still carries the retired keys ([ladder] main_hours and silence) loads and does nothing
+# The old hand-up of an alive item that had not moved for `main_hours` is gone: nothing reads the key, and an item a busy mover has held for many hours, with no ladder entry, is told to nobody.
+set_live("home-peer"); ladder_cfg(True, main_hours=4, silence=True)
+clear_records(); put(9080, act=30, mover="home-peer"); cli_row("home-peer", "busy", now0 - 20 * MIN)
+n_before = len(pushes())
+done = [stk(now0 + 31 * MIN), stk(now0 + 5 * H), stk(now0 + 9 * H), stk(now0 + 30 * H)]
+check("12 a config that carries main_hours = 4 and silence = true: an alive item with a busy live mover that has not moved for 30 hours is told to no one, by any pass",
+      done == [[], [], [], []] and len(pushes()) == n_before and not pushes_to("home-front", "a9080") and not any("has not moved for" in p_[1] for p_ in pushes()[n_before:]), (done, pushes()[n_before:]))
+check("12 …and nothing is written to the item or the ladder's record: no History line, no mark, no rung taken (the entry the stall pass keeps stays at the ask, with no `main_at`)", mt(9080).get("progress_up_at") is None and "stall" not in mt(9080) and (entry(9080) or {}).get("step", 0) == 0 and not (entry(9080) or {}).get("main_at") and not hasattr(server, "_ladder_stuck"), (mt(9080), entry(9080)))
+check("12 …and the live mover's own rung is the same with the keys present: its silence after the look still goes to -main, every ladder.MAIN_EVERY (4 hours), not every main_hours",
+      LD.MAIN_EVERY == 4 * 3600.0 and not hasattr(server, "_ladder_main_hours") and "main_every" not in __import__("inspect").signature(LD.action).parameters, None)
+close(9080)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

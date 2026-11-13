@@ -106,7 +106,7 @@ def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", l
         base["last_activity"] = {"at": now0 - mins * MIN, "kind": kind, "what": "something happened"}
     at = now0 - act * MIN
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": now0 - 2 * MIN, "state_updated": at, "confirmed": now0 - 2 * MIN,
-                                                       "activity": at, "progress": at, "written_at": at, "written_by": mover, "metadata": base}))
+                                                       "activity": at, "written_at": at, "written_by": mover, "metadata": base}))
 def ho(mover, mins, sender="home-stew", **extra):
     """The metadata of an untaken hand-off to `mover`, delivered `mins` minutes before now0 (`extra` sets or clears fields of the record)."""
     r = HO.new_record(mover, "", sender, now0 - mins * MIN); r["delivered_at"] = now0 - mins * MIN; r.update(extra)
@@ -209,7 +209,7 @@ check("2 …through the notice path (tell_woken), not the message tool: nothing 
 check("2 -main is told nothing of a move, and nobody else is: the new builder and the former mover only", to_main() == [] and sorted(x[1] for x in sent) == sorted([U["team-aux"], U["home-peer"]]), sent)
 check("2 the record of the balancer is its own key, {at, from, to, count}, written in the save of the move, and `hand_idle` is not touched", m["balance"] == {"at": now0, "from": "home-peer", "to": "team-aux", "count": 1} and "hand_idle" not in m, m.get("balance"))
 check("2 the owner is not put in the item: next and state as they were", m.get("next") == before["metadata"]["next"] and m.get("state") == "doing" and not any("Oliver" in str(v) for k, v in m.items() if k in ("needs", "next", "mover")), m)
-check("2 the activity and progress clocks are as they were: the move is the server's own bookkeeping", all(rd(1)[k] == before[k] for k in ("activity", "progress", "written_by", "written_at")))
+check("2 the activity clock is as it was: the move is the server's own bookkeeping", all(rd(1)[k] == before[k] for k in ("activity", "written_by", "written_at")))
 check("2 a second pass a minute later finds a fresh untaken hand-off and does nothing more", tick(now0 + MIN) == [] and len(told("balance")) == 1 and len(to_builder("team-aux")) == 1 and history(1) == h1)
 check("2 the server logs it on stderr", "moved from home-peer to team-aux" in err.text, err.text)
 check("2 the minute set carries a tag the front gate knows for that notice", telling.FRONT_TAG_KIND.get("balance") == "exempt", telling.FRONT_TAG_KIND.get("balance"))

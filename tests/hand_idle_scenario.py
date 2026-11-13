@@ -104,7 +104,7 @@ def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", i
     if idle_line and "hourly_audit" not in base: base["hourly_audit"] = {"log": [{"at": now0 - 5 * MIN, "text": "Audit 10:00: idle, nothing verified", "kind": "audit_idle"}]}
     at = now0 - act * MIN
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": now0 - 2 * MIN, "state_updated": at, "confirmed": now0 - 2 * MIN,
-                                                       "activity": at, "progress": at, "written_at": at, "written_by": mover, "metadata": base}))
+                                                       "activity": at, "written_at": at, "written_by": mover, "metadata": base}))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def mover_of(i): return mt(i).get("mover")      # the stored mover (a waiting item has no derived one)
@@ -185,7 +185,7 @@ check("2 nobody else is told: every notice went to the builder or to -main, none
 check("2 the owner is not put in the item: no decision or step of his, the next lines and the ask as they were, the item's state still doing",
       "decision" not in [str(x).lower() for x in m.get("needs", [])] and m.get("next") == before["metadata"]["next"] and not m.get("ask") and m.get("state") == "doing" and not any("Oliver" in str(v) for k, v in m.items() if k in ("needs", "next", "mover")), m)
 check("2 the record of this pass says who it was handed from and to, and when", m["hand_idle"] == {"handed_at": now0, "from": "home-peer", "to": "team-back"}, m.get("hand_idle"))
-check("2 the activity and progress clocks are as they were: the move is the server's own bookkeeping", all(rd(1)[k] == before[k] for k in ("activity", "progress", "written_by", "written_at")))
+check("2 the activity clock is as it was: the move is the server's own bookkeeping", all(rd(1)[k] == before[k] for k in ("activity", "written_by", "written_at")))
 check("2 a second pass at once finds the item with an untaken hand-off and does nothing", tick(now0 + 10 * MIN) == [] and len(to_builder("team-back")) == 1 and len(to_main()) == 1 and history(1) == h1)
 check("2 the server logs it on stderr", "idle, handed from home-peer to team-back" in err.text, err.text)
 

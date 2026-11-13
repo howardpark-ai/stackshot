@@ -115,7 +115,7 @@ def put(i, mover="team-back", status="open", act=0, project="projects/alpha", lo
             ent.append(e)
         base["hourly_audit"] = {"log": ent}
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": DESC, "status": status, "updated": now0 - 2 * MIN, "state_updated": at, "confirmed": now0 - 2 * MIN,
-                                                       "activity": at, "progress": at, "written_at": at, "written_by": mover, "metadata": base}))
+                                                       "activity": at, "written_at": at, "written_by": mover, "metadata": base}))
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def wr(i, d): (T / f"store/a/{i}.json").write_text(json.dumps(d))
 def mt(i): return rd(i)["metadata"]
@@ -142,7 +142,7 @@ def run(frm, to, step=10, line=True, each=None):
         out += tick(at(m))
     return out
 def activity_at(i, t):
-    d = rd(i); d["activity"] = d["progress"] = d["written_at"] = t; wr(i, d)
+    d = rd(i); d["activity"] = d["written_at"] = t; wr(i, d)
 def to_main(): return [x for x in sent if x[1] == U["home-main"]]
 def to(name): return [x for x in sent if x[1] == U[name]]
 def history(i): return [e["text"] for e in ST.log_of(mt(i))]
