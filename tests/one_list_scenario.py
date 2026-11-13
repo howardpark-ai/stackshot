@@ -7,7 +7,7 @@ done=[n], some by a status done). What the item shows is one list, not two:
   2  a status write changes the status of the sender's open step in place; one sent again unchanged keeps its old time; state done ticks the step; with no open step it makes one
   3  the page: the Work field is gone from the sidebar; Next shows the open step and the newest done step, and the other done steps fold behind one line that opens to one line each
   4  History: one line per closed step with its status updates folded under it, not one line per write; other writes (the create, a hand-off) keep their own lines
-  5  the stall pass and the balancer take a step-status write as news: it ends the stall episode (`server._stall_ver`), moves the activity clock, keeps a build subagent "running" for 90 minutes
+  5  the stall pass and the balancer take a step-status write as news: it ends the stall episode (`stall_svc.stall_ver`), moves the activity clock, keeps a build subagent "running" for 90 minutes
      (`silence.subagent_running`, from the step's status time), and a status sent again unchanged does not extend that; the state clock and the confirm stay for a plain status write
   6  the item never has more than a handful of visible lines in Next and in History, however many writes came
 
@@ -45,6 +45,7 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import work as W; from stackshot.audit import silence as SL; from stackshot.model import ids as _model_ids
+from stackshot.service import stall as stall_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.ui import render as ui_render
@@ -72,7 +73,7 @@ try:
             before = rd(g)
             server._update(g, work={"text": txt}, sender=ENG); snap(f"s{stage}.{j}")
             after = rd(g); writes += 1; n_this += 1
-            vers.append((server._stall_ver(before), server._stall_ver(after), before, after))
+            vers.append((stall_svc.stall_ver(before), stall_svc.stall_ver(after), before, after))
         # close the stage: some by done=[n] with the next stage in next, some by a status done with the next stage given in the same call
         clk[0] += 30 * MIN
         pos = len(S.view(rd(g)["metadata"]))          # the open step is the last position of the stored checklist
@@ -128,7 +129,7 @@ try:
 
     # ------------------------------------------------------------ 5 news for the stall pass and the balancer
     ended = [v for v in vers if v[0] != v[1]]
-    check("every status write ended the stall episode (the version `_stall_ver` reads moved)", len(ended) == writes, (len(ended), writes))
+    check("every status write ended the stall episode (the version `stall_ver` reads moved)", len(ended) == writes, (len(ended), writes))
     check("a plain status write keeps the state clock and the confirm (a filing edit)", all(v[2]["state_updated"] == v[3]["state_updated"] and v[2].get("confirmed") == v[3].get("confirmed") for v in vers), vers[0][2].get("state_updated"))
     check("…and it moves the activity clock, the item's own measure of news", all(float(v[3].get("activity") or 0) > float(v[2].get("activity") or 0) for v in vers), [(v[2].get("activity"), v[3].get("activity")) for v in vers[:2]])
     it = rd(g); tag_ts = S.tag_of(S.view(it["metadata"])[10])["ts"]

@@ -1,4 +1,4 @@
-"""Scenario test for the stall pass (stall.py, server.py _stall_tick) — fixture data, no live store, no network, no server socket.
+"""Scenario test for the stall pass (stall.py, service/stall_tick.py stall_tick) — fixture data, no live store, no network, no server socket.
 
 When the session that moves a live item has no turn running for 10 minutes, stackshot moves the item on itself. The signal is the CLI's registry (handoff_svc.handoff_status: a live pane's
 status busy | idle and when it changed); the clocks are given to the pass as `now`, the panes' rows are files in a temp folder.
@@ -91,6 +91,7 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
 from stackshot.service import handoff as handoff_svc
 from stackshot.service import handoff_cold as hcold_svc
+from stackshot.service import ladder as ladder_svc, stall as stall_svc, stall_tick as stalltick_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
@@ -130,7 +131,7 @@ server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      
 def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fleet recovery:" in p[1]]
 def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", gid) if "has gone quiet" in p[1]]      # a project with no background agent (beta) ends at its -main agent, marked for the owner
 item(97, status="completed", answers=[{"ts": 9e9, "kind": "comment", "text": "Pause it for now.", "via": "board"}])      # Oliver's answer, the pause_item of every pause below
-server._stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
+stall_svc.stall_since(B)          # the pass first ran at B (before every clock below); test 12 starts from no file at all
 COLD_MSGS = []
 def cold(answer, status="ok"):
     def run(msg):
@@ -150,8 +151,8 @@ ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of del
 MIN = 60.0
 def stk(at):
     """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on."""
-    server._STALL_LAST[0] = 0.0
-    out = server._stall_tick(at); drain()
+    stall_svc.STALL_LAST[0] = 0.0
+    out = stalltick_svc.stall_tick(at); drain()
     return out
 def log_of(i): return S.log_of(mt(i))
 IDLE0 = B + 60.0                       # the pane went idle then: the first step is due at T1
@@ -205,7 +206,7 @@ check("3 recovery: …nothing went to the quiet session or the project's front, 
 T3 = T2 + 21.0
 check("3 recovery: a second pass sends nothing, and neither do later ones: still one message, no raise, the entry carries no stuck mark", stk(T3) == [] and stk(T3 + 5 * 3600) == [] and len(main_recovery_pushes("a3")) == 1 and "decision" not in (mt(3).get("needs") or []), (main_recovery_pushes("a3"), mt(3)))
 # the guard is the record's, not the pass's memory: with the pass's entry for the item lost (a file wiped, a restart that lost it) the ladder walks its steps again from the top and must not ask a second time
-_st = server._stall_load(); _st.pop("a3", None); server._stall_save(_st)
+_st = stall_svc.stall_load(); _st.pop("a3", None); stall_svc.stall_save(_st)
 X3 = T3 + 3 * 3600
 walked = stk(X3) + stk(X3 + 11 * MIN) + stk(X3 + 22 * MIN) + stk(X3 + 33 * MIN)
 check("3 recovery: …and the request is once per record, not per pass: with the pass's own entry wiped the ladder walks again and still sends no second message", len(main_recovery_pushes("a3")) == 1 and bool(ho(3).get("recovery_at"))
@@ -231,7 +232,7 @@ cold({"action": "hand_to", "to": "home-docs", "reason": "it is the project's own
 item(4, mover="home-front"); cli_row("home-front", "idle", IDLE0)
 done = stk(T1)
 check("4 front: an item a front agent moves is covered, but no notice wakes a front agent: step 1 is the History line alone, no push", "a4" in done and not pushes_to("home-front", "a4") and len(log_of(4)) == 1
-      and "front agent" in log_of(4)[0]["text"] and server._stall_load()["a4"]["step"] == 1, (done, pushes(), log_of(4)))
+      and "front agent" in log_of(4)[0]["text"] and stall_svc.stall_load()["a4"]["step"] == 1, (done, pushes(), log_of(4)))
 n_cold = len(COLD_MSGS)
 done = stk(T2)
 check("4 front: …the cold call hands it on to the session it names, written as the cold call", len(COLD_MSGS) == n_cold + 1 and mt(4).get("mover") == "home-docs" and rd(4).get("written_by") == "cold-call"
@@ -263,7 +264,7 @@ cold({"action": "none", "reason": "nothing in the record says who owns it"})    
 journal = two_steps(91)
 check("4b no ask: …a none answer is the same: nothing written, the builder next", "decision" not in (mt(91).get("needs") or []) and not mt(91).get("ask") and mt(91).get("mover") == "team-back"
       and ho(91).get("stall") is True and "stall: a91 cold call named no taker: to the builder" in journal, (mt(91), ho(91)))
-check("4b no ask: …and the cold call is stamped for its 24 hours", server._stall_load().get("a91", {}).get("cold_at"), server._stall_load().get("a91"))
+check("4b no ask: …and the cold call is stamped for its 24 hours", stall_svc.stall_load().get("a91", {}).get("cold_at"), stall_svc.stall_load().get("a91"))
 close(91)
 cold("no json at all here")                                                             # an answer the call could not give: the same
 journal = two_steps(92)
@@ -320,7 +321,7 @@ done = stk(IDLE0 + 5 * 3600) + stk(IDLE0 + 6 * 3600)
 check("5 exempt: a hold, the owner's decision, an external wait, a hand-off in flight, an item whose recovery was already asked, an unknown pane, a busy pane and a closed item: untouched",
       not (set(done) & {f"a{i}" for i in before}) and all(rd(i) == before[i] for i in before), done)
 check("5 exempt: …none got a step, a push or an entry", not (set(done) & {f"a{i}" for i in before}) and all(rd(i) == before[i] for i in before) and not [p for p in pushes() if any(f"a{i}:" in p[1] or f"a{i}," in p[1] for i in before)]
-      and not [g for g, r in server._stall_load().items() if g in {f"a{i}" for i in before} and int(r.get("step") or 0) > 0], (done, server._stall_load()))
+      and not [g for g, r in stall_svc.stall_load().items() if g in {f"a{i}" for i in before} and int(r.get("step") or 0) > 0], (done, stall_svc.stall_load()))
 close(10, 11, 12, 13, 15, 16, 17)
 # ranks are retired: an item that still stores one (a store from before the cleanup) is stalled like any other
 item(19, mover="home-peer", rank=1)
@@ -362,7 +363,7 @@ server._update("a22", sender="home-peer", next="home-peer: still on it")
 w22 = rd(22)["updated"]
 check("7 write: a write to the item restarts the ladder (the version moved): no step at the old time", w22 > B and stk(T1 + 11 * MIN) == [], w22)
 done = stk(w22 + 10 * MIN + 5)
-check("7 write: …from the write, the notice again (step 1 of a new episode)", "a22" in done and S.log_of(mt(22))[-1]["text"].endswith("sent to it again") and len(pushes_to("home-peer", "a22")) == 2 and server._stall_load()["a22"]["step"] == 1, (done, server._stall_load().get("a22")))
+check("7 write: …from the write, the notice again (step 1 of a new episode)", "a22" in done and S.log_of(mt(22))[-1]["text"].endswith("sent to it again") and len(pushes_to("home-peer", "a22")) == 2 and stall_svc.stall_load()["a22"]["step"] == 1, (done, stall_svc.stall_load().get("a22")))
 close(22)
 
 # ================================================================ 8. config
@@ -374,16 +375,16 @@ set_stall(enabled=False)
 item(24, mover="home-peer2")
 check("8 config: [stall] enabled = false: nothing", stk(IDLE0 + 5 * 3600) == [] and not log_of(24), log_of(24))
 set_stall(every_seconds=600)
-server._STALL_LAST[0] = 0.0; first = server._stall_tick(T1 + 5 * 3600); drain()
-check("8 config: [stall] every_seconds = 600: a second pass 20 seconds after the first does nothing", "a24" in first and server._stall_tick(T1 + 5 * 3600 + 20) == [] and len(log_of(24)) == 1, (first, log_of(24)))
+stall_svc.STALL_LAST[0] = 0.0; first = stalltick_svc.stall_tick(T1 + 5 * 3600); drain()
+check("8 config: [stall] every_seconds = 600: a second pass 20 seconds after the first does nothing", "a24" in first and stalltick_svc.stall_tick(T1 + 5 * 3600 + 20) == [] and len(log_of(24)) == 1, (first, log_of(24)))
 close(24); set_stall()
 # the runner ticks the pass once a minute (the old fleet watch every 20 s): with the default gate of 20 s every tick of a minute pace runs the pass, a tick 20 s after one does not
-server._STALL_LAST[0] = 0.0
-server._stall_tick(T1 + 6 * 3600); l1 = server._STALL_LAST[0]
-server._stall_tick(T1 + 6 * 3600 + 60); l2 = server._STALL_LAST[0]
-server._stall_tick(T1 + 6 * 3600 + 80); l3 = server._STALL_LAST[0]
+stall_svc.STALL_LAST[0] = 0.0
+stalltick_svc.stall_tick(T1 + 6 * 3600); l1 = stall_svc.STALL_LAST[0]
+stalltick_svc.stall_tick(T1 + 6 * 3600 + 60); l2 = stall_svc.STALL_LAST[0]
+stalltick_svc.stall_tick(T1 + 6 * 3600 + 80); l3 = stall_svc.STALL_LAST[0]
 check("8 config: with the default every_seconds (20) a tick every 60 s (the minute pace) runs the pass each time, and a tick 20 s after a pass runs again too",
-      l1 == T1 + 6 * 3600 and l2 == T1 + 6 * 3600 + 60 and l3 == T1 + 6 * 3600 + 80 and server._stall_num("every_seconds", server._stall.EVERY) == 20, (l1, l2, l3))
+      l1 == T1 + 6 * 3600 and l2 == T1 + 6 * 3600 + 60 and l3 == T1 + 6 * 3600 + 80 and stall_svc.stall_num("every_seconds", server._stall.EVERY) == 20, (l1, l2, l3))
 set_cfg(handoff=False)
 item(25, mover="home-peer2")
 check("8 config: [model] handoff = false: the pass does nothing (it moves items through the hand-off machinery)", stk(IDLE0 + 5 * 3600) == [] and not log_of(25), log_of(25))
@@ -392,7 +393,7 @@ check("8 config: the example config documents the keys with their defaults", all
 
 # ================================================================ 9. the cold call once per item in 24 hours
 item(26, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
-server._stall_save({"a26": {"mover": "home-peer2", "ver": [B, B], "step": 1, "last": T1, "cold_at": T1 - 3600}})
+stall_svc.stall_save({"a26": {"mover": "home-peer2", "ver": [B, B], "step": 1, "last": T1, "cold_at": T1 - 3600}})
 n_cold = len(COLD_MSGS)
 done = stk(T2)
 check("9 once a day: a cold call made for the item less than 24 hours ago is not made again: the step is the builder's", "a26" in done and len(COLD_MSGS) == n_cold and mt(26).get("mover") == "team-back" and ho(26).get("stall") is True, (done, mt(26), COLD_MSGS[n_cold:]))
@@ -414,10 +415,10 @@ close(27)
 for i in (40, 41, 42, 43, 44, 45):
     item(i, mover="home-peer")                                  # six items on one long-idle pane (idle for hours)
 cli_row("home-peer", "idle", B - 5 * 3600)
-server._stall_path().unlink(missing_ok=True)                  # no stall.json: the pass has never run on this store
+stall_svc.stall_path().unlink(missing_ok=True)                  # no stall.json: the pass has never run on this store
 X = now0 + 7 * 86400                                          # the first pass of the new deploy
 check("12 deploy: the first pass sends nothing, though every pane has been idle for hours", stk(X) == [] and not any(log_of(i) for i in range(40, 46)), [log_of(i) for i in range(40, 46)])
-check("12 deploy: …it recorded when it first ran in stall.json, and that survives the next passes", server._stall_raw().get("_pass", {}).get("since") == X and stk(X + 96) == [] and server._stall_raw()["_pass"]["since"] == X, server._stall_raw())
+check("12 deploy: …it recorded when it first ran in stall.json, and that survives the next passes", stall_svc.stall_raw().get("_pass", {}).get("since") == X and stk(X + 96) == [] and stall_svc.stall_raw()["_pass"]["since"] == X, stall_svc.stall_raw())
 check("12 deploy: …nothing 599 seconds after it, either", stk(X + 599) == [], None)
 set_stall(max_per_tick=2)
 got = stk(X + 601)
@@ -430,7 +431,7 @@ check("12 deploy: the default cap is 5", S.MAX_PER_TICK == 5, S.MAX_PER_TICK)
 # ================================================================ 13. a quiet builder is nudged at once: a doing item carries no expected time to wait for
 def hhmm(ep): return time.strftime("%Y-%m-%d %H:%M", time.gmtime(ep + ZONE_OFFSET))      # the instance zone is Asia/Dubai
 cli_row("team-back", "idle", IDLE0); cli_row("home-front", "idle", IDLE0)
-server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 LATE = IDLE0 + 3 * 3600
 item(50, mover="team-back", needs=["team-back"], state="doing", expected_by=hhmm(LATE))      # written before the time was dropped: the stored time is not read
 item(51, mover="home-front", needs=["home-front"], state="doing", expected_by=hhmm(LATE))
@@ -438,26 +439,26 @@ item(52, mover="team-back", needs=["team-back"], state="doing")                 
 d13 = stk(T1 + 2 * 3600)
 check("13 doing: a quiet builder's doing item (stored with a time still ahead, or with none) is stepped at once, the front agent's too: the pass waits for no expected time",
       all(f"a{i}" in d13 for i in (50, 51, 52)) and all(len(log_of(i)) == 1 for i in (50, 51, 52)), (d13, log_of(50), log_of(51), log_of(52)))
-check("13 doing: …a record is kept for each, as for any item the pass steps", all(f"a{i}" in server._stall_load() for i in (50, 51, 52)), server._stall_load())
+check("13 doing: …a record is kept for each, as for any item the pass steps", all(f"a{i}" in stall_svc.stall_load() for i in (50, 51, 52)), stall_svc.stall_load())
 check("13 doing: pure: not_due says nothing for a doing item, whatever expected_by it was stored with", S.not_due(rd(50), IDLE0) == "" and S.not_due(rd(52), IDLE0) == "" and S.due_at(rd(50)) == 0.0, (S.not_due(rd(50), IDLE0), S.due_at(rd(50))))
 close(50, 51, 52); no_row("team-back")
 
 # ---- 13b. a background agent whose pane shows `shell` (its turn is over, a run_in_background job such as a CI watch runs) is working on that job: not quiet
-server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 item(53, mover="team-back", needs=["team-back"], state="doing"); cli_row("team-back", "shell", IDLE0)
 item(54, mover="home-front", needs=["home-front"], state="doing"); cli_row("home-front", "shell", IDLE0)
 d13b = stk(T1 + 2 * 3600)
-check("13b background job: a background agent's `shell` pane is not nudged, however long (the job is its work); no record is kept", "a53" not in d13b and not log_of(53) and "a53" not in server._stall_load(), (d13b, log_of(53)))
+check("13b background job: a background agent's `shell` pane is not nudged, however long (the job is its work); no record is kept", "a53" not in d13b and not log_of(53) and "a53" not in stall_svc.stall_load(), (d13b, log_of(53)))
 check("13b background job: …a front agent does no background work of its own, so its `shell` pane counts as idle and is nudged", "a54" in d13b and len(log_of(54)) == 1, (d13b, log_of(54)))
 check("13b background job: …the same builder's turn over with nothing running (`idle`) is nudged at once", (cli_row("team-back", "idle", IDLE0 + 2 * 3600), "a53" in stk(T1 + 4 * 3600))[1] and len(log_of(53)) == 1, log_of(53))
-check("13b background job: pure: _stall_background is true for a background agent of a project page only", server._stall_background("team-back") and server._stall_background("home-docs") and not server._stall_background("home-front") and not server._stall_background("home-peer"), None)
+check("13b background job: pure: _stall_background is true for a background agent of a project page only", stall_svc.stall_background("team-back") and stall_svc.stall_background("home-docs") and not stall_svc.stall_background("home-front") and not stall_svc.stall_background("home-peer"), None)
 close(53, 54); no_row("team-back"); no_row("home-front")
 
 # ================================================================ 14. the 24-hour bound on a kept item, a restart, a front agent's recovery request
 cli_row("home-peer2", "idle", IDLE0)
 item(60, mover="home-peer2")
 R = T1 + 100.0
-server._stall_save({"a60": {"mover": "home-peer2", "ver": server._stall_ver(server._load("a60")), "step": 0, "last": R, "kept": R}})       # the cold call kept the item with its mover at R (the entry is carried into a new episode)
+stall_svc.stall_save({"a60": {"mover": "home-peer2", "ver": stall_svc.stall_ver(server._load("a60")), "step": 0, "last": R, "kept": R}})       # the cold call kept the item with its mover at R (the entry is carried into a new episode)
 check("14 24 h: an item kept less than 24 hours ago is left alone, 23 hours on", stk(R + 23 * 3600) == [] and not log_of(60), log_of(60))
 done = stk(R + 25 * 3600)
 check("14 24 h: …and past 24 hours the ladder runs again (the notice, step 1)", "a60" in done and len(log_of(60)) == 1 and S.spent({"kept": R}, R + 25 * 3600) is False and S.spent({"kept": R}, R + 23 * 3600) is True, (done, log_of(60)))
@@ -466,8 +467,8 @@ close(60)
 item(61, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
 set_cfg(cold_call=False)
 stk(T1)
-snap = server._stall_path().read_text(encoding="utf-8")
-server._STALL_LAST[0] = 0.0
+snap = stall_svc.stall_path().read_text(encoding="utf-8")
+stall_svc.STALL_LAST[0] = 0.0
 check("14 restart: step 1 is in the file (the episode, its stamps, when the pass first ran)", json.loads(snap)["a61"]["step"] == 1 and json.loads(snap)["a61"]["last"] == T1 and json.loads(snap)["_pass"]["since"] == B, snap[:400])
 check("14 restart: …a pass that knows only the file does not send step 1 again (5 minutes on), and takes step 2 at its time", stk(T1 + 5 * MIN) == [] and len(log_of(61)) == 1 and "a61" in stk(T1 + 10 * MIN + 1) and mt(61).get("mover") == "team-back", (log_of(61), mt(61)))
 close(61); set_cfg()
@@ -496,7 +497,7 @@ close(63); set_cfg()
 N = T1 + 3600
 def wk(ep): return time.strftime("%Y-%m-%dT%H:%M", time.gmtime(ep + ZONE_OFFSET))      # a wake with a time of day, in the instance zone
 for w_ in ("home-front", "team-back", "home-peer", "home-peer2", "home-peer3"): cli_row(w_, "idle", IDLE0)
-server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 WAKE16 = wk(N + 3600)
 BASIS16 = {"text": "the vendor answers on that day", "wake": WAKE16, "by": "team-back", "at": N}      # a wake that stands on a real-world date: the board shows the item waiting
 item(70, mover="home-front", wake=WAKE16, wait_basis=BASIS16)                          # a front agent's item parked until a dated event
@@ -507,14 +508,14 @@ item(75, mover="home-peer2", after=["a74"])
 item(76, mover="home-peer3", needs=["decision"], ask=ASK, next=f"{OWN}: decide")       # waiting on the owner, though a session is stored as mover
 item(77, mover="home-peer", needs=["external"], next="a vendor: reply")                # waiting on someone outside
 item(78, mover="home-peer2", wake=WAKE16, wait_basis=BASIS16)                          # a dated wait, with a leftover record from an earlier episode
-server._stall_save({"a78": {"mover": "home-peer2", "ver": [B, B], "step": 2, "last": N - 100.0, "cold_at": N - 200.0}})
+stall_svc.stall_save({"a78": {"mover": "home-peer2", "ver": [B, B], "step": 2, "last": N - 100.0, "cold_at": N - 200.0}})
 ids16 = (70, 71, 73, 75, 76, 77, 78)
 before16 = {i: rd(i) for i in ids16}
 done = stk(N) + stk(N + 1800)
 gids16 = {f"a{i}" for i in ids16}
 check("16 not due: a wake with a wait_basis (front mover and background mover), a parked item, an item after an open one, a needs-decision item and a needs-external item: none is stepped, written or sent anything",
       not (set(done) & gids16) and all(rd(i) == before16[i] for i in ids16) and not [p for p in pushes() if any(f"a{i}" in p[1] for i in ids16)], (done, pushes()[-3:]))
-check("16 not due: ...and the pass keeps no record of them, a leftover one included", not (set(server._stall_load()) & gids16), server._stall_load())
+check("16 not due: ...and the pass keeps no record of them, a leftover one included", not (set(stall_svc.stall_load()) & gids16), stall_svc.stall_load())
 check("16 not due: pure: not_due says why, and nothing for an item whose work is due",
       S.not_due(rd(70), N) == "the board shows it waiting (time)" and S.not_due(rd(73), N) == "the board shows it waiting (time)" and S.not_due(rd(76), N) == "waiting on the owner"
       and S.not_due(rd(77), N) == "the board shows it waiting (relay)" and S.not_due(rd(75), N, lambda it: ["a74"]) == "the board shows it waiting (item)" and S.not_due(rd(75), N, lambda it: []) == ""
@@ -539,7 +540,7 @@ done = stk(D + 11 * MIN) + stk(D + 11 * MIN + 30)        # at most [stall] max_p
 check("16 due: ...and past 10 minutes the same items are stepped as before: a passed wake (front mover: History line only, background mover: the notice), an `after` closed, a hold released, the answers given",
       gids16 <= set(done) and all(len(log_of(i)) == 1 for i in ids16), (sorted(gids16 - set(done)), [len(log_of(i)) for i in ids16]))
 check("16 due: ...the background mover's notice went out, the front agent's did not", len(pushes_to("team-back", "a71")) == 1 and not pushes_to("home-front"), pushes()[n_push:])
-check("16 due: ...the item with the leftover record starts at the notice (step 1), not at the cold call it had reached", server._stall_load()["a78"]["step"] == 1 and "cold_at" not in server._stall_load()["a78"] and S.log_of(mt(78))[-1]["text"].endswith("sent to it again"), (server._stall_load().get("a78"), log_of(78)))
+check("16 due: ...the item with the leftover record starts at the notice (step 1), not at the cold call it had reached", stall_svc.stall_load()["a78"]["step"] == 1 and "cold_at" not in stall_svc.stall_load()["a78"] and S.log_of(mt(78))[-1]["text"].endswith("sent to it again"), (stall_svc.stall_load().get("a78"), log_of(78)))
 close(*ids16)
 for w_ in ("home-front", "team-back", "home-peer", "home-peer2", "home-peer3"): no_row(w_)
 
@@ -554,15 +555,15 @@ def err(fn, *a):
     return r, buf.getvalue()
 def fresh_pause():
     """A server restart for the pause: nothing in memory, the state file is what is left."""
-    server._STALL_PAUSE.update(rec=None, loaded=False, said="")
+    stall_svc.STALL_PAUSE.update(rec=None, loaded=False, said="")
 PAUSE_FILE = T / "state/stall_pause.json"
 H4 = 4 * 3600.0
 Q = float(int(T1 // 60) * 60 + 6 * 3600)                    # a whole minute (an ISO time here has no seconds)
 START = r"stall: paused until \w{3} \w{3} \d+(?:st|nd|rd|th) \d\d:\d\d " + re.escape(ZONE_ABBR) + r" \((.*)\)"
 cli_row("home-peer", "idle", IDLE0)
-server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-server._stall_pause_log_project = lambda: "projects/alpha"           # the fleet operator's page (the test fleet has no operator_session)
+stall_svc.stall_pause_log_project = lambda: "projects/alpha"           # the fleet operator's page (the test fleet has no operator_session)
 
 # 17a. paused_until ahead: no step until then, one start line, one end line, the pass runs again with no edit
 item(80)
@@ -584,7 +585,7 @@ check("17 paused_until passed: no further pause line while the setting stays in 
 close(80)
 
 # 17b. paused_until already past: the pass runs and nothing is logged
-fresh_pause(); server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+fresh_pause(); stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 item(81)
 set_stall(paused_until=iso(Q - 3600))
 r, e = err(stk, Q)
@@ -593,7 +594,7 @@ close(81)
 
 # 17c. enabled = false is held at most [stall] max_pause_hours (4) from when the server first saw it
 Q2 = Q + 86400
-fresh_pause(); server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+fresh_pause(); stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 item(82)
 set_stall(enabled=False)
 r, e = err(stk, Q2)
@@ -602,48 +603,48 @@ r, e = err(stk, Q2 + H4 - 60)
 check("17 enabled = false: still no step a minute before the cap, no new line", r == [] and not log_of(82) and e == "", (r, e))
 r, e = err(stk, Q2 + H4 + 1)
 check("17 enabled = false: past the cap the pass runs again (stepped) with enabled still false, one `pause ended` line", "a82" in r and e.count("stall: pause ended, the pass runs again") == 1, (r, e))
-r, e = err(server._stall_pause_check, Q2 + 5 * 3600)
-check("17 enabled = false: ...and the same setting does not start another pause or repeat the line", r is None and e == "" and server._stall_on(Q2 + 5 * 3600), (r, e))
+r, e = err(stall_svc.stall_pause_check, Q2 + 5 * 3600)
+check("17 enabled = false: ...and the same setting does not start another pause or repeat the line", r is None and e == "" and stall_svc.stall_on(Q2 + 5 * 3600), (r, e))
 set_stall()
-r, e = err(server._stall_pause_check, Q2 + 6 * 3600)
-check("17 enabled = false: ...turning it back on after the cap logs nothing and clears the record", r is None and e == "" and not PAUSE_FILE.exists(), (r, e, server._STALL_PAUSE))
+r, e = err(stall_svc.stall_pause_check, Q2 + 6 * 3600)
+check("17 enabled = false: ...turning it back on after the cap logs nothing and clears the record", r is None and e == "" and not PAUSE_FILE.exists(), (r, e, stall_svc.STALL_PAUSE))
 set_stall(enabled=False)
-r, e = err(server._stall_pause_check, Q2 + 7 * 3600)
+r, e = err(stall_svc.stall_pause_check, Q2 + 7 * 3600)
 check("17 enabled = false: ...setting it false again is a new pause: a start line, a new cap", r == Q2 + 7 * 3600 + H4 and re.findall(START, e) == ["enabled=false, capped at 4 h"], (r, e))
 # a restart does not reset the clock: the start time is the state file's
 fresh_pause()
-r, e = err(server._stall_pause_check, Q2 + 10 * 3600)
+r, e = err(stall_svc.stall_pause_check, Q2 + 10 * 3600)
 check("17 a restart keeps the pause's start: the same end time, no new start line", r == Q2 + 7 * 3600 + H4 and e == "", (r, e))
 check("17 a restart keeps the pause's start: the file holds the first sighting", json.loads(PAUSE_FILE.read_text())["since"] == Q2 + 7 * 3600, PAUSE_FILE.read_text())
 fresh_pause()
-r, e = err(server._stall_pause_check, Q2 + 7 * 3600 + H4 + 1)
+r, e = err(stall_svc.stall_pause_check, Q2 + 7 * 3600 + H4 + 1)
 check("17 a restart after the cap: the pass runs, the end is logged once", r is None and e.count("stall: pause ended, the pass runs again") == 1, (r, e))
 close(82)
 
 # 17d. a paused_until further out than the cap is cut to the cap; [stall] max_pause_hours changes the cap
 Q3 = Q2 + 86400
 set_stall(paused_until=iso(Q3 + 10 * 3600)); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-r, e = err(server._stall_pause_check, Q3)
+r, e = err(stall_svc.stall_pause_check, Q3)
 check("17 paused_until beyond the cap: the pause ends at the cap, and the line says so", r == Q3 + H4 and re.findall(START, e) == ["paused_until, capped at 4 h"], (r, e))
-r, e = err(server._stall_pause_check, Q3 + H4 + 1)
+r, e = err(stall_svc.stall_pause_check, Q3 + H4 + 1)
 check("17 paused_until beyond the cap: ...and past it the pass runs again though the file still names a later time", r is None and e.count("pause ended") == 1, (r, e))
 Q4 = Q3 + 86400
 set_stall(paused_until=iso(Q4 + 10 * 3600), max_pause_hours=1); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-r, e = err(server._stall_pause_check, Q4)
+r, e = err(stall_svc.stall_pause_check, Q4)
 check("17 [stall] max_pause_hours = 1: the cap is one hour", r == Q4 + 3600 and re.findall(START, e) == ["paused_until, capped at 1 h"], (r, e))
 Q5 = Q4 + 86400
 set_stall(enabled=False, paused_until=iso(Q5 + 3600)); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-r, e = err(server._stall_pause_check, Q5)
+r, e = err(stall_svc.stall_pause_check, Q5)
 check("17 enabled = false with a nearer paused_until: the earlier end holds", r == Q5 + 3600 and re.findall(START, e) == ["paused_until"], (r, e))
 Q6 = Q5 + 86400
 set_stall(enabled=False, paused_until=iso(Q6 + 10 * 3600)); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-r, e = err(server._stall_pause_check, Q6)
+r, e = err(stall_svc.stall_pause_check, Q6)
 check("17 enabled = false with a paused_until beyond the cap: cut to the cap", r == Q6 + 4 * 3600 and re.findall(START, e) == ["paused_until, capped at 4 h"], (r, e))
 set_stall(max_pause_hours="x", enabled=False); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-r, e = err(server._stall_pause_check, Q6)
+r, e = err(stall_svc.stall_pause_check, Q6)
 check("17 [stall] max_pause_hours that is not a number: the default (4 h)", r == Q6 + H4, (r, e))
 set_stall(paused_until="tomorrow"); fresh_pause(); PAUSE_FILE.unlink(missing_ok=True)
-r, e = err(server._stall_pause_check, Q6)
+r, e = err(stall_svc.stall_pause_check, Q6)
 check("17 a paused_until that is not a time is ignored (the pass runs), and the notes name it", r is None and e == "" and any("paused_until" in n and "ignored" in n for n in server._cfg.stall_notes()), (r, e, server._cfg.stall_notes()))
 
 # 17e. doctor and the start (config.notes) and the reload name a pause and when it ends
@@ -652,7 +653,7 @@ check("17 notes: nothing paused: no stall note", server._cfg.notes() == [] and s
 set_stall(paused_until=iso(now0 + 3600))
 n1 = server._cfg.stall_notes()
 check("17 notes: a pause the server has not read yet: named with its end, counted from now", len(n1) == 1 and "takes no step until" in n1[0] and "counted from now" in n1[0] and "runs again on its own" in n1[0] and ZONE_ABBR in n1[0], n1)
-err(server._stall_pause_check)
+err(stall_svc.stall_pause_check)
 n2 = server._cfg.stall_notes()
 check("17 notes: ...once the server has read it: its end, no 'counted from now'", len(n2) == 1 and "takes no step until" in n2[0] and "counted from now" not in n2[0] and "(paused_until)" in n2[0], n2)
 check("17 notes: ...config.notes (doctor, the start) carries it too", any("takes no step until" in n for n in server._cfg.notes()), server._cfg.notes())
@@ -692,7 +693,7 @@ check("17 pure: the setting no longer asking for a pause clears the record, with
 REFUSED = r"stall: pause refused, the pass keeps running: (.*)"
 H24 = 24 * 3600.0
 def reset18():
-    fresh_pause(); PAUSE_FILE.unlink(missing_ok=True); server._stall_save({}); server._stall_write({"_pass": {"since": B}})
+    fresh_pause(); PAUSE_FILE.unlink(missing_ok=True); stall_svc.stall_save({}); stall_svc.stall_write({"_pass": {"since": B}})
 def oliver(i, *stamps, **extra):
     """An item that carries Oliver's answers dated `stamps` (a closed item: the pass leaves it alone)."""
     item(i, status="completed", answers=[{"ts": t, "kind": "comment", "text": "Pause it.", "via": "board"} for t in stamps], **extra)
@@ -709,17 +710,17 @@ check("18 no pause_item: the pass keeps running (the item is stepped) and the jo
 check("18 no pause_item: ...no pause starts (no `paused until` line)", not re.findall(START, e), e)
 r, e = err(stk, Q7 + 30)
 check("18 no pause_item: ...the next tick logs nothing more (once per config load, not per tick)", e == "", e)
-r, e = err(server._stall_pause_check, Q7 + 60)
-check("18 no pause_item: ...many checks, still nothing more, and the pass is on", e == "" and r is None and server._stall_on(Q7 + 60), (r, e))
-server._stall_pause_reload()
-r, e = err(server._stall_pause_check, Q7 + 90)
+r, e = err(stall_svc.stall_pause_check, Q7 + 60)
+check("18 no pause_item: ...many checks, still nothing more, and the pass is on", e == "" and r is None and stall_svc.stall_on(Q7 + 60), (r, e))
+stall_svc.stall_pause_reload()
+r, e = err(stall_svc.stall_pause_check, Q7 + 90)
 check("18 no pause_item: a reload or a start (a new config load) logs the refusal once more", len(re.findall(REFUSED, e)) == 1 and e.count("\n") == 1, e)
 nn = server._cfg.stall_notes()
 check("18 no pause_item: doctor and the start show it: refused, the pass keeps running, why", len(nn) == 1 and "pause_item names no board item" in nn[0] and "refused" in nn[0] and "keeps running" in nn[0] and "takes no step until" not in nn[0], nn)
 check("18 no pause_item: ...config.notes (doctor, the start) carries it", any("refused" in n for n in server._cfg.notes()), server._cfg.notes())
 check("18 no pause_item: the record keeps when the server first saw the setting, marked refused", json.loads(PAUSE_FILE.read_text()).get("refused") is True and json.loads(PAUSE_FILE.read_text())["since"] == Q7, PAUSE_FILE.read_text() if PAUSE_FILE.exists() else None)
 set_stall()
-r, e = err(server._stall_pause_check, Q7 + 120)
+r, e = err(stall_svc.stall_pause_check, Q7 + 120)
 check("18 no pause_item: the setting going away logs nothing (no `pause ended`: nothing had paused) and clears the record", r is None and e == "" and not PAUSE_FILE.exists() and server._cfg.stall_notes() == [], (r, e))
 close(96)
 
@@ -761,9 +762,9 @@ check("18 an item with no answer yet: refused, the pass runs", "a33" in r and le
 oliver(95, Q9 + 600)
 r, e = err(stk, Q9 + 700)
 check("18 ...he answers: the next tick honors the pause (no step, the start line)", r == [] and re.findall(START, e) == ["enabled=false, capped at 4 h"] and not re.findall(REFUSED, e), (r, e))
-r, e = err(server._stall_pause_check, Q9 + 800)
+r, e = err(stall_svc.stall_pause_check, Q9 + 800)
 check("18 ...its end is 4 hours from when the setting was first seen, not from his answer", r == Q9 + H4 and e == "", (r, e))
-r, e = err(server._stall_pause_check, Q9 + H4 + 1)
+r, e = err(stall_svc.stall_pause_check, Q9 + H4 + 1)
 check("18 ...and it ends on its own at that time (one `pause ended` line)", r is None and e.count("stall: pause ended, the pass runs again") == 1, (r, e))
 close(33)
 
@@ -814,9 +815,9 @@ late = [l for l in e.splitlines() if "started late" in l]
 check("18 late: his answer comes after the cap has passed: the pause starts then (no step), with ONE line saying it started late", r == [] and len(late) == 1 and e.count("stall: paused until") == 1 and not re.findall(REFUSED, e), (r, e))
 rec_ = json.loads(PAUSE_FILE.read_text())
 check("18 late: the record's clock restarted at the moment it was honored, no longer marked refused", rec_.get("since") == Q9c + H4 + 3700 and "refused" not in rec_ and not rec_.get("ended"), rec_)
-r, e = err(server._stall_pause_check, Q9c + H4 + 3800)
+r, e = err(stall_svc.stall_pause_check, Q9c + H4 + 3800)
 check("18 late: it ends 4 hours after it was honored, and logs nothing more meanwhile", r == Q9c + H4 + 3700 + H4 and e == "", (r, e))
-r, e = err(server._stall_pause_check, Q9c + 2 * H4 + 3701)
+r, e = err(stall_svc.stall_pause_check, Q9c + 2 * H4 + 3701)
 check("18 late: and it ends on its own then (one `pause ended` line)", r is None and e.count("stall: pause ended, the pass runs again") == 1, (r, e))
 close(36)
 reset18(); item(915)
@@ -824,7 +825,7 @@ answered(53)
 raw_stall(enabled=False, pause_item="a53", max_pause_hours=96)
 r, e = err(stk, Q9c)
 answered(53, (Q9c + 3 * 86400, {"kind": "comment", "text": "pause"}))
-r, e = err(server._stall_pause_check, Q9c + 3 * 86400 + 60)
+r, e = err(stall_svc.stall_pause_check, Q9c + 3 * 86400 + 60)
 check("18 late: still capped at 24 hours from when it was honored (max_pause_hours = 96)", r == Q9c + 3 * 86400 + 60 + H24 and e.count("started late") == 1, (r, e))
 close(915)
 rLa, eLa, wLa, vLa = S.pause(False, "", ZONE_TZ, 4, {"sig": "0|", "since": 1000.0, "refused": True}, 1000.0 + 5 * 3600, lambda since: "")
@@ -840,24 +841,24 @@ g7 = server._gh.norm("board#7"); (T / f"store/{g7[0]}").mkdir(exist_ok=True)
                                                            "metadata": {"project": "projects/alpha", "answers": [{"ts": 9e9, "kind": "decision", "choice": "Pause", "via": "board"}]}}))
 Q10 = Q9 + 86400
 reset18(); raw_stall(enabled=False, pause_item="board#7")
-r, e = err(server._stall_pause_check, Q10)
+r, e = err(stall_svc.stall_pause_check, Q10)
 check("18 pause_item = board#7: found in the issue-numbered store and honored", r == Q10 + H4 and len(re.findall(START, e)) == 1, (r, e))
 reset18(); raw_stall(enabled=False, pause_item="#7")
-r, e = err(server._stall_pause_check, Q10)
+r, e = err(stall_svc.stall_pause_check, Q10)
 check("18 pause_item = #7: the same", r == Q10 + H4, (r, e))
 
 # 18e. no pause is longer than 24 hours
 Q11 = Q10 + 86400
 reset18(); raw_stall(enabled=False, pause_item="a97", max_pause_hours=48)
-r, e = err(server._stall_pause_check, Q11)
+r, e = err(stall_svc.stall_pause_check, Q11)
 check("18 max_pause_hours = 48: the pause is cut to 24 hours", r == Q11 + H24 and re.findall(START, e) == ["enabled=false, capped at 24 h"], (r, e))
 reset18(); raw_stall(paused_until=iso(Q11 + 3 * 86400), pause_item="a97", max_pause_hours=96)
-r, e = err(server._stall_pause_check, Q11)
+r, e = err(stall_svc.stall_pause_check, Q11)
 check("18 a paused_until three days out (max_pause_hours = 96): cut to 24 hours from when it was first seen", r == Q11 + H24 and re.findall(START, e) == ["paused_until, capped at 24 h"], (r, e))
-r, e = err(server._stall_pause_check, Q11 + H24 + 1)
+r, e = err(stall_svc.stall_pause_check, Q11 + H24 + 1)
 check("18 ...and it ends there, the pass runs again", r is None and e.count("pause ended") == 1, (r, e))
 reset18(); raw_stall(paused_until=iso(Q11 + 20 * 3600), pause_item="a97", max_pause_hours=96)
-r, e = err(server._stall_pause_check, Q11)
+r, e = err(stall_svc.stall_pause_check, Q11)
 check("18 a paused_until inside the 24 hours keeps its own time", r == Q11 + 20 * 3600 and re.findall(START, e) == ["paused_until"], (r, e))
 
 # 18f. a reload of a config file with the switch-off and no pause_item
@@ -903,7 +904,7 @@ check("19 kept: the cold call that names the mover leaves the item with it: same
       len(COLD_MSGS) == n_cold + 1 and mt(64).get("mover") == "home-peer2" and "decision" not in (mt(64).get("needs") or []) and not mt(64).get("ask") and rd(64).get("written_by") != "cold-call"
       and not ho(64).get("recovery_at") and not recovery_pushes("a64") and (ho(64).get("cold") or {}).get("state") == "done", (mt(64), ho(64)))
 check("19 kept: …the History line says the call named its mover and the item was left with it", any("named its mover" in e["text"] and "left with it" in e["text"] for e in log_of(64)), log_of(64))
-check("19 kept: …the episode is marked kept, and it is spent (the pass leaves the item alone)", (server._stall_load().get("a64") or {}).get("kept") and S.spent(server._stall_load()["a64"], T2 + 1), server._stall_load().get("a64"))
+check("19 kept: …the episode is marked kept, and it is spent (the pass leaves the item alone)", (stall_svc.stall_load().get("a64") or {}).get("kept") and S.spent(stall_svc.stall_load()["a64"], T2 + 1), stall_svc.stall_load().get("a64"))
 told = [p for p in pushes_to("home-peer2", "a64") if "fresh session read it" in p[1]]
 check("19 kept: …the mover is told once, with how to store a wait the server watches", len(told) == 1 and "wait_kind=" in told[0][1], pushes_to("home-peer2", "a64"))
 n_push = len(pushes_to("home-peer2", "a64"))
@@ -918,14 +919,14 @@ cold("no json at all here")
 # ================================================================ 20. a confirm ends the episode
 item(65); cli_row("home-peer", "idle", IDLE0)
 stk(T1)
-check("20 confirm: (setup) the notice went at T1, the episode is on step 1", server._stall_load()["a65"]["step"] == 1, server._stall_load().get("a65"))
+check("20 confirm: (setup) the notice went at T1, the episode is on step 1", stall_svc.stall_load()["a65"]["step"] == 1, stall_svc.stall_load().get("a65"))
 d = rd(65); d["confirmed"] = T2 - 30.0; d["written_by"] = "home-peer"; (T / "store/a/65.json").write_text(json.dumps(d))     # its mover confirms it just before the cold call is due; nobody else writes it
 n_cold = len(COLD_MSGS)
 done = stk(T2)
-check("20 confirm: the mover's confirm ends the episode: no cold call at T2, the count starts over from the confirm (step 0 again)", "a65" not in done and len(COLD_MSGS) == n_cold and server._stall_load()["a65"]["step"] == 0
-      and server._stall_load()["a65"].get("conf") == T2 - 30.0, (done, server._stall_load().get("a65")))
+check("20 confirm: the mover's confirm ends the episode: no cold call at T2, the count starts over from the confirm (step 0 again)", "a65" not in done and len(COLD_MSGS) == n_cold and stall_svc.stall_load()["a65"]["step"] == 0
+      and stall_svc.stall_load()["a65"].get("conf") == T2 - 30.0, (done, stall_svc.stall_load().get("a65")))
 done = stk(T2 - 30.0 + 10 * MIN + 1)
-check("20 confirm: …and the first step comes ten minutes after the confirm", "a65" in done and server._stall_load()["a65"]["step"] == 1, (done, server._stall_load().get("a65")))
+check("20 confirm: …and the first step comes ten minutes after the confirm", "a65" in done and stall_svc.stall_load()["a65"]["step"] == 1, (done, stall_svc.stall_load().get("a65")))
 old = S.episode({"mover": "home-peer", "ver": [1.0, 1.0], "step": 1, "last": 5.0}, "home-peer", [1.0, 1.0], lambda a, b: a == b, 77.0)
 check("20 confirm: pure: an entry written before the confirm was recorded adopts the item's confirm and keeps its step; a later confirm starts over",
       old["step"] == 1 and old["conf"] == 77.0 and S.episode(old, "home-peer", [1.0, 1.0], lambda a, b: a == b, 77.0) is old and S.episode(old, "home-peer", [1.0, 1.0], lambda a, b: a == b, 99.0)["step"] == 0, old)
@@ -937,7 +938,7 @@ stk(T1)
 d = rd(66); d["confirmed"] = T2 - 30.0; d["written_by"] = "home-other"; (T / "store/a/66.json").write_text(json.dumps(d))     # another session confirms it: that says nothing about the mover
 n_cold = len(COLD_MSGS)
 done = stk(T2)
-check("21 confirm: another session's confirm does not restart the episode: the cold call comes at T2 as it would have", len(COLD_MSGS) == n_cold + 1 and not server._stall_load().get("a66", {}).get("restarts"), (done, server._stall_load().get("a66")))
+check("21 confirm: another session's confirm does not restart the episode: the cold call comes at T2 as it would have", len(COLD_MSGS) == n_cold + 1 and not stall_svc.stall_load().get("a66", {}).get("restarts"), (done, stall_svc.stall_load().get("a66")))
 same = lambda a, b: a == b
 rec = {"mover": "home-peer", "ver": [1.0, 1.0], "conf": 10.0, "step": 1, "last": 5.0}
 r1 = S.episode(rec, "home-peer", [1.0, 1.0], same, 20.0)
@@ -958,26 +959,26 @@ stk(T2 - 290.0)
 d = rd(68); d["confirmed"] = T2 - 30.0; d["written_by"] = "home-other"; (T / "store/a/68.json").write_text(json.dumps(d))
 done = stk(T2)
 check("21 confirm: the mover confirmed, then another session did: the entry keeps the mover's confirm and the minutes still count from it (nothing due at T2)",
-      "a68" not in done and server._stall_load()["a68"].get("conf") == T2 - 300.0 and server._stall_load()["a68"]["step"] == 0, (done, server._stall_load().get("a68")))
+      "a68" not in done and stall_svc.stall_load()["a68"].get("conf") == T2 - 300.0 and stall_svc.stall_load()["a68"]["step"] == 0, (done, stall_svc.stall_load().get("a68")))
 done = stk(T2 - 300.0 + 10 * MIN + 1)
-check("21 confirm: …and the first step comes ten minutes after the mover's confirm", "a68" in done, (done, server._stall_load().get("a68")))
+check("21 confirm: …and the first step comes ten minutes after the mover's confirm", "a68" in done, (done, stall_svc.stall_load().get("a68")))
 check("21 confirm: pure: a confirm of 0 (not the mover's) or an older one leaves the mover's `conf` as it was", S.episode(rec, "home-peer", [1.0, 1.0], same, 0.0) is rec and rec["conf"] == 10.0, rec)
 close(68)
 
 # the tick does not overwrite a `kept` mark that the cold call wrote while the pass ran
 item(67); cli_row("home-peer", "idle", IDLE0)
 stk(T1)
-orig_cold = server._stall_cold
+orig_cold = stall_svc.stall_cold
 def cold_keeps_meanwhile(gid, who, now, minutes):
-    with server._STALL_LOCK:
-        st = server._stall_load(); rec = dict(st[gid]); rec["kept"] = now; rec["marker"] = "written during the tick"; st[gid] = rec; server._stall_save(st)
+    with stall_svc.STALL_LOCK:
+        st = stall_svc.stall_load(); rec = dict(st[gid]); rec["kept"] = now; rec["marker"] = "written during the tick"; st[gid] = rec; stall_svc.stall_save(st)
     return "cold"
-server._stall_cold = cold_keeps_meanwhile
+stall_svc.stall_cold = cold_keeps_meanwhile
 try:
     stk(T2)
 finally:
-    server._stall_cold = orig_cold
-check("21 kept: a `kept` mark written while the pass ran survives the pass's own save", (server._stall_load().get("a67") or {}).get("marker") == "written during the tick" and (server._stall_load().get("a67") or {}).get("kept"), server._stall_load().get("a67"))
+    stall_svc.stall_cold = orig_cold
+check("21 kept: a `kept` mark written while the pass ran survives the pass's own save", (stall_svc.stall_load().get("a67") or {}).get("marker") == "written during the tick" and (stall_svc.stall_load().get("a67") or {}).get("kept"), stall_svc.stall_load().get("a67"))
 close(67)
 
 # ================================================================ 22. the one ladder ([ladder] enabled): the stall pass takes the later rungs of an entry the hand-off audit or the dates pass made
@@ -987,24 +988,24 @@ def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "no turn running" in p[1]]
 cold("no json at all here"); COLD_MSGS.clear(); set_cfg(); set_stall()
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, as at the top (an earlier section's config swap may have dropped it)
-check("22 off: the flag is off by default: no [ladder] section reads as off", not server._ladder_on() and server._ladder_look() == 30.0, None)
+check("22 off: the flag is off by default: no [ladder] section reads as off", not ladder_svc.ladder_on() and ladder_svc.ladder_look() == 30.0, None)
 ladder_cfg(True)
-check("22 on: [ladder] enabled = true turns it on (only a TOML true), look_minutes is the look time (30 by default; a bad value is the default)", server._ladder_on() and server._ladder_look() == 30.0
-      and (ladder_cfg(True, look_minutes=20) or server._ladder_look() == 20.0) and (ladder_cfg(True, look_minutes="x") or server._ladder_look() == 30.0) and (ladder_cfg("yes") or not server._ladder_on()), None)
+check("22 on: [ladder] enabled = true turns it on (only a TOML true), look_minutes is the look time (30 by default; a bad value is the default)", ladder_svc.ladder_on() and ladder_svc.ladder_look() == 30.0
+      and (ladder_cfg(True, look_minutes=20) or ladder_svc.ladder_look() == 20.0) and (ladder_cfg(True, look_minutes="x") or ladder_svc.ladder_look() == 30.0) and (ladder_cfg("yes") or not ladder_svc.ladder_on()), None)
 ladder_cfg(True)
 
 # A. a pane with no turn running starts no ladder: the items come to it from the dates pass's entry and the hand-off audit, not from the stall pass (the rungs themselves are tests/ladder_silence_scenario.py's)
 item(83); cli_row("home-peer", "idle", IDLE0)
 check("22 A: with the ladder on, a pane idle for 10 minutes, for 41 minutes and for hours starts nothing: no notice, no cold call, no step taken",
-      all("a83" not in stk(t) for t in (T1, T1 + 31 * MIN, T1 + 41 * MIN + 1, T1 + 5 * 3600)) and not stall_notices("home-peer", 83) and not COLD_MSGS and not (server._stall_load().get("a83") or {}).get("step"), (pushes_to("home-peer", "a83"), COLD_MSGS, server._stall_load().get("a83")))
+      all("a83" not in stk(t) for t in (T1, T1 + 31 * MIN, T1 + 41 * MIN + 1, T1 + 5 * 3600)) and not stall_notices("home-peer", 83) and not COLD_MSGS and not (stall_svc.stall_load().get("a83") or {}).get("step"), (pushes_to("home-peer", "a83"), COLD_MSGS, stall_svc.stall_load().get("a83")))
 close(83)
 
 # D. an untaken hand-off to a session is the hand-off audit's: the stall pass does not start it, so one item never has two ladders
 item(86, mover="home-peer", handoff=H.new_record("home-peer", U["home-peer"], "home-send", IDLE0 + 5 * MIN, delivered_at=IDLE0 + 5 * MIN + 10)); cli_row("home-peer", "idle", IDLE0)
-check("22 D: a hand-off that nobody took yet is left alone by the stall pass, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in server._stall_load(), (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
+check("22 D: a hand-off that nobody took yet is left alone by the stall pass, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in stall_svc.stall_load(), (pushes_to("home-peer", "a86"), stall_svc.stall_load().get("a86")))
 check("22 D: …until the hand-off audit brings it (its entry says so), and then the ladder takes the later rungs here, once, in its order",
-      handoff_svc.handoff_tick(now=T1 + 61 * MIN, only=["a86"]) == ["a86"] and (server._stall_load().get("a86") or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a86")) == 1
-      and "a86" not in stk(T1 + 62 * MIN) and len(pushes_to("home-peer", "a86")) == 1 and "a86" in stk(T1 + 92 * MIN) and len(pushes_to("home-peer", "a86")) == 2, (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
+      handoff_svc.handoff_tick(now=T1 + 61 * MIN, only=["a86"]) == ["a86"] and (stall_svc.stall_load().get("a86") or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a86")) == 1
+      and "a86" not in stk(T1 + 62 * MIN) and len(pushes_to("home-peer", "a86")) == 1 and "a86" in stk(T1 + 92 * MIN) and len(pushes_to("home-peer", "a86")) == 2, (pushes_to("home-peer", "a86"), stall_svc.stall_load().get("a86")))
 close(86)
 
 # E0. the flag off from the start: the old ladder's own first step and the cold call after it
@@ -1012,7 +1013,7 @@ ladder_cfg(False)
 item(88, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
 stk(T1)
 n_cold = len(COLD_MSGS)
-check("22 E0 off: with the flag off from the start the first step is the old ladder's (the notice, step 1) and the next is the cold call 10 minutes later", server._stall_load()["a88"]["step"] == 1 and "a88" in stk(T2) and len(COLD_MSGS) == n_cold + 1, (server._stall_load().get("a88"), COLD_MSGS[-1:]))
+check("22 E0 off: with the flag off from the start the first step is the old ladder's (the notice, step 1) and the next is the cold call 10 minutes later", stall_svc.stall_load()["a88"]["step"] == 1 and "a88" in stk(T2) and len(COLD_MSGS) == n_cold + 1, (stall_svc.stall_load().get("a88"), COLD_MSGS[-1:]))
 close(88)
 
 # F. the ladder steps read in the old table when the flag is turned off
