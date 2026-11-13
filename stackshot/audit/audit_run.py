@@ -177,6 +177,7 @@ class Env:
         self.front = kw.get("front")                # (name, project) -> whether that session is a front agent of the project (the server's `_front_keeper`); None = the role map's `front` role
         self.front_only_of = kw.get("front_only")   # (project) -> whether the project is front-only (anchors.front_only); None = read it from the registry (`registry` when given), except that an environment which names the builder itself (`builder`) says the project has one
         self.front_strict = kw.get("front_strict")  # (name, project) -> whether that session is a front agent, answering True when it cannot tell (the server's `_front_keeper(strict=True)`); the queue rule's test (model/queued.py)
+        self.front_or_unread = kw.get("front_or_unread")   # (name, project) -> whether that session is a front agent, answering True when the role map cannot be read (the server's `_front_keeper(unread_front=True)`); the hourly audit's test (audit/hourly.py)
         self._told: set[str] = set()                # the projects whose "front-only, no -main agent" line this run has already printed
 
     def role_map(self) -> dict[str, dict[str, Any]]:
@@ -210,6 +211,26 @@ class Env:
             if self.roles is None:
                 from stackshot.anchors import anchors as _anc  # noqa: PLC0415
                 roles = _anc.file_roles(_anc.registry())      # raises when the registry cannot be read
+            else:
+                roles = self.roles
+            return any(str(k).strip().lower() == name and isinstance(v, dict) and v.get("role") == "front" for k, v in roles.items())
+        except Exception:  # noqa: BLE001
+            return True
+
+    def is_front_or_unread(self, who: Any, project: str = "") -> bool:
+        """Is `who` a front agent, for the hourly audit (audit/hourly.py)? As `is_front` where the role map was read, but a role map that cannot be read (or holds no role at all) counts as front: a front agent's items are never handed
+        on, so an unreadable registry leaves the item where it is, where `is_front` would read the mover as a builder. The silence pass and the others keep `is_front`."""
+        try:
+            if self.front_or_unread:
+                return bool(self.front_or_unread(who, project))
+            if self.front:
+                return bool(self.front(who, project))
+            name = str(who or "").strip().lower()
+            if self.roles is None:      # the role map is read here: one that is empty (an unreadable registry reads {}) is no proof that nobody is front
+                from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+                roles = _anc.file_roles(_anc.registry())
+                if not roles:
+                    return True
             else:
                 roles = self.roles
             return any(str(k).strip().lower() == name and isinstance(v, dict) and v.get("role") == "front" for k, v in roles.items())

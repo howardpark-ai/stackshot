@@ -37,6 +37,21 @@ def read(letter: str, name: str) -> dict[str, Any]:
         return {}
 
 
+def sessions_unreadable() -> list[str]:
+    """The machine letters whose sessions.json cannot be read as an object (absent, torn or not JSON): `read` gives {} for each, so an index built from `read` alone is partial without saying so.
+    The view writes machine.json and sessions.json together for every machine it holds (clients.py `_materialize`), so a letter with the one and not the other is a read that failed, never a machine with no sessions."""
+    out: list[str] = []
+    for L in letters():
+        try:
+            with open(FLEET_DIR / L / "sessions.json", encoding="utf-8") as f:
+                ok = isinstance(json.load(f), dict)
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            out.append(L)
+    return out
+
+
 def names() -> dict[str, str]:
     """letter → fleet name: session-names.tsv first (a box with no fleet state yet), then the fleet state's own `fleet` name."""
     out: dict[str, str] = {}
