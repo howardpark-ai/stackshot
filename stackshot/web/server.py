@@ -1263,6 +1263,9 @@ def project_ref(x: str) -> dict[str, Any] | None:
 # A background agent whose mandate never works items (the maintainer that merges and deploys, the daily audit) is listed in
 # stackshot.toml [pilot] never_named and is never named at either moment, so a release request that cites an item in passing
 # leaves that item alone; such an agent can still be named by hand (needs=). Read at each naming, so a reload applies it.
+# A message (moment 1) never leaves the item with a second mover: when the needs that would result are refused by the guards' one-mover test
+# (model_guards.second_mover_in), or the item stores another session as its mover, the agent is not named, the item is untouched and the reply says who moves it
+# and that update(mover=) hands it over (_one_mover_clash). A background agent of the item's project is always named. Moment 2 is the agent's own work and is not judged.
 # _ID_FORM, _ID_END and _ITEM_REF (an id written as a plain word) and _QUOTED and _plain_text (the text with its code and quotes blanked) are model/ids.py's.
 
 
@@ -1313,7 +1316,32 @@ def _never_named(agent: str, nm: dict[str, str] | None = None) -> bool:
     return any(x == agent or _anc.canonical(x, nm) == me for x in listed)
 
 
-def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str, tail: str = "", nm: dict[str, str] | None = None) -> str:
+def _one_mover_clash(item: dict[str, Any], agent: str) -> str:
+    """Why naming `agent` in the item's needs would leave it with a second mover, in words ("<session> already moves it", or that it waits on the decision); "" when it would not. The test is
+    the model guards' own (model_guards.second_mover_in) on the needs as they would stand, so a naming this lets through is never refused on the mover's next write, and it also reads a mover the
+    item stores (metadata.mover) when needs does not name it. A background agent of the item's project is never counted by the guards, so it is always named, whatever the item holds.
+    Off with [model] one_mover = false or guards = false."""
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    if not bool(_cfg.get("model", "one_mover", default=True)) or not _model_guards_on():
+        return ""
+    try:
+        project, ctx = str(meta.get("project") or ""), _mg.Ctx(label=_session_label, shown=_gh.shown)
+        if ctx.background_of(agent, project):
+            return ""
+        needs_now = _needs_of(meta)
+        if _mg.second_mover_in([*needs_now, _store_ref(agent)], project, ctx):
+            others = _mg.counted_movers(needs_now, project, ctx)
+            return f"{', '.join(_session_label(x) for x in others)} already moves it" if others else f"it waits on {_model.owner_display()}'s call (needs decision)"
+        stored = _model.norm_who(meta.get("mover"))
+        if stored and not _model.is_owner(stored) and not ctx.background_of(stored, project) and not any(_anc.canonical(stored) == _anc.canonical(x) for x in needs_now):
+            return f"{_session_label(stored)} already moves it"
+        return ""
+    except Exception as e:  # noqa: BLE001  — a registry that cannot be read names the agent as before
+        print(f"naming: one-mover check failed for {agent}: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return ""
+
+
+def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str, tail: str = "", nm: dict[str, str] | None = None, one_mover: bool = False) -> str:
     """Name a background agent in an open item's needs as the server's own act: `why` is the record's line ("handover message from
     my-board", "update by my-engineer"), `tail` the mover's notice's words ("handed over", "after its
     update"; "" tells the mover nothing: a close's own notice names the closer), `writer` the session whose act it was (a mover
@@ -1331,6 +1359,10 @@ def _auto_name(gid: str, item: dict[str, Any], agent: str, writer: str, why: str
     me = _anc.canonical(agent, nm)
     if any(_anc.canonical(s, nm) == me for s in _needs_sessions(meta)):
         return ""
+    if one_mover:         # a handover message never leaves the item with a second mover: the next write of its mover would be refused
+        clash = _one_mover_clash(item, agent)
+        if clash:
+            return f"\n(did not name {agent} in {_gh.shown(gid)}'s needs: {clash}, and an item has one mover. To hand it to {agent}, write the item: update(mover={agent}))"
     prev = _telling.holder(item)       # the session that held the item before the agent is named hears of it
     already = list(_needs_sessions(meta))
     _needs_store(meta, _canon_needs([*_needs_of(meta), _store_ref(agent)], nm))
@@ -1354,7 +1386,7 @@ def _name_on_handover(to: str, text: str, sender: str, idx: dict[str, dict[str, 
             it = _load(g)
         except ToolError:
             continue
-        out += _auto_name(g, it, agent, sender, f"handover message from {_session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm)
+        out += _auto_name(g, it, agent, sender, f"handover message from {_session_label(sender)}" + (f" ({via})" if via else ""), "handed over", nm, one_mover=True)
     if out:
         _publish()
     return out
@@ -10808,7 +10840,7 @@ _MESSAGE_DESC = (
     f"ask a front agent (a session {OWNER} talks to; the sessions tool shows each role) for input {OWNER} must give: message(to=\"widgets-main\", sender=\"my-x\", text=\"{_FOR_OWNER}\\nDecide whether the export ships on Friday; I would ship it.\"); "
     "a plain result (a build is done, it is live, an FYI): message(to=\"projects/widgets\", sender=\"my-x\", text=\"PR 12 is live\", fyi=true), or put it on the item (update, complete); "
     "a question to a background agent, the id cited only for context: message(to=\"widgets-builder\", sender=\"my-x\", text=\"Does `board#N` need the export in the nightly run?\"); "
-    "a hand-off of an item's done step, which names the item id, written as a plain word, not in backticks or quotes: message(to=\"widgets-builder\", sender=\"my-x\", text=\"board#N: the design is done, build the export\"), and the server then names that agent in the item's needs. "
+    "a hand-off of an item's done step, which names the item id, written as a plain word, not in backticks or quotes: message(to=\"widgets-builder\", sender=\"my-x\", text=\"board#N: the design is done, build the export\"), and the server then names that agent in the item's needs, unless that would leave the item with a second mover (another session already moves it, or it waits on a decision): the agent is then not named, the reply says so in one line, and the way to hand the item over is update(mover=<agent>). "
     "An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item. "
     f"A message to a front agent is refused unless its first line carries {_FOR_OWNER}, and the mark is for what {OWNER} has to do (a decision, a go-ahead, a step only he can take): a build hand-back, a result, a screenshot, \"it's live\" or an FYI goes to the project (to=projects/<slug>), where the router rules it and passes on what needs the agent; a marked message that says nothing is needed from him (nothing needed from {OWNER}, no action needed, FYI, for the record, no reply needed, …) is refused too. "
     "A background agent's message to a front agent (marked, or a project message that opens For <front agent>) that names one to three board items is held back, not delivered, only when it clearly reads as a plain status report: the reply then begins 'Not delivered: written onto <item> as a History line from <sender>, because ...' and the message sits on the item for the front agent to read there. "
