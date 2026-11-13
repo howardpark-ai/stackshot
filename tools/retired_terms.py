@@ -23,9 +23,10 @@ The config (see tests/retired_terms.toml for the live one, with every allow entr
     exclude = ["tests/*"]                # optional globs left out
     skip_keys = ["name", "type"]         # optional, json only: keys whose values are names, not text (a parameter called owner)
     skip_terms = ["owner"]               # optional: retired words this scan does not check (a guide that says "the owner" for the instance's person throughout)
-    kind    = "python"                   # optional: read the files as python | json | text whatever their suffix (a script with no .py)
+    kind    = "python"                   # optional: read the files as python | json | sections | text whatever their suffix (a script with no .py)
 
-Any other file is scanned line by line. A hit inside an allow phrase is excused; there is no other escape, so every new
+A `sections` file (a tool's text file, stackshot/web/tools/text/*.md) is read by its sections, each with its wrapped lines joined by one space, as the
+loader joins them, so a phrase wrapped across two lines is found and an allow phrase can span the wrap. Any other file is scanned line by line. A hit inside an allow phrase is excused; there is no other escape, so every new
 legitimate use is a reviewed line in the config."""
 from __future__ import annotations
 
@@ -128,6 +129,22 @@ def json_strings(doc: object, skip_keys: set[str], path: str = "") -> Iterator[t
                 yield from json_strings(v, skip_keys, f"{path}.{k}" if path else str(k))
 
 
+SECTION = re.compile(r"^## ")
+
+
+def section_strings(src: str) -> Iterator[tuple[int, int, str]]:
+    """(first line, last line, text) of each `## ` section of a tool's text file: its non-blank lines joined by one space (the header line itself is not text)."""
+    head, first, body = 0, 0, []
+    lines = src.split("\n")
+    for n, line in enumerate(lines + ["## "], 1):
+        if SECTION.match(line):
+            if head and body:
+                yield first, n - 1, " ".join(body)
+            head, first, body = n, n + 1, []
+        elif head and line.strip():
+            body.append(line.strip())
+
+
 def line_in_range(lines: list[str], first: int, last: int, rx: re.Pattern[str]) -> int:
     for ln in range(first, min(last, len(lines)) + 1):
         if rx.search(lines[ln - 1]):
@@ -146,6 +163,10 @@ def scan_file(root: Path, rel: str, terms: list[Term], skip_keys: set[str], kind
     kind = kind or ("python" if rel.endswith(".py") else "json" if rel.endswith(".json") else "text")
     if kind == "python":
         for first, last, value in python_strings(src):
+            for t, off, ctx in find(value, terms):
+                out.append(Hit(rel, line_in_range(lines, first, last, t.rx), t.retired, t.use, ctx))
+    elif kind == "sections":
+        for first, last, value in section_strings(src):
             for t, off, ctx in find(value, terms):
                 out.append(Hit(rel, line_in_range(lines, first, last, t.rx), t.retired, t.use, ctx))
     elif kind == "json":

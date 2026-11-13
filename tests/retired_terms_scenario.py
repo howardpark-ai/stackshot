@@ -160,6 +160,19 @@ for word in STEP_SEND_TERMS:
     check(f"retired: \"{word}\" in a string of server.py and in the tool-text snapshot is a hit (two, one per file), and the two-button wording beside it is not",
           sorted((h.file, h.term) for h in got) == [("server.py", word), ("tests/tool_text.snapshot.json", word)], [str(h) for h in got])
 
+# a tool's text file (stackshot/web/tools/text/*.md) is read by its sections, the wrapped lines of one joined by a space: a retired phrase wrapped across two lines is a hit,
+# an allow phrase may span the wrap, the header line is not text, and the live list scans the folder
+plant = T / "plant-sections"; (plant / "stackshot" / "web" / "tools" / "text").mkdir(parents=True)
+(plant / "stackshot" / "web" / "tools" / "text" / "get.md").write_text("# a note above the sections\n\n## description get\nThe item is in the stuck\nstate now, and the owner is the mover.\n\n## param steward\nOne line.\n")
+secs = list(rt.section_strings((plant / "stackshot" / "web" / "tools" / "text" / "get.md").read_text()))
+check("section_strings gives each section's lines joined by one space, with its line span; the note above the first section and the header are not text",
+      [v for _, _, v in secs] == ["The item is in the stuck state now, and the owner is the mover.", "One line."] and secs[0][0] == 4, secs)
+(plant / "sect.toml").write_text('[[term]]\nretired = "stuck state"\nuse = "failed wait"\n[[term]]\nretired = "owner"\nuse = "mover"\nallow = ["the owner is the mover"]\n[[term]]\nretired = "steward"\nuse = "router"\n[[scan]]\nfiles = ["stackshot/web/tools/text/*.md"]\nkind = "sections"\n')
+got = rt.lint(plant, plant / "sect.toml")
+check("a phrase wrapped across two lines is a hit (on the first line it starts), an allow phrase covers the one inside its section, and a word only in a header is none",
+      [(h.file, h.line, h.term) for h in got] == [("stackshot/web/tools/text/get.md", 4, "stuck state")], [str(h) for h in got])
+check("the live list scans the tools' text folder as sections", any(s.get("kind") == "sections" and "stackshot/web/tools/text/*.md" in s.get("files", []) for s in rt.load(pathlib.Path(SCR, "retired_terms.toml"))[1]))
+
 import shutil; shutil.rmtree(T, ignore_errors=True)
 left = sorted(p.name for p in BASE.iterdir())
 check("a run leaves nothing behind: its scratch folder is removed at exit", not left, left)

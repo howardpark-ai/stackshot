@@ -8,7 +8,7 @@ that text in one committed snapshot, tests/tool_text.snapshot.json, and holds th
     python3 tools/tool_text.py check                   exit 1, with a readable diff, when the live text differs from the snapshot
     python3 tools/tool_text.py update                  write the snapshot from the live text (the refresh command; commit the result)
     python3 tools/tool_text.py touched --base SHA --head SHA [--body-file F]
-                                                       exit 1 when a tool function or an output helper has a changed body between the two commits
+                                                       exit 1 when a tool function, an output helper or a text file (web/tools/text/*.md, reported as `file:text`) has changed between the two commits
                                                        while the snapshot is unchanged, unless the PR body has a line `tool-text: unchanged: <reason>`
     python3 tools/tool_text.py summary [--base REV]    the line the brief will carry for the change from REV (default origin/main) to the working copy
     python3 tools/tool_text.py record                  the server's own release mark by hand (whatschanged.record): normally the server's start does it
@@ -59,6 +59,10 @@ SERVER_REL = "stackshot/web/server.py"
 # The tools are registered in these modules (each `register` adds its own with `mcp.tool(...)(function)`); until the server was split a revision has them in server.py,
 # which stays watched for that reason.
 TOOL_FILES = tuple(f"stackshot/web/tools/{m}.py" for m in ("brief", "get", "create", "update", "complete", "sessions", "message", "route", "anchors", "rules"))
+# The words of the tools are in text files, one per tool module and a shared one (stackshot/web/tools/text/<module>.md, read by web/tools/textfile.py): a change
+# to one is a change to what a session reads, so `touched` watches each file whole and reports it as `<file>:text`.
+TEXT_DIR = "stackshot/web/tools/text"
+TEXT_SHARED = f"{TEXT_DIR}/shared.md"
 # Where each watched file stood before the code moved into the package (Sun Nov 8th 2026): a base revision from before the move has the file there, so the move itself is not a change of every watched function.
 _BEFORE_PACKAGE = {
     "stackshot/model/model.py": "model.py",
@@ -79,6 +83,17 @@ def show_at(root: Path, rev: str, rel: str) -> str | None:
     if got is None and rel in _BEFORE_PACKAGE:
         got = git(root, "show", f"{rev}:{_BEFORE_PACKAGE[rel]}")
     return got
+
+
+def is_text_file(rel: str) -> bool:
+    """A tool's text file (web/tools/text/*.md)."""
+    return rel.startswith(f"{TEXT_DIR}/") and rel.endswith(".md")
+
+
+def text_files_at(root: Path, rev: str) -> list[str]:
+    """The text files the tree at `rev` holds (none at a revision from before they existed)."""
+    got = git(root, "ls-tree", "-r", "--name-only", rev, "--", TEXT_DIR)
+    return sorted(f for f in (got or "").split("\n") if is_text_file(f))
 
 
 # The output helpers: the functions the lines a tool returns come from, (file, function name) by tool. The labels of a tool are the labels found in its helpers; the
@@ -402,6 +417,8 @@ def watched(src: str | None, file: str) -> dict[str, str] | None:
     """{function name: its body dump} for the functions of one file the gate watches (the tool functions, in web/tools/ (before the split, server.py), and the output helpers); None when it does not parse."""
     if src is None:
         return {}
+    if is_text_file(file):
+        return {"text": src}       # a text file is watched whole: any change in it is a change of the words
     try:
         tree = ast.parse(src)
     except SyntaxError:
@@ -438,7 +455,7 @@ def real_reason(reason: str) -> bool:
 def changed_since(root: Path, base: str, head: str, exact: bool = False) -> tuple[str, list[str]]:
     """(the fork point of base and head, or base itself when exact; the watched functions changed from it to head as `file:function`). Shared with tools/text_check.py."""
     mb = base if exact else (git(root, "merge-base", base, head) or base).strip()    # the fork point: a main that moved on since is not this PR's change
-    files = sorted({f for f, _ in ALL_HELPERS} | {SERVER_REL} | set(TOOL_FILES))
+    files = sorted({f for f, _ in ALL_HELPERS} | {SERVER_REL} | set(TOOL_FILES) | set(text_files_at(root, mb)) | set(text_files_at(root, head)))
     src = lambda rev: {f: show_at(root, rev, f) for f in files}
     return mb, changed_functions(src(mb), src(head))
 

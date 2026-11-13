@@ -195,6 +195,12 @@ kind = "python"
 [[scan]]
 files = ["stackshot/*.py", "stackshot/**/*.py"]
 
+# The tools' text files (stackshot/web/tools/text/*.md): the words a session reads a tool from, which used to be string literals of the tool modules. Read by section,
+# the wrapped lines of one section joined by a space, so the allow phrases of the code's literals apply to them as they did.
+[[scan]]
+files = ["stackshot/web/tools/text/*.md"]
+kind = "sections"
+
 # The guides, read line by line (a phrase wrapped across two lines is for a person to catch). They are written about the instance's person, whom they call
 # "the owner" on almost every page (the `[instance] owner` key; the `owner` term's `use` above sanctions the word for that person), so the `owner` term is not
 # checked here: its allow list is the code's and the tools' text, phrase by phrase, and cannot hold a guide's prose. Every other retired word is.

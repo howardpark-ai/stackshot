@@ -290,6 +290,8 @@ session_need() {
             printf 'notice\tthe rubric the daily audit judges a session'"'"'s items by, read at each audit' ;;
         client/hooks/*|stackshot/fleet/client.py|stackshot/projects/pages.py|stackshot/cli.py|bin/stackshot|client.py|pages.py|reboot-hooks/*)
             printf 'nothing\ta script or CLI run fresh at each call' ;;
+        stackshot/web/tools/text/*.md)
+            printf 'nothing\tthe tools'"'"' text files, server-side (a changed sentence changes the snapshot too, which carries the notice; deploy.sh restarts the server)' ;;
         *.md|docs/*)
             printf 'nothing\tdocs' ;;
         tests/*)

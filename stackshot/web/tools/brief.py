@@ -15,7 +15,9 @@ from stackshot.waits import watchers as _watch
 from stackshot.web import whatschanged as _wc
 from stackshot.web.auth import oauth as _oauth
 from stackshot.web.page_debts import _nag
-from stackshot.web.tools.text import _lead
+from stackshot.web.tools.text import _lead, load_text
+
+_T = load_text("brief", {"BOARD_URL": str(_inst.BOARD_URL)})
 
 _fmt = None      # set by register: the server's own, looked up at each call
 _handoff_brief = None      # set by register: the server's own, looked up at each call
@@ -51,10 +53,7 @@ def _world_waits_text() -> str:
 
 
 _BRIEF_DESC = (
-    "\"What is outstanding?\" brief() shows the board at a glance: counts, the Machines panel, the receivers and the project index (every open item: your move, on agents, waiting), then every open item in full as get shows it (its mover, its open next steps, its `model:` line and, once a step is done or dropped, its `checklist:`), the items on hold after them. "
-    "For a doing item the board lists as waiting (see `model:` in get) the `model:` line ends with `· the board lists it as waiting until <time> (<why>)`. "
-    "A `state:` line shows only for an item that stores a state. An item's `project:` line reads as in get. A line at the top says what changed in stackshot for 7 days after a release that changes a tool. The item model: docs/design. "
-    f"The full board is at {_inst.BOARD_URL} (markdown: board.md next to it)."
+    _T.description("brief")
 )
 
 
