@@ -1332,8 +1332,10 @@ def _one_mover_clash(item: dict[str, Any], agent: str) -> str:
         if _mg.second_mover_in([*needs_now, _store_ref(agent)], project, ctx):
             others = _mg.counted_movers(needs_now, project, ctx)
             return f"{', '.join(_session_label(x) for x in others)} already moves it" if others else f"it waits on {_model.owner_display()}'s call (needs decision)"
-        stored = _model.norm_who(meta.get("mover"))
-        if stored and not _model.is_owner(stored) and not ctx.background_of(stored, project) and not any(_anc.canonical(stored) == _anc.canonical(x) for x in needs_now):
+        stored = _model.pick_who(meta.get("mover"))      # the legacy literal `none` names nobody
+        # The stored mover is the agent being named: naming it keeps one mover, so it is no clash (and the reply would say the agent "already moves it" and tell it to hand the item to itself).
+        if (stored and not _model.is_owner(stored) and not ctx.background_of(stored, project) and _anc.canonical(stored) != _anc.canonical(agent)
+                and not any(_anc.canonical(stored) == _anc.canonical(x) for x in needs_now)):
             return f"{_session_label(stored)} already moves it"
         return ""
     except Exception as e:  # noqa: BLE001  — a registry that cannot be read names the agent as before
@@ -3948,30 +3950,40 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     return handed
 
 
+_BALANCE_LOGGED: dict[tuple[str, str], float] = {}   # (item, reason) -> when the balancer last logged it: a stay that lasts is one stderr line an hour, not one a minute
+BALANCE_LOG_EVERY = 3600.0
+
+
+def _balance_log_once(gid: str, key: str, now: float, line: str) -> None:
+    """One stderr line for an item the balancer leaves where it is, at most once per `BALANCE_LOG_EVERY` per item and reason (the pass looks at the item every minute for as long as it waits)."""
+    last = _BALANCE_LOGGED.get((gid, key))
+    if last is not None and 0 <= now - last < BALANCE_LOG_EVERY:
+        return
+    if len(_BALANCE_LOGGED) > 2000:
+        _BALANCE_LOGGED.clear()
+    _BALANCE_LOGGED[(gid, key)] = now
+    print(line, file=sys.stderr, flush=True)
+
+
 def _balance_builders(project: str) -> list[str]:
-    """The sessions the balancer may move an item of `project` to, best first: BUILDERS only, the project's own first (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1), then those of any other
-    project whose mandate says `build`, as the idle hand-over's fallback reads them (`_hand_idle_builders`). A reviewer or any other background agent is no candidate."""
-    out = [n for c, _o, n in _handoff_ranked(project) if c < 2]
-    try:
-        out += [n for n in _balance_builder_names(True) if not any(_ho_same(n, o) for o in out)]
-    except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's builders are all there is
-        pass
-    return out
+    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1). Never another
+    project's builder: a project's code is built, reviewed and released by its own builder, and a builder of an unrelated project has a different mandate. With no other builder here the item stays where it is. A reviewer or any
+    other background agent is no candidate."""
+    return [n for c, _o, n in _handoff_ranked(project) if c < 2]
 
 
-def _balance_builder_names(narrow: bool = False) -> list[str]:
+def _balance_builder_names() -> list[str]:
     """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read): who counts as a builder whose item may be balanced.
-    With `narrow` only the mandates that say `build` (the idle hand-over's fallback, as `_hand_idle_builders` reads other projects): who qualifies as a target from ANOTHER project."""
+    Only the item's mover is judged by this; where an item may go is `_balance_builders` (its own project's builders)."""
     reg = _anc.registry()
-    rx = re.compile(r"\bbuild", re.I) if narrow else _router._BUILDER
     return [n for n, r in _anc.session_roles(reg).items()
-            if r.get("role") == "back" and not r.get("retired") and rx.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
+            if r.get("role") == "back" and not r.get("retired") and _router._BUILDER.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
 
 
 def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                   dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
     """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
-    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder with the fewest open
+    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder of its own project with the fewest open
     items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
     subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
@@ -4045,7 +4057,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 continue
             to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
             if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
-                print(f"balance: {gid} stays with {row['mover']}: no builder has few enough open items", file=sys.stderr, flush=True)      # silent otherwise: a spread that is as good as it can be is no news
+                _balance_log_once(gid, "load", now, f"balance: {gid} stays with {row['mover']}: no builder has few enough open items")      # silent otherwise: a spread that is as good as it can be is no news
             elif to:
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
                     cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
@@ -4066,7 +4078,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                 gone.append((row["mover"], gid, to))
                 print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
             elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _ho_same, front, project):
-                print(f"balance: {gid} stays with {row['mover']}: no other builder to move it to", file=sys.stderr, flush=True)      # a mover that is the only builder has nobody to lose: no note, no message
+                _balance_log_once(gid, "alone", now, f"balance: {gid} stays with {row['mover']}: no other builder to move it to")      # a mover that is the only builder has nobody to lose: no note, no message
             else:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
@@ -5220,8 +5232,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
 
 
 # ----------------------------------------------------------------------------- auth
-from stackshot.web import signin as _signin  # noqa: E402  — the board's sign-in (signin.py), with the auth mode it reads: `_signin._auth_mode()` is read and set there, never here
-from stackshot.web.server_auth import _auth, _who  # noqa: E402,F401  — the auth section (server_auth.py): `_auth()` is called below, by `mcp = FastMCP(...)`, so this import stays above it; `_env` is read only there
+from stackshot.web.auth import oauth as _oauth, signin as _signin  # noqa: E402  — the MCP sign-in provider (auth/oauth.py: `_oauth._auth()` is called below, by `mcp = FastMCP(...)`, so this import stays above it; `_oauth._who()` is what every tool asks) and the board's own sign-in (auth/signin.py, whose names are read and set there)
 
 
 # ----------------------------------------------------------------------------- MCP surface
@@ -5250,7 +5261,7 @@ mcp = FastMCP(
         f"that shown form, never a store id such as {_gh.letter()}7. A board change that reflects a state change is matched by a project-page "
         f"update in the same turn, the page first (a page write up to five minutes before the change counts). If your session did not load {OWNER}'s standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it: it overrides any default behaviour. A Claude Code session on the owner's machines has it already through CLAUDE.md and does not call it."
     ),
-    auth=_auth(),
+    auth=_oauth._auth(),
 )
 
 
@@ -5380,7 +5391,7 @@ def _request_lang(request) -> str:
         got = getattr(request.state, "ui_lang", None)
         if got is not None:
             return got
-        email = _ui_email(request) if request.method in ("GET", "HEAD") else ""
+        email = _signin._ui_email(request) if request.method in ("GET", "HEAD") else ""
         lang = _uiprefs.lang_of(email) if email else _i18n.DEFAULT
         lang = _i18n.norm(lang) if lang != _i18n.DEFAULT else lang
         request.state.ui_lang = lang
@@ -5399,7 +5410,7 @@ def _panel_ordered(request, resp):
         if (request.method != "GET" or not isinstance(resp, HTMLResponse)
                 or resp.status_code != 200 or not str(resp.media_type or "").startswith("text/html")):
             return resp
-        email = _ui_email(request)
+        email = _signin._ui_email(request)
         from stackshot.web.ui import render as r2
         if not email:       # not signed in: nothing of a person's to put in, and the language switch (it saves per person) comes out
             page = bytes(resp.body).decode("utf-8")
@@ -8065,7 +8076,7 @@ _BRIEF_DESC = (
 
 @mcp.tool(name="brief", description=_lead(_BRIEF_DESC))
 def stackshot_brief() -> str:
-    _who()
+    _oauth._who()
     md = _cfg.path("paths", "markdown")
     head = ""
     if md.exists():
@@ -8201,7 +8212,7 @@ _STALL_SHORT = f" A wrong `stall:` step is undone with update (mover, next, clea
                                          "a notice not ruled yet shows that it is still held for the router and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router gave up on shows `ruling: none, stuck` and its `reason:`); an id no routing log holds answers \"no notice <id>\"." + _STALL_FORM))
 def stackshot_get(item_id: Annotated[str, Field(description="An item id (board#N; a bare number N is read as board#N; <letter><n> for an older item), or a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\"), which shows the router's ruling of that notice.")]) -> str:
     """Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), `after:` (the items that must close first, each with its state), and `observers:`. It leads with `mover:` (who moves the item now) and `then:` (who takes it after the answer or the wait); History says who created it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)` (stored as doing, but its wake is more than an hour away and every open step is dated for that day or later, or its wake carries a wait_basis and is still ahead; a wake kept as a hand-off's backstop, with no wait_basis, is no wait; a date alone is a wait until it), so it is listed as waiting until then. After `next:` a `named in next:` block gives each board#N the next names with its live state (closed with the time and outcome, open with its mover, waiting, or not found), so a status is never relayed from the words of next. The item model is on docs/design. item_id can also be a notice id (the six hex characters a message to a project returns): it then shows who sent the notice and when, its project, a one-line excerpt, the router's ruling with its reason, rule and item, when it was ruled, or that it is still held and when the router rules it."""
-    _who()
+    _oauth._who()
     nid = _notice_asked(item_id)
     if nid:
         return _notice_report(nid)
@@ -8409,7 +8420,7 @@ _MODEL_FORM = (
     "update(wait_kind=\"event\", wait_event=\"pr_released <n>\" (this repository's pull request number), ask_by=<the day it comes back anyway, required>, post_wake_mover=<who takes it then>). "
     "Live for now: pr_released, pr_merged, box_online, recycle, and every fleet_op form (any verb, any, many); a job_run wait turns only on its backstop day. "
     "box_online <machine> waits for a machine to be online (its puller checking in, within the minutes the server counts as online): the server reads it itself and the item turns within a minute or two of the machine's return, so an item waiting on a date for an offline machine says wait_event=\"box_online <machine>\" with that date as ask_by instead; the machine must be one the fleet knows (an unknown name is refused with the known ones). "
-    "The backstop must be after now, and a day (ask_by=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already past: give tomorrow at the earliest, or a wake time later today. "
+    "The backstop must be after now, and a day (ask_by=YYYY-MM-DD) falls due at 00:00 of that day in the instance timezone, so today's date is already past: give tomorrow at the earliest (a relay or event wait takes the day alone, with no time of day). "
     "A wait for something that has already happened (a PR already merged or live, a machine already online) is refused; a recycle wait never asks for a recycle (it waits for the next one). "
     f"A step of his, or needs holding decision, makes him the mover: a write that names a session as mover beside it is refused (leave mover out, or mover={OWNER}, and put the session in then). "
     f"The mirror is refused too: a write that leaves an open item with mover={OWNER} but in none of his states, so it has no step and no ask, "
@@ -8502,7 +8513,7 @@ _DONE_PARAM = Annotated[list[int | str] | int | str | None, Field(description="O
 
 _DROPPED_PARAM = Annotated[list[int | str] | int | str | None, Field(description="Open steps that are no longer wanted, named like done: dropped=[2]. A different action is a new line of next, not a reword.")]
 
-_WAKE_PARAM = Annotated[str, Field(description=("The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, in the board timezone. Alone it is a wait: the item waits until that date (outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's backstop (unless the item carries hold, wait_kind, wait_basis or an after link, in this call or stored by an earlier one: then the date stays a wait)). A window the work needs: wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". A wait on your own item also needs wait_reason (at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters); a wait with wait_basis needs none, and a wake more than " + f"{_wt.cap_days():g}" + " days out needs a wait_basis. Moving a wake (or ask_by) later with the item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one does not count, and a wait_reason does not count)."))]
+_WAKE_PARAM = Annotated[str, Field(description=("The old name of until, accepted for now: when the item wakes, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM for a time of day, in the board timezone (a relay or event wait takes the day alone, YYYY-MM-DD). Alone it is a wait: the item waits until that date (outside a hand-off: in an update that hands the item to another session the date parks nothing, it is the hand-off's backstop (unless the item carries hold, wait_kind, wait_basis or an after link, in this call or stored by an earlier one: then the date stays a wait)). A window the work needs: wake=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". A wait on your own item also needs wait_reason (at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters); a wait with wait_basis needs none, and a wake more than " + f"{_wt.cap_days():g}" + " days out needs a wait_basis. Moving a wake (or ask_by) later with the item otherwise as it was is refused: in the same write mark a step done or dropped, write the next step or a new reason, or change what the wait stands on (wait_kind, wait_event, wait_anchor, after; a flip back to an earlier one does not count, and a wait_reason does not count)."))]
 
 _AFTER_PARAM = Annotated[list[str] | str | None, Field(description="Items this one waits on: after=[\"board#N\"], with ask_by=<YYYY-MM-DD> as the day it comes back if they are still open. The wait ends when they close.")]
 
@@ -8528,7 +8539,7 @@ _OPTIONS_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=
 
 _CHECK_PARAM = Annotated[str, Field(description="What closes the item once work handed to another session is done; the server runs it every minute: check=\"pr_merged acme/widgets#12\" (also item_closed <item id>, lane <session> <lane>, unit_active <unit>.service). A next line that hands the item to a session other than its mover and you needs a check or, instead, a date (wake or until) as the hand-off's backstop: with a hand-off the date is no wait (unless the item carries hold, wait_kind, wait_basis or an after link, in this call or stored by an earlier one: then the date stays a wait), the item stays active in the new mover's lane and the hand-off is recorded; a front agent needs neither. check=\"none\" clears it.")]
 
-_HOLD_PARAM = Annotated[bool, Field(description="The old way to wait on a date, accepted for now (stored as until). True parks the item until its wake, for a window the work itself needs: hold=true, until=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". It reads as waiting, not on agent; clear_hold=true ends it.")]
+_HOLD_PARAM = Annotated[bool, Field(description="The old way to wait on a date, accepted for now (stored as until). True parks the item until its wake, for a window the work itself needs: hold=true, until=\"<last day of the window, YYYY-MM-DD>\", wait_basis=\"soak ends <that day>\". It reads as waiting, not on agent; clear_hold=true ends it. On a relay or event wait no flag is stored (the wait is the park until its day) and the hold ends a stored work-in-hand state.")]
 _STEP_PROOF_FORM = (
     " A step can name the event that finishes it, and the server then ticks it done when the event happens: a pull request merged (pr_merged), or released, i.e. merged and live (pr_released: this repository's with main's tests passed, or a configured repository's). "
     "A step that is only `release PR #<n>`, `release #<n>` or `release <URL>` (or the same with `merge`), with at most a short parenthetical (`(in its turn)`) and a closing full stop, is ticked when that pull request is released, "
@@ -8576,7 +8587,7 @@ _WAIT_BASIS_PARAM = Annotated[str, Field(description=f"The reason a time wait's 
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=f"The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any new notice there that reaches the server and passes the project's keeper wakes the item; a wait_event naming a merge, close, landing or completion is not woken by a routine push or CI line on the fleet's own PR (only by one that says merged or closed). A relay wait: the party or event {OWNER} relays. An event wait: the fleet event, one of {_ew.FORMS} (live today: pr_released, pr_merged, box_online, recycle and every fleet_op form; job_run turns only on the backstop day; box_online <machine> ends when that machine is online and is refused while it already is, or for a machine the fleet does not know; an item waiting on a date for an offline machine says wait_event=\"box_online <machine>\" with that date as ask_by instead). \"none\" clears it.")]
 _RANK_PARAM = Annotated[int, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
 _CLEAR_RANK_PARAM = Annotated[bool, Field(description="Retired: refused. Ranks are retired; a call that carries this is refused.")]
-_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give.")]
+_MOVER_PARAM = Annotated[str, Field(description=f"Who moves the item now: {OWNER}, a session name or id, or the project's background agent. A front agent (a session {OWNER} talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give. On an update that sets no needs, the session needs names for the mover it replaces is swapped for the new one.")]
 _THEN_PARAM = Annotated[str, Field(description=f"Who takes the item after {OWNER}'s answer or step (it becomes the mover then): a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets then=<front agent> gets the project's builder instead, as for mover.")]
 _POST_WAKE_PARAM = Annotated[str, Field(description=f"Who moves the item when its wait ends (it becomes the mover then): {OWNER}, a session name or id, or the project's background agent. A front agent only by itself: a create or update from another session that sets post_wake_mover=<front agent> gets the project's builder instead, as for mover.")]
 _CONTACT_PARAM = Annotated[str, Field(description=f"The item's contact: the front agent (a user-facing agent) that {OWNER} talks to about it, by its name. Leave it out and the contact is the creator when that is a front agent, else the project's -main agent. "
@@ -8642,7 +8653,7 @@ def stackshot_create(
     wait_reason: Annotated[str, Field(description="What the step waits on that is not available now (a reply, a build or test still running, a window the work needs, a resource that is down), at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters. Required when this write sets a wake, or a line of your own next dated later than today, on an item you move: without it the write is refused, and a model may refuse it when the step could be done now. Not stored on the item. A park (hold=true with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by, due or before is a deadline, not a wait.")] = "",
     contact: _CONTACT_PARAM = "",
 ) -> str:
-    _who()
+    _oauth._who()
     note = _owner_param("create", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
     _sender_not_owner(sender)
     owner = str(sender or "").strip() or str(owner or "").strip()    # the creator: the record's keeper
@@ -8816,8 +8827,9 @@ _CLOSE_REFUSAL = (      # the full close rule a refused close appends (unchanged
     f"(at most {_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters), shown in the Outcome block. "
     "A close leaves the description as it was (a description passed with a close is stored as outcome_text) and clears next, ask and needs (and any hold, wake or recycle wait); due stays as a record. "
     "Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and superseded_by. "
-    "A close also marks every step still open, by the closer (done when the outcome is done, dropped otherwise; steps marked in the same call keep their marks; "
-    "this settles a step of his too, the one case where a session's call marks it, because the item is over), and tells the mover of every other open item whose next or description names the closed item (board#N), "
+    "A close ticks only the steps that are still open and are yours (you wrote them, or they open with your name), by the closer (done when the outcome is done, dropped otherwise; steps marked in the same call keep their marks; "
+    "this settles a step of his too, the one case where a session's call marks it, because the item is over). A step that opens with another session's name stays open, so the close is refused, naming that step, and nothing changes: "
+    "ask that session to finish it, or mark it in the closing call itself (update with status=completed and done=[n] or dropped=[n]). It tells the mover of every other open item whose next or description names the closed item (board#N), "
     "one message per mover (the first 8 items, then a count); the items that wait on it through after get their own wake, and the closer is not told. "
     + _ASK_RULE
 )
@@ -8828,7 +8840,8 @@ _CLOSE_FORM = (
     f"reason (one line, the end state reached and why, at most {_CLOSE_REASON_MAX} characters (longer is refused)) and outcome_text (short `- ` bullets, at most {_DESC_MAX_LINES} lines of {_DESC_LINE_MAX} characters, shown as the Outcome); "
     "it leaves the description as it was (one passed with a close is stored as outcome_text) and clears next, ask and needs (and any hold, wake or recycle wait); due stays as a record. "
     "Reopening (status=open on a completed item) takes a new next, and drops outcome, outcome_text, reason and superseded_by. "
-    "A close also marks every step still open, by the closer (done when the outcome is done, dropped otherwise; this settles a step of his too), and tells the mover of every other open item whose next or description names the closed item (board#N), "
+    "A close ticks only the steps that are still open and are yours (you wrote them, or they open with your name), by the closer (done when the outcome is done, dropped otherwise; this settles a step of his too). A step that opens with another session's name stays open, "
+    "so the close is refused, naming that step, and nothing changes: ask that session to finish it, or mark it in the closing call with update (status=completed and done=[n] or dropped=[n]; complete takes no marks). It tells the mover of every other open item whose next or description names the closed item (board#N), "
     "one message per mover (the first 8 items, then a count); the items that wait on it through after get their own wake, and the closer is not told. "
     + _ASK_RULE
 )
@@ -10324,7 +10337,7 @@ def stackshot_update(
     """The update tool; its description is _UPDATE_DESC + _SELF_WAIT_FORM + _WAIT_FORM."""
     if rank or clear_rank:
         raise ToolError(RANK_RETIRED)       # a stale caller is told, never silently ignored
-    _who()
+    _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
@@ -10380,7 +10393,7 @@ def stackshot_complete(item_id: str, outcome: _OUTCOME_PARAM = "", reason: _REAS
                        outcome_text: _OUTCOME_TEXT_PARAM = "") -> str:
     """Close an item with how it ended; its description is _COMPLETE_DESC. The fields default to empty so that a pane with
     an older cached schema gets the refusal that says what is missing and how to close through the portal, not a schema error."""
-    _who()
+    _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
     return _update_svc.complete_item(item_id, outcome=outcome, reason=reason, description=description, superseded_by=superseded_by, sender=sender, said=said, outcome_text=outcome_text)
@@ -10396,7 +10409,7 @@ _FD = _cfg.freshness_days()
                                              "sender = your own session (name or cse_… id). item_id = board#N (a bare number N is read as board#N). " + _SENDER_MIRROR.strip()))
 def stackshot_confirm(item_id: str, sender: str = "") -> str:
     """Mark an item still true: sets its `confirmed` clock only. item_id: board#N (a bare number N is read as board#N)."""
-    _who()
+    _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
     return _update_svc.confirm_item(item_id, sender)
@@ -10437,7 +10450,7 @@ def _machine_states() -> dict[str, str]:
 
 @mcp.tool(name="sessions", description=_lead(f"{OWNER}'s Claude sessions and machines, from the live fleet state on the server box — for a session that cannot read it itself (on another machine, in the cloud, in Cowork). Each session: its name, its link (for a pane, the URL the fleet tool's store gives it, where one is configured; for a cloud or Cowork session, its claude.ai link; link a session by it; empty = no link, name it plainly), its machine, and its role where a project page names it (front agent or background agent of <project>; a front agent takes a message only with {_FOR_OWNER} on its first line). Each machine: online or offline, its Claude Code CLI version, and on the box that runs it the {OPERATOR} (the session a recycle or CLI-update cue goes to — from a cloud or Cowork session, relay the cue with message(to=<that name>)), live or not running. Cloud and Cowork sessions are listed when they own an open board item. name: optional case-insensitive filter on session names."))
 def stackshot_sessions(name: str = "") -> str:
-    _who()
+    _oauth._who()
     return _sessions_listing(name.strip().lower())
 
 
@@ -10862,7 +10875,7 @@ def stackshot_message(to: Annotated[str, Field(description="Who gets it: a sessi
                       text: Annotated[str, Field(description=f"The message, at most {MSG_MAX} characters. To a front agent its first line is {_FOR_OWNER}, then what is needed; a plain result goes to projects/<slug> or onto the item.")],
                       sender: Annotated[str, Field(description="Your own session name or id.")],
                       fyi: Annotated[bool, Field(description="True when the message asks nothing of its receiver (news, a result, a status). A background agent then gets it with its next turn instead of a turn of its own; a front agent is unaffected. Default false.")] = False) -> str:
-    out = _message(to, text, sender, auth=_who(), fyi=fyi)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
+    out = _message(to, text, sender, auth=_oauth._who(), fyi=fyi)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
     return out + _off_map_note_to(sender, to)       # a message to a project page: the sender may be off that project's map
 
 
@@ -10901,7 +10914,7 @@ def _route(notice: str, ruling: str, to: str = "", reason: str = "", sender: str
 
 @mcp.tool(name="route", description=_lead(f"A ruling on a notice delivered for a project. The router rules every notice of every project by itself (rules in code, then one thin call), so call this to overrule a ruling that was wrong. `notice` = the id at the end of the notice (\"notice a1b2c3\"); `ruling` = passed (handed to an agent: name it in `to`) | merged (folded into a digest) | held (kept for later) | dropped (not worth anyone's attention); `reason` = one line {OWNER} can skim; `sender` = your own session. Right call: route(notice=\"a1b2c3\", ruling=\"passed\", to=\"my-x\", reason=\"belongs to the export work\", sender=\"my-x\"). Call it once per notice, after acting on it; call it again to overrule an earlier ruling. The project's routing page (behind its number in the board's anchors column) lists every notice with its ruling and reason, and the board flags notices left without a ruling for over an hour."))
 def stackshot_route(notice: str, ruling: str, to: str = "", reason: str = "", sender: str = "") -> str:
-    _who()
+    _oauth._who()
     return _route(notice, ruling, to, reason, sender)
 
 
@@ -10925,7 +10938,7 @@ def stackshot_anchors(project: Annotated[str, Field(description="The project pag
                       add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it), whose query joins from:/to:/cc:/subject:/person: terms with AND, OR and parentheses (from:(a OR b) for one key over several values; see the tool description); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
                       items: Annotated[list[str] | None, Field(description="Open items of this project the added URLs are about, items=[\"board#N\"]; omit for a project-wide anchor. Every URL in add is scoped to every id in items (several URLs with several ids give each URL all the items).")] = None,
                       remove: Annotated[list[str] | None, Field(description="URLs to stop watching, or machine:<name> to drop a machine anchor.")] = None) -> str:
-    return _anchors(project, add, items, remove, _who())
+    return _anchors(project, add, items, remove, _oauth._who())
 
 
 def _gmail_boxes() -> dict[str, str]:
@@ -11216,7 +11229,7 @@ def _rules_text(profile: str = "cowork") -> str:
 
 @mcp.tool(name="rules", description=f"{OWNER}'s standing rules — the rulebook every Claude Code session on the owner's machines loads through CLAUDE.md ({_cfg.path('paths', 'rules').name}, git-synced). A session that did not load it at start (cloud, Cowork) calls this once at the start of a task and follows it; a session that has it does not. profile=\"cowork\" (default) = the Cowork view: CLI-only sections replaced by their Cowork equivalents, incident notes stripped; profile=\"full\" = the whole file. The rulebook parts named in config (skill files that CLI sessions load through hooks) are appended after the rulebook, each under \"## Part: <name>\".")
 def stackshot_rules(profile: str = "cowork") -> str:
-    _who()
+    _oauth._who()
     return _rules_text("full" if profile == "full" else "cowork")
 
 
@@ -11232,93 +11245,21 @@ _SITE_TYPES = {".html": "text/html", ".svg": "image/svg+xml", ".txt": "text/plai
 @mcp.tool(name="bump_versions", description=_lead("Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."))
 def stackshot_bump_versions(host: str = "") -> str:
     """Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."""
-    _who()
+    _oauth._who()
     return "published: " + _publish_now(force_versions=True, host=host)
 
 
 # ----------------------------------------------------------------------------- the board's own sign-in, step e)
-# [auth] ui_open = true (today): the web UI is served to whoever reaches it, and the edge decides who that is (Cloudflare
-# Access in front of the hostname). ui_open = false: the server asks for a sign-in itself, with the OAuth it already runs
-# for /mcp — the board is one more client of its own /authorize, so no second OAuth app and no new redirect URI at Google.
-# The signed-in address is kept in a signed cookie; only [auth] allowed_emails get in.
-# The cookie, the guard and the board's own OAuth client are signin.py's (imported here, where they were defined, apart from `_auth_mode`, `_ui_now`, `_ui_http` and `_ui_client_id`: those four
-# are read and set on that module (`_signin.`), as the suites set them there). The three /ui/ routes and `_ui_exchange` stay here: they use `mcp`.
-from stackshot.web.signin import (_APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_COOKIE, _UI_FLOW, _UI_PUBLIC, _UI_CLIENT, _ui_days, _ui_email, _ui_guard, _ui_is_board_client,  # noqa: E402,F401
-                                  _ui_is_navigation, _ui_key, _ui_open, _ui_redirect_uri, _ui_renewed, _ui_session, _ui_set_session, _ui_sign, _ui_unsign)
+# The cookie, the guard, the board's own OAuth client and the three /ui/ routes (/ui/login, /ui/callback, /ui/logout) are auth/signin.py's; the routes are added to `mcp` by `register`, here, where they were declared.
+from stackshot.web.auth.signin import _APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_PUBLIC, _ui_guard, _ui_key, _ui_open, _ui_renewed  # noqa: E402
+
+_signin.register(mcp)
 
 
 def _ui_mods():
     """The page renderers: (render, search, runners) of the board (ui/render.py, ui/search.py, ui/runners.py)."""
     from stackshot.web.ui import render as r2, runners as n2, search as s2
     return r2, s2, n2
-
-
-def _ui_exchange(code: str, verifier: str) -> str:
-    """An authorization code → the address that signed in ('' when the exchange or the token does not hold)."""
-    import asyncio
-    status, d = _signin._ui_http("POST", "/token", {"grant_type": "authorization_code", "code": code, "redirect_uri": _ui_redirect_uri(),
-                                             "client_id": _signin._ui_client_id(), "code_verifier": verifier}, form=True)
-    tok = str(d.get("access_token") or "") if status == 200 else ""
-    if not tok:
-        return ""
-    at = asyncio.run(mcp.auth.verify_token(tok))
-    return str((getattr(at, "claims", None) or {}).get("email") or "")
-
-
-@mcp.custom_route("/ui/login", methods=["GET"])
-async def ui_login(request: Request):
-    """Start the board's sign-in: send the browser to this server's own /authorize (which hands on to Google)."""
-    import base64, hashlib, secrets as _s
-    from urllib.parse import urlencode
-    from starlette.concurrency import run_in_threadpool
-    from starlette.responses import RedirectResponse
-    if _ui_open() or _signin._auth_mode() == "off":
-        return RedirectResponse("/", status_code=302)
-    if not _ui_is_navigation(request):          # a script's request starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
-        return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
-    nxt = str(request.query_params.get("next") or "/")
-    if not nxt.startswith("/") or nxt.startswith("//"):
-        nxt = "/"
-    try:
-        cid = await run_in_threadpool(_signin._ui_client_id)
-    except Exception as e:  # noqa: BLE001
-        return PlainTextResponse(f"sign-in is not available: {e}", status_code=503)
-    verifier = _s.token_urlsafe(48); state = _s.token_urlsafe(16)
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-    q = urlencode({"response_type": "code", "client_id": cid, "redirect_uri": _ui_redirect_uri(), "code_challenge": challenge, "code_challenge_method": "S256",
-                   "state": state, "scope": "openid https://www.googleapis.com/auth/userinfo.email"})
-    r = RedirectResponse(str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/authorize?" + q, status_code=302)
-    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": _signin._ui_now() + 600})), max_age=600,
-                 httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/ui")
-    return r
-
-
-@mcp.custom_route("/ui/callback", methods=["GET"])
-async def ui_callback(request: Request):
-    """Finish the board's sign-in: the code this server's /authorize sent back becomes a signed session cookie."""
-    from starlette.concurrency import run_in_threadpool
-    from starlette.responses import RedirectResponse
-    try:
-        flow = json.loads(_ui_unsign(request.cookies.get(_UI_FLOW, "")) or "{}")
-    except Exception:
-        flow = {}
-    code, state = str(request.query_params.get("code") or ""), str(request.query_params.get("state") or "")
-    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _signin._ui_now():
-        return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
-    email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
-    if email not in _cfg.CFG["auth"]["allowed_emails"]:
-        return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
-    r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)
-    _ui_set_session(r, email)
-    r.delete_cookie(_UI_FLOW, path="/ui")
-    return r
-
-
-@mcp.custom_route("/ui/logout", methods=["GET"])
-async def ui_logout(request: Request):
-    r = PlainTextResponse("signed out")
-    r.delete_cookie(_UI_COOKIE, path="/")
-    return r
 
 
 _RO_BOARD: dict[str, Any] = {"at": 0.0, "r": None}
@@ -14004,7 +13945,7 @@ def _item_page(request: Request, gid: str):
     g = _ui_guard(request)
     if g is not None:
         return g
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     rmod = _ui_mods()[0]
     box = {"action": f"/items/{_gh.href_id(gid)}/answer", "token": _answer_token(email, gid),
            "sent": str(request.query_params.get("sent") or "")} if email else None
@@ -14464,7 +14405,7 @@ async def item_answer(request: Request):
     raw = str(request.path_params.get("key") or "")
     if not re.fullmatch(_ITEM_KEY, raw):
         return PlainTextResponse("no such item", status_code=404)
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return PlainTextResponse("sign in to the board to answer an item", status_code=403)
     if not _answer_same_origin(request):
@@ -14506,7 +14447,7 @@ async def answer_tokens(request: Request):
     g = _ui_guard(request)
     if g is not None:
         return g
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     out: dict[str, str] = {}
     if email:
         for raw in str(request.query_params.get("ids") or "").split(",")[:_ANSWER_TOKENS_MAX]:
@@ -14539,7 +14480,7 @@ async def item_watch(request: Request):
     raw = str(request.path_params.get("key") or "")
     if not re.fullmatch(_ITEM_KEY, raw):
         return PlainTextResponse("no such item", status_code=404)
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return PlainTextResponse("sign in to the board to watch or mute an item", status_code=403)
     if not _answer_same_origin(request):
@@ -14569,7 +14510,7 @@ async def for_you_seen(request: Request):
     """The owner marks a row of the For you list seen (id=<row id>, or id=all): it leaves the list. The board's page is one file for
     everyone allowed, so there is no per-page token: signed in to the board, from its own origin (the same origin check as his
     answer), the cookie is SameSite=Lax. Then 303 to the board; a fetch from the page's script reads the status only."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email and not (_ui_open() or _signin._auth_mode() == "off"):
         return PlainTextResponse("sign in to the board", status_code=403)
     if not _answer_same_origin(request):
@@ -14593,7 +14534,7 @@ async def _prefs_body(request: Request, what: str):
     """The gates every save under /prefs/ shares, for a body of JSON: (the signed-in person's address, the decoded JSON, None), or (None, None, the refusal to answer with). Signed in to
     the board (403 otherwise: with no address there is no person to keep it for, so a viewer let in without sign-in cannot save), from the board's own origin (403), a JSON content type
     (415), a body of at most 4 KB (413, judged from Content-Length before the body is read, or as a body with none arrives), valid JSON (400). `what` names the setting in the refusals."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return None, None, PlainTextResponse(f"sign in to the board to keep the panel {what}", status_code=403)
     if not _answer_same_origin(request):
@@ -14753,7 +14694,7 @@ async def _colors_body(request: Request) -> dict[str, Any] | JSONResponse:
 async def _colors_browser(request: Request, op: str):
     """The board's own page: signed in (403 otherwise, a read too: nothing here is public), and a write from the board's own origin (403)."""
     from starlette.concurrency import run_in_threadpool
-    if not _ui_email(request):
+    if not _signin._ui_email(request):
         return _colors_err(403, "sign in to the board to use the saved colors")
     body: dict[str, Any] = {}
     if op != "list":
@@ -14915,7 +14856,7 @@ async def _landed_change(request: Request, change):
     """The Landed page's buttons: Clear, Clear all and Undo post here through `change` (landed.clear or landed.unclear), which takes the comma-separated landed.key values of the `keys` field. The gates are the For you
     seen route's: signed in to the board (or the board open), from its own origin; the body is capped at 64 KB. A change that changed something republishes the board (debounced; the home Landed count follows with it).
     A form post (no JavaScript) gets a 303 back to the page; the page's own script asks with `Accept: application/json` and gets {"ok": true, "changed": n}, and keeps the line where it is. No keys changes nothing (it is not a clear-everything call)."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email and not (_ui_open() or _signin._auth_mode() == "off"):
         return PlainTextResponse("sign in to the board", status_code=403)
     if not _answer_same_origin(request):
@@ -14967,7 +14908,7 @@ def _runners_token_maker(request: Request):
     """The page's token maker for the viewer (None draws no button: no switch script configured, or this copy is read-only)."""
     if _ro.is_read_only() or not _runners.switch_enabled():
         return None
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return None                        # the route needs a real signed-in address, so an open board draws no button that would only be refused
     return lambda box: _runners_switch_token(email, box)
@@ -15009,7 +14950,7 @@ async def site_runners_switch(request: Request):
     Disable lets a running job finish and then takes no new job. The gates are the other state-changing actions': a read-only copy answers 503 first (the route wrapper), then a real signed-in address (an open board is refused too, as /answer and /watch do), from its own origin,
     the form's token (an HMAC over the viewer and the machine); the body is capped at 4096 bytes; the action and the machine are checked (the machine against runners.switch_boxes: the fleet's names, plus a [runners] boxes entry named in [runners.ssh_hosts]) before anything runs. The page's script asks with
     `Accept: application/json` and gets {"ok": bool, "text": "..."} to show; a form post gets the same text as plain text."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return PlainTextResponse("sign in to the board to disable or enable a CI machine", status_code=403)
     if not _answer_same_origin(request):

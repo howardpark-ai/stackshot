@@ -55,10 +55,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.web import server; from stackshot.web import uiprefs as up
+from stackshot.web.auth import signin as _signin
 import uvicorn
 server._publish = lambda: None
 DEFAULT = list(up.PANEL_SECTIONS); LAB = {"machines": "Machines", "runners": "Runners", "anchorhub": "Anchor hub", "audit-panel": "Audit", "projects-panel": "Projects"}
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 srv = uvicorn.Server(uvicorn.Config(server.mcp.http_app(), host="127.0.0.1", port=PORT, log_level="critical", lifespan="on"))
 th = threading.Thread(target=srv.run, daemon=True); th.start()
 for _ in range(100):
@@ -84,7 +85,7 @@ try:
         print("no browser (once per machine: uvx playwright@1.63.0 install chromium):", str(e)[:160]); srv.should_exit = True; sys.exit(2)
     def ctx_for(w, scheme, js=True):
         ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme, java_script_enabled=js)
-        ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+        ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
         return ctx
     def open_panel(pg, w):
         if w < 800 and not pg.evaluate("document.body.classList.contains('panel-open')"):

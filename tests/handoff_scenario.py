@@ -817,9 +817,9 @@ check("12 his hand-off: a close drops the mover and then, settles nothing and le
 to_him(35)
 pre_as = (mt(35)["mover"], mt(35)["then"], dict(ho(35)))
 check("12 close: before the close the item is his (mover Oliver, then the agent) with the record to him not yet taken", pre_as[0] == OWN and pre_as[1] == "team-back" and not pre_as[2].get("taken_at"), pre_as)
-out_aq = server.stackshot_complete("a35", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="team-back")
+out_aq = server.stackshot_update("a35", status="completed", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="team-back", done=[1])      # the step names the front agent: a close by the builder marks it itself (done=[1]), as a close no longer settles another session's step
 last_an = (mt(35).get("handoff_history") or [{}])[-1]
-check("12 close: complete (not only update status=completed) on such an item: mover and then dropped, the record to him ends into the history unchanged but for how it ended (not taken, no event added), get shows no hand-off line",
+check("12 close: a close through update (status=completed, the step marked in the call) on such an item: mover and then dropped, the record to him ends into the history unchanged but for how it ended (not taken, no event added), get shows no hand-off line",
       rd(35)["status"] == "completed" and "mover" not in mt(35) and "then" not in mt(35) and "handoff" not in mt(35) and last_an.get("ended") == "the item closed" and not last_an.get("taken_at") and "events" not in last_an
       and {k: v for k, v in last_an.items() if k not in ("ended", "ended_at")} == pre_as[2] and "handoff:" not in server.stackshot_get("a35"), (mt(35), ho(35), pre_as[2]))
 shut = json.loads(json.dumps(rd(35))); shut["metadata"].update(mover="team-back", needs=["decision"], ask=ASK, handoff=dict(pre_as[2]))
@@ -1082,10 +1082,10 @@ tick(d94 + 11 * MIN, 94); drain()
 check("15 cold call: a hand-on by the cold call leaves the record on the new mover", mt(94).get("mover") == "home-gamma-docs" and ho(94).get("to") == "home-gamma-docs" and not stale_now(94), (mt(94), ho(94)))
 # 15.6 close and reopen
 item(95); hand(95, "home-peer"); drain()
-server.stackshot_complete("a95", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="home-peer"); drain()
+server.stackshot_update("a95", status="completed", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="home-peer", done=[1]); drain()
 check("15 close: the mover's own close takes the record (a close is a start): taken, nothing stale", rd(95)["status"] == "completed" and ho(95).get("taken_at") and not stale_now(95), (rd(95)["status"], mt(95)))
 item(115); hand(115, "home-peer"); drain()
-server.stackshot_complete(f"a{115}", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="home-send"); drain()
+server.stackshot_update(f"a{115}", status="completed", outcome="done", reason="finished", description="- A thing\n- It shipped\n- Done", sender="home-send", done=[1]); drain()
 check("15 close: another session's close ends the open record into the history (\"the item closed\"): a closed item has no mover and no open record",
       rd(115)["status"] == "completed" and "handoff" not in mt(115) and mt(115)["handoff_history"][-1].get("ended") == "the item closed" and not stale_now(115), (rd(115)["status"], mt(115)))
 upd(95, "home-send", status="open", mover="team-back", next="team-back: look again", wake=FUT); drain()

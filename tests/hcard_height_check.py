@@ -66,9 +66,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 import uvicorn
 server._publish = lambda: None
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 srv = uvicorn.Server(uvicorn.Config(server.mcp.http_app(), host="127.0.0.1", port=PORT, log_level="critical", lifespan="on"))
 th = threading.Thread(target=srv.run, daemon=True); th.start()
 for _ in range(100):
@@ -146,7 +147,7 @@ try:
                 for panel in ("open", "closed"):
                     tag = f"{case} {w} {scheme} panel {panel}"
                     ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme)
-                    ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+                    ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
                     pg = ctx.new_page(); pg.goto(BOARD + "/"); settle(pg)
                     if w >= 800:
                         check(f"{tag}: the panel starts pinned", pg.evaluate("document.body.classList.contains('panel-pin')"))
@@ -206,7 +207,7 @@ try:
                     for panel in ("open", "closed"):
                         cssw = round(w / z); tag = f"new word '{word}' {n_closed} closed / {n_new} new, window {w} px at {round(z * 100)}% ({cssw} css px), panel {panel}"
                         ctx = br.new_context(viewport={"width": cssw, "height": 900}, device_scale_factor=z)
-                        ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+                        ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
                         pg = ctx.new_page(); pg.goto(BOARD + "/"); settle(pg, 150)
                         if cssw >= 800:
                             if panel == "closed": pg.click("#panel-open"); pg.mouse.move(cssw // 2, 500); settle(pg, 400)
@@ -232,7 +233,7 @@ try:
         for scheme in ("light", "dark"):
             tag = f"closed page {w} {scheme}"
             ctx = br.new_context(viewport={"width": w, "height": 900}, color_scheme=scheme)
-            ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+            ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
             pg = ctx.new_page(); pg.goto(BOARD + "/"); settle(pg); href = pg.get_attribute("a.hcard:last-child", "href")
             pg.click("a.hcard:last-child"); settle(pg, 400)
             d = pg.evaluate("""() => ({path: location.pathname, h1: document.querySelector('h1').textContent, title: document.title, heads: [...document.querySelectorAll('h2.lsec')].map(h => h.textContent.replace(/\\s+/g, ' ').trim()),
@@ -272,7 +273,7 @@ try:
             for name, path in PAGES.items():
                 for panel in ("open", "closed"):
                     tag = f"layout {name} {w} px, {sbar}, panel {panel}"
-                    ctx = brx.new_context(viewport={"width": w, "height": 700}); ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+                    ctx = brx.new_context(viewport={"width": w, "height": 700}); ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
                     pg = ctx.new_page(); pg.goto(BOARD + path); settle(pg)
                     pg.evaluate("document.body.style.minHeight = '3000px'"); settle(pg, 150)       # taller than the window: a classic scrollbar shows where the browser keeps it
                     pinned = pg.evaluate("document.body.classList.contains('panel-pin')")
@@ -320,7 +321,7 @@ try:
     for name, path in PAGES.items():
         for panel in ("open", "closed"):
             tag = f"scrolled {name} 1280 px, panel {panel}"
-            ctx = br.new_context(viewport={"width": 1280, "height": 700}); ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+            ctx = br.new_context(viewport={"width": 1280, "height": 700}); ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
             pg = ctx.new_page(); pg.goto(BOARD + path); settle(pg)
             pg.evaluate("document.querySelector('main').style.minHeight = '3000px'"); settle(pg, 150)       # the main column is taller than the window (the sticky header stays inside it)
             if pg.evaluate("document.body.classList.contains('panel-pin')") != (panel == "open"): pg.click("#panel-open"); pg.mouse.move(640, 400); settle(pg, 500)
@@ -350,7 +351,7 @@ try:
                 for length in ("short", "long"):
                     tag = f"gutter {name} {w} px{' (phone)' if mobile else ''}, panel {panel}, {length} page"
                     ctx = brc.new_context(viewport={"width": w, "height": 5000 if length == "short" else 700}, is_mobile=mobile, has_touch=mobile)
-                    ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+                    ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
                     pg = ctx.new_page(); pg.goto(BOARD + path); settle(pg)
                     if length == "long": pg.evaluate("document.body.style.minHeight = '3000px'"); settle(pg, 150)
                     if w >= 800 and pg.evaluate("document.body.classList.contains('panel-pin')") != (panel == "open"): pg.click("#panel-open"); pg.mouse.move(w // 2, 400); settle(pg, 500)

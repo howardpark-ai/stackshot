@@ -326,6 +326,7 @@ R._get = fake_get
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
 server._publish = lambda: None
@@ -377,11 +378,11 @@ with TestClient(server.mcp.http_app()) as c:
     h = ui_render.Board(str(T / "store")).render({"html"})["html"]
     hd = h[h.find('<header class="top">'):h.find("</header>")]
     check("the board's header no longer links /runners (the panel's Runners cards link it, and there is no separate link)", '<header class="top">' in h and "/runners" not in hd and "Runners page" not in h, hd[:400])
-    real_mode, server._signin._auth_mode = server._signin._auth_mode, (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
+    real_mode, _signin._auth_mode = _signin._auth_mode, (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
     r1, r2 = c.get("/runners", follow_redirects=False), c.get("/runners.json", follow_redirects=False)
     check("[auth] ui_open = false: both ask for the board's sign-in first, as the other pages do", r1.status_code == 302 and r1.headers["location"] == "/ui/login?next=%2Frunners"
           and r2.status_code == 302 and r2.headers["location"] == "/ui/login?next=%2Frunners.json", (r1.status_code, r1.headers.get("location"), r2.status_code))
-    server._signin._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
+    _signin._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
 
 # ---- 7b. the machine comes from the runner's name; the labels are only the fallback
 def rl(name, *labels, online=True): return {"id": sum(map(ord, name)), "name": name, "status": "online" if online else "offline", "busy": False,
@@ -1309,23 +1310,23 @@ try:
 
     # 12e. the route: POST only, signed in, the board's own origin, the form's token, read-only refusal, validated machine
     EMAIL = "oliver@example.org"; BOARD12 = _core_instance.BOARD_URL
-    COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+    COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
     SAME = {"Origin": BOARD12}; JSONH = {"Origin": BOARD12, "Accept": "application/json"}
-    allowed_was = server._cfg.CFG["auth"].get("allowed_emails"); ui_open_was = server._cfg.CFG["auth"].get("ui_open"); real_mode = server._signin._auth_mode
-    server._cfg.CFG["auth"]["allowed_emails"] = [EMAIL]; server._cfg.CFG["auth"]["ui_open"] = False; server._signin._auth_mode = lambda: "google"
+    allowed_was = server._cfg.CFG["auth"].get("allowed_emails"); ui_open_was = server._cfg.CFG["auth"].get("ui_open"); real_mode = _signin._auth_mode
+    server._cfg.CFG["auth"]["allowed_emails"] = [EMAIL]; server._cfg.CFG["auth"]["ui_open"] = False; _signin._auth_mode = lambda: "google"
     CFGR["switch_timeout_s"] = 60
     try:
         with TestClient(server.mcp.http_app(), base_url=BOARD12) as c:
             def post(data, headers=SAME, cookie=COOKIE):
                 c.cookies.clear()
-                if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+                if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
                 return c.post("/runners/switch", data=data, headers=headers, follow_redirects=False)
             def tok(box, email=EMAIL): return server._runners_switch_token(email, box)
             good = lambda box="box-b", act="off": {"box": box, "act": act, "token": tok(box)}
             n0 = ncalls()
             r = post(good(), cookie=None)
             check("not signed in (ui_open off, auth on): 403, nothing runs", r.status_code == 403 and ncalls() == n0, (r.status_code, r.text))
-            r = post(good(), cookie=server._ui_sign(json.dumps({"email": "intruder@example.org", "exp": time.time() + 3600})))
+            r = post(good(), cookie=_signin._ui_sign(json.dumps({"email": "intruder@example.org", "exp": time.time() + 3600})))
             check("signed in as someone who is not allowed: 403, nothing runs", r.status_code == 403 and ncalls() == n0, r.status_code)
             r = post(good(), cookie="forged.cookie")
             check("a forged cookie: 403, nothing runs", r.status_code == 403 and ncalls() == n0, r.status_code)
@@ -1371,10 +1372,10 @@ try:
             check("the script failing: 502 and {ok: false, text} with the reason, shown back on the page", r.status_code == 502 and j["ok"] is False and j["text"].startswith("Disable box-d failed.") and "ssh refused" in j["text"], (r.status_code, r.text))
             # the page carries the buttons for the viewer; the token in them is the one the route accepts
             SSH_OUT.update({"box-b": wsl("off"), "box-c": wsl("on")}); R.reset()
-            h = get_settled(c, "/runners", headers={"Cookie": f"{server._UI_COOKIE}={COOKIE}"}).text
+            h = get_settled(c, "/runners", headers={"Cookie": f"{_signin._UI_COOKIE}={COOKIE}"}).text
             fs = forms(row(h, "box-b"))
             check("GET /runners (signed in): the Enable button for box-b carries the viewer's token for that machine", len(fs) == 1 and fs[0][:2] == ("box-b", "on") and fs[0][2] == tok("box-b") and fs[0][3] == "Enable", fs)
-            jd = get_settled(c, "/runners.json", headers={"Cookie": f"{server._UI_COOKIE}={COOKIE}"}).json()
+            jd = get_settled(c, "/runners.json", headers={"Cookie": f"{_signin._UI_COOKIE}={COOKIE}"}).json()
             check("/runners.json: the same buttons in its html", len(forms(row(jd["html"], "box-a"))) == 1 and jd["counts"]["runners"] == 10, jd.get("counts"))
             check("the token follows the viewer and the machine only", tok("box-b") == tok("box-b") and tok("box-b") != tok("box-a") and tok("box-b") != tok("box-b", "x@example.org"))
             # read-only copy: refused first, and no buttons drawn
@@ -1391,7 +1392,7 @@ try:
             check("no switch_script: the token maker is None (no button on the page); a press from an old page is refused with the sentence, nothing runs", server._runners_token_maker(None) is None and r.status_code == 502 and "not set up" in r.text and ncalls() == n0, (r.status_code, r.text))
             CFGR["switch_script"] = str(FAKE)
         # the board open (auth off, as in the other suites): the switch still needs a real signed-in address, as /answer and /watch do, so an anonymous viewer is refused and no button is drawn
-        server._cfg.CFG["auth"]["ui_open"] = True; server._signin._auth_mode = lambda: "off"
+        server._cfg.CFG["auth"]["ui_open"] = True; _signin._auth_mode = lambda: "off"
         with TestClient(server.mcp.http_app(), base_url=BOARD12) as c:
             n0 = ncalls()
             r = c.post("/runners/switch", data={"box": "box-b", "act": "off", "token": server._runners_switch_token("", "box-b")}, headers=JSONH)
@@ -1401,7 +1402,7 @@ try:
             h = get_settled(c, "/runners").text
             check("…and the open board's page draws no Disable / Enable button", "/runners/switch" not in h and not forms(row(h, "box-b")), len(h))
     finally:
-        server._signin._auth_mode = real_mode
+        _signin._auth_mode = real_mode
         if allowed_was is None: server._cfg.CFG["auth"].pop("allowed_emails", None)
         else: server._cfg.CFG["auth"]["allowed_emails"] = allowed_was
         if ui_open_was is None: server._cfg.CFG["auth"].pop("ui_open", None)

@@ -54,6 +54,7 @@ git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 import uvicorn; from stackshot.web import server; from stackshot.web import render; from stackshot.web import board_home
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -74,7 +75,7 @@ for _ in range(200):
     time.sleep(0.05)
 if not srv.started: print("the test server did not start"); sys.exit(1)
 
-COOKIE = {"name": server._UI_COOKIE, "value": server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600})), "url": BASE}
+COOKIE = {"name": _signin._UI_COOKIE, "value": _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600})), "url": BASE}
 from playwright.sync_api import sync_playwright
 def redraw(bump=None):
     """make the server draw its home again, a second later than the page in the browser (the page's stamp is whole seconds), after `bump()` changed something"""

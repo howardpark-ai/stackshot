@@ -49,7 +49,7 @@ state file). No trigger, no call. The item's marker is `test_trim:<repo>/<short 
 `--dry-run`, which writes nothing) prints what would be sent and calls nothing. The call is made once, never retried: a refusal or a client
 that cannot be run prints its text on stderr and the status is 3, after the report was printed. The state file is written after the call; when
 the item was not opened it records the triggers as owed (`open_pending`) and the next run asks for them again together with its own, so a growth
-trigger does not vanish because its baseline moved on. A debt is cleared by the call that opens (or answers) the item; `--no-open` leaves one as it is.
+trigger does not vanish because its baseline moved on. A debt is cleared by the call that opens (or answers) the item; a `--no-open` run sends nothing, so it records its own triggers as owed together with any earlier debt.
 `--client PROGRAM` names the client program (default: stackshot/fleet/client.py of the checkout this tool is in, run with this Python).
 
 State file: `${XDG_STATE_HOME:-~/.local/state}/stackshot/test-trim/<repo>.json` (--state-dir replaces the folder), written
@@ -482,10 +482,13 @@ def build(args, now: dt.datetime, work: list[str]) -> tuple[str, dict, str]:
 
 
 def owed_triggers(prev: dict | None) -> list[dict]:
-    """the triggers the previous run could not get an item for (its `open_pending`), read leniently: an entry that is not a threshold of this tool is dropped"""
+    """the triggers the previous run could not get an item for (its `open_pending`), read leniently: an entry that is not a threshold of this tool (not a map, a key that is not the name of one) is dropped; `limit` and `value` are only carried through, never computed with"""
     out = []
-    for t in (prev or {}).get("open_pending") or []:
-        if isinstance(t, dict) and t.get("key") in DEFAULTS and isinstance(t.get("line"), str) and t["line"].startswith("TRIGGER: "):
+    pending = (prev or {}).get("open_pending")
+    if not isinstance(pending, list):        # absent, or damaged into a number, a string or a map: no debt, and the run goes on
+        return out
+    for t in pending:
+        if isinstance(t, dict) and isinstance(t.get("key"), str) and t["key"] in DEFAULTS and isinstance(t.get("line"), str) and t["line"].startswith("TRIGGER: "):
             out.append({"key": t["key"], "limit": t.get("limit"), "value": t.get("value"), "line": t["line"]})
     return out
 
@@ -628,8 +631,8 @@ def main(argv: list[str] | None = None) -> int:
                 failure = e
         if failure:
             rec["open_pending"] = args.item_triggers     # the item is still owed: the next run asks again, whatever its own numbers say
-        elif args.item_owed and not (res and res["sent"]):
-            rec["open_pending"] = args.item_owed         # nothing was sent (--no-open): a debt of an earlier run stays
+        elif args.item_triggers and not (res and res["sent"]):
+            rec["open_pending"] = args.item_triggers     # nothing was sent (--no-open): this run's triggers are owed too, with any debt of an earlier run, or the baseline moving on would drop them
         if not args.dry_run:
             try:
                 write_state(state_file, rec)         # after the call: the baseline moves on, with the debt recorded in it when the item was not opened

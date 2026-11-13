@@ -233,6 +233,7 @@ check("…a line addressed by that name records the live session's id", line["uu
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.core import store as _core_store
 ls = server._sessions_listing("", now=T3 + 2).split("\n"); ly = [l for l in ls if l.startswith("- work-y2 ")]
 check("sessions tool: the live namesake plain, the gone owner of an open item kept with its last sign of life",
@@ -747,7 +748,7 @@ with TestClient(app) as c:
     server._cfg.CFG["pilot"]["writer_owes_page"] = _writer_owes
 
     # ============================================================= 8. the board's own sign-in
-    check("the cookie signature holds, and a tampered cookie is nothing", server._ui_unsign(server._ui_sign("payload")) == "payload" and server._ui_unsign((lambda v: v[:-1] + ("0" if v[-1] != "0" else "1"))(server._ui_sign("payload"))) == "" and server._ui_unsign("") == "")
+    check("the cookie signature holds, and a tampered cookie is nothing", _signin._ui_unsign(_signin._ui_sign("payload")) == "payload" and _signin._ui_unsign((lambda v: v[:-1] + ("0" if v[-1] != "0" else "1"))(_signin._ui_sign("payload"))) == "" and _signin._ui_unsign("") == "")
     check("the signing key is private", oct(os.stat(T / "secrets/ui-session.key").st_mode & 0o777) == "0o600")
     r = c.get("/", follow_redirects=False)
     check("ui_open false: the board asks for a sign-in", r.status_code == 302 and r.headers["location"] == "/ui/login?next=%2F", (r.status_code, r.headers.get("location")))
@@ -772,7 +773,7 @@ with TestClient(app) as c:
         r = c.post(path, data=data) if form else c.post(path, json=data)
         try: return r.status_code, r.json()
         except Exception: return r.status_code, {}
-    server._signin._ui_http = ui_http
+    _signin._ui_http = ui_http
     r = c.get("/ui/login?next=/projects/alpha", follow_redirects=False)
     loc = r.headers.get("location", "")
     from urllib.parse import urlparse, parse_qs
@@ -785,15 +786,15 @@ with TestClient(app) as c:
           and (r2.status_code == 200 or any(x in r2.headers.get("location", "") for x in ("accounts.google.com", "/consent"))), (r2.status_code, r2.headers.get("location", "")[:120], r2.text[:200]))
     r = c.get("/ui/login?next=//evil.example", follow_redirects=False)
     fc2 = next((v.split(";")[0].split("=", 1)[1] for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui_flow=")), "")
-    check("an off-site `next` is not followed", json.loads(server._ui_unsign(fc2))["next"] == "/")
+    check("an off-site `next` is not followed", json.loads(_signin._ui_unsign(fc2))["next"] == "/")
     state = q["state"][0]
-    server._ui_exchange = lambda code, verifier: "stranger@example.com"
+    _signin._ui_exchange = lambda code, verifier: "stranger@example.com"
     r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
     check("sign-in end: an address that is not allowed gets no session", r.status_code == 403 and "set-cookie" not in {k for k, _ in r.headers.multi_items() if _.startswith("stackshot_ui=")}, (r.status_code, r.text))
     r = c.get("/ui/callback?code=abc&state=wrong", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False); r2 = c.get(f"/ui/callback?code=abc&state={state}", follow_redirects=False)
     check("sign-in end: a callback that does not belong to a sign-in started here is refused", r.status_code == 400 and r2.status_code == 400)
     seen_args = []
-    server._ui_exchange = lambda code, verifier: (seen_args.append((code, verifier)), "you@example.com")[1]
+    _signin._ui_exchange = lambda code, verifier: (seen_args.append((code, verifier)), "you@example.com")[1]
     r = c.get(f"/ui/callback?code=abc&state={state}", cookies={"stackshot_ui_flow": flow_cookie}, follow_redirects=False)
     sess = next((v.split(";")[0].split("=", 1)[1] for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui=")), "")
     attrs = next((v.lower() for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith("stackshot_ui=")), "")
@@ -892,8 +893,8 @@ with TestClient(app) as c:
     check("…and the new bytes' version is", r.headers.get("cache-control") == "public, max-age=31536000, immutable", dict(r.headers))
     forged = sess[:-1] + ("0" if sess[-1] != "0" else "1")          # one hex digit of the signature changed, whatever it was
     r = c.get("/", cookies={"stackshot_ui": forged}, follow_redirects=False)
-    exp = server._ui_sign(json.dumps({"email": "you@example.com", "exp": time.time() - 5})); r2 = c.get("/", cookies={"stackshot_ui": exp}, follow_redirects=False)
-    gone = server._ui_sign(json.dumps({"email": "left@example.com", "exp": time.time() + 999})); r3 = c.get("/", cookies={"stackshot_ui": gone}, follow_redirects=False)
+    exp = _signin._ui_sign(json.dumps({"email": "you@example.com", "exp": time.time() - 5})); r2 = c.get("/", cookies={"stackshot_ui": exp}, follow_redirects=False)
+    gone = _signin._ui_sign(json.dumps({"email": "left@example.com", "exp": time.time() + 999})); r3 = c.get("/", cookies={"stackshot_ui": gone}, follow_redirects=False)
     check("a forged, an expired and a no-longer-allowed cookie all go back to the sign-in", (r.status_code, r2.status_code, r3.status_code) == (302, 302, 302))
     server._cfg.CFG["auth"]["ui_open"] = True                       # read at each request: no restart
     check("ui_open true (today's setting): the board is served without a sign-in, as before", c.get("/", follow_redirects=False).status_code == 200 and c.get("/ui/login", follow_redirects=False).headers["location"] == "/")

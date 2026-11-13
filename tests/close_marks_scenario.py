@@ -1,7 +1,7 @@
 """Scenario test for "a close marks the item's open next steps" (no closed item shows an open next step) — fixture data, no live store, no network, no server socket.
 
 Before a close marked nothing: the steps still open stayed open on the closed item's checklist. Now:
-  1  a close with outcome done marks every step still open DONE, by the closer, at the time of the close; dropped and superseded mark them DROPPED; steps marked in the same call keep their marks
+  1  a close with outcome done marks the closer's own steps still open DONE, by the closer, at the time of the close; dropped and superseded mark them DROPPED; steps marked in the same call keep their marks
      (done=[…] / dropped=[…] with the close win for their steps); steps already marked are untouched
   2  the server's own closes (a done check, the owner's "drop" on a watcher ask) mark the open steps the same way (done / dropped), by the server
   3  reopening is unchanged: the marks stay, the steps an OLD close left open are dropped, the new next is the open step; a closed item's checklist still refuses a mark
@@ -127,8 +127,8 @@ check("reopening an OLD close (steps left open) is unchanged: the steps left ope
 
 # ================================================================ 4. the text
 desc_ = {t.name: t.description for t in __import__("asyncio").run(server.mcp.list_tools())}
-check("text: complete and update say a close marks the open steps, done or dropped by the outcome", all("marks every step" in desc_[n] and "dropped" in desc_[n] for n in ("complete", "update"))
-      and "marks nothing" not in desc_["update"] + desc_["complete"] + desc_["get"], [n for n in ("complete", "update") if "marks every step" not in desc_[n]])
+check("text: complete and update say a close ticks only the closer's own open steps, done or dropped by the outcome", all("ticks only the steps that are still open and are yours" in desc_[n] and "dropped" in desc_[n] for n in ("complete", "update"))
+      and "marks nothing" not in desc_["update"] + desc_["complete"] + desc_["get"], [n for n in ("complete", "update") if "ticks only the steps that are still open and are yours" not in desc_[n]])
 
 # ================================================================ 5. the backfill tool
 CLOSE = now0 - 3 * DAY

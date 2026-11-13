@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render
@@ -363,16 +364,16 @@ for i, ts in WORK4: d_ = ld._load(); d_[f"a{i}"]["cleared"] = 0.0; ld._save(d_)
 check("(cleanup of the mixed-scope fixtures) the page is back to the six lines: work's four and home's two", page_lines() == 6 and [(sc, n) for sc, n, _p in scope_tree(board().landed_html())] == [("work", 4), ("home", 2)])
 
 # ---- 5. clear: opening the page clears nothing; Clear; Clear all
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 SAME = {"Origin": BOARD}
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path, follow_redirects=False)
     def post(path, data, headers=SAME, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.post(path, data=data, headers=headers, follow_redirects=False)
     os.environ["STACKSHOT_AUTH"] = "oauth"
     try:

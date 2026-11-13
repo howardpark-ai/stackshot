@@ -107,6 +107,7 @@ threads_before = {t.name for t in threading.enumerate()}
 from stackshot.core import readonly
 from stackshot.core import store as _core_store
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.service import writes
 atexit.register(lambda: readonly._reload_for_test(False))        # runs before _scratch's clean-up: the backstop must be off when the folders are removed
 REFUSAL = "stackshot here is a read-only standby copy (STACKSHOT_READ_ONLY); writes go to the live board."
@@ -236,7 +237,7 @@ with TestClient(app, base_url=BOARD) as c:
     check("/healthz?format=json: ok, read_only true, data_age_s, commit", hj["ok"] is True and hj["read_only"] is True and isinstance(hj["data_age_s"], int) and 85 <= hj["data_age_s"] <= 140
           and "commit" in hj and (hj["commit"] is None or re.fullmatch(r"[0-9a-f]{12}", hj["commit"])), hj)
     check("/healthz.json answers the same", c.get("/healthz.json").json()["read_only"] is True)
-    check("the health answers are public (no sign-in)", "healthz" in server._UI_PUBLIC and "healthz.json" in server._UI_PUBLIC)
+    check("the health answers are public (no sign-in)", "healthz" in _signin._UI_PUBLIC and "healthz.json" in _signin._UI_PUBLIC)
 
     # the data age
     check("data age is None for a store that cannot be read", readonly.data_age(T / "no-such-store") is None and "unknown" in readonly.healthz_line(T / "no-such-store"))
@@ -339,7 +340,8 @@ shutil.copy(T / "RULES.md", N / "RULES.md")
 write_toml("stackshot.toml", root=str(N))
 src = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 declared = {}
-for path, m in re.findall(r'(?m)^@mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)', src):
+signin_src = pathlib.Path(STACK, "stackshot/web/auth/signin.py").read_text(encoding="utf-8")      # the sign-in's three routes are registered there, by signin.register(mcp)
+for path, m in re.findall(r'(?m)^@mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)', src) + re.findall(r'(?m)^    mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)\(', signin_src):
     if not m.startswith("["):
         m = re.search(rf'(?m)^{m} = (\[.*\])\s*$', src).group(1)
     declared.setdefault(path, set()).update(ast.literal_eval(m))

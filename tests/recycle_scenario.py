@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web.auth import oauth as _oauth
 from stackshot.service import telling
 server._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
@@ -205,7 +206,7 @@ check("an exception still exits 0", rc == 0)
 # ---- 5. recycle-due: a script marks a recycle as due on an existing item,
 # by id or through the pull request it is anchored to, and never files one (and it is not an item)
 def _no_identity(): raise server.ToolError("Refused: unknown identity is not allowed on this board")
-server._who = _no_identity                         # as with auth on and no signed-in caller: the client path must not need one
+_oauth._who = _no_identity                         # as with auth on and no signed-in caller: the client path must not need one
 nfiles = lambda: len(list((T / "store").glob("?/*.json")))
 item(8, "home-here"); item(9, "home-skipped")
 PR = "https://github.com/example-owner/stackshot/pull/11"

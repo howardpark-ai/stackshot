@@ -93,6 +93,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 
 from stackshot.web import server; from stackshot.web import render; from stackshot.web import search
+from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import search as s2
 server._publish = lambda: None
 from starlette.testclient import TestClient
@@ -118,7 +119,7 @@ check("find: search.query still matches the start of a word (a prefix finds a2)"
 check("find: nothing for no word, and no FTS syntax is read from the query", FOUND("") == [] and FOUND('"*') == [] and FOUND("NEAR(quokka redesign)") == [] and FOUND("title:quokka") == [] and FOUND("quokka OR needle") == [], FOUND("quokka OR needle"))
 
 # ---- 2. the page
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 LI = re.compile(r'<li class="irow srow"([^>]*)>(.*?)</li>', re.S)
 def rows_of(t):
     """[(kind label, link address, title text, the li's attributes, the li's html)] of the list's rows, in order."""
@@ -139,7 +140,7 @@ chip = lambda t: re.findall(r'<button type="submit" class="se-chip" name="w" val
 
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path):
-        c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE)
+        c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE)
         return c.get(path, follow_redirects=False)
     def page(q, extra="", full=True):
         """The results page for q; `full` asks for every row (n=200) so a check can look at all of a search, not its first 25."""

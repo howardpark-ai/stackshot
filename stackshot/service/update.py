@@ -42,7 +42,7 @@ from stackshot.model import steps as _steps
 from stackshot.model import work as _work
 from stackshot.model.bullet_text import _clip_line
 from stackshot.model.ids import _bare_id_ok, _norm_id
-from stackshot.model.needs import _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
+from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import gates as _gates
 from stackshot.service import telling as _telling
@@ -639,7 +639,7 @@ def update_unlocked(
     if marks and not steps_on:
         raise ToolError(f"Refused: {_gh.shown(gid)} is closed and its checklist is the record of what was done; reopen it (status=open with a next) before marking or rewording a step")
     if rewording and (closing or clear_next):
-        raise ToolError("Refused: reword changes the words of a step that stays open; " + ("a close marks every open step, so reword goes with a call that keeps the item open" if closing else "clear_next=true wipes every line, so reword goes with a call that keeps them"))
+        raise ToolError("Refused: reword changes the words of a step that stays open; " + ("a close settles the open steps itself, so reword goes with a call that keeps the item open" if closing else "clear_next=true wipes every line, so reword goes with a call that keeps them"))
     steps_old = _steps.view(item_was.get("metadata"), keeper=keeper_was) if steps_on else []          # the checklist as it stood: the stored steps lined up with the lines of next, each open one with its writer
     steps_before = list(steps_old)          # …as the write found it: a reword below replaces entries of steps_old, and the front-agent step check judges the new words against these
     steps_by = _session_label(debtor) or debtor or "unknown"
@@ -652,6 +652,8 @@ def update_unlocked(
             raise _steps.StepError(f"step {both[0] + 1} is in reword and in done or dropped ({_steps.first_line(steps_old[both[0]]['text'])[:90]}); pick one")
     except _steps.StepError as e:
         raise ToolError(f"Refused: {e}")
+    if closing and steps_old and (_writes.session_next() or _writes.close_tool()):      # a session's close ticks its own steps only: another session's open step is never settled by it
+        _gates.gate_close_steps(gid, steps_old, _steps.others_open(steps_old, lambda w: not w or h.ho_same(w, next_writer), {*done_ix, *drop_ix}, lambda nm: h.ho_same(nm, next_writer)))
     reword_note = ""
     if reword_ix:                  # the step keeps its number, its place and its open state; its text (and its line of next, its proof) become the new words before anything below lines the checklist up with next
         for i, text in reword_ix.items():
@@ -848,7 +850,7 @@ def update_unlocked(
         if opts: meta["options"] = opts
         else: meta.pop("options", None)
     if closing:                   # the end state is the record; nothing is left to do, ask or wait on (due stays as a record)
-        if steps_old:             # a close marks every step still open, by the closer: done when the outcome is done, dropped otherwise; a mark passed with the close counts first
+        if steps_old:             # a close marks the steps still open (a session's close has refused above while another session's is one), by the closer: done when the outcome is done, dropped otherwise; a mark passed with the close counts first
             try:
                 meta["steps"] = _steps.stored(_steps.mark_open(_steps.apply(steps_old, None, done_ix, drop_ix, steps_by, time.time()), outcome, steps_by, time.time()))
             except _steps.StepError as e:
@@ -884,6 +886,16 @@ def update_unlocked(
         nm_mv = _anc.names()
         if stored_mv and named_now and not _model.is_owner(stored_mv) and not any(x == stored_mv or _anc.canonical(x, nm_mv) == _anc.canonical(stored_mv, nm_mv) or h.render_same_ref(x, stored_mv) for x in named_now):
             meta.pop("mover", None)
+    needs_replaced: list[str] = []      # the session this write put into `needs` in place of the mover it came from: it hears the hand-off notice, not a second "now needs you"
+    if "mover" in model_set and not (needs_set or agent.strip() or clear_needs):      # a hand-over by `mover=` alone: the session `needs` names for the mover it came from is replaced by the new one, so a hand-back leaves no stale entry (a write that sets `needs` itself is taken as given)
+        prev_mv, new_mv = _model.norm_who(meta.get("mover")), _model.norm_who(model_set.get("mover"))
+        nm_now = _anc.names()
+        if prev_mv and new_mv and not _model.is_owner(prev_mv) and not _model.is_owner(new_mv) and _anc.canonical(prev_mv, nm_now) != _anc.canonical(new_mv, nm_now):
+            is_prev = lambda x: x.lower() not in _NEEDS_KINDS and _anc.canonical(x, nm_now) == _anc.canonical(prev_mv, nm_now)      # noqa: E731
+            held = _needs_of(meta)
+            if any(is_prev(x) for x in held):
+                _needs_store(meta, _canon_needs([new_mv if is_prev(x) else x for x in held], nm_now))
+                needs_replaced.append(new_mv)
     h.model_apply(meta, str(item.get("status") or ""), model_set, model_drop)   # goal, mover, then and the wait's fields: a filing edit
     if "wait_kind" in model_drop:
         h.wait_end_sent_back(meta, (_we.PR, _we.BOX, _we.URL, _we.STORED))      # clear_wait on a wait the server set from the line's words
@@ -978,8 +990,9 @@ def update_unlocked(
     if item.get("status") != "completed" and (ask or opts):
         asked += h.options_note(meta) + h.actor_note(meta, options=bool(opts), ask=bool(ask))
     hold_note = ""
-    if hold and meta.get("hold") and not state_st and meta.get("state") in _states.STATES and meta["state"] != "parked":     # a hold makes the item read parked: a state of another kind cannot stand beside it
-        hold_note = f"\n(stored state {meta['state']} dropped: a hold ends it; the item reads parked)"
+    if ((hold and meta.get("hold") and meta.get("state") in _states.STATES and meta["state"] != "parked")
+            or (relay_hold and meta.get("state") in _model.ALIVE_STATES)) and not state_st:     # a hold makes the item read parked: a state of another kind cannot stand beside it; a relay or event wait stores no flag, so the hold ends only the alive states the model's conflict line names (a waiting state stands beside the wait and keeps its fields)
+        hold_note = f"\n(stored state {meta['state']} dropped: a hold ends it; the item reads " + ("as its relay or event wait" if relay_hold else "parked") + ")"
         h.state_end(meta)
     state_touched = frozenset(k for k, v in (("needs", needs_set or clear_needs or agent.strip()), ("after", after_set or clear_after),
                                               ("wake", wake or clear_wake), ("hold", hold or clear_hold), ("ask", ask or clear_ask), ("next", next_touch),
@@ -1121,7 +1134,7 @@ def update_unlocked(
                 told += _telling.tell_handback(gid, item, was_needs, debtor, heard)   # a front agent mover hears an item handed back to it alone; nothing else wakes it
             except Exception as e:  # noqa: BLE001  — the write is saved and published; a notice that fails is a stderr line, never a failed write
                 print(f"owner: {gid} hand-back not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        new_s = [s for s in _needs_sessions(meta) if h.session_id(s) not in {h.session_id(x) for x in was_needs}]
+        new_s = [s for s in _needs_sessions(meta) if h.session_id(s) not in {h.session_id(x) for x in [*was_needs, *needs_replaced]}]
         told += _telling.tell_needed(gid, item, new_s, debtor, heard)
         if "decision" in [str(x).lower() for x in was_needs] and "decision" not in _needs_kinds(meta):   # he has decided; the sessions still named move now
             told += _telling.tell_decided(gid, item, [s for s in _needs_sessions(meta) if s not in new_s], debtor, heard)
@@ -1227,7 +1240,8 @@ def complete_item(item_id: str, outcome: str = "", reason: str = "", description
     h = _hooks()
     gid = _norm_id(item_id)
     before = _load(gid)
-    out = h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
+    with _writes.close_write():      # the complete tool's own call: the close ticks the sender's own steps only (update_unlocked reads it, as it reads session_next for the update tool's)
+        out = h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
     try:
         out += _completion_anchor_prompt(gid, before)
     except Exception as e:  # never fail a completion over the prompt

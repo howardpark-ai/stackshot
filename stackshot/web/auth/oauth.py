@@ -1,10 +1,9 @@
-"""server_auth.py: the auth section of server.py: `_env` (a secret read from the environment), `_auth` (the auth object the MCP server is built with, from `signin._auth_mode()`; None when the mode is off) and
-`_who` (the signed-in identity, allow-listed).
+"""oauth.py: the MCP sign-in provider: `_env` (a secret read from the environment), `_auth` (the auth object the MCP server is built with, from `signin._auth_mode()`; None when the mode is off)
+and `_who` (the signed-in identity, allow-listed).
 
-server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the auth mode
-(`signin.py`) and the board's own client check (`_ui_is_board_client`, signin.py's). server.py imports `_auth` and `_who` back at the old position, before `mcp = FastMCP(..., auth=_auth())`, so `server._auth` and `server._who`
-stay the names the tools and the suites use (`_env` is read only here, and not imported back): `_auth()` is called at that import, with the same config and environment as before, and `_who()` is looked up in `server`'s globals by every tool, so a suite that
-replaces `server._who` reaches them all. Nothing in this module calls `_who` or `_env` through a name a suite replaces."""
+The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the auth mode (`signin.py`) and the board's own client check
+(`_ui_is_board_client`, signin.py's). server.py calls `_auth()` where it builds `mcp = FastMCP(..., auth=_auth())`, and every tool asks `oauth._who()` through the module, so a suite that
+replaces `_who` sets it here. Nothing in this module calls `_who` or `_env` through a name a suite replaces."""
 from __future__ import annotations
 
 import os
@@ -13,8 +12,8 @@ import sys
 from fastmcp.exceptions import ToolError
 
 from stackshot.core import config as _cfg
-from stackshot.web import signin as _signin
-from stackshot.web.signin import _ui_is_board_client
+from stackshot.web.auth import signin as _signin
+from stackshot.web.auth.signin import _ui_is_board_client
 
 
 def _env(key: str) -> str:
@@ -82,7 +81,7 @@ def _auth():
         required_scopes=scopes,
         allowed_client_redirect_uris=list(_cfg.CFG["auth"].get("allowed_client_redirect_uris") or []) + [str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/ui/callback"],
     )
-    from stackshot.web.cimd import _harden_cimd   # retry claude.ai's metadata fetch and serve the last good document when it fails
+    from stackshot.web.auth.cimd import _harden_cimd   # retry claude.ai's metadata fetch and serve the last good document when it fails
     mgr = getattr(p, "_cimd_manager", None)
     f = getattr(mgr, "_fetcher", None)
     if f is not None:

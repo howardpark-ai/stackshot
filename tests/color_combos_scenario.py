@@ -54,14 +54,15 @@ if len(sys.argv) > 2 and sys.argv[1] == "--standby-child":
     os.environ.update(STACKSHOT_CONFIG=f"{root}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{root}/fleet"); os.environ.pop("STACKSHOT_URL", None)
     sys.path.insert(0, STACK); logging.disable(logging.CRITICAL)
     from stackshot.web import server
+    from stackshot.web.auth import signin as _signin
     from stackshot.web.colorcombos import WEB_LABEL as WL
     from starlette.testclient import TestClient
     server._cfg.CFG["project_agent"] = {"form_senders": [WL], "form_machines": [HOST]}
-    cookie = server._ui_sign(json.dumps({"email": MINA, "exp": time.time() + 3600}))
+    cookie = _signin._ui_sign(json.dumps({"email": MINA, "exp": time.time() + 3600}))
     VALS = json.loads(sys.argv[3])
     out = {}
     with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
-        c.cookies.set(server._UI_COOKIE, cookie)
+        c.cookies.set(_signin._UI_COOKIE, cookie)
         JH = {"Origin": BOARD, "Content-Type": "application/json"}
         MH = {"Authorization": "Bearer " + TOK[HOST], "Content-Type": "application/json"}
         def row(r): return [r.status_code, r.text[:200], r.headers.get("cache-control")]
@@ -97,6 +98,7 @@ def check(name, cond, got=None):
 from stackshot.web import colorcombos as cc
 WL = cc.WEB_LABEL         # the label the web form sends: the code's own constant, so this file names none of its own
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from starlette.requests import Request
 from starlette.testclient import TestClient
 FILE = cc.path()
@@ -312,8 +314,8 @@ try:
     reset()
 
     # ---- 2. the routes
-    COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, EVE)}
-    EXPIRED = server._ui_sign(json.dumps({"email": MINA, "exp": time.time() - 10}))
+    COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, EVE)}
+    EXPIRED = _signin._ui_sign(json.dumps({"email": MINA, "exp": time.time() - 10}))
     JSON_H = {"Origin": BOARD, "Content-Type": "application/json"}
     server._cfg.CFG["project_agent"] = {"form_senders": [WL, "other-web"], "form_machines": [HOST]}
     MH = {"Authorization": "Bearer " + TOK[HOST], "Content-Type": "application/json"}
@@ -324,7 +326,7 @@ try:
     with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         def who(w):
             c.cookies.clear()
-            if w: c.cookies.set(server._UI_COOKIE, w if w == EXPIRED else COOKIE[w])
+            if w: c.cookies.set(_signin._UI_COOKIE, w if w == EXPIRED else COOKIE[w])
         def bget(w=MINA, path="/colors/combos"):
             who(w); return c.get(path, follow_redirects=False)
         def bpost(body, w=MINA, headers=JSON_H, raw=None, path="/colors/combos"):
@@ -397,7 +399,7 @@ try:
                 if k < len(chunks): return {"type": "http.request", "body": chunks[k], "more_body": k < len(chunks) - 1}
                 return {"type": "http.disconnect"}
             return asyncio.run(fn(Request(scope, receive))), len(reads)
-        cookie_h = {"Origin": BOARD, "Cookie": f"{server._UI_COOKIE}={COOKIE[MINA]}"}
+        cookie_h = {"Origin": BOARD, "Cookie": f"{_signin._UI_COOKIE}={COOKIE[MINA]}"}
         mach_h = {"Authorization": "Bearer " + TOK[HOST]}
         for label, fn, path, hd, extra in (("board", server.colors_combos_save, "/colors/combos", cookie_h, {}), ("board delete", server.colors_combos_delete, "/colors/combos/delete", cookie_h, {}),
                                            ("machine", server.client_colors_combos_save, "/client/colors/combos", mach_h, {"sender": WL}),
@@ -499,7 +501,7 @@ try:
         check("machine GET: no token is 401, the plain text of the other /client routes", r.status_code == 401 and r.text.startswith("unauthorized: a machine token is required") and "json" not in r.headers["content-type"], (r.status_code, r.text, r.headers["content-type"]))
         res = [mget({"Authorization": "Bearer " + "x" * 43}), mget({"Authorization": "Bearer short"}), mget({"Authorization": "Basic " + TOK[HOST]}), mget({"Authorization": TOK[HOST]})]
         check("machine GET: an unknown token, a short one, another scheme, a bare token: 401", all(r.status_code == 401 for r in res), [r.status_code for r in res])
-        c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA])
+        c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[MINA])
         check("machine GET: the board's cookie alone does not open the machine route (401)", c.get("/client/colors/combos").status_code == 401)
         r = mget(OH)
         check("machine GET: a valid token of a machine that is not in form_machines is 403 (a read too), an error object", is_err(r, 403, None, "form_machines"), (r.status_code, r.text))

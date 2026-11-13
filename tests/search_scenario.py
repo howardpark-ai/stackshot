@@ -77,6 +77,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 from stackshot.web import server; from stackshot.service import writes; from stackshot.web import render; from stackshot.web import search
+from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import search as ui_search, render as ui_render
 server._publish = lambda: None
 from starlette.testclient import TestClient
@@ -124,11 +125,11 @@ check("Japanese: two words (an AND) and a word with a Latin one", SEL("ボード
 check("Japanese: the History keeps what the edit replaced (the subject it was)", set(SEL("試験").get("history", [])) == {"a2"} and SEL("修正").get("item") == ["a2"], SEL("試験"))
 
 # ---- 4. the results page at /search (its markup is checked in ui_search; here only what the index owes it)
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path, follow_redirects=False)
     r = get("/search?q=" + "x" * 5000)
     check("a very long query is cut, not an error", r.status_code == 200 and len(r.text) < 200000)
@@ -176,14 +177,14 @@ search.reset(); (T / "state/search/index.db").unlink()
 part = search.sync(fresh(), max_items=2)
 check("a bounded sync indexes the newest first and says what is left; the index is 'being built' until it is done", part["items"] == 2 and part["left"] == 3 and search.building(), part)
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
-    c.cookies.set(server._UI_COOKIE, COOKIE)
+    c.cookies.set(_signin._UI_COOKIE, COOKIE)
     rr = c.get("/search?q=home")
     check("the results page indexes the rest of the items' text in one visit (REQUEST_ITEMS a visit), the History is owed to the thread; the thread's pass finishes it and drops the note",
           "a2" in " ".join(search._PARTIAL) and search.building() and search.sync(fresh())["left"] == 0 and not search.building() and "still being built" not in c.get("/search?q=home").text, (search._PARTIAL, search.building()))
 search.reset(); (T / "state/search/index.db").unlink()
 search.sync(fresh(), max_items=1)
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
-    c.cookies.set(server._UI_COOKIE, COOKIE)
+    c.cookies.set(_signin._UI_COOKIE, COOKIE)
     check("…and says so while it is still going", "still being built" in c.get("/search?q=home").text or not search.building())
 
 # ---- 8. the LIKE fallback (a SQLite build without FTS5) answers the same
@@ -262,7 +263,7 @@ check("5: a re-key of more than a tenth (the Board as big as the stamps) drops t
 def _boom(ws): raise _sq.DatabaseError("database disk image is malformed")
 _rq = search.find; search.find = _boom
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
-    c.cookies.set(server._UI_COOKIE, COOKIE)
+    c.cookies.set(_signin._UI_COOKIE, COOKIE)
     r6 = c.get("/search?q=quokka")
 search.find = _rq
 check("6: a damaged index: the page says it is being rebuilt, the file is dropped and the thread is woken", "being rebuilt" in r6.text and r6.status_code == 200 and not (T / "state/search/index.db").exists() and search._WAKE.is_set(), r6.text[r6.text.find("being rebuilt") - 100:][:300])
