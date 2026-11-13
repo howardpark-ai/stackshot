@@ -1,7 +1,9 @@
 # The scenario suites, on every pull request and on main. They run on fixture data in a temp dir: no store, no
 # network beyond what uv needs to fetch fastmcp. A PR is merged by the builder (example-engineer) only when this is green, and, unless it is a small change, after a fresh reviewer subagent has read it.
 # THE GATE. The merge queue's run is the full run; main's push only stamps it. Per event:
-#   * a pull request runs only the suites its change reaches by the newest map (tests/suitemap.py select; the reasons are in the job summary), and all of them when the map is missing or the change is to the harness itself;
+#   * a pull request runs only the suites its change reaches by the newest map (tests/suitemap.py select; the reasons are in the job summary), and all of them when the map is missing or the change is to the harness itself.
+#     The selection is made once, by the `shards` job. A small one (fewer than SHARD_MIN = 40 suites, tests/suitemap.py) runs in the `suites` job as it always did; a large one (a harness change, a missing map and a wide change all give about 200 suites, 22 minutes serially)
+#     runs in the same six shards a merge-queue entry uses, PLAINLY (`suitemap.py run`: nothing is measured, no map is made, kept or published), and the `suites` job only judges it (step "run the selection, sharded");
 #   * a GitHub merge-queue entry (`merge_group`) runs EVERY suite, measured, on the entry's head: `shards` (the plan), six `measure` jobs, then `suites` merges their maps, says "run every suite, measured" and
 #     publishes the merged map as the artifact `suitemap` (14 days). No cache is saved there: a cache saved on a merge-queue ref cannot be read from main, from a pull request or from another entry;
 #   * a push to main starts with the job `proof`. It finds the merge-queue run of that same commit (a completed, successful `tests` run of event merge_group with this head_sha), downloads its `suitemap` artifact and runs
@@ -33,8 +35,14 @@
 # measuring the list it is given (so a cache miss in one of them cannot change what it runs) and handing its map on as an
 # artifact. The `suites` job then merges them (tests/suitemap.py merge) and keeps, publishes and audits the map (main saves it to the cache, when the run is main's); its step
 # "run every suite, measured" passes only when every shard passed and the merged map holds every suite exactly once. release.sh (main_green) reads
-# that step's name and the audit's, in the `suites` job. A pull request, a queue branch's push and a manual run do not use the shards (both jobs are
-# skipped) and run in the `suites` job as before. `shards` and `measure` need `proof` and carry `!cancelled()`: `proof` is skipped on every event but a push to main, and a skipped need would skip them too.
+# that step's name and the audit's, in the `suites` job. A queue branch's push and a manual run do not use the shards (both jobs are
+# skipped) and run in the `suites` job as before; a pull request uses them only for a large selection (below). `shards` and `measure` need `proof` and carry `!cancelled()`: `proof` is skipped on every event but a push to main, and a skipped need would skip them too.
+#
+# A LARGE PULL REQUEST SELECTION IN SHARDS. On a pull request the `shards` job first makes the selection (step "the suites the change reaches": `suitemap.py select`, the failure of which is every suite, as ever) and hands it on as its output `selected`, then plans only those
+# suites (`suitemap.py plan --of 6 --only <them>`), which also prints `large=true` when they number SHARD_MIN or more. When `large` is true the `measure` matrix runs, each shard running its list plainly (step "run this shard's suites": `suitemap.py run`, a suite gets SUITE_T,
+# no strace, no map, no artifact), and the `suites` job skips its own selection and judges the run in the step "run the selection, sharded" (the plan and every shard must each be `success`: a skipped shard counts as passing for GitHub, not for this step).
+# When `large` is not true the `suites` job runs the selection the plan job handed on (when the plan job failed it selects for itself: the run is then serial, as before the shards). The cost of the sharded way: one more job before the suites (about a minute) and up to six runners
+# instead of one for the minutes of the run; the serial way stays under SHARD_MIN suites, where it is within a minute or two of the sharded one. A merge-queue entry and main's push are as before, and so are a queue branch's push and a manual run.
 #
 # THE RELEASE QUEUE'S BRANCHES. A push to a branch named `queue/**` (the queue's stacked group branches: main plus the waiting PRs merged on top) is a `push` event too, but it gets the run a
 # pull request gets, not the full one: the `proof`, `shards` and `measure` jobs are skipped and the `suites` job runs the selection step ("run the suites the change reaches": `suitemap.py select --map .suitemap/map.json --to HEAD`, which compares the
@@ -154,14 +162,14 @@ jobs:
             echo "proven=false" >> "$GITHUB_OUTPUT"
             echo "not proven (find: ${FOUND:-none}, stamp: $STAMP, upload: $UP): the whole run follows"
           fi
-  # The full run, split in two jobs (a merge-queue entry, and a push to main that is not proven; a pull request and a queue branch's push skip both: skipped counts as passing). `shards` makes the plan ONCE: it reads the earlier map and
+  # The full run, split in two jobs (a merge-queue entry, and a push to main that is not proven; a queue branch's push skips both: skipped counts as passing; a pull request runs them for a large selection only, see A LARGE PULL REQUEST SELECTION IN SHARDS). `shards` makes the plan ONCE: it reads the earlier map and
   # puts every suite in exactly one of the 6 lists (tests/suitemap.py plan: balanced by the map's measured times, or by a stable hash of the name when the map is missing, which is
   # also what a cache miss here gives), and hands the six lists on as job outputs. `measure` is a matrix of 6 jobs on the labels the suites job used before, each running the list
   # it is given and nothing else, so a cache miss in one of them cannot make it plan differently from the others (a suite run twice, or by none). The shard count is in two places,
   # the matrix and --of below; tests/suitemap_scenario.py checks that they agree with tests/suitemap.py's SHARDS, that every suite is in exactly one list, and that every shard reads the plan.
   shards:
     needs: proof
-    if: ${{ !cancelled() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.proof.outputs.proven != 'true') || github.event_name == 'merge_group') }}   # an entry, or a push to main the queue did not prove; `!cancelled()` because `proof` is skipped on an entry and a skipped need would skip this job
+    if: ${{ !cancelled() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.proof.outputs.proven != 'true') || github.event_name == 'merge_group' || github.event_name == 'pull_request') }}   # an entry, a push to main the queue did not prove, or a pull request (it makes the selection and decides whether the shards run); `!cancelled()` because `proof` is skipped on an entry and a skipped need would skip this job
     name: main shard plan
     runs-on: ubuntu-latest   # it only reads a map and lists suites
     timeout-minutes: 15
@@ -172,6 +180,8 @@ jobs:
       shard3: ${{ steps.plan.outputs.shard3 }}
       shard4: ${{ steps.plan.outputs.shard4 }}
       shard5: ${{ steps.plan.outputs.shard5 }}
+      large: ${{ steps.plan.outputs.large }}        # a pull request only: `true` when its selection is large (SHARD_MIN suites or more) and runs in the shards
+      selected: ${{ steps.select.outputs.selected }}   # a pull request only: the suites its change reaches, which the `suites` job runs when the selection is not large
     steps:
       - name: scratch goes to the runner's temp folder
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
@@ -186,16 +196,33 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .suitemap/map.json
-          key: suitemap-${{ github.event.merge_group.base_sha || github.event.before }}
+          key: suitemap-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           restore-keys: suitemap-
+      # A pull request only: the selection, made here once (the same command and fallback the `suites` job used to run itself). A failed selection is every suite. The output is one line: the names, separated by spaces
+      - name: the suites the change reaches
+        id: select
+        if: github.event_name == 'pull_request'
+        run: |
+          sel=$(uv run --locked --only-group tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD) \
+            || { echo "::warning::the suite selection failed: running every suite"; sel=all; }
+          if [ "$sel" = all ]; then sel=$(uv run --locked --only-group tests python tests/suitemap.py list); fi
+          sel=$(echo $sel)   # one line, single spaces: a job output is one line
+          [ -n "$sel" ] || echo "no suite is reached by this change"
+          echo "selected=$sel" >> "$GITHUB_OUTPUT"
       - name: plan the shards
         id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SELECTED: ${{ steps.select.outputs.selected }}
         run: |
           set -o pipefail   # the default shell has no pipefail: a failing plan must fail the step, not hide behind tee's exit status
-          uv run --locked --only-group tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json | tee -a "$GITHUB_OUTPUT"
+          case $SELECTED in *[!a-z0-9_\ ]*) echo "the selection holds only names of suites, separated by spaces"; exit 2 ;; esac
+          only=
+          [ "$EVENT" != pull_request ] || only="--only $SELECTED"   # a pull request plans its selection alone (an empty one plans nothing: `--only` with no name); the others plan every suite
+          uv run --locked --only-group tests python tests/suitemap.py plan --of 6 --map .suitemap/map.json $only | tee -a "$GITHUB_OUTPUT"
   measure:
     needs: [proof, shards]
-    if: ${{ !cancelled() && needs.shards.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.proof.outputs.proven != 'true') || github.event_name == 'merge_group') }}   # as `shards`, and only when the plan was made
+    if: ${{ !cancelled() && needs.shards.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.proof.outputs.proven != 'true') || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.shards.outputs.large == 'true')) }}   # as `shards`, and only when the plan was made; a pull request only for a large selection
     name: main shard ${{ matrix.shard }}
     strategy:
       fail-fast: false   # one failing shard must not cancel the others, whose measurement the map still needs
@@ -204,6 +231,7 @@ jobs:
     runs-on: ubuntu-latest   # the measured run's shards
     timeout-minutes: 180   # a suite gets MEASURE_T (60 min) and its plain rerun (release: 5 min): 100 min could not hold both
     env:
+      SUITE_T: 900       # seconds a suite gets on a pull request's plain run (as in the suites job)
       MEASURE_T: 3600    # seconds a suite gets traced and under coverage (see the suites job): the release suite, before it was split into release and release_queue, alone in its shard took far longer measured than plain and timed out
       CAIO_IMPL: linux
     steps:
@@ -214,18 +242,20 @@ jobs:
         with:
           python-version: "3.14"
       - name: strace, for the measured run
-        if: runner.environment == 'github-hosted'
+        if: github.event_name != 'pull_request' && runner.environment == 'github-hosted'   # a pull request's shards run plainly
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends strace
       - name: the one test environment
         run: echo "UV_PROJECT_ENVIRONMENT=${XDG_CACHE_HOME:-$HOME/.cache}/stackshot/test-venv" >> "$GITHUB_ENV"
-      # the earlier map, for measure --prev only (which suites to trace again). The list of suites is not decided from it here: it comes from the plan job, the same for every shard
+      # the earlier map, for measure --prev only (which suites to trace again). The list of suites is not decided from it here: it comes from the plan job, the same for every shard. A pull request's shards run plainly and read no map
       - name: the suite map
+        if: github.event_name != 'pull_request'
         uses: actions/cache/restore@v4
         with:
           path: .suitemap/map.json
           key: suitemap-${{ github.event.merge_group.base_sha || github.event.before }}
           restore-keys: suitemap-
       - name: run this shard's suites, measured
+        if: github.event_name != 'pull_request'
         env:
           SHARD: ${{ matrix.shard }}
           SELECTED: ${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}
@@ -234,6 +264,17 @@ jobs:
           [ -n "$SELECTED" ] || { echo "shard $SHARD has no suite"; exit 0; }
           echo "shard $SHARD: $SELECTED"
           exec uv run --locked --only-group tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py
+      # A pull request's large selection: this shard's list of the selection, plainly, as the suites job runs a small one. Nothing is measured, so there is no map to hand on (the step below finds no file)
+      - name: run this shard's suites
+        if: github.event_name == 'pull_request'
+        env:
+          SHARD: ${{ matrix.shard }}
+          SELECTED: ${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}
+        run: |
+          case $SELECTED in *[!a-z0-9_\ ]*) echo "the plan holds only names of suites, separated by spaces"; exit 2 ;; esac
+          [ -n "$SELECTED" ] || { echo "shard $SHARD has no suite"; exit 0; }
+          echo "shard $SHARD: $SELECTED"
+          exec uv run --locked --only-group tests python tests/suitemap.py run -T "$SUITE_T" $SELECTED   # exec: a cancel's signal reaches suitemap.py
       - name: hand the shard's map on
         if: always() && hashFiles('.suitemap/shard-*.json') != ''
         uses: actions/upload-artifact@v4
@@ -244,7 +285,7 @@ jobs:
           overwrite: true   # a re-run of the job (same run id) uploads the same artifact name again; without this the second upload fails
   suites:
     # The gate (see THE GATE above). On a merge-queue entry and on a push to main that is not proven, this job runs after the plan and the shards (needs; `!cancelled()` so that a failing shard still gets its verdict here) and merges their maps.
-    # On a push to main that the proof job proved it runs no suite: it takes the stamped map and says so. On a pull request and on a queue branch the proof, the plan and the shards are skipped (skipped needs do not stop it) and it runs the selection itself.
+    # On a push to main that the proof job proved it runs no suite: it takes the stamped map and says so. On a queue branch the proof, the plan and the shards are skipped (skipped needs do not stop it) and it runs the selection itself. On a pull request the plan job has made the selection: a small one runs here (the selection the plan job handed on), a large one ran in the shards and is only judged here.
     # It is never skipped on a merge_group event: GitHub counts a skipped job as passing, and this is the merge queue's required check (tests/suitemap_scenario.py evaluates this `if` for it).
     needs: [proof, shards, measure]
     if: ${{ !cancelled() }}
@@ -288,15 +329,24 @@ jobs:
       # One suite gets 10 minutes (900 hosted; 15 measured; the longest, pilot and page_currency, take one or two): a hung suite fails on
       # its own with the traceback of where it sat (SIGINT), and the suites after it still run, instead of the whole job
       # sitting until its limit cancels it with no trace (github's pacer waiting out the hour).
-      # A pull request and a push to a queue branch (the group's head: main plus the waiting PRs): the newest map from main, `--to HEAD`. Nothing here needs the PR's fork point: select compares the map's commit
+      # A small pull request selection, and a push to a queue branch (the group's head: main plus the waiting PRs): the newest map from main, `--to HEAD` (a pull request's was made by the plan job and is taken from it). Nothing here needs the PR's fork point: select compares the map's commit
       # with HEAD (fetching that commit when the checkout, one commit deep, lacks it), and a queue head holds main plus the group. On a queue push `github.event.before` is the branch's earlier head, which has no map, so the restore falls back to the newest `suitemap-` entry.
       # A merge-queue entry does not select: it runs every suite, measured, in the steps below.
       - name: run the suites the change reaches
-        if: github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/queue/'))   # not a manual run on a queue ref: that runs the step below
+        if: (github.event_name == 'pull_request' && needs.shards.outputs.large != 'true') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/queue/'))   # not a manual run on a queue ref: that runs the step below; not a large pull request selection: the shards ran it
+        env:
+          EVENT: ${{ github.event_name }}
+          PLAN: ${{ needs.shards.result }}
+          HANDED: ${{ needs.shards.outputs.selected }}
         run: |
-          sel=$(uv run --locked --only-group tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD) \
-            || { echo "::warning::the suite selection failed: running every suite"; sel=all; }
-          if [ "$sel" = all ]; then sel=$(uv run --locked --only-group tests python tests/suitemap.py list); fi
+          if [ "$EVENT" = pull_request ] && [ "$PLAN" = success ]; then
+            sel=$HANDED   # the plan job's selection, the one it judged small: this job and the plan cannot disagree (the map in the cache may be newer by now)
+            case $sel in *[!a-z0-9_\ ]*) echo "the selection holds only names of suites, separated by spaces"; exit 2 ;; esac
+          else   # a queue branch, or a pull request whose plan job failed (then it is a serial run, as before the shards)
+            sel=$(uv run --locked --only-group tests python tests/suitemap.py select --map .suitemap/map.json --to HEAD) \
+              || { echo "::warning::the suite selection failed: running every suite"; sel=all; }
+            if [ "$sel" = all ]; then sel=$(uv run --locked --only-group tests python tests/suitemap.py list); fi
+          fi
           [ -n "$sel" ] || { echo "no suite is reached by this change"; exit 0; }
           # -T 600 again (900 hosted): the stopgap 900 was for the release suite's waits starting extra Python processes, before the shell stubs and the short give-up caps
           # exec: a cancel signals this shell alone; uv in its place forwards INT and TERM to suitemap.py, which stops the suite
@@ -310,6 +360,16 @@ jobs:
           case $SUITES in *[!a-z0-9_\ ]*) echo "the suites input holds only names of suites, separated by spaces"; exit 2 ;; esac
           [ -n "$SUITES" ] || SUITES=$(uv run --locked --only-group tests python tests/suitemap.py list)
           exec uv run --locked --only-group tests python tests/suitemap.py run -T "$SUITE_T" $SUITES
+      # A large pull request selection, run by the shards (the measure job, plainly): this job judges it. Like the verdict step below it is what keeps a skipped or failed shard from passing the required check, since GitHub counts a skipped job as passing
+      - name: run the selection, sharded
+        if: github.event_name == 'pull_request' && needs.shards.outputs.large == 'true'
+        env:
+          PLAN: ${{ needs.shards.result }}
+          SHARDS: ${{ needs.measure.result }}
+        run: |
+          [ "$PLAN" = success ] || { echo "::error::the plan of the selection was not made (plan: $PLAN): see the shard plan job"; exit 1; }
+          [ "$SHARDS" = success ] || { echo "::error::a shard of the selection did not pass (shards: $SHARDS): see the shards' jobs"; exit 1; }
+          echo "every shard of the selection passed"
       # A merge-queue entry, and a push to main (the steps down to "audit the selection" skip on a pull request and on a queue branch). On an entry, and on a push to main the proof job did not prove, the shards measured every suite (the measure job; MEASURE_T there:
       # -T 3600, as a suite traced and under coverage runs four to eight times its plain time; release, a few minutes plainly, once ran over its limit measured, which failed it only measured: the map then carries its earlier measurement, see tests/suitemap.py).
       # Their maps come here and are merged into one. On a push to main the proof job proved, there are no shards: the stamped map comes from the proof job's artifact.

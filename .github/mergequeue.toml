@@ -9,7 +9,7 @@ base = "main"                  # the branch PRs target and the queue's entries a
 queue_mode = "chain"
 
 # What a queue run is tested by: a push to a branch under queue_prefix runs tests.yml (its `push` trigger lists 'queue/**') and gets the run a pull request gets: the suites its change reaches by the newest map
-# (`suitemap.py select`), in the `suites` job, with no plan and no six measuring shards (a selected run is much shorter than a full sharded run). That is GitHub's merge-queue convention: an entry runs the checks a PR runs, and
+# (`suitemap.py select`), in the `suites` job, with no plan and no six measuring shards, however large the selection (a pull request's large selection runs in the shards, a queue branch's never does; a selected run is much shorter than a full sharded run). That is GitHub's merge-queue convention: an entry runs the checks a PR runs, and
 # main's own full measured run, with the selection audit, follows the merge. The job named `suites` is the check mq reads on an entry's head, and the same job name the PR check and release.sh's main_green read.
 # What a queue run does not give is the measured map and the selection audit (main's run only); the risk is a selection that misses a suite, which a PR's run accepts as well, and main's full run after the merge catches it.
 required = ["suites"]
