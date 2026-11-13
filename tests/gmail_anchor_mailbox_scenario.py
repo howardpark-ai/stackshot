@@ -424,8 +424,10 @@ got, calls, cur, more = run_paged(2, 3)
 check("paging cap: a history that ends on the last page the cap allows leaves no second poll", len(calls) == 2 and got == [f"m{i}" for i in range(1, 7)] and cur == "99" and not more, (calls, got, cur, more))
 
 # ---- the reader tells an expired history from any other failure by the status, never by the text
-def run_fake(make, bindings, total=None, **consts):
+def run_fake(make, bindings, total=None, saved=None, saved_all=None, peek=None, queue_of=None, poll=("gmail", ADA), **consts):
     """One mailbox (ADA) served by the fake `make()` returns, polled until the fake calls its stop(); `consts` are gworkspace constants set for the run.
+    `saved` is what a service that ran before left for this mailbox (its read position as hub.saved holds it); None: a first start. `saved_all` is the whole of hub.saved["google"]
+    instead (for a damaged file). `peek`, a list, gets what the saver gives right after the start, before the first pass. `queue_of(hub)` makes the trigger queue; `poll` is the first trigger.
     → (the (anchor, text) heard, the fake, the saved read position, whether a further poll is queued)."""
     env0 = pathlib.Path(core.ENVF).read_text(); acct0 = accts[ADA]; old = {k: getattr(gw, k) for k in ("HEALTH", *consts)}
     try:
@@ -433,14 +435,18 @@ def run_fake(make, bindings, total=None, **consts):
         pg = accts[ADA] = make(); gw.HEALTH = 10 ** 12
         for k, v in consts.items(): setattr(gw, k, v)
         hp = core.Hub(); hp.status["receivers"] = {}; hp.triggers = FastQ(); hp.bindings = {k: {"sess"} for k in bindings}
-        got = []; pg.stop = hp.stopping.set
+        if queue_of: hp.triggers = queue_of(hp)
+        if saved is not None: hp.saved = {"google": {ADA: saved}}
+        if saved_all is not None: hp.saved = {"google": saved_all}
+        got = []; pg.stop = hp.stopping.set; pg.poke = lambda: hp.triggers.put(("gmail", ADA))
         def heard_(anchor, summ, kind="slack"):
             got.append((anchor, summ["text"]))
             if total is not None and len(got) >= total: hp.stopping.set()      # everything expected is heard: the pass in hand ends the run
         hp.event = heard_
         n = len(caught); gw.run(hp)
+        if peek is not None: peek.append(hp.savers["google"]()[ADA])
         lp = next(t for t in caught[n:] if t.__name__ == "loop")
-        hp.triggers.put(("gmail", ADA)); lp()
+        hp.triggers.put(poll); lp()
         return got, pg, hp.savers["google"]()[ADA], not hp.triggers.empty()
     finally:
         pathlib.Path(core.ENVF).write_text(env0); accts[ADA] = acct0
@@ -477,13 +483,14 @@ class Many(Account):
     (the record at the cursor comes back). It counts its history.list and messages.get calls and stops the run after `stop_lists` history.list calls (a runaway guard)."""
     def __init__(self, email, n, per=1, size=500, inclusive=False, stop_lists=12, dup=False):
         super().__init__(email); self.size, self.inclusive, self.stop_lists, self.lists, self.gets, self.starts = size, inclusive, stop_lists, 0, 0, []
+        self.gets_at = []; self.poke = lambda: None      # the gets made when each history.list call came; a way to ask for another poll
         self.n = n; self.recs = [{"id": str(i), "messagesAdded": [{"message": {"id": f"m{i}-{j}", "threadId": f"t{i}-{j}"}} for j in range(per)]} for i in range(1, n + 1)]
         if dup:      # the first record's mail is named again in every later record (a mail changed by a later event is added to the history again)
             for r in self.recs[1:]: r["messagesAdded"].append(self.recs[0]["messagesAdded"][0])
     def handle(self, key, kw):
         if key == "gmail.users.getProfile": return {"historyId": "0"}
         if key == "gmail.users.history.list":
-            self.lists += 1
+            self.lists += 1; self.gets_at.append(self.gets)
             if "pageToken" not in kw: self.starts.append(kw["startHistoryId"])
             s = int(kw["startHistoryId"]); todo = [r for r in self.recs if (int(r["id"]) >= s if self.inclusive else int(r["id"]) > s)]
             at = int(kw.get("pageToken", 0)); more = at + self.size < len(todo)
@@ -531,6 +538,147 @@ check("page cap: a last record with no id keeps the old cursor (no KeyError), an
 got, pg, sv, more = run_fake(lambda: Many(ADA, 12, size=1), [UN], total=12)
 check("pages: with the module's own bound (not set here) a poll reads ten pages of history and the next poll goes on from the last record read",
       pg.starts == ["0", "10"] and pg.lists == 12 and sorted(t for _a, t in got) == sorted(ids(12)) and len(got) == 12 and not more, (pg.starts, pg.lists, len(got), more))
+
+# ---- a restart resumes from the saved read position: mail that arrives while the service is stopped is still delivered
+import contextlib
+@contextlib.contextmanager
+def block(name):
+    try: yield
+    except Exception as e: check(f"{name}: raised {type(e).__name__}", False, repr(e)[:400])
+class Live(Many):
+    """A Many whose getProfile answers the mailbox's current position (its last history id), as Gmail's does: a start that resets the cursor to `now` skips what the mailbox gained meanwhile."""
+    def handle(self, key, kw):
+        if key == "gmail.users.getProfile": return {"historyId": str(self.n)}
+        if key == "gmail.users.history.list":
+            try: return super().handle(key, kw)
+            finally:
+                if self.lists >= self.stop_lists: self.stop()      # also when the call raised (a position it cannot read): the run ends, a failing check and not a hang
+        return super().handle(key, kw)
+class Flaky(Many):
+    """A Many whose messages.get fails (a 500) for the mail ids in `fail`, that many times each; it asks for another poll after each history.list until its last, and counts the attempts per id."""
+    def __init__(self, email, n, fail=None, **kw): super().__init__(email, n, **kw); self.fail, self.attempts = dict(fail or {}), {}
+    def handle(self, key, kw):
+        if key == "gmail.users.messages.get":
+            mid = kw["id"]; self.attempts[mid] = self.attempts.get(mid, 0) + 1
+            if self.fail.get(mid, 0) > 0: self.fail[mid] -= 1; raise HttpErr(500, "Backend Error")
+        out = super().handle(key, kw)
+        if key == "gmail.users.history.list" and self.lists < self.stop_lists: self.poke()
+        return out
+class DupRec(Many):
+    """A Many whose every history record names each of its mails twice."""
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        for r in self.recs: r["messagesAdded"] = r["messagesAdded"] + r["messagesAdded"][::-1]
+class Sized(Many):
+    """A Many whose record i holds sizes[i-1] mails."""
+    def __init__(self, email, sizes, **kw):
+        super().__init__(email, len(sizes), **kw)
+        self.recs = [{"id": str(i), "messagesAdded": [{"message": {"id": f"m{i}-{j}", "threadId": f"t{i}-{j}"}} for j in range(k)]} for i, k in enumerate(sizes, 1)]
+heardids = lambda got: sorted(t for _a, t in got)
+DR = "drive:f1"
+with block("restart"):
+    got1, pg1, sv1, _m = run_fake(lambda: Live(ADA, 3, stop_lists=1), [UN])
+    check("restart: a first start (nothing saved) begins at now: the three mails there already are not delivered, and the position is saved", got1 == [] and sv1["hist"] == "3", (got1, sv1))
+    got2, pg2, sv2, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved=sv1)
+    check("restart: mail that arrived while the service was stopped is delivered after the restart, once (the saved position is kept, not reset to now)",
+          heardids(got2) == ["m4-0", "m5-0"] and len(got2) == 2 and sv2["hist"] == "5" and pg2.starts == ["3"], (got2, sv2, pg2.starts))
+    got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": "3", "sent": ["m4-0"]})
+    check("restart: a mail the saved state lists as handled is not delivered again, the others are", [t for _a, t in got] == ["m5-0"] and pg.gets == 1 and sv["sent"] == ["m4-0", "m5-0"], (got, pg.gets, sv))
+    class Bind(FastQ):
+        """A trigger queue that binds the anchor between the first pass and the second: the first pass sees nothing bound, and the kind becomes bound while the service runs."""
+        def __init__(self, hub, anchor): super().__init__(); self.hub, self.anchor, self.calls = hub, anchor, 0
+        def get(self, block=True, timeout=None):
+            self.calls += 1
+            if self.calls == 1: self.hub.bindings = {self.anchor: {"sess"}}; return ("gmail", ADA)
+            if self.calls == 2: self.put(("gmail", ADA)); raise queue.Empty
+            return super().get(block, timeout)
+    got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [], saved={"hist": "3"}, queue_of=lambda hp: Bind(hp, UN))
+    check("restart: a kind bound only after the start (the saved position may be old) begins at now, as a first binding does", got == [] and sv["hist"] == "5" and pg.starts == ["5"], (got, sv, pg.starts))
+    pre = []
+    got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": "3", "page": "d3", "sent": ["m1-0"]}, peek=pre)
+    check("save: before the first pass the saver gives the position it loaded, so a start cut short does not lose it",
+          pre and pre[0]["hist"] == "3" and pre[0]["page"] == "d3" and pre[0]["sent"] == ["m1-0"] and pre[0].get("retry") == [], pre)
+    check("save: after a pass the position of a kind that is not bound is not saved (it goes stale; a later start must not resume it), the bound kind's is",
+          sv["hist"] == "5" and sv["page"] is None, sv)
+    got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN, DR], saved={"hist": "3", "page": "d3"})
+    check("save: with a Drive anchor bound as well, its position is saved too", sv["page"] is not None and sv["hist"] == "5", sv)
+    pre = []
+    run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": "3", "sent": [f"x{i}" for i in range(12)]}, peek=pre, SENT_KEEP=5)
+    check("save: the saved list of handled mails is cut to SENT_KEEP at the start", pre and pre[0]["sent"] == [f"x{i}" for i in range(7, 12)], pre)
+with block("drive restart"):
+    class DriveFake(Account):
+        """A Drive whose change list is one change for the page token "d3" and nothing for any other; every getStartPageToken answer is new (tok1, tok2, ...); `gone` makes changes.list answer 404."""
+        def __init__(self, email, gone=False): super().__init__(email); self.gone, self.tokens, self.asked = gone, 0, []
+        def handle(self, key, kw):
+            if key == "drive.changes.getStartPageToken": self.tokens += 1; return {"startPageToken": f"tok{self.tokens}"}
+            if key == "drive.changes.list":
+                self.asked.append(kw["pageToken"]); self.stop()
+                if self.gone: raise HttpErr(404, "Invalid page token")
+                if kw["pageToken"] == "d3": return {"changes": [{"fileId": "f1", "time": "2026-11-10T10:00:00Z", "file": {"name": "N", "lastModifyingUser": {"emailAddress": "other@example.test"}}}], "newStartPageToken": "d5"}
+                return {"newStartPageToken": kw["pageToken"]}
+            return super().handle(key, kw)
+    got, pg, sv, _m = run_fake(lambda: DriveFake(ADA), [DR], saved={"page": "d3"}, poll=("drive", ADA))
+    check("drive restart: a change made while the service was stopped is delivered after the restart (the saved page token is kept)", got == [(DR, "changed it")] and pg.asked == ["d3"] and sv["page"] == "d5", (got, pg.asked, sv))
+    got, pg, sv, _m = run_fake(lambda: DriveFake(ADA), [DR], poll=("drive", ADA))
+    check("drive restart: a first start (nothing saved) reads from now", got == [] and pg.asked == ["tok2"], (got, pg.asked))
+    got, pg, sv, _m = run_fake(lambda: DriveFake(ADA, gone=True), [DR], saved={"page": "d3"}, poll=("drive", ADA))
+    check("drive restart: a saved page token Google answers with 404 is read again from now, once, and nothing is delivered", got == [] and pg.asked == ["d3"] and pg.tokens == 2 and sv["page"] == "tok2", (got, pg.asked, pg.tokens, sv))
+with block("expired"):
+    got, pg, sv, more = run_fake(lambda: Failing(ADA, 404, "Requested entity was not found."), [UN], saved={"hist": "3"})
+    check("restart: a saved position Google answers with 404 (history older than about a week) is read again from now, with no crash, no flood, and no second reset", sv["hist"] == "p2" and pg.profiles == 2 and got == [] and pg.gets == 0 and not more, (sv, pg.profiles, got, more))
+with block("wrong types"):
+    BADH = [5, 5.5, True, "", "abc", "3x", "-3", [], ["3"], {}, {"a": 1}, None]
+    BADP = [5, True, "", [], {}, ["d3"], None]
+    BADS = [None, 5, 5.5, True, "m4-0", {}, {"m4-0": 1}, [1, 2], ["m4-0", 5], [["m4-0"]]]
+    BADR = [None, 5, True, "abc", {}, {"m": 1}, [["zz"]], [["zz", "tzz"]], [["zz", "tzz", "1"]], [["zz", "tzz", 0]], [["zz", "tzz", 99]], [["zz", "tzz", True]], [["zz", "tzz", 1.0]], [["zz", "", 1]], [["", "tzz", 1]], [[1, 2, 3]], [5], ["zz"]]      # "zz" is no mail of the mailbox: fetched, it would be delivered
+    for v in BADH:
+        got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": v, "sent": []})
+        check(f"wrong type: a saved hist {v!r} is ignored (a first binding: from now), with no crash", got == [] and sv["hist"] == "5", (got, sv))
+    for v in BADP:
+        got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN, DR], saved={"hist": "3", "page": v})
+        check(f"wrong type: a saved page {v!r} is ignored (the Drive position starts at now) and the good hist is kept", heardids(got) == ["m4-0", "m5-0"] and sv["page"] == "p1", (got, sv))
+    for v in BADS:
+        got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": "3", "sent": v})
+        check(f"wrong type: a saved sent {v!r} is ignored, and the good hist is kept", heardids(got) == ["m4-0", "m5-0"] and sv["sent"] == ["m4-0", "m5-0"], (got, sv))
+    for v in BADR:
+        got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": "3", "retry": v})
+        check(f"wrong type: a saved retry {v!r} is ignored, and the good hist is kept", heardids(got) == ["m4-0", "m5-0"] and pg.gets == 2 and sv["retry"] == [], (got, pg.gets, sv))
+    for v in ([], "x", 5, True, [ADA], {ADA: []}, {ADA: "x"}, {ADA: 5}, {ADA: True}, None):
+        got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved_all=v)
+        check(f"wrong type: a saved google section {v!r} is ignored (a first start)", got == [] and sv["hist"] == "5", (got, sv))
+with block("duplicates"):
+    got, pg, sv, _m = run_fake(lambda: DupRec(ADA, 3, stop_lists=1), [UN])
+    check("dedupe: a mail named twice in one history record is fetched and delivered once", pg.gets == 3 and heardids(got) == ids(3) and len(got) == 3, (pg.gets, got))
+    got, pg, sv, _m = run_fake(lambda: DupRec(ADA, 2, per=2, stop_lists=1), [UN], MESSAGE_GETS=2)
+    check("dedupe: the cap counts each mail of a record once", pg.gets == 2 and pg.starts == ["0"] and len(got) == 2, (pg.gets, pg.starts, got))
+with block("retry"):
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 3, fail={"m2-0": 1}, stop_lists=6), [UN], total=3)
+    check("retry: a messages.get that failed is tried again at a later poll and its mail is delivered, once", heardids(got) == ids(3) and len(got) == 3 and pg.attempts["m2-0"] == 2 and sv["retry"] == [], (got, pg.attempts, sv))
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 3, fail={"m2-0": 99}, stop_lists=6), [UN])
+    check("retry: a get that keeps failing is tried GET_TRIES times in all, then given up on (the others are delivered, nothing stays queued)",
+          pg.attempts["m2-0"] == gw.GET_TRIES == 3 and heardids(got) == ["m1-0", "m3-0"] and sv["retry"] == [] and sv["hist"] == "3", (pg.attempts, got, sv))
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 4, inclusive=True, fail={"m4-0": 99}, stop_lists=8), [UN])
+    check("stall: an inclusive position whose own record's get fails advances after GET_TRIES tries, the record read again is not fetched again, and the other mail is delivered once",
+          pg.attempts["m4-0"] == gw.GET_TRIES and heardids(got) == ids(3) and len(got) == 3 and sv["hist"] == "4" and sv["retry"] == [], (pg.attempts, got, sv))
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 3, fail={"m2-0": 99}, stop_lists=1), [UN])
+    check("retry: a failed get is saved with the position and its tries so far", heardids(got) == ["m1-0", "m3-0"] and sv["retry"] == [["m2-0", "t2-0", 1]] and sv["hist"] == "3", (got, sv))
+    got2, pg2, sv2, _m = run_fake(lambda: Flaky(ADA, 3, stop_lists=1), [UN], saved=sv)
+    check("retry: after a restart the saved failed get is tried again and delivered once, with nothing else delivered again", heardids(got2) == ["m2-0"] and pg2.attempts == {"m2-0": 1} and sv2["retry"] == [], (got2, pg2.attempts, sv2))
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 3, fail={"m2-0": 99}, stop_lists=1), [UN], saved={"hist": "3", "retry": [["m2-0", "t2-0", 2]]})
+    check("retry: a saved failed get on its last try that fails again is given up on", pg.attempts == {"m2-0": 1} and sv["retry"] == [] and got == [], (pg.attempts, got, sv))
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 5, fail={f"m{i}-0": 99 for i in range(1, 6)}, stop_lists=1), [UN], RETRY_KEEP=3)
+    check("retry: at most RETRY_KEEP failed gets are kept, the newest", sv["retry"] == [["m3-0", "t3-0", 1], ["m4-0", "t4-0", 1], ["m5-0", "t5-0", 1]], sv)
+    got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 3, fail={"m2-0": 99}, stop_lists=1), ["gmail:q@home:from:pat"], saved={"hist": "3", "retry": [["m2-0", "t2-0", 1]]})
+    check("retry: a saved failed get nobody reads any more is dropped without a get", pg.attempts == {} and sv["retry"] == [] and got == [], (pg.attempts, got, sv))
+    got, pg, sv, more = run_fake(lambda: Flaky(ADA, 2, stop_lists=1), [UN], saved={"hist": "0", "retry": [["r1", "tr1", 1], ["r2", "tr2", 1], ["r3", "tr3", 1]]}, MESSAGE_GETS=3)
+    check("retry: the tried-again gets count against MESSAGE_GETS: a poll that used the cap on them reads no new record, and goes on from where it was at once",
+          heardids(got) == ["r1", "r2", "r3"] and sv["hist"] == "0" and more and sv["retry"] == [], (got, sv, more))
+    got, pg, sv, more = run_fake(lambda: Flaky(ADA, 2, stop_lists=1), [UN], saved={"hist": "2", "sent": ["r1"], "retry": [["r1", "tr1", 1]]})
+    check("retry: a saved failed get whose mail is already handled is not fetched again", pg.attempts == {} and got == [] and sv["retry"] == [], (pg.attempts, got, sv))
+with block("oversize"):
+    got, pg, sv, _m = run_fake(lambda: Sized(ADA, [250, 1, 1], stop_lists=6), [UN], total=252)
+    check("oversize: one history record holding more mails than MESSAGE_GETS is handled whole in one poll (250 gets against the cap of 200); the next record waits for the next poll",
+          pg.gets_at[:2] == [0, 250] and pg.starts == ["0", "1"] and len(got) == 252 and sv["hist"] == "3", (pg.gets_at, pg.starts, len(got), sv))
 
 # ---- the tool text teaches the syntax
 desc = server._ANCHORS_DESC
