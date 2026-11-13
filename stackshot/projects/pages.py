@@ -17,7 +17,8 @@ layer any session reads before acting. This script is the mechanism behind the r
                         The turn's first such write also gets the end-of-turn board question as additionalContext,
                         once per turn, so the reply carries its `Board:` lines and the Stop check asks nothing.
                         A SendMessage (the matcher names it too) to a background agent that names an item is reported to the
-                        server as a handover (POST /client/handover): the server names that agent in the item's needs.
+                        server as a handover (POST /client/handover): the server names that agent in the item's needs, or, when that would
+                        leave the item with a second mover, says so in its line and names nobody.
   nag                   UserPromptSubmit hook: print a reminder for every touched project whose page has not
                         been committed since the board change (stdout = context for the model)
   check                 Stop hook: the board check alone ([board_check] mode = block | note): a turn that did real work
@@ -894,8 +895,8 @@ def other_write(payload, inbound=None):
     return False
 
 # ---------- a handover by SendMessage ----------
-# A message to a background agent that names an item is a handover the server records: it names that agent in the item's needs, as
-# its own message tool does (server._name_on_handover). On a box whose PostToolUse hook watches SendMessage (the touch matcher), the
+# A message to a background agent that names an item is a handover the server records: it names that agent in the item's needs (unless
+# that would leave the item with a second mover: then it names nobody and says so), as its own message tool does (server._name_on_handover). On a box whose PostToolUse hook watches SendMessage (the touch matcher), the
 # hook reports the recipient, the text and the sending session through the client API with the machine's token (POST
 # /client/handover); the server decides who is a background agent and which items are named, so this side only skips a text that
 # names no id at all (no network call for the ordinary message). Never blocks and never fails the hook: a server out of reach means

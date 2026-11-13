@@ -842,6 +842,18 @@ def _owner_display() -> str:
 WAIT_DROP_HINT = " If the item should not wait, drop the wait with update clear_wait=true (wait_kind, wait_anchor, wait_event, ask_by and post_wake_mover go together)."
 
 
+def counted_movers(needs: list[str], project: str, ctx: Ctx) -> list[str]:
+    """The sessions in a needs list that the second_mover guard counts as movers: every session that is not a background agent of the project (a background agent of the project is named
+    into needs by the server itself and is never a second mover)."""
+    return [x for x in needs if x.lower() not in _states._KINDS and not ctx.background_of(x, project)]
+
+
+def second_mover_in(needs: list[str], project: str, ctx: Ctx) -> bool:
+    """Would a needs list be refused as naming more than one mover: more than one counted mover, or decision beside one? The guard's own test, so a writer that edits needs (the server's naming of an agent included) reads it the same way."""
+    movers = counted_movers(needs, project, ctx)
+    return len(movers) > 1 or ("decision" in [x.lower() for x in needs] and bool(movers))
+
+
 def _wait_text(w: "_model.Wait") -> str:
     return {"time": "a time", "anchor": "an anchor event", "item": "another item's close", "relay": f"news only {_owner_display()} relays", "event": "a fleet event"}.get(w.kind, w.kind)
 
@@ -947,11 +959,10 @@ def check(item: dict[str, Any], ctx: Ctx, *, touched: "frozenset[str] | set[str]
     if not state_run or mod is None:
         return out, flags
     # ---- the state invariants
-    sess = [x for x in nds if x.lower() not in _states._KINDS]
     kinds = [x.lower() for x in nds if x.lower() in _states._KINDS]
     project = clean(m.get("project"))
-    movers = [x for x in sess if not ctx.background_of(x, project)]      # a background agent of the project is named into needs by the server itself: never a second mover
-    if one_mover and (len(movers) > 1 or ("decision" in kinds and movers)):
+    movers = counted_movers(nds, project, ctx)      # a background agent of the project is named into needs by the server itself: never a second mover
+    if one_mover and second_mover_in(nds, project, ctx):
         who = ", ".join(ctx.label(x) for x in movers)
         add("second_mover", f"needs names more than one mover ({'decision plus ' if 'decision' in kinds else ''}{who}): an item has one mover, and a second one in needs is a second mover. "
                             f"Keep needs to the one who moves it now and name who takes it after {H}'s answer or step in then=<session>.")
