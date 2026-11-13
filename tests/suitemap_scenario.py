@@ -310,6 +310,90 @@ def sel_after(edit, msg, *, to_base=True, env=None):
 def sub(rel, a, b):
     p = R / rel; t = p.read_text(encoding="utf-8"); assert a in t, (rel, a); p.write_text(t.replace(a, b, 1), encoding="utf-8")
 
+# What the parts below share with each other, defined here so that a part that runs in another process finds it.
+def rm(n): return lambda: sub("pmod.py", f"from typing import {n}\n", "")   # an edit that removes the one-name import line of n
+I1, N1 = {"SUITEMAP_IMPORT_RULE": "I1"}, {"SUITEMAP_ANNOTATION_RULE": "N1"}
+def old_rule(head, env): return tool("select", "--map", str(MAP), "--to", head, env=env).stdout.split()
+sm = importlib.util.spec_from_file_location("suitemap_real", os.path.join(SCR, "suitemap.py")); smod = importlib.util.module_from_spec(sm); sm.loader.exec_module(smod)
+
+# ---- run ahead (Fri Nov 13th 2026). This script runs itself in parts, in order, in this one module: the lines below, from each `# [...]` marker line to the next, are a part.
+# A part marked `# [ahead NAME CHILD]` builds nothing any other part reads, and reads nothing but what stands above `# [fork]`: the harness above, the checkout's files
+# (read only), and the throwaway repo, which a child has a copy of. At the `# [fork]` line this process forks one child for each CHILD named; a child has a folder, a copy of the
+# repo and of its map of its own, a lower priority (the timing checks of the parts that stay here are not slowed), and runs its parts in order while this process runs the others.
+# Where an ahead part stands, this process notes the place; at `# [final]` it takes what each child recorded (its check names, the FAIL lines it printed, an exception it raised)
+# and puts the names and the failures in at their places, so the checks, their count, their order and their failures are those of a run in one process.
+# SUITEMAP_SCENARIO_SERIAL=1, or a box with fewer than four CPUs, runs every part here, in order, as a script without this would.
+import ctypes as _ct, io as _io, signal as _sg, time as _tm, traceback as _tb
+def _ahead_put(box, name, obj):
+    with open(os.path.join(box, name + ".tmp"), "w", encoding="utf-8") as f: json.dump(obj, f)
+    os.replace(os.path.join(box, name + ".tmp"), os.path.join(box, name + ".json"))
+def _ahead_child(parts, box, parent):
+    try:
+        os.nice(10)
+        try: _ct.CDLL(None).prctl(1, _sg.SIGKILL, 0, 0, 0)   # PR_SET_PDEATHSIG: the child ends with this process, whatever ends it
+        except Exception: pass
+        if os.getppid() != parent: os._exit(1)
+        g = globals()
+        g["T"] = pathlib.Path(box) / "t"; g["R"] = g["T"] / "repo"; g["ENV"]["SUITEMAP_ROOT"] = str(g["R"]); g["MAP"] = g["T"] / "map.json"   # the copies were made before the fork
+        for name, code in parts:
+            n_ran, n_fails = len(g["ran"]), len(g["fails"])
+            keep, sys.stdout, err = sys.stdout, _io.StringIO(), None
+            try: exec(code, g)
+            except BaseException: err = _tb.format_exc()
+            out, sys.stdout = sys.stdout.getvalue(), keep
+            _ahead_put(box, name, {"ran": g["ran"][n_ran:], "fails": g["fails"][n_fails:], "out": out, "err": err})
+            if err: break
+    except BaseException: _tb.print_exc()   # a failure before the first part: the parent then reports that the process ended early, and this is why
+    finally:
+        os._exit(0)
+def _ahead_fork(parts):
+    import _scratch
+    box = _scratch.mkdtemp(prefix="suitemaptest-ahead-")
+    os.mkdir(os.path.join(box, "t")); shutil.copytree(R, os.path.join(box, "t", "repo"), symlinks=True); shutil.copy(MAP, os.path.join(box, "t", "map.json"))   # made here, while nothing else changes the repo: a copy taken in the child could catch it half changed
+    sys.stdout.flush(); sys.stderr.flush()
+    parent = os.getpid(); pid = os.fork()
+    if pid == 0: _ahead_child(parts, box, parent)
+    return {"pid": pid, "box": box, "gone": False}
+def _ahead_take(child, name):
+    path = os.path.join(child["box"], name + ".json")
+    while not os.path.exists(path):
+        if child["gone"] or (w := os.waitpid(child["pid"], os.WNOHANG))[0]:
+            if not child["gone"]: child["gone"], child["status"] = True, w[1]
+            if not os.path.exists(path): raise RuntimeError(f"the run-ahead process ended before it finished the part {name} (wait status {child['status']})")
+            break
+        _tm.sleep(0.2)
+    with open(path, encoding="utf-8") as f: return json.load(f)
+def _ahead_collect(slots):
+    g = globals(); add_ran = add_fails = 0; errs = []
+    for name, child, at_ran, at_fails in slots:
+        res = _ahead_take(child, name)
+        g["ran"][at_ran + add_ran:at_ran + add_ran] = res["ran"]; add_ran += len(res["ran"])
+        g["fails"][at_fails + add_fails:at_fails + add_fails] = res["fails"]; add_fails += len(res["fails"])
+        sys.stdout.write(res["out"])
+        if res["err"]: errs.append(f"the part {name} raised in the run-ahead process:\n{res['err']}")
+    sys.stdout.flush()
+    if errs: raise RuntimeError("\n".join(errs))
+def _run_parts():
+    lines = pathlib.Path(__file__).read_text(encoding="utf-8").split("\n")
+    marks = [(i, m.group(1)) for i, l in enumerate(lines) if (m := re.fullmatch(r"# \[(main|fork|final|ahead \w+ \w+)\]", l))]
+    parts = []
+    for k, (i, tag) in enumerate(marks):
+        end = marks[k + 1][0] if k + 1 < len(marks) else len(lines)
+        parts.append((tag, compile("\n" * i + "\n".join(lines[i:end]) + "\n", __file__, "exec")))   # the padding keeps a traceback's line numbers the file's
+    by_child = {}
+    for tag, code in parts:
+        if tag.startswith("ahead"): by_child.setdefault(tag.split()[2], []).append((tag.split()[1], code))
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    ahead_on = bool(by_child) and cpus >= 4 and not os.environ.get("SUITEMAP_SCENARIO_SERIAL")
+    children, slots = {}, []
+    for tag, code in parts:
+        if tag == "fork" and ahead_on: children = {label: _ahead_fork(plist) for label, plist in by_child.items()}
+        if tag == "final" and slots: _ahead_collect(slots)
+        if tag.startswith("ahead") and ahead_on: slots.append((tag.split()[1], children[tag.split()[2]], len(ran), len(fails)))
+        else: exec(code, globals())
+_run_parts()
+os._exit(1)   # the last part ends the script with its own os._exit: a run that gets here ended without it
+# [fork]
 out, err, _ = sel_after(lambda: sub("mod.py", "return LIMIT + 1", "return LIMIT + 2"), "f body")
 check("a function body reaches the suites that ran it (and the text reader)", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", 'return "h"', 'return "h" '), "h body")
@@ -371,6 +455,7 @@ out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the too
 check("a decorated function's docstring is module level (a decorator reads it at import)", out == "all", (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's new docstring"), "static docstring")
 check("a docstring under a decorator that only wraps (@staticmethod) is the function's own body", out.split() == ["a", "c"], (out, err))
+# [ahead docstrings b]
 # ---- Docstrings (Wed Nov 11th 2026): the docstring of an undecorated module-level function is not code; deep() is run by b (through g), named by nobody;
 # documented() is never run, and z reads its __doc__; the K.s case above and the decorated one are the rule's other side
 out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new docstring"), "undecorated docstring")
@@ -427,12 +512,10 @@ check("DOC13 a suite that reads names wide is not chosen for a docstring by that
       r.stdout.split() == ["w3"], (r.stdout, r.stderr[-600:]))
 r = tool("list", env={"SUITEMAP_DOCSTRING_RULE": "x"})
 check("DOC12 a value that is not a rule is an error at once", r.returncode != 0 and "SUITEMAP_DOCSTRING_RULE" in (r.stderr + r.stdout), (r.returncode, r.stderr[-200:]))
+# [main]
 # ---- Imports and annotations (Thu Nov 12th 2026): see the base pmod.py above for what each name is. I1 and N1 are the old rules: each case that narrows says what
 # the old rule chose, so it fails if the rule is reverted; the cases after them are the ones that must NOT narrow.
-def rm(n): return lambda: sub("pmod.py", f"from typing import {n}\n", "")   # an edit that removes the one-name import line of n
 CO = "from collections import Counter, OrderedDict, deque"
-I1, N1 = {"SUITEMAP_IMPORT_RULE": "I1"}, {"SUITEMAP_ANNOTATION_RULE": "N1"}
-def old_rule(head, env): return tool("select", "--map", str(MAP), "--to", head, env=env).stdout.split()
 def narrows(tag, what, edit, old_env, old_out, msg):
     out, err, head = sel_after(edit, msg)
     check(f"{tag} {what}: nothing is selected", out == "", (out, err))
@@ -517,6 +600,7 @@ write("tests/w1_scenario.py", "from pmod import pa as alias\nuse = [alias]\n"); 
 out3 = tool("select", "--map", str(MAP), "--to", head2).stdout.split()
 check("ESC2 the same removal of Iterable that selected nothing (ANN1) selects a once pa is used as a value (w1: an alias of it; w1 has no measurement and runs anyway)",
       out3 == ["a", "w1"], out3)
+# [ahead review a]
 # ---- the review of the import and annotation rules (Thu Nov 12th 2026). OLD: both old rules (what the PR before the rules chose).
 OLD = {**I1, **N1}
 # an import the file gains that does not resolve fails every importer at import; no annotation-only name shows it. imod.py imports Tag from tmod.py and uses it only in an annotation (b runs it).
@@ -722,7 +806,6 @@ r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests
                    capture_output=True, text=True, env=ENV, cwd=str(R))
 check("a suite that runs another suite (INNER) is chosen when its inner suite is: z runs a, a opened the data file", r.stdout.split() == ["a", "z"], (r.stdout, r.stderr[-600:]))
 real = (pathlib.Path(SCR) / "scratch_scenario.py").read_text(encoding="utf-8")
-sm = importlib.util.spec_from_file_location("suitemap_real", os.path.join(SCR, "suitemap.py")); smod = importlib.util.module_from_spec(sm); sm.loader.exec_module(smod)
 named = set(re.findall(r'for name in \(([^)]*)\)', real)[0].replace('"', '').replace(" ", "").split(",")) | {"migration"}
 check("INNER's scratch lists exactly the suites scratch_scenario.py runs (its real-suite loop and the migration suite)", set(smod.INNER.get("scratch", ())) == named,
       (smod.INNER, named))
@@ -761,6 +844,7 @@ for rel, edit in (("pyproject.toml", lambda: write("pyproject.toml", "[project]\
     out, err, _ = sel_after(edit, rel)
     check(f"the harness's {rel} reaches all, even a comment", out == "all" and "the harness" in err, (out, err))
 
+# [ahead repo23 b]
 # ---- the example config (Tue Nov 10th 2026): a synthetic map, nothing measured. direct opens stackshot.example.toml itself, fx1 and fx2 read
 # it through the link tests/example_base.toml (the fixture suites), other opens data.txt
 R_MAIN = R; R = T / "repo2"; R.mkdir()
@@ -1007,6 +1091,7 @@ for name, edit in (("E1 a plain comment line right under [audit]", lambda: after
     out, err = real_sel(edit, name)
     check(f"real example: {name} selects the fixture readers", out.split() == FIX, (out, err))
 R = R_MAIN
+# [main]
 # what apply() touches, run for real: every setting it sets and every table it appends is a name the selection knows (the names come from the constants
 # of tests/_instance.py, so a new line in apply() that changes something the constants do not list fails here)
 sys.path.insert(0, SCR)
@@ -1526,6 +1611,7 @@ if use_strace:
 else:
     print("suitemap: the measured run's cancel is not checked here: strace is missing, or this run is already traced", file=sys.stderr)
 
+# [ahead tail b]
 # ---- the docstring tripwire (Wed Nov 11th 2026). A docstring-only change of an undecorated function selects by name (tests/suitemap.py, *Docstrings*): that
 # is sound while nothing reaches a function by a variable name and reads its docstring, or registers it somewhere that builds a description from it. The
 # checkout's Python (every .py file and every script with a python shebang, under the root) is scanned for the common forms that do either; the number of
@@ -2255,5 +2341,6 @@ okc = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_CLASS_RULE": " c1 "})
 check("CLASS 8b ... and c1 in lower case with spaces is C1", okc.returncode == 0, (okc.returncode, okc.stderr[-300:]))
 R = R_MAIN
 
+# [final]
 shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": suitemap scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)
