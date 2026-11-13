@@ -321,7 +321,7 @@ def audit_wait_end_settle_minutes() -> float:
 
 
 def audit_hourly_line() -> bool:
-    """[audit] hourly_line: the hourly audit line (audit/hourly.py): an item on an agent with no write for an hour gets one line saying what the audit verified. Default true (it replaces the 45-minute news ask); a TOML false, or any value that is not a TOML true, switches it off, read at use."""
+    """[audit] hourly_line: the hourly audit line (audit/hourly.py): an item on an agent with no activity for 45 minutes gets one line saying what the audit verified. Default true (it replaces the 45-minute news ask); a TOML false, or any value that is not a TOML true, switches it off, read at use."""
     return get("audit", "hourly_line", default=True) is True
 
 

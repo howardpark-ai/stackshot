@@ -17,7 +17,7 @@ An item is handed on when all of these hold:
 
   - the newest audit line on it is `idle, nothing verified` (`hourly.idle_marked`: kind `audit_idle` alone; a line that could not tell, kind `audit_unknown`, because a running subagent of the mover is tied to no item or the subagents could not be read, is no idle mark and the item stays), and not older than `FRESH` (the pass writes one at least every 6 hours while the item is on an agent and silent; an older
     line means the hourly pass is off or the item was off the agent since), and nothing has moved the item since that line (`silence.clock` is not later than it: a step done, a state change, the
-    mover's own write, an event on an anchor, the owner's answer all count);
+    mover's own write, an event on an anchor, the owner's answer all count), and it has had no activity for a full hour (`hourly.HOUR`): the first audit line is owed after 45 minutes (`hourly.EVERY`), so an idle line can be younger than an hour of silence, and the item waits for the hour before it is handed on;
   - it is open and on an agent as the board shows it, not held, and its hand-off, if it has one, was taken (an untaken hand-off is the hand-off audit's);
   - its mover is not a front agent: an item a front agent moves is the owner's work and is left where it is;
   - it was not handed on by this pass in the last 24 hours (`DAY`). An item handed on once and idle again after that may be handed again.
@@ -133,6 +133,8 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
     line = _hourly.last_line(meta, now)
     if line is None or now - line["at"] > FRESH or _silence.clock(it, mover) > line["at"]:
         return None      # an old line, or something moved the item after the line was written
+    if now - _silence.clock(it, mover) < _hourly.HOUR:
+        return None      # the first audit line is owed after 45 minutes, inside the hour: an item is handed on only after a full hour without activity, as it was when the first line itself waited for the hour
     if handed_recently(meta, now):
         return None
     return {"mover": mover, "project": project, "line_at": line["at"], "told_none": none_told_recently(meta, now)}
