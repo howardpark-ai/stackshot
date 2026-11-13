@@ -232,6 +232,8 @@ def create_item(
             raise ToolError(f"Refused: until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {until_v!r})")
         if until_at <= _pages.zone_now():
             raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
+        if _uw.slot_of(_model.clean(wait_kind).lower()) == "ask_by" and len(until_v) != 10:
+            raise ToolError(f"Refused: on a relay or event wait until is its ask-by day, YYYY-MM-DD with no time of day (got {until_v!r}); pass the day alone, e.g. until={until_v[:10]}")
         if _uw.slot_of(_model.clean(wait_kind).lower()) != "ask_by":      # the cap judges a wait on a date as an update's wake is judged (a relay's or event's ask-by day is no wake)
             _gates.gate_cap({}, said_l, "until", h.parse_wake(until_v), until_at.timestamp())
     elif alias_used:

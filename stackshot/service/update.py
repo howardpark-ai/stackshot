@@ -746,6 +746,15 @@ def update_unlocked(
             h.cap_ok_put(meta, "wake", stored, words, quote=q_text, source=q_src)
         else:                     # (a real-world date is its own record, wait_basis, below)
             h.cap_ok_drop(meta, "wake")
+    relay_hold = False
+    if hold and not (clear_hold or clear_wake or clear_wait) and (wait_kind.strip().lower() or _uw.kind_of(meta)) in ("relay", "event") and (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) and not meta.get("wake"):
+        hold, relay_hold = False, True      # a relay or event wait is itself the park until its ask-by day (the date this call gave as wake or ask_by went there): no second wait, the hold flag is not stored
+        if _uw._dated(ask_by):               # the date went to ask_by, which the wake cap above never sees: the cap judges it here as it judges a hold's wake (his words lift it the same way)
+            rd = h.parse_wake(_uw._dated(ask_by))
+            rwords = _gates.gate_cap(item, said_l, "wake", rd, h.wake_at(rd).timestamp())
+            if rwords and rwords != h.basis_words:
+                _, rq_text, rq_src = h.owner_quote_on(item, said_l, _wt.cap_days())
+                h.cap_ok_put(meta, "wake", rd, rwords, quote=rq_text, source=rq_src)
     if hold:
         meta["hold"] = True
         if not (was_held and h.render_hold_at(item)):   # who set it and when: the unexplained-holds report and the briefings read it; a hold already held keeps its stamp
@@ -755,6 +764,7 @@ def update_unlocked(
         meta.pop("wake", None); h.cap_ok_drop(meta, "wake")
         if _watch.stored_kind(meta) != "relay":      # a relay's until is its ask-by day, which clear_wake never dropped
             meta.pop("until", None)
+    relay_clear_hold = bool(clear_hold) and _uw.kind_of(meta) in ("relay", "event") and not meta.get("hold")      # clear_hold on a relay or event wait that holds no flag changes nothing: the reply says what ends the wait
     if clear_hold:                # released now: the hold and its wake go together
         if meta.get("wake") and _sf.marked(meta, _sf.WAKE_PARK, str(meta["wake"])):      # the server parked this wake and the mover sends it back: the server leaves that wake alone from here
             _sf.unmark(meta, _sf.WAKE_PARK, str(meta["wake"])); _sf.decline(meta, _sf.WAKE_PARK, str(meta["wake"]))
@@ -881,6 +891,10 @@ def update_unlocked(
             for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
                 meta.pop(k_, None)
     wait_note = ""
+    if relay_clear_hold:
+        wait_note += "\n(clear_hold releases a hold, and this relay or event wait holds no flag: it goes on waiting; clear_wait=true ends the wait)"
+    if relay_hold:
+        wait_note += "\n(hold=true is not stored on a relay or event wait: the wait is itself the park, until its ask-by day " + (_uw._dated(ask_by) or _uw._dated(meta.get("ask_by"))) + "; it ends when the notice arrives or on that day)"
     gave_ask = bool(ask_by.strip()) and ask_by.strip().lower() not in h.ask_none
     if was_until and bool(wake) != gave_ask and item.get("status") == "open":      # one date given: the date the item held before (unfolded into the other working field) does not outlive it
         meta.pop("ask_by" if wake else "wake", None)
