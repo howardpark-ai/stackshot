@@ -2,7 +2,7 @@
 
 The pure half of audit/hourly.py: no server import, no clock read, no file. The lines are an item's History (one line each, "stackshot: Audit hh:mm: …"), written in a log of their own,
 `metadata.hourly_audit.log`, so they neither crowd out the stall ladder's last eight entries nor read as steps of the stall pass (`get` prints them with an `audit:` prefix, not `stall:`).
-Each entry is {"at", "text", "kind"}, kind `audit` (something was verified), `audit_idle` (nothing was) or `audit_unknown` (the audit could not tell: a running subagent of the mover is tied to no item, or the mover's subagents could not be read;
+Each entry is {"at", "text", "kind"} (and `"pane_only": true` on a line whose only verification was a busy pane), kind `audit` (something was verified), `audit_idle` (nothing was) or `audit_unknown` (the audit could not tell: a running subagent of the mover is tied to no item, or the mover's subagents could not be read;
 the item is not idle and nothing is stamped). Importable from the renderers: it pulls in nothing."""
 from __future__ import annotations
 
@@ -27,10 +27,13 @@ def log_of(meta: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [x for x in ((s or {}).get("log") or []) if _well_formed(x)] if isinstance(s, dict) else []
 
 
-def note(meta: dict[str, Any], now: float, text: str, kind: str, keep: int = KEEP) -> None:
-    """Write a line onto the item's metadata."""
+def note(meta: dict[str, Any], now: float, text: str, kind: str, keep: int = KEEP, pane_only: bool = False) -> None:
+    """Write a line onto the item's metadata. `pane_only` marks a line that verified nothing but a busy pane (audit/busy_tell.py reads it): the entry then carries `"pane_only": true`; any other entry has no such key."""
     log = log_of(meta)
-    log.append({"at": now, "text": " ".join(str(text).split())[:CLIP], "kind": kind})
+    entry: dict[str, Any] = {"at": now, "text": " ".join(str(text).split())[:CLIP], "kind": kind}
+    if pane_only:
+        entry["pane_only"] = True
+    log.append(entry)
     meta[KEY] = {"log": log[-keep:]}
 
 

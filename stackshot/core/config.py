@@ -335,6 +335,23 @@ def audit_hand_idle() -> bool:
     return get("audit", "hand_idle", default=True) is True
 
 
+AUDIT_BUSY_TELL_HOURS = 4.0
+
+
+def audit_busy_tell() -> bool:
+    """[audit] busy_tell: an item on an agent whose hourly audit lines have said only "the mover's pane is in a turn" for `busy_tell_hours` with no other sign of progress tells the project's -main agent once (audit/busy_tell.py); an item a front agent holds
+    that has had only hourly lines for that long tells that front agent itself once. Never the owner. Default true; a TOML false, or any value that is not a TOML true, switches it off, read at use."""
+    return get("audit", "busy_tell", default=True) is True
+
+
+def audit_busy_tell_hours() -> float:
+    """[audit] busy_tell_hours: how long a busy stretch lasts before it is told. Default 4, never under 1; a number is taken, anything else (a boolean, text, a non-finite number) reads as the default. Read at use."""
+    v = get("audit", "busy_tell_hours")
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+        return AUDIT_BUSY_TELL_HOURS
+    return max(1.0, float(v))
+
+
 AUDIT_BALANCE_MINUTES = 10.0
 
 

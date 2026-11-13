@@ -3771,7 +3771,7 @@ def _queue_map(now: "float | None" = None, items: "dict[str, dict[str, Any]] | N
 
 
 def _silence_tick() -> "dict[str, Any] | None":
-    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`). Each is switched by
+    """The ten-minute audit tick (the name is the runner's key and stays): the hourly audit line (`_hourly_tick`), then the hand-over of the items it found idle (`_hand_idle_tick`), then the one message about an item whose lines have only said "busy" for hours (`_busy_tell_tick`). Each is switched by
     its own `[audit]` key and stands still when off. Stands still when the audit is off or runs in agent mode. One that raises never stops the other; the first error is printed."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
@@ -3783,6 +3783,10 @@ def _silence_tick() -> "dict[str, Any] | None":
         _hand_idle_tick()
     except Exception as e:  # noqa: BLE001  — handing an idle item on is its own pass: the line above has run
         print(f"audit: idle items not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    try:
+        _busy_tell_tick()
+    except Exception as e:  # noqa: BLE001  — the lines above have run
+        print(f"audit: long busy stretches not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return None
 
 
@@ -3831,7 +3835,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     45 minutes, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
-    request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
+    request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
     passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
@@ -3876,7 +3880,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
                 line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
-                _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
+                _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"], pane_only=_hourly.pane_only(line))
                 _hourly.stamp(item, line, now)      # a line that verified something is the hourly update: it is the item's last activity too, newest wins and never backwards (an idle line stamps nothing)
                 _writes.save(gid, item, note="audit: hourly line")
             written.append(gid)
@@ -3886,6 +3890,73 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     if written:
         _publish()
     return written
+
+
+def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None) -> list[str]:
+    """A long busy stretch tells the right agent once (audit/busy_tell.py, `[audit] busy_tell`, on by default; `[audit] busy_tell_hours`, 4), run from the ten-minute audit tick after the idle hand-over. An open item on an agent whose hourly audit lines since its last
+    real activity have verified only that the mover's pane is in a turn, for that long, gets ONE message to its project's -main agent (the mover has looked busy for about that long with no other sign of progress on the item; please look). An item a FRONT agent
+    holds that has had no write but the hourly lines for that long tells that front agent ITSELF, never its -main agent. The message is the same as the idle hand-over's to -main: `[for <owner>]` on its first line (a message to a front agent), through `tell_woken`
+    (tag `stall`, the kind that asks the agent to act), one message per agent per pass. The owner is never told, and no step is made for him. `metadata.busy_tell` is written in the save, before anything is sent (at most once: a crash between the save and the send loses
+    the message), one History line says who was told; a stretch is told of once, and a new one (real activity, or a line that verified something else) can be told again. A project with no -main agent logs it (once an hour per item) and tells nobody, and is looked at again at the next tick.
+    Stands still while the hourly line is off, in a read-only copy and while the board is paused. `now`, `items`, `env` are for tests and the tick. → the ids told."""
+    from stackshot.audit import busy_tell as _bt
+    from stackshot.audit import hourly as _hourly
+    from stackshot.audit import silence as _silence
+    from stackshot.tools import next_report as _nr
+    if not _bt.enabled() or not _hourly.enabled() or _ro.is_read_only() or _handoff_paused():
+        return []
+    now = time.time() if now is None else now
+    items = items if items is not None else _nr.load_all(None)
+    env = env if env is not None else _silence_env()
+    front = getattr(env, "is_front_or_unread", None) or getattr(env, "is_front", None)      # as the hourly line: a registry that cannot be read says front, so the agent holding the item is told, never a guess at its -main agent
+    hrs = _bt.hours()
+    rows = _bt.due_all(items, now, front, _silence.queued(items, now, env), hrs)
+    if not rows:
+        return []
+    done: list[str] = []
+    told: dict[str, list[tuple[str, str, str]]] = {}      # recipient -> (item, kind, line) of its message
+    mains: dict[str, str] = {}
+    for gid, row in rows:
+        try:
+            mover, kind = row["mover"], row["kind"]
+            if kind == _bt.KIND_FRONT:
+                to = mover
+            else:
+                if row["project"] not in mains:
+                    mains[row["project"]] = _main_agent(row["project"])
+                to = mains[row["project"]]
+                if to and _ho_same(to, mover):
+                    kind = _bt.KIND_FRONT      # the mover is the project's -main agent itself: the front wording, to the same session
+            if not to or _model.is_owner(to):
+                _balance_log_once(gid, "busy-tell-no-main", now, f"audit: {gid} busy stretch not told: no -main agent to tell")
+                continue
+            with _writes.ITEM_LOCK:
+                item = _load(gid)
+                cur = _bt.due({**items, gid: item}, gid, now, front, None, hrs)      # read again under the lock: the item may have been written, held, closed or told of since
+                if cur is None or not _ho_same(cur["mover"], mover):
+                    continue
+                meta = item.setdefault("metadata", {})
+                span = _bt.span(cur["since"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back
+                _bt.mark(meta, now, to, kind, cur["since"])
+                _stall.note(meta, now, f"{_session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_session_label(to)} was told")
+                _writes.save(gid, item, note="audit: busy stretch told")
+            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
+            line = (f"{lead}: no write on it but the hourly audit lines for about {span}. If you are at work on it, write a line on it; if you are not, say what blocks it or hand it on" if kind == _bt.KIND_FRONT else
+                    f"{lead}: {_session_label(mover)} has looked busy for about {span} (every audit line since said only that its pane is in a turn) with no step change, pull request event or other sign of progress on this item. Please look at what it is doing")
+            told.setdefault(to, []).append((gid, kind, line))
+            done.append(gid)
+            print(f"audit: {gid} busy stretch told to {to} ({kind})", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"audit: {gid} busy stretch not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for to, rows_ in told.items():
+        try:
+            gids, lines = [g for g, _k, _l in rows_], [l for _g, _k, l in rows_]
+            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had only the audit's lines for hours:\n" + "\n".join("- " + x for x in lines)
+            _telling.tell_woken(",".join(gids), _session_id(to) or to, f"{_FOR_OWNER}\n[stackshot] {body}\nNo reply is owed to the audit; nothing here is for {OWNER}. → "
+                                + (_telling.notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+        except Exception as e:  # noqa: BLE001
+            print(f"audit: {to} not told of the busy stretches: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return done
 
 
 def _hand_idle_builders(project: str) -> list[str]:
