@@ -67,6 +67,7 @@ SLOW_EVERY = 6 * 3600.0
 SLACK = 300.0            # in the slow stretch (a line every SLOW_EVERY): the ten-minute tick reads its clock a few seconds later or earlier each time, so the line is owed once this much less than the gap has passed and 6 hours on the tick grid is never missed by seconds and pushed a whole tick on
 PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:05: verified …`
 KIND_OK, KIND_IDLE, KIND_UNKNOWN = _log.KIND_OK, _log.KIND_IDLE, _log.KIND_UNKNOWN      # the `kind` of the log entry of a line that verified something, of one that verified nothing, and of one that could not tell
+PANE = "the mover's pane is in a turn"      # the phrase of a busy pane; a line whose only phrase it is is `pane_only` (audit/busy_tell.py)
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
 PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED})      # the recorded signals that are a tied pull request's events
 
@@ -103,7 +104,7 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
     recorded: list[str] = []
     try:
         if pane is not None and pane(mover) == "busy" and (alone is None or alone()):
-            out.append("the mover's pane is in a turn")
+            out.append(PANE)
     except Exception:  # noqa: BLE001  (a pane that cannot be read verifies nothing)
         pass
     try:
@@ -116,6 +117,11 @@ def verified(item: dict[str, Any], meta: dict[str, Any], mover: str, now: float,
         out.append(rec["what"])
         recorded.append(rec["what"])
     return out, recorded
+
+
+def pane_only(line: dict[str, Any] | None) -> bool:
+    """Did the line verify NOTHING but that the mover's pane is in a turn (no subagent, no recorded event)? What audit/busy_tell.py counts a long stretch of."""
+    return bool(line) and line.get("kind") == KIND_OK and list(line.get("verified") or []) == [PANE] and not line.get("recorded")
 
 
 def stamp_signal(line: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
