@@ -973,6 +973,12 @@ def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any],
                        else f"The project has no background agent with a pane either: hand it to a session that has one, or put the call to {OWNER} (needs=decision with its ask)."))
 
 
+def _ask_by_day_only(param: str, value: str) -> None:
+    """A relay or event wait waits on news, so its date is a day, not a time of day: the refusal for the date a call gave as `param` (until, or the old name wake) with a time on it."""
+    if len(value) != 10:
+        raise ToolError(f"Refused: on a relay or event wait {param} is its ask-by day, YYYY-MM-DD with no time of day (got {value!r}); pass the day alone, e.g. {param}={value[:10]}")
+
+
 def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold: bool, wait_kind: str) -> tuple[str, str, bool, list[str], str]:
     """The update tool's date parameters → (wake, ask_by, until_wait, the old parameters used, the date they gave). `until` goes through the write as the wake it is read as (the same gates:
     the future, the cap, the renewal guard), or as the relay's ask_by when the wait is a relay's; the old wake, ask_by and hold(+wake) are read the same way and listed so that the reply names
@@ -994,6 +1000,7 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
     if not u:
         if kind and not (wake.strip() and ask_by.strip()):                    # an old parameter on a kind of wait names the date for that kind: it goes where the stored date stands, so it replaces it
             if slot == "ask_by" and wake.strip() and not none(wake):
+                _ask_by_day_only("wake", wake.strip())
                 return "", wake, False, used, given
             if slot == "wake" and ask_by.strip() and not none(ask_by) and kind in ("anchor", "item"):
                 return ask_by, "", False, used, given
@@ -1006,8 +1013,8 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
         if at <= _pages.zone_now():
             raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
     if slot == "ask_by":
-        if u.lower() not in h.ask_none and len(u) != 10:
-            raise ToolError(f"Refused: on a relay or event wait until is its ask-by day, YYYY-MM-DD with no time of day (got {u!r}); pass the day alone, e.g. until={u[:10]}")
+        if u.lower() not in h.ask_none:
+            _ask_by_day_only("until", u)
         return "", u, True, used, given
     return u, "", True, used, given
 
