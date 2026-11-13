@@ -77,7 +77,8 @@ from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render
 from starlette.testclient import TestClient
-pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
+from stackshot.web.routes import ui_api as _rt_ui
+pub = [0]; server._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the Landed routes (web/routes/ui_api.py) look the publish up on their own module
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}

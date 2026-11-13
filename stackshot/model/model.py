@@ -13,7 +13,7 @@ optional and all in the item's metadata:
   goal              the end-state in one sentence (shown by get and the brief; not used to derive anything)
   mover             who moves an alive item now: the owner, a session name, or the project's background agent; on a waiting item, who picks it up when the wait ends
   then              who takes an item after the owner's answer or step: it stands only while the owner is the mover (an alive item he moves, or a waiting one he picks up), whatever is stored
-  wait_kind         time | anchor | item | relay | event, what an item waits on
+  wait_kind         time | anchor | item | relay | event | list, what an item waits on (list: several waits at once, the lines in `waits`, `all` or `any` of them in `wait_mode`, the backstop day in `until`; waits/wait_list.py)
   wait_anchor       the anchor (URL) an anchor wait watches
   wait_event        the event expected: of the anchor (anchor wait), the party or event the owner relays (relay wait), or the fleet event an event wait watches for (event_waits.py)
   ask_by            YYYY-MM-DD, the day a relay wait turns into a question to the owner
@@ -25,7 +25,7 @@ optional and all in the item's metadata:
                     minute set's phase sweep (server._phase_sweep: a dated wait's wake coming within the hour, local midnight (instance timezone), an `after` item closing). The readers (view) take the alive-or-waiting
                     decision and the kind of the wait from this stored pair and from nothing else; the fields give the details of the item (its mover, the wake, the anchor), never the decision. Only
                     the writer (view with check=False) works the pair out from the fields
-  waits_on          time | anchor | item | relay | event, the kind of the wait the board SHOWS a waiting open item as (shown_pair), stored beside `phase` by the same stamp (server._phase_stamp), absent for an
+  waits_on          time | anchor | item | relay | event | list, the kind of the wait the board SHOWS a waiting open item as (shown_pair), stored beside `phase` by the same stamp (server._phase_stamp), absent for an
                     alive item and dropped by a close. It is NOT `wait_kind`: that field is a behaviour switch (a stored one hands the item to the watchers), this one is a label
 
 Where nothing is stored, today's fields decide (design section 2: today's states map onto the three) and section 3's defaults give the mover. Pure
@@ -40,19 +40,21 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from stackshot.model import states as _states
+from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 
 DEAD, ALIVE, WAITING = "dead", "alive", "waiting"
 PHASES = (ALIVE, WAITING)       # what an open item stores as `phase` (a closed item is dead and stores none)
-WAIT_KINDS = ("time", "anchor", "item", "relay", "event")
-WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "until")      # what a clear of the wait drops (the wake and after have flags of their own)
+SINGLE_KINDS = ("time", "anchor", "item", "relay", "event")      # the kinds of a single wait, and of a line of a list (waits/wait_list.py)
+WAIT_KINDS = (*SINGLE_KINDS, "list")                             # …and the sixth, a wait on a list of waits: wait_kind=list, the lines in `waits`, the mode in `wait_mode`, the backstop day in `until`
+WAIT_GROUP = ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "until", "waits", "wait_mode")      # what a clear of the wait drops (the wake and after have flags of their own)
 MODEL_FIELDS = ("goal", "mover", "then", *WAIT_GROUP)
 DROP_ON_CLOSE = ("mover", "then", *WAIT_GROUP)            # a closed item has no mover and waits on nothing; its goal stays as the record
 LINE_MAX = 300
 ALIVE_STATES = ("doing", "your-call", "your-step")                  # today's states that read as alive (design section 2)
 WAITING_STATES = ("outside", "blocked", "parked", "verifying")                # …and as waiting
 OWNER_STATES = ("your-call", "your-step")                                    # alive with the owner as the mover, whatever needs says
-KIND_WORDS = {"time": "a time", "anchor": "an anchor event", "item": "another item's close", "relay": "news only {owner} relays", "event": "a fleet event"}
+KIND_WORDS = {"time": "a time", "anchor": "an anchor event", "item": "another item's close", "relay": "news only {owner} relays", "event": "a fleet event", "list": "several things"}
 _KINDS_IN_NEEDS = ("decision", "external")
 
 
@@ -115,6 +117,23 @@ class Wait:
 
 
 @dataclass(frozen=True)
+class WaitLine:
+    """One line of a wait on a list (waits/wait_list.py): the kind and the fields of that kind (until for a time line, anchor and event for an anchor line, after for an item line, event for a relay or
+    an event line), and, once it has arrived, when (epoch seconds, 0 for none yet) and in what words."""
+    kind: str
+    until: str = ""
+    anchor: str = ""
+    event: str = ""
+    after: str = ""
+    arrived_at: float = 0.0
+    arrived_what: str = ""
+
+    @property
+    def arrived(self) -> bool:
+        return self.arrived_at > 0
+
+
+@dataclass(frozen=True)
 class Model:
     """The item as the model reads it. `state` is dead | alive | waiting; `today` is today's state word it came from ("" for a closed item), `today_derived` whether
     that word was derived (no stored state). For an alive item `mover` is who moves it (`mover_explicit`: stored, False = defaulted), `then` who takes it after the
@@ -131,6 +150,8 @@ class Model:
     checkback: str = ""
     wait: Wait | None = None
     conflicts: tuple[str, ...] = field(default_factory=tuple)
+    waits: tuple[WaitLine, ...] = ()      # the lines of a wait on a list (empty for every other wait)
+    wait_mode: str = ""                   # all | any for a wait on a list, "" otherwise
 
     @property
     def owner_moves(self) -> bool:
@@ -239,6 +260,11 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
     kind_set = kind_set if kind_set in WAIT_KINDS else ""
     su = _wt.stored_until(m)                                   # a stored until is a wait on its own: with no kind, on the date alone
     conflicts: list[str] = []
+    if kind_set == _wl.LIST:
+        note = _wl.note_malformed(m)                           # a list that does not hold (waits/wait_list.py) is ignored, never a crash: the item reads as it would without it, counted and noted
+        if note:
+            conflicts.append(note)
+            kind_set = ""
     waiting = bool(kind_set) or bool(su) or today in WAITING_STATES
     if kind_set and today in ALIVE_STATES and not (kind_set in ("event", "relay") and derived):      # an event or relay wait on an item with no stored state is the way to store one (the state it would read as is the wait's own, never a stored alive one)
         conflicts.append(f"wait_kind={kind_set} on an item whose state is {today}, which is alive: the wait wins. To drop the wait, update clear_wait=true; to keep it, park the item: update hold=true (a hold ends a stored work-in-hand state)")
@@ -285,6 +311,9 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
         else:
             until = ask_by
             due = _epoch_passed(_wt.due_epoch(ask_by) if ask_by else None, now)
+    elif kind == _wl.LIST:
+        backstop = su                                          # the one date of the item: the day it comes back whatever has arrived
+        due = _wl.done(m) or _epoch_passed(_wt.wake_epoch(su), now)
     else:
         backstop = su or wake
         if kind == "item":
@@ -302,7 +331,14 @@ def derive(item: dict[str, Any], now: float | None = None, after_open: Callable[
                 event=(_first(m, "wait_event") or (clean(m.get("party")) if today == "outside" else "")) if kind in ("anchor", "relay") else (_first(m, "wait_event") if kind == "event" else ""),
                 after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), by_until=bool(su), due=due,
                 basis=_wt.basis_of(m) if kind == "time" else "", owner_words=bool(kind == "time" and (su or wake) and isinstance(m.get("cap_ok"), dict) and m["cap_ok"].get("wake") == (su or wake)))
-    return Model(WAITING, today, derived, "", False, then_s, bool(then_s), "", wait, tuple(conflicts))
+    return Model(WAITING, today, derived, "", False, then_s, bool(then_s), "", wait, tuple(conflicts), *_list_of(m, kind))
+
+
+def _list_of(m: dict[str, Any], kind: str) -> tuple[tuple[WaitLine, ...], str]:
+    """(the lines, the mode) of a wait on a list as the model carries them; ((), "") for any other wait."""
+    if kind != _wl.LIST:
+        return (), ""
+    return tuple(WaitLine(ln["kind"], ln["until"], ln["anchor"], ln["event"], ln["after"], ln["arrived_at"], ln["arrived_what"]) for ln in _wl.lines(m)), _wl.mode(m)
 
 
 def view(item: dict[str, Any], mod: Model, now: float | None = None, after_open: Callable[[dict[str, Any]], Any] | None = None, check: bool = True) -> Model:
@@ -330,7 +366,7 @@ def view(item: dict[str, Any], mod: Model, now: float | None = None, after_open:
         out = _shown(item, mod, now, after_open)
         if out.state != WAITING or out.wait is None:
             out = _wait_of(item, mod, sw)
-    if out.wait is not None and out.wait.kind != sw:
+    if out.wait is not None and out.wait.kind != sw and not (sw == _wl.LIST and not out.waits):      # a stored list the fields no longer hold (hand-edited since the last restamp) is not drawn as one with no lines
         out = dataclasses.replace(out, wait=dataclasses.replace(out.wait, kind=sw, kind_explicit=False))
     return out
 
@@ -355,12 +391,13 @@ def _wait_of(item: dict[str, Any], mod: Model, kind: str) -> Model:
     wake = su or clean(m.get("wake"))
     picker_s = norm_who(m.get("post_wake_mover")) or pick_who(m.get("mover"))
     picker = picker_s or mod.mover
+    kind = "time" if kind == _wl.LIST and not _wl.valid(m) else kind      # a stored list the fields do not hold reads as the date alone, as derive reads it
     wait = Wait(kind=kind, kind_explicit=False, until=wake if kind == "time" else "", backstop=wake if kind != "time" else "", by_until=bool(su),
                 anchor=_first(m, "wait_anchor") if kind == "anchor" else "", event=_first(m, "wait_event") if kind in ("anchor", "relay", "event") else "",
                 after=tuple(_wt.after_of(m)) if kind == "item" else (), mover=picker, mover_explicit=bool(picker_s), due=False,
                 basis=_wt.basis_of(m) if kind == "time" else "")
     then = mod.then if is_owner(picker) else ""
-    return Model(WAITING, mod.today, mod.today_derived, "", False, then, mod.then_explicit and bool(then), "", wait, mod.conflicts)
+    return Model(WAITING, mod.today, mod.today_derived, "", False, then, mod.then_explicit and bool(then), "", wait, mod.conflicts, *_list_of(m, kind))
 
 
 def _shown(item: dict[str, Any], mod: Model, now: float | None, after_open: Callable[[dict[str, Any]], Any] | None) -> Model:
@@ -459,6 +496,9 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
         what = "the close of " + (", ".join(shown(x) for x in w.after) or "no item stored") + (" (" + back(f"backstop wake {w.backstop}") + ")" if w.backstop else "")
     elif w.kind == "event":
         what = "a fleet event (" + (w.event or "wait_event not set") + ("; " + back(f"backstop {w.backstop}") if w.backstop else "") + ")"
+    elif w.kind == _wl.LIST:
+        parts = [_wl.line_text(dataclasses.asdict(ln), shown) + (" (arrived)" if ln.arrived else "") for ln in mod.waits]
+        what = f"several things ({mod.wait_mode} of {len(mod.waits)}: " + "; ".join(parts) + (f"; {back(f'backstop {w.backstop}')}" if w.backstop else "") + ")"
     else:
         bits = [x for x in (w.event, (f"until {w.until}" if w.by_until else f"ask by {w.until}") if w.until else "no ask-by date") if x]
         what = f"news only {owner_display()} relays ({'; '.join(bits)})"
@@ -474,8 +514,8 @@ def check_fields(values: dict[str, Any]) -> list[str]:
         if v and len(v) > LINE_MAX:
             out.append(f"{k} is one line of at most {LINE_MAX} characters (got {len(v)})")
     k = clean(values.get("wait_kind")).lower()
-    if k and k not in WAIT_KINDS:
-        out.append(f"wait_kind is one of {' | '.join(WAIT_KINDS)} (got {k!r})")
+    if k and k not in SINGLE_KINDS:      # a wait on a list is stored by the server's own write path, never named as a wait_kind by a caller
+        out.append(f"wait_kind is one of {' | '.join(SINGLE_KINDS)} (got {k!r})")
     u = clean(values.get("until"))
     if u and _wt.wake_epoch(u) is None:
         out.append(f"until is YYYY-MM-DD or YYYY-MM-DDTHH:MM, a real date (got {u!r})")

@@ -27,7 +27,7 @@ ALIAS_UNTIL = "2026-11-25"
 
 
 def kind_of(m: dict[str, Any]) -> str:
-    """The wait_kind an item stores, "" when it stores none or a word that is not one of the five."""
+    """The wait_kind an item stores, "" when it stores none or a word that is not one of the six."""
     k = " ".join(str(m.get("wait_kind") or "").split()).lower()
     return k if k in KINDS else ""
 
@@ -60,7 +60,7 @@ def unfold(meta: dict[str, Any]) -> bool:
     k = kind_of(meta)
     if slot_of(k) == "ask_by":
         meta["ask_by"] = u
-    elif k in ("anchor", "item"):
+    elif k in ("anchor", "item", "list"):
         meta["wake"] = u
     else:
         meta["wake"] = u
@@ -94,7 +94,7 @@ def date_of(meta: dict[str, Any]) -> str:
     k = kind_of(meta)
     if k == "relay":
         return ask or wake
-    if k in ("anchor", "item", "event"):
+    if k in ("anchor", "item", "event", "list"):
         both = [(_wt.wake_epoch(v), v) for v in (ask, wake) if v]
         return min(both)[1] if both else ""
     return wake or ask
@@ -104,7 +104,7 @@ def to_slot(meta: dict[str, Any]) -> None:
     """A wait whose kind this write changed carries its date in the working field of the NEW kind (`slot_of`): a date the item held for another kind moves there, so the new kind's gates find it
     (a relay or event wait reads ask_by; a time wait reads its wake, and a time wait stands as a hold). An anchor or item wait reads either, so it stays as it is."""
     k = kind_of(meta)
-    if not k or k in ("anchor", "item"):
+    if not k or k in ("anchor", "item", "list"):
         return
     wake, ask = _dated(meta.get("wake")), _dated(meta.get("ask_by"))
     if slot_of(k) == "ask_by":

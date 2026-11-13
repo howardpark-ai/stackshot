@@ -44,11 +44,12 @@ def text_of(html):
 NAMES = ["Silence", "Filing", "Wording", "Dates", "Proof and patterns", "Pages and agents", "Fleet and services", "Text and rules"]
 
 from stackshot.web import server
+from stackshot.audit import audit as _audit_mod
 from stackshot.web.auth import signin as _signin
 server._publish = lambda: None
 from starlette.testclient import TestClient
 posts = []
-server._audit.cue = lambda reason: (posts.append(reason), (202, "audit cued to falcon-audit"))[1]
+_audit_mod.cue = lambda reason: (posts.append(reason), (202, "audit cued to falcon-audit"))[1]
 
 # ---- 1. the catalog and the counts, before any page
 check("the catalog: eight groups in the order the page lists them; the two that report to a machine or to CI keep no findings log", [g["name"] for g in ov.GROUPS] == NAMES

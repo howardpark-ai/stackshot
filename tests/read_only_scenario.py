@@ -341,9 +341,10 @@ write_toml("stackshot.toml", root=str(N))
 src = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
 declared = {}
 signin_src = pathlib.Path(STACK, "stackshot/web/auth/signin.py").read_text(encoding="utf-8")      # the sign-in's three routes are registered there, by signin.register(mcp)
-for path, m in re.findall(r'(?m)^@mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)', src) + re.findall(r'(?m)^    mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)\(', signin_src):
+routes_src = "\n".join(f.read_text(encoding="utf-8") for f in sorted(pathlib.Path(STACK, "stackshot/web/routes").glob("*.py")))      # the rest of the routes are registered by the modules of web/routes/, each by its register(mcp)
+for path, m in re.findall(r'(?m)^@mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)', src) + re.findall(r'(?m)^    mcp\.custom_route\("([^"]+)",\s*methods=(\[[^\]]*\]|\w+)\)\(', signin_src + "\n" + routes_src):
     if not m.startswith("["):
-        m = re.search(rf'(?m)^{m} = (\[.*\])\s*$', src).group(1)
+        m = re.search(rf'(?m)^{m} = (\[.*\])\s*$', src + "\n" + routes_src).group(1)
     declared.setdefault(path, set()).update(ast.literal_eval(m))
 expected = {k: sorted(v | ({"HEAD"} if "GET" in v else set())) for k, v in declared.items()}      # Starlette adds HEAD to a GET route
 cenv = {k: v for k, v in os.environ.items() if k not in ("STACKSHOT_READ_ONLY", "STACKSHOT_URL")}

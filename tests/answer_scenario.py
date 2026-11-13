@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.web.routes import answers as _rt_answers
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
@@ -340,8 +341,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           r_sp.status_code == 303 and _u.path == "/" and parse_qs(_u.query, keep_blank_values=True) == {"sent": ["empty"], "item": ["a12"]} and _u.fragment == "task-a-12"
           and r_sp.headers["location"] == "/?sent=empty&item=a12#task-a-12" and not any(x in r_sp.headers["location"] for x in ("spoof", "%", "\r", "\n", "Cookie", "x=1")), r_sp.headers["location"])
     check("home answer: the item page's own form (no back) behaves as before: 303 to its own page, ?sent only", b_(None).headers["location"] == "/items/a5?sent=empty", b_(None).headers["location"])
-    check("home answer: _answer_back keeps (path, anchor) for a known page and None for the rest", server._answer_back("/#task-a-5") == ("/", "#task-a-5") and server._answer_back("/projects/alpha/sub") == ("/projects/alpha/sub", "")
-          and server._answer_back("/index.html") == ("/index.html", "") and server._answer_back(None) is None and server._answer_back("//x") is None)
+    check("home answer: _answer_back keeps (path, anchor) for a known page and None for the rest", _rt_answers._answer_back("/#task-a-5") == ("/", "#task-a-5") and _rt_answers._answer_back("/projects/alpha/sub") == ("/projects/alpha/sub", "")
+          and _rt_answers._answer_back("/index.html") == ("/index.html", "") and _rt_answers._answer_back(None) is None and _rt_answers._answer_back("//x") is None)
     c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE)
     rf = c.post("/items/a5/answer", content="token=" + tok("a5") + "&text=+&act=comment", headers={**SAME, "Content-Type": "application/x-www-form-urlencoded"}, follow_redirects=True)
     check("a POST as the page's fetch sends it (url-encoded, following the redirect) lands on the item's page with its notice, 303 then no-store; nothing written for an empty box",

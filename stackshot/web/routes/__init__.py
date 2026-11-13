@@ -1,0 +1,1 @@
+"""The routes of the web server, one module per group (client, answers, ui_api, board), each adding its own to the server's `mcp` through `register(mcp)`; server.py calls them in the order the routes were declared."""
