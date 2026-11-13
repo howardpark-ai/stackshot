@@ -17,6 +17,7 @@ from stackshot.core import legacy_owner as _lo   # an old version of an item (fr
 from stackshot.fleet import fleet as _fleet   # the session and machine view, and the one rule for a session's presence (running / present)
 from stackshot.router import routing as _routing   # the routing log: what came in per project and how it was ruled (the pilot)
 from stackshot.github import ghsync as _gh   # how an id is written for a person (board-tmp-<machine>#3) and its page address (/items/<n>)
+from stackshot.model import queued as _queued   # a mover busy on another item: its other items on an agent read waiting, queued behind it (queued.py)
 from stackshot.model import work as _work   # a step's status line, what is in motion on an item (a row's "engineer: migrating", the item page's Next and History)
 from stackshot.model import said as _said   # the trailers: his words on an item, a tag on the History line of the write that recorded them, the quote behind it
 from stackshot.model import states as _states   # an open item's stored state, or the one derived from its fields (states.py)
@@ -2766,7 +2767,7 @@ class Board:
         held_on = lambda x: (f' · <span class="dim">{_t("item.anchor_on", page=e(self.proj_label(x["page"]) if x["page"] in self.proj else x["page"]))}</span>' if x["page"] != pk else "")
         alist = "".join(f'<li><b>{e(kind)}</b> ' + (f'<a href="{e(u)}" target="_blank" rel="noopener">{e(nm_)}</a>' if u else e(nm_)) + f' <em>· {w}</em>{held_on(x)}</li>'
                         for (kind, (nm_, u, w, _sc, _h)), x in arows)
-        mod = _model.view(r, _model.derive(r, now=tnow, after_open=after_open, anchored=lambda _i: bool(arows)), tnow, after_open)      # a doing item whose wake is far out with every step dated reads as waiting
+        mod = _queued.overlay(_model.view(r, _model.derive(r, now=tnow, after_open=after_open, anchored=lambda _i: bool(arows)), tnow, after_open), self.queue_map().get(r["gid"], ""))      # a doing item whose wake is far out with every step dated reads as waiting
         alive, waiting = mod.state == _model.ALIVE, mod.state == _model.WAITING
         who_html = lambda w: e(w) if (not w or _model.is_owner(w)) else self.sess_html(self.mover_name(w))     # the owner as he is named; a session linked while its pane lives
         who_text = lambda w: (w if (not w or _model.is_owner(w)) else self.mover_name(w))
@@ -2947,7 +2948,8 @@ class Board:
             what = self.wait_anchor_html(r, w, full=True)      # the stored anchor in full, else the ones scoped to the item
         elif w.kind == "item":
             opn = set(after_open(r))
-            what = ", ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">{_t("wait.state_open" if g in opn else "wait.state_closed")}</span>' for g in w.after) or _t("wait.item_none")
+            what = ", ".join(f'<a href="{e(id_href(g))}">{e(shown(g))}</a> <span class="dim">{_t("wait.state_open" if (g in opn or w.queued) else "wait.state_closed")}</span>' for g in w.after) or _t("wait.item_none")
+            if w.queued: what += f' <span class="dim">· {e(_t("wait.queued_note"))}</span>'
         elif w.kind == "relay": what = self.mentions(e(_wat.subject_of(m)), r["gid"]) + f' <span class="dim">{_t("wait.relay_note", who=e(_model.owner_display()))}</span>'
         else:
             what = e(wtext) if wtext and wtext != _t("wait.a_date") else _t("wait.a_date")
@@ -3438,11 +3440,20 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
     # alive or waiting (model.py) and sits in exactly one of Your move, On agent and Waiting. A row is two lines: the goal (the subject,
     # linking the item page) and its age; the immediate next step (the first `next` line, its `<mover>: ` prefix stripped) and the mover. The
     # lists draw nothing that pushes, sends or repeats: the nag is the age's colour on Your move (amber past two days, red past five), here only.
-    def mod_of(self, r):
-        """The item as the model reads it (model.derive: the stored model fields, else today's fields), once per row."""
-        m = r.get("_mod")
+    def base_mod(self, r):
+        """The item as the model reads it (model.derive: the stored model fields, else today's fields), once per row, before the queue rule."""
+        m = r.get("_base")
         if m is None:
-            m = r["_mod"] = _model.view(r, _model.derive(r, self.now.timestamp(), after_open=after_open, anchored=lambda it: str(it["gid"]) in self.scoped_urls()), self.now.timestamp(), after_open)      # a doing item whose wake is far out with every step dated reads as waiting
+            m = r["_base"] = _model.view(r, _model.derive(r, self.now.timestamp(), after_open=after_open, anchored=lambda it: str(it["gid"]) in self.scoped_urls()), self.now.timestamp(), after_open)      # a doing item whose wake is far out with every step dated reads as waiting
+        return m
+    def queue_map(self):
+        """{item: the item it is queued behind} over the open rows (queued.board_queue: a mover busy on another item, `[model] queued_behind`), {} while the rule is off; read once per Board."""
+        if getattr(self, "_queue", None) is None: self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp())
+        return self._queue
+    def mod_of(self, r):
+        """The item as the board shows it: base_mod, then the queue rule (an item behind its mover's other item reads waiting, queued behind it), once per row."""
+        m = r.get("_mod")
+        if m is None: m = r["_mod"] = _queued.overlay(self.base_mod(r), self.queue_map().get(str(r.get("gid") or ""), ""))
         return m
     def scoped_urls(self, gid=None):
         """The anchors scoped to items, from every project's page in the anchors file (anchor_scope.scoped_map, the rule the server reads too): {item id: [url, …]} in the order they were added
@@ -3722,7 +3733,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             why = w.basis or (f"“{quote}”" if quote else "") or (_t("home.wait.proof", proof=proof) if proof else "")
             text = (_t("home.wait.until", day=e(self.day_words(w.until))) if w.until else esc(_t("home.wait.no_date"))) + (f": {e(why)}" if why else "")
         elif w.kind == "item":
-            text = _t("home.wait.after", ids=", ".join(f'<a href="{e(id_href(g))}" target="_blank" rel="noopener">{e(shown(g))}</a>' for g in w.after)) if w.after else esc(_t("home.wait.item_none"))
+            text = _t("home.wait.queued" if w.queued else "home.wait.after", ids=", ".join(f'<a href="{e(id_href(g))}" target="_blank" rel="noopener">{e(shown(g))}</a>' for g in w.after)) if w.after else esc(_t("home.wait.item_none"))
             if w.backstop: text += f' <span class="dim">{_t("home.wait.back_anyway", day=e(self.day_words(w.backstop)))}</span>'
         elif w.kind == "anchor":
             text = _t("home.wait.on", what=self.wait_anchor_html(r, w))      # the anchor the wait stores, else the ones scoped to the item

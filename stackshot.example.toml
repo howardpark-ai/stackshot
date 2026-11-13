@@ -619,6 +619,10 @@ one_mover = true                                    # false: needs may name more
 description_guard = "note"                           # a thick description (a paragraph over 300 characters, or over 400 with no `- ` bullet; fenced code and `>` quotes do not count) draws guidance
                                                     # Note = the write goes through and the
                                                     # reply carries the guidance (this release); refuse = the write is refused with it (a later release). Live
+queued_behind = false                               # true: a session that moves several open items is working on the one with its newest visible activity (metadata.last_activity); each of its other items on an agent with no
+                                                    # activity for an hour reads WAITING, "queued behind <item>" (an item wait), and the silence pass, the hourly audit line and the stall ladder leave it alone as they do a waiting item.
+                                                    # Derived when the board is read, never stored: it ends when the mover moves the item, the item it waits behind closes or goes quiet for an hour, or the mover has one item left.
+                                                    # A front agent's items are never queued. Off by default. Live (read at use)
 rebullet_machines = []                              # the machines whose token may write through /client/rebullet, e.g. ["myhost"]; [] = none, the call is refused (stackshot/tools/rebullet_descriptions.py --apply: an open item's description
                                                     # rewritten as bullets, as the author `rebullet`, with nothing lost; the state clock and confirm stay). The server box only. Live
                                                     #

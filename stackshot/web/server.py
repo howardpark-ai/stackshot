@@ -112,6 +112,7 @@ from stackshot.model import retire_fields as _retire  # noqa: E402  — the data
 from stackshot.core import retired_inputs as _retired  # noqa: E402  — the old item-state inputs of create and update, and the refusal naming what to pass instead (retired_inputs.py)
 from stackshot.waits import waiting as _wt  # noqa: E402  — what an item waits on and whose move it is (waiting.py)
 from stackshot.model import model as _model  # noqa: E402  — the item model of the redesign: dead | alive | waiting, the mover and the wait, derived from the fields (model.py)
+from stackshot.model import queued as _queued  # noqa: E402  — a mover busy on another item: the rule that reads its other on-agent items as waiting, queued behind it (queued.py; `[model] queued_behind`)
 from stackshot.waits import dated_wait as _dw  # noqa: E402  — a doing item the board lists as waiting for its wake (dated_wait.py; the end-of-turn question skips a basis wait)
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
 from stackshot.core import call_log as _calls  # noqa: E402  — the count of refused writes and the corrections the server made instead (call_log.py)
@@ -6052,6 +6053,31 @@ def _silence_env() -> Any:
     return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0])
 
 
+_queued.configure(is_front=lambda who, project: _front_keeper(who, project)[0])      # the board's rendering asks the same question the passes' environment answers
+_QUEUE_CACHE: "dict[str, Any]" = {"at": 0.0, "map": {}}
+_QUEUE_TTL = 30.0
+
+
+def _queue_map(now: "float | None" = None, items: "dict[str, dict[str, Any]] | None" = None) -> "dict[str, str]":
+    """{item: the item it is queued behind} for a mover busy on another item (silence.queued, model/queued.py), {} while `[model] queued_behind` is off or when the store cannot be read. Without `items` the
+    answer is kept for `_QUEUE_TTL` seconds, so a page or a pass that asks about many items reads the store once. Derived, never stored."""
+    if not _queued.enabled():
+        return {}
+    from stackshot.audit import silence as _silence
+    from stackshot.tools import next_report as _nrep
+    now = time.time() if now is None else now
+    if items is None and 0 <= now - _QUEUE_CACHE["at"] < _QUEUE_TTL:
+        return _QUEUE_CACHE["map"]
+    try:
+        out = _silence.queued(items if items is not None else _nrep.load_all(None), now, _silence_env())
+    except Exception as e:  # noqa: BLE001  — an extra reading: a failure leaves every item as it was
+        print(f"queued: not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return {}
+    if items is None:
+        _QUEUE_CACHE.update(at=now, map=out)
+    return out
+
+
 def _silence_tick() -> "dict[str, Any] | None":
     """The ten-minute silence tick: the silence pass with its backstop (`_silence_pass_tick`), and, whatever that did (even a ladder view that could not be built), the hourly audit line (`_hourly_tick`, off by
     default). Stands still when the audit is off or runs in agent mode."""
@@ -9945,6 +9971,7 @@ def _stall_tick(now: float | None = None) -> list[str]:
     ladder_on, look = _ladder_on(), _ladder_look()
     silence_on = ladder_on and _ladder_silence_on()      # the silence audit brings the items: a pane with no turn running starts nothing
     from stackshot.audit import silence as _silence      # the clocks of the silence audit, and `subagent_running`, the step status a background mover's ladder is held by
+    from stackshot.tools import next_report as _nrep
     since = _stall_since(now)          # no clock starts before the pass first ran (a deploy must not step every long-idle pane at once)
     cap = max(1, int(_stall_num("max_per_tick", _stall.MAX_PER_TICK)))
     old_st = _stall_load()
@@ -9956,12 +9983,13 @@ def _stall_tick(now: float | None = None) -> list[str]:
     alive: dict[str, float] = {}      # open items due now, and since when (the first pass that saw them so; kept across passes): `_alive_load`
     stuck: list[tuple[str, str, float]] = []      # (gid, mover) of the alive items that have not moved for `[ladder] main_hours`: handed up to -main after the rungs below (`_ladder_stuck`)
     main_hours = _ladder_main_hours()
+    queue = _queue_map(now, _nrep.load_all(None)) if _queued.enabled() else {}      # an item queued behind another of its mover's reads waiting: the ladder leaves it as it leaves a waiting one
     for gid, _p in _item_files():
         try:
             it = _load(gid)
             if it.get("status") != "open":
                 continue
-            if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})):
+            if _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or gid in queue:
                 continue                 # its work is not due now (the board shows it waiting, or it is the owner's or an outsider's move): no record is kept, so its clock starts when it is due
             alive[gid] = alive_old.get(gid) or now
             old = old_st.get(gid)
@@ -14670,7 +14698,8 @@ def _item_list(item: dict[str, Any]) -> str:
     rule for an item it cannot place (a failed reading, or a dead one) is Agents at work (home.classify), so the field is never empty: the items sheet groups as the page does."""
     try:
         it = dict(item, gid=str(item.get("gid") or item.get("id") or ""))
-        which = _home.list_of(_model.view(it, _model_of(it), after_open=lambda i_: _after_open(i_.get("metadata") or {})))     # a doing item with a far wake and every step dated is listed as waiting
+        vw = _model.view(it, _model_of(it), after_open=lambda i_: _after_open(i_.get("metadata") or {}))
+        which = _home.list_of(_queued.overlay(vw, _queue_map().get(it["gid"], "")))     # a doing item with a far wake and every step dated is listed as waiting, and one queued behind its mover's other item
     except Exception:  # noqa: BLE001
         which = ""
     return which or _home.AGENTS

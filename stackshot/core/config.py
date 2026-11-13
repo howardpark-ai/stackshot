@@ -325,6 +325,11 @@ def audit_hourly_line() -> bool:
     return get("audit", "hourly_line", default=False) is True
 
 
+def model_queued_behind() -> bool:
+    """[model] queued_behind: a mover busy on another item reads waiting, queued behind that item, not on agent (model/queued.py). Default false; only a TOML true switches it on, read at use."""
+    return get("model", "queued_behind", default=False) is True
+
+
 def audit_orphan_handover() -> str:
     """[audit] orphan_handover: what the audit does with an open item whose mover is gone (successor.py): "report" (the default for the first week of use) only lists it, "apply" hands it to the closest live agent, "off" makes no check.
     A value that is none of these reads as the default."""

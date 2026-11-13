@@ -104,14 +104,16 @@ def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
     return f"{PREFIX}{hm}: verified " + ", ".join(what) + ("" if recorded else LIVE_ONLY)
 
 
-def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None) -> dict[str, Any] | None:
+def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None, queue: dict[str, str] | None = None) -> dict[str, Any] | None:
     """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind"}. `env.is_front(name, project)` says who is a front agent (None reads none as front)."""
     item = items.get(gid) or {}
     if item.get("status") != "open":
         return None
     it, meta, after_open, mover = _ac._item_view(items, gid)
-    if not _silence.reading(it, mover, after_open, now) or _wt.is_held(it):
-        return None      # not on an agent as the board shows it (a hold, a park, a stored wait, the owner's or an outsider's move), or on hold
+    if queue is None:
+        queue = _silence.queued(items, now, env)      # the mover's other items it is busy on (model/queued.py): `pass_` reads it once for every item
+    if not _silence.reading(it, mover, after_open, now, queue.get(gid, "")) or _wt.is_held(it):
+        return None      # not on an agent as the board shows it (a hold, a park, a stored wait, an item queued behind another of its mover's, the owner's or an outsider's move), or on hold
     front = (env.is_front if hasattr(env, "is_front") else None)
     if _ho.awaiting_session(it) and not (front is not None and front(mover, str(meta.get("project") or ""))):
         return None      # an untaken hand-off to a back agent is the hand-off audit's (a front agent's is checked, as the silence pass does)
@@ -128,11 +130,12 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
 def pass_(items: dict[str, dict[str, Any]], now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None) -> list[tuple[str, dict[str, Any]]]:
     """[(gid, line)] of every open item that is owed a line now, in id order; reads only. An item that cannot be read is left out (the server logs nothing for it: the board's other passes report it)."""
     out: list[tuple[str, dict[str, Any]]] = []
+    queue = _silence.queued(items, now, env)
     for gid in sorted(items, key=_ac._num):
         if items[gid].get("status") != "open":
             continue
         try:
-            line = due(items, gid, now, env, pane, same)
+            line = due(items, gid, now, env, pane, same, queue)
         except Exception:  # noqa: BLE001
             continue
         if line is not None:

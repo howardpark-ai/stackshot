@@ -102,6 +102,7 @@ class Wait:
     due: bool = False
     basis: str = ""            # a time wait's reason: a real outside date (wait_basis text) …
     owner_words: bool = False  # … or the owner's recorded words (cap_ok)
+    queued: bool = False       # an item wait that is no stored wait: the mover is busy on the item in `after` and this one stands in line behind it (model/queued.py, derived and never stored)
 
     @property
     def post_wake_mover(self) -> str:
@@ -452,6 +453,8 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     elif w.kind == "anchor":
         bits = [x for x in (w.anchor or "wait_anchor not set", w.event) if x]      # an anchor scoped to the item stands for it: "no anchor stored" said the item had none when the project's anchors held its anchor
         what = "an anchor (" + ": ".join(bits) + ("; " + back(f"backstop wake {w.backstop}") if w.backstop else "") + ")"
+    elif w.kind == "item" and w.queued:
+        what = "the mover's other item (queued behind " + (", ".join(shown(x) for x in w.after) or "no item stored") + ")"
     elif w.kind == "item":
         what = "the close of " + (", ".join(shown(x) for x in w.after) or "no item stored") + (" (" + back(f"backstop wake {w.backstop}") + ")" if w.backstop else "")
     elif w.kind == "event":
