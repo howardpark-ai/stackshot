@@ -5799,8 +5799,13 @@ def _shown_waiting_note(item: dict[str, Any], mod: "_model.Model") -> str:
 
 
 def _arrival_when(ts: float) -> str:
-    """The time a line of a wait on a list arrived, for the `model:` line: YYYY-MM-DD HH:MM in the board's zone."""
-    return dt.datetime.fromtimestamp(float(ts), ZONE).strftime("%Y-%m-%d %H:%M")
+    """The time a line of a wait on a list arrived, for the `model:` line: YYYY-MM-DD HH:MM and the zone's name (as the refusals that give a time name it), in the board's zone; "" for a time no date can show,
+    so the line keeps its arrival words and drops the time (a get never loses its model line over one)."""
+    try:
+        t = dt.datetime.fromtimestamp(float(ts), ZONE)
+        return f"{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}"
+    except (ValueError, OverflowError, OSError):
+        return ""
 
 
 def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:

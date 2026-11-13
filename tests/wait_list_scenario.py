@@ -131,6 +131,20 @@ check("shape: …and the problem says why (a stored list only)", "2 to 8" in WL.
       and "all or any" in WL.problem(BAD["a mode that is neither"]) and "backstop" in WL.problem(BAD["no backstop day"]), [WL.problem(v) for v in BAD.values()])
 check("shape: a line that carries an arrival is read with it; a torn record is no arrival", WL.arrived(WL.lines({**GOOD, "waits": [{**Tm("2026-11-20"), "arrived": {"at": 5.0, "what": "x"}}, It("a1")]})[0])
       and not WL.arrived(WL.lines({**GOOD, "waits": [{**Tm("2026-11-20"), "arrived": {"at": "no", "what": "x"}}, It("a1")]})[0]), None)
+HOSTILE_AT = (float("inf"), "inf", "Infinity", 1e20, 1e300, "1e400", 10 ** 400, 253402300800, WL.ARRIVED_AT_MAX + 1, float("nan"), -5.0, 0, True, None, [1.7e9])      # a time no date can show, or no time at all
+arr_of = lambda at: WL.lines({**GOOD, "waits": [{**Tm("2026-11-20"), "arrived": {"at": at, "what": "x"}}, It("a1")]})[0]
+check("shape: an arrival whose time no date can show (inf, \"inf\", 1e20, 1e300, year 10000, nan, a huge integer, a bool, a negative) is no arrival: the line reads as open, with no time and no words",
+      all(not WL.arrived(arr_of(at)) and arr_of(at)["arrived_at"] == 0.0 and arr_of(at)["arrived_what"] == "" for at in HOSTILE_AT) and WL.open_lines({**GOOD, "waits": [{**Tm("2026-11-20"), "arrived": {"at": float("inf"), "what": "x"}}, It("a1")]}) == [0, 1],
+      [at for at in HOSTILE_AT if WL.arrived(arr_of(at))])
+check("shape: …a real time (a string number too, and the latest the shape allows) is an arrival; the first moment past the latest is not",
+      all(WL.arrived(arr_of(at)) and arr_of(at)["arrived_at"] == float(at) for at in (1.7e9, "1.7e9", 1, WL.ARRIVED_AT_MAX)) and not WL.arrived(arr_of(WL.ARRIVED_AT_MAX + 1)) and WL.ARRIVED_AT_MAX < 253402300800, WL.ARRIVED_AT_MAX)
+check("shape: …every time the shape accepts can be drawn as a date in the board's zone (the latest one too), so a reader never has to guard it",
+      all(isinstance(datetime.datetime.fromtimestamp(arr_of(at)["arrived_at"], datetime.timezone(datetime.timedelta(hours=14))).strftime("%Y-%m-%d %H:%M"), str) for at in (1, 1.7e9, WL.ARRIVED_AT_MAX)), None)
+LONG_ID = "a" + "9" * 1_000_000
+long_line = WL.lines({**GOOD, "waits": [Tm("2026-11-20"), It(LONG_ID)]})[1]
+check("shape: an item line's id is clipped like an anchor's or an event's (a stored line can be long, what a reader sees never is): LINE_MAX characters, and a normal id is untouched",
+      len(long_line["after"]) == WL.LINE_MAX == 300 and long_line["after"] == LONG_ID[:300] and WL.lines(GOOD)[1]["after"] == "a1" and len(WL.line_text(long_line)) < 400
+      and len(WL.lines({**GOOD, "waits": [Tm("2026-11-20"), An(AURL, "e" * 5000)]})[1]["event"]) == 300, len(long_line["after"]))
 
 # marks
 m0 = json.loads(json.dumps(GOOD)); alias = dict(m0)
@@ -429,6 +443,17 @@ server._evwait_report(EW.event("job_run", name="weekly"))
 check("mixed: …an item, an anchor and an event each mark their line; the item still waits, nobody is told", arrived_of(170) == [True, True, True, True, False] and mt(170).get("wait_kind") == "list" and not sent("watch"), arrived_of(170))
 server._watch_mark("a170", "relay", time.time(), {}, lambda m_: WL.lines_by_kind(m_, "relay"), "he relayed x")
 check("mixed: …the relay line, the last, ends it", mt(170).get("mover") == BACK and mt(170)["woke"]["what"].startswith("all 5 arrived:") and all(k not in mt(170) for k in GONE) and "hold" not in mt(170), mt(170))
+
+# the marks are made, and the group ended, on the item as it stands under the lock: an item that no longer stores a list, an event older than the wait, and a group that is not due are left as they are
+reset()
+lst(172, [Ev("job_run weekly"), Re("x")], mode="any"); item(173, subject="[home] a single time wait that replaced a list", wait_kind="time", hold=True, wake=day(5), needs=[], post_wake_mover=BACK, watch={"set_at": now0 - 3600})
+lst(174, [Tm(day(5)), Re("y")], mode="all")
+b172, b173, b174 = raw(172), raw(173), raw(174)
+old_ev = EW.event("job_run", name="weekly")
+check("under the lock: an event dated before the wait was set (its floor) marks no line", server._watch_mark("a172", "event", now0 - 7200, {}, lambda m_: WL.lines_by_kind(m_, "event"), "weekly ran", ev=old_ev) is False and raw(172) == b172, mt(172))
+check("under the lock: …an item that no longer stores a list (a single wait now) marks nothing and is not touched", server._watch_mark("a173", "relay", now0, {}, lambda m_: [0], "x") is False and raw(173) == b173, mt(173))
+check("under the lock: …a group that is not due is not ended (the wait is read again: its cause is not the one the caller saw)", server._watch_fire("a174", "time", now0, {}, recheck=True) is False and raw(174) == b174, mt(174))
+check("under the lock: …the same event dated after the wait was set marks its line and, in an `any` list, ends it", server._watch_mark("a172", "event", now0, {}, lambda m_: WL.lines_by_kind(m_, "event"), "weekly ran", ev=old_ev) is True and mt(172).get("mover") == BACK, mt(172))
 
 # ================================================================ the backstop day
 reset()

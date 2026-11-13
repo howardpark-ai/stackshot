@@ -20,6 +20,7 @@ A list that does not hold (fewer than two lines or more than eight, an unknown k
 empty and the item reads as it would without it. Every caller goes through this module; nothing else reads `waits` by hand."""
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Callable
 
@@ -30,6 +31,7 @@ KINDS = ("time", "anchor", "item", "relay", "event")       # the kinds a line ma
 MODES = ("all", "any")
 MIN_LINES, MAX_LINES = 2, 8
 LINE_MAX = 300                                              # the most a line's free text (an anchor, an event) and an arrival's words keep: longer is clipped
+ARRIVED_AT_MAX = 253402300800 - 86400                       # the latest arrival time a stored line may carry (epoch seconds: a day short of year 10000, the last moment Python can draw as a date); a later one is no time
 MALFORMED: dict[str, int] = {"count": 0}                   # reads of an item that stores wait_kind=list with a list that does not hold (the model counts each one it ignores)
 
 _FIELDS = {"time": ("until",), "anchor": ("anchor", "event"), "item": ("after",), "relay": ("event",), "event": ("event",)}
@@ -78,15 +80,15 @@ def _line(raw: Any) -> tuple[dict[str, Any] | None, str]:
             return None, f"a {kind} line needs {f}"
         if f == "until" and _wt.wake_epoch(v) is None:
             return None, f"a time line's until is YYYY-MM-DD or YYYY-MM-DDTHH:MM, a real date (got {v!r})"
-        out[f] = v[:LINE_MAX] if f in ("anchor", "event") else v      # free text is clipped (a stored line can be long; what a reader sees never is)
+        out[f] = v[:LINE_MAX] if f in ("anchor", "event", "after") else v      # free text and an item id are clipped (a stored line can be long; what a reader sees never is)
     arr = raw.get("arrived")
     if isinstance(arr, dict):
         at_raw = arr.get("at")
         try:
             at = 0.0 if isinstance(at_raw, bool) else float(at_raw)      # float(True) is 1.0: a bool is no time
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):      # OverflowError: an integer too large for a float
             at = 0.0
-        if at > 0:                                              # a torn record (no usable time) is no arrival
+        if math.isfinite(at) and 0 < at <= ARRIVED_AT_MAX:      # a torn record (no usable time: none, zero, negative, inf, nan or a moment no date can show) is no arrival
             out["arrived_at"], out["arrived_what"] = at, _one(arr.get("what"))[:LINE_MAX]
     return out, ""
 

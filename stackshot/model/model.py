@@ -498,8 +498,8 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     elif w.kind == "event":
         what = "a fleet event (" + (w.event or "wait_event not set") + ("; " + back(f"backstop {w.backstop}") if w.backstop else "") + ")"
     elif w.kind == _wl.LIST:
-        parts = [("[x] " if ln.arrived else "[ ] ") + _wl.line_text(dataclasses.asdict(ln), shown)
-                 + (" (" + ", ".join(x for x in (ln.arrived_what, when(ln.arrived_at) if when else "") if x) + ")" if ln.arrived and (ln.arrived_what or when) else "") for ln in mod.waits]
+        arrival = lambda ln: ", ".join(x for x in (ln.arrived_what, when(ln.arrived_at) if when else "") if x) if ln.arrived else ""      # the words it came with and, when the caller gives a way to say it, the time
+        parts = [("[x] " if ln.arrived else "[ ] ") + _wl.line_text(dataclasses.asdict(ln), shown) + (f" ({arrival(ln)})" if arrival(ln) else "") for ln in mod.waits]
         what = f"several things ({mod.wait_mode} of {len(mod.waits)}, {sum(1 for ln in mod.waits if ln.arrived)} arrived: " + "; ".join(parts) + (f"; {back(f'backstop {w.backstop}')}" if w.backstop else "") + ")"
     else:
         bits = [x for x in (w.event, (f"until {w.until}" if w.by_until else f"ask by {w.until}") if w.until else "no ask-by date") if x]

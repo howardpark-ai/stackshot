@@ -9,10 +9,12 @@ The list itself (waits/wait_list.py) and its ending are tests/wait_list_scenario
   * every kind of line: time, anchor, item, relay, event; free text (an event, an anchor, the words of an arrival) is escaped in the row and on the page
   * a single wait reads exactly as it did (a row with no list class, the old words, its Watched by and Chases rows), and a stored list that does not hold reads as the date alone
   * every user-visible string comes from the string table: a locale that marks every key marks every word of a list row and of the page block
-  * the `model:` line of get: the mode, how many arrived, each line ticked [x] or open [ ], with the time and the words of an arrival and the backstop
+  * the `model:` line of get: the mode, how many arrived, each line ticked [x] or open [ ], with the time (and the zone's name) and the words of an arrival and the backstop
+  * a stored arrival time no date can show (inf, "inf", 1e20, 1e300, year 10000) reads as no arrival on the home page, the item page and get, and no display of a time can raise (a model handed such a time anyway keeps the
+    arrival words and drops the time); an item id in a line is clipped; a line that arrived with no recorded words reads "arrived <time>", never "arrived · arrived <time>"
 
     tests/run-suite wait_list_display        → exit 0 / 1"""
-import datetime, html, json, os, re, sys, pathlib, time, logging
+import dataclasses, datetime, html, json, os, re, sys, pathlib, time, logging, zoneinfo
 SCR = os.path.dirname(os.path.abspath(__file__)); STACK = os.path.dirname(SCR)
 import _scratch, _instance
 sys.path.insert(0, STACK)
@@ -72,6 +74,12 @@ item(321, subject="[home] a single relay wait", wait_kind="relay", hold=True, as
 item(322, subject="[home] a single item wait", wait_kind="item", hold=True, after=["a301"], wake=day(7), needs=[], post_wake_mover=BACK)
 item(323, subject="[home] a single anchor wait", wait_kind="anchor", hold=True, wait_anchor=AURL, wait_event="PR merged", wake=day(7), needs=[], post_wake_mover=BACK)
 lst(330, [Tm(day(3))], mode="all", until=day(4), subject="[home] a list that does not hold")
+HOSTILE = {340: float("inf"), 341: "inf", 342: 1e20, 343: 1e300, 344: 253402300800, 345: 10 ** 400}      # a stored arrival time no date can show (the shape reads each as no arrival)
+for i_, at_ in HOSTILE.items(): lst(i_, [arr(Re("the lease"), at_, "the lease arrived"), It("a301")], mode="all", subject=f"[home] hostile arrival time {i_}")
+lst(346, [arr(Re("the lease"), GOT, "the lease arrived"), It("a301")], mode="all", subject="[home] a real arrival time")
+LONG_ID = "a" + "9" * 1_000_000
+lst(347, [Re("one"), It(LONG_ID)], mode="all", subject="[home] a line that names an item with a very long id")
+lst(348, [arr(Re("the lease"), GOT, ""), arr(An(AURL, "PR merged"), GOT + 60, ""), It("a301")], mode="all", subject="[home] arrivals with no words recorded")
 fails = []; ran = []
 def check(name, cond, got=None):
     ran.append(name)
@@ -186,12 +194,61 @@ _cfg.CFG["ui"].pop("locale_dir", None); i18n._WARNED.clear(); i18n._LOADED.clear
 
 # ================================================================ the `model:` line of get
 def get_line(g): return [l for l in server._model_lines({**json.loads((T / f"store/a/{g[1:]}.json").read_text()), "gid": g}) if l.startswith("model:")][0]
+ZLAB = zoneinfo.ZoneInfo("Asia/Dubai").tzname(NOW)      # the zone's own label, as the refusals that give a time name it (the instance zone pinned above)
 g312 = get_line("a312")
 check("get: the model line says the mode, how many have arrived, each line ticked [x] or open [ ] (an arrival with its words and its time), the backstop and the mover",
-      g312.startswith("model: waiting on several things (all of 6, 2 arrived: [x] the date " + day(3) + " (its date came, " + day(0) + " 08:30); [x] the close of ") and "[ ] the close of" in g312 and "[ ] a notice at " + AURL + " (PR merged)" in g312
+      g312.startswith("model: waiting on several things (all of 6, 2 arrived: [x] the date " + day(3) + " (its date came, " + day(0) + " 08:30 " + ZLAB + "); [x] the close of ") and "[ ] the close of" in g312 and "[ ] a notice at " + AURL + " (PR merged)" in g312
       and "[ ] a fleet event (recycle testbox)" in g312 and "[ ] news of the lease; until " + day(6) + ") · mover team-back" in g312, g312)
 check("get: …nothing arrived: every line open, 0 arrived", get_line("a310") == f"model: waiting on several things (all of 2, 0 arrived: [ ] news of SK's final ticket and its feedback; [ ] news of the signing order the team agrees; until {day(4)}) · mover team-back", get_line("a310"))
 check("get: …a single wait's line is what it was", get_line("a320") == f"model: waiting on a time (wake {day(5)}) · mover team-back", get_line("a320"))
 check("get: …the model's words without a time formatter name no time (the brief and other callers)", "(its date came)" in model.words(next(m_ for m_ in [server._model_of({**json.loads((T / "store/a/312.json").read_text()), "gid": "a312"})]), derived=False), None)
+
+# ================================================================ a stored arrival time no date can show; an arrival with no words
+check("zone: the arrival time of get's model line names the zone, the way the refusals that give a time do (the label is the instance zone's, and not empty)", bool(ZLAB) and ZLAB == _cfg.tz_abbr(NOW) and f"08:30 {ZLAB})" in g312, (ZLAB, g312))
+home_html, why_home = None, ""
+try: home_html = b.html()
+except Exception as ex_: why_home = f"{ex_.__class__.__name__}: {ex_}"
+check("hostile: a list whose stored arrival time no date can show (inf, \"inf\", 1e20, 1e300, year 10000, a huge integer) does not take the home page down: every one of them is drawn", home_html is not None
+      and all(f"hostile arrival time {i_}" in home_html for i_ in HOSTILE) and "a real arrival time" in home_html, why_home)
+for i_, at_ in HOSTILE.items():
+    g_ = f"a{i_}"; tag = f"hostile arrival time ({at_!r:.12})"
+    try: c_, p_ = wait_cell(g_), page_wait(g_); why_ = ""
+    except Exception as ex_: c_ = p_ = ""; why_ = f"{ex_.__class__.__name__}: {ex_}"
+    check(f"{tag}: the home row and the item page draw it, and it reads as not arrived (open, no time, no words), 0 arrived", bool(c_) and bool(p_) and box_on(c_) == [False, False] and box_on(p_) == [False, False]
+          and "0 arrived" in plain(c_) and "the lease arrived" not in plain(c_ + p_) and "arrived · arrived" not in plain(p_), why_ or plain(c_))
+    gl = get_line(g_)
+    check(f"{tag}: get keeps its model line, with the line open and no time", gl == f"model: waiting on several things (all of 2, 0 arrived: [ ] news of the lease; [ ] the close of a301; until {day(4)}) · mover team-back", gl)
+c346, p346, g346 = wait_cell("a346"), plain(page_wait("a346")), get_line("a346")
+check("hostile: …a real arrival time on the same shape is drawn: ticked, with its time on the row, its words and time on the page, its words, time and zone in get", box_on(c346) == [True, False] and f"arrived {W_(GOT)}" in plain(c346)
+      and f"the lease arrived · arrived {W_(GOT)}" in p346 and f"[x] news of the lease (the lease arrived, {day(0)} 08:30 {ZLAB})" in g346, (plain(c346), p346, g346))
+# a model handed a time no date can show anyway (the shape keeps it out; the three places that say a time never raise on one)
+r312, m312 = row("a312")      # its first two lines have arrived (the date line and the item line)
+NOT_A_DATE = (float("inf"), 1e20, 1e300, 253402300800.0)
+for at_ in NOT_A_DATE:
+    bad = dataclasses.replace(m312, waits=tuple(dataclasses.replace(ln, arrived_at=at_) if ln.arrived else ln for ln in m312.waits))
+    try: hr_, hp_ = b.wait_list_html(r312, bad, page=False), b.wait_list_html(r312, bad, page=True); why_ = ""
+    except Exception as ex_: hr_ = hp_ = ""; why_ = f"{ex_.__class__.__name__}: {ex_}"
+    try: wd_ = model.words(bad, when=server._arrival_when); why_w = ""
+    except Exception as ex_: wd_ = ""; why_w = f"{ex_.__class__.__name__}: {ex_}"
+    check(f"hostile model ({at_!r}): the row and the page of a model handed it draw, ticked and keeping the arrival words with no time; get's words keep the words with no empty bracket",
+          bool(hr_) and bool(hp_) and box_on(hr_)[:2] == [True, True] and "its date came" in plain(hp_) and "arrived · arrived" not in plain(hp_) and "arrived arrived" not in plain(hp_) and "arrived" in plain(hr_)
+          and "(its date came)" in wd_ and "()" not in wd_, why_ or why_w or (plain(hp_), wd_))
+    bare = dataclasses.replace(m312, waits=tuple(dataclasses.replace(ln, arrived_at=at_, arrived_what="") if ln.arrived else ln for ln in m312.waits))
+    try: wb_ = model.words(bare, when=server._arrival_when); hb_ = b.wait_list_html(r312, bare, page=True)
+    except Exception as ex_: wb_ = hb_ = f"{ex_.__class__.__name__}: {ex_}"
+    check(f"hostile model ({at_!r}): an arrival with no words and no time to say reads as ticked alone: get's words carry no empty bracket, the page says \"arrived\" once", "[x] the date " in wb_ and "[x] the close of a300;" in wb_ and "()" not in wb_ and "( )" not in wb_
+          and plain(hb_).count("arrived arrived") == 0 and "arrived · arrived" not in plain(hb_), (wb_, plain(hb_)[:300]))
+check("hostile: the time of an arrival is empty (never an error) for a time no date can show, in the server's `model:` line, and the zone follows a real one", all(server._arrival_when(x) == "" for x in (float("inf"), 1e20, 1e300, 253402300800.0, float("nan")))
+      and server._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}" and b.arrival_when(float("inf")) == "" and b.arrival_when(GOT) == W_(GOT), (server._arrival_when(float("inf")), server._arrival_when(GOT)))
+# an item id of a megabyte in a line is clipped everywhere it is drawn
+c347, p347, h347, g347 = wait_cell("a347"), page_wait("a347"), b.item_html("a347"), get_line("a347")
+check("clip: a line that names an item with a one-megabyte id is drawn with the id clipped (the home cell, the item page, get's model line), never the megabyte", len(c347) < 4000 and len(p347) < 8000 and len(h347) < len(b.item_html("a310")) + 5000 and len(g347) < 2000
+      and LONG_ID[:300] in c347 and LONG_ID[:301] not in c347 and LONG_ID[:301] not in h347 and LONG_ID[:301] not in g347, (len(c347), len(p347), len(h347), len(g347)))
+# an arrival with no words recorded
+p348, c348, g348 = plain(page_wait("a348")), plain(wait_cell("a348")), get_line("a348")
+check("words: a line that arrived with no recorded words reads as the time alone on the item page (\"arrived <time>\", the word once), the anchor line keeps its address before it", f"arrived {W_(GOT)}" in p348 and "arrived · arrived" not in p348 and "arrived arrived" not in p348
+      and p348.count("arrived " + W_(GOT)) == 1 and f"{AURL} · arrived {W_(GOT + 60)}" in p348 and "arrived · arrived" not in c348, p348)
+check("words: …and a line that arrived with words keeps them: \"<words> · arrived <time>\"", f"the lease arrived · arrived {W_(GOT)}" in p346, p346)
+check("words: …in get's model line the time alone stands in the bracket, with the zone", f"[x] news of the lease ({day(0)} 08:30 {ZLAB})" in g348 and "()" not in g348, g348)
 
 print(("ok" if not fails else "FAILED") + f": wait list display scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

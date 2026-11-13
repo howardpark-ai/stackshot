@@ -2276,6 +2276,10 @@ class Board:
         elif isinstance(ts, datetime.date): t, clock = ts, False
         else: t = datetime.datetime.fromtimestamp(float(ts), self.now.tzinfo)
         return when_words(t, clock)
+    def arrival_when(self, ts):
+        """When a line of a wait on a list arrived, as `when` says it; "" for a time no date can show (the stored shape keeps those out, this keeps a page whole whatever it is handed)."""
+        try: return self.when(ts)
+        except (ValueError, OverflowError, OSError, TypeError): return ""
     def span_words(self, a, b):
         """A span of time for a History line that folds several writes: "Tue Nov 10th 08:31 – 09:39" (the second time alone when it is the same day), the board's zone."""
         ta, tb = (datetime.datetime.fromtimestamp(float(x), self.now.tzinfo) for x in (a, b))
@@ -3772,6 +3776,8 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
         out = [f'<span class="wlh"><span class="wmode">{e(_ip.list_mode_words(mod))}</span><span class="dim">{head}</span></span>']
         for ln in mod.waits:
             k = ln.kind
+            at = self.arrival_when(ln.arrived_at) if ln.arrived else ""      # "" when it has not arrived, or for a time no date can show
+            arrived_at = _t("wait.list.arrived", when=at) if at else _t("wait.list.box_on")
             if k == "time": text = e(_t("wait.list.line.time", day=self.day_words(ln.until)))
             elif k == "item":
                 text = _t("wait.what.close_of", items=f'<a href="{e(id_href(ln.after))}" target="_blank" rel="noopener">{e(shown(ln.after))}</a>')
@@ -3784,12 +3790,14 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
             sub = ""
             if page:
                 watcher = e(_home.watcher_word(_ip._WATCHERS.get(k, "the server")))
-                if ln.arrived: sub = (link + " · " if k == "anchor" else "") + e(_t("wait.list.arrived_sub", what=ln.arrived_what or _t("wait.list.box_on"), when=self.when(ln.arrived_at)))      # an arrived anchor line keeps its address
+                if ln.arrived:
+                    said = _t("wait.list.arrived_sub", what=ln.arrived_what, when=at) if ln.arrived_what and at else ln.arrived_what or arrived_at      # its words and its time; no words → "arrived <time>" alone (never "arrived · arrived <time>")
+                    sub = (link + " · " if k == "anchor" else "") + e(said)      # an arrived anchor line keeps its address
                 else:
                     what = (_t("wait.list.sub.relay", who=_model.owner_display()) if k == "relay" else (link if k == "anchor" else ("" if k != "item" else _t("wait.state_open" if self.item_open(ln.after) else "wait.state_closed"))))
                     sub = _t("wait.list.sub.watched", what=what, who=watcher) if what else _t("home.watched_by", who=watcher)
             tick = f'<span class="wbox on" title="{e(_t("wait.list.box_on"))}" aria-label="{e(_t("wait.list.box_on"))}">✓</span>' if ln.arrived else f'<span class="wbox" title="{e(_t("wait.list.box_off"))}" aria-label="{e(_t("wait.list.box_off"))}"></span>'
-            arr = f'<span class="warr">{e(_t("wait.list.arrived", when=self.when(ln.arrived_at)))}</span>' if (ln.arrived and not page) else ""
+            arr = f'<span class="warr">{e(arrived_at)}</span>' if (ln.arrived and not page) else ""
             out.append(f'<span class="wll{" wdone" if ln.arrived else ""}">{tick}<span class="wlt"><span class="wkind">{e(_t("wait.list.kind." + k))}</span>{text}{arr}' + (f'<span class="wsub">{sub}</span>' if sub else "") + '</span></span>')
         return '<span class="wl">' + "".join(out) + '</span>'
     def wait_end_slot(self, mod, t0):

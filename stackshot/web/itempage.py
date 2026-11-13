@@ -130,8 +130,6 @@ def wait_what(w: "_model.Wait", *, shown: Callable[[str], str] = str, party: str
 def wait_end_label(w: "_model.Wait") -> str:
     """The word before a wait's end date: "until" for a time, "ask by" for a relay (the day it turns into a question), "backstop" for an event wait's fallback date; "until" whatever the kind
     when the date is the item's stored `until`."""
-    if w.kind == "list":
-        return _t("wait.end.backstop")      # the one date of a list is its backstop day, whichever way it is stored
     if w.by_until:
         return _t("wait.end.until")
     if w.kind == "relay":
