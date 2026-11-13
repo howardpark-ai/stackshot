@@ -67,14 +67,27 @@ def registry_source(root: Path, rev: str) -> str:
     return "\n".join(tt.show_at(root, rev, f) or "" for f in (tt.SERVER_REL, *tt.TOOL_FILES))
 
 
-def affected_tools(changed: list[str], head_server: str | None, base_server: str | None) -> list[str]:
-    """The tools a changed `file:function` list reaches: a changed tool function is its tool; a changed output helper reaches every tool that lists it in HELPERS. The two sources are those of `registry_source`."""
+def module_tools(root: Path, rev: str) -> dict[str, set[str]]:
+    """{tool module name: the tools its file registers} at `rev`, for `affected_tools` to read a text file's reach from."""
+    return {Path(f).stem: set(tool_names(tt.show_at(root, rev, f)).values()) for f in tt.TOOL_FILES}
+
+
+def affected_tools(changed: list[str], head_server: str | None, base_server: str | None, by_module: dict[str, set[str]] | None = None) -> list[str]:
+    """The tools a changed `file:function` list reaches: a changed tool function is its tool; a changed output helper reaches every tool that lists it in HELPERS; a changed
+    text file (`file:text`) reaches the tools of its module (`by_module`, from `module_tools`; the tool of the same name without it), the shared file every tool. The two sources are those of `registry_source`."""
     names = {**tool_names(base_server), **tool_names(head_server)}
     out: set[str] = set()
     for c in changed:
         if ":" not in c:
             continue
         file, fn = c.rsplit(":", 1)
+        if tt.is_text_file(file):
+            if file == tt.TEXT_SHARED:
+                out |= set(tt.HELPERS) | set(names.values())
+            else:
+                stem = Path(file).stem
+                out |= (by_module or {}).get(stem) or ({stem} & (set(tt.HELPERS) | set(names.values())))
+            continue
         if (file == tt.SERVER_REL or file in tt.TOOL_FILES) and fn in names:
             out.add(names[fn])
         for tool, helpers in tt.HELPERS.items():
@@ -117,7 +130,7 @@ def split_diff(diff: str) -> list[tuple[str, str, int, int, int, int]]:
 
 def fit_diff(root: Path, mb: str, head: str, changed: list[str], limit: int) -> str:
     """`git diff` of the watched files from the fork point to head, cut to `limit` characters by hunks: the ones that overlap a changed function first."""
-    files = sorted({f for f, _ in tt.ALL_HELPERS} | {tt.SERVER_REL} | set(tt.TOOL_FILES))
+    files = sorted({f for f, _ in tt.ALL_HELPERS} | {tt.SERVER_REL} | set(tt.TOOL_FILES) | set(tt.text_files_at(root, mb)) | set(tt.text_files_at(root, head)))
     r = subprocess.run(["git", "-C", str(root), "diff", "--no-color", f"-U{CONTEXT}", mb, head, "--", *files, *tt._BEFORE_PACKAGE.values()], capture_output=True, text=True, errors="replace")
     diff = r.stdout if r.returncode == 0 else ""
     hunks = split_diff(diff)
@@ -129,7 +142,7 @@ def fit_diff(root: Path, mb: str, head: str, changed: list[str], limit: int) -> 
     old_sp = {f: spans(tt.show_at(root, mb, f), n) for f, n in want.items()}
     new_sp = {f: spans(tt.show_at(root, head, f), n) for f, n in want.items()}
     hit = lambda sp, a, n: any(a <= e and a + max(n, 1) - 1 >= s for s, e in sp)
-    rel = [hit(old_sp.get(f, []), a, b) or hit(new_sp.get(f, []), c, d) for f, _, a, b, c, d in hunks]
+    rel = [tt.is_text_file(f) or hit(old_sp.get(f, []), a, b) or hit(new_sp.get(f, []), c, d) for f, _, a, b, c, d in hunks]     # a hunk of a text file is the words themselves: always first
     order = [i for i in range(len(hunks)) if rel[i]] + [i for i in range(len(hunks)) if not rel[i]]
     used, keep = 0, set()
     for i in order:
@@ -166,7 +179,7 @@ def build_pack(root: Path, base: str, head: str, exact: bool, max_diff: int, max
     if not changed:
         raise NothingToRead("no tool function and no output helper has a changed body")
     head_server, base_server = registry_source(root, head), registry_source(root, mb)
-    tools = affected_tools(changed, head_server, base_server)
+    tools = affected_tools(changed, head_server, base_server, {k: v | module_tools(root, mb).get(k, set()) for k, v in module_tools(root, head).items()})
     if not tools:
         raise NothingToRead("the changed functions reach no tool's text: " + ", ".join(changed))
     try:

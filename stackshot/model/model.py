@@ -465,12 +465,13 @@ def derived_fields(mod: Model) -> list[str]:
     return []
 
 
-def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], str] = str, derived: bool = True) -> str:
+def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], str] = str, derived: bool = True, when: Callable[[float], str] | None = None) -> str:
     """The model as one plain line for get and the brief:
       model: alive · mover the owner (then my-x)
       model: waiting on a time (wake 2099-03-02) · mover my-x
       model: waiting on a time (wake 2099-03-02) · mover the owner (then my-x)
-    `label` shows a session reference as people read it, `shown` an item id. A trailing `derived: mover, then` names what the item does not store (derived=False leaves it off: the brief)."""
+      model: waiting on several things (all of 3, 1 arrived: [x] the date 2099-03-02 (its date came, <when>); [ ] the close of #5; [ ] news of the lease; until 2099-03-09) · mover my-x
+    `label` shows a session reference as people read it, `shown` an item id, `when` an arrival time (epoch seconds; none: the arrival carries no time). A trailing `derived: mover, then` names what the item does not store (derived=False leaves it off: the brief)."""
     who = lambda w: label(w) if w and not is_owner(w) else (w or "no one")
     d = derived_fields(mod) if derived else []
     tail = f" · derived: {', '.join(d)}" if d else ""
@@ -497,8 +498,9 @@ def words(mod: Model, label: Callable[[str], str] = str, shown: Callable[[str], 
     elif w.kind == "event":
         what = "a fleet event (" + (w.event or "wait_event not set") + ("; " + back(f"backstop {w.backstop}") if w.backstop else "") + ")"
     elif w.kind == _wl.LIST:
-        parts = [_wl.line_text(dataclasses.asdict(ln), shown) + (" (arrived)" if ln.arrived else "") for ln in mod.waits]
-        what = f"several things ({mod.wait_mode} of {len(mod.waits)}: " + "; ".join(parts) + (f"; {back(f'backstop {w.backstop}')}" if w.backstop else "") + ")"
+        arrival = lambda ln: ", ".join(x for x in (ln.arrived_what, when(ln.arrived_at) if when else "") if x) if ln.arrived else ""      # the words it came with and, when the caller gives a way to say it, the time
+        parts = [("[x] " if ln.arrived else "[ ] ") + _wl.line_text(dataclasses.asdict(ln), shown) + (f" ({arrival(ln)})" if arrival(ln) else "") for ln in mod.waits]
+        what = f"several things ({mod.wait_mode} of {len(mod.waits)}, {sum(1 for ln in mod.waits if ln.arrived)} arrived: " + "; ".join(parts) + (f"; {back(f'backstop {w.backstop}')}" if w.backstop else "") + ")"
     else:
         bits = [x for x in (w.event, (f"until {w.until}" if w.by_until else f"ask by {w.until}") if w.until else "no ask-by date") if x]
         what = f"news only {owner_display()} relays ({'; '.join(bits)})"

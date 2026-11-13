@@ -2070,7 +2070,11 @@ def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             if ep is not None:
                 out.append((gid, p, it, dt.datetime.fromtimestamp(ep, _pages.zone_now().tzinfo)))
             continue
-        if _wl.valid(meta):                  # a list is the watchers' alone: with them off it waits (the backstop day would otherwise read as a time wait's date and drop half the list)
+        if _wl.valid(meta):                  # a list is the watchers' alone, so with them off only its backstop day is looked at (the wake pass ends it there: _watch_fire(legacy=True)); the date as a time wait's wake would drop half the list
+            try:
+                out.append((gid, p, it, _wake_at(_wl.backstop(meta))))
+            except ValueError:
+                continue
             continue
         if not _wt.wake_value(meta):
             continue
@@ -2121,6 +2125,14 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
             if _watch.watches(it) or not due(at) or _old_wait_off():       # a watched wait is the watchers', above; after the switchover (fallback off) the old pass stands down
                 continue
             meta = it.get("metadata") or {}
+            if _wl.valid(meta):                # a list with the watchers off: its backstop day has come, so it ends as the watchers would end it there (the same words, an open relay line asks the owner)
+                try:
+                    cause = _watch.due(it, epoch)       # the backstop day, or (a list edited by hand so that every line has arrived) the kind of the line that completed the group
+                    if cause and _watch_fire(gid, cause, epoch, wout, recheck=True, legacy=True):
+                        woke.append(gid)
+                except _WatchStuck as e:
+                    print(f"watch: {e}", file=sys.stderr, flush=True)
+                continue
             wake = _wt.wake_value(meta)
             had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
             if had_u:
@@ -2561,15 +2573,17 @@ def _watch_failed(gid: str, now: float) -> None:
         print(f"watch: {gid} failure not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
-def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], detail: dict[str, str] | None = None, recheck: bool = False, ev: dict[str, Any] | None = None) -> bool:
+def _watch_fire(gid: str, cause: str, now: float, out: dict[str, list[tuple[str, dict[str, Any], str]]], detail: dict[str, str] | None = None, recheck: bool = False, ev: dict[str, Any] | None = None,
+                legacy: bool = False) -> bool:
     """The wait of `gid` is over (`cause`: time | item | backstop | relay | anchor | event): turn the item, save it, and collect the message its new mover is owed in `out` (recipient
     session id → [(gid, item, what arrived)]; the caller sends one message per recipient). Under the item lock, re-read: an item that is no longer watched, or no longer waits on this,
     is left alone. `recheck` (the clock's pass): the cause is read again under the lock and the item turns only if it is still due. → True when it turned; _WatchStuck when the wait is due and cannot turn.
-    `detail["what"]` replaces the words of the arrival (the caller knows what closed or arrived)."""
+    `detail["what"]` replaces the words of the arrival (the caller knows what closed or arrived). `legacy` (the wake pass, with the watchers off): a wait on a list that holds is ended at its
+    backstop day all the same, by this one path, so its words, its mover and the question for an open relay line are the watchers' (nothing else of the watchers runs: no line is marked)."""
     detail = detail or {}
     with _writes.ITEM_LOCK:
         it = _load(gid)
-        if not _watch.watches(it):
+        if not (_watch.watches(it) or (legacy and it.get("status") == "open" and _wl.valid(it.get("metadata") or {}))):
             return False
         if recheck and _watch.due(it, now, _after_open(it.get("metadata") or {})) != cause:
             return False
@@ -2732,11 +2746,16 @@ def _wl_mark_save(gid: str, it: dict[str, Any], meta: dict[str, Any], marks: lis
     clock (the state clock and the confirm stay: the item is still waiting), with a History line `arrived: <what> (<k> of <n>)` for each line marked and `notes` (a followed replacement) before them.
     Idempotent: a line that has arrived is left as it was and costs no write. → True when something was written."""
     said = list(notes or [])
+    floor = _watch_floor(it)                      # the oldest notice an anchor line may still count, read before this save moves the item's clock
     for i, what in marks:
         if _wl.mark_arrived(meta, i, what, now):
-            said.append(f"arrived: {what} ({len(_wl.arrived_lines(meta))} of {len(_wl.lines(meta))})")
+            said.append(f"arrived: {_clip_line(what, _wl.LINE_MAX)} ({len(_wl.arrived_lines(meta))} of {len(_wl.lines(meta))})")      # the words are free text (a notice's, an event's): the History keeps a line's worth
     if not said:
         return False
+    w = dict(meta.get("watch") or {}) if isinstance(meta.get("watch"), dict) else {}
+    if not w.get("set_at") and floor:             # an unstamped list stamps its floor first: the save below moves `updated`, and a second notice dated between the old floor and this save would be dropped
+        w["set_at"] = floor
+        meta["watch"] = w
     it["metadata"] = meta
     it["updated"] = now
     _writes.save(gid, it, note="; ".join(said))
@@ -5850,6 +5869,16 @@ def _shown_waiting_note(item: dict[str, Any], mod: "_model.Model") -> str:
     return f" · the board lists it as waiting until {vw.wait.until}" + (f" ({vw.wait.basis})" if vw.wait.basis else "")
 
 
+def _arrival_when(ts: float) -> str:
+    """The time a line of a wait on a list arrived, for the `model:` line: YYYY-MM-DD HH:MM and the zone's name (as the refusals that give a time name it), in the board's zone; "" for a time no date can show,
+    so the line keeps its arrival words and drops the time (a get never loses its model line over one)."""
+    try:
+        t = dt.datetime.fromtimestamp(float(ts), ZONE)
+        return f"{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}"
+    except (ValueError, OverflowError, OSError):
+        return ""
+
+
 def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
     """The `model:` line of get (and its conflicts, one line each); the brief's (short) is one line for an open item, with no `derived:` tail, no conflicts and none for a closed item.
     [] when the reading fails: a get never fails over it."""
@@ -5857,9 +5886,9 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
         mod = _model_of(item)
         shown_as = _shown_waiting_note(item, mod)
         if short:
-            return [_model.words(mod, _session_label, _gh.shown, derived=False) + shown_as] if mod.state != _model.DEAD else []
+            return [_model.words(mod, _session_label, _gh.shown, derived=False, when=_arrival_when) + shown_as] if mod.state != _model.DEAD else []
         extra = [x for x in (_watch.chases_line(item.get("metadata") or {}, _session_label), _watch.woke_line(item.get("metadata") or {}, _session_label)) if x and item.get("status") == "open"]
-        return [_model.words(mod, _session_label, _gh.shown) + shown_as] + extra + [f"model conflict: {c}" for c in mod.conflicts]
+        return [_model.words(mod, _session_label, _gh.shown, when=_arrival_when) + shown_as] + extra + [f"model conflict: {c}" for c in mod.conflicts]
     except Exception as e:  # noqa: BLE001
         print(f"model: {item.get('gid') or item.get('id')} not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return []

@@ -93,11 +93,25 @@ def since_of(item: dict[str, Any], mod: "_model.Model") -> float:
 
 
 # ---------------------------------------------------------------------------------------------------------------- the wait, in words
-def wait_what(w: "_model.Wait", *, shown: Callable[[str], str] = str, party: str = "", words: str = "") -> str:
+def list_mode_words(mod: "_model.Model") -> str:
+    """The mode of a wait on a list as the board says it: "all of 3" or "any of 3" ("" when the model carries no list)."""
+    return _t(f"wait.list.{mod.wait_mode}_of", n=len(mod.waits)) if mod.waits and mod.wait_mode in ("all", "any") else ""
+
+
+def list_watchers(mod: "_model.Model") -> list[str]:
+    """Who notices the arrival of the lines of a wait on a list, in the English words watched_by maps (the scheduler, the anchor module, the server), each once, in the order the lines come: the lines
+    still open first (an arrived line has no more to watch), every line when none is open."""
+    ls = [ln for ln in mod.waits if not ln.arrived] or list(mod.waits)
+    return list(dict.fromkeys(_WATCHERS.get(ln.kind, "the server") for ln in ls))
+
+
+def wait_what(w: "_model.Wait", *, shown: Callable[[str], str] = str, party: str = "", words: str = "", mode: str = "") -> str:
     """What a wait waits on, as the state line says it: a time → his words or the basis, else "a date"; an item → the close of board#N; an anchor → the anchor's event; a relay → the
     party's news. `party` names who the relay waits on, `words` is the time wait's reason (the basis, or his recorded words)."""
     if w.kind == "time":
         return clean(words) or _t("wait.a_date")
+    if w.kind == "list":
+        return _t("wait.what.list", mode=mode)
     if w.kind == "item" and w.queued:
         return _t("wait.what.queued", items=", ".join(shown(x) for x in w.after) or _t("wait.what.an_item"))
     if w.kind == "item":

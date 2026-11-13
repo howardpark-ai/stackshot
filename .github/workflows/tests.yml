@@ -451,7 +451,7 @@ jobs:
         continue-on-error: ${{ github.event_name == 'merge_group' }}
         run: uv run --locked --only-group tests python tests/suitemap.py audit --old .suitemap/old.json --new .suitemap/new.json --to ${{ github.sha }}
   # The tool's text changes in the same release as the tool: a pull request that changes the body of an MCP tool
-  # function or of an output helper (tools/tool_text.py HELPERS) while tests/tool_text.snapshot.json is unchanged fails here, unless its body has the line
+  # function, of an output helper (tools/tool_text.py HELPERS) or of a tool's text file (stackshot/web/tools/text/*.md) while tests/tool_text.snapshot.json is unchanged fails here, unless its body has the line
   # `tool-text: unchanged: <reason>`. The other two gates run in the suites job as suites: tool_text (the live registry equals the snapshot) and retired_terms.
   # No model reads the text in CI: whether the words still say what the code does is read before the merge by the maintainer's reviewer subagent (CONTRIBUTING.md, "The tool-text gates", item 4).
   # It needs no token beyond the job's own: the body is read with `gh pr view` (so a re-run after the author added the line sees it; the event's copy, with a

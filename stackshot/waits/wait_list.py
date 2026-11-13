@@ -20,6 +20,7 @@ A list that does not hold (fewer than two lines or more than eight, an unknown k
 empty and the item reads as it would without it. Every caller goes through this module; nothing else reads `waits` by hand."""
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Callable
 
@@ -29,6 +30,8 @@ LIST = "list"
 KINDS = ("time", "anchor", "item", "relay", "event")       # the kinds a line may be (the five single waits)
 MODES = ("all", "any")
 MIN_LINES, MAX_LINES = 2, 8
+LINE_MAX = 300                                              # the most a line's free text (an anchor, an event) and an arrival's words keep: longer is clipped
+ARRIVED_AT_MAX = 253402300800 - 86400                       # the latest arrival time a stored line may carry (epoch seconds: a day short of year 10000, the last moment Python can draw as a date); a later one is no time
 MALFORMED: dict[str, int] = {"count": 0}                   # reads of an item that stores wait_kind=list with a list that does not hold (the model counts each one it ignores)
 
 _FIELDS = {"time": ("until",), "anchor": ("anchor", "event"), "item": ("after",), "relay": ("event",), "event": ("event",)}
@@ -77,15 +80,16 @@ def _line(raw: Any) -> tuple[dict[str, Any] | None, str]:
             return None, f"a {kind} line needs {f}"
         if f == "until" and _wt.wake_epoch(v) is None:
             return None, f"a time line's until is YYYY-MM-DD or YYYY-MM-DDTHH:MM, a real date (got {v!r})"
-        out[f] = v
+        out[f] = v[:LINE_MAX] if f in ("anchor", "event", "after") else v      # free text and an item id are clipped (a stored line can be long; what a reader sees never is)
     arr = raw.get("arrived")
     if isinstance(arr, dict):
+        at_raw = arr.get("at")
         try:
-            at = float(arr.get("at"))
-        except (TypeError, ValueError):
+            at = 0.0 if isinstance(at_raw, bool) else float(at_raw)      # float(True) is 1.0: a bool is no time
+        except (TypeError, ValueError, OverflowError):      # OverflowError: an integer too large for a float
             at = 0.0
-        if at > 0:                                              # a torn record (no usable time) is no arrival
-            out["arrived_at"], out["arrived_what"] = at, _one(arr.get("what"))
+        if math.isfinite(at) and 0 < at <= ARRIVED_AT_MAX:      # a torn record (no usable time: none, zero, negative, inf, nan or a moment no date can show) is no arrival
+            out["arrived_at"], out["arrived_what"] = at, _one(arr.get("what"))[:LINE_MAX]
     return out, ""
 
 
@@ -169,7 +173,7 @@ def mark_arrived(meta: dict[str, Any], idx: int, what: str, at: float) -> bool:
     if not 0 <= idx < len(ls) or arrived(ls[idx]):
         return False
     raw = [dict(r) for r in meta["waits"]]
-    raw[idx]["arrived"] = {"at": float(at), "what": _one(what)[:300]}
+    raw[idx]["arrived"] = {"at": float(at), "what": _one(what)[:LINE_MAX]}
     meta["waits"] = raw
     return True
 
@@ -256,18 +260,18 @@ def _join(parts: list[str]) -> str:
 def outcome_text(meta: dict[str, Any], cause: str, shown: Callable[[str], str] = str) -> str:
     """What the list's end says, from the record of what arrived (read BEFORE the wait's fields are dropped):
       all     "all 3 arrived: a; b; c"
-      any     "a arrived (any of 3); b, c were not needed"
-      the backstop day passing with the group not over   "backstop day 2026-11-20: arrived a; still open b, c"   (none arrived: "backstop day 2026-11-20: nothing had arrived; still open b, c")
-    where a, b, c are the words each arrival came with (what was recorded) and, for a line still open, what it waits on."""
+      any     "any of 3 arrived: a; not needed: b; c"
+      the backstop day passing with the group not over   "backstop day 2026-11-20: arrived a; b; still open: c; d"   (none arrived: "backstop day 2026-11-20: nothing had arrived; still open: c; d")
+    where a, b, c are the words each arrival came with (what was recorded) and, for a line still open, what it waits on. Lines are joined with "; " everywhere."""
     ls = lines(meta)
     n = len(ls)
     got = [ls[i]["arrived_what"] or line_text(ls[i], shown) for i in arrived_lines(meta)]
     left = [line_text(ls[i], shown) for i in open_lines(meta)]
     if cause == "backstop" and not done(meta):
-        return f"backstop day {backstop(meta)}: " + (f"arrived {_join(got)}" if got else "nothing had arrived") + (f"; still open {', '.join(left)}" if left else "")
+        return f"backstop day {backstop(meta)}: " + (f"arrived {_join(got)}" if got else "nothing had arrived") + (f"; still open: {_join(left)}" if left else "")
     if mode(meta) == "all":
         return f"all {n} arrived: {_join(got)}"
-    return f"{_join(got)} arrived (any of {n})" + (f"; {', '.join(left)} {'was' if len(left) == 1 else 'were'} not needed" if left else "")
+    return f"any of {n} arrived: {_join(got)}" + (f"; not needed: {_join(left)}" if left else "")
 
 
 def summary(meta: dict[str, Any], shown: Callable[[str], str] = str) -> str:
