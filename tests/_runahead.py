@@ -104,6 +104,11 @@ class RunAhead:
         self.futs = {}      # key of a call -> the started runs of it, oldest first
         self.started = {}   # index of a suite statement -> the key of the run started for it
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="runahead")
+        prev = sys.excepthook   # the suite ends on an uncaught exception (a failed scenario, a SIGINT's KeyboardInterrupt): runs that are queued and not started are dropped, so the process ends once the running ones do
+        def hook(*a):
+            self.pool.shutdown(wait=False, cancel_futures=True)
+            prev(*a)
+        sys.excepthook = hook
         self.main = sys.modules.get("__main__")
         self.body = None
         try:

@@ -8,7 +8,7 @@ change what they read (a call that is not a reader), when they read a name the s
 arguments that turn out different when the suite gets there is dropped, and the call runs again with its own.
 
     tests/run-suite runahead        → exit 0 / 1"""
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, re, subprocess, sys, time
 import _scratch
 SCR = os.path.dirname(os.path.abspath(__file__))
 fails = []; ran = []
@@ -99,6 +99,52 @@ if "log" in on and "log" in off:
     check("on: y was started early on the level the suite had not yet changed, dropped, and run again after the suite changed it", len(ys) == 2 and ys[1] >= ys[0], ys)
     check("on: a loop of scenarios and checks does not stop the look-ahead: z1, after it, starts before the loop's second run does", at(on, "z1") < at(on, "l2"), on["log"])
     check("on: the whole script takes less than off (the runs overlap)", on["total"] < off["total"] - 2 * STEP, (on["total"], off["total"]))
+
+# a scenario that raises, and a suite that ends on an exception, with the runs that are coming already started: the failure is at the call that asked for the run, in the same words with it
+# on and off; the folders the runs made are gone; and runs that are queued and not started never start
+SCRIPT2 = '''
+import atexit, json, os, sys, threading, time
+sys.path.insert(0, %(scr)r)
+import _scratch, _runahead
+LOG = []; LOCK = threading.Lock()
+atexit.register(lambda: print("log", json.dumps(sorted(LOG)), flush=True))   # the threads of the pool are joined before this runs
+def run(name, *pos, **kw):
+    d = _scratch.mkdtemp(prefix="rsv-ra-" + name + "-")   # a scenario's folder of its own, as the harness makes
+    with LOCK: LOG.append(name)
+    if name == "boom": raise RuntimeError("boom in scenario " + name)
+    time.sleep(%(step)s * (3 if name in ("b", "c") else 1))
+    return {"name": name}
+RA = _runahead.make(run)
+def scenario(name, *pos, **kw): return RA.call(name, pos, kw) if RA else run(name, *pos, **kw)
+def check(name, cond, got=None): print("check", name, bool(cond), flush=True)
+s = scenario("a")
+check("a", s["name"] == "a")
+s = scenario("b")
+s = scenario("boom")
+check("b", s["name"] == "b")
+s = scenario("c")
+check("never reached", s["name"] == "c")
+'''
+# the second: no boom, and the suite itself ends on an exception at its first check; with 2 runs at once, b and c (the long ones) hold the pool while a runs, so d and e are queued
+SCRIPT3 = SCRIPT2.replace('s = scenario("boom")\n', "").replace('check("a", s["name"] == "a")', 'check("a", s["nope"] == "a")').replace('check("b", s["name"] == "b")\n', "") + 's = scenario("d")\ns = scenario("e")\n'
+
+def end_play(par, script):
+    d = pathlib.Path(_scratch.mkdtemp(prefix="runahead-end-")); (d / "tmp").mkdir()
+    p = d / "play.py"; p.write_text(script % {"scr": SCR, "step": STEP})
+    r = subprocess.run([sys.executable, str(p)], env={**os.environ, "RELEASE_SUITE_PAR": str(par), "TMPDIR": str(d / "tmp"), "KEEP_SCRATCH": ""}, capture_output=True, text=True, timeout=120)
+    frames = re.findall(r'File "[^"]*play\.py", line (\d+), in <module>', r.stderr)
+    lines = [l for l in r.stdout.splitlines() if not l.startswith("log ")]
+    log = next((json.loads(l[4:]) for l in r.stdout.splitlines() if l.startswith("log ")), None)
+    return {"rc": r.returncode, "out": lines, "log": log, "last": r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "", "frames": frames, "left": sorted(os.listdir(d / "tmp"))}
+
+f_on, f_off = end_play(2, SCRIPT2), end_play(1, SCRIPT2)
+check("a scenario that raises, started early or not, fails the suite at the call that asked for it: the same exit status, words and line of the suite",
+      f_on["rc"] == f_off["rc"] == 1 and f_on["last"] == f_off["last"] == "RuntimeError: boom in scenario boom" and f_on["frames"] == f_off["frames"] and len(f_on["frames"]) == 1, (f_on, f_off))
+check("a scenario that raises: the checks before it ran, the same with it on and off", f_on["out"] == f_off["out"] == ["check a True"], (f_on["out"], f_off["out"]))
+check("a scenario that raises: the folders of the runs, started ahead or not, are gone when the suite has ended", f_on["left"] == [] and f_off["left"] == [], (f_on["left"], f_off["left"]))
+g_on, g_off = end_play(2, SCRIPT3), end_play(1, SCRIPT3)
+check("a suite that ends on an exception at its first check: the same status and words with it on and off, no folder left", g_on["rc"] == g_off["rc"] == 1 and g_on["last"] == g_off["last"] == "KeyError: 'nope'" and g_on["left"] == [] and g_off["left"] == [], (g_on, g_off))
+check("a suite that ends on an exception does not start the runs that were queued behind the running ones (on: a, b, c ran; d and e did not)", g_on["log"] == ["a", "b", "c"] and g_off["log"] == ["a"], (g_on["log"], g_off["log"]))
 
 # what the look-ahead may start early and what may stand between: the rules on single statements
 import ast, _runahead as ra

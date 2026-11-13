@@ -7,7 +7,8 @@ small readers the sections of both suites use. A suite imports it whole:
 
     from _release_harness import *
 
-and ends with `finish()`. The lists `fails`, `ran`, `dirs` and `POLLS` are this module's own, one set per suite process. Nothing here runs a check by itself.
+`scenario()` starts the scenarios that are coming on a few threads while the suite reads the one it is at (tests/_runahead.py; RELEASE_SUITE_PAR=1 runs them one at a time, as before),
+the checks and their order unchanged. A suite ends with `finish()`. The lists `fails`, `ran`, `dirs` and `POLLS` are this module's own, one set per suite process. Nothing here runs a check by itself.
 """
 import fcntl, json, os, pathlib, re, shutil, subprocess, sys, tempfile, threading, time
 import _scratch, _runahead
