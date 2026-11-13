@@ -7,7 +7,7 @@ network, no model call, no message sent.
      writer are as they were; an idle, shell or unreadable pane, another agent's status line, a done or old one, and a pull request event older than an hour verify nothing
   2  due and nothing verified: `Audit hh:mm: idle, nothing verified`, kind `audit_idle`, `hourly.idle_marked`; the last-activity record is untouched
   3  not due: under an hour of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the clock the silence pass reads decides
-  4  twice in an hour: a second pass writes nothing, the next line comes an hour after the first, and a mover's write in between starts the hour again
+  4  twice in 45 minutes: a second pass writes nothing, the next line comes 45 minutes after the first, and a mover's write in between starts the hour again
   5  not on an agent: a hold (dated wake or none), a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off to a back agent are skipped; one to a front
      agent is written
   6  the switch: absent, false, the string "true" and 1 write nothing; only a TOML true does; the example config documents it as false; read-only copies write nothing
@@ -15,10 +15,14 @@ network, no model call, no message sent.
   8  the tick: `_silence_tick` runs it (with the audit on in script mode) and stands still when the audit is off or in agent mode; an item read again under the lock that is no longer due is left alone; one that cannot
      be saved stops no other
   9  the pure parts: the line's words, `last_line`, the log's cap, a malformed item, a log entry dated far ahead, an item with no timestamp, each tied-pull-request kind, `new_entries`
-  10 the cap on lines: one an hour for the first 24 hours of silence, then one every 6 hours (a week with the clock stepped), a clock that goes backwards delays the next line without a second write
+  10 the cap on lines: one every 50 minutes on the ten-minute grid for the first 24 hours of silence (27), then one every 6 hours (51 in a week, the clock stepped), a clock that goes backwards delays the next line without a second write
   11 the lines are kept out of the stall ladder's log: its entries are untouched and not crowded out, `get` prints the newest as `audit:` and never as `stall:`, both History renderers show the line
   12 a last-activity record dated ahead of the clock is no event
   13 the hourly line runs whatever the silence pass did: a ladder view that cannot be built (the pass returns early) or a pass that raises still gets the hourly line
+  14 tick jitter: on a ten-minute grid with 0 to 8 seconds of jitter the lines come every 50 minutes in the first day and every 6 hours after
+  15 a torn entry in the log never raises
+  16 a verified line is the item's last activity: the row reads its time and words, an idle line leaves the record alone, an older line never replaces a newer real event, the backfill does not undo it
+  18 the row never reads "idle over 1 h" between two lines (read through act_parts and band at the worst landing time); the record never goes backwards (a stepped-back clock, a record dated ahead)
 
     tests/run-suite audit_hourly       -> exit 0 / 1"""
 import io, json, os, re, sys, pathlib, time, logging
@@ -514,7 +518,7 @@ while t_ <= now0 + 24 * H:
     if tick(at_): landed.append(at_)
     t_ += 10 * MIN
 gaps18 = [b_ - a_ for a_, b_ in zip(landed, landed[1:])]
-check("18 on the ten-minute grid with a late round and jitter, the next line lands 50 minutes on and never later than 56 minutes 10 seconds after the last (an hour would turn the row red)", len(landed) > 20 and max(gaps18) <= 50 * MIN + 10 * MIN + 68 and min(gaps18) >= 45 * MIN, (max(gaps18), min(gaps18), len(landed)))
+check("18 on the ten-minute grid with a late round and jitter, the next line lands 50 minutes on and never later than 51 minutes 10 seconds after the last (the true bound is 50 minutes plus the difference of two lateness values, at most 68 seconds; an hour would turn the row red)", len(landed) > 20 and max(gaps18) <= 50 * MIN + 70 and max(gaps18) < 55 * MIN and min(gaps18) >= 45 * MIN, (max(gaps18), min(gaps18), len(landed)))
 worst = max(gaps18)
 i_worst = gaps18.index(worst)
 d18 = rd(1); d18["metadata"]["last_activity"] = {"at": landed[i_worst], "kind": "audit", "what": "audit verified the mover's pane is in a turn"}; (T / "store/a/1.json").write_text(json.dumps(d18))
