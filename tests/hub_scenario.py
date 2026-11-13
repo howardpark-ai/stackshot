@@ -109,6 +109,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import create as _wt_create
@@ -200,7 +201,7 @@ check("roles.json: refreshed with a new stamp at 30 min though nothing changed (
 _stale = json.loads(RJ.read_text()); _stale["generated"] = "2026-01-01T00:00:00Z"; RJ.write_text(json.dumps(_stale))
 server._roles_sync_safe()
 check("roles.json: a stale file is refreshed by the pass the runner runs every minute (with the board held too)", json.loads(RJ.read_text())["generated"] > "2026-01-02"
-      and [(t.group, t.board) for t in server._minute_ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(server._publish_now), json.loads(RJ.read_text())["generated"])
+      and [(t.group, t.board) for t in runner_svc.ticks() if t.name == "roles_sync_safe"] == [("fleet", False)] and "_roles_sync_safe()" in inspect.getsource(server._publish_now), json.loads(RJ.read_text())["generated"])
 st, ct, body = server._client_get("roles", {})
 check("client read `roles`: the file as written", (st, ct) == (200, "application/json") and body == RJ.read_text() and json.loads(body)["sessions"]["home-side-main"]["role"] == "front", (st, ct, body[:200]))
 from stackshot.fleet import client as _client

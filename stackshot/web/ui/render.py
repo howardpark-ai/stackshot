@@ -4119,7 +4119,7 @@ body::after{content:"";display:none;position:fixed;top:0;right:calc(__PW__px - 1
     def audits_html(self, runner=None) -> str:
         """The Audits page (GET /audits, behind the board's sign-in, drawn on request): the three paces the audits run at, the audit groups (each a fold of its audits with their pace and mode, the number
         of audits and the findings of the last 24 hours), the latest findings, and the recent runs, with an Audit now button at the top (the same button as the side panel card's: _AUDIT_JS drives both, and both post
-        to /audit/now). The data is audit_overview.overview: the findings log, the run records and, for the ten-minute set's last run, `runner`, the runner's record (server._runner_status; None draws no "last").
+        to /audit/now). The data is audit_overview.overview: the findings log, the run records and, for the ten-minute set's last run, `runner`, the runner's record (service/runner.py status; None draws no "last").
         A group that keeps no findings log shows `not logged`, never a zero; with the findings log off no group has a count. Nothing yet (no run, no finding) draws the same page with plain empty lines, and the audit off
         says so and has no button. The page makes no write and no model call."""
         from stackshot.audit import audit_overview as _ov

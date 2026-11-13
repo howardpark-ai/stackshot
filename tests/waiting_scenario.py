@@ -65,6 +65,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
@@ -137,7 +138,7 @@ item(LATE, hold=True, wake=wk(-3600), su=now0 - 1 * DAY)
 g30 = _wt_get.stackshot_get(f"a{LATE}")
 check("get shows a hold ten minutes past its wake as it is: no waiting line, no past-due mark, no step of a ladder and no stuck mark", "waiting: " not in g30 and "past due" not in g30 and not re.search(r"step \d of \d|\(stuck\)|stuck list", g30), g30)
 check("no waiting tick is left: it is not on the runner's table, and the server has no function of that name nor of its plan, send or record",
-      not any("waiting" in t.name for t in server._minute_ticks()) and not any(hasattr(server, n) for n in ("_waiting_tick", "_wait_plan", "_wait_record", "_wait_raise", "_wait_text", "_wait_options", "_wait_recipient", "_wait_hint", "_waiting_counts", "_WAIT_LAST", "_DOWN_SINCE")),
+      not any("waiting" in t.name for t in runner_svc.ticks()) and not any(hasattr(server, n) for n in ("_waiting_tick", "_wait_plan", "_wait_record", "_wait_raise", "_wait_text", "_wait_options", "_wait_recipient", "_wait_hint", "_waiting_counts", "_WAIT_LAST", "_DOWN_SINCE")),
       [n for n in dir(server) if "wait" in n.lower()][:30])
 check("waiting.py has no ladder: no steps, no landings, no grace, no record check", not any(hasattr(W, n) for n in ("STEPS", "LANDINGS", "grace_hours", "agent_grace_hours", "stuck_to", "grace_for", "start_of", "step_due", "record_of", "record_valid", "stuck_step")),
       [n for n in dir(W) if not n.startswith("_")])

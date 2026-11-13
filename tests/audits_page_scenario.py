@@ -44,6 +44,7 @@ def text_of(html):
 NAMES = ["Silence", "Filing", "Wording", "Dates", "Proof and patterns", "Pages and agents", "Fleet and services", "Text and rules"]
 
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.audit import audit as _audit_mod
@@ -211,17 +212,17 @@ with TestClient(server.mcp.http_app()) as c:
           [x["detail"] for x in audit_run.read_log(NOW - 86400)])
     LOG.unlink()
     # the paces' last-run words: the clock for today, the date and clock for another day; a time no date can hold is a dash and the page still renders
-    real_runner = server._runner_status
+    real_runner = runner_svc.status
     try:
-        server._runner_status = lambda: {"ticks": [{"name": "filing_tick", "last_run": time.time() - 5}]}
+        runner_svc.status = lambda: {"ticks": [{"name": "filing_tick", "last_run": time.time() - 5}]}
         today = text_of(c.get("/audits").text)
-        server._runner_status = lambda: {"ticks": [{"name": "filing_tick", "last_run": time.time() - 3 * 86400}]}
+        runner_svc.status = lambda: {"ticks": [{"name": "filing_tick", "last_run": time.time() - 3 * 86400}]}
         old = text_of(c.get("/audits").text)
-        server._runner_status = lambda: {"ticks": [{"name": "filing_tick", "last_run": 1e300}]}
+        runner_svc.status = lambda: {"ticks": [{"name": "filing_tick", "last_run": 1e300}]}
         (D / "run-2026-02-25.json").write_text('{"started": 1e300, "finished": 1e300, "items_read": 3, "findings": []}')
         far = c.get("/audits")
     finally:
-        server._runner_status = real_runner
+        runner_svc.status = real_runner
     check("the ten-minute pace says its last run as the clock today", re.search(r"last \d\d:\d\d: filing, dates, audit lines", today) is not None, re.findall(r"Every 10 minutes.{0,60}", today))
     check("... and with its date for a run of another day", re.search(r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th) \d\d:\d\d: filing, dates, audit lines", old) is not None, re.findall(r"Every 10 minutes.{0,60}", old))
     check("a time no date can hold (1e300 in the runner's record and in a run record): the page answers 200 and draws a dash", far.status_code == 200 and "last –: filing, dates, audit lines" in text_of(far.text), (far.status_code, far.text[:200]))
