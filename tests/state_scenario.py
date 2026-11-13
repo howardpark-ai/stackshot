@@ -338,7 +338,7 @@ def g(n, subject=None, **kw): item(n, letter="g", subject=subject, **kw)
 # ================================================================ a doing item stored with a far expected time (before the time was dropped): work in hand, read as it always was (tools/move_waiting_doing.py, which parked them once, is removed)
 from stackshot.model import model as _model
 # states.reads_as_wait stays gone: the reason text is never refused. The wait wording is read since the board item's follow-up by model_guards.reads_as_wait, which only adds a note to the update
-# reply (server._doing_wait_note; tests/agent_due_scenario.py, section 6b), never a refusal and never a state change.
+# reply (service/update.py _doing_wait_note; tests/agent_due_scenario.py, section 6b), never a refusal and never a state change.
 check("far-by states.reads_as_wait is gone: the reason text is never refused (model_guards.reads_as_wait only notes)", not hasattr(states, "reads_as_wait"), None)
 for p in (T / "store/a").glob("*.json"): p.unlink()
 for p in (T / "store/g").glob("*.json"): p.unlink()

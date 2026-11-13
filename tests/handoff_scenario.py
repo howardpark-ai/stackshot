@@ -812,7 +812,7 @@ upd(65, "team-back", status="completed", outcome="done", reason="finished", desc
 check("12 his hand-off: a close drops the mover and then, settles nothing and leaves the closed item's record alone", "mover" not in mt(65) and "then" not in mt(65) and not ho(65).get("taken_at") and "handoff:" not in server.stackshot_get("a65"), (mt(65), ho(65)))
 # what a close and a confirm do to an item that stands in his state with then=<agent> and a hand-off to him not yet taken. The close path: writes.save reaches
 # _settle_mover_on_save and _handoff_his_over with a closed item; model.settle returns None for status != open and handoff.pending_his is None for a closed record, so neither hook acts.
-# The mover and then go because of model.DROP_ON_CLOSE, which _update_unlocked applies, not because of settle.
+# The mover and then go because of model.DROP_ON_CLOSE, which update_unlocked (service/update.py) applies, not because of settle.
 to_him(35)
 pre_as = (mt(35)["mover"], mt(35)["then"], dict(ho(35)))
 check("12 close: before the close the item is his (mover Oliver, then the agent) with the record to him not yet taken", pre_as[0] == OWN and pre_as[1] == "team-back" and not pre_as[2].get("taken_at"), pre_as)
@@ -1002,8 +1002,9 @@ check("15.1e an item waiting on his decision with an until is parked by neither 
 for n_, kw_ in ((158, {"until": FUT}), (159, {"until": FUT, "wait_kind": "time"}), (160, {"until": FUT, "wait_kind": "relay"}), (161, {"hold": True, "wake": FUT}), (162, {})):
     item(n_, mover="home-front", **kw_)
     check(f"15.1e a{n_} {sorted(kw_)}: _date_parked is _is_parked for an item with no hold flag, and neither parks a decision", (server._date_parked(rd(n_)) == server._is_parked(rd(n_))) or bool(mt(n_).get("hold")), mt(n_))
-# 15.1f the backstop reading fails closed: when handoff.detect raises inside _hands_on, the date stays the hand-off's backstop (the item stays active) and the failure is logged
+# 15.1f the backstop reading fails closed: when handoff.detect raises inside _hands_on (service/update.py), the date stays the hand-off's backstop (the item stays active) and the failure is logged
 import contextlib as _cl
+from stackshot.service import update as _upd_svc
 _real_detect = server._ho.detect
 def _raising_detect(*a, **k):
     if sys._getframe(1).f_code.co_name == "_hands_on":
@@ -1013,7 +1014,7 @@ _err = _io.StringIO()
 server._ho.detect = _raising_detect
 try:
     with _cl.redirect_stderr(_err):
-        direct_ = server._hands_on("a149", rd(150), rd(150), None, "home-send")
+        direct_ = _upd_svc._hands_on("a149", rd(150), rd(150), None, "home-send")
         item(149); upd(149, "home-send", next="home-send: do the thing now", wake=FUT)      # a write that hands nothing on: the reading fails, so the date is kept as the backstop and the item is not parked
 finally:
     server._ho.detect = _real_detect

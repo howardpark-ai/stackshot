@@ -1576,7 +1576,7 @@ def ann_forms(src):
             out["subscript of __annotations__"] += 1   # f.__dict__["__annotations__"], vars(f)["__annotations__"]
     return +out
 ANNUSE_ALLOW = {
-    ("stackshot/web/server.py", "wraps"): (2, "functools.wraps twice: a decorator's wrapper, and the update tool's own signature kept visible; the function it copies from (_update_unlocked) is used as a value there, so its annotation names stay reads"),
+    ("stackshot/web/server.py", "wraps"): (2, "functools.wraps twice: a decorator's wrapper, and the update tool's own signature kept visible; the function it copies from (update_unlocked, in service/update.py) is used as a value there, so its annotation names stay reads"),
     ("tests/read_only_scenario.py", "getattr of __annotations__ or __wrapped__"): (2, "hasattr(endpoint, '__wrapped__') twice: whether a route is wrapped, nothing is evaluated"),
 }
 def ann_uses(files):
