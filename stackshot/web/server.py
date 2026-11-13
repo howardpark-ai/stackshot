@@ -856,7 +856,8 @@ def _follow_superseded(gid: str, seen: set[str] | None = None) -> str:
 
 
 def _after_reaches(start: list[str], target: str, seen: set[str] | None = None) -> bool:
-    """Does `target` sit in the after chain of any of `start` (open items only)? The loop test."""
+    """Does `target` sit in the wait chain of any of `start` (open items only)? The loop test. An item waits on what its `after` names and on the item lines of its list of waits that have not arrived
+    (wait_list.item_ids): the one place the wait graph is walked, so a list's item lines count as links in every write that asks."""
     seen = set() if seen is None else seen
     for g in start:
         if g == target:
@@ -868,7 +869,7 @@ def _after_reaches(start: list[str], target: str, seen: set[str] | None = None) 
             it = _load(g)
         except ToolError:
             continue
-        if it.get("status") == "open" and _after_reaches(_after_of(it.get("metadata") or {}), target, seen):
+        if it.get("status") == "open" and _after_reaches(_after_of(it.get("metadata") or {}) + _wl.item_ids(it.get("metadata") or {}), target, seen):
             return True
     return False
 
@@ -7990,6 +7991,7 @@ _update_svc.install(_update_svc.Hooks(
     date_only_wait=_late("_date_only_wait"),
     date_parked=_late("_date_parked"),
     eff_state=_late("_eff_state"),
+    evwait_gate=_late("_evwait_gate"),
     evwait_preread=_late("_evwait_preread"),
     fallback_wait_date=_late("_fallback_wait_date"),
     finishes_own_line=_late("_finishes_own_line"),

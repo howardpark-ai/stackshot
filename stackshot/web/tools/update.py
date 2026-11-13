@@ -12,11 +12,11 @@ from stackshot.model import ask_leaves as _askl, model as _model, states as _sta
 from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.service import gates as _gates, writes as _writes
 from stackshot.service.store import _load
-from stackshot.waits import until_write as _uw, waiting as _wt
+from stackshot.waits import until_write as _uw, wait_list_write as _wlw, waiting as _wt
 from stackshot.web.auth import oauth as _oauth
 from stackshot.web.field_gates import _fleet_tool, _when_idle
 from stackshot.web.tools.notes import _off_map_note_item, _owner_param, _sender_required
-from stackshot.web.tools.text import _AFTER_PARAM, _ALIASES, _ASK_NONE, _CHECK_PARAM, _CONTACT_PARAM, _DESCRIPTION_PARAM, _MOVER_PARAM, _OPTIONS_PARAM, _OUTCOME_PARAM, _OUTCOME_TEXT_PARAM, _POST_WAKE_PARAM, _P_BARE, _P_EX2, _P_OLD, _P_PLACE_STEP, _REASON_PARAM, _SAID_PARAM, _SELF_WAIT_FORM, _STEP_PROOF_PARAM, _THEN_PARAM, _WAIT_EVENT_PARAM, _WAIT_KIND_PARAM, _lead, load_text
+from stackshot.web.tools.text import _AFTER_PARAM, _ALIASES, _ASK_NONE, _CHECK_PARAM, _CONTACT_PARAM, _DESCRIPTION_PARAM, _MOVER_PARAM, _OPTIONS_PARAM, _OUTCOME_PARAM, _OUTCOME_TEXT_PARAM, _POST_WAKE_PARAM, _P_BARE, _P_EX2, _P_OLD, _P_PLACE_STEP, _REASON_PARAM, _SAID_PARAM, _SELF_WAIT_FORM, _STEP_PROOF_PARAM, _THEN_PARAM, _WAIT_EVENT_PARAM, _WAIT_KIND_PARAM, _WAIT_MODE_PARAM, _WAITS_PARAM, _lead, load_text
 
 _ask_after_write = None      # set by register: the server's own, looked up at each call
 _sender_not_owner = None      # set by register: the server's own, looked up at each call
@@ -50,7 +50,7 @@ RANK_RETIRED = _T.piece("RANK_RETIRED")
 # parameter that can carry free text is listed here, and every other parameter says why it carries none. A test keeps the two lists equal to the update signature, so a parameter added
 # later has to be placed in one of them.
 _ASK_TEXT_PARAMS = ("subject", "description", "next", "options", "said", "work", "check", "wait_basis", "reason", "expected_reason", "step", "supplies", "goal", "wait_event", "draft", "watch_reason",
-                    "outcome_text", "wait_reason", "reword",                                                  # free text
+                    "outcome_text", "wait_reason", "reword", "waits",                                         # free text (a list's lines carry anchors, events and item ids)
                     "owner_name", "owner", "agent", "observers", "step_proof",                                # stored as written, with no check against a closed set: counted as text too
                     "wait_anchor", "post_wake_mover", "then")                                                 # a stored string a session names, accepted as written (found by a real update call with a hedge in it)
 _ASK_NONTEXT_PARAMS = (
@@ -59,6 +59,7 @@ _ASK_NONTEXT_PARAMS = (
     "needs", "mover", "contact", "sender", "project",                                                        # a kind, or a session, a front agent or a page: a string with words in it is refused or not stored (a test sends one through the real update)
     "anchors", "after", "superseded_by",                                                                     # a link or an item id: the same test
     "done", "dropped", "rank",                                                                               # step numbers; a retired field
+    "wait_mode",                                                                                             # all or any
     "ask", "clear_ask",                                                                                      # the ask itself: a write that sets one takes the ask-time check, not this
     "clear_needs", "clear_due", "clear_wake", "hold", "clear_hold", "recycle", "clear_recycle", "clear_options", "clear_after", "clear_wait_basis", "clear_rank", "clear_goal", "clear_mover",
     "clear_then", "clear_wait", "clear_draft", "clear_next", "clear_check")                                   # switches
@@ -177,6 +178,8 @@ def stackshot_update(
     wait_reason: Annotated[str, Field(description=_T.param("wait_reason"))] = "",
     contact: _CONTACT_PARAM = "",
     reword: _REWORD_PARAM = None,
+    waits: _WAITS_PARAM = None,
+    wait_mode: _WAIT_MODE_PARAM = "",
 ) -> str:
     """The update tool; its description is _UPDATE_DESC + _SELF_WAIT_FORM + _WAIT_FORM."""
     if rank or clear_rank:
@@ -197,9 +200,14 @@ def stackshot_update(
             vals[f_], n_, fx_ = _gates.fix_front_mover(f_, v_, sender, proj_, str(meta_.get(f_) or ""), meta_)    # a front agent gets no hand-off notice: another session's value becomes the project's builder and the reply says so; the value the item already holds changes nothing; the same value sent again is kept as sent
             fix_note += n_; fixes += fx_
         mover, then, post_wake_mover = vals["mover"], vals["then"], vals["post_wake_mover"]
-    wake, ask_by, until_wait, alias_used, alias_date = _gates.until_in(item_id, status, until, wake, ask_by, hold, wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
+    list_in = _wlw.passed(waits) and not _wlw.clearing(waits)      # a wait on a list: its date is the backstop, read as an anchor or item wait's is, and it names its blockers (the lines)
+    if list_in:
+        old_ = [n for n, v in (("wake", wake), ("ask_by", ask_by), ("hold", hold)) if v and str(v).strip().lower() not in _ASK_NONE]
+        if old_:
+            raise _gates.waits_clash(old_)
+    wake, ask_by, until_wait, alias_used, alias_date = _gates.until_in(item_id, status, until, wake, ask_by, hold, "list" if list_in else wait_kind)     # the date as the gates below read it; wake, ask_by and hold are aliases of until
     alias_ends = _wait_alias_gate(alias_used)
-    _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
+    _gates.gate_self_wait(_norm_id(item_id, bare=_bare_id_ok(status)), sender, next_text=next, wake=wake, mover=mover, needs=needs, after=after or "", wait_kind=_wlw.judged_as(waits) if list_in else wait_kind, hold=hold, wait_basis=wait_basis, state="your-step" if step.strip() else "blocked" if supplies.strip() else "",
                     status=status, wait_reason=wait_reason, clear_next=clear_next, clear_wake=clear_wake, clear_needs=clear_needs, clear_after=clear_after, clear_wait=clear_wait, clear_hold=clear_hold)   # before the item lock: it may ask a model
     ask_pre = _gates.ask_pre(item_id)      # the ask that stands before this write, for its tail (the reminder, the ask-time check, an ask the author calls wrong)
     with _writes.session_write():
@@ -209,7 +217,7 @@ def stackshot_update(
                        expected_by=expected_by, expected_reason=expected_reason, step=step, supplies=supplies,
                        goal=goal, mover=mover, then=then, wait_kind=wait_kind, wait_anchor=wait_anchor, wait_event=wait_event, ask_by=ask_by, post_wake_mover=post_wake_mover, until_wait=until_wait,
                        clear_goal=clear_goal, clear_mover=clear_mover, clear_then=clear_then, clear_wait=clear_wait, draft=draft, clear_draft=clear_draft, clear_next=clear_next, clear_check=clear_check,
-                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes) + fix_note
+                       done=done, dropped=dropped, step_proof=step_proof, watch_reason=watch_reason, wait_reason=wait_reason, outcome_text=outcome_text, contact=contact, reword=reword, fixes=fixes, waits=waits, wait_mode=wait_mode) + fix_note
         if alias_used:
             out += _uw.alias_note(alias_used, _model.clean(alias_date), alias_ends, _backstop_field(item_id, status))
         return out + note + _off_map_note_item(sender, item_id, project) + _ask_after_write(ask_pre, sender, ask, clear_ask or ask.strip().lower() in _ASK_NONE, _ask_write_texts(locals()))

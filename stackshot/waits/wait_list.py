@@ -31,7 +31,7 @@ KINDS = ("time", "anchor", "item", "relay", "event")       # the kinds a line ma
 MODES = ("all", "any")
 MIN_LINES, MAX_LINES = 2, 8
 LINE_MAX = 300                                              # a LIMIT, not a cosmetic clip: the most a line's free text (an anchor, an event), an item id and an arrival's words keep (read: the first 300 characters). An anchor or item id longer than that
-                                                            # would no longer match the notice or item it names, so the write path (a later change) refuses a longer one; docs/item-model.md and docs/waiting-and-doing.md say so
+                                                            # would no longer match the notice or item it names, so the write path (`write_line`) refuses a longer one; docs/item-model.md and docs/waiting-and-doing.md say so
 WORD_MAX = 40                                               # the most of a kind, a mode, a date or a stored word that is read at all: every one of them is shorter when it is valid, so a longer text is invalid whatever follows the 40th character
 ARRIVED_AT_MAX = 253402300800 - 86400                       # the latest arrival time a stored line may carry (epoch seconds: a day short of year 10000, the last moment Python can draw as a date); a later one is no time
 MALFORMED: dict[str, int] = {"count": 0}                   # reads of an item that stores wait_kind=list with a list that does not hold (the model counts each one it ignores)
@@ -54,6 +54,16 @@ def _one(v: Any, cap: int | None = None) -> str:
         n *= 4
 
 
+def fields_of(kind: str) -> tuple[str, ...]:
+    """The fields a line of `kind` carries besides its kind (time: until; anchor: anchor and event; item: after; relay and event: event); () for a word that is no kind."""
+    return _FIELDS.get(kind, ())
+
+
+def kind_of(raw: Any) -> str:
+    """The kind a line (a dict) says it is, as the read takes it (trimmed, lower case, at most WORD_MAX characters): "" for a line that names none, and a word that is no kind comes back as it is."""
+    return _one(raw.get("kind"), WORD_MAX).lower() if isinstance(raw, dict) else ""
+
+
 def stored(meta: dict[str, Any]) -> bool:
     """Does the item say it waits on a list (wait_kind=list)? True whether or not the list holds; `valid` says that."""
     return _one((meta or {}).get("wait_kind"), WORD_MAX).lower() == LIST
@@ -66,8 +76,11 @@ def mode(meta: dict[str, Any]) -> str:
 
 
 def backstop(meta: dict[str, Any]) -> str:
-    """The backstop day: the item's stored `until` (waiting.stored_until, read to its first WORD_MAX characters: a date is never longer, so a longer text is no date either way and is not normalised whole), "" when it has none."""
-    return _one((meta or {}).get("until"), WORD_MAX)
+    """The backstop day: the item's stored `until` (waiting.stored_until, read to its first WORD_MAX characters: a date is never longer, so a longer text is no date either way and is not normalised whole), "" when it has none.
+    While an update judges its write the stored `until` stands as the old working field `wake` (until_write.unfold: the date of an anchor, item or list wait), so with no `until` the `wake` is the backstop: a list is the
+    same list in that working copy as in the store."""
+    m = meta or {}
+    return _one(m.get("until"), WORD_MAX) or _one(m.get("wake"), WORD_MAX)
 
 
 def backstop_epoch(meta: dict[str, Any]) -> float | None:
@@ -104,6 +117,32 @@ def _line(raw: Any) -> tuple[dict[str, Any] | None, str]:
         if math.isfinite(at) and 0 < at <= ARRIVED_AT_MAX:      # a torn record (no usable time: none, zero, negative, inf, nan or a moment no date can show) is no arrival
             out["arrived_at"], out["arrived_what"] = at, _one(arr.get("what"), LINE_MAX)
     return out, ""
+
+
+def write_line(raw: Any) -> tuple[dict[str, Any] | None, str]:
+    """One line a caller passes → (the line to store: its kind and the fields of that kind, normalised as `_line` reads them, never an `arrived`, "") or (None, why it is refused). The same rules as the
+    read (`_line`) with two differences: a field of a line is text (a number, a list or an object is refused, where a read would turn it into text), and where a read clips an anchor, an event or an item id to
+    LINE_MAX characters, a write refuses a longer one, since the clipped text would no longer match the notice, the event or the item it names."""
+    if not isinstance(raw, dict):
+        return None, "a line is an object"
+    kind = kind_of(raw)
+    for f in _FIELDS.get(kind, ()):
+        v = raw.get(f)
+        if v is not None and not isinstance(v, str):
+            return None, f"a line's {'item id' if f == 'after' else f} is text (got {type(v).__name__})"
+    for f in ("anchor", "event", "after"):
+        v = raw.get(f)
+        if kind in KINDS and f in _FIELDS[kind] and isinstance(v, str) and len(_one(v)) > LINE_MAX:
+            return None, f"a line's {'item id' if f == 'after' else f} is at most {LINE_MAX} characters (got {len(_one(v))})"
+    got, why = _line(raw)                    # the line returned below carries the fields of its kind only, so an `arrived` the caller sent never reaches the store
+    if got is None:
+        return None, why
+    return {"kind": got["kind"], **{f: got[f] for f in _FIELDS[got["kind"]]}}, ""
+
+
+def line_key(line: dict[str, Any]) -> tuple[str, ...]:
+    """What makes two lines the same wait: the kind and the fields of that kind."""
+    return (line["kind"], *(str(line.get(f) or "") for f in _FIELDS[line["kind"]]))
 
 
 def problem(meta: dict[str, Any]) -> str:
@@ -195,6 +234,11 @@ def mark_arrived(meta: dict[str, Any], idx: int, what: str, at: float) -> bool:
 def lines_for_item(meta: dict[str, Any], item_id: str, open_only: bool = True) -> list[int]:
     """The lines (indexes) of the item kind that wait on `item_id`; open ones only unless open_only is false. Two lines on the same item are both found."""
     return [i for i, ln in enumerate(lines(meta)) if ln["kind"] == "item" and ln["after"] == item_id and not (open_only and arrived(ln))]
+
+
+def item_ids(meta: dict[str, Any]) -> list[str]:
+    """The ids the item still waits on through the lines of its list: the item lines that have not arrived, in stored order ([] when the item stores no list that holds). The loop test walks these as it walks `after`."""
+    return [ln["after"] for ln in lines(meta) if ln["kind"] == "item" and not arrived(ln)]
 
 
 def lines_for_anchor(meta: dict[str, Any], url: str, same: Callable[[str, str], bool], open_only: bool = True) -> list[int]:
