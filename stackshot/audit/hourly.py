@@ -1,7 +1,7 @@
 """hourly.py: the hourly audit line: an item on an agent that has had no write for an hour gets one short line saying what the audit verified.
 
 Part of the rule that no item an agent moves goes more than an hour without an update. The mover writes the update; when it has nothing new to add, the audit checks that the item is moving and
-writes the line itself, so the owner never sees an item on an agent idle for over an hour. This is the audit side; handing an idle item on is audit/hand_idle.py. Together they replace the 45-minute news ask. On by default (`[audit] hourly_line`).
+writes the line itself, so the owner never sees an item on an agent idle for over an hour. A mover's own status write with new text is that update (kind `update`, model/last_activity.py `update_signals`, stamped by service/writes.py): the line is owed only after an hour without one. This is the audit side; handing an idle item on is audit/hand_idle.py. Together they replace the 45-minute news ask. On by default (`[audit] hourly_line`).
 
   enabled()                                    `[audit] hourly_line`, on unless a TOML false
   due(items, gid, now, env, pane, same, subagents, anchored, queue)   the line an item is owed now, None when none: {"text", "verified", "kind"}
