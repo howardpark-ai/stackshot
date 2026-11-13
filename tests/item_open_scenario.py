@@ -3,11 +3,11 @@ network, no server process (the server module is imported and called in-process,
 
 Covers: open (one item filed through the create tool's own code: the subject takes the project scope's prefix from the server and replaces a prefix the caller wrote, marked metadata.item_open = the
 marker, the mover a background agent of the page and in needs, the project's -main agent the creator, one step that names the mover, description bullets ending with the attribution line, no machine
-host name anywhere in the item, the mover told once, nothing owed to the page); a repeat call while the item is open answers it and files nothing, another marker is another item; a call after the
+host name anywhere in the item, the mover told once, nothing owed to the page); a repeat call while the item is open answers it and files nothing, another marker is another item, and the same marker on another project is that project's own item (a call never answers or shows another project's item); a call after the
 item was closed files a new item (the open state is read from the store); a mover that is not a background agent the page lists (a front agent, the owner, another project's agent, a made-up name)
 is refused with the listed ones named; bad bullets (none, too many, too long, a control character, a wrong type) are refused and never cut; a missing or malformed marker, a missing field, a step that
 does not start with the mover, a key the route does not take (needs, owner, priority) and a sender with markup or the owner's name are refused with nothing filed; an @name is broken so the mirror pings
-no one; an unknown project a 404, a project with no front agent a 409; eight threads calling at once file one item; over HTTP (401 without a token) and through client.py (the id alone on stdout,
+no one; an unknown project a 404, a project with no front agent a 409; a cap of 10 open items per project (the eleventh marker is refused, a repeat at the cap is still answered, a closed item frees a place, the cap is per project); a long sender and a doubled caller prefix; the unknown-write 404 lists the route; eight threads calling at once file one item; over HTTP (401 without a token) and through client.py (the id alone on stdout,
 usage on misuse, the server's refusal on stderr, a server that is not reached).
 
     tests/run-suite item_open        → exit 0 / 1"""
@@ -31,18 +31,21 @@ for d in ("store/a", "fleet/a", "sala/a", "brain/projects", "brain/infra", "secr
 (T / "store/next-id").write_text("10"); (T / "store/anchors.json").write_text("{}")
 
 def uid(n): return f"00000000-0000-4000-8000-{n:012d}"
-S = {"build": uid(101), "main": uid(102), "docs": uid(103), "nbmain": uid(104), "gbuild": uid(105)}
+S = {"build": uid(101), "main": uid(102), "docs": uid(103), "nbmain": uid(104), "gbuild": uid(105), "bmain": uid(106), "bbuild": uid(107), "cmain": uid(108), "cbuild": uid(109)}
 def row(key, name, project_key):
     return {"id": S[key], "name": name, "aliases": [], "project": None, "project_key": project_key, "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": name,
             "cwd": "/work", "state": "live", "created": "2026-10-21T21:00:00Z", "retired_at": None,
             "transcripts": [{"id": uid(200 + int(S[key][-3:]) - 100), "machine": "a", "at": "2026-10-21T21:00:00Z", "why": "import"}]}
 ROWS = [row("build", "home-sparrow-builder", "projects/alpha"), row("main", "home-sparrow-main", "projects/alpha"), row("docs", "home-sparrow-docs", "projects/alpha"), row("nbmain", "home-nobuild-main", "projects/nobuild"),
-        row("gbuild", "heron-engineer", "ops/general")]
+        row("gbuild", "heron-engineer", "ops/general"),
+        row("bmain", "home-beta-main", "projects/beta"), row("bbuild", "home-beta-builder", "projects/beta"), row("cmain", "home-capped-main", "projects/capped"), row("cbuild", "home-capped-builder", "projects/capped")]
 (T / "sala/a/session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {r["id"]: r for r in ROWS}}), encoding="utf-8")
 def page(rel, front):
     q = T / "brain" / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_text("---\n" + front + "\n---\n\n# x\n", encoding="utf-8")
 page("projects/alpha.md", "type: project\ntitle: Alpha\ndisplay-name: home-sparrow\nagents:\n  home-sparrow-docs: keeps the docs\n  home-sparrow-main: talks to Oliver\n  background:\n    home-sparrow-notes: keeps the notes\n    home-sparrow-builder: builds\nstatus: active")
 page("projects/nobuild.md", "type: project\ntitle: Nobuild\ndisplay-name: home-nobuild\nagents:\n  home-nobuild-main: talks to Oliver\nstatus: active")
+page("projects/beta.md", "type: project\ntitle: Beta\ndisplay-name: home-beta\nagents:\n  home-beta-main: talks to Oliver\n  background:\n    home-beta-builder: builds\nstatus: active")
+page("projects/capped.md", "type: project\ntitle: Capped\ndisplay-name: home-capped\nagents:\n  home-capped-main: talks to Oliver\n  background:\n    home-capped-builder: builds\nstatus: active")
 page("projects/gamma.md", "type: project\ntitle: Gamma\ndisplay-name: home-gamma\nstatus: active")
 page("ops/general.md", "type: project\ntitle: General\ndisplay-name: heron\nagents:\n  heron-main: talks to Oliver\n  background:\n    heron-engineer: builds and fixes needing no decision\nstatus: active")
 for pg in (T / "brain").rglob("*.md"): os.utime(pg, (time.time() - 8 * 3600, time.time() - 8 * 3600))      # the pages are older than any debt (and the 5-minute slack), so a debt charged by a write would stand
@@ -80,7 +83,7 @@ def io_(marker="test_trim:alpha", **kw):
          "description": ["- Repo alpha tripped max_suites: 120 > 100", "- A deep scan for duplicate or obsolete suites is the first step"], "sender": "test-trim-job"}
     b.update(kw)
     return server._client_post(me, "item-open", {k: v for k, v in b.items() if v is not None})
-def open_for(marker): return server._itemopen_open_items(marker)
+def open_for(marker, project="projects/alpha"): return [g for g, m_ in server._itemopen_open_items(project) if m_ == marker]
 def close(shown):
     server._update(_model_ids._norm_id(shown), outcome_text="- done", status="completed", outcome="done", reason="the deep scan is done", sender="home-sparrow-builder")
 n0 = len(items())
@@ -126,7 +129,7 @@ check("a call after the close files a new item: 200, a new id, repeat false, ope
       and item(o5["item"])["metadata"]["item_open"] == "test_trim:alpha" and len(items()) == n2 + 1, (st, o5))
 st, o6 = io_()
 check("…and a repeat of that one answers it", st == 200 and o6["item"] == o5["item"] and o6["repeat"] is True, (st, o6))
-check("…a marker of an item removed from the store is no open item (nothing the caller keeps is read)", server._itemopen_open_items("test_trim:never-filed") == [])
+check("…a marker of an item removed from the store is no open item (nothing the caller keeps is read)", open_for("test_trim:never-filed") == [])
 close(o5["item"])
 
 # ---- 4. the mover must be a background agent the page lists
@@ -171,7 +174,7 @@ for name, kw, needle in (("no marker", dict(marker=""), "marker is required"), (
                          ("a step that does not name the mover", dict(step="deep-scan the suites"), "starts with the mover"), ("a step that names another agent", dict(step="home-sparrow-notes: deep-scan"), "starts with the mover"),
                          ("a step with only the name", dict(step="home-sparrow-builder: "), "starts with the mover"), ("a step with a line break", dict(step="home-sparrow-builder: a\nb"), "one line"),
                          ("a subject with a line break", dict(subject="a\nb"), "one line"), ("a sender with a space", dict(sender="a b"), "sender ="), ("a sender with markup", dict(sender="<i>x</i>"), "sender ="),
-                         ("a sender with a mention", dict(sender="@octocat"), "sender ="), ("a sender of 81 characters", dict(sender="s" * 81), "sender ="), ("the owner as the sender", dict(sender="Oliver"), "Only the board writes as"),
+                         ("a sender with a mention", dict(sender="@octocat"), "sender ="), ("a sender of 61 characters", dict(sender="s" * 61), "sender ="), ("the owner as the sender", dict(sender="Oliver"), "Only the board writes as"),
                          ("a marker that is not text", dict(marker=7), "marker is text")):
     st, e = io_(**kw)
     check(f"{name}: 400 and the reason, nothing filed", st == 400 and needle in e["error"] and len(items()) == n5, (st, e))
@@ -182,6 +185,14 @@ st, o = io_(marker="test_trim:nosender", sender=None)
 check("no sender: taken as client.py, recorded as the writer", st == 200 and item(o["item"])["filed_by"] == "client.py (a script on a client machine)" and "- Opened by client.py (a script on a client machine)" in item(o["item"])["description"], (st, o)); close(o["item"]) if st == 200 else None
 st, o = io_(marker="test_trim:prefix", subject="[work] Wrong prefix")
 check("a prefix the caller wrote is replaced by the project scope's own", st == 200 and item(o["item"])["subject"] == "[home] Wrong prefix", (st, o)); close(o["item"]) if st == 200 else None
+st, o = io_(marker="test_trim:twice", subject="[work] [home] twice")
+check("every prefix the caller wrote is taken off and the scope's goes on once", st == 200 and item(o["item"])["subject"] == "[home] twice", (st, o)); close(o["item"]) if st == 200 else None
+st, o = io_(marker="test_trim:s60", sender="s" * 60, description=["- a fact"])
+oi = item(o["item"]) if st == 200 else {"description": ""}
+check("a sender of exactly 60 characters is taken and its attribution line is whole (not clipped by the line limit)", st == 200 and oi["description"].splitlines()[-1] == "- Opened by " + "s" * 60 + " (a script on a client machine)"
+      and "…" not in oi["description"], (st, oi["description"])); close(o["item"]) if st == 200 else None
+st, e = server._client_post(me, "no-such-write", {})
+check("the 404 for an unknown write lists item-open", st == 404 and "item-open" in e["error"] and "job-gap" in e["error"], (st, e))
 st, o = io_(marker="test_trim:longsubj", subject="x" * 90)
 check("a subject over the limit is refused by the create tool's own gate, nothing filed", st == 400 and "Refused" in o["error"] and open_for("test_trim:longsubj") == [], (st, o))
 st, o = io_(marker="test_trim:alarm", description=["- the token is exposed and the box was killed"])
@@ -200,6 +211,43 @@ st, e = io_(project="projects/solo", mover="home-solo-builder", step="home-solo-
 check("a project with a background agent and no front agent: 409, nothing filed", st == 409 and "front agent" in e["error"] and len(items()) == n6 and open_for("test_trim:alpha") == [], (st, e))
 st, o = io_(project="alpha", marker="test_trim:slug")
 check("a bare slug names the project", st == 200 and o["project"] == "projects/alpha", (st, o)); close(o["item"]) if st == 200 else None
+
+# ---- 7b. a marker belongs to its project
+nb0 = len(items())
+st, a = io_(marker="size:report")
+st2, b = io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan the beta suites", subject="Deep-scan the beta suites")
+check("the same marker on a second project files that project's own item (not the first project's, and nothing of it is shown)", st == 200 and st2 == 200 and b["item"] != a["item"] and b["repeat"] is False and b["project"] == "projects/beta"
+      and b["mover"] == "home-beta-builder" and b["owner"] == "home-beta-main" and len(items()) == nb0 + 2 and item(b["item"])["metadata"]["project"] == "projects/beta", (st, a, st2, b))
+st3, a2 = io_(marker="size:report"); st4, b2 = io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan", subject="x")
+check("…a repeat on each project dedupes on its own: each answers its own open item and nothing is filed", st3 == 200 and st4 == 200 and a2["item"] == a["item"] and a2["repeat"] and b2["item"] == b["item"] and b2["repeat"] and b2["project"] == "projects/beta" and len(items()) == nb0 + 2, (a2, b2))
+check("…the store lookup is per project", [m_ for _g, m_ in server._itemopen_open_items("projects/beta")] == ["size:report"] and [m_ for _g, m_ in server._itemopen_open_items("projects/nobuild")] == [], server._itemopen_open_items("projects/beta"))
+close(a["item"]); st5, a3 = io_(marker="size:report")
+check("…closing one project's item leaves the other's open: the first project files a new item, the second still answers its own", st5 == 200 and a3["item"] != a["item"] and a3["repeat"] is False and item(b["item"])["status"] == "open"
+      and io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan", subject="x")[1]["item"] == b["item"], (st5, a3))
+close(a3["item"]); close(b["item"])
+
+# ---- 7c. a cap of 10 open items per project
+CAP = server._ITEMOPEN_OPEN_MAX
+cp = dict(project="projects/capped", mover="home-capped-builder", step="home-capped-builder: deep-scan", subject="Deep-scan")
+check("the cap is 10", CAP == 10, CAP)
+ids = []
+for i in range(CAP):
+    st, o = io_(marker=f"size:run{i}", **cp); ids.append(o.get("item") if st == 200 else None)
+check("ten different markers file ten open items on one project", all(ids) and len({*ids}) == CAP and len(server._itemopen_open_items("projects/capped")) == CAP, ids)
+nc = len(items()); pushed.clear()
+st, e = io_(marker="size:run-new", **cp)
+check("an eleventh marker is refused: 400 that names the cap and says an open item must close first; nothing filed, no one told", st == 400 and "cap is 10" in e["error"] and "must close" in e["error"] and len(items()) == nc, (st, e)); settle()
+check("…nobody was told of the refused call", pushed == [], pushed)
+st, o = io_(marker="size:run3", **cp)
+check("…a repeat of an open marker at the cap is still answered (never counted as new)", st == 200 and o["item"] == ids[3] and o["repeat"] is True and len(items()) == nc, (st, o))
+st, o = io_(marker="size:report", project="projects/beta", mover="home-beta-builder", step="home-beta-builder: deep-scan", subject="x")
+check("…the cap is per project: another project still files", st == 200 and o["repeat"] is False, (st, o)); close(o["item"]) if st == 200 else None
+close(ids[0])
+check("…closed items do not count", len(server._itemopen_open_items("projects/capped")) == CAP - 1, len(server._itemopen_open_items("projects/capped")))
+st, o = io_(marker="size:run-new", **cp)
+check("…after one item closes, a new marker files again, and the cap holds again", st == 200 and o["repeat"] is False and io_(marker="size:run-next", **cp)[0] == 400, (st, o))
+for g in ids[1:] + ([o["item"]] if st == 200 else []): close(g)
+check("…everything closed, the project is empty again", server._itemopen_open_items("projects/capped") == [], server._itemopen_open_items("projects/capped"))
 
 # ---- 8. concurrency: one marker, many calls, one item
 n7 = len(items()); res = []

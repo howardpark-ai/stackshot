@@ -223,13 +223,13 @@ runs on every box.
                                 to file under), not reached ([0]) or misused (usage).
   client.py post item-open <marker> --project <key|id|slug> --subject "<action and object>" --mover <agent> --step "<agent>: <what it does>" --line "<fact>" [--line "<fact>" ...] [--sender <label>]
                                 for a timer's script that finds work for a project's background agent: open ONE board item for it and print its id (exit 0). <marker> = <kind>:<what> (for example
-                                test_trim:stackshot), the item's mark: while an item with that marker is open a repeat call prints the same id and files nothing; once it is closed a call files a new item. --mover must be a
+                                test_trim:stackshot), the item's mark: while an item with that marker is open on the same project a repeat call prints the same id and files nothing; once it is closed a call files a new item. A project holds at most 10 open items filed by this route: past it a new marker is refused until one closes. --mover must be a
                                 background agent under `background:` on the project's page (refused otherwise, the refusal names the listed ones); it is named in needs and told once, at the create. --step is one line that starts
                                 with the mover's name and a colon. --subject is the action and its object with no prefix: the server puts the project scope's prefix before it. Each --line is one fact, a "- " bullet of the
                                 description (repeat it; at most [description] max_lines less one, each at most [description] line_max characters as a bullet; too many or too long is refused, never cut); the last bullet is
-                                "- Opened by <label> (a script on a client machine)", so no host name reaches the item or its GitHub issue. --sender is the script's own label (default client.py): one word, never the owner's
-                                name. The project's -main agent is the item's creator. The server runs the create tool's own checks (subject, description and next gates, project page, GitHub mirror) and the row owes no page.
-                                Exit 0 · 1 and the reason on stderr when refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be
+                                "- Opened by <label> (a script on a client machine)", so no host name reaches the item or its GitHub issue. --sender is the script's own label (default client.py): one word of at most 60 characters, never the owner's
+                                name. The project's -main agent is the item's creator. The server runs the create tool's own checks (subject, description and next gates, project page, GitHub mirror) except the ones that judge a session's write: a description needs no Goal bullet, and the
+                                row owes no page. Exit 0 · 1 and the reason on stderr when refused (400 a check, 404 no such project, 409 no front agent to file under), not reached ([0]), misused (usage) or when the project record cannot be
                                 read right now (503, nothing filed).
   client.py message <to> <text> --sender <label>
                                 for a script: send a message the way a session's `message` tool does. <to> = a session's
