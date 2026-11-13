@@ -46,7 +46,7 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
-from stackshot.service import gates
+from stackshot.service import gates, telling
 from stackshot.web.ui import render as UR
 
 H = 3600.0; DAY = 86400.0

@@ -118,7 +118,7 @@ try:
 
     # ---- the other readers of historical versions read no needs
     from stackshot.web import server; from stackshot.waits import waiting as _wt
-from stackshot.service import telling
+    from stackshot.service import telling
     ws = telling.writers_since("a1", T0 - 10)
     check("telling.writers_since (written_by) gives both writers of the old commits", ("home-x", "") in ws and ("home-y", "") in ws, ws)
     prior = _wt.prior_state_ts("a3", W1)

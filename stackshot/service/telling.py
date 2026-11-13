@@ -891,19 +891,19 @@ def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, h
     """a session newly named in an item's needs gets one notice, never the writer. The item's mover (_holder) named by another session is told
     like any other, unless `heard` shows this same write already told it as mover (a move to decision, a reopen) or passed a front agent mover by on a move
     to decision, so it hears the write once and the reply says so once. → the reply line, or ""."""
-    h = _hooks()
+    hk = _hooks()
     meta = item.get("metadata") or {}
     owner, project = holder(item), str(meta.get("project") or "")
-    wid = h.session_id(writer)
-    skip = {wid, *(h.session_id(h) for h in (heard or []))}
+    wid = hk.session_id(writer)
+    skip = {wid, *(hk.session_id(h) for h in (heard or []))}
     who = _session_label(writer) or "a session"
     told, quiet = [], ""
     for s in added:
-        sid = h.session_id(s)
+        sid = hk.session_id(s)
         if not sid or sid in skip:
             continue
         skip.add(sid)
-        if owner and sid == h.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
+        if owner and sid == hk.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
             quiet = quiet_line(item, owner); continue
         nxt = next_head(meta, writer)[:160]
         thn = then_part(item)
@@ -911,7 +911,7 @@ def tell_needed(gid: str, item: dict[str, Any], added: list[str], writer: str, h
                               + (f"; next: {nxt}" if nxt else "") + f". Do your part and close it or hand it back (sender={_session_label(s)!r}); "
                               f"Your turn-end board check asks about it until then. → {notice_link(gid)}", tag="needs")
         told.append(_session_label(s))
-        if heard is not None and owner and sid == h.session_id(owner):
+        if heard is not None and owner and sid == hk.session_id(owner):
             heard.append(sid)     # the mover has heard this write: a later notice in it (_tell_decided) leaves it out
     return (f"\n({', '.join(told)} {'has' if len(told) == 1 else 'have'} been told the item needs {'it' if len(told) == 1 else 'them'})" if told else "") + quiet
 
@@ -921,24 +921,24 @@ def tell_decided(gid: str, item: dict[str, Any], sessions: list[str], writer: st
     way round): when `decision` leaves an item's needs, the sessions still named in it are told at once that the move is theirs,
     never the writer. The item's mover named by another session is told like any other (a mover that wrote it is the writer), unless
     `heard` shows this same write already reached it as mover, so it hears the write once. → the reply line, or ""."""
-    h = _hooks()
+    hk = _hooks()
     meta = item.get("metadata") or {}
     owner, project = holder(item), str(meta.get("project") or "")
-    skip = {h.session_id(writer), *(h.session_id(h) for h in (heard or []))}
+    skip = {hk.session_id(writer), *(hk.session_id(h) for h in (heard or []))}
     thn = then_part(item)
     nxt = next_head(meta, writer)[:160]
     told, quiet = [], ""
     for s in sessions:
-        sid = h.session_id(s)
-        if not sid or sid in skip or sid in [h.session_id(x) for x in told]:
+        sid = hk.session_id(s)
+        if not sid or sid in skip or sid in [hk.session_id(x) for x in told]:
             continue
-        if owner and sid == h.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
+        if owner and sid == hk.session_id(owner) and front_keeper(owner, project)[0]:   # no item notice wakes a front agent mover
             quiet = quiet_line(item, owner); continue
         tell_woken(gid, sid, f"[stackshot] {_gh.shown(gid)}: {OWNER} has decided (decision left its needs, by {_session_label(writer) or 'a session'}), so the move is yours "
                               f"as named in its needs: {item.get('subject') or ''} ({project}){thn}" + (f"; next: {nxt}" if nxt else "")
                               + f". Read its next for his call, do your part and close it or hand it back (sender={_session_label(s)!r}). → {notice_link(gid)}", tag="needs")
         told.append(s)
-        if heard is not None and owner and sid == h.session_id(owner):
+        if heard is not None and owner and sid == hk.session_id(owner):
             heard.append(sid)     # the mover has heard this write, as _tell_needed records it: _tell_owner_change leaves it out
     return (f"\n({', '.join(_session_label(s) for s in told)} {'has' if len(told) == 1 else 'have'} been told the move is {'its' if len(told) == 1 else 'theirs'} now that the decision is in)" if told else "") + quiet
 
@@ -1193,7 +1193,7 @@ def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool,
     item only when it is closed (here) or back with it alone (_tell_handback); a builder's step stays on the item's History (one line a change)
     and, for a state-changing write, the page debt it leaves (_owed_mark). The mover is added to `heard` and to _OWNER_HEARD so the write's other notices leave it out.
     → the writer's reply line, or "" (nobody told)."""
-    h = _hooks()
+    hk = _hooks()
     if getattr(_writes.TERMINAL_ROW, "on", False):      # a terminal-prompt row (a script's notification of its own) tells no session
         return ""
     if not closing:
@@ -1202,10 +1202,10 @@ def tell_owner_close(gid: str, item: dict[str, Any], writer: str, closing: bool,
     owner, project = holder(item), str(meta.get("project") or "")
     if not tell_owner_on() or not _owner_is_session(owner):
         return ""
-    oid, wid = h.session_id(owner), h.session_id(writer)
-    if not oid or not wid or wid == oid or oid in {h.session_id(h) for h in heard} or h.fy_flag(gid) == "mute":
+    oid, wid = hk.session_id(owner), hk.session_id(writer)
+    if not oid or not wid or wid == oid or oid in {hk.session_id(h) for h in heard} or hk.fy_flag(gid) == "mute":
         return ""
-    if not front_keeper(owner, project)[0] or h.foryou_key(gid, "closed", item) in _FORYOU_FELL:
+    if not front_keeper(owner, project)[0] or hk.foryou_key(gid, "closed", item) in _FORYOU_FELL:
         return ""
     who, olabel, subject = _session_label(writer) or "a session", _session_label(owner), str(item.get("subject") or "")
     tell_kind("close", gid, oid, f"{_FOR_OWNER} [stackshot] {_gh.shown(gid)} {subject}: {_closed_by(item, who)} \u2192 {notice_link(gid)}", tag="owner")      

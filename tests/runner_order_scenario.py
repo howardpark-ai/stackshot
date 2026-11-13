@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.core import runner as R
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 
 class Clock:

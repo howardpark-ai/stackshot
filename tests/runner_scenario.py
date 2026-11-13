@@ -303,6 +303,7 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.service import telling
 server._publish = lambda: None
 ticks = server._minute_ticks()
 names = [t.name for t in ticks]
