@@ -31,7 +31,7 @@
 # The suites are every tests/*_scenario.py: a new suite is a new file, not an edit here.
 # THE FULL RUN IN SHARDS. The measured run was one long job on one runner (and every release waited for it) while the
 # other runners sat idle. In a full run the `shards` job makes the plan once (tests/suitemap.py plan --of 6: every suite in exactly one of six lists, balanced by
-# the map's measured times, each suite by its time as the run will have it, traced or plain, or by a hash of the name without a map) and hands the six lists on as outputs; the `measure` job is a matrix of 6 jobs on the same labels, each
+# the map's measured times, each suite by its time as the run will have it, traced or plain, or by a hash of the name without a map) and hands the six lists on as outputs, with the suites the run traces (`traced`, asked once here: every shard traces those and none asks again); the `measure` job is a matrix of 6 jobs on the same labels, each
 # measuring the list it is given (so a cache miss in one of them cannot change what it runs) and handing its map on as an
 # artifact. The `suites` job then merges them (tests/suitemap.py merge) and keeps, publishes and audits the map (main saves it to the cache, when the run is main's); its step
 # "run every suite, measured" passes only when every shard passed and the merged map holds every suite exactly once. release.sh (main_green) reads
@@ -182,6 +182,7 @@ jobs:
       shard5: ${{ steps.plan.outputs.shard5 }}
       large: ${{ steps.plan.outputs.large }}        # a pull request only: `true` when its selection is large (SHARD_MIN suites or more) and runs in the shards
       selected: ${{ steps.select.outputs.selected }}   # a pull request only: the suites its change reaches, which the `suites` job runs when the selection is not large
+      traced: ${{ steps.plan.outputs.traced }}         # a measured run only: the suites it puts strace on (`-` none), asked once here so every shard traces the same ones; empty: not predicted, each shard decides for itself
     steps:
       - name: scratch goes to the runner's temp folder
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
@@ -259,11 +260,13 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
           SELECTED: ${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}
+          TRACED: ${{ needs.shards.outputs.traced }}
         run: |
           case $SELECTED in *[!a-z0-9_\ ]*) echo "the plan holds only names of suites, separated by spaces"; exit 2 ;; esac
+          case $TRACED in *[!a-z0-9_\ -]*) echo "the plan holds only names of suites, separated by spaces"; exit 2 ;; esac
           [ -n "$SELECTED" ] || { echo "shard $SHARD has no suite"; exit 0; }
           echo "shard $SHARD: $SELECTED"
-          exec uv run --locked --only-group tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py
+          exec uv run --locked --only-group tests python tests/suitemap.py measure -T "$MEASURE_T" --prev .suitemap/map.json ${TRACED:+--trace "$TRACED"} --map ".suitemap/shard-$SHARD.json" $SELECTED   # exec: a cancel's signal reaches suitemap.py; the plan's `traced` when it made one
       # A pull request's large selection: this shard's list of the selection, plainly, as the suites job runs a small one. Nothing is measured, so there is no map to hand on (the step below finds no file)
       - name: run this shard's suites
         if: github.event_name == 'pull_request'

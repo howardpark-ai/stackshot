@@ -8,7 +8,7 @@ module level every suite that ran the file, a comment only the suites that read 
 that opened it, the harness all; and the audit reports a suite the earlier map skipped.
 
     tests/run-suite suitemap        → exit 0 / 1"""
-import importlib.util, json, os, pathlib, re, shutil, subprocess, sys, tempfile, textwrap
+import datetime, importlib.util, json, os, pathlib, re, shutil, subprocess, sys, tempfile, textwrap
 SCR = os.path.dirname(os.path.abspath(__file__))
 import _scratch
 tmp = _scratch.mkdtemp(prefix="suitemaptest-"); T = pathlib.Path(tmp)
@@ -1182,15 +1182,57 @@ if use_strace:
           r.returncode == 0 and "tracing 1 of 4" in r.stderr and m6["suites"].get("b", {}).get("files") == S["b"]["files"]
           and m6["suites"]["b"].get("traced") == S["b"].get("traced") and m6["suites"]["a"].get("traced") != S["a"].get("traced"),
           (r.returncode, r.stderr[-800:], m6["suites"].get("b")))
-    check("measure: a suite's time is kept under the kind of run it had (strace_seconds for the traced a, nostrace_seconds for b) and the other kind is carried from the earlier map",
-          m6["suites"]["a"].get("strace_seconds") == m6["suites"]["a"]["seconds"] and "nostrace_seconds" not in m6["suites"]["a"]
-          and m6["suites"]["b"].get("nostrace_seconds") == m6["suites"]["b"]["seconds"] and m6["suites"]["b"].get("strace_seconds") == S["b"]["strace_seconds"]
-          and all(e.get("strace_seconds") == e["seconds"] for e in S.values()), (m6["suites"]["a"], m6["suites"]["b"], S["b"]))
-    # plan, on the checkout the earlier map did not measure: the one change reaches suite a only, so the run will trace one suite of four, and the plan says so
+    traced_by_measure = sorted(n for n, e in m6["suites"].items() if e.get("traced") != S[n].get("traced"))
+    check("measure: a suite's time is kept under the kind of run it had (strace_seconds for the traced suite, nostrace_seconds for the others), the first run's maps hold strace_seconds alone",
+          traced_by_measure == ["a"] and m6["suites"]["a"].get("strace_seconds") == m6["suites"]["a"]["seconds"]
+          and all(m6["suites"][n].get("nostrace_seconds") == m6["suites"][n]["seconds"] for n in ("b", "c", "z"))
+          and all(e.get("strace_seconds") == e["seconds"] and "nostrace_seconds" not in e for e in S.values()), (traced_by_measure, m6["suites"]))
+    # an earlier map that holds both times of every suite, distinct values: the traced suite keeps the plain time it had and takes a new traced time, each other suite the reverse
+    both = json.loads(MAP.read_text())
+    for i, (n, e) in enumerate(sorted(both["suites"].items())):
+        e["strace_seconds"], e["nostrace_seconds"] = 1000.0 + i, 500.0 + i
+    BOTH = T / "both.json"; BOTH.write_text(json.dumps(both))
+    MAP3 = T / "map3.json"
+    r = tool("measure", "--prev", str(BOTH), "--map", str(MAP3), "-T", "120")
+    m8 = json.loads(MAP3.read_text()) if MAP3.exists() else {"suites": {}}
+    carry_ok = r.returncode == 0 and bool(m8["suites"])
+    for n, e in m8["suites"].items():
+        was = both["suites"][n]
+        if n == "a":   # traced now: its own time is the new traced one, the plain one stays as the earlier map had it
+            carry_ok = carry_ok and e["strace_seconds"] == e["seconds"] and e["strace_seconds"] != was["strace_seconds"] and e["nostrace_seconds"] == was["nostrace_seconds"]
+        else:          # not traced: the new plain time, the traced time as it was
+            carry_ok = carry_ok and e["nostrace_seconds"] == e["seconds"] and e["nostrace_seconds"] != was["nostrace_seconds"] and e["strace_seconds"] == was["strace_seconds"]
+    check("measure: each time is kept under its kind and the other kind is carried from the earlier map (a traced suite keeps its plain time, an untraced one its traced time)", carry_ok, (r.returncode, r.stderr[-400:], m8["suites"]))
+    # plan, on the checkout the earlier map did not measure: the one change reaches suite a only, so the run will trace exactly the suite measure traced, and the plan prints which one
     r = tool("plan", "--of", "2", "--map", str(MAP))
     pl = [x.split("=", 1)[1].split() for x in r.stdout.splitlines() if x.startswith("shard")]
-    check("plan: asks the same question measure does (which suites the change since the map's commit reaches): 1 of 4 traced, and every suite in exactly one shard",
-          r.returncode == 0 and "the run traces 1 of 4 suites" in r.stderr and sorted(x for p in pl for x in p) == ["a", "b", "c", "z"], (r.returncode, r.stdout, r.stderr[-600:]))
+    pl_traced = [x.split("=", 1)[1].split() for x in r.stdout.splitlines() if x.startswith("traced=")]
+    check("plan: asks the same question measure does and says the answer: the suites it prints in `traced=` are the ones measure traced (a), every suite is in exactly one shard",
+          r.returncode == 0 and "the run traces 1 of 4 suites" in r.stderr and pl_traced == [traced_by_measure] and sorted(x for p in pl for x in p) == ["a", "b", "c", "z"], (r.returncode, r.stdout, r.stderr[-600:]))
+    # `measure --trace` takes the plan's answer and does not ask again, though the earlier map has since aged: every suite's stamp 25 h old would make measure trace all four on its own clock
+    aged = json.loads(MAP.read_text())
+    for e in aged["suites"].values():
+        e["traced"] = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=25)).isoformat(timespec="seconds")
+    AGED = T / "aged.json"; AGED.write_text(json.dumps(aged))
+    r = tool("measure", "--prev", str(AGED), "--map", str(T / "map-own.json"), "-T", "120")
+    own = json.loads((T / "map-own.json").read_text())["suites"] if (T / "map-own.json").exists() else {}
+    r2 = tool("measure", "--prev", str(AGED), "--trace", "a", "--map", str(T / "map-told.json"), "-T", "120")
+    told = json.loads((T / "map-told.json").read_text())["suites"] if (T / "map-told.json").exists() else {}
+    r3 = tool("measure", "--prev", str(AGED), "--trace", "-", "--map", str(T / "map-none.json"), "-T", "120")
+    none = json.loads((T / "map-none.json").read_text())["suites"] if (T / "map-none.json").exists() else {}
+    r4 = tool("measure", "--prev", str(AGED), "--trace", "b", "--map", str(T / "map-b.json"), "-T", "120", "b", "c")
+    only_b = json.loads((T / "map-b.json").read_text())["suites"] if (T / "map-b.json").exists() else {}
+    stamped = lambda sm_: sorted(n for n, e in sm_.items() if e.get("traced") != aged["suites"][n]["traced"])
+    check("measure --trace: the suites it names are traced and no others, whatever the clock says of the earlier map (own decision on the aged map: all four; told `a`: a; told `-`: none; told `b` of the list b c: b alone)",
+          r.returncode == r2.returncode == r3.returncode == r4.returncode == 0 and stamped(own) == ["a", "b", "c", "z"] and stamped(told) == ["a"] and stamped(none) == [] and stamped(only_b) == ["b"]
+          and "as the plan decided" in r2.stderr, (stamped(own), stamped(told), stamped(none), stamped(only_b), r2.stderr[-300:]))
+    # a suite the earlier map has no files for is traced even when the plan did not name it (this shard's cache differs from the plan's)
+    nofiles = json.loads(MAP.read_text()); del nofiles["suites"]["c"]["files"]
+    NOF = T / "nofiles.json"; NOF.write_text(json.dumps(nofiles))
+    r = tool("measure", "--prev", str(NOF), "--trace", "a", "--map", str(T / "map-nof.json"), "-T", "120")
+    nof = json.loads((T / "map-nof.json").read_text())["suites"] if (T / "map-nof.json").exists() else {}
+    check("measure --trace: a suite the earlier map holds no files for is traced anyway (it has none to keep)",
+          r.returncode == 0 and sorted(n for n, e in nof.items() if "files" in e and e.get("traced") != S[n].get("traced")) == ["a", "c"], (r.returncode, r.stderr[-300:]))
     git("checkout", "-q", "main")
 
     # a suite that fails only when measured (the release suite, which timed out at the measuring limit while it passes plainly) is `ok: false`: it keeps its last clean measurement beside the
@@ -1331,8 +1373,20 @@ check("shard plan: a suite's time for the run is its own kind's, the other kind'
       sm.expected_seconds(only_plain, True) == 40 * sm.TRACE_COST and sm.expected_seconds(only_plain, False) == 40 and sm.expected_seconds(only_trace, False) == 90 / sm.TRACE_COST
       and sm.expected_seconds(only_trace, True) == 90 and sm.expected_seconds(old_entry, True) == 70 and sm.expected_seconds(old_entry, None) == 70
       and sm.expected_seconds(EARLIER["suites"]["release"], None) == 93 and sm.expected_seconds(EARLIER["suites"]["release"], True) == 184, None)
+# the question of which suites a run traces gets a time budget in the plan job: past it the plan goes without (an answer that took 2.5 to 3 minutes over 20 to 30 commits must not hold the plan job)
+_real_trace_set, _t0, _alarm = sm.trace_set, time.time(), signal.getsignal(signal.SIGALRM)
+sm.trace_set = lambda *a: time.sleep(30)
+try:
+    try:
+        sm.predicted_trace(EARLIER, every_name[:3], budget=1); _late = None
+    except TimeoutError as e:
+        _late = e
+finally:
+    sm.trace_set = _real_trace_set
+check("plan: the prediction of the traced suites stops at its budget (a TimeoutError after 1 s, not 30), and leaves the SIGALRM handler and the alarm as it found them",
+      isinstance(_late, TimeoutError) and time.time() - _t0 < 10 and signal.getsignal(signal.SIGALRM) == _alarm and signal.alarm(0) == 0, (_late, time.time() - _t0))
 y = yaml.safe_load(open(os.path.join(SCR, "..", ".github", "workflows", "tests.yml"), encoding="utf-8"))
-pj, mj, uj =y["jobs"]["shards"], y["jobs"]["measure"], y["jobs"]["suites"]
+pj, mj, uj = y["jobs"]["shards"], y["jobs"]["measure"], y["jobs"]["suites"]
 plan_step = next(st for st in pj["steps"] if st.get("id") == "plan")
 measure_step = next(st for st in mj["steps"] if st.get("name") == "run this shard's suites, measured")
 suites_steps = [st.get("name") for st in uj["steps"]]
@@ -1348,7 +1402,7 @@ check(f"tests.yml: the plan is made once, by the shards job: `suitemap.py plan -
 select_step = next(st for st in pj["steps"] if st.get("id") == "select")
 pr_shard_step = next(st for st in mj["steps"] if st.get("name") == "run this shard's suites")
 check("tests.yml: the shards job makes a pull request's selection once (the `select` step, for a pull request only, `suitemap.py select --map .suitemap/map.json --to HEAD`, a failure of it is every suite) and hands it on as `selected`, with `large` from the plan",
-      [k for k in pj["outputs"] if not k.startswith("shard")] == ["large", "selected"] and "steps.plan.outputs.large" in pj["outputs"]["large"] and "steps.select.outputs.selected" in pj["outputs"]["selected"]
+      [k for k in pj["outputs"] if not k.startswith("shard")] == ["large", "selected", "traced"] and "steps.plan.outputs.large" in pj["outputs"]["large"] and "steps.select.outputs.selected" in pj["outputs"]["selected"]
       and select_step["if"].strip() == "github.event_name == 'pull_request'" and "suitemap.py select --map .suitemap/map.json --to HEAD" in select_step["run"] and "sel=all" in select_step["run"]
       and plan_step["env"]["SELECTED"] == "${{ steps.select.outputs.selected }}" and "--only $SELECTED" in plan_step["run"] and "pull_request" in plan_step["run"], (select_step, plan_step))
 check("tests.yml: a pull request's shards run the plan's list plainly (`suitemap.py run`: no measure, no --prev, no map, no strace, no cache read), on a pull request only; main's and the entry's measured run is for every other event",
@@ -1360,6 +1414,9 @@ check("tests.yml: every shard runs the list the plan job gave it (its own output
       measure_step["env"]["SELECTED"] == "${{ needs.shards.outputs[format('shard{0}', matrix.shard)] }}" and "measure" in measure_step["run"] and "$SELECTED" in measure_step["run"]
       and not any(re.search(r"suitemap\.py (shard|plan)\b", st.get("run", "")) for st in mj["steps"])
       and not any(re.search(r"suitemap\.py (shard|plan)\b", st.get("run", "")) for st in uj["steps"]), (measure_step, [st.get("name") for st in mj["steps"]]))
+check("tests.yml: the plan's `traced` output reaches every shard's measure step (env TRACED, from needs.shards.outputs.traced) and is passed as `--trace` only when set, as one argument",
+      pj["outputs"]["traced"] == "${{ steps.plan.outputs.traced }}" and measure_step["env"]["TRACED"] == "${{ needs.shards.outputs.traced }}"
+      and '${TRACED:+--trace "$TRACED"}' in measure_step["run"] and re.search(r"case \$TRACED in \*\[!a-z0-9_\\ -\]\*\)", measure_step["run"]), (pj["outputs"].get("traced"), measure_step.get("env"), measure_step["run"]))
 check("tests.yml: the suites job waits for the proof, the plan and the shards and keeps the steps release.sh reads, after the merge of the shards' maps and the stamped map; it is never skipped (`!cancelled()`, and no job name)",
       sorted(uj["needs"]) == ["measure", "proof", "shards"] and uj["if"].replace("${{", "").replace("}}", "").strip() == "!cancelled()" and "name" not in uj
       and suites_steps.index("merge the shards' maps") < suites_steps.index("take the stamped map") < suites_steps.index("run every suite, measured") < suites_steps.index("audit the selection"), (uj.get("needs"), suites_steps))
@@ -1542,8 +1599,10 @@ def plan_lines(*extra):
     return r.returncode, {l.split("=", 1)[0]: l.split("=", 1)[1].split() for l in r.stdout.splitlines()}
 rc0, pl_nomap = plan_lines(); rc1, pl_timed = plan_lines("--map", str(TIMES)); rc2, pl_miss = plan_lines("--map", str(T / "no-such-map.json"))
 check(f"plan: {sm.SHARDS} lines shard0..shard{sm.SHARDS - 1}=names, the same lists as `shard --index` gives, with a map and without one",
-      rc0 == rc1 == 0 and sorted(pl_nomap) == sorted(pl_timed) == [f"shard{i}" for i in range(sm.SHARDS)]
+      rc0 == rc1 == 0 and sorted(pl_nomap) == [f"shard{i}" for i in range(sm.SHARDS)] and sorted(k for k in pl_timed if k != "traced") == [f"shard{i}" for i in range(sm.SHARDS)]
       and [pl_nomap[f"shard{i}"] for i in range(sm.SHARDS)] == nomap and [pl_timed[f"shard{i}"] for i in range(sm.SHARDS)] == timed, (pl_nomap, nomap))
+check("plan: with a map the whole plan adds the line `traced=` (the suites the run traces, here every suite: the map has no commit to narrow by), and without a map it adds none, so each shard decides for itself",
+      "traced" not in pl_nomap and sorted(pl_timed.get("traced", [])) == every, (pl_timed.get("traced"), every))
 check("plan: a map that is not there (a cache miss) gives the hash plan, for all six lists alike, every suite in exactly one", rc2 == 0 and pl_miss == pl_nomap and once(list(pl_miss.values())), pl_miss)
 (T / "garbage.json").write_text("not json")
 check("plan: an unreadable map gives the hash plan too", plan_lines("--map", str(T / "garbage.json"))[1] == pl_nomap)

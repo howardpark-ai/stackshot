@@ -25,11 +25,12 @@ What a suite touches, at two grains:
 
 Usage (run from the checkout; `measure` in the test environment, which has coverage; the rest need only git):
   tests/suitemap.py list                                  every suite, one per line (tests/*_scenario.py)
-  tests/suitemap.py measure --map OUT [--prev MAP] [-T secs] [suite…]
+  tests/suitemap.py measure --map OUT [--prev MAP] [--trace "a b"] [-T secs] [suite…]
                                                           run the suites measured (all when none is named), write the map
                                                           (SUITEMAP_STRACE=0: coverage only, so files are not measured; with
                                                           --prev, strace only the suites the change since that map reaches
-                                                          and those traced over 24 h ago, the rest keep their file half);
+                                                          and those traced over 24 h ago, the rest keep their file half; with
+                                                          --trace, strace exactly the suites named, as `plan` decided: `-` is none);
                                                           exit 1 when a suite fails (a suite that fails only when measured
                                                           passes on a plain rerun: a warning, and the map marks it `ok: false`, keeping the
                                                           earlier clean measurement beside it as `carry` for a reader of the map; release.sh no longer reads it)
@@ -40,7 +41,9 @@ Usage (run from the checkout; `measure` in the test environment, which has cover
                                                           --only it plans just the suites named (a pull request's selection; none is a
                                                           plan of nothing, never of every suite) and adds the line `large=true|false`:
                                                           true when they number SHARD_MIN or more (see *Shards*). Each suite is weighed by the
-                                                          time of the kind of run it will get, traced or plain (see *Shards*)
+                                                          time of the kind of run it will get, traced or plain (see *Shards*); a plan of
+                                                          every suite made with a map adds the line `traced=a b c` (`-`: none), the suites
+                                                          the run traces, for `measure --trace`
   tests/suitemap.py shard --of N --index I [--map MAP]   one line of that plan: the suites of shard I (0 to N-1), one per line
   tests/suitemap.py merge --map OUT SHARD…                one map out of the shards' maps (one commit); exit 1 when a suite is
                                                           in two of them or a suite of the checkout is in none (the map is
@@ -271,7 +274,10 @@ of the name. A suite's time depends on whether the run puts strace on it (1.6 ti
 20 suites of 233 and the next one all 233, and the plan made from the first put `release` at 93 s and `install` at 41 s in one shard, where they took 184 s and 111 s): the map keeps, per suite, the
 time of its last run that traced it (`strace_seconds`) and of its last run that did not (`nostrace_seconds`), and `plan` asks `trace_set`, the function `measure` decides by, which suites the run
 will trace, then weighs each by the time of that kind of run (the other kind scaled by TRACE_COST when the map has only that one; a map from before the two keys, or a plan that cannot tell, by `seconds`
-as before). A pull request's selection runs plainly and is weighed as a run that traces nothing. The plan is made ONCE per run, by the `shards` job (`plan`, with the map from the cache, or none: a cache miss gives the hash
+as before), and hands that answer to the shards as the line `traced=` (`measure --trace`): it is asked once, at one time, so the plan and the six shards cannot differ about it (a day's group of suites
+ages out together, and clocks minutes apart would split it), and the minutes `selection` takes over a long gap of commits (2.5 to 3 minutes for 20 to 30) are spent once, in the plan job, not again in every shard: the plan job
+is that much longer and each shard that much shorter. The question gets PLAN_TRACE_BUDGET seconds; past it, or when it fails, the plan weighs by the recorded times and prints no `traced=`, and each shard decides for itself as before.
+A pull request's selection runs plainly and is weighed as a run that traces nothing. The plan is made ONCE per run, by the `shards` job (`plan`, with the map from the cache, or none: a cache miss gives the hash
 plan, for all six lists alike), and handed to the `measure` matrix as job outputs; each shard runs the list it is given and
 does not plan, so a cache miss in one shard cannot make it plan differently from the others. `merge` still finds the suite that
 is in none or in two, and the run fails.
@@ -1677,10 +1683,19 @@ def measure(args):
     # TRACE_MAX_AGE ago; the others keep the file half of their earlier measurement.
     prev = load_map(args.prev) if args.prev else None
     now = datetime.datetime.now(datetime.timezone.utc)
-    trace, narrowed = trace_set(prev, names, commit, now) if use_strace else (set(), False)
-    if narrowed:
-        print(f"suitemap: tracing {len(trace)} of {len(names)} suites (the change since {prev['commit'][:12]} reaches them, or "
-              f"their files were traced over {TRACE_MAX_AGE} h ago); the others keep their earlier file measurement", file=sys.stderr)
+    if not use_strace:
+        trace = set()
+    elif args.trace is not None:
+        # the plan job decided, once for every shard and at one time, which suites the run traces (`plan` prints it as the line `traced=`): this shard does not ask again. A suite that
+        # would keep an earlier file measurement it does not have (this shard's cache differs from the plan's) is traced anyway
+        trace = set(names) & set(args.trace.split())
+        trace |= {n for n in names if "files" not in (((prev or {}).get("suites") or {}).get(n) or {})}
+        print(f"suitemap: tracing {len(trace)} of {len(names)} suites, as the plan decided; the others keep their earlier file measurement", file=sys.stderr)
+    else:
+        trace, narrowed = trace_set(prev, names, commit, now)
+        if narrowed:
+            print(f"suitemap: tracing {len(trace)} of {len(names)} suites (the change since {prev['commit'][:12]} reaches them, or "
+                  f"their files were traced over {TRACE_MAX_AGE} h ago); the others keep their earlier file measurement", file=sys.stderr)
     # compile the bytecode first: a measured Python then opens a .py only to read it as text
     subprocess.run([sys.executable, "-m", "compileall", "-q", "-x", r"/tests/.*_(scenario|check)\.py$", ROOT],
                    capture_output=True)
@@ -1825,6 +1840,22 @@ def shard(args):
     return 0
 
 
+PLAN_TRACE_BUDGET = 300   # seconds `plan` may spend on which suites the run traces (`selection` over a long gap of commits took 2.5 to 3 minutes): past it the plan goes without
+
+def predicted_trace(m, planned, budget=None):
+    """trace_set at one fixed time, within `budget` seconds (PLAN_TRACE_BUDGET): the set of suites; TimeoutError past the budget (SIGALRM, in the main thread of a process of its own)"""
+    budget = PLAN_TRACE_BUDGET if budget is None else budget
+    def late(_sig, _frame):
+        raise TimeoutError(f"no answer in {budget} s")
+    old = signal.signal(signal.SIGALRM, late)
+    signal.alarm(budget)
+    try:
+        return trace_set(m, planned, git("rev-parse", "HEAD").strip(), datetime.datetime.now(datetime.timezone.utc))[0]
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
 def plan(args):
     """the whole plan, one `shardI=names` line a shard (names separated by spaces: a suite's name has none), as a job's outputs"""
     if args.of < 1:
@@ -1843,15 +1874,21 @@ def plan(args):
     # cannot be had (the earlier map's commit is not to be fetched, the diff fails) the plan weighs each suite by its recorded time, as it did before
     traced = set()
     if only is None:
-        try:
-            traced, _ = trace_set(m, planned, git("rev-parse", "HEAD").strip(), datetime.datetime.now(datetime.timezone.utc)) if m else (None, False)
-        except Exception as e:
-            print(f"suitemap: the suites the run will trace are not known ({e}): planning by the recorded times", file=sys.stderr)
-            traced = None
+        traced = None
+        if m:
+            try:
+                traced = predicted_trace(m, planned)
+            except Exception as e:
+                print(f"suitemap: the suites the run will trace are not known ({e}): planning by the recorded times; each shard decides for itself", file=sys.stderr)
     if traced is not None and only is None and m:
         print(f"suitemap: the run traces {len(traced)} of {len(planned)} suites: weighed by the time of that kind of run", file=sys.stderr)
     for i, names in enumerate(shard_plan(planned, args.of, m, traced)):
         print(f"shard{i}={' '.join(names)}")
+    if traced is not None and only is None and m:
+        # handed to every shard, which traces exactly these (`measure --trace`): the question is answered once, at one time, so the plan and the shards cannot differ about it (a
+        # suite's files age out at TRACE_MAX_AGE; two clocks a few minutes apart split a day's group of suites), and the shards do not each spend the minutes `selection` takes.
+        # `-` is none: an empty value would read as "not predicted"
+        print(f"traced={' '.join(sorted(traced)) or '-'}")
     if only is not None:
         print(f"large={'true' if len(only) >= SHARD_MIN else 'false'}")
     return 0
@@ -2532,7 +2569,7 @@ def main():
     ap = argparse.ArgumentParser(prog="tests/suitemap.py", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
-    p = sub.add_parser("measure"); p.add_argument("--map", required=True); p.add_argument("--prev"); p.add_argument("-T", "--timeout", type=int, default=900); p.add_argument("suites", nargs="*")
+    p = sub.add_parser("measure"); p.add_argument("--map", required=True); p.add_argument("--prev"); p.add_argument("--trace"); p.add_argument("-T", "--timeout", type=int, default=900); p.add_argument("suites", nargs="*")
     p = sub.add_parser("run"); p.add_argument("-T", "--timeout", type=int, default=600); p.add_argument("suites", nargs="*")
     p = sub.add_parser("plan"); p.add_argument("--of", type=int, required=True); p.add_argument("--map"); p.add_argument("--only", nargs="*")
     p = sub.add_parser("shard"); p.add_argument("--of", type=int, required=True); p.add_argument("--index", type=int, required=True); p.add_argument("--map")
