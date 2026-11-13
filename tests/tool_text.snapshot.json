@@ -328,7 +328,7 @@
         },
         "mover": {
           "default": "",
-          "description": "Who moves the item now: the owner, a session name or id, or the project's background agent. A front agent (a session the owner talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give.",
+          "description": "Who moves the item now: the owner, a session name or id, or the project's background agent. A front agent (a session the owner talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give. On an update that sets no needs, the session needs names for the mover it replaces is swapped for the new one.",
           "required": false,
           "type": "string"
         },
@@ -854,7 +854,7 @@
         },
         "mover": {
           "default": "",
-          "description": "Who moves the item now: the owner, a session name or id, or the project's background agent. A front agent (a session the owner talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give.",
+          "description": "Who moves the item now: the owner, a session name or id, or the project's background agent. A front agent (a session the owner talks to) only by itself: it gets no hand-off notice, so a create or update from another session that sets mover=<front agent> gets the project's builder instead (the reply and History say so; send mover=<front agent> again and it is kept as sent; with no builder it is refused unless sender and target are both front agents of the item's project); message the front agent for a check or an answer only it can give. On an update that sets no needs, the session needs names for the mover it replaces is swapped for the new one.",
           "required": false,
           "type": "string"
         },

@@ -28,7 +28,7 @@ background agents, best first; when none of them is free, the background agents 
 item per 24 hours. At most `MAX_PER_TICK` items are handed on in one pass.
 
 THE BALANCER (`[audit] balance`, on by default; `server._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
-builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance_minutes` (default 10) goes to the builder with the FEWEST open items; the former mover is told to disregard it.
+builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance_minutes` (default 10) goes to the builder of its OWN PROJECT with the FEWEST open items; the former mover is told to disregard it.
 
   balance_enabled() / balance_minutes()         `[audit] balance` (on unless a TOML false) and `[audit] balance_minutes` (default 10, floor 1), both read at use
   balance_queue(items, now, window, front)      the queue rule (model/queued.py) read over the balancer's own window, whatever `[model] queued_behind` says: {queued item: the item it waits behind}
@@ -48,11 +48,11 @@ An item is moved when all of these hold:
     no pull request event (a CI result, review, comment, merge or commit) as its last activity;
   - it was not moved by the idle hand-over (`metadata.hand_idle`) nor by the balancer in the last 24 hours and has been moved fewer than `BALANCE_LIFETIME` (2) times; one at the lifetime cap is left to the ladders, and -main is told once (`capped_at`).
 
-Which builder: the candidates are the builders only (`server._balance_builders`: the item's project's background agents whose mandate says build, maintain, merge or engineer, then those of any other project) less any whose pane
+Which builder: the candidates are the builders only (`server._balance_builders`: the item's own project's background agents whose mandate says build, maintain, merge or engineer, and no other project's) less any whose pane
 is known dead, the item's own mover, every name in the hand-off record's `tried` and any front agent; the pick is the one with the fewest open items (a busy pane only breaks a tie: an idle one first; then the candidates' order).
 The move must improve the spread, the mover's count including the item: an untaken hand-off moves when `to == 0 or to + 1 < from` (a lone item goes to an empty builder; a swap does not happen), a queued item only when
 `to + 1 < from`. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With NO eligible candidate (no live builder) the item stays, one History line says so and -main is told once per item per 24 hours (`none_at`; the pass looks again every minute, so a builder that comes back is used at once and its move ends the note) and ONLY when the role map holds another builder than the mover, which is dead or gone (`balance_others`): with no
-other builder, or a pick that is no improvement, it is silent (a log line only). The other projects' candidates are those whose mandate says `build` (as the idle hand-over's fallback), the item's own project's those that build, maintain, merge or engineer.
+other builder, or a pick that is no improvement, it is silent (a log line only). A project whose only builder is the mover therefore keeps its item, however idle another project's builders are.
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
