@@ -46,6 +46,7 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
+from stackshot.service import gates
 from stackshot.web.ui import render as UR
 
 H = 3600.0; DAY = 86400.0
@@ -253,11 +254,11 @@ def srd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def smt(i): return srd(i)["metadata"]
 
 try:
-    server._gate_model_args({"wait_kind": "time"}, {"wait": True}); msg = ""
+    gates.gate_model_args({"wait_kind": "time"}, {"wait": True}); msg = ""
 except Exception as e:  # noqa: BLE001
     msg = str(e)
 check("refusal text: clear_wait names the five a caller can pass, never `until` (it is no write field yet)", msg.startswith("Refused: clear_wait drops wait_kind") and "post_wake_mover" in msg and "until" not in msg and "does not go with a new wait_kind" in msg, msg)
-_, dropped = server._gate_model_args({}, {"wait": True})
+_, dropped = gates.gate_model_args({}, {"wait": True})
 check("clear_wait still drops the whole wait group, `until` among it", "until" in dropped and "wait_kind" in dropped, dropped)
 
 g1 = sitem(901, wait_kind="time", until=day(3), needs=[BACK], mover=BACK)

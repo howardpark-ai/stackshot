@@ -84,7 +84,7 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 # section 15's invariant, checked after every save of the run: an OPEN record never names someone but the item's mover (handoff.stale)
@@ -737,7 +737,7 @@ check("11 follow: the server's own save (no writer: a wake, an idle pass) that c
       (mt(24).get("handoff") or {}).get("to") == "home-peer" and (mt(24).get("handoff") or {}).get("from") == "stackshot" and not (mt(24).get("handoff") or {}).get("delivered_at") and not pushes_to("home-peer", "a24"), (mt(24), pushes()))
 refusal_ok = True
 try:
-    server._gate_handoff("a18", rd(18), {**rd(18), "metadata": {**mt(18), "mover": "home-dead"}}, "x via a script on testbox")
+    gates.gate_handoff("a18", rd(18), {**rd(18), "metadata": {**mt(18), "mover": "home-dead"}}, "x via a script on testbox")
 except Exception:
     refusal_ok = False
 check("11 no record: …and a script's write is not refused by the send-time guard", refusal_ok, None)

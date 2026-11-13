@@ -64,7 +64,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import gates; from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
@@ -246,7 +246,7 @@ check("5 …nor a closed item", server._wake_park("a9101", now).get("parked") is
 fixed_ids = (101, 201, 202, 301, 302, 9071)
 check("5 no fix closed an item or wrote an ask: every item the fixes touched is still open, and none carries an ask it was not given",
       all(rd(i)["status"] == "open" for i in fixed_ids) and all(not mt(i).get("ask") for i in fixed_ids if i != 202), None)
-check("5 the fix keys are the server's bookkeeping: a write that changes only them is no re-park", SF.MARK in server._REPARK_QUIET and SF.DECLINED in server._REPARK_QUIET, None)
+check("5 the fix keys are the server's bookkeeping: a write that changes only them is no re-park", SF.MARK in gates._REPARK_QUIET and SF.DECLINED in gates._REPARK_QUIET, None)
 
 
 # ================================================================ 6. the review's fixes

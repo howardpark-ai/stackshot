@@ -225,6 +225,11 @@ retired = "Send with an empty box finishes the step"
 use = "Done finishes the step (a note in the box goes along to the next owner); Send note keeps it open"
 allow = []
 
+[[term]]
+retired = "his Send on the step"
+use = "`his Done or Send note on the step`: the step form has two buttons, there is no single Send on it"
+allow = []
+
 # ---- the silence check (the ten-minute silence pass, the 45-minute news ask): retired. An item on an agent with no activity for an hour gets the hourly audit line, and one
 # the audit marked idle is handed on by the idle hand-over; nothing asks the mover for news at 45 minutes any more. The quiet ladder (`via` = "silence" in a stored ladder entry,
 # the dates pass's entry) keeps its own wording: "asked for news" and "is still yours: nothing written for" are not these terms.

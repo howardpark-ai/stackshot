@@ -1,7 +1,7 @@
 """Scenario test for: a step that opens with a front agent is refused on an item another session moves — fixture data, no live store, no network.
 
 A front agent (a user-facing agent on a project's agents map) gets no work notice and its own reminder wakes are refused, so a step it is given (or gives itself) on an item another session
-moves can never fire. The create and update tools refuse a NEW or reworded open step of that kind (server._gate_front_step); the refusal says who to give the step to or message instead.
+moves can never fire. The create and update tools refuse a NEW or reworded open step of that kind (service/gates.py gate_front_step); the refusal says who to give the step to or message instead.
 
   1  create: a front agent's step on an item a background agent moves is refused (the refusal quotes the step, names the agent, its project, the mover and the way out), whoever writes it; nothing is stored
   2  allowed: the item's own mover as opener (the front agent's own item), a background agent as opener, an item nobody moves, an owner-moved item, a step that names no one

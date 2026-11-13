@@ -107,6 +107,7 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
       A.file_roles(_bg).get("home-both", {}).get("role") == "front", A.file_roles(_bg).get("home-both"))
 
 # ---- 2. the server's note
+from stackshot.service import gates
 from stackshot.web import server
 from stackshot.projects import project_registry as _projects_registry
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
@@ -199,7 +200,7 @@ check("client read `roles`: the file as written", (st, ct) == (200, "application
 from stackshot.fleet import client as _client
 check("client.py knows the read", "roles" in _client.READS)
 check("the server's own gates keep session_roles: a one-session project's keeper may be named in needs, takes messages unmarked, "
-      "and is no front agent for its notices", server._gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
+      "and is no front agent for its notices", gates.gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
       and server._front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", server._sessions_index()) is None)
 ls = server._sessions_listing("").split("\n")
 row = lambda n: next((l for l in ls if l.startswith(f"- {n} — ")), "")

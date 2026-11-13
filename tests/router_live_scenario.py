@@ -101,6 +101,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
+from stackshot.service import gates
 from stackshot.web import server
 from stackshot.anchors.anchorhub import core
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
@@ -538,13 +539,13 @@ check("roles: …the keeper of a page with no agent and no hub (delta: a one-ses
 cfg(live=False, live_projects=["projects/gamma"], shadow=True)
 check("roles: …[router] live, live_projects and shadow are no longer read: the same entries", a.session_roles() == rl and a.file_roles() == fr)
 cfg()
-try: server._gate_needs_session("work-osprey", "projects/alpha", ""); e = ""
+try: gates.gate_needs_session("work-osprey", "projects/alpha", ""); e = ""
 except ToolError as x: e = str(x)
 check("needs: a retired name-line session is refused, naming who can act", "retired name-line session of projects/alpha" in e and "work-osprey-x" in e and "work-osprey-main" not in e.split("For projects/alpha:")[-1], e)
-check("needs: …a background agent is allowed", server._gate_needs_session("work-osprey-x", "projects/alpha", "") == "work-osprey-x")
+check("needs: …a background agent is allowed", gates.gate_needs_session("work-osprey-x", "projects/alpha", "") == "work-osprey-x")
 check("_hub_sessions: no page offers a keeper any more", all(server._hub_sessions(k)[1] == "" for k in ("projects/alpha", "projects/beta", "projects/delta", "projects/eta")), [server._hub_sessions(k)[1] for k in ("projects/alpha", "projects/beta")])
 cfg(live=False)
-try: server._gate_needs_session("work-osprey", "projects/alpha", ""); e = ""
+try: gates.gate_needs_session("work-osprey", "projects/alpha", ""); e = ""
 except ToolError as x: e = str(x)
 check("needs: [router] live = false does not open the keeper again (e)", "retired name-line session of projects/alpha" in e, e)
 cfg()
@@ -712,7 +713,7 @@ check("completion anchor on a one-session page: the keeper told is the page's ow
 item(21, "projects/eta", "home-beta", status="open", needs=[])
 got = server.stackshot_get("a21")
 check("get shows the -main agent as the mover of an item whose needs names no session and which has no mover stored (the creator is nothing), not the retired name-line session", "mover: home-eta-main" in got and "home-eta (" not in got and "mover: home-eta\n" not in got, got)
-try: server._gate_needs_session("home-eta", "projects/eta", ""); e = ""
+try: gates.gate_needs_session("home-eta", "projects/eta", ""); e = ""
 except ToolError as x: e = str(x)
 check("…the gate refuses naming the retired name-line session", "retired name-line session of projects/eta" in e, e)
 out = server._anchors("projects/eta", who="home-beta")

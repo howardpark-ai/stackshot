@@ -64,6 +64,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
+from stackshot.service import gates
 from stackshot.web import server
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -160,9 +161,9 @@ server.stackshot_update("a15", sender=BACK, wake=day(5), done=[1], wait_reason="
 check("tool: …with a step marked done accepted", wk_(mt(15)) == day(5), mt(15))
 
 # ================================================================ the owner's words in the same write are a reason
-_real_verify = server._said_verify
+_real_verify = gates._said_verify
 VERIFY = {"on": True}      # True: the transcript check passes (a checked entry); False: the real check, which finds no transcript here (an unchecked entry)
-server._said_verify = lambda sess, spec, *a, **k: (sess, {"code": "ok", "ts": time.time(), "checked": True, "detail": "", "prompt_source": ""}) if VERIFY["on"] else _real_verify(sess, spec, *a, **k)
+gates._said_verify = lambda sess, spec, *a, **k: (sess, {"code": "ok", "ts": time.time(), "checked": True, "detail": "", "prompt_source": ""}) if VERIFY["on"] else _real_verify(sess, spec, *a, **k)
 def said(tag="Acked-by", quote="push it out a few days", msg="11111111-1111-4111-8111-000000000001"): return [{"tag": tag, "quote": quote, "msg": msg, "session": U["home-owner"]}]
 doing(40)
 refused_nw("said: a push-out with no words is refused", 40, lambda: upd(40, wake=day(4)), "clock pushed out")

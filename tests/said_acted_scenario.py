@@ -1,4 +1,4 @@
-"""Scenario test for said entries of kind acted (said.py, server._gate_said, tools/next_report.py N4) — fixture data, no live store, no network, no server socket
+"""Scenario test for said entries of kind acted (said.py, gates.gate_said, tools/next_report.py N4) — fixture data, no live store, no network, no server socket
 (the server module is imported and called in-process, on a temporary config; the transcripts are fixture files in a temporary directory, never the host's).
 
 A message the owner sends while a session is working (a reply he got elsewhere, pasted in) is recorded in the transcript as an attachment entry of type
@@ -32,7 +32,7 @@ os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off"
 os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
 for d in ("store/a", "fleet/a", "state/anchor-hub", "brain/projects", "transcripts/-home-x"): (T / d).mkdir(parents=True)
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import said; from stackshot.tools import next_report as NR
+from stackshot.service import gates; from stackshot.web import server; from stackshot.model import said; from stackshot.tools import next_report as NR
 
 fails = []; ran = []
 def check(name, cond, got=None):
@@ -66,7 +66,7 @@ rows = [
 (T / "transcripts/-home-x" / f"{SESS}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
 def gate(*specs, sess=SESS):
-    try: return server._gate_said(list(specs), sess, "home-agent"), ""
+    try: return gates.gate_said(list(specs), sess, "home-agent"), ""
     except Exception as e: return None, str(e)
 words = lambda msg, quote="refund of 12 dollars": {"tag": "Acked-by", "quote": quote, "msg": uid(msg)}
 acted = lambda msg, quote="refund of 12 dollars", **kw: {"kind": "acted", "quote": quote, "msg": uid(msg), **kw}

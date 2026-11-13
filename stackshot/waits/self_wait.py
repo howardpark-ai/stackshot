@@ -12,7 +12,7 @@ the date although nothing stops it. This module judges such a write, in two step
      past the hourly cap ([wait_guard] max_calls). Every outcome other than a plain accept is logged on the server's stderr.
 
 Not judged here, because the wait already names its blocker: a wait on another item (`after`), on the owner's decision or an outside party (`needs` decision or external), a relay, anchor or
-item wait (`wait_kind`), a park that carries its `wait_basis`, and any state that is a wait by itself. The server decides that scope (server.py `_gate_self_wait`); this module holds the
+item wait (`wait_kind`), a park that carries its `wait_basis`, and any state that is a wait by itself. The server decides that scope (service/gates.py `gate_self_wait`); this module holds the
 words, the cap and the call, and takes the facts as arguments so the tests and the server share one copy. `[wait_guard] enabled = false` turns the whole check off."""
 from __future__ import annotations
 

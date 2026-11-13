@@ -10,6 +10,9 @@ told), signs a browser in with the board's cookie, and drives the real flow in C
     back, and the page and its history are unchanged;
   - without script the form is still the plain POST and its 303: the answer is recorded and Back shows the item page
     before the answer (one entry more), as it always did;
+  - the step form of a your-step item (the note box with Done and Send note): Send note is greyed on a blank box with its hint as the
+    title and enabled once there is text; Ctrl+Enter in the box means Done and the notice says the note went along; after a refused post
+    the form is put back as its box says (the page's resync), the text kept;
   - an item page restored from the back-forward cache reloads (a synthetic pageshow with persisted; and whether Chromium here
     restored it from that cache at all, reported, not required: headless Chromium may not use the cache for a no-store page).
 
@@ -51,6 +54,7 @@ def item(i, **meta):
                                                      "metadata": {"owner": OWNER, "project": "projects/alpha", "next": "the next step", **meta}}))
 for i in (1, 2, 3, 4, 6): item(i, needs=["decision"], ask=ASK, options=OPTS)
 item(5)
+for i in (7, 8): item(i, state="your-step", step="Call the office and say done")
 (T / "store/next-id").write_text("20"); (T / "store/anchors.json").write_text("{}")
 (T / "brain/projects/alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n")
 import subprocess
@@ -165,7 +169,42 @@ try:
         check("ctrl+enter: Ctrl+Enter in the box sends it as Send does: the text is recorded as his answer and the page lands on the item with its notice",
               [a.get("text") for a in a6] == ["first line\nsecond line"] and "Sent: your answer is on the item" in pg.text_content("p.isent.ok"), a6)
         ctx.close()
-        ctx.close(); br.close()
+
+        # 7. the step form (a your-step item): Send note is greyed on a blank box with its hint and Done is not; Ctrl+Enter means Done; a failed post puts Send note back as the box says
+        HINT = "Write a note to send it"
+        ctx, pg = tab()
+        pg.goto(BASE + "/items/a7")
+        sn = lambda: pg.evaluate("(() => { const b = document.querySelector('form.ianswer button[value=note]'), d = document.querySelector('form.ianswer button[value=done]'); return [b.disabled, b.title, d.disabled] })()")
+        check("step form: on a blank box Send note is disabled and says why in its title, and Done is enabled", sn() == [True, HINT, False], sn())
+        pg.click("#atext"); pg.keyboard.type("   "); pg.wait_for_timeout(100)
+        check("step form: a box of blanks counts as blank", sn() == [True, HINT, False], sn())
+        pg.keyboard.type("a word"); pg.wait_for_timeout(100)
+        check("step form: with text in the box Send note is enabled and its hint title is gone", sn() == [False, "", False], sn())
+        pg.fill("#atext", ""); pg.wait_for_timeout(100)
+        check("step form: emptying the box greys Send note again with its hint", sn() == [True, HINT, False], sn())
+        pg.fill("#atext", "line one"); pg.wait_for_timeout(100)
+        tt = pg.evaluate("document.querySelector('form.ianswer button[name=act]').title")
+        check("step form: the first button of the form (Done) carries the key as its hover title", tt in ("Ctrl+Enter", "\u2318+Enter"), tt)
+        pg.keyboard.press("Control+Enter"); pg.wait_for_url(re.compile(r".*/items/a7\?sent=donenote.*"))
+        a7 = rd(7)["metadata"]
+        check("step form: Ctrl+Enter in the box means Done: the step is finished and the note goes along (notice: your note went along)",
+              "your note went along" in pg.text_content("p.isent.ok") and a7.get("state") != "your-step" and any(("line one" in json.dumps(a)) for a in a7.get("answers", [])), (pg.text_content("p.isent"), a7))
+        ctx.close()
+
+        # a failed post (a stale token): the form comes back as the box says: blank, Send note greyed with its hint; with text, Send note enabled
+        ctx, pg = tab()
+        pg.goto(BASE + "/items/a8")
+        pg.evaluate("document.querySelector('form.ianswer input[name=token]').value = 'stale'")
+        pg.click('button[name="act"][value="done"]'); pg.wait_for_selector("p.aerr:not([hidden])")
+        check("step form: a refused Done on a blank box shows the server's words, and Send note is greyed again with its hint (Done is back)",
+              pg.text_content("p.aerr").startswith("Nothing sent: refused") and sn() == [True, HINT, False] and "answers" not in rd(8)["metadata"], (pg.text_content("p.aerr"), sn()))
+        pg.fill("#atext", "keep me"); pg.wait_for_timeout(100)
+        pg.click('button[name="act"][value="note"]'); pg.wait_for_selector("p.aerr:not([hidden])")
+        pg.wait_for_function("!document.querySelector('form.ianswer').hasAttribute('aria-busy')")
+        check("step form: a refused Send note with text keeps the text, puts both buttons back (Send note enabled, no title), and writes nothing",
+              pg.input_value("#atext") == "keep me" and sn() == [False, "", False] and "answers" not in rd(8)["metadata"] and rd(8)["metadata"].get("state") == "your-step", (pg.input_value("#atext"), sn(), rd(8)["metadata"]))
+        ctx.close()
+        br.close()
 finally:
     srv.should_exit = True; th.join(timeout=10)
 print(f"ok: answer back check, {len(ran)} checks" if not fails else f"{len(fails)} check(s) failed"); sys.exit(1 if fails else 0)
