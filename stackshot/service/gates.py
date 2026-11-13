@@ -1006,6 +1006,8 @@ def until_in(item_id: str, status: str, until: str, wake: str, ask_by: str, hold
         if at <= _pages.zone_now():
             raise ToolError(f"Refused: until must be in the future ({_cfg.tz_abbr()})")
     if slot == "ask_by":
+        if u.lower() not in h.ask_none and len(u) != 10:
+            raise ToolError(f"Refused: on a relay or event wait until is its ask-by day, YYYY-MM-DD with no time of day (got {u!r}); pass the day alone, e.g. until={u[:10]}")
         return "", u, True, used, given
     return u, "", True, used, given
 
