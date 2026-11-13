@@ -6054,7 +6054,7 @@ def _silence_env() -> Any:
 
 def _silence_tick() -> "dict[str, Any] | None":
     """The ten-minute silence tick: the silence pass with its backstop (`_silence_pass_tick`), and, whatever that did (even a ladder view that could not be built), the hourly audit line (`_hourly_tick`, off by
-    default). Stands still when the audit is off or runs in agent mode."""
+    default) and then the hand-over of the items it found idle (`_hand_idle_tick`, off by default). Stands still when the audit is off or runs in agent mode."""
     if not _cfg.audit_enabled() or _cfg.audit_mode() != "script":
         return None
     try:
@@ -6064,6 +6064,10 @@ def _silence_tick() -> "dict[str, Any] | None":
             _hourly_tick()
         except Exception as e:  # noqa: BLE001  — the hourly line is an extra (off by default): the silence pass above has run
             print(f"audit: hourly line not run: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        try:
+            _hand_idle_tick()
+        except Exception as e:  # noqa: BLE001  — handing an idle item on is an extra (off by default): the lines above have run
+            print(f"audit: idle items not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
 def _silence_pass_tick() -> "dict[str, Any] | None":
@@ -6123,6 +6127,96 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     if written:
         _publish()
     return written
+
+
+def _hand_idle_builders(project: str) -> list[str]:
+    """The sessions an idle item of `project` may be handed to, best first: the project's background agents (`_handoff_background`), then the background agents of any other project whose mandate says build."""
+    out = list(_handoff_background(project))
+    try:
+        reg = _anc.registry()
+        for n, r in _anc.session_roles(reg).items():
+            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
+            if r.get("role") == "back" and not r.get("retired") and re.search(r"\bbuild", mand, re.I) and n not in out:
+                out.append(n)
+    except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's agents are all there is
+        pass
+    return out
+
+
+def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
+                    dead: "Callable[[str], str] | None" = None) -> list[str]:
+    """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, off by default), run from the ten-minute silence tick right after the hourly line: an open item on an agent whose newest audit line is
+    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its project, else of any project whose mandate builds; one whose pane is in no turn on this box and
+    that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff_exec` → `_handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
+    from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
+    line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
+    `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
+    from stackshot.audit import hand_idle as _hi
+    from stackshot.tools import next_report as _nr
+    if not _hi.enabled() or _ro.is_read_only() or _handoff_paused():
+        return []
+    now = time.time() if now is None else now
+    items = items if items is not None else _nr.load_all(None)
+    env = env if env is not None else _silence_env()
+    front = env.is_front if hasattr(env, "is_front") else None
+    rows = _hi.due_all(items, now, front)
+    if not rows:
+        return []
+    if status is None or dead is None:
+        idx = _sessions_index()
+        status = status or (lambda who: _handoff_status(who, idx)[0])
+        dead = dead or (lambda who: _handoff_pane(who, idx))
+    busy = _hi.busy_movers(items, now)
+    handed: list[str] = []
+    told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
+    for gid, row in rows:
+        if len(handed) >= _hi.MAX_PER_TICK:
+            break
+        try:
+            to = _hi.pick_free(_hand_idle_builders(row["project"]), busy, status, dead, _ho_same, row["mover"])
+            main = _main_agent(row["project"])
+            if main and _model.is_owner(main):
+                main = ""      # the owner is told nothing by this pass, whatever the page names as -main
+            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({row['project']})"
+            if to:
+                def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due, and still with the mover it was found with; the stamp goes on the metadata the move saves
+                    cur = _hi.due({**items, st.gid: item}, st.gid, now, front)
+                    if cur is None or not _ho_same(cur["mover"], st.frm):
+                        return False
+                    _hi.mark_handed(item.setdefault("metadata", {}), now, st.frm, st.to)
+                    return True
+                st = _ho.Step("move", gid, f"{_hi.WHY} (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
+                if not _handoff_exec([st], now, verify=False, recheck=still):
+                    continue
+                handed.append(gid)
+                busy.append(to)
+                if main:
+                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, so it went from {_session_label(row['mover'])} to {_session_label(to)}"))
+                print(f"audit: {gid} idle, handed from {row['mover']} to {to}", file=sys.stderr, flush=True)
+            elif not row["told_none"]:
+                with _writes.ITEM_LOCK:
+                    item = _load(gid)
+                    cur = _hi.due({**items, gid: item}, gid, now, front)
+                    if cur is None or cur["told_none"] or not _ho_same(cur["mover"], row["mover"]):
+                        continue
+                    meta = item.setdefault("metadata", {})
+                    _hi.mark_none(meta, now)
+                    _stall.note(meta, now, "no activity for an hour and nothing verified, but no builder was free to take it: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _writes.save(gid, item, note="audit: idle, no builder free")
+                if main:
+                    told.setdefault(main, []).append((gid, f"{lead}: no activity for an hour and nothing the audit could verify, and no builder was free to take it, so it stays with {_session_label(row['mover'])}"))
+                print(f"audit: {gid} idle, no builder free", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"audit: {gid} idle item not handed on: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for main, pairs in told.items():
+        try:
+            gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
+            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items had no activity for an hour and nothing the audit could verify:\n" + "\n".join("- " + x for x in lines)
+            _tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+        except Exception as e:  # noqa: BLE001
+            print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return handed
 
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
