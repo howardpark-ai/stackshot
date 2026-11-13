@@ -6091,11 +6091,24 @@ def _silence_pass_tick() -> "dict[str, Any] | None":
     return res
 
 
-def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
+def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
+    """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
+    the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle, a session this box does not run and a session
+    with no transcript here give []: nothing can be verified there, and nothing is claimed."""
+    from stackshot.audit import subagent_tie as _tie
+    row = _handoff_pane_row(who, idx)
+    if not row or str(row[1].get("status") or "") != "busy":
+        return []
+    sid = str(row[1].get("sessionId") or "")
+    return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now) if sid else []
+
+
+def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
+                 subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
     hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one an hour for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit` or `audit_idle`).
-    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
+    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
@@ -6108,15 +6121,27 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
     env = env if env is not None else _silence_env()
+    idx = _sessions_index() if (pane is None or subagents is None) else {}
     if pane is None:
-        idx = _sessions_index()
         pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
+    if subagents is None:
+        seen: dict[str, "list[dict[str, Any]]"] = {}      # a mover's subagents are read once a pass, not once an item
+        def subagents(who: str) -> "list[dict[str, Any]]":
+            if who not in seen:
+                seen[who] = _mover_subagents(who, idx, now)
+            return seen[who]
+    if anchored is None:
+        try:
+            anchored = _released_anchors()      # {item id: the pull requests anchored to it}: a subagent whose brief names one of them is tied to the item
+        except Exception as e:  # noqa: BLE001  — without the anchors a subagent is tied by the item's own id alone
+            anchored = {}
+            print(f"audit: anchors not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     written: list[str] = []
-    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same):
+    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same, subagents, anchored):
         try:
             with _writes.ITEM_LOCK:
                 item = _load(gid)
-                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
+                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
