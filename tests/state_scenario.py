@@ -61,13 +61,14 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.web.tools import brief as _wt_brief
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False      # kept stubbed: this suite sets a reminder wake on an alive item another session moves, as home-front, to touch a state field; the real front test would refuse it (suite watch covers the rule)
@@ -278,7 +279,7 @@ check("get: an after link to an open item reads blocked from the fields (the ser
 txt = server._fmt({**rd(49), "gid": "a49"})
 check("get: a closed item shows no state line", "state:" not in txt, txt)
 # the brief
-b = server.stackshot_brief()
+b = _wt_brief.stackshot_brief()
 check("brief: an item that stores a state carries its state line; one that stores none carries none", "state: your-call (derived)" not in b and "(derived)" not in b and "expected_by" not in b and "state: doing" in b, b.count("state: "))
 B_ = render.Board(str(T / "store"))
 br = B_.brief()

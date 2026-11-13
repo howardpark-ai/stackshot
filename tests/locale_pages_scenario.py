@@ -61,6 +61,8 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg
 from stackshot.web import i18n, search, server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.web.auth import signin as _signin
 from stackshot.web import runners as R
 from stackshot.web.runners import RunnersError
@@ -70,7 +72,7 @@ from stackshot.web.ui import render as r2
 from stackshot.web.ui import runners as R2
 from stackshot.web.ui import search as US
 from starlette.testclient import TestClient
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 EN = i18n.EN
 LOC = T / "locales"
 MARK = lambda v: f"[x:{v}]"

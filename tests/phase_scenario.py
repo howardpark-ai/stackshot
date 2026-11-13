@@ -56,10 +56,11 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.core import store as _core_store
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
@@ -162,7 +163,7 @@ def created(out):
     m = re.search(r"created ([a-z]\d+)", out); assert m, out
     return _model_ids._norm_id(m.group(1))
 def uptd(gid, **kw): return server._update(gid, sender="home-front", **kw)
-out = server._create(subject="[home] phase create alive", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK])
+out = _wt_create._create(subject="[home] phase create alive", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK])
 gid = created(out)
 check("3 a create of a doing item stores phase alive and no wait_kind", server._load(gid)["metadata"].get("phase") == "alive" and "wait_kind" not in server._load(gid)["metadata"], server._load(gid)["metadata"])
 uptd(gid, hold=True, wake=day(30), wait_basis=f"the vendor ships on {day(33)}")
@@ -175,14 +176,14 @@ put(46, needs=[BACK], state="doing")          # an item that stores the old word
 uptd("g46", hold=True, wake=wk(24 * 5), wait_basis=f"the vendor ships on {day(7)}")
 m = mt(46)
 check("3 …a stored doing item put on hold with a far wake stores waiting, and the hold ends the stored doing word (the item reads from its fields)", m.get("phase") == "waiting" and m.get("waits_on") == "time" and "state" not in m, m)
-out = server._create(subject="[home] phase create blocked", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK], after=["g31"], ask_by=day(9))
+out = _wt_create._create(subject="[home] phase create blocked", description=DESC, project="projects/alpha", owner="home-front", next="team-back: write it", needs=[BACK], after=["g31"], ask_by=day(9))
 gid_b = created(out)
 check("3 a create with an open after link stores phase waiting and waits_on item", server._load(gid_b)["metadata"].get("phase") == "waiting" and server._load(gid_b)["metadata"].get("waits_on") == "item", server._load(gid_b)["metadata"])
-out = server._create(subject="[home] phase create decision", description=DESC, project="projects/alpha", owner="home-front", next=f"{OWN}: decide", needs=["decision"],
+out = _wt_create._create(subject="[home] phase create decision", description=DESC, project="projects/alpha", owner="home-front", next=f"{OWN}: decide", needs=["decision"],
                      ask="Decide: ship it · Recommend: yes · Stakes: a week · By: no date")
 gid_d = created(out)
 check("3 a create that asks the owner stores phase alive", server._load(gid_d)["metadata"].get("phase") == "alive", server._load(gid_d)["metadata"])
-out = server._create(subject="[home] phase create relay", description=DESC, project="projects/alpha", owner="home-front", next="team-back: wait for the reply", needs=[BACK],
+out = _wt_create._create(subject="[home] phase create relay", description=DESC, project="projects/alpha", owner="home-front", next="team-back: wait for the reply", needs=[BACK],
                      wait_kind="relay", wait_event="Acme's reply", ask_by=day(6), post_wake_mover=BACK)
 gid_r = created(out)
 m = server._load(gid_r)["metadata"]

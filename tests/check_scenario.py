@@ -115,9 +115,16 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
@@ -189,15 +196,15 @@ refused("unit_active with a unit that reads as an option (-H: another host)", la
 refused("unit_active with a unit that reads as a long option", lambda: server._update("a1", check="unit_active --foo.service", sender="home-owner"), "unit_active takes one")
 refused("an unknown kind", lambda: server._update("a1", check="shell true", sender="home-owner"), "not a check the server knows", FORMS, "item_closed <item id>", "lane <session> <lane>", "unit_active <unit>.service")
 check("nothing above changed the stored check", rd(1)["metadata"].get("check") == "unit_active example-watch@x.timer", rd(1)["metadata"])
-g = server.stackshot_get("a1")
+g = _wt_get.stackshot_get("a1")
 check("get shows the check and that the server closes on it", "check: unit_active example-watch@x.timer (the server closes the item when it passes)" in g, g)
 check("a check alone is a filing edit: the state clock stays, no page owed", rd(1)["state_updated"] == now0 - 60 and "a1" not in json.dumps(server._owed_load()), (rd(1)["state_updated"], server._owed_load()))
 server._update("a1", check="none", sender="home-owner")
 check('check="none" clears it', "check" not in rd(1)["metadata"], rd(1)["metadata"])
-out = server._create(subject="[home] made with a check", description=DESC, project="projects/alpha", owner="home-owner", next="team-back: build it", needs=["team-back"], check="pr_merged o/r#8")
+out = _wt_create._create(subject="[home] made with a check", description=DESC, project="projects/alpha", owner="home-owner", next="team-back: build it", needs=["team-back"], check="pr_merged o/r#8")
 gid0 = re.search(r"created (\S+)", out).group(1)
 check("create takes a check, and is never refused for a hand-off", gid0.startswith("s") and json.loads((T / f"store/s/{gid0[1:]}.json").read_text())["metadata"].get("check") == "pr_merged o/r#8" and "check: pr_merged o/r#8" in out, out)
-refused("create refuses a bad check", lambda: server._create(subject="[home] bad check", description=DESC, project="projects/alpha", owner="home-owner", check="nope"), "not a check the server knows")
+refused("create refuses a bad check", lambda: _wt_create._create(subject="[home] bad check", description=DESC, project="projects/alpha", owner="home-owner", check="nope"), "not a check the server knows")
 
 # ---- 2. the gate: a hand-off is a line of next in the form "<session>: <action>", a list marker before the name at most
 refused("next handing the work to a background agent, no check, no wake: refused, naming the session, the form and the fix",
@@ -256,7 +263,7 @@ refused("a plain session the fleet knows counts too", lambda: server._update("a1
 server._update("a14", next="home-other: run the export", check="unit_active export.service", sender="home-owner")
 server._update("a14", check="none", sender="home-owner")           # cleared again: the pass below never runs the box's systemctl
 server._update("a15", next="team-back: ship it", check="item_closed a16", sender="home-owner")
-server.stackshot_complete("a15", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner")
+_wt_complete.stackshot_complete("a15", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner")
 check("a close clears the check", "check" not in rd(15)["metadata"] and rd(15)["status"] == "completed", rd(15)["metadata"])
 # A session's name elsewhere in next hands nothing over (the review of the first cut: the plain-word match fired on each of these)
 for label, nx in (("inside a page slug", "update projects/example-site with the outcome"),
@@ -283,7 +290,7 @@ item(22, after=["a20"], next="after a20")
 told.clear()
 check("a pass with nothing passed closes nothing", tick(1) == [] and rd(20)["status"] == "open")
 check("a pass less than a minute after the last does nothing", server._check_tick(clock[0] + 30) == [])
-server.stackshot_complete("a21", outcome="done", reason="finished", description="- Finished", sender="home-owner")
+_wt_complete.stackshot_complete("a21", outcome="done", reason="finished", description="- Finished", sender="home-owner")
 told.clear()
 closed = tick(1)
 m = rd(20)["metadata"]
@@ -296,13 +303,13 @@ check("the item's mover (the session in its needs) is told once (tag check), in 
       len(about20) == 1 and about20[0][0] == "check" and about20[0][2] == U["team-back"] and "its done check passed (item_closed a21)" in about20[0][3], told)
 check("no page owed by anyone for the close", "a20" not in json.dumps(server._owed_load()), server._owed_load())
 check("the item that waited on it is released and told, as any close releases it", "after" not in rd(22)["metadata"] and [x for x in told if x[1] == "a22"], (rd(22)["metadata"], told))
-check("get shows the close", "outcome: done" in server.stackshot_get("a20") and "reason: done check passed: item_closed a21" in server.stackshot_get("a20"), server.stackshot_get("a20"))
+check("get shows the close", "outcome: done" in _wt_get.stackshot_get("a20") and "reason: done check passed: item_closed a21" in _wt_get.stackshot_get("a20"), _wt_get.stackshot_get("a20"))
 check("a completed item with a check left on it is left alone", rd(13)["metadata"].get("reason") == "before")
 check("a13 and a20 are not in the pass's state", not set(st()["items"]) & {"a13", "a20"}, st())
 
 item(33, check="item_closed a34", next="team-back: finish a34", needs=["team-back"], answers=[{"ts": now0 - 30, "kind": "decision", "text": "go ahead", "via": "board"}], said=[{"tag": "Acked-by", "quote": "go ahead", "msg": "m1", "session": "s1", "ts": now0 - 30, "checked": True}])
 item(34)
-server.stackshot_complete("a34", outcome="done", reason="finished", description="- Finished", sender="home-owner")
+_wt_complete.stackshot_complete("a34", outcome="done", reason="finished", description="- Finished", sender="home-owner")
 told.clear()
 check("the pass closes it", tick(1) == ["a33"] and rd(33)["status"] == "completed", rd(33))
 about33 = [x for x in told if x[1] == "a33"]
@@ -313,7 +320,7 @@ check("…and the row is on the list: the item as closed by the server's done ch
 
 item(37, check="item_closed a38", next="team-back: finish a38", needs=["team-back"], answers=[{"ts": now0 - 30, "kind": "decision", "text": "go ahead", "via": "board"}])
 item(38)
-server.stackshot_complete("a38", outcome="done", reason="finished", description="- Finished", sender="home-owner")
+_wt_complete.stackshot_complete("a38", outcome="done", reason="finished", description="- Finished", sender="home-owner")
 told.clear()
 check("the pass closes it", tick(1) == ["a37"] and rd(37)["status"] == "completed", rd(37))
 about37 = [x for x in told if x[1] == "a37"]
@@ -333,7 +340,7 @@ check("inactive: not closed, no error; the argv carries -- before the unit", tic
 UNIT[0] = "LoadState=not-found\nActiveState=inactive\n"
 check("not found: an error, never a close", tick(1) == [] and rd(23)["status"] == "open" and st()["items"]["a23"]["err"] == "unit stackshot.service is not-found", st())
 check("the error is logged once and shown by get", server._CHECK_LOGGED.get("a23") == "unit stackshot.service is not-found"
-      and "check: unit_active stackshot.service (the server closes the item when it passes; not readable at the last pass: unit stackshot.service is not-found)" in server.stackshot_get("a23"), server.stackshot_get("a23"))
+      and "check: unit_active stackshot.service (the server closes the item when it passes; not readable at the last pass: unit stackshot.service is not-found)" in _wt_get.stackshot_get("a23"), _wt_get.stackshot_get("a23"))
 UNIT[0] = ""
 check("no answer: an error", tick(1) == [] and st()["items"]["a23"]["err"] == "systemctl gave no state for stackshot.service", st())
 UNIT[0] = "LoadState=loaded\nActiveState=active\n"
@@ -349,7 +356,7 @@ check("an item written while its check ran is not closed on that pass, and the w
 check("…and is closed on the next pass, the check still holding", tick(1) == ["a30"] and rd(30)["metadata"].get("reason") == "done check passed: unit_active stackshot.service", rd(30)["metadata"])
 item(31, check="unit_active stackshot.service", next="team-back: install it")
 def unit_run_closing(argv):                       # a session closes the item itself while the check runs
-    calls.append(list(argv)); server.stackshot_complete("a31", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner"); server._unit_run = unit_run; return UNIT[0]
+    calls.append(list(argv)); _wt_complete.stackshot_complete("a31", outcome="dropped", reason="not needed", description="- Not needed after all", sender="home-owner"); server._unit_run = unit_run; return UNIT[0]
 server._unit_run = unit_run_closing
 check("an item a session closed while its check ran keeps that close", tick(1) == [] and rd(31)["status"] == "completed" and rd(31)["metadata"].get("outcome") == "dropped"
       and rd(31)["metadata"].get("reason") == "not needed" and "a31" not in st()["items"], (rd(31)["metadata"], st()))
@@ -510,7 +517,7 @@ check("a PR closed unmerged: the item stays open, its check is gone and the wait
       rd(35)["status"] == "open" and "check" not in m35 and m35.get("wait_failed", {}).get("what") == "check pr_merged o/r#9" and "closed without being merged" in m35["wait_failed"]["why"], m35)
 check("the keeper is told once, in one line that says the wait can no longer end and what to give it",
       [(x[0], x[2]) for x in told if x[1] == "a35"] == [("wait", U["home-stew"])] and "can no longer end" in [x[3] for x in told if x[1] == "a35"][0] and "closed without being merged" in [x[3] for x in told if x[1] == "a35"][0], told)
-check("get says the wait failed", "wait failed: check pr_merged o/r#9" in server.stackshot_get("a35"), server.stackshot_get("a35"))
+check("get says the wait failed", "wait failed: check pr_merged o/r#9" in _wt_get.stackshot_get("a35"), _wt_get.stackshot_get("a35"))
 check("the check pass does not read it again", tick(5) == [] and "a35" not in st()["items"], st())
 
 # ---- 6c. a check met while his decision is open waits (one line, once) and closes the item once the decision is cleared; clear_check takes the check off
@@ -532,7 +539,7 @@ check("…one line records that the check is met and waits for the decision", le
 check("…the keeper is not told (nothing closed), the clocks did not move", not [x for x in told if x[1] == "a63"] and rd(63)["updated"] == now0 - 60 and rd(63)["state_updated"] == now0 - 60, (told, rd(63)))
 check("another needs (external) keeps today's behaviour: the same check closes it", "a64" in closed and rd(64)["status"] == "completed", (closed, rd(64)))
 check("the pass records that it is met", st()["items"]["a63"].get("met") == "item_closed a62" and st()["items"]["a63"]["err"] == "", st())
-check("get says the check is met and waits for the decision", "waiting for" in server.stackshot_get("a63") and "before it closes the item" in server.stackshot_get("a63"), server.stackshot_get("a63"))
+check("get says the check is met and waits for the decision", "waiting for" in _wt_get.stackshot_get("a63") and "before it closes the item" in _wt_get.stackshot_get("a63"), _wt_get.stackshot_get("a63"))
 check("later passes, the decision still open: still open and no second line", tick(3) == [] and rd(63)["status"] == "open" and len([1 for g, n in _saves if g == "a63"]) == 1, [(g, n) for g, n in _saves if g == "a63"])
 server._update("a63", clear_needs=True, sender="home-owner")
 check("the decision cleared by a write: the item is still open until the pass", rd(63)["status"] == "open" and "needs" not in rd(63)["metadata"], rd(63)["metadata"])
@@ -557,7 +564,7 @@ out = server._update("a69", clear_check=True, sender="home-owner")
 check("clear_check removes the check and nothing else", "check" not in rd(69)["metadata"] and rd(69)["metadata"].get("next") == "x" and rd(69)["metadata"].get("needs") == ["team-back"], rd(69)["metadata"])
 check("…the returned item no longer shows a check line", "updated a69" in out and "check:" not in out, out)
 check("…and the pass leaves it alone", tick(2) == [] and rd(69)["status"] == "open" and "a69" not in st()["items"], (rd(69), st()))
-out = server.stackshot_update("a69", clear_check=True, sender="home-owner")
+out = _wt_update.stackshot_update("a69", clear_check=True, sender="home-owner")
 check("clear_check on an item with no check is a no-op, not an error", "updated a69" in out and "check" not in rd(69)["metadata"], out)
 item(71, check="item_closed a70", next="x", needs=["team-back"])
 server._update("a71", next="home-owner: y", check="", sender="home-owner"); server._update("a71", next="home-owner: z", needs="", sender="home-owner")
@@ -567,8 +574,8 @@ check('check="none" still clears it (the old way), as needs="none" does', "check
 item(72, check="item_closed a70", next="x")
 server._update("a72", clear_check=True, check="item_closed a62", sender="home-owner")
 check("clear_check beside a new check: the new check stands, as clear_needs beside a new needs", rd(72)["metadata"].get("check") == "item_closed a62", rd(72)["metadata"])
-check("the update description and the tool's parameters name clear_check", "clear_check=true" in server._UPDATE_DESC and "clear_check" in inspect.signature(server._update).parameters
-      and "clear_check" in inspect.signature(server.stackshot_update).parameters, server._UPDATE_DESC[-200:])
+check("the update description and the tool's parameters name clear_check", "clear_check=true" in _wt_update._UPDATE_DESC and "clear_check" in inspect.signature(server._update).parameters
+      and "clear_check" in inspect.signature(_wt_update.stackshot_update).parameters, _wt_update._UPDATE_DESC[-200:])
 
 # ---- 6d. the waiting line is written once per met check: an error pass or a race keeps the record, a clean "not met" resets it; get shows "met" only while it is true
 _saves = []
@@ -599,19 +606,19 @@ tick(1)
 check("…and the next pass writes no second line", len(waits("a74")) == 1, _saves)
 server._update("a74", check="unit_active w74b.service", sender="home-owner")
 check("get shows nothing of the old met right after the check was replaced, though the record still holds it",
-      "waiting for" not in server.stackshot_get("a74") and st()["items"]["a74"].get("met") == "unit_active w74.service", (server.stackshot_get("a74"), st()))
+      "waiting for" not in _wt_get.stackshot_get("a74") and st()["items"]["a74"].get("met") == "unit_active w74.service", (_wt_get.stackshot_get("a74"), st()))
 server._update("a74", check="unit_active w74.service", sender="home-owner")
-check("get shows it again while the check is the one met and the decision is open", "met, and waiting for" in server.stackshot_get("a74"), server.stackshot_get("a74"))
+check("get shows it again while the check is the one met and the decision is open", "met, and waiting for" in _wt_get.stackshot_get("a74"), _wt_get.stackshot_get("a74"))
 server._update("a74", clear_needs=True, sender="home-owner")
-check("…and not once the decision is cleared, before the pass that closes it", "waiting for" not in server.stackshot_get("a74") and rd(74)["status"] == "open", server.stackshot_get("a74"))
+check("…and not once the decision is cleared, before the pass that closes it", "waiting for" not in _wt_get.stackshot_get("a74") and rd(74)["status"] == "open", _wt_get.stackshot_get("a74"))
 writes.save = _orig_save
 for i in (73, 74): item(i, status="completed", outcome="dropped", reason="out of the passes")
 
 # ---- 7. the descriptions say so
-cd = str(getattr(server.stackshot_create, "description", "") or "")
+cd = str(getattr(_wt_create.stackshot_create, "description", "") or "")
 check("the create and update descriptions carry the check field and the gate", all("check: what closes this item once the work handed to another session is done" in d and "pr_merged <owner>/<repo>#<n>" in d
-      and "is refused unless the item carries a check or a wake" in d and "the hand-off's backstop" in d for d in (server._UPDATE_DESC, cd or server._CHECK_FORM)), (len(cd), server._UPDATE_DESC[-300:]))
-check("the close form still sits inside the first 2048 characters of the update description", 0 < server._lead(server._UPDATE_DESC).find("drops outcome, outcome_text, reason and superseded_by.") < 2048 - 40)
+      and "is refused unless the item carries a check or a wake" in d and "the hand-off's backstop" in d for d in (_wt_update._UPDATE_DESC, cd or _wt_text._CHECK_FORM)), (len(cd), _wt_update._UPDATE_DESC[-300:]))
+check("the close form still sits inside the first 2048 characters of the update description", 0 < _wt_text._lead(_wt_update._UPDATE_DESC).find("drops outcome, outcome_text, reason and superseded_by.") < 2048 - 40)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": check scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

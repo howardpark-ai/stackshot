@@ -8,7 +8,7 @@ Covers, through stackshot_create and stackshot_update (a session's write):
       clear_next); a close is exempt; an item that had no open step before is not refused for an unrelated write
   N7  a commit id, a test count, a past-tense status, a since-time stamp, "at work since" and a mid-line status word are noted in the reply and the write goes through; "release PR #16", "merge PR #12
       after green CI", a condition and a `Oliver:` line are quiet
-Internal writers (server._update, server._create, create_item, the answer, the hold and the wake pass) are not judged: only the two tools mark a session's write.
+Internal writers (server._update, _wt_create._create, create_item, the answer, the hold and the wake pass) are not judged: only the two tools mark a session's write.
 
     tests/run-suite next_rules        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, time
@@ -71,7 +71,10 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
-from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
@@ -82,7 +85,7 @@ for p_ in (T / "store/a").glob("*.json"):       # as a session's write leaves th
     j_ = json.loads(p_.read_text()); m_ = j_["metadata"]
     if m_.get("next", "").startswith("home-agent:"):
         m_["next_by"] = [[AGENT, NL.key_of(m_["next"])]]; p_.write_text(json.dumps(j_))
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
@@ -92,10 +95,10 @@ def refused(name, f, *want, i=None):
         out = f(); check(name, False, out)
     except server.ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
-def upd(i, **kw): return server.stackshot_update(f"a{i}", sender="home-agent", **kw)
+def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def mk(**kw):
     kw = {"subject": "[home] a new thing", "description": DESC, "project": "projects/alpha", "next": "home-agent: build it", "sender": "home-agent", "mover": "home-agent", **kw}
-    return server.stackshot_create(**kw)
+    return _wt_create.stackshot_create(**kw)
 def files(): return sorted(p.name for p in (T / "store/a").glob("*.json"))
 def st(i): return [(x["status"], x["text"]) for x in S.view(mt(i), keeper=OWNER)]
 OPEN = lambda t: ("open", t)
@@ -228,7 +231,7 @@ r = upd(13, done=[1])
 check("N6 update: done on one of two open steps passes (one stays open)", st(13) == [("done", "home-agent: build it"), OPEN("home-agent: second step")], (r, st(13)))
 r = upd(14, done=[1], next="home-agent: the step after")
 check("N6 update: done on the last step with a new step in the same write passes", st(14) == [("done", "home-agent: build it"), OPEN("home-agent: the step after")], (r, st(14)))
-r = server.stackshot_complete("a15", outcome="done", reason="finished", description="- Goal: A thing, finished", sender="home-agent")
+r = _wt_complete.stackshot_complete("a15", outcome="done", reason="finished", description="- Goal: A thing, finished", sender="home-agent")
 check("N6: closing the item (complete) is exempt: the last open step goes with it", rd(15)["status"] == "completed", (r, rd(15)["status"]))
 # the board item part 3 (reviewer note a): a parked item needs the step its wake leads to
 import datetime as _dt3
@@ -324,15 +327,15 @@ try:
 except server.ToolError as e:
     check("internal: server._update that leaves no open step is not refused", False, str(e))
 try:
-    r = server._create(subject="[home] made by the server", description=DESC, project="projects/alpha", owner="home-agent", next="")
-    check("internal: server._create with no next is not refused (the router, the cold call and the recycle write create items this way)", str(r).startswith("created"), r)
+    r = _wt_create._create(subject="[home] made by the server", description=DESC, project="projects/alpha", owner="home-agent", next="")
+    check("internal: _wt_create._create with no next is not refused (the router, the cold call and the recycle write create items this way)", str(r).startswith("created"), r)
 except server.ToolError as e:
-    check("internal: server._create with no next is not refused", False, str(e))
+    check("internal: _wt_create._create with no next is not refused", False, str(e))
 try:
-    r = server._create(subject="[home] made by the server again", description=DESC, project="projects/alpha", owner="home-agent", next="an unnamed line")
-    check("internal: server._create with an unnamed line is not refused", str(r).startswith("created"), r)
+    r = _wt_create._create(subject="[home] made by the server again", description=DESC, project="projects/alpha", owner="home-agent", next="an unnamed line")
+    check("internal: _wt_create._create with an unnamed line is not refused", str(r).startswith("created"), r)
 except server.ToolError as e:
-    check("internal: server._create with an unnamed line is not refused", False, str(e))
+    check("internal: _wt_create._create with an unnamed line is not refused", False, str(e))
 refused("a refused tool call leaves the flag off again", lambda: mk(next="build it"), "names no one")
 check("…the flag is off after a tool call, refused or not", not getattr(writes.SESSION_NEXT, "on", False), None)
 _ng.__exit__(None, None, None)

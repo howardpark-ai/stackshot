@@ -57,14 +57,17 @@ def refused(name, f, *want):
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
-get = lambda i: server.stackshot_get(f"a{i}")
+get = lambda i: _wt_get.stackshot_get(f"a{i}")
 GUARDS = server._cfg.CFG.setdefault("model", {})
 
 JA = "こんにちは、オリバーです。\n\n  - 第一: 日程はそのままです。\n  - 第二: <b>リンク</b>は https://example.com/a?b=1&c=2 です。\n\nよろしくお願いします。\nThanks, Alex."
@@ -93,11 +96,11 @@ check("3 link: the board's own links (the configured public base URL) cannot hol
 check("3 stem: a link in the text is found; a bare word is not", D.has_link("see https://docs.google.com/d/1") and D.has_link("x", "[doc](http://example.com/x)") and not D.has_link("see the doc", "ftp://x", None))
 
 # ================================================================ 1. the field
-out = server._create(subject="[home] filed with a draft", description=DESC, project="projects/alpha", owner="home-front", next="team-back: build it", needs=["team-back"], draft=JA)
+out = _wt_create._create(subject="[home] filed with a draft", description=DESC, project="projects/alpha", owner="home-front", next="team-back: build it", needs=["team-back"], draft=JA)
 gid = (re.match(r"created (\w\d+)", out) or [0, ""])[1]
 (T / f"store/{gid[0]}").mkdir(exist_ok=True) if gid else None
 check("1 field: create stores the draft as written, many lines, Japanese and indentation", bool(gid) and rd(gid)["metadata"].get("draft") == JA, (out[:200], gid))
-g = server.stackshot_get(gid)
+g = _wt_get.stackshot_get(gid)
 check("1 field: get shows it as a `draft:` block, every line as written", "\ndraft:\n" + JA + "\n" in "\n" + g + "\n", g)
 item(1, needs=["team-back"], next="team-back: build it", draft=JA)
 bf = server._fmt(json.loads(raw(1)) | {"gid": "a1"}, brief=True)
@@ -121,7 +124,7 @@ refused_nw("1 field: a clear does not go with a new text", 2, lambda: upd(2, dra
 upd(2, draft="x" * D.MAX)
 check("1 field: a draft of exactly the cap is stored", len(mt(2)["draft"]) == D.MAX, len(mt(2).get("draft", "")))
 refused_nw("1 field: a draft over the cap is refused, naming the cap", 2, lambda: upd(2, draft="x" * (D.MAX + 1)), "draft is at most 20000 characters", "20001")
-refused("1 field: a create over the cap is refused", lambda: server._create(subject="[home] too long", description=DESC, project="projects/alpha", owner="home-front", next="team-back: x", needs=["team-back"], draft="y" * (D.MAX + 1)), "draft is at most")
+refused("1 field: a create over the cap is refused", lambda: _wt_create._create(subject="[home] too long", description=DESC, project="projects/alpha", owner="home-front", next="team-back: x", needs=["team-back"], draft="y" * (D.MAX + 1)), "draft is at most")
 refused_nw("1 field: a draft that is not a string is refused", 2, lambda: upd(2, draft=["a", "b"]), "draft is a string")
 item(3, needs=["team-back"], next="team-back: build it", draft="to post")
 upd(3, status="completed", outcome="done", reason="finished", description="- It shipped\n- Closed as done\n- Nothing left")
@@ -265,7 +268,7 @@ check("4 mirror: a draft set, edited or cleared is no change of what the issue c
 import inspect
 snap = json.loads(pathlib.Path(STACK, "tests/tool_text.snapshot.json").read_text(encoding="utf-8"))["tools"]
 check("6 text: create and update take draft, update clear_draft (the snapshot)", "draft" in snap["create"]["parameters"] and "draft" in snap["update"]["parameters"] and "clear_draft" in snap["update"]["parameters"], None)
-check("6 text: …as the functions do", {"draft"} <= set(inspect.signature(server.stackshot_create).parameters) and {"draft", "clear_draft"} <= set(inspect.signature(server.stackshot_update).parameters), None)
+check("6 text: …as the functions do", {"draft"} <= set(inspect.signature(_wt_create.stackshot_create).parameters) and {"draft", "clear_draft"} <= set(inspect.signature(_wt_update.stackshot_update).parameters), None)
 for tool in ("create", "update"):
     d = snap[tool]["description"]
     check(f"6 text: {tool}'s description says what a draft is, the Copy button and that a post or send step needs one", "draft: the text exactly as it is to be posted, sent or pasted" in d and "Copy button" in d

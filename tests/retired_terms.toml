@@ -191,7 +191,7 @@ files = ["stackshot"]
 kind = "python"
 
 # The server, the web UI and the other modules of the package: text a session reads. `stackshot/*.py` reaches the package's own files, `stackshot/**/*.py`
-# the subpackages such as stackshot/web/server.py.
+# the subpackages such as stackshot/web/server.py and stackshot/web/tools/.
 [[scan]]
 files = ["stackshot/*.py", "stackshot/**/*.py"]
 

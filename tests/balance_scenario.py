@@ -62,12 +62,16 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web.tools import sessions as _wt_sessions
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.audit import hand_idle as HI, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.model import queued as Q, last_activity as LA
 from stackshot.tools import next_report as NR
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
@@ -90,7 +94,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 server._handoff_status = fake_status
 server._handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = lambda: {}
+server._sessions_index = _wt_sessions._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", last=None, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. `last` = minutes ago (or (minutes, kind)) of its `last_activity` record, which the queue rule reads."""
@@ -444,7 +448,7 @@ def probe_none():
     return got == [] and mover_of(1) == "home-peer" and len(to_main()) == 1 and len(sent) == 1 and not told("balance") and "no live builder could take it" in to_main()[0][2] and "stays with home-peer" in to_main()[0][2]
 rule("7 with NO live builder to take it the item stays, nobody is told to disregard it, and -main is told, and only -main", probe_none, [(HI, "balance_ok", lambda kind, to, frm: True), (HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": "team-aux")])
 none_setup(); tick(); m7 = to_main()[0][2]
-check("7 the message to -main is the notice path's (the front agent's mark on line 1, tag stall), says what stayed where, and asks nothing", m7.startswith(server._FOR_OWNER + "\n") and to_main()[0][3] == "stall" and "Nothing is asked of you and no reply is owed" in m7 and "?" not in m7.split("\n", 1)[1], m7)
+check("7 the message to -main is the notice path's (the front agent's mark on line 1, tag stall), says what stayed where, and asks nothing", m7.startswith(_wt_text._FOR_OWNER + "\n") and to_main()[0][3] == "stall" and "Nothing is asked of you and no reply is owed" in m7 and "?" not in m7.split("\n", 1)[1], m7)
 h7 = history(1)
 check("7 one History line says so; the item keeps its mover, its hand-off and the balance record carries only the day's note", len(h7) == 1 and h7[0].startswith("not started or queued for 10 min, but no live builder could take it, so it stays with home-peer: home-main was told")
       and mt(1)["balance"] == {"none_at": now0} and HO.record_of(rd(1))["to"] == "home-peer", (h7, mt(1).get("balance")))

@@ -43,7 +43,12 @@ def check(name, cond, got=None):
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.web import server
-server._publish = lambda: None
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 DESC = "- Goal: The side panel's left line\n- It lives in the board's stylesheet\n- Done when the line is picked"
 ASKB = lambda decide, rec="yes": f"Decide: {decide} · Recommend: {rec} · Stakes: the panel looks different · By: no date"
 LABELS = [{"label": "A", "line": "Full height, as now.", "recommended": True}, {"label": "B", "line": "Starts below the cards.", "recommended": False}]
@@ -52,14 +57,14 @@ def items():
 def create(**kw):
     a = dict(subject="[home] Pick the side panel line", description=DESC, project="projects/kiwi", sender="home-kiwi-engineer", then="home-kiwi-engineer", needs=["decision"], ask=ASKB("whether to ship"))
     a.update(kw)
-    try: return server.stackshot_create(**a), ""
+    try: return _wt_create.stackshot_create(**a), ""
     except server.ToolError as e: return "", str(e)
 def gid_of(out):
     m = re.search(r"\b[a-z]\d+\b", out); assert m, out
     return m.group(0)
 def stored(gid): return json.loads((T / "store" / gid[0] / f"{gid[1:]}.json").read_text())
 def update(gid, **kw):
-    try: return server.stackshot_update(item_id=gid, sender="home-kiwi-engineer", **kw), ""
+    try: return _wt_update.stackshot_update(item_id=gid, sender="home-kiwi-engineer", **kw), ""
     except server.ToolError as e: return "", str(e)
 def says_options(e): return e.startswith("Refused: this needs=decision item names alternatives (") and "lists no options" in e and "Put each alternative in as one option" in e and '"recommended": true' in e and "Yes / No" in e
 
@@ -100,7 +105,7 @@ check("update refused: clearing the options while the ask names the pair", says_
 out, e = update(g, ask=ASKB("whether to ship it"), options="none")
 check("update accepted: a yes/no ask with the options cleared", not e and "options" not in stored(g)["metadata"], e or out)
 # ---- 4. the text the tools teach names the new shape
-check("the text of options in the ask names labeled choices", "labeled choices in the Decide part" in server._ITEM_FORM, server._ITEM_FORM[-300:])
+check("the text of options in the ask names labeled choices", "labeled choices in the Decide part" in _wt_text._ITEM_FORM, _wt_text._ITEM_FORM[-300:])
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

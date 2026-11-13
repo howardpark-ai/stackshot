@@ -38,35 +38,44 @@ CONTEXT = 6                                                   # lines of context
 
 # ---------------------------------------------------------------- what is affected
 def tool_names(src: str | None) -> dict[str, str]:
-    """{function name: tool name} for the functions decorated @mcp.tool(name="…") (the function's own name when the decorator gives none)."""
+    """{function name: tool name} for the functions registered as tools: decorated @mcp.tool(name="…"), or handed to `mcp.tool(name="…")(function)` (the function's own name when the registration gives none)."""
     out: dict[str, str] = {}
     try:
         tree = ast.parse(src or "")
     except SyntaxError:
         return out
+    def named(call: ast.AST, default: str) -> str:
+        if isinstance(call, ast.Call):
+            for k in call.keywords:
+                if k.arg == "name" and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str):
+                    return k.value.value
+        return default
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for d in n.decorator_list:
-                f = d.func if isinstance(d, ast.Call) else d
-                if isinstance(f, ast.Attribute) and f.attr == "tool" and isinstance(f.value, ast.Name) and f.value.id == "mcp":
-                    name = n.name
-                    if isinstance(d, ast.Call):
-                        for k in d.keywords:
-                            if k.arg == "name" and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str):
-                                name = k.value.value
-                    out[n.name] = name
+                if tt._is_mcp_tool(d.func if isinstance(d, ast.Call) else d):
+                    out[n.name] = named(d, n.name)
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Call) and tt._is_mcp_tool(n.func.func):
+            for a in n.args:
+                if isinstance(a, ast.Name):
+                    out[a.id] = named(n.func, a.id)
     return out
 
 
+def registry_source(root: Path, rev: str) -> str:
+    """The text of the files a tool is registered in at `rev` (server.py and web/tools/*.py), joined: what `affected_tools` reads the tool names from."""
+    return "\n".join(tt.show_at(root, rev, f) or "" for f in (tt.SERVER_REL, *tt.TOOL_FILES))
+
+
 def affected_tools(changed: list[str], head_server: str | None, base_server: str | None) -> list[str]:
-    """The tools a changed `file:function` list reaches: a changed tool function is its tool; a changed output helper reaches every tool that lists it in HELPERS."""
+    """The tools a changed `file:function` list reaches: a changed tool function is its tool; a changed output helper reaches every tool that lists it in HELPERS. The two sources are those of `registry_source`."""
     names = {**tool_names(base_server), **tool_names(head_server)}
     out: set[str] = set()
     for c in changed:
         if ":" not in c:
             continue
         file, fn = c.rsplit(":", 1)
-        if file == tt.SERVER_REL and fn in names:
+        if (file == tt.SERVER_REL or file in tt.TOOL_FILES) and fn in names:
             out.add(names[fn])
         for tool, helpers in tt.HELPERS.items():
             if (file, fn) in helpers:
@@ -108,7 +117,7 @@ def split_diff(diff: str) -> list[tuple[str, str, int, int, int, int]]:
 
 def fit_diff(root: Path, mb: str, head: str, changed: list[str], limit: int) -> str:
     """`git diff` of the watched files from the fork point to head, cut to `limit` characters by hunks: the ones that overlap a changed function first."""
-    files = sorted({f for f, _ in tt.ALL_HELPERS} | {tt.SERVER_REL})
+    files = sorted({f for f, _ in tt.ALL_HELPERS} | {tt.SERVER_REL} | set(tt.TOOL_FILES))
     r = subprocess.run(["git", "-C", str(root), "diff", "--no-color", f"-U{CONTEXT}", mb, head, "--", *files, *tt._BEFORE_PACKAGE.values()], capture_output=True, text=True, errors="replace")
     diff = r.stdout if r.returncode == 0 else ""
     hunks = split_diff(diff)
@@ -156,7 +165,7 @@ def build_pack(root: Path, base: str, head: str, exact: bool, max_diff: int, max
     mb, changed = tt.changed_since(root, base, head, exact)
     if not changed:
         raise NothingToRead("no tool function and no output helper has a changed body")
-    head_server, base_server = tt.show_at(root, head, tt.SERVER_REL), tt.show_at(root, mb, tt.SERVER_REL)
+    head_server, base_server = registry_source(root, head), registry_source(root, mb)
     tools = affected_tools(changed, head_server, base_server)
     if not tools:
         raise NothingToRead("the changed functions reach no tool's text: " + ", ".join(changed))

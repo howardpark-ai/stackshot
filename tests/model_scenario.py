@@ -61,13 +61,20 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states; from stackshot.model import model
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import notes as _wt_notes
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 FB = telling.fallback_mover("projects/alpha")      # the project's builder, else its -main agent (here its first front agent): what an item nothing else names is moved by, never its creator
@@ -188,18 +195,18 @@ check("form: norm_who: oliver and the owner's name are the owner; a session stay
 
 # ================================================================ the fields through create, update and get
 NEW_GOAL = "The model's fields are stored and shown."
-out = server._create(subject="[home] model fields", description=DESC, project="projects/alpha", owner="home-front", next="home-front: write it", needs=["decision"], ask=ASK,
+out = _wt_create._create(subject="[home] model fields", description=DESC, project="projects/alpha", owner="home-front", next="home-front: write it", needs=["decision"], ask=ASK,
                      goal=NEW_GOAL, mover="oliver", then="home-front")
 cid = int(re.search(r"created s(\d+)", out)[1])
 m = mt(cid, "s")
 check("create: goal, mover and then are stored in the item's metadata (the owner's name normalised)", m.get("goal") == NEW_GOAL and m.get("mover") == OWN and m.get("then") == "home-front", m)
 check("create: the reply shows the goal and the model line", f"goal: {NEW_GOAL}" in out and f"model: alive · mover {OWN} (then home-front)" in out and "model conflict" not in out, out)
 check("create: …no wait field stored that was not given", not any(k in m for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")), m)
-refused("create: a wait_kind that is none of the kinds is refused", lambda: server._create(subject="[home] bad kind", description=DESC, project="projects/alpha", owner="home-front", wait_kind="soon"), "wait_kind is one of time | anchor | item | relay")
+refused("create: a wait_kind that is none of the kinds is refused", lambda: _wt_create._create(subject="[home] bad kind", description=DESC, project="projects/alpha", owner="home-front", wait_kind="soon"), "wait_kind is one of time | anchor | item | relay")
 check("create: …and wrote nothing", not any(json.loads(p.read_text())["subject"] == "[home] bad kind" for p in (T / "store").glob("*/*.json")), None)
 item(1, needs=["decision"], ask=ASK, subject="[home] plain item")
 item(4, needs=[BACK], subject="[home] derived item")
-g = server.stackshot_get("a4")
+g = _wt_get.stackshot_get("a4")
 check("get: an item with none of the fields shows its model line, derived, and no goal line", "model: alive · mover team-back · derived: mover" in g and "goal:" not in g, g)
 before = rd(1)
 out = upd(1, goal=NEW_GOAL, mover="OLIVER", then="team-back")
@@ -207,7 +214,7 @@ m = mt(1)
 check("update: goal, mover and then are stored", m["goal"] == NEW_GOAL and m["mover"] == OWN and m["then"] == "team-back", m)
 check("update: …filing edits like a rank: no state clock, no confirm; only `updated` moves", rd(1)["state_updated"] == before["state_updated"] and rd(1)["confirmed"] == before["confirmed"] and rd(1)["updated"] > before["updated"], None)
 check("update: …every other field stays (the stored phase and the last-activity record apart: every save of an open item writes the phase, and a state change records itself)", {k: v for k, v in m.items() if k not in ("goal", "mover", "then", "phase", "last_activity")} == before["metadata"], (m, before["metadata"]))
-check("update: …the reply and get show the goal and the model line", f"goal: {NEW_GOAL}" in out and f"model: alive · mover {OWN} (then team-back)" in out and f"model: alive · mover {OWN} (then team-back)" in server.stackshot_get("a1"), out)
+check("update: …the reply and get show the goal and the model line", f"goal: {NEW_GOAL}" in out and f"model: alive · mover {OWN} (then team-back)" in out and f"model: alive · mover {OWN} (then team-back)" in _wt_get.stackshot_get("a1"), out)
 check("update: …no page is owed for it", "page update" not in out.lower().replace("(pilot", ""), out[-300:])
 check("update: …a goal alone names no session in needs (it is filing)", mt(1)["needs"] == ["decision"], mt(1))
 item(2, needs=[BACK], subject="[home] goal only")
@@ -216,8 +223,8 @@ check("update: a goal alone is stored and leaves needs as it was", mt(2)["goal"]
 out = upd(1, wait_kind="relay", wait_event="Robin's reply on the contract", ask_by=FUT, post_wake_mover="home-front", mover="none")
 m = mt(1)
 check("update: a relay wait is stored (kind, event, ask-by day, post-wake mover), and mover=none drops the mover", m["wait_kind"] == "relay" and m["wait_event"] == "Robin's reply on the contract" and ab_(m) == FUT and m["post_wake_mover"] == "home-front" and "mover" not in m, m)
-check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; until {FUT}) · mover home-front" in server.stackshot_get("a1"), server.stackshot_get("a1"))
-check("update: …the brief carries the model line of the item too", "model: waiting on news only" in server.stackshot_brief() and "model: alive · mover team-back" in server.stackshot_brief(), None)
+check("update: …get reads the item as waiting on the owner's relay, then the post-wake mover", f"model: waiting on news only {OWN} relays (Robin's reply on the contract; until {FUT}) · mover home-front" in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
+check("update: …the brief carries the model line of the item too", "model: waiting on news only" in _wt_brief.stackshot_brief() and "model: alive · mover team-back" in _wt_brief.stackshot_brief(), None)
 server._anc.save({"projects/alpha": [{"url": "https://example.org/pull/7", "items": None, "added": now0, "by": "x"}]})      # the anchor is on the project's list (a wait on an unlisted one is refused: anchor_wait_refusal)
 out = upd(1, wait_kind="anchor", wait_anchor="https://example.org/pull/7", wait_event="merged", wake=FUT)
 m = mt(1)
@@ -227,7 +234,7 @@ m = mt(1)
 check("update: clear_wait drops the wait's fields, its until with them (the one date the wait ends on is part of the wait; after keeps its own flag)", not any(k in m for k in ("wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "until", "wake")), m)
 refused_nw("update: clear_wait does not go with a new wait field", 1, lambda: upd(1, clear_wait=True, wait_kind="time"), "clear_wait drops", "wait_kind")
 import inspect as _inspect
-_params, _doc = _inspect.signature(server.stackshot_update).parameters, server._MODEL_FORM
+_params, _doc = _inspect.signature(_wt_update.stackshot_update).parameters, _wt_text._MODEL_FORM
 check("update: wait_anchor and wait_event are real parameters of the tool and each is listed in its description with its own line, as ask_by and post_wake_mover are",
       all(f in _params for f in ("wait_anchor", "wait_event", "ask_by", "post_wake_mover")) and "; wait_anchor=<" in _doc and "; wait_event=<" in _doc and "; ask_by=YYYY-MM-DD" in _doc and "; post_wake_mover=<" in _doc, _doc[:900])
 refused_nw("update: …clear_goal does not go with a new goal", 1, lambda: upd(1, clear_goal=True, goal="x"), "clear_goal drops goal")
@@ -242,7 +249,7 @@ item(3, needs=[BACK], subject="[home] closing", mover="team-back", then="home-fr
 server._update("a3", sender="home-front", status="completed", outcome="done", reason="finished", description="- Goal: The thing is done and closed")
 m = mt(3)
 check("close: the mover and the wait are dropped, the goal stays", m["goal"] == "The close drops the mover" and not any(k in m for k in ("mover", "then", "wait_kind", "wait_event", "ask_by", "post_wake_mover")) and m["outcome"] == "done", m)
-check("close: get shows the goal and `model: dead`", "goal: The close drops the mover" in server.stackshot_get("a3") and "model: dead" in server.stackshot_get("a3"), server.stackshot_get("a3"))
+check("close: get shows the goal and `model: dead`", "goal: The close drops the mover" in _wt_get.stackshot_get("a3") and "model: dead" in _wt_get.stackshot_get("a3"), _wt_get.stackshot_get("a3"))
 refused_nw("close: a mover on a closed item is refused (a goal alone may be set)", 3, lambda: server._update("a3", sender="home-front", mover="team-back"), "has no mover and waits on nothing")
 server._update("a3", sender="home-front", goal="The close drops the mover and keeps the goal")
 check("close: …a goal on a closed item is allowed", mt(3)["goal"].endswith("keeps the goal"), mt(3))
@@ -276,9 +283,9 @@ check("conflict: an agent mover on a doing item raises none; nor does the owner 
       not m_.conflicts and not D(state="your-step", step="x", mover="oliver").conflicts and not D(state="your-call", needs=["decision"], ask=ASK, mover="oliver").conflicts, m_)
 # the brief carries one short line
 item(22, needs=[BACK], subject="[home] brief line", goal="x")
-b = server.stackshot_brief()
+b = _wt_brief.stackshot_brief()
 check("brief: one short model line per open item: no `derived:` tail, no conflict lines", "model: alive · mover team-back" in b and "derived:" not in b and "model conflict" not in b, [l for l in b.splitlines() if l.startswith("model")][:6])
-g = server.stackshot_get("a22")
+g = _wt_get.stackshot_get("a22")
 check("brief: ...get keeps the full line", "model: alive · mover team-back · derived: mover" in g, g)
 check("brief: ...none for a closed item in a brief format", not any(l.startswith("model:") for l in server._fmt({**rd(21), "gid": "a21"}, brief=True).splitlines()) and "model: dead" in server._fmt({**rd(21), "gid": "a21"}), None)
 
@@ -290,7 +297,7 @@ server._update("a10", sender="home-front", next="team-back: look at it")
 check("author: an update by a session records its name and its id", wb(10) == ("home-front", U["home-front"]), wb(10))
 server._update("a10", sender="home-other", next="team-back: look at it again")
 check("author: …the next writer replaces the last in the file (the store's history keeps each revision's)", wb(10) == ("home-other", U["home-other"]), wb(10))
-server.stackshot_confirm("a10", sender="team-back")
+_wt_complete.stackshot_confirm("a10", sender="team-back")
 check("author: a confirm records its sender", wb(10) == ("team-back", U["team-back"]), wb(10))
 it_ = server._load("a10"); writes.save("a10", it_)
 before_srv = raw(10); it_ = server._load("a10"); writes.save("a10", it_)
@@ -324,47 +331,47 @@ import datetime as _dt; from stackshot.web import whatschanged
 _mc = lambda **kw: {"subject": "[home] mover create", "description": DESC, "project": "projects/alpha", "needs": [BACK], "next": "team-back: take it up", **kw}
 nfiles = lambda: len(list((T / "store").glob("*/*.json")))
 # create: the sender is the creator, mover names who moves it; owner is accepted with a note until [model] owner_param_until, then refused
-out = server.stackshot_create(**_mc(sender="home-front", mover="team-back"))
+out = _wt_create.stackshot_create(**_mc(sender="home-front", mover="team-back"))
 sid = re.search(r"created (?:board#|s)(\d+)", out)[1]
 check("create: sender alone is the creator: stored as metadata.owner, with no owner note", rd(sid, "s")["metadata"]["owner"] == U["home-front"] and rd(sid, "s")["metadata"]["mover"] == "team-back" and "owner is going away" not in out, out[-400:])
 check("create: …the reply leads with mover: and shows no creator line (History says created by), never `owner:`", out.split("\n")[2] == "mover: team-back" and not re.search(r"(?m)^keeper of record: ", out) and not re.search(r"(?m)^owner:", out), out[:500])
-out = server.stackshot_create(**_mc(subject="[home] owner create", owner="home-front", mover="team-back"))
+out = _wt_create.stackshot_create(**_mc(subject="[home] owner create", owner="home-front", mover="team-back"))
 check("create: an owner still accepted before the cut-off is stored as the creator, with a note that names mover and the model page",
       "(note: owner is going away: it is accepted until " in out and "mover=" in out and PAGE_ in out and rd(re.search(r"created (?:board#|s)(\d+)", out)[1], "s")["metadata"]["owner"] == U["home-front"], out[-500:])
-refused("create: no sender and no owner is refused, with sender and mover named", lambda: server.stackshot_create(**_mc()), "pass sender=", "mover=", PAGE_)
-refused("create: a sender that names the owner is refused as on update", lambda: server.stackshot_create(**_mc(sender=server.OWNER)), "Only the board writes as")
+refused("create: no sender and no owner is refused, with sender and mover named", lambda: _wt_create.stackshot_create(**_mc()), "pass sender=", "mover=", PAGE_)
+refused("create: a sender that names the owner is refused as on update", lambda: _wt_create.stackshot_create(**_mc(sender=server.OWNER)), "Only the board writes as")
 _CUT = server._cfg.CFG["model"].get("owner_param_until")
 n0 = nfiles()
 server._cfg.CFG["model"]["owner_param_until"] = (_dt.datetime.now(server._cfg.tz()).date() - _dt.timedelta(days=1)).isoformat()      # patch the date: yesterday was the last day
-refused("create: after the cut-off owner is refused, with a pointer to sender and mover", lambda: server.stackshot_create(**_mc(subject="[home] late owner", owner="home-front")), "owner is not a parameter of create any more", "sender=", "mover=", PAGE_)
+refused("create: after the cut-off owner is refused, with a pointer to sender and mover", lambda: _wt_create.stackshot_create(**_mc(subject="[home] late owner", owner="home-front")), "owner is not a parameter of create any more", "sender=", "mover=", PAGE_)
 check("create: …and wrote nothing", nfiles() == n0, None)
-out = server.stackshot_create(**_mc(subject="[home] late sender", sender="home-front", mover="team-back"))
+out = _wt_create.stackshot_create(**_mc(subject="[home] late sender", sender="home-front", mover="team-back"))
 check("create: …sender and mover still work", "created" in out and "owner is going away" not in out, out[:200])
 was = raw(1)
-refused("update: after the cut-off owner is refused, with a pointer to mover", lambda: server.stackshot_update(item_id="a1", sender="home-front", owner="team-back"), "owner is not a parameter of update any more", "mover=", PAGE_)
+refused("update: after the cut-off owner is refused, with a pointer to mover", lambda: _wt_update.stackshot_update(item_id="a1", sender="home-front", owner="team-back"), "owner is not a parameter of update any more", "mover=", PAGE_)
 check("update: …and wrote nothing", raw(1) == was, None)
-check("update: without owner it goes through after the cut-off", "updated" in server.stackshot_update(item_id="a1", sender="home-front", goal="Say mover"), None)
+check("update: without owner it goes through after the cut-off", "updated" in _wt_update.stackshot_update(item_id="a1", sender="home-front", goal="Say mover"), None)
 server._cfg.CFG["model"]["owner_param_until"] = (_dt.datetime.now(server._cfg.tz()).date()).isoformat()                                  # today is the last day: still accepted
-out = server.stackshot_update(item_id="a1", sender="home-front", owner="home-front")
+out = _wt_update.stackshot_update(item_id="a1", sender="home-front", owner="home-front")
 check("update: on the last day owner is accepted, with a note that names mover", "(note: owner is going away: it is accepted until " in out and "set mover=<session>" in out and PAGE_ in out, out[-400:])
 server._cfg.CFG["model"]["owner_param_until"] = "not a date"
-check("a value that is no date reads as the default cut-off", server._owner_param_until() == _dt.date(2099, 3, 3), server._owner_param_until())
+check("a value that is no date reads as the default cut-off", _wt_notes._owner_param_until() == _dt.date(2099, 3, 3), _wt_notes._owner_param_until())
 if _CUT is None: server._cfg.CFG["model"].pop("owner_param_until", None)
 else: server._cfg.CFG["model"]["owner_param_until"] = _CUT
 # get: leads with mover and then; the keeper of record among the details
 item(31, needs=["decision"], ask=ASK, subject="[home] get leads"); upd(31, mover="OLIVER", then="team-back")
-g = server.stackshot_get("a31").split("\n")
+g = _wt_get.stackshot_get("a31").split("\n")
 check("get: leads with mover: and then: right after the heading line", g[1] == f"mover: {OWN}" and g[2] == "then: team-back" and g[0].endswith("[home] get leads"), g[:4])
 check("get: no creator line, never `owner:` nor `keeper of record:`", not any(l.startswith("keeper of record: ") for l in g) and not any(l.startswith("owner:") for l in g), g)
-item(32, subject="[home] derived lead", needs=[BACK]); g = server.stackshot_get("a32").split("\n")
+item(32, subject="[home] derived lead", needs=[BACK]); g = _wt_get.stackshot_get("a32").split("\n")
 check("get: a mover the item does not store reads (derived)", g[1] == "mover: team-back (derived)", g[:3])
-item(33, subject="[home] waiting lead", wait_kind="time", wake=FUT, post_wake_mover="team-back", needs=[BACK]); g = server.stackshot_get("a33").split("\n")
+item(33, subject="[home] waiting lead", wait_kind="time", wake=FUT, post_wake_mover="team-back", needs=[BACK]); g = _wt_get.stackshot_get("a33").split("\n")
 check("get: a waiting item's mover line says who picks it up when the wait ends, and there is no `then:` line (it stands only beside the owner)", g[1] == "mover: team-back (picks it up when the wait ends)" and not any(l.startswith("then:") for l in g), g[:4])
-check("get: a closed item has no mover line", not any(l.startswith("mover:") for l in server.stackshot_get("a21").split("\n")), server.stackshot_get("a21")[:200])
-check("brief: the open items carry the model line that names the mover; the brief's items show `keeper of record:` too", "model: alive · mover team-back" in server.stackshot_brief() and not re.search(r"(?m)^owner:", server.stackshot_brief()), None)
-check("the tool descriptions say mover, name the model page and say owner only to say it is going", all(PAGE_ in str(f) for f in (server._MODEL_FORM, server.stackshot_get.__doc__)) and "mover" in server._UPDATE_DESC
-      and not re.findall(r"(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-])", server._NEEDS_FORM.replace(server.OWNER, "")), re.findall(r".{30}(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-]).{30}", server._NEEDS_FORM.replace(server.OWNER, "")))
-check("create's schema takes sender and no longer requires owner", "sender" in _inspect.signature(server.stackshot_create).parameters and _inspect.signature(server.stackshot_create).parameters["owner"].default == "", None)
+check("get: a closed item has no mover line", not any(l.startswith("mover:") for l in _wt_get.stackshot_get("a21").split("\n")), _wt_get.stackshot_get("a21")[:200])
+check("brief: the open items carry the model line that names the mover; the brief's items show `keeper of record:` too", "model: alive · mover team-back" in _wt_brief.stackshot_brief() and not re.search(r"(?m)^owner:", _wt_brief.stackshot_brief()), None)
+check("the tool descriptions say mover, name the model page and say owner only to say it is going", all(PAGE_ in str(f) for f in (_wt_text._MODEL_FORM, _wt_get.stackshot_get.__doc__)) and "mover" in _wt_update._UPDATE_DESC
+      and not re.findall(r"(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-])", _wt_text._NEEDS_FORM.replace(server.OWNER, "")), re.findall(r".{30}(?<![A-Za-z_{<])owner(?![A-Za-z_}:/=-]).{30}", _wt_text._NEEDS_FORM.replace(server.OWNER, "")))
+check("create's schema takes sender and no longer requires owner", "sender" in _inspect.signature(_wt_create.stackshot_create).parameters and _inspect.signature(_wt_create.stackshot_create).parameters["owner"].default == "", None)
 _sw = server._cfg.CFG["model"].get("switchover")
 server._cfg.CFG["model"]["switchover"] = True
 md_ = render.render(str(T / "store"), "full")
@@ -385,10 +392,10 @@ check("what changed: a missing file or a malformed one shows nothing", whatschan
 whatschanged.PATH = cf
 _today = _dt.datetime.now(server._cfg.tz()).date()
 cf.write_text(json.dumps([{"date": _today.isoformat(), "text": "a tool changed"}]))
-check("what changed: the brief tool carries the line at its top while the entry is live", server.stackshot_brief().split("\n")[0].startswith(f"stackshot changed on {whatschanged.day_words(_today)}: a tool changed; see {PAGE_}"), server.stackshot_brief()[:200])
+check("what changed: the brief tool carries the line at its top while the entry is live", _wt_brief.stackshot_brief().split("\n")[0].startswith(f"stackshot changed on {whatschanged.day_words(_today)}: a tool changed; see {PAGE_}"), _wt_brief.stackshot_brief()[:200])
 check("what changed: …and the session-start brief too", render.render(str(T / "store"), "brief").split("\n")[1].startswith("stackshot changed on "), render.render(str(T / "store"), "brief")[:300])
 cf.write_text(json.dumps([{"date": (_today - _dt.timedelta(days=8)).isoformat(), "text": "a tool changed"}]))
-check("what changed: …and neither once the entry is 8 days old", "stackshot changed on" not in server.stackshot_brief() and "stackshot changed on" not in render.render(str(T / "store"), "brief"), None)
+check("what changed: …and neither once the entry is 8 days old", "stackshot changed on" not in _wt_brief.stackshot_brief() and "stackshot changed on" not in render.render(str(T / "store"), "brief"), None)
 check("what changed: the seed (the two hand-written entries of Tue Mar 3rd, before the snapshot) is in the entry shape", whatschanged.SEED and all(set(e) == {"date", "text"} and _dt.date.fromisoformat(e["date"]) for e in whatschanged.SEED) and "mover" in whatschanged.SEED[0]["text"], whatschanged.SEED)
 check("what changed: changes.json is gone (the line is generated from tests/tool_text.snapshot.json)", not (pathlib.Path(STACK) / "changes.json").exists())
 
@@ -397,7 +404,7 @@ ANC = "https://example.org/pull/9"
 WAITK = dict(wait_kind="anchor", wait_anchor=ANC, wait_event="the PR merges", ask_by=FUT, post_wake_mover="team-back")
 item(40, needs=[BACK], subject="[home] waits on an anchor", **WAITK)
 item(41, needs=["decision", BACK], ask=ASK, state="your-call", subject="[home] wait beside a your-call", **WAITK)
-g41 = server.stackshot_get("a41")
+g41 = _wt_get.stackshot_get("a41")
 check("hint: get's model conflict (a wait beside a your-call state) ends with how to resolve it: clear_wait=true, or park the item with hold=true",
       any(l.startswith("model conflict: wait_kind=anchor") and "the wait wins" in l and "update clear_wait=true" in l and "park the item: update hold=true" in l for l in g41.splitlines()), g41)
 refused_nw("hint: wait_event=none on an anchor wait is refused 'input is missing' and names clear_wait=true", 40, lambda: upd(40, wait_event="none"), "input is missing", "clear_wait=true")
@@ -411,7 +418,7 @@ ASK2 = "Decide: merge now · Recommend: yes · Stakes: a day · By: no date"
 refused_nw("ask: needs=decision on an item that stores a wait is refused, naming the wait and clear_wait=true", 40, lambda: upd(40, needs=["decision"], ask=ASK2),
            "a40 still waits on an anchor event (the PR merges)", "pass clear_wait=true with this update", "do not ask")
 out40 = upd(40, needs=["decision"], ask=ASK2, clear_wait=True)
-check("ask: …with clear_wait=true the same update drops the wait and asks", "wait_kind" not in mt(40) and "decision" in mt(40)["needs"] and "model conflict" not in server.stackshot_get("a40"), (mt(40), out40))
+check("ask: …with clear_wait=true the same update drops the wait and asks", "wait_kind" not in mt(40) and "decision" in mt(40)["needs"] and "model conflict" not in _wt_get.stackshot_get("a40"), (mt(40), out40))
 item(44, needs=[BACK], subject="[home] derived wait, then ask", state="outside", party="Acme", chase=day(4))
 upd(44, needs=["decision"], ask=ASK2)
 check("ask: …an item whose wait is only read from its state (no wait_kind stored) is not refused", "decision" in mt(44)["needs"], mt(44))
@@ -421,8 +428,8 @@ check("ask: …an item that already holds the decision and a wait (stored before
 upd(45, needs=["decision"], ask=ASK2)
 check("ask: …a decision restated on an item that already holds it (and a wait, stored before) is not refused", mt(45)["state"] == "your-call" and "decision" in mt(45)["needs"] and "wait_kind" in mt(45), mt(45))
 check("hint: update's text says what clear_wait is for and when a decision is refused; create's shared text makes no update-only claim",
-      "clear_wait=true is how an update drops a stored wait" in server._WAIT_FORM and "newly adds needs=decision to an item that stores a wait is refused unless it also passes clear_wait=true" in server._WAIT_FORM
-      and "is how an update drops" not in server._MODEL_FORM and "clear_wait" in _inspect.signature(server.stackshot_update).parameters, None)
+      "clear_wait=true is how an update drops a stored wait" in _wt_update._WAIT_FORM and "newly adds needs=decision to an item that stores a wait is refused unless it also passes clear_wait=true" in _wt_update._WAIT_FORM
+      and "is how an update drops" not in _wt_text._MODEL_FORM and "clear_wait" in _inspect.signature(_wt_update.stackshot_update).parameters, None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": model scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

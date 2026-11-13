@@ -69,7 +69,9 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld
-from stackshot.web import server; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web import app as _wapp
+from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.routes import answers as _rt_answers
 from stackshot.web.routes import board_pages as _rt_board
 from stackshot.web.auth import signin as _signin
@@ -79,13 +81,13 @@ from stackshot.web import ui as ui_pkg
 from stackshot.web.ui import render as r2, search as s2, runners as n2
 from starlette.testclient import TestClient
 from stackshot.web.routes import ui_api as _rt_ui
-pub = [0]; server._publish = _rt_answers._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the routes (web/routes/) look the publish up on their own modules
+pub = [0]; server._publish = _wt_anchors._publish = _wt_route._publish = _rt_answers._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the routes (web/routes/) look the publish up on their own modules
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 NEWD = "- The thing works and is in use"
 for i, who in ((3, "alpha-x"), (4, "alpha-x"), (5, "beta-x")):
-    r = server.stackshot_complete(f"a{i}", outcome="done", reason="the change is live", description=NEWD, sender=who)
+    r = _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason="the change is live", description=NEWD, sender=who)
     assert "a" in str(r), r
 check("the fixture has closes on the Landed list", len(ld.records()) == 3, ld.records())
 
@@ -323,7 +325,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("item: the page carries the cards' script and style; the selected card gets a filled circle, a 2 px accent border and a tint", "window.ssCards" in pg3 and ".acards .acard:has(input:checked){border:2px solid var(--acc);background:var(--selbg)" in pg3
           and ".adot::after" in pg3)
     check("item, the comment-only box of an item he does not move is unchanged: no cards", '<form class="ianswer" data-cards' not in get("/items/a2").text)
-    server._board_home_drop(); hm3 = get("/").text
+    _wapp._board_home_drop(); hm3 = get("/").text
     hrow = re.search(r'<form class="hanswer" data-cards method="post" action="/items/a30/answer".*?</form>', hm3, re.S)
     check("home: the row's answer form has the same cards, note and one Send (drawn hidden until its token arrives)", bool(hrow) and hrow.group(0).count('class="acard"') == 3 and _html.escape(LONG["Alpha"]) in hrow.group(0) and 'value="B · Beta"' in hrow.group(0)
           and 'disabled>Send</button><span class="ahint" hidden>' in hrow.group(0) and not re.search(r'<button[^>]*name="choice"', hrow.group(0)), (hrow.group(0) if hrow else hm3[:200])[:500])
@@ -416,7 +418,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("…a card of words that start with \"A\" keeps them whole under the badge", re.findall(r'<span class="akey">(.)</span>([^<]*)</span>', b61) == [("A", "A wake alone"), ("B", "A dropped step"), ("C", "A third thing")]
           and vals(b61) == ["A · A wake alone", "B · A dropped step", "C · A third thing"], b61[:500])
     check("…a label that was only its letter draws the badge alone and posts the letter", re.findall(r'<span class="akey">(.)</span>([^<]*)</span>', b62) == [("A", ""), ("B", "Plan"), ("C", "Fix")] and vals(b62) == ["A", "B · Plan", "C · Fix"], b62[:500])
-    server._board_home_drop(); hm60 = get("/").text
+    _wapp._board_home_drop(); hm60 = get("/").text
     hrow60 = re.search(r'<form class="hanswer" data-cards method="post" action="/items/a60/answer".*?</form>', hm60, re.S)
     check("the home row draws the same stripped cards", bool(hrow60) and re.findall(r'name="choice" value="([^"]*)"', hrow60.group(0)) == ["A · Report", "B · Plan", "C · Fix"] and "A Report" not in hrow60.group(0), hm60[:200])
     # a pick lands on a stripped card whichever form the answer comes in: the card's own "A · Report", the bare shown label, the label as stored, a page loaded before the change ("A · A Report")
@@ -491,7 +493,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     post("/for-you/seen", {"id": "all"})
     check("…and a write from a page drops it: the next read draws again", "fresh item ten" in get("/").text)
     item(11, subject="[work] fresh item eleven")
-    server._board_home_drop()
+    _wapp._board_home_drop()
     check("a drop (what a publish does) makes the next read draw again", "fresh item eleven" in get("/").text)
 
     # a watch change drops the home too (the publish is stubbed here, so only the handler's own drop can show it)
@@ -507,10 +509,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         def __init__(self, *a, **k): type(self).calls += 1; raise RuntimeError("draw failed (test)")
     real_board, real_backoff = r2.Board, _rt_board._BOARD_FAIL_BACKOFF_S
     try:
-        good = get("/").text; server._board_home_drop(); r2.Board = _Boom
+        good = get("/").text; _wapp._board_home_drop(); r2.Board = _Boom
         rs = [get("/") for _ in range(5)]
         check("a failed draw: one attempt for five requests, each served the last good copy (200)", _Boom.calls == 1 and all(x.status_code == 200 and x.text == good for x in rs), (_Boom.calls, [x.status_code for x in rs]))
-        server._board_home_drop(); get("/")
+        _wapp._board_home_drop(); get("/")
         check("a drop (a write) during the back-off does not draw again", _Boom.calls == 1, _Boom.calls)
         _web_board_home._BOARD_HOME["failed"] -= _rt_board._BOARD_FAIL_BACKOFF_S + 1; get("/")
         check("...after the back-off one more attempt is made (and a failure starts it again)", _Boom.calls == 2 and get("/").status_code == 200 and _Boom.calls == 2, _Boom.calls)
@@ -557,26 +559,26 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         # a write: the poll answers with the held stamp at once, the next sees the new one
         old = ts0 - 100
         _web_board_home._BOARD_HOME["html"] = _web_board_home._BOARD_HOME["html"].replace(f'content="{ts0}"', f'content="{old}"', 1)
-        server._board_home_drop(); n1 = _Count.calls
+        _wapp._board_home_drop(); n1 = _Count.calls
         r = get("/render-stamp")
         check("render-stamp after a write (a drop): the held stamp at once, never 0", r.status_code == 200 and r.json() == {"ts": old}, r.text)
         check("...one background draw ran, and the next poll sees the newer stamp (an open page then fetches the new copy)", settle() and _Count.calls == n1 + 1 and get("/render-stamp").json().get("ts", 0) > old, (_Count.calls, n1))
         # a burst of polls with a slow draw: at most one draw, no waiting
-        server._board_home_drop(); n2 = _Count.calls; r2.Board = _Slow; gate.clear()
+        _wapp._board_home_drop(); n2 = _Count.calls; r2.Board = _Slow; gate.clear()
         t0 = time.time(); rs = [get("/render-stamp") for _ in range(6)]
         check("a burst of polls while a draw runs: all answered at once with the held stamp, and only one draw started", all(x.status_code == 200 and x.json().get("ts", 0) > 0 for x in rs) and time.time() - t0 < 5 and _Count.calls == n2 + 1, (_Count.calls, n2, [x.status_code for x in rs]))
         gate.set()
         check("...the draw ends and the lock is free again", settle())
         # a drop while a draw runs: the copy it finishes is held but not marked fresh, so the next read draws again
-        server._board_home_drop(); n4 = _Count.calls; r2.Board = _Slow; gate.clear()
+        _wapp._board_home_drop(); n4 = _Count.calls; r2.Board = _Slow; gate.clear()
         get("/render-stamp")
         dl = time.time() + 10
         while _Count.calls == n4 and time.time() < dl: time.sleep(0.02)
-        server._board_home_drop(); gate.set()
+        _wapp._board_home_drop(); gate.set()
         check("a drop while a draw runs: the draw ends, its copy is held, and it is not marked fresh (at stays 0)", settle() and _Count.calls == n4 + 1 and _web_board_home._BOARD_HOME["html"] is not None and _web_board_home._BOARD_HOME["at"] == 0.0, (_Count.calls, n4, _web_board_home._BOARD_HOME["at"]))
         r2.Board = _Count
         # the lock held elsewhere (a draw by a page request): the poll does not wait for it and starts nothing
-        server._board_home_drop(); n3 = _Count.calls; r2.Board = _Count
+        _wapp._board_home_drop(); n3 = _Count.calls; r2.Board = _Count
         _rt_board._BOARD_HOME_LOCK.acquire()
         try:
             t0 = time.time(); r = get("/render-stamp")
@@ -585,7 +587,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
             _rt_board._BOARD_HOME_LOCK.release()
         _web_board_home._BOARD_HOME["at"] = time.time()
         # a failing draw: polls within the back-off start no more than the one attempt
-        server._board_home_drop(); _web_board_home._BOARD_HOME["failed"] = 0.0; r2.Board = _Boom; _Boom.calls = 0
+        _wapp._board_home_drop(); _web_board_home._BOARD_HOME["failed"] = 0.0; r2.Board = _Boom; _Boom.calls = 0
         for _ in range(5): get("/render-stamp"); settle()
         check("polls after a failed draw: one attempt in all (the back-off holds), the held stamp still answered", _Boom.calls == 1 and get("/render-stamp").status_code == 200, _Boom.calls)
         r2.Board = _Count; _web_board_home._BOARD_HOME["failed"] = 0.0; _web_board_home._BOARD_HOME["at"] = time.time()
@@ -597,7 +599,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         r = get("/render-stamp")
         check("render-stamp with no usable time at all: 503, never ts 0", r.status_code == 503 and "ts" not in r.json(), r.text)
     finally:
-        gate.set(); settle(); r2.Board = real_board; server._board_home_drop(); _web_board_home._BOARD_HOME.update(html=None, drawn=0, failed=0.0)
+        gate.set(); settle(); r2.Board = real_board; _wapp._board_home_drop(); _web_board_home._BOARD_HOME.update(html=None, drawn=0, failed=0.0)
 
 print(f"\n{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

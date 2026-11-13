@@ -101,6 +101,15 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import message as _wt_message
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import writes
 from stackshot.service import telling
 from stackshot.core import instance as _core_instance
@@ -111,7 +120,7 @@ def setwk_(m, w):
     if "until" in m: m["until"] = w
     else: m["wake"] = w
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends; the held case has its own check (front_quiet_scenario)
 _real_verdict = telling.front_verdict
 telling.front_verdict = lambda gid, owner, kind: ("send", "") if PRESENT[0] else _real_verdict(gid, owner, kind)
@@ -120,12 +129,12 @@ from fastmcp.exceptions import ToolError
 def refused(fn):
     try: fn(); return False
     except ToolError: return True
-check("passed needs an agent", refused(lambda: server._route(nid, "passed")))
-check("unknown ruling refused", refused(lambda: server._route(nid, "ignored")))
-check("unknown notice refused", refused(lambda: server._route("zzzzzz", "dropped")))
-res = server._route(nid, "passed", to="work-osprey-main", reason="their thread", sender="work-osprey"); check("ruling recorded", res.startswith(f"ruled {nid} (projects/alpha): passed to work-osprey-main — their thread"), res)
+check("passed needs an agent", refused(lambda: _wt_route._route(nid, "passed")))
+check("unknown ruling refused", refused(lambda: _wt_route._route(nid, "ignored")))
+check("unknown notice refused", refused(lambda: _wt_route._route("zzzzzz", "dropped")))
+res = _wt_route._route(nid, "passed", to="work-osprey-main", reason="their thread", sender="work-osprey"); check("ruling recorded", res.startswith(f"ruled {nid} (projects/alpha): passed to work-osprey-main — their thread"), res)
 c = routing.counts(["projects/alpha", "projects/alpha/sub"]); check("after one ruling: 1 passed, 2 pending", (c["in"], c["passed"], c["pending"]) == (3, 1, 2), c)
-server._route(nid, "dropped", reason="overruled: noise", sender="work-osprey")
+_wt_route._route(nid, "dropped", reason="overruled: noise", sender="work-osprey")
 n = next(x for x in routing.read("projects/alpha") if x["id"] == nid); check("a later ruling wins", (n["ruling"], n["reason"], n["ruled_by"]) == ("dropped", "overruled: noise", "work-osprey"), n)
 
 # ---- 4. an agent's board write is the keeper's
@@ -708,20 +717,20 @@ check("…a project with nothing open says so, and draws no group", '<p class="e
 
 # ---- anchors under a key whose page is gone (a rename by hand): listable and removable, nothing else
 st0 = a.load(); st0["projects/gone"] = [{"url": "https://x.slack.com/archives/C0000000009", "items": None, "added": 1, "by": "t"}]; a.save(st0)
-out = server._anchors("projects/gone", who="t")
+out = _wt_anchors._anchors("projects/gone", who="t")
 check("anchors: a key with no page lists what it still holds and says so", "names no page any more" in out and "C0000000009" in out, out)
-try: server._anchors("projects/gone", add=["https://x.slack.com/archives/C0000000008"], who="t"); ok = False
+try: _wt_anchors._anchors("projects/gone", add=["https://x.slack.com/archives/C0000000008"], who="t"); ok = False
 except Exception as e: ok = "names no page" in str(e) and "not added to" in str(e)
 check("anchors: nothing can be added under it", ok)
-out = server._anchors("gone", remove=["https://x.slack.com/archives/C0000000009"], who="t")
+out = _wt_anchors._anchors("gone", remove=["https://x.slack.com/archives/C0000000009"], who="t")
 check("anchors: its anchors can be removed, and the key goes with the last one", "(none)" in out and "projects/gone" not in a.load(), (out, list(a.load())))
-try: server._anchors("projects/never", who="t"); ok = False
+try: _wt_anchors._anchors("projects/never", who="t"); ok = False
 except Exception as e: ok = "names no page" in str(e) and "still holds" not in str(e)
 check("anchors: a key that names nothing at all is refused as before", ok)
 general(True)
-out = server._anchors("projects/beta", who="t")
+out = _wt_anchors._anchors("projects/beta", who="t")
 check("anchors: a page with one session lists as ever, naming the router and the keeper (its own session)", out.startswith("projects/beta anchors (router: rules this project; keeper: home-beta):") and "C0000000002" in out, out)
-out = server._anchors("projects/alpha/kept", who="t")
+out = _wt_anchors._anchors("projects/alpha/kept", who="t")
 check("anchors: a kept sub-page names the router, the keeper, then the agent that keeps it", out.startswith("projects/alpha/kept anchors (router: rules this project; keeper: work-osprey; kept by work-osprey-x):"), out)
 general(False)
 
@@ -1220,7 +1229,7 @@ res = server._update("a5", clear_hold=True, sender="home-beta"); m5 = rd("a5")["
 check("hold: clear_hold=true releases now: the date goes, needs, due and next stay", rd("a5")["status"] == "open" and "hold" not in m5 and "wake" not in m5 and "until" not in m5
       and m5.get("due") == D(9) and m5.get("needs") == ["external"] and m5.get("next") == "ask Kim for A or B" and res.startswith("updated a5.\na5 [open] ") and HINT not in res, res)
 check("hold: released with needs external → back on others at once", "a5" in [r["gid"] for r in ui_render.Board(str(T / "store")).n_relay])
-server._update("a6", hold=True, wake=D(4), sender="home-beta"); res = server.stackshot_complete("a6", sender="home-beta", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
+server._update("a6", hold=True, wake=D(4), sender="home-beta"); res = _wt_complete.stackshot_complete("a6", sender="home-beta", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
 check("hold: complete (the complete tool) drops the hold and the wake", rd("a6")["status"] == "completed" and "wake" not in rd("a6")["metadata"] and "hold" not in rd("a6")["metadata"], rd("a6"))
 res = server._update("a3", wake="none", sender="home-beta")
 check("hold: wake=\"none\" on a wait on a date alone ends the wait (the date was all it waited on; nothing is left parked)", not held_("a3") and not _WT.stored_until(rd("a3")["metadata"]), (res, rd("a3")["metadata"]))
@@ -1337,7 +1346,7 @@ check("timed and date-only wakes: the owner is told each time, the date as store
       f"[stackshot] a9 is yours now: its until {D(1)} came."]), p[n9:])
 # brief: the held item has its own block, after the open ones and not among them
 (T / "board.md").write_text(ui_render.Board(f"{tmp}/store").markdown(), encoding="utf-8")   # what the publish writes; the brief reads its head
-b = server.stackshot_brief(); op, _, hd = b.partition("\n\nOn hold (")
+b = _wt_brief.stackshot_brief(); op, _, hd = b.partition("\n\nOn hold (")
 check("brief: an item waiting on a date is listed (with its date) and no longer in an On hold block", "a7 [open" in b and f"until: {D(5)}" in b and "a3 [open]" in b, b[-1500:])
 check("brief: the board's index links each item's page, never its card anchor #task-<letter>-<n>",
       "#task-" not in b and "](https://stackshot.example.com/items/a3)" in b and "#task-" in (T / "board.md").read_text(), b[:1500])
@@ -1366,7 +1375,7 @@ check("legacy: before the migration, _load reads it as open + hold", server._loa
 check("legacy: before the migration, its wake is on the minute loop's list", "a91" in [g for g, *_ in server._wakes()])
 bl_ = ui_render.Board(str(T / "store"))
 check("legacy: before the migration, the board draws it held, never on others", {"a91", "a92"} <= {r["gid"] for r in bl_.held} and not {"a91", "a92"} & {r["gid"] for r in bl_.n_relay})
-check("legacy: before the migration, the brief tool lists it on hold", "a91 [open · on hold]" in server.stackshot_brief().partition("\n\nOn hold (")[2])
+check("legacy: before the migration, the brief tool lists it on hold", "a91 [open · on hold]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[2])
 _err = io.StringIO()
 with contextlib.redirect_stderr(_err):
     mig = server._migrate_holds()
@@ -1392,10 +1401,10 @@ b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
 check("wake alone: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
 _wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)
 check("wake alone: the item page shows the date in the sidebar's Wake row, and says waiting", bool(_wk30) and _wk30.group(1) == b_.when(render.wake_of(rd("a30"))) and "tag t-wait" in ip_, (_wk30.group(1) if _wk30 else None, ip_[ip_.find("istat"):][:300]))
-_b30 = server.stackshot_brief().partition("\n\nOn hold (")
+_b30 = _wt_brief.stackshot_brief().partition("\n\nOn hold (")
 check("wake alone: the brief lists it among the parked, not the active items", "a30 [open" in _b30[2] and "a30 [open" not in _b30[0], _b30[0][-300:])
 check("wake alone: the update description says a wake alone is a wait until that date, never that it implies a hold",
-      "alone is a wait: the item waits until that date" in server._UPDATE_DESC and "a wake implies" not in server._UPDATE_DESC and "implies hold" not in server._UPDATE_DESC)
+      "alone is a wait: the item waits until that date" in _wt_update._UPDATE_DESC and "a wake implies" not in _wt_update._UPDATE_DESC and "implies hold" not in _wt_update._UPDATE_DESC)
 pj = json.load(open(T / "store/projects.json")); pj["pages"]["projects/zz"] = {**page("Zz", "work-zz"), "agents": {"work-zz-bg": "builds"}, "back_agents": {"work-zz-bg": "builds"}}; (T / "store/projects.json").write_text(json.dumps(pj))
 # a session in needs: a background agent (a page's keeper is retired and refused); it has a pane in the heartbeat, or the hand-off's send-time guard (handoff suite) refuses it
 ZZB = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -1448,7 +1457,7 @@ check("decision + hold flag: the board shows it in your call, never parked; the 
       "a35" in [r["gid"] for r in b_.n_call] and "a35" not in [r["gid"] for r in b_.held]
       and '<span class="badge hold">on hold</span>' not in ip_ and "(on hold" not in b_.markdown().split("a35 · ")[1][:200] if "a35 · " in b_.markdown() else False,
       [r["gid"] for r in b_.held])
-check("decision + hold flag: the server's views agree (get, the brief's lanes)", not server._is_held(rd("a35")) and "a35 [open]" in server.stackshot_brief().partition("\n\nOn hold (")[0]
+check("decision + hold flag: the server's views agree (get, the brief's lanes)", not server._is_held(rd("a35")) and "a35 [open]" in _wt_brief.stackshot_brief().partition("\n\nOn hold (")[0]
       and "on hold" not in server._fmt({**rd("a35"), "gid": "a35"}).splitlines()[0])
 res = server._update("a35", next="prepping the options", sender="home-beta"); m_ = rd("a35")["metadata"]
 check("decision + hold flag: any write drops the hold, keeps its date, and says so",
@@ -1464,7 +1473,7 @@ ASK = "Decide: whether to take vendor A · Recommend: yes, it is cheaper · Stak
 SHAPE = 'Refused: ask must read "Decide: … · Recommend: … · Stakes: … · By: …" in one line of at most 240 characters'
 NEED = 'Refused: a needs=decision item needs an ask line: ask="Decide: … · Recommend: … · Stakes: … · By: …" (≤ 240 chars). A client whose tool has no ask parameter writes the line as the first line of next instead.'
 NAG = '[ask] a needs=decision item carries an ask line: ask="Decide: … · Recommend: … · Stakes: … · By: …" (≤ 240 chars)'
-mk = lambda **kw: server.stackshot_create(subject="[home] ask test", description="- Goal: A decision\n- It lives here\n- Done when decided", project="beta", sender="home-beta", **{"next": "home-beta: carry on", **kw})
+mk = lambda **kw: _wt_create.stackshot_create(subject="[home] ask test", description="- Goal: A decision\n- It lives here\n- Done when decided", project="beta", sender="home-beta", **{"next": "home-beta: carry on", **kw})
 gid_of = lambda res: re.match(r"created (\w+) ", res).group(1)
 nfiles = lambda: len(list((T / "store/a").glob("*.json")))
 def setf(g, **kw):
@@ -1533,15 +1542,15 @@ e = refusal(lambda: server._update(g4, needs="decision", sender="home-beta")); c
 res = server._update(g4, needs="decision", ask=ASK, sender="home-beta"); check("ask: …with the ask in the same update it is accepted", rd(g4)["metadata"].get("needs") == ["decision"] and "[ask]" not in res, res)
 e = refusal(lambda: server._update(g2, priority="p1", sender="home-beta")); check("ask: from refuse_after, an edit of an ask-less needs=decision item is refused", e == NEED and rd(g2)["metadata"].get("priority") == "p2", e)
 e = refusal(lambda: server._update(g4, ask="none", sender="home-beta")); check("ask: from refuse_after, clearing the ask of a needs=decision item is refused", e == NEED and rd(g4)["metadata"]["ask"] == ASK, e)
-res = server.stackshot_complete(g2, sender="home-beta", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place"); check("ask: a completion never needs an ask", rd(g2)["status"] == "completed" and "[ask]" not in res, res)
+res = _wt_complete.stackshot_complete(g2, sender="home-beta", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place"); check("ask: a completion never needs an ask", rd(g2)["status"] == "completed" and "[ask]" not in res, res)
 CF["ask"]["refuse_after"] = ""
 res = server._update(g4, clear_needs=True, sender="home-beta"); check("ask: an ask is kept when needs changes, but not shown once the decision left", "needs" not in rd(g4)["metadata"] and rd(g4)["metadata"]["ask"] == ASK and ASK not in res and "ask:" not in res, res)
-res = server._update(g4, needs="decision", sender="home-beta"); check("ask: the decision put back brings the stored ask back into get", f"ask: {ASK}" in res and f"ask: {ASK}" in server.stackshot_get(g4), res)
+res = server._update(g4, needs="decision", sender="home-beta"); check("ask: the decision put back brings the stored ask back into get", f"ask: {ASK}" in res and f"ask: {ASK}" in _wt_get.stackshot_get(g4), res)
 res = server._update(g4, needs="decision", ask=ASK, sender="home-beta"); res = server._update(g4, needs="none", sender="home-beta")
 check("needs: needs=\"none\" clears the badge, like clear_needs (an older tool list may lack it)", "needs" not in rd(g4)["metadata"], res)
 res = server._update(g4, ask="none", sender="home-beta"); check("ask: ask=\"none\" clears it", "ask" not in rd(g4)["metadata"] and "ask:" not in res, res)
-check("ask: the update and create tools take an ask, and both descriptions say its shape", all("ask" in __import__("inspect").signature(f).parameters for f in (server.stackshot_create, server.stackshot_update, server._update))
-      and "ask=\"none\" clears it" in server._UPDATE_DESC and "Stakes: <what happens either way>" in server._UPDATE_DESC)
+check("ask: the update and create tools take an ask, and both descriptions say its shape", all("ask" in __import__("inspect").signature(f).parameters for f in (_wt_create.stackshot_create, _wt_update.stackshot_update, server._update))
+      and "ask=\"none\" clears it" in _wt_update._UPDATE_DESC and "Stakes: <what happens either way>" in _wt_update._UPDATE_DESC)
 
 # ---- 17b. the options
 OA = {"label": "Vendor A", "line": "Cheaper, and ships next week.", "recommended": True}
@@ -1569,14 +1578,14 @@ for why, kw in {"`which of the two` in the ask": dict(ask=ASKO),
                 "`x, y or z` in the Decide part": dict(ask="Decide: merge, deploy or wait · Recommend: merge · Stakes: a day · By: no date"),
                 "`x vs y` in the Decide part": dict(ask="Decide: Postgres vs SQLite · Recommend: SQLite · Stakes: a week · By: no date")}.items():
     n_ = nfiles(); kw.setdefault("description", "- Goal: A decision\n- It lives here\n- Done when decided")
-    e = refusal(lambda: server.stackshot_create(subject="[home] alt test", project="beta", owner="home-beta", needs="decision", **kw))
+    e = refusal(lambda: _wt_create.stackshot_create(subject="[home] alt test", project="beta", owner="home-beta", needs="decision", **kw))
     check(f"options: {why}, no options → refused, nothing created, the refusal says what to add and the portal route",
           e.startswith(ALT) and "lists no options" in e and '"recommended": true' in e and "codemode.stackshot_update" in e and nfiles() == n_, e)
 for why, a_ in {"a yes/no ask": "Decide: whether to ship the release today · Recommend: yes · Stakes: a day either way · By: no date",
                 "one vendor named, no pair (`whether to take vendor A`)": ASK, "the word `optional`": "Decide: make the field optional · Recommend: yes · Stakes: none · By: no date",
                 "`options` as a plain noun": "Decide: keep our options open on the lease · Recommend: yes · Stakes: rent · By: no date"}.items():
     res = mk(needs="decision", ask=a_); check(f"options: {why} passes without options", "created" in res, res)
-res = server.stackshot_create(subject="[home] alt test", project="beta", owner="home-beta", description="- Goal: Option A or Option B\n- Done when picked", next="home-beta: carry on")
+res = _wt_create.stackshot_create(subject="[home] alt test", project="beta", owner="home-beta", description="- Goal: Option A or Option B\n- Done when picked", next="home-beta: carry on")
 check("options: alternatives on an item that needs no decision pass", "created" in res, res)
 # a yes/no decision lists Approve (recommended) and Decline; the gates accept exactly that list and the item page draws its two buttons
 YN_ASK = "Decide: whether to ship the release today · Recommend: Approve · Stakes: a day either way · By: no date"
@@ -1668,7 +1677,7 @@ check("actor: …and naming who acts in the line ends the note", "name who acts"
 res = server._update(gl, options=opt_pair("A: flag", "we approve it"), ask="Decide: flag or hold \u00b7 Recommend: the slim one \u00b7 Stakes: a day either way \u00b7 By: no date", sender="home-beta")
 check("actor: the Recommend-part note still works beside the actor note",
       "(note: the ask's Recommend part does not name the recommended option" in res and "(note: the line of option" in res and "Refused" not in res, res)
-check("actor: the shared item form (create and update descriptions) carries the sentence", "Name who acts in every option label and line" in server._ITEM_FORM and "the ask line likewise never says" in server._ITEM_FORM, "")
+check("actor: the shared item form (create and update descriptions) carries the sentence", "Name who acts in every option label and line" in _wt_text._ITEM_FORM and "the ask line likewise never says" in _wt_text._ITEM_FORM, "")
 bo = ui_render.Board(str(T / "store")); ip = bo.item_html(go)
 check("options: the item page lists them under the ask, the recommended one marked",
       '<b class="osub">Options</b><ol class="iopts"><li class=rec><b>Vendor A</b> <span class="badge rec">recommended</span><span class="oline">Cheaper, and ships next week.</span></li><li><b>Vendor B</b>' in ip, ip[ip.find('class="iask"'):ip.find('class="iask"') + 900])
@@ -1686,16 +1695,16 @@ check("options: …nor the get reply", "options:" not in server._fmt(rd(go)), se
 check("options: …nor the item page as an open choice", 'class="iopts"' not in ip and '<b class="osub">' not in ip, ip[ip.find('class="iask"'):ip.find('class="iask"') + 600])
 res = server._update(go, needs="decision", ask=ASKO, sender="home-beta")
 check("options: back to needs=decision: they are an open choice again", "options:\n- Vendor A (recommended)" in res and 'class="iopts"' in ui_render.Board(str(T / "store")).item_html(go), res)
-res = server.stackshot_complete(go, sender="home-beta", outcome="done", reason="Vendor A was picked", description="- Goal: The vendor is picked")
+res = _wt_complete.stackshot_complete(go, sender="home-beta", outcome="done", reason="Vendor A was picked", description="- Goal: The vendor is picked")
 check("options: a close drops them with the ask", "options" not in rd(go)["metadata"] and "options:" not in res and 'class="iopts"' not in ui_render.Board(str(T / "store")).item_html(go), res)
 check("options: create and update take options and both descriptions say the form and the refusal",
-      all("options" in __import__("inspect").signature(f).parameters for f in (server.stackshot_create, server.stackshot_update, server._update, server._create))
-      and "exactly one recommended" in server._UPDATE_DESC and "A yes/no decision lists two options" in server._UPDATE_DESC and "whose Decide part opens with what, which, how, who, when, where or why" in server._UPDATE_DESC and "options=\"none\" clears them" in server._UPDATE_DESC)
+      all("options" in __import__("inspect").signature(f).parameters for f in (_wt_create.stackshot_create, _wt_update.stackshot_update, server._update, _wt_create._create))
+      and "exactly one recommended" in _wt_update._UPDATE_DESC and "A yes/no decision lists two options" in _wt_update._UPDATE_DESC and "whose Decide part opens with what, which, how, who, when, where or why" in _wt_update._UPDATE_DESC and "options=\"none\" clears them" in _wt_update._UPDATE_DESC)
 
 # One decision per item: an ask that packs several decisions, or points at its choices by a code the item
 # does not spell out, is refused when it is written or changed; an existing item is not held for the ask it already has.
 ODRE = "Refused: this ask"
-mkd = lambda **kw: server.stackshot_create(**{"subject": "[home] od test", "project": "beta", "owner": "home-beta", "description": "- Goal: A decision\n- It lives here\n- Done when decided", "next": "home-beta: carry on", **kw})
+mkd = lambda **kw: _wt_create.stackshot_create(**{"subject": "[home] od test", "project": "beta", "owner": "home-beta", "description": "- Goal: A decision\n- It lives here\n- Done when decided", "next": "home-beta: carry on", **kw})
 ODHINT = ("One decision per item", "split it into one item per decision", "write each option out in words")   # several decisions
 ODCODE = ("write each option out in words", "define each code in the ask or description", "A: ")   # a code the item does not define: no split advice
 mkask = lambda decide, rec="yes", desc="- Goal: A decision\n- It lives here\n- Done when decided", **kw: dict(
@@ -1799,7 +1808,7 @@ res = server._update(g9, description="- Goal: A decision\n- It lives here\n- Don
 res = server._update(g9, needs="none", sender="home-beta"); check("one decision: …nor a needs clear", "decision" not in str(rd(g9)["metadata"].get("needs") or ""), res)
 res = server._update(g9, clear_ask=True, sender="home-beta"); check("one decision: …nor clearing the ask", "ask" not in rd(g9)["metadata"], res)
 check("one decision: create and update descriptions say one decision per item with the options in words",
-      all(("One decision per item" in d and "write each option out in words" in d) for d in (server._UPDATE_DESC, server._ITEM_FORM)), server._ITEM_FORM[-700:])
+      all(("One decision per item" in d and "write each option out in words" in d) for d in (_wt_update._UPDATE_DESC, _wt_text._ITEM_FORM)), _wt_text._ITEM_FORM[-700:])
 
 # the item (the linked agent of before it): needs is a list of decision, external and session names. A background agent of the hub, the
 # keeper, a sub-page's keeper, the keeper or a background agent of another project, or the item's owner may be named; a user-facing agent or
@@ -1810,11 +1819,11 @@ _rg["pages"]["projects/alpha"].update(agents={"work-osprey-main": "front", "work
 _sjy = json.loads((T / "fleet/a/sessions.json").read_text())      # the background agents named below have panes in the heartbeat: a hand-off to one without is refused (handoff suite)
 for _i, _n in enumerate(("work-osprey-y",)): _sjy[f"ffffffff-ffff-4fff-8fff-ffffffffff0{_i}"] = {"name": _n, "machine": "a", "url": "", "seen": "x"}
 (T / "fleet/a/sessions.json").write_text(json.dumps(_sjy))
-mka = lambda **kw: server.stackshot_create(**{"subject": "[home] linked test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "projects/alpha", "owner": "work-osprey-main", "next": "work-osprey-main: carry on", **kw})
+mka = lambda **kw: _wt_create.stackshot_create(**{"subject": "[home] linked test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "projects/alpha", "owner": "work-osprey-main", "next": "work-osprey-main: carry on", **kw})
 ya = server._session_id("work-osprey-y")
 n0 = len(wait_push(0)); res = mka(needs=["work-osprey-y"]); gl = gid_of(res); p = wait_push(n0 + 2)   # the keeper's board line and the named session's, from two threads
 check("needs: a background agent of the hub is named, stored as a list, and get shows it", rd(gl)["metadata"].get("needs") == ["work-osprey-y"] and "agent" not in rd(gl)["metadata"]
-      and "\nneeds: work-osprey-y\n" in res and "\nneeds: work-osprey-y\n" in server.stackshot_get(gl) and "keeper:" not in server.stackshot_get(gl), res)
+      and "\nneeds: work-osprey-y\n" in res and "\nneeds: work-osprey-y\n" in _wt_get.stackshot_get(gl) and "keeper:" not in _wt_get.stackshot_get(gl), res)
 check("needs: the session named gets one notice, and the reply says so", any(m[0] == ya and m[1].startswith(f"[stackshot] {gl} now needs you (named in its needs by work-osprey-main)") for m in p[n0:])
       and "work-osprey-y has been told the item needs it" in res, (p[n0:], res))
 res = mka(); gd = gid_of(res)
@@ -1825,9 +1834,9 @@ for why, a_, frag in (("another user-facing agent", "work-osprey-z", "is a user-
     check(f"needs: {why} is refused with the reason and the choices, nothing created", e.startswith("Refused: ") and frag in e and "work-osprey-y" in e and nfiles() == n_, e)
 res = mka(agent="work-osprey-y"); ga = gid_of(res)
 check("agent=: the older form still writes the session into needs, nothing under agent", rd(ga)["metadata"].get("needs") == ["work-osprey-y"] and "agent" not in rd(ga)["metadata"], res)
-res = server.stackshot_create(subject="[home] linked test", description="- Goal: A thing\n- It lives here\n- Done when done", project="beta", owner="home-beta", needs=["home-beta"], next="home-beta: carry on"); gb = gid_of(res)
+res = _wt_create.stackshot_create(subject="[home] linked test", description="- Goal: A thing\n- It lives here\n- Done when done", project="beta", owner="home-beta", needs=["home-beta"], next="home-beta: carry on"); gb = gid_of(res)
 check("needs: outside the pilot too (the whole board): the owner itself may be named", rd(gb)["metadata"].get("needs") == ["home-beta"] and "\nneeds: home-beta\n" in res, res)
-e = refusal(lambda: server.stackshot_create(subject="[home] linked test", description="- Goal: A thing\n- It lives here\n- Done when done", project="beta", owner="home-beta", needs=["nobody-here"]))
+e = refusal(lambda: _wt_create.stackshot_create(subject="[home] linked test", description="- Goal: A thing\n- It lives here\n- Done when done", project="beta", owner="home-beta", needs=["nobody-here"]))
 check("needs: …and a session with no role is refused there too", e.startswith("Refused: nobody-here is not a background agent of any project"), e)
 e = refusal(lambda: server._update(gd, agent="work-osprey", sender="work-osprey")); check("needs: the retired name-line session is refused by update (agent=), nothing stored", "retired name-line session of projects/alpha" in e and "needs" not in rd(gd)["metadata"], e)
 res = server._update(gd, agent="work-osprey-y", sender="work-osprey"); check("needs: a background agent may be named by update (agent=)", rd(gd)["metadata"].get("needs") == ["work-osprey-y"], res)
@@ -1880,16 +1889,16 @@ res = server._update("a74", needs="decision", ask=ASKO, options=OPTS, sender="wo
 mo_ = [m for m in p[n0:] if m[0] == S and "a74 now needs" in m[1]]
 check("D2: a move to needs=decision by another agent reaches the mover, with the ask and the options, unmarked", len(mo_) == 1
       and mo_[0][1].startswith(f"[stackshot] a74 now needs {server.OWNER}'s call") and ASKO in mo_[0][1] and "Vendor A (recommended): Cheaper" in mo_[0][1]
-      and "set by work-osprey-y" in mo_[0][1] and server._FOR_OWNER not in mo_[0][1] and "keeper of record" not in res, (p[n0:], res))
-server.stackshot_complete("a74", sender="work-osprey", outcome="dropped", reason="test item", description="- Goal: Dropped"); time.sleep(0.5)
+      and "set by work-osprey-y" in mo_[0][1] and _wt_text._FOR_OWNER not in mo_[0][1] and "keeper of record" not in res, (p[n0:], res))
+_wt_complete.stackshot_complete("a74", sender="work-osprey", outcome="dropped", reason="test item", description="- Goal: Dropped"); time.sleep(0.5)
 n0 = len(wait_push(0)); res = server._update(gl, next="a next step", sender="work-osprey-y"); time.sleep(0.5)
 check("D2: an ordinary edit by the agent tells the creator nothing", not [m for m in wait_push(0)[n0:] if m[0] == A], wait_push(0)[n0:])
-n0 = len(wait_push(0)); res = server.stackshot_update(gl, status="completed", sender="work-osprey-y", outcome="done", reason="Vendor A was picked", description="- Goal: Picked", done=[1]); time.sleep(0.7); p = wait_push(0)      # the open step names the front agent: this close marks it itself (done=[1]), as a close no longer settles another session's step
+n0 = len(wait_push(0)); res = _wt_update.stackshot_update(gl, status="completed", sender="work-osprey-y", outcome="done", reason="Vendor A was picked", description="- Goal: Picked", done=[1]); time.sleep(0.7); p = wait_push(0)      # the open step names the front agent: this close marks it itself (done=[1]), as a close no longer settles another session's step
 check("D2: a close by another session is told to the item's mover alone, never to its creator, and the reply names no keeper of record",
       not [m for m in p[n0:] if m[0] == A] and "keeper of record" not in res and not any("keeper of record" in m[1] for m in p[n0:]), (p[n0:], res))
 n0 = len(wait_push(0)); res = server._update(gl, status="open", next="look again", sender="work-osprey-y"); time.sleep(0.7); p = wait_push(0)
 check("D2: a reopen by another session tells the creator nothing either", not [m for m in p[n0:] if m[0] == A] and "keeper of record" not in res, (p[n0:], res))
-n0 = len(wait_push(0)); res = server.stackshot_complete(gl, sender="work-osprey-bld", outcome="done", reason="closed by the builder", description="- Goal: Closed"); time.sleep(0.7); p = wait_push(0)
+n0 = len(wait_push(0)); res = _wt_complete.stackshot_complete(gl, sender="work-osprey-bld", outcome="done", reason="closed by the builder", description="- Goal: Closed"); time.sleep(0.7); p = wait_push(0)
 check("D2: a close by the builder tells the creator nothing", not [m for m in p[n0:] if m[0] == A] and "keeper of record" not in res, (p[n0:], res))
 n0 = len(wait_push(0)); res = server._update(gl, status="open", next="look once more", sender="work-osprey-bld"); time.sleep(0.7); p = wait_push(0)
 check("D2: a reopen by the builder tells the creator nothing", not [m for m in p[n0:] if m[0] == A] and "keeper of record" not in res, (p[n0:], res))
@@ -1905,8 +1914,8 @@ dd = [m for m in p[n0:] if m[0] == ya]
 check("decided: decision leaving needs tells the session still named at once, with the next line, and the reply says so", len(dd) == 1
       and dd[0][1].startswith(f"[stackshot] {gl}: {server.OWNER} has decided (decision left its needs, by work-osprey-main), so the move is yours as named in its needs:")
       and "next: his call: vendor A; place the order" in dd[0][1] and "work-osprey-y has been told the move is its now that the decision is in" in res, (p[n0:], res))
-check("decided: the create and update descriptions carry the sequencing rule", all(x in server._NEEDS_FORM for x in ("needs names only who can move now", "the session goes first and adds decision when it is done", "when unsure, in sequence", "the sessions still named are told at once"))
-      and server._NEEDS_FORM in server._UPDATE_DESC)
+check("decided: the create and update descriptions carry the sequencing rule", all(x in _wt_text._NEEDS_FORM for x in ("needs names only who can move now", "the session goes first and adds decision when it is done", "when unsure, in sequence", "the sessions still named are told at once"))
+      and _wt_text._NEEDS_FORM in _wt_update._UPDATE_DESC)
 n0 = len(wait_push(0)); server._update(gl, clear_needs=True, sender="work-osprey-main"); wait_push(n0 + 1)   # its board line lands before the next count, or that count is stale
 # the item rows 3-5: the page-owed notice never goes to a front agent keeper (the writer owes it, the keeper past the grace); an item a
 # front agent owns wakes its keeper when no linked agent takes the wake; a back agent, a keeper or a session with no role is unchanged
@@ -1940,7 +1949,7 @@ check("a recycle done is told to the item's mover alone, whoever it is (a front 
       len(r50) == 1 and r50[0][0] == "home-beta-main" and r50[0][1].startswith("[stackshot] the recycle you waited for has run (testbox, ") and "re-read a50 and resume." in r50[0][1]
       and "keeper of record" not in r50[0][1] and "recycle" not in rd("a50")["metadata"], (rr, pw))
 check("…a session with no role hears its own", len(r51) == 1 and r51[0][0] == "nobody-roleless" and "re-read a51 and resume." in r51[0][1], pw)
-check("…and the -main agent that moves a52 hears it, nobody else", len(r52) == 1 and r52[0][0] == _sid("work-osprey-main") and "re-read a52 and resume." in r52[0][1] and server._FOR_OWNER not in r52[0][1], pw)
+check("…and the -main agent that moves a52 hears it, nobody else", len(r52) == 1 and r52[0][0] == _sid("work-osprey-main") and "re-read a52 and resume." in r52[0][1] and _wt_text._FOR_OWNER not in r52[0][1], pw)
 check("the recycle's report counts the three, told to the three movers", rr["cleared"] == ["a50", "a51", "a52"] and sorted(rr["told"]) == sorted([_sid("work-osprey-main"), "home-beta-main", "nobody-roleless"]), rr)
 server._on_machine = _om
 for i in (50, 51, 52): (T / f"store/a/{i}.json").unlink()
@@ -1956,10 +1965,10 @@ n0 = len(wait_push(0)); r_ = telling.pilot_relay("projects/alpha", "a1", rd("a1"
 check("…and gets alpha's page-owed notice, unmarked", "charged to the keeper" in r_ and any(m[0] == S and m[1].startswith("[board] a1 ") for m in pk[n0:]), (r_, pk[n0:]))
 item(49, "projects/alpha", A); it = rd("a49"); it["metadata"].update(hold=True, wake=D(-1)); (T / "store/a/49.json").write_text(json.dumps(it))
 n0 = len(wait_push(0)); server._wake_pass(); pw = [m for m in wait_push(n0 + 1)[n0:] if " a49 " in m[1]]
-check("…and alpha's wake goes to the item's mover, unmarked", len(pw) == 1 and pw[0][0] == server._session_id("work-osprey-main") and pw[0][1].startswith("[stackshot] a49 woke") and server._FOR_OWNER not in pw[0][1], pw)
+check("…and alpha's wake goes to the item's mover, unmarked", len(pw) == 1 and pw[0][0] == server._session_id("work-osprey-main") and pw[0][1].startswith("[stackshot] a49 woke") and _wt_text._FOR_OWNER not in pw[0][1], pw)
 (T / "store/a/49.json").unlink(); _rg4["pages"]["projects/beta"]["agents"].pop("work-osprey"); (T / "store/projects.json").write_text(json.dumps(_rg4))
-check("needs: the create, update and get descriptions say it; agent=, observers and after are parameters of both tools", server._NEEDS_FORM in server._UPDATE_DESC and "agent=\"none\" takes the sessions out" in server._NEEDS_FORM
-      and all(k in __import__("inspect").signature(f).parameters for f in (server.stackshot_create, server.stackshot_update) for k in ("needs", "agent", "observers", "after")))
+check("needs: the create, update and get descriptions say it; agent=, observers and after are parameters of both tools", _wt_text._NEEDS_FORM in _wt_update._UPDATE_DESC and "agent=\"none\" takes the sessions out" in _wt_text._NEEDS_FORM
+      and all(k in __import__("inspect").signature(f).parameters for f in (_wt_create.stackshot_create, _wt_update.stackshot_update) for k in ("needs", "agent", "observers", "after")))
 for g in (gl, gd): (T / f"store/{g[0]}/{g[1:]}.json").unlink()
 (T / "store/projects.json").write_text(_reg0)
 
@@ -1977,13 +1986,13 @@ res = server._update(gc, next="run the paste on [the project page](https://examp
 res = server._update(gc, priority="p3", sender="home-beta"); check("command: an update that writes none of ask, next or needs says nothing", CMDN not in res, res)
 
 # the item (the item phase 2): the board's form rules that left the rulebook speak as reply notes, only when broken, never as refusals
-res = server._create(subject="[home] form test", description="- Lives at https://example.com/x\n- Done when decided", project="beta", owner="home-beta", next="home-beta: carry on"); g5 = gid_of(res)
+res = _wt_create._create(subject="[home] form test", description="- Lives at https://example.com/x\n- Done when decided", project="beta", owner="home-beta", next="home-beta: carry on"); g5 = gid_of(res)
 check("form: a naked URL in a description written by a script (not through the tools) → a note naming it, the item created", "(note: a naked URL (https://example.com/x):" in res and rd(g5)["description"].startswith("- Lives at"), res)
 res = server._update(g5, next="read [the doc](https://example.com/y)", sender="home-beta"); check("form: a link on words → no note", "(note:" not in res, res)
 res = server._update(g5, next="see https://example.com/z and https://example.com/w", sender="home-beta"); check("form: a naked URL in next → a note, the item updated", "(note: a naked URL (https://example.com/z, …)" in res and rd(g5)["metadata"]["next"].startswith("see"), res)
 # a bare URL in what a session writes through the create and update tools is refused (a script's write is not): description, next and ask, each by itself
 BARE = "has a bare URL (https://example.com/q) and the page may not draw it as a link. Write it as `[words](url)`"
-mkb = lambda **kw: server.stackshot_create(subject="[home] bare url test", description=kw.pop("description", "- Goal: A fact\n- Done when decided"), project="beta", sender="home-beta", **{"next": "home-beta: carry on", **kw})
+mkb = lambda **kw: _wt_create.stackshot_create(subject="[home] bare url test", description=kw.pop("description", "- Goal: A fact\n- Done when decided"), project="beta", sender="home-beta", **{"next": "home-beta: carry on", **kw})
 n_items = len(list((T / "store/a").glob("*.json")))
 e = refusal(lambda: mkb(description="- Goal: Lives at https://example.com/q\n- Done when decided")); check("bare url: a create with one in the description is refused, naming the field and the fix", e.startswith("Refused: description " + BARE), e)
 e = refusal(lambda: mkb(next="home-beta: read https://example.com/q.")); check("bare url: …in next (the closing dot is not part of it)", e.startswith("Refused: next " + BARE), e)
@@ -1992,45 +2001,45 @@ check("bare url: …and none of the three created an item", len(list((T / "store
 res = mkb(description="- Goal: Lives at [the doc](https://example.com/q)\n- Done when decided", next="home-beta: read [the doc](https://example.com/q) and `curl https://example.com/q`"); g6 = gid_of(res)
 check("bare url: a URL inside [words](url) or a code span is accepted in description and next", rd(g6)["description"].startswith("- Goal: Lives at [the doc]"), res)
 res = mkb(needs="decision", ask="Decide: ship it ([doc](https://example.com/q))? · Recommend: yes · Stakes: none · By: no date"); check("bare url: …and inside [words](url) in the ask", res.startswith("created "), res)
-e = refusal(lambda: server.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided", sender="home-beta")); check("bare url: an update with one in the description is refused and writes nothing", e.startswith("Refused: description " + BARE) and "[the doc]" in rd(g6)["description"], e)
-e = refusal(lambda: server.stackshot_update(g6, next="home-beta: read https://example.com/q", sender="home-beta")); check("bare url: …in next", e.startswith("Refused: next " + BARE) and "[the doc]" in rd(g6)["metadata"]["next"], e)
-e = refusal(lambda: server.stackshot_update(g6, needs="decision", ask="Decide: ship it https://example.com/q? · Recommend: yes · Stakes: none · By: no date", sender="home-beta")); check("bare url: …in the ask", e.startswith("Refused: ask " + BARE), e)
-res = server.stackshot_update(g6, description="- Goal: Lives at [the page](https://example.com/q)\n- Done when decided", next="home-beta: read [the page](https://example.com/q)", sender="home-beta"); check("bare url: an update with the URL in [words](url) is accepted", "[the page]" in rd(g6)["description"], res)
+e = refusal(lambda: _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided", sender="home-beta")); check("bare url: an update with one in the description is refused and writes nothing", e.startswith("Refused: description " + BARE) and "[the doc]" in rd(g6)["description"], e)
+e = refusal(lambda: _wt_update.stackshot_update(g6, next="home-beta: read https://example.com/q", sender="home-beta")); check("bare url: …in next", e.startswith("Refused: next " + BARE) and "[the doc]" in rd(g6)["metadata"]["next"], e)
+e = refusal(lambda: _wt_update.stackshot_update(g6, needs="decision", ask="Decide: ship it https://example.com/q? · Recommend: yes · Stakes: none · By: no date", sender="home-beta")); check("bare url: …in the ask", e.startswith("Refused: ask " + BARE), e)
+res = _wt_update.stackshot_update(g6, description="- Goal: Lives at [the page](https://example.com/q)\n- Done when decided", next="home-beta: read [the page](https://example.com/q)", sender="home-beta"); check("bare url: an update with the URL in [words](url) is accepted", "[the page]" in rd(g6)["description"], res)
 # old text with a bare URL stays: an update that does not set the field is not refused for it, and one that sets it with that same URL again is not either
 it = rd(g6); it["description"] = "- Lives at https://example.com/q\n- Done when decided"; it["metadata"]["next"] = "home-beta: read https://example.com/q"; (T / f"store/{g6[0]}/{g6[1:]}.json").write_text(json.dumps(it))
-res = server.stackshot_update(g6, priority="p2", sender="home-beta"); check("bare url: an update that sets none of the three fields is not refused for the stored URLs", rd(g6)["metadata"].get("priority") == "p2", res)
-res = server.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided and posted", sender="home-beta"); check("bare url: …nor one that sets the description with the stored URL still in it", rd(g6)["description"].endswith("posted"), res)
-e = refusal(lambda: server.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- And at https://example.com/r", sender="home-beta")); check("bare url: …but a new bare URL beside it is refused", "(https://example.com/r)" in e, e)
-check("bare url: the create and update descriptions say it", "a naked http(s) URL in description, next or ask is refused, write `[words](url)`" in server._ITEM_FORM and server._ITEM_FORM in server._UPDATE_DESC)
+res = _wt_update.stackshot_update(g6, priority="p2", sender="home-beta"); check("bare url: an update that sets none of the three fields is not refused for the stored URLs", rd(g6)["metadata"].get("priority") == "p2", res)
+res = _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- Done when decided and posted", sender="home-beta"); check("bare url: …nor one that sets the description with the stored URL still in it", rd(g6)["description"].endswith("posted"), res)
+e = refusal(lambda: _wt_update.stackshot_update(g6, description="- Goal: Lives at https://example.com/q\n- And at https://example.com/r", sender="home-beta")); check("bare url: …but a new bare URL beside it is refused", "(https://example.com/r)" in e, e)
+check("bare url: the create and update descriptions say it", "a naked http(s) URL in description, next or ask is refused, write `[words](url)`" in _wt_text._ITEM_FORM and _wt_text._ITEM_FORM in _wt_update._UPDATE_DESC)
 e = refusal(lambda: server._update(g5, hold=True, sender="home-beta")); check("form: an owner's hold without a wake is refused outright, no longer noted", e.startswith("Refused: a hold names what it waits for") and not hd_(rd(g5)["metadata"]), e)
 wk = (today + datetime.timedelta(days=3)).isoformat()
 res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: a hold with a wake → no note", "(note:" not in res, res)
 res = server._update(g5, priority="p2", sender="home-beta"); check("form: a filing edit of a held item → no note", "(note:" not in res, res)
 server._update(g5, clear_hold=True, sender="home-beta"); server._update(g5, needs="external", next="wait on Kim", sender="home-beta")
 res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("form: parking an item that waits on someone outside → a note", "(note: on hold while it waits on someone outside" in res and "without a wake" not in res, res)
-check("form: the update description carries the rules that moved", all(x in server._UPDATE_DESC for x in ("(needs=external) is not parked", "never a naked URL", "page first")), server._UPDATE_DESC[:200])
+check("form: the update description carries the rules that moved", all(x in _wt_update._UPDATE_DESC for x in ("(needs=external) is not parked", "never a naked URL", "page first")), _wt_update._UPDATE_DESC[:200])
 
 # an item put on someone outside with no anchor scoped to it draws one note to anchor the thread, never a refusal
 EXTN = "this item now waits on someone outside, and no thread is anchored to it: anchor the thread it waits on in this same turn"
-res = server.stackshot_create(subject="[home] ext anchor note", description="- Goal: Waits on Kim's email\n- Done when she answers", project="beta", owner="home-beta", needs="external", next="Kim: answer the email"); gx = gid_of(res)
+res = _wt_create.stackshot_create(subject="[home] ext anchor note", description="- Goal: Waits on Kim's email\n- Done when she answers", project="beta", owner="home-beta", needs="external", next="Kim: answer the email"); gx = gid_of(res)
 check("ext anchor: create with needs=external and no anchor → the note naming the item, the item created", EXTN in res and f"items=[{gx}]" in res and server._path(gx).exists(), res)
 res = server._update(gx, priority="p2", sender="home-beta"); check("ext anchor: an update that leaves external as it was → no note", EXTN not in res, res)
-res = server.stackshot_create(subject="[home] ext anchor note decision", description="- Goal: Waits on Oliver\n- Done when decided", project="beta", owner="home-beta", needs="decision",
+res = _wt_create.stackshot_create(subject="[home] ext anchor note decision", description="- Goal: Waits on Oliver\n- Done when decided", project="beta", owner="home-beta", needs="decision",
                               ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver: pick one"); gdx = gid_of(res)
 check("ext anchor: create without external → no note", EXTN not in res, res)
 res = server._update(gdx, needs="external", next="wait on Kim", sender="home-beta"); check("ext anchor: an update that adds external with no anchor → the note", EXTN in res and f"items=[{gdx}]" in res, res)
 res = server._update(gdx, needs="external", next="still waiting on Kim", sender="home-beta"); check("ext anchor: an update when external was already in needs → no note", EXTN not in res, res)
 server._update(gdx, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
-server._anchors("projects/beta", add=["https://github.com/example/repo/issues/91"], who="t")   # project-wide: no items
+_wt_anchors._anchors("projects/beta", add=["https://github.com/example/repo/issues/91"], who="t")   # project-wide: no items
 res = server._update(gdx, needs="external", next="wait on Kim", sender="home-beta"); check("ext anchor: a project-wide anchor alone does not count → the note", EXTN in res, res)
 server._update(gdx, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
-server._anchors("projects/beta", add=["https://github.com/example/repo/issues/92"], items=[gdx], who="t")
+_wt_anchors._anchors("projects/beta", add=["https://github.com/example/repo/issues/92"], items=[gdx], who="t")
 res = server._update(gdx, needs="external", next="wait on Kim", sender="home-beta"); check("ext anchor: an anchor scoped to the item → no note", EXTN not in res, res)
-server._anchors("projects/beta", remove=["https://github.com/example/repo/issues/92"], who="t")
+_wt_anchors._anchors("projects/beta", remove=["https://github.com/example/repo/issues/92"], who="t")
 server._update(gdx, clear_hold=True, needs="decision", ask="Decide: whether to take A · Recommend: yes · Stakes: none · By: no date", next="Oliver picks", sender="home-beta")
 res = server._update(gdx, needs="external", next="wait on Kim", hold=True, wake=wk, sender="home-beta")
 check("ext anchor: external added with a hold and no anchor → exactly one note, the hold's", "(note: on hold while it waits on someone outside" in res and EXTN not in res and res.count("(note:") == 1, res)
-server._anchors("projects/beta", remove=["https://github.com/example/repo/issues/91"], who="t")
+_wt_anchors._anchors("projects/beta", remove=["https://github.com/example/repo/issues/91"], who="t")
 for g in (gx, gdx): (T / f"store/{g[0]}/{g[1:]}.json").unlink()
 
 # next that reads like a report (a commit hash, a test count, a past-tense report) draws one note, never a refusal; a line over 200 characters is refused (tests/bullets_scenario.py)
@@ -2071,28 +2080,28 @@ for name_, nx_ in (
     check(f"report note: {name_} → no note", rnote(nx_) == "", (nx_, rnote(nx_)))
 r_ = rnote("merged 0a0a0a0a0, 12 tests passed\nPR #3 deployed")
 check("report note: one note however many lines match, each kind named once", r_.count("next reads like a report") == 1 and "a commit hash" in r_ and "a test count" in r_ and "a past-tense report" in r_, r_)
-res = server.stackshot_create(subject="[home] report note", description="- Goal: Waits on Kim\n- Done when she answers", project="beta", owner="home-beta", next="ops-x: merged 0a0a0a0a0, 12 tests passed"); gn = gid_of(res)
+res = _wt_create.stackshot_create(subject="[home] report note", description="- Goal: Waits on Kim\n- Done when she answers", project="beta", owner="home-beta", next="ops-x: merged 0a0a0a0a0, 12 tests passed"); gn = gid_of(res)
 check("report note: create → one note, the item still written with that next", res.count(RN) == 1 and server._path(gn).exists() and rd(gn)["metadata"]["next"].startswith("ops-x: merged"), res)
 res = server._update(gn, next="ops-x: merge PR #12 after green CI", sender="home-beta"); check("report note: an update to an action line → no note", RN not in res, res)
 res = server._update(gn, next="ops-x: PR #12 deployed, all suites green", sender="home-beta"); check("report note: an update to a report → the note, next stored", res.count(RN) == 1 and rd(gn)["metadata"]["next"].startswith("ops-x: PR #12 deployed"), res)
 res = server._update(gn, description="- Goal: Merged in 0a0a0a0a0\n- Done when decided", sender="home-beta"); check("report note: a hash in the description alone → no note (only next counts)", RN not in res, res)
 res = server._update(gn, priority="p2", sender="home-beta"); check("report note: an update that leaves next as it was → no note", RN not in res, res)
 (T / f"store/{gn[0]}/{gn[1:]}.json").unlink()
-W_ = server._NEXT_WORDS        # the one wording of what next holds, shared by the create and update forms and the connector instructions
-check("report note: the item form (create and update) and the server instructions say what next holds", W_ in server._ITEM_FORM and W_ in server._UPDATE_DESC and W_ in (server.mcp.instructions or ""), server._ITEM_FORM[:300])
+W_ = _wt_text._NEXT_WORDS        # the one wording of what next holds, shared by the create and update forms and the connector instructions
+check("report note: the item form (create and update) and the server instructions say what next holds", W_ in _wt_text._ITEM_FORM and W_ in _wt_update._UPDATE_DESC and W_ in (server.mcp.instructions or ""), _wt_text._ITEM_FORM[:300])
 
 # an item that waits on someone outside is parked when the thread it waits on is anchored to it and named in next
 TH = "https://github.com/example/repo/issues/7"
 server._update(g5, clear_hold=True, sender="home-beta")
-server._anchors(rd(g5)["metadata"]["project"], add=[TH], items=[g5], who="t")
+_wt_anchors._anchors(rd(g5)["metadata"]["project"], add=[TH], items=[g5], who="t")
 res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("anchored hold: anchored to the item, not named in next → the note says how", f"anchored to it (anchors(project, add=[url], items=[{g5}])) and named in next" in res, res)
 server._update(g5, clear_hold=True, next=f"wait on Kim in [#7]({TH})", sender="home-beta")
 res = server._update(g5, hold=True, wake=wk, sender="home-beta"); check("anchored hold: anchored to the item and named in next → no note", "(note:" not in res and hd_(rd(g5)["metadata"]), res)
 res = server._update(g5, wake=(today + datetime.timedelta(days=45)).isoformat(), sender="home-beta")
 check("anchored hold: a wake beyond the backstop (the 7-day cap) → a note", "(note: on hold on an anchored thread with a wake more than 7 days out" in res and "a longer one needs" in res, res)
 res = server._update(g5, wake=(today + datetime.timedelta(days=7)).isoformat(), sender="home-beta"); check("anchored hold: a backstop of cap_days → no note", "(note:" not in res, res)
-check("anchored hold: the update description carries the exception", "anchored to it (anchors(project, add=[url], items=[its id])) and named in next" in server._UPDATE_DESC
-      and "backstop wake (at most [waiting] cap_days out unless his words are on the item)" in server._UPDATE_DESC, server._UPDATE_DESC[:200])
+check("anchored hold: the update description carries the exception", "anchored to it (anchors(project, add=[url], items=[its id])) and named in next" in _wt_update._UPDATE_DESC
+      and "backstop wake (at most [waiting] cap_days out unless his words are on the item)" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
 # the item: a notice from the anchor scoped to a held item
 # releases the hold when the keeper passes or merges it, never when it drops it; the anchor alone is no condition (the backstop wake stays);
 # a project with no keeper releases on the notice itself, by the minute loop's pass
@@ -2100,10 +2109,10 @@ e = refusal(lambda: server._update(g5, wake="none", sender="home-beta"))
 check("anchor wait: dropping the backstop wake of a hold that waits on an anchor is refused, naming the backstop", e.startswith(f"Refused: a hold that waits on a notice from the anchor scoped to {g5} still carries a backstop wake, at most 7 days out unless the owner's words are on the item") and held_(g5), e)
 t0 = time.time(); time.sleep(0.05)
 n_d = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="a comment on #7", target="for home-beta", anchor=TH)
-server._route(n_d, "dropped", reason="noise", sender="home-beta")
+_wt_route._route(n_d, "dropped", reason="noise", sender="home-beta")
 check("anchor wait: a notice the keeper drops releases nothing", held_(g5), rd(g5)["metadata"])
 n_p = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="Kim answered on #7", target="for home-beta", anchor=TH)
-n0 = len(wait_push(0)); res = server._route(n_p, "passed", to="home-beta", reason="Kim's answer", sender="home-beta"); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); res = _wt_route._route(n_p, "passed", to="home-beta", reason="Kim's answer", sender="home-beta"); p = wait_push(n0 + 1)
 check("anchor wait: a notice the keeper passes releases the hold and its wake; the route reply says so", not held_(g5) and "wake" not in rd(g5)["metadata"] and rd(g5)["status"] == "open"
       and f"({g5} waited on this anchor and is released from hold)" in res, (res, rd(g5)["metadata"]))
 check("anchor wait: the owner is told what released it", any(m[0] == B and m[1].startswith(f"[stackshot] {g5} woke: a notice from {TH}, the anchor it waited on, was passed by home-beta") for m in p[n0:]), p[n0:])
@@ -2111,10 +2120,10 @@ check("anchor wait: the release moves both clocks (so one notice never releases 
 server._update(g5, hold=True, wake=wk, sender="home-beta")
 check("anchor wait: a notice older than the park releases nothing", server._anchor_release("projects/beta", next(n for n in routing.read("projects/beta") if n["id"] == n_p)) == [] and held_(g5))
 n_m = routing.record("projects/beta", kind="anchor", to=B, label="GitHub #7", who="hub", text="merged", target="for home-beta", anchor=TH)
-server._route(n_m, "merged", reason="in the digest", sender="home-beta")
+_wt_route._route(n_m, "merged", reason="in the digest", sender="home-beta")
 check("anchor wait: merged releases too", not held_(g5), rd(g5)["metadata"])
 n_o = routing.record("projects/beta", kind="anchor", to=B, label="Slack #ops", who="hub", text="elsewhere", target="for home-beta", anchor="https://example.slack.com/archives/C1")
-server._update(g5, hold=True, wake=wk, sender="home-beta"); time.sleep(0.05); server._route(n_o, "passed", to="home-beta", reason="not this thread", sender="home-beta")
+server._update(g5, hold=True, wake=wk, sender="home-beta"); time.sleep(0.05); _wt_route._route(n_o, "passed", to="home-beta", reason="not this thread", sender="home-beta")
 check("anchor wait: a notice from an anchor not scoped to the item releases nothing", held_(g5), rd(g5)["metadata"])
 _pj = json.loads((T / "store/projects.json").read_text()); _keep_beta = _pj["pages"]["projects/beta"].get("session"); _pj["pages"]["projects/beta"]["session"] = ""; (T / "store/projects.json").write_text(json.dumps(_pj))
 check("anchor wait: with no keeper, a pass before any notice releases nothing", server._anchor_pass() == [] and held_(g5))
@@ -2127,7 +2136,7 @@ check("anchor wait: …and the notice itself does once it arrives, saying the pr
       and any(m[1].startswith(f"[stackshot] {g5} woke: a notice from {TH}, the anchor it waited on, arrived (nobody rules this project's notices)") for m in p[n0:]), (rel, p[n0:]))
 check("anchor wait: the pass releases once", server._anchor_pass() == [])
 _pj["pages"]["projects/beta"]["session"] = _keep_beta; (T / "store/projects.json").write_text(json.dumps(_pj))
-check("anchor wait: the update description says how the hold is released", "releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a notice from that anchor" in server._UPDATE_DESC)
+check("anchor wait: the update description says how the hold is released", "releases the hold when the project's router (or the project's builder, else its -main agent) passes or merges a notice from that anchor" in _wt_update._UPDATE_DESC)
 
 # last confirmed: set on create and on a state change, never on a filing edit
 it5 = rd(g4); check("confirmed: set on create (with both clocks)", rd(g1)["confirmed"] == rd(g1)["updated"] == rd(g1)["state_updated"], rd(g1))
@@ -2136,24 +2145,24 @@ server._update(g4, priority="p3", sender="home-beta"); check("confirmed: a filin
 server._update(g4, ask=ASK, sender="home-beta"); check("confirmed: an ask edit is filing: no confirm, no state clock", rd(g4)["confirmed"] == 1000.0 and rd(g4)["state_updated"] == 1000.0, rd(g4))
 t0 = time.time(); server._update(g4, next="pick one", sender="home-beta"); check("confirmed: a state change sets it with the state clock", rd(g4)["confirmed"] == rd(g4)["state_updated"] >= t0, rd(g4))
 # the confirm tool: confirmed only; no page, no relay; published
-pubs = []; _pub_ = server._publish; server._publish = lambda: pubs.append(1)
+pubs = []; _pub_ = server._publish; server._publish = _wt_anchors._publish = _wt_route._publish = lambda: pubs.append(1)
 setf("a1", confirmed=1000.0, updated=2000.0, state_updated=2000.0); before = rd("a1")
 led0 = json.dumps(server._owed_load(), sort_keys=True); n0 = len(wait_push(0)); t0 = time.time()
-res = server.stackshot_confirm("a1", sender="work-osprey-main"); after_ = rd("a1"); time.sleep(0.5)
-server._publish = _pub_
+res = _wt_complete.stackshot_confirm("a1", sender="work-osprey-main"); after_ = rd("a1"); time.sleep(0.5)
+server._publish = _wt_anchors._publish = _wt_route._publish = _pub_
 check("confirm: sets confirmed only (updated, state_updated, metadata, status as they were); the writer stamp beside it (written_at: when the session last wrote the item) is the one other field that moves",
       after_["confirmed"] >= t0 and after_.get("written_at", 0) >= t0 and {k: v for k, v in after_.items() if k not in ("confirmed", "written_at")} == {k: v for k, v in before.items() if k not in ("confirmed", "written_at")}, (before, after_))
 check("confirm: replies 'confirmed <gid> at <time>.' and the item", re.match(r"confirmed a1 at \w{3} \w{3} \d{1,2}(st|nd|rd|th) \d\d:\d\d\.\na1 \[open\] ", res) is not None
-      and f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(after_['confirmed'], server.ZONE))} (fresh)" in res, res)
+      and f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(after_['confirmed'], _wt_text.ZONE))} (fresh)" in res, res)
 check("confirm: owes no page and tells no keeper on a pilot project", json.dumps(server._owed_load(), sort_keys=True) == led0 and len(wait_push(0)) == n0 and "charged" not in res, (server._owed_load(), wait_push(0)[n0:]))
 check("confirm: publishes", pubs == [1], pubs)
-check("confirm: a bad id is refused", refusal(lambda: server.stackshot_confirm("zz9")).startswith("bad item id"))
+check("confirm: a bad id is refused", refusal(lambda: _wt_complete.stackshot_confirm("zz9")).startswith("bad item id"))
 # with the GitHub mirror off (the default here), a tool write without a sender is still the owner's, as before
 _save_, saved = writes.save, []
 writes.save = lambda gid, item, writer="", note="", **kw: (saved.append((gid, writer)), _save_(gid, item, writer=writer, note=note, **kw))[1]
 res = mk(); g_ns = gid_of(res); own_ns = server._session_id(telling.holder(rd(g_ns))); saved.clear()
-server.stackshot_confirm(g_ns); server.stackshot_update(g_ns, next="home-beta: take the owner's step")
-server.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- Goal: The test item's work is in place")
+_wt_complete.stackshot_confirm(g_ns); _wt_update.stackshot_update(g_ns, next="home-beta: take the owner's step")
+_wt_complete.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- Goal: The test item's work is in place")
 writes.save = _save_
 check("mirror off: update, confirm and complete without a sender go through, written as the item's mover", rd(g_ns)["status"] == "completed"
       and rd(g_ns)["metadata"].get("outcome") == "done" and [server._session_id(w) for g, w in saved if g == g_ns] == [own_ns] * 3 and own_ns, (own_ns, saved))
@@ -2181,7 +2190,7 @@ check("freshness: no confirmed → state_updated, else updated", render.freshnes
 fp_ = T / "fresh-mtime.json"; fp_.write_text("{}"); os.utime(fp_, (NOW - 5 * DAY, NOW - 5 * DAY))
 check("freshness: no clock at all → the file's mtime", render.freshness({"status": "open", "metadata": {}, "_path": str(fp_)}, NOW) == ("stale", 5 * DAY)
       and render.confirmed_at({}, str(fp_)) == NOW - 5 * DAY and render.confirmed_at({}) == 0.0)
-check("freshness: takes an aware datetime as well", render.freshness({"status": "open", "metadata": {}, "confirmed": NOW - 60}, datetime.datetime.fromtimestamp(NOW, server.ZONE)) == ("fresh", 60))
+check("freshness: takes an aware datetime as well", render.freshness({"status": "open", "metadata": {}, "confirmed": NOW - 60}, datetime.datetime.fromtimestamp(NOW, _wt_text.ZONE)) == ("fresh", 60))
 check("freshness: limits default to 1 / 1 / 3 days", server._cfg.freshness_days() == {"call_days": 1.0, "agent_days": 1.0, "external_days": 3.0})
 CF["freshness"] = {"external_days": 5, "call_days": "x", "agent_days": 0.5}
 check("freshness: [freshness] overrides a limit; a value that is not a positive number keeps its default", fr("external", 4 * DAY)[0] == "fresh" and fr("decision", DAY)[0] == "stale" and fr("", DAY / 2)[0] == "stale")
@@ -2190,15 +2199,15 @@ del CF["freshness"]
 fm = lambda **kw: server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"owner": B, "project": "projects/beta", "needs": "decision", "ask": ASK, "priority": "p1"}, **kw})
 c_ = time.time() - 2 * DAY - 100; out_ = fm(confirmed=c_)
 out_nw = out_
-check("_fmt: ask after needs, before priority; confirmed in words with its staleness", f"needs: decision\nask: {ASK}\npriority: p1\nconfirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, server.ZONE))} (stale 2 d)" in out_nw, out_)
+check("_fmt: ask after needs, before priority; confirmed in words with its staleness", f"needs: decision\nask: {ASK}\npriority: p1\nconfirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, _wt_text.ZONE))} (stale 2 d)" in out_nw, out_)
 check("_fmt: no waiting line (no expected time is computed): priority is followed by confirmed", "\npriority: p1\nconfirmed: " in out_ and "waiting:" not in out_ and "expected by" not in out_, out_)
 cline = lambda out: out.split("\nconfirmed: ", 1)[1].split("\n", 1)[0]
 check("_fmt: a fresh item says (fresh)", cline(fm(confirmed=time.time() - 600)).endswith(" (fresh)"), fm(confirmed=time.time() - 600))
 check("_fmt: a held item says (held)", server._fmt({"id": "99", "gid": "a99", "status": "open", "subject": "[home] fmt", "metadata": {"hold": True}, "confirmed": c_}).split("\nconfirmed: ", 1)[1].endswith(" (held)"))
-check("_fmt: an item without confirmed reads its state_updated", f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, server.ZONE))} (stale 2 d)" in fm(state_updated=c_))
+check("_fmt: an item without confirmed reads its state_updated", f"confirmed: {render.when_words(datetime.datetime.fromtimestamp(c_, _wt_text.ZONE))} (stale 2 d)" in fm(state_updated=c_))
 # the renderer: every row carries its freshness; the session-start line counts the stale active items
 Z = T / "zstore"; (Z / "a").mkdir(parents=True); (Z / "projects.json").write_text((T / "store/projects.json").read_text())
-znow = datetime.datetime(2026, 2, 23, 18, 40, tzinfo=server.ZONE); zt = znow.timestamp()
+znow = datetime.datetime(2026, 2, 23, 18, 40, tzinfo=_wt_text.ZONE); zt = znow.timestamp()
 def zitem(i, ago, status="open", **md):
     (Z / f"a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] z {i}", "description": "x", "status": status, "metadata": {"owner": B, "project": "projects/beta", **md}, "updated": zt - ago, "confirmed": zt - ago}))
 zitem(1, 2 * DAY, needs="decision"); zitem(2, 3600); zitem(3, 2 * DAY, needs="external"); zitem(4, 9 * DAY, hold=True); zitem(5, 2 * DAY, status="completed"); zitem(6, 4 * DAY, needs="external")
@@ -2210,7 +2219,7 @@ check("session-start line: nothing about staleness when nothing is stale", ui_re
 
 # ---- 18. the ask line and staleness on the board (render.py over #9192's fields): the queue, the item page, the landing lines, board.md
 K = T / "store_k"; (K / "a").mkdir(parents=True); (K / "projects.json").write_text((T / "store/projects.json").read_text())
-know = datetime.datetime(2026, 2, 23, 18, 40, tzinfo=server.ZONE); kt = know.timestamp()
+know = datetime.datetime(2026, 2, 23, 18, 40, tzinfo=_wt_text.ZONE); kt = know.timestamp()
 KASK = "Decide: whether to take vendor A · Recommend: yes, it is cheaper · Stakes: B costs a month either way · By: Mon Mar 2nd"
 def kitem(i, owner, upd, conf, **md):
     (K / f"a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] k {i}", "description": "x", "status": "open",
@@ -2773,7 +2782,7 @@ server._update("a40", status="completed", sender="work-osprey-main", outcome="dr
 check("a close without anchors tells nobody", len(wait_push(0)) == n0, wait_push(0)[n0:])
 res = server._update("a4", next="the kept page's item, switch on", sender="work-osprey-main")
 check("a sub-page an agent keeps still charges that agent", "charged to the agent work-osprey-x" in res and X in server._owed_load().get("projects/alpha/kept", {}), res)
-res = server._create(subject="[home] a new thing", description="- Goal: A new thing\n- It lives here\n- Done when done", project="projects/alpha", owner="work-osprey-main")
+res = _wt_create._create(subject="[home] a new thing", description="- Goal: A new thing\n- It lives here\n- Done when done", project="projects/alpha", owner="work-osprey-main")
 gid_new = re.search(r"created ([a-z]\d+)", res).group(1); time.sleep(0.3)
 check("a create by an agent is its own debt, Current state", server._owed_load()["projects/alpha"][A].get("item") == gid_new and server._owed_load()["projects/alpha"][A]["settle"] == "ct" and "its Current state" in res, res)
 res = server._update(gid_new, next="the keeper's own step", sender="work-osprey")
@@ -2817,7 +2826,7 @@ _rg["pages"]["projects/alpha"].update(agents={"work-osprey-main": "talks", "work
 def why(fn):
     try: fn(); return ""
     except ToolError as e: return str(e)
-n0 = len(wait_push(0)); MK = server._FOR_OWNER
+n0 = len(wait_push(0)); MK = _wt_text._FOR_OWNER
 r = why(lambda: server._message("work-osprey-main", "can you look at the vendor thread?", "home-beta"))
 check("an unmarked message to a front agent is refused, naming the mark and the project, where the router rules it",
       r == f"Refused: work-osprey-main is a front agent of projects/alpha, a session {server.OWNER} talks to, and it takes a message only when the message's first line "
@@ -2858,14 +2867,14 @@ check("gate: …and to the keeper, marked or not", res.startswith("delivered") a
 _reg_b = (T / "store/projects.json").read_text(); _rgo = json.loads(_reg_b)
 _rgo["pages"]["projects/alpha"].update(agents={"work-osprey-main": "front", "work-osprey-x": "back", "work-osprey-bld": "builds and releases the code"}, back_agents={"work-osprey-x": "back", "work-osprey-bld": "builds and releases the code"})
 (T / "store/projects.json").write_text(json.dumps(_rgo))
-mk2 = lambda **kw: gid_of(server.stackshot_create(**{"subject": "[home] after test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "beta", "owner": "home-beta", "next": "home-beta: carry on", **kw}))
+mk2 = lambda **kw: gid_of(_wt_create.stackshot_create(**{"subject": "[home] after test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "beta", "owner": "home-beta", "next": "home-beta: carry on", **kw}))
 o1 = mk2(observers=["work-osprey-x", "work-osprey-main"]); xs = ("work-osprey-x", X)
-check("observers: stored as given; get shows them", rd(o1)["metadata"].get("observers") == ["work-osprey-x", "work-osprey-main"] and "\nobservers: work-osprey-x, work-osprey-main\n" in server.stackshot_get(o1), server.stackshot_get(o1))
+check("observers: stored as given; get shows them", rd(o1)["metadata"].get("observers") == ["work-osprey-x", "work-osprey-main"] and "\nobservers: work-osprey-x, work-osprey-main\n" in _wt_get.stackshot_get(o1), _wt_get.stackshot_get(o1))
 e = refusal(lambda: mk2(observers=["nobody-at-all"])); check("observers: an unknown session is refused", e.startswith("Refused: observer 'nobody-at-all' names no session"), e)
 n0 = len(wait_push(0)); server._update(o1, next="a step", sender="home-beta"); time.sleep(0.4)
 check("observers: an ordinary edit tells them nothing", not [m for m in wait_push(0)[n0:] if m[0] in xs or m[0] == S], wait_push(0)[n0:])
 from stackshot.waits import held; held.mark_client(X, "work-osprey-x")      # the rollout gate: its hook fetches held lines
-n0 = len(wait_push(0)); res = server.stackshot_complete(o1, sender="home-beta", outcome="done", reason="landed", description="- Goal: Done"); p = wait_push(n0 + 2)
+n0 = len(wait_push(0)); res = _wt_complete.stackshot_complete(o1, sender="home-beta", outcome="done", reason="landed", description="- Goal: Done"); p = wait_push(n0 + 2)
 ox = [m for m in p[n0:] if m[0] in xs]; os_ = [m for m in p[n0:] if m[0] == "work-osprey-bld"]
 from stackshot.waits import held
 hx = held.take(X, "work-osprey-x")
@@ -2893,20 +2902,20 @@ e = refusal(lambda: server._update(a1_, after=[a1_], sender="home-beta")); check
 e = refusal(lambda: server._update(a1_, after=["a2"], sender="home-beta")); check("after: a closed item is refused, naming its outcome", "is already completed" in e and "after names open items" in e, e)
 e = refusal(lambda: server._update(a1_, after=["z999"], sender="home-beta")); check("after: an unknown id is refused", "does not exist" in e, e)
 check("after: every idle pass skips it", server._after_open(rd(a1_)["metadata"]) == [a2_, a3_])
-n0 = len(wait_push(0)); res = server.stackshot_complete(a2_, sender="home-beta", outcome="dropped", reason="not needed", description="- Goal: Dropped"); time.sleep(0.4)
+n0 = len(wait_push(0)); res = _wt_complete.stackshot_complete(a2_, sender="home-beta", outcome="dropped", reason="not needed", description="- Goal: Dropped"); time.sleep(0.4)
 msgs_ = [m for m in wait_push(0)[n0:] if a1_ in m[1]]
 check("after: a dropped prerequisite leaves the list; the item still waits on the other and is not released, and its wait did not fail (one rule: another blocker is open): nothing recorded, nobody told",
       rd(a1_)["metadata"].get("after") == [a3_] and "released" not in res and "wait_failed" not in rd(a1_)["metadata"] and not msgs_, (res, rd(a1_)["metadata"], msgs_))
-res = server.stackshot_complete(a3_, sender="home-beta", outcome="superseded", superseded_by=a4_, reason="folded into a4", description="- Goal: Superseded")
+res = _wt_complete.stackshot_complete(a3_, sender="home-beta", outcome="superseded", superseded_by=a4_, reason="folded into a4", description="- Goal: Superseded")
 check("after: a superseded prerequisite is followed to its replacement", rd(a1_)["metadata"].get("after") == [a4_] and "released" not in res, (res, rd(a1_)["metadata"]))
 server._update(a1_, hold=True, wake=D(9), sender="home-beta")
-n0 = len(wait_push(0)); res = server.stackshot_complete(a4_, sender="home-beta", outcome="dropped", reason="not needed either", description="- Goal: Dropped"); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); res = _wt_complete.stackshot_complete(a4_, sender="home-beta", outcome="dropped", reason="not needed either", description="- Goal: Dropped"); p = wait_push(n0 + 1)
 check("after: the last one closing releases the item, after, hold and wake together; the reply and the owner's line say it was dropped", "after" not in rd(a1_)["metadata"] and not held_(a1_) and "wake" not in rd(a1_)["metadata"]
       and f"({a1_} waited on {a4_} and is released" in res and any(m[0] == B and m[1].startswith(f"[stackshot] {a1_} is yours now: {a4_}, the last item it waited on, was dropped by home-beta") for m in p[n0:]), (res, p[n0:]))
 check("after: back in the queue", a1_ in [r["gid"] for r in ui_render.Board(str(T / "store")).agent])
 check("after: a done close releases with 'closed (done)'", True)
 a5_, a6_ = mk2(), mk2(); n0 = len(wait_push(0)); server._update(a5_, after=[a6_], needs=["work-osprey-x"], sender="home-beta"); wait_push(n0 + 1)   # its "now needs you" line lands before the next count
-n0 = len(wait_push(0)); server.stackshot_complete(a6_, sender="home-beta", outcome="done", reason="landed", description="- Goal: Done"); p = wait_push(n0 + 1)
+n0 = len(wait_push(0)); _wt_complete.stackshot_complete(a6_, sender="home-beta", outcome="done", reason="landed", description="- Goal: Done"); p = wait_push(n0 + 1)
 w5 = [m for m in p[n0:] if f" {a5_} woke" in m[1]]
 check("after: the release tells the session named in needs, not the owner", len(w5) == 1 and w5[0][0] in xs and f"{a6_}, the last item it waited on, closed (done) by home-beta" in w5[0][1]
       and not [m for m in p[n0:] if m[0] == B], p[n0:])
@@ -2922,7 +2931,7 @@ mig = server._migrate_needs()
 check("migration: the start step rewrites the open item, clocks untouched, and leaves the closed one as a record", "a90" in mig and "a91" not in mig and rd("a90")["metadata"].get("needs") == ["decision", "home-beta-ops"] and "agent" not in rd("a90")["metadata"] and rd("a90")["updated"] == 1.0
       and rd("a91")["metadata"].get("needs") == "external" and rd("a91")["metadata"].get("agent") == "home-beta-ops", (mig, rd("a90"), rd("a91")))
 check("migration: idempotent", server._migrate_needs() == [])
-check("migration: get shows the migrated item's needs; the hub's name line not, since a session is named", "\nneeds: decision, home-beta-ops\n" in server.stackshot_get("a90") and "keeper:" not in server.stackshot_get("a90"), server.stackshot_get("a90"))
+check("migration: get shows the migrated item's needs; the hub's name line not, since a session is named", "\nneeds: decision, home-beta-ops\n" in _wt_get.stackshot_get("a90") and "keeper:" not in _wt_get.stackshot_get("a90"), _wt_get.stackshot_get("a90"))
 for i in (90, 91): (T / f"store/a/{i}.json").unlink()
 (T / "store/projects.json").write_text(_reg_b)
 
@@ -2964,8 +2973,8 @@ check("work: a status sent again unchanged keeps its old time", (rd(w1)["metadat
 _m1 = rd(w1)["metadata"]
 check("work: the change reads as one line, in History, never a JSON dump", W.changes({**_m1, "steps": [{**x, "tag": None} if i == 1 else x for i, x in enumerate(_m1["steps"])]}, _m1) == ["status: review running \u00b7 in progress (work-osprey-x)"],
       W.changes({**_m1, "steps": [{**x, "tag": None} if i == 1 else x for i, x in enumerate(_m1["steps"])]}, _m1))
-check("work: get and the brief carry the one line", "\nstep status: migrating the ids — in progress (home-beta) · review running — in progress (work-osprey-x)\n" in server.stackshot_get(w1)
-      and "step status: migrating the ids — in progress (home-beta) · review running — in progress (work-osprey-x)" in server.stackshot_brief(), server.stackshot_get(w1))
+check("work: get and the brief carry the one line", "\nstep status: migrating the ids — in progress (home-beta) · review running — in progress (work-osprey-x)\n" in _wt_get.stackshot_get(w1)
+      and "step status: migrating the ids — in progress (home-beta) · review running — in progress (work-osprey-x)" in _wt_brief.stackshot_brief(), _wt_get.stackshot_get(w1))
 # the forms: a plain string is the text, a JSON string too (a client whose cached schema sends text)
 server._update(w1, work="tests running", sender="work-osprey-x"); server._update(w1, work='{"text": "docs", "state": "in progress"}', sender="work-osprey-x")
 check("work: a plain string and a JSON string are the status text; each replaces the status in place", tags_of(w1)[1:] == [("work-osprey-x", "open", "docs", "in progress")], tags_of(w1))
@@ -3007,8 +3016,8 @@ _it_old["metadata"]["work"] = [{"id": "migrating", "text": "migrating", "agent":
 (T / f"store/{wl_old[0]}/{wl_old[1:]}.json").write_text(json.dumps(_it_old))
 bO = ui_render.Board(str(T / "store")); pO, mdO = bO.item_html(wl_old), bO.markdown()
 check("work: an item that still carries the old list (until the migration has run) shows it in the sidebar and in get, and counts it in progress for the checks",
-      '<dt>Work <span class="count">2</span></dt>' in _side(pO) and "\nstep status: migrating — in progress (work-osprey-x) · docs — defined\n" in server.stackshot_get(wl_old) and W.in_progress(rd(wl_old)["metadata"])[0]["agent"] == "work-osprey-x", _side(pO)[:300])
-check("work: the update tool's description says it", "work: the status of your open step, one line per call" in server._UPDATE_DESC and "Written by the mover or a session named in needs" in server._UPDATE_DESC)
+      '<dt>Work <span class="count">2</span></dt>' in _side(pO) and "\nstep status: migrating — in progress (work-osprey-x) · docs — defined\n" in _wt_get.stackshot_get(wl_old) and W.in_progress(rd(wl_old)["metadata"])[0]["agent"] == "work-osprey-x", _side(pO)[:300])
+check("work: the update tool's description says it", "work: the status of your open step, one line per call" in _wt_update._UPDATE_DESC and "Written by the mover or a session named in needs" in _wt_update._UPDATE_DESC)
 (T / "store/projects.json").write_text(_regw)
 # ---- the board item: the server names the working background agent in needs, at the
 # moments it sees: a handover by message, and a write on the item. Only a background agent; never twice; never on a closed item;
@@ -3019,7 +3028,7 @@ _rg46["pages"]["projects/alpha"].update(agents={"work-osprey-main": "front", "wo
 _sj46 = json.loads((T / "fleet/a/sessions.json").read_text()); _sj46["55555555-5555-4555-8555-555555555555"] = {"name": "work-osprey-ops", "machine": "a", "url": "", "seen": "x"}      # a session named in needs below has a pane in the heartbeat (the hand-off guard, handoff suite); the same row is written again further down
 (T / "fleet/a/sessions.json").write_text(json.dumps(_sj46))
 def mk46(**kw):                      # a create on the pilot project relays to the keeper in the background: let that push land before counting
-    g = gid_of(server.stackshot_create(**{"subject": "[home] auto-name test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "projects/alpha", "owner": "work-osprey-main", "mover": kw.get("owner", "work-osprey-main"), "next": "work-osprey-main: carry on", **kw}))
+    g = gid_of(_wt_create.stackshot_create(**{"subject": "[home] auto-name test", "description": "- Goal: A thing\n- It lives here\n- Done when done", "project": "projects/alpha", "owner": "work-osprey-main", "mover": kw.get("owner", "work-osprey-main"), "next": "work-osprey-main: carry on", **kw}))
     time.sleep(0.6); return g
 needs46 = lambda g: rd(g)["metadata"].get("needs")
 # moment 1: a handover by the message tool
@@ -3072,8 +3081,8 @@ wait_push(n0 + 1); time.sleep(0.3)
 check("plain id: a sala-style handover names the job's item and not the item its context line cites in backticks",
       needs46(q2) == ["work-osprey-x"] and "needs" not in rd(q3)["metadata"] and res.count("(named work-osprey-x") == 1, (needs46(q2), rd(q3)["metadata"], res))
 check("plain id: the message tool's description says how a handover writes the id, and that a context-only id goes in backticks",
-      "names the item id, written as a plain word, not in backticks or quotes" in server._MESSAGE_DESC
-      and "An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item." in server._MESSAGE_DESC)
+      "names the item id, written as a plain word, not in backticks or quotes" in _wt_message._message_desc()
+      and "An item id cited only for context, not handed over, goes in backticks, since a plain-word id names the receiver on that item." in _wt_message._message_desc())
 # moment 2: a write on the item by a background agent not named in its needs
 w1 = mk46(); n0 = len(wait_push(0))
 res = server._update(w1, next="building it", sender="work-osprey-x"); p = wait_push(n0 + 2)
@@ -3101,7 +3110,7 @@ res = server._update(k1, next="prepping while he decides", sender="work-osprey-x
 check("auto-name: a needs=decision item keeps decision first and stays in his lane", needs46(k1) == ["decision", "work-osprey-x"] and k1 in [r["gid"] for r in ui_render.Board(str(T / "store")).n_call], (needs46(k1), res))
 # only plain work names the agent: a write by it that sets needs itself (none included), parks the item (hold, wake) or sets a recycle
 # leaves needs as the write says.
-wk46 = (datetime.datetime.now(server.ZONE).date() + datetime.timedelta(days=3)).isoformat()
+wk46 = (datetime.datetime.now(_wt_text.ZONE).date() + datetime.timedelta(days=3)).isoformat()
 n1 = mk46(); server._update(n1, next="building it", sender="work-osprey-x"); res = server._update(n1, needs="none", sender="work-osprey-x")
 check("auto-name: a background agent's needs=none clears needs and does not name it back", "needs" not in rd(n1)["metadata"] and "(named" not in res, (rd(n1)["metadata"], res))
 res = server._update(n1, wake=wk46, recycle=True, sender="work-osprey-x")
@@ -3127,7 +3136,7 @@ f1 = mk46(); res = server._update(f1, project="projects/alpha", sender="work-osp
 check("auto-name: a background agent's update of only the project key names nobody (a page rename's mover); the write lands", "needs" not in rd(f1)["metadata"] and "(named" not in res and rd(f1)["metadata"]["project"] == "projects/alpha", (rd(f1)["metadata"], res))
 f2 = mk46(); res = server._update(f2, project="projects/beta", sender="work-osprey-x")
 check("auto-name: …also when the key names another page (the item refiles itself to its owner's page, as for any project edit)", "needs" not in rd(f2)["metadata"] and "(named" not in res, (rd(f2)["metadata"], res))
-f3 = mk46(); res = server.stackshot_update(f3, project="projects/beta", sender="work-osprey-x")
+f3 = mk46(); res = _wt_update.stackshot_update(f3, project="projects/beta", sender="work-osprey-x")
 check("auto-name: …through the update tool itself, whose wrapper passes every parameter", "needs" not in rd(f3)["metadata"] and "(named" not in res, (rd(f3)["metadata"], res))
 f4 = mk46(); res = server._update(f4, subject="[home] auto-name test, renamed", priority="p1", sender="work-osprey-x")
 check("auto-name: …and a subject or priority edit alone", "needs" not in rd(f4)["metadata"] and "(named" not in res, (rd(f4)["metadata"], res))
@@ -3164,7 +3173,7 @@ e3b = own46(); res = server._update(e3b, work={"text": "moving the docs", "state
 check("auto-name: …also with its own name repeated", needs46(e3b) is None and "(named" not in res, (needs46(e3b), res))
 e4 = own46(); res = server._update(e4, work={"text": "moving the docs", "state": "done"}, said=[{"tag": "Suggested-by", "quote": "finish it", "msg": "11111111-1111-4111-8111-0000000000e4", "session": "cse_e4unreadable"}], sender="work-osprey-x")
 check("auto-name: a finish together with said is still a finish: not named", needs46(e4) is None and "(named" not in res and ("work-osprey-x", "done", "moving the docs") in st46(e4), (needs46(e4), st46(e4), res))
-e6 = own46(); server.stackshot_complete(e6, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
+e6 = own46(); _wt_complete.stackshot_complete(e6, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
 e = refusal(lambda: server._update(e6, work={"state": "done"}, sender="work-osprey-x"))
 check("auto-name: a finish on a completed item is refused as before, the writer not named", "work-osprey-x is neither" in e and "needs" not in rd(e6)["metadata"], (e, rd(e6)["metadata"]))
 # …and the status text is the one the update path gets: it rewrites a bare store id (g9999) to first (patched here so that g9999 maps)
@@ -3178,12 +3187,12 @@ finally:
 check(f"auto-name: a status whose text the update path rewrites (g9999 → board#{BID_B}) is stored as rewritten, and the writer is named",
       needs46(e7) == ["work-osprey-x"] and "(named" in res and ("work-osprey-x", "open", f"wait for board#{BID_B} now") in st46(e7), (needs46(e7), st46(e7), res))
 wait_push(0)
-z1 = mk46(); server.stackshot_complete(z1, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
+z1 = mk46(); _wt_complete.stackshot_complete(z1, sender="work-osprey-main", outcome="done", reason="landed", description="- Goal: Done")
 res = server._update(z1, priority="p1", sender="work-osprey-x"); res2 = server._message("work-osprey-x", f"look at {z1}", "home-beta"); time.sleep(0.3)
 check("auto-name: a closed item is never touched, by a write or by a message", "needs" not in rd(z1)["metadata"] and rd(z1)["status"] == "completed" and "(named" not in res and "(named" not in res2, (rd(z1)["metadata"], res, res2))
 x1 = mk46(); n0 = len(wait_push(0))
 # the open step names the front agent: the close marks it itself (done=[1]), as a close no longer settles another session's step
-res = server.stackshot_update(x1, status="completed", sender="work-osprey-x", outcome="done", reason="built", description="- Goal: Built", done=[1]); p = wait_push(n0 + 2); time.sleep(0.3); p = wait_push(0)
+res = _wt_update.stackshot_update(x1, status="completed", sender="work-osprey-x", outcome="done", reason="built", description="- Goal: Built", done=[1]); p = wait_push(n0 + 2); time.sleep(0.3); p = wait_push(0)
 check("auto-name: a close by an unnamed background agent names it first (the record), then closes with no needs; the owner hears the close only",
       rd(x1)["status"] == "completed" and "needs" not in rd(x1)["metadata"] and f"(named work-osprey-x in {x1}'s needs: close by work-osprey-x)" in res
       and not [m for m in p[n0:] if "now names work-osprey-x" in m[1]] and any(f"{x1} (mover work-osprey-main, a front agent) was completed (done: built) by work-osprey-x" in m[1] for m in p[n0:]), (res, p[n0:]))
@@ -3296,7 +3305,7 @@ for n in routing.read("projects/alpha"):
 # the daily digest of automatic rulings is gone with the keeper: a ruling by stackshot (auto) stays on the routing page, and route() overrules it
 st, body = server._client_post("testbox", "message", {"to": "projects/alpha", "text": GREEN.replace("PR #113", "PR #115"), "sender": "release", "release": "green", "pr": PRU.replace("113", "115")})
 nid47c = re.search(r"notice ([0-9a-f]{6})", body["result"]).group(1)
-res = server._route(nid47c, "passed", to="work-osprey-main", reason="the owner should hear of this one", sender="work-osprey")
+res = _wt_route._route(nid47c, "passed", to="work-osprey-main", reason="the owner should hear of this one", sender="work-osprey")
 nc = next(n for n in routing.read("projects/alpha") if n["id"] == nid47c)
 check("overrule: route() on an automatic ruling records the keeper's own, which wins",
       res.startswith(f"ruled {nid47c} (projects/alpha): passed to work-osprey-main") and (nc["ruling"], nc["ruled_by"], nc["ruled_to"]) == ("passed", "work-osprey", "work-osprey-main"), (res, nc))
@@ -3431,7 +3440,7 @@ check("release: once (the release moves the clocks)", server._anchor_pass() == [
 server._update("a54", hold=True, wake="2099-01-01", sender="work-osprey-main"); time.sleep(0.05)
 check("release: a log-only line older than the park releases nothing", server._anchor_pass() == [] and server._is_held(rd("a54")))
 got, ln = ev48(A48, "pr_synchronize", "pushed 1 commit"); auto48.append(ln["id"])
-server._route(ln["id"], "dropped", reason="not what a54 waits on", sender="work-osprey")
+_wt_route._route(ln["id"], "dropped", reason="not what a54 waits on", sender="work-osprey")
 check("release: an automatic ruling the keeper overrules with dropped releases nothing", server._anchor_pass() == [] and server._is_held(rd("a54")))
 routing.record("projects/alpha", kind="anchor", to="", label="GitHub stackshot#116", who="hub", text="logged, not delivered", target="direct", anchor=A48, reason="direct: log only")
 check("release: a log-only direct anchor's line (no log_only mark, no ruling) still releases nothing", server._anchor_pass() == [] and server._is_held(rd("a54")))
@@ -3440,7 +3449,7 @@ check("release: a log-only merge on the PR the item waits on releases it", got =
 # the same release through a delivered notice and the keeper's ruling: the notice names the anchor by id (github:…), the store by URL
 server._update("a54", hold=True, wake="2099-01-01", sender="work-osprey-main"); time.sleep(0.05)
 got, ln = ev48(A48, "comment", "a question for the owner", who="kim", kind="github")
-res = server._route(ln["id"], "passed", to="work-osprey-main", reason="Kim asks", sender="work-osprey")
+res = _wt_route._route(ln["id"], "passed", to="work-osprey-main", reason="Kim asks", sender="work-osprey")
 check("release: a delivered notice the keeper passes releases it too, its anchor id matched to the store's URL",
       "(a54 waited on this anchor and is released from hold)" in res and not server._is_held(rd("a54")), res)
 wait_push(0)
@@ -3784,11 +3793,11 @@ check("tell owner: a change of needs is told (the window had expired), as 'chang
 telling.OWNER_HEARD[("a78", B)] -= 601; n1 = len(wait_push(0))
 res = server._update("a78", next="its own step", sender="home-beta"); time.sleep(0.5)
 check("tell owner: the owner's own update sends nothing", len(told_owner(B, "a78")) == 3 and len(wait_push(0)) == n1 and "has been told" not in res, (told_owner(B, "a78"), res[-200:]))
-n1 = len(wait_push(0)); res = server.stackshot_complete("a78", sender=Xn, outcome="done", reason="it is live", description="- Goal: The thing is live"); wait_push(n1 + 1); time.sleep(0.3)
+n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a78", sender=Xn, outcome="done", reason="it is live", description="- Goal: The thing is live"); wait_push(n1 + 1); time.sleep(0.3)
 t6 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a78 was completed")]
 check("tell owner: a non-owner's close tells the owner at once even inside the window, though the item is closed, with the outcome and the reason (every page is a router page: the close notice of tell_owner, once, and no second '[board]' line)",
       len(told_owner(B, "a78")) == 3 and len(t6) == 1 and t6[0][1] == "[stackshot] a78 was completed (done: it is live) by work-osprey-x: [home] item 78 → https://stackshot.example.com/items/a78" and rd("a78")["status"] == "completed", (t6, told_owner(B, "a78")))
-n1 = len(wait_push(0)); res = server.stackshot_complete("a79", sender=Xn, outcome="dropped", reason="not needed", description="- Goal: Dropped"); wait_push(n1 + 1); time.sleep(0.3)
+n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a79", sender=Xn, outcome="dropped", reason="not needed", description="- Goal: Dropped"); wait_push(n1 + 1); time.sleep(0.3)
 t7 = [m for m in wait_push(0) if m[0] == B and m[1].startswith("[stackshot] a79 was completed")]
 check("tell owner: …and a close with no change before it is told too", len(t7) == 1 and "(dropped: not needed) by work-osprey-x" in t7[0][1] and not told_owner(B, "a79"), (t7, told_owner(B, "a79")))
 n1 = len(wait_push(0)); server._update("a93", next="a step", sender=Xn); server._update("a94", next="a step", sender=Xn); time.sleep(0.5)
@@ -3820,9 +3829,9 @@ check("tell owner: the decision leaving the needs tells the named owner once ('h
 item2(15, "projects/alpha", A); item2(16, "projects/alpha", A); item2(17, "projects/alpha", A)
 n1 = len(wait_push(0)); res = server._update("a15", next="the keeper changes the front owner's next", sender="work-osprey"); time.sleep(0.7)
 check("tell owner: the project's keeper changing a front agent owner's next sends nothing to the page key", not to_page(n1) and "went to projects/alpha" not in res, (wait_push(0)[n1:], res[-200:]))
-n1 = len(wait_push(0)); res = server.stackshot_complete("a16", sender="work-osprey", outcome="done", reason="the keeper closes", description="- Goal: Done"); time.sleep(0.7)
+n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a16", sender="work-osprey", outcome="done", reason="the keeper closes", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: the keeper closing a front agent owner's item sends nothing to the page key, the quiet line standing", not to_page(n1) and "went to projects/alpha" not in res, (wait_push(0)[n1:], res[-200:]))
-n1 = len(wait_push(0)); res = server.stackshot_complete("a17", sender="plain-y", outcome="done", reason="plain closes", description="- Goal: Done"); time.sleep(0.7)
+n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a17", sender="plain-y", outcome="done", reason="plain closes", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: a close by another session on a front agent's item that is also its project's keeper (no builder) reaches the owner in its one marked line (tell_owner_close) and sends nothing to the page key",
       not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[for the owner] [stackshot] a17 [home] item 17: closed by plain-y: done (plain closes) → https://stackshot.example.com/items/a17"], (wait_push(0)[n1:], res[-200:]))
 # a front agent owner whose write no relay carried (outside the pilot): the page key, through its keeper or stand-in, once
@@ -3838,7 +3847,7 @@ check("tell owner: a front agent owner's change that no relay carried (a next ch
 check("tell owner: …naming no builder in the item's needs (the page key's delivery is not the message tool's)", "needs" not in rd("a18")["metadata"], rd("a18")["metadata"])
 n1 = len(wait_push(0)); server._update("a18", next="a second front change", sender="plain-y"); time.sleep(0.5)
 check("tell owner: …and a second change inside ten minutes sends no second inbound", not to_page(n1) and len([x for x in routing.read("projects/delta") if x["kind"] == "message" and "may need to act" in x["text"]]) == 1, wait_push(0)[n1:])
-item2(19, "projects/delta", A); n1 = len(wait_push(0)); res = server.stackshot_complete("a19", sender="plain-y", outcome="done", reason="front owner's item closed", description="- Goal: Done"); time.sleep(0.7)
+item2(19, "projects/delta", A); n1 = len(wait_push(0)); res = _wt_complete.stackshot_complete("a19", sender="plain-y", outcome="done", reason="front owner's item closed", description="- Goal: Done"); time.sleep(0.7)
 check("tell owner: a close of a front agent owner's item no relay carried is told to the owner itself, once, marked, and not also to the page key; the 'not told' line is gone",
       not to_page(n1) and [m[1] for m in wait_push(0)[n1:] if m[0] == A] == ["[for the owner] [stackshot] a19 [home] item 19: closed by plain-y: done (front owner's item closed) \u2192 https://stackshot.example.com/items/a19"]
       and "not told; the board shows it" not in res and "told at once that it was closed" in res, (wait_push(0)[n1:], res[-300:]))
@@ -3859,7 +3868,7 @@ general(False)
 check("tell owner: when the routing record cannot be written nothing is pushed (no fall-through to a push naming a builder), and the write goes through",
       not to_page(n1) and rd("a22")["metadata"]["next"].endswith("when the log cannot be written") and "needs" not in rd("a22")["metadata"], (wait_push(0)[n1:], rd("a22")["metadata"]))
 server._cfg.CFG["board"]["tell_owner"] = False; item(95, "projects/beta", B); n1 = len(wait_push(0))
-server._update("a95", next="with the switch off", sender=Xn); server.stackshot_complete("a95", sender=Xn, outcome="done", reason="closed with it off", description="- Goal: Done"); time.sleep(0.5)
+server._update("a95", next="with the switch off", sender=Xn); _wt_complete.stackshot_complete("a95", sender=Xn, outcome="done", reason="closed with it off", description="- Goal: Done"); time.sleep(0.5)
 check("tell owner: with [board] tell_owner = false neither a next change nor a close sends a '[board]' line: the close is told once by the older close notice alone",
       not told_owner(B, "a95") and [m[1] for m in wait_push(0)[n1:] if m[0] == B] == ["[stackshot] a95 was completed (done: closed with it off) by work-osprey-x: [home] item 95 \u2192 https://stackshot.example.com/items/a95"], wait_push(0)[n1:])
 server._cfg.CFG["board"]["tell_owner"] = True
@@ -3890,7 +3899,7 @@ res = server._update("a28", needs=["decision"], ask="Decide: a or b · Recommend
 check("tell owner: …and in the pilot too (the older rule), with no 'may need to act' line", not to_page(n1) and not [m for m in wait_push(0)[n1:] if m[0] == A], (wait_push(0)[n1:], res[-300:]))
 # a reopen is told inside the window that a close opened
 item2(29, "projects/beta", P_); n1 = len(wait_push(0))
-server._update("a29", next="n1", sender="plain-y"); server.stackshot_complete("a29", sender="plain-y", outcome="done", reason="r", description="- Goal: Done")
+server._update("a29", next="n1", sender="plain-y"); _wt_complete.stackshot_complete("a29", sender="plain-y", outcome="done", reason="r", description="- Goal: Done")
 res = server._update("a29", status="open", next="reopened step", sender="plain-y"); wait_push(n1 + 3); time.sleep(0.5); replies.append(res)
 t_ = [m[1] for m in wait_push(0)[n1:] if m[0] in (P_, "plain-owner", B, "home-beta-main", "home-beta-ops") and m[1].startswith(("[board] a29 [home] item ", "[stackshot] a29 "))]
 check("tell owner: set next and the close are told to the mover (each once); the reopen is not: a close drops the mover, the item falls to the project's default holder, a front agent, which is not pushed",

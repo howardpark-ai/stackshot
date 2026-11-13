@@ -102,19 +102,19 @@ def check(name, cond, got=None):
 def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
-from stackshot.service import gates; from stackshot.web import server; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
 D = lambda t: f"- Goal: {t}\n- It lives here\n- Finished when it works"
 DW = lambda t: DESC + f"\n- {t}"      # the author's own sentence as a new bullet of its own, the only new line of the description
-upd = lambda i, **kw: server.stackshot_update(i, **{"sender": "home-agent", **kw})
+upd = lambda i, **kw: _wt_update.stackshot_update(i, **{"sender": "home-agent", **kw})
 history = lambda i: [str(x.get("text") if isinstance(x, dict) else x) for x in (rd(i)["metadata"].get("stall") or {}).get("log", [])]
 stood = lambda i: bool(rd(i)["metadata"].get("ask")) and "decision" in _model_needs._needs_kinds(rd(i)["metadata"])
 
@@ -444,7 +444,7 @@ for j, t in enumerate(ALL_ASKS):
 KS = [k for k, _, _ in CASES]
 gone = lambda k: [h for h in history(k) if "ask taken off" in h] + ([] if "ask_left" not in rd(k)["metadata"] else ["ask_left"])
 told.clear()
-r = server.stackshot_complete("g600", outcome="dropped", reason="no longer wanted", outcome_text="- It was dropped, nobody wants it", sender="home-agent")
+r = _wt_complete.stackshot_complete("g600", outcome="dropped", reason="no longer wanted", outcome_text="- It was dropped, nobody wants it", sender="home-agent")
 check("the fixture close: g600 is closed as dropped", rd(600, "g")["status"] == "completed" and rd(600, "g")["metadata"].get("outcome") == "dropped", r)
 check("the close path: closing the item as dropped leaves every ask standing (%d asks, with and without a stored after), no History line, nothing kept as taken off, nobody told of one" % len(KS),
       all(stood(k) for k in KS) and not [k for k in KS if gone(k)] and not [x for x in told if x[3] == "ask"], ([k for k in KS if not stood(k)], [k for k in KS if gone(k)][:5], [x for x in told if x[3] == "ask"][:3]))
@@ -548,19 +548,19 @@ for k, h in zip(range(730, 737), HEDGES):
 SAY = "Keep the ask, it is still right"
 PVAL = {"options": [{"label": "Keep", "line": SAY}], "said": [{"quote": SAY, "kind": "comment"}], "work": {"note": SAY}, "reword": {1: SAY}, "step_proof": [{"step": 1, "proof": SAY}], "observers": [SAY]}
 import inspect
-SIG = set(inspect.signature(server.stackshot_update).parameters)
-TP, NP = list(server._ASK_TEXT_PARAMS), list(server._ASK_NONTEXT_PARAMS)
+SIG = set(inspect.signature(_wt_update.stackshot_update).parameters)
+TP, NP = list(_wt_update._ASK_TEXT_PARAMS), list(_wt_update._ASK_NONTEXT_PARAMS)
 check("every parameter of update is placed in exactly one of the two ask lists (text read, or not read), so a parameter added later forces a decision",
       SIG == set(TP) | set(NP) and not set(TP) & set(NP) and len(TP) == len(set(TP)) and len(NP) == len(set(NP)), (sorted(SIG - set(TP) - set(NP)), sorted((set(TP) | set(NP)) - SIG), sorted(set(TP) & set(NP))))
 check("the texts of a call: each text parameter's strings are found (a mapping or list gives each string inside it), the fixed-word and switch parameters give none",
-      all(SAY in server._ask_write_texts({p: PVAL.get(p, SAY)}) for p in TP) and not any(server._ask_write_texts({p: PVAL.get(p, SAY)}) for p in NP), [p for p in TP if SAY not in server._ask_write_texts({p: PVAL.get(p, SAY)})])
+      all(SAY in _wt_update._ask_write_texts({p: PVAL.get(p, SAY)}) for p in TP) and not any(_wt_update._ask_write_texts({p: PVAL.get(p, SAY)}) for p in NP), [p for p in TP if SAY not in _wt_update._ask_write_texts({p: PVAL.get(p, SAY)})])
 item(799, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-check("the control: the sentence alone in the description, through the server's own tail, takes the ask off", "took the ask off" in tail(server._ask_write_texts({"description": DW("The ask is wrong.")}), 799) and not stood(799))
+check("the control: the sentence alone in the description, through the server's own tail, takes the ask off", "took the ask off" in tail(_wt_update._ask_write_texts({"description": DW("The ask is wrong.")}), 799) and not stood(799))
 bad_p = []
 for j, p in enumerate(TP):
     k = 800 + j
     item(k, mover="home-agent", needs=["decision"], ask=ASK, ask_rec={"by": "home-agent", "at": now - 600, "text": ASK})
-    r = tail(server._ask_write_texts({"description": DW("The ask is wrong."), p: PVAL.get(p, SAY)}), k)
+    r = tail(_wt_update._ask_write_texts({"description": DW("The ask is wrong."), p: PVAL.get(p, SAY)}), k)
     if "took the ask off" in r or not stood(k): bad_p.append(p)
 check("the sentence in the description plus new text in any one of the %d text parameters of update (%s) leaves the ask standing" % (len(TP), ", ".join(TP)), not bad_p, bad_p)
 # the same through the update tool, on the parameters whose write is accepted as sent here, with the write's effect read back
@@ -579,7 +579,7 @@ check("... while the same fields sent again unchanged (next as stored, the subje
 
 # (round 12, M1) every parameter left on the non-text list is tried through the REAL update with a free-text hedge: it must be refused or not stored, so a parameter that starts to accept text fails here
 SKIP_NP = {"item_id", "sender", "ask", "clear_ask"}      # the item's id; the sender's own name; the ask itself (a write that sets one takes the ask-time check, and replaces the ask by design)
-DEFAULTS = {n: p.default for n, p in inspect.signature(server.stackshot_update).parameters.items()}
+DEFAULTS = {n: p.default for n, p in inspect.signature(_wt_update.stackshot_update).parameters.items()}
 NP_REAL = [p for p in NP if p not in SKIP_NP and not isinstance(DEFAULTS[p], bool)]
 def real(k, **kw):
     try:
@@ -634,7 +634,7 @@ check("a corrupt ask_rec.at or ask_left.at never fails the write: the update is 
 # (round 12, L4) the writer's label is read only when a save changes the ask
 labels = []
 _label0 = server._session_label
-server._session_label = lambda w: (labels.append(w), _label0(w))[1]
+server._session_label = _wt_route._session_label = lambda w: (labels.append(w), _label0(w))[1]
 try:
     it0 = rd(1000); before0 = json.loads(json.dumps(it0))
     server._ask_stamp(it0, before0, "home-agent"); n_same = len(labels)
@@ -643,7 +643,7 @@ try:
     it2 = json.loads(json.dumps(it0)); it2["metadata"].pop("ask", None)
     server._ask_stamp(it2, before0, "home-agent"); n_gone = len(labels) - n_same - n_changed
 finally:
-    server._session_label = _label0
+    server._session_label = _wt_route._session_label = _label0
 check("a save that leaves the ask as it was, or removes it, does not look the writer up; one that changes it does, once, and records who wrote it",
       n_same == 0 and n_gone == 0 and n_changed == 1 and it1["metadata"]["ask_rec"]["by"] and "ask_rec" not in it2["metadata"] and it0["metadata"]["ask_rec"] == before0["metadata"]["ask_rec"], (n_same, n_changed, n_gone))
 check("changed(): a new ask, the same ask with other spacing, none", AL.changed({"ask": "a b"}, {"ask": "a  c"}) and not AL.changed({"ask": "a  b"}, {"ask": "a b"}) and not AL.changed({}, {"ask": "a"}) and AL.changed({"ask": "a"}, None))
@@ -701,24 +701,24 @@ res = server._answer("a34", "", "", "done")
 check("Done with an empty box still finishes the step as before", res == "done" and "step" not in rd(34)["metadata"], res)
 
 # ---- 8. the texts agents learn it from
-d = server._UPDATE_DESC
+d = _wt_update._UPDATE_DESC
 check("the update text says it: the reminder, the one plain sentence, what stands, the dropped dependency as a reminder only, the late answer, what it never does, and the notes it applies",
       all(x in d for x in ("reminder", "in one case only: its author's own plain sentence", "whose whole new text", "exactly one sentence", "The ask is wrong.", "My question is moot.", "This ask is no longer needed.",
                            "Any other new line or sentence in that write", "A dropped dependency removes nothing", "a dropped gate often makes the ask more live", "names an item after/once/when/until/waiting for/depends on",
                            "reminded on each of his writes to the item while that item stays dropped and the ask stands", "in every text parameter of the call", "and only \"now\", \"anymore\" or a full stop after it", "clear_ask=true", "late answer as a comment", "never writes an ask, closes an item or answers for", "ran it", "tomorrow evening"))
       and not any(x in d for x in ("two plain shapes", "shape (2)", "approve-type request", "replacement chain", "taken off by the record")), [x for x in ("reminder", "in one case only") if x not in d])
-cf = server._CLOSE_FORM
-check("the close text carries the same words as the update text (one rule, one paragraph) and no longer says a close acts on asks", server._ASK_RULE in cf and server._ASK_RULE in d and "applies shape" not in cf and "A dropped dependency removes nothing" in cf, None)
+cf = _wt_text._CLOSE_FORM
+check("the close text carries the same words as the update text (one rule, one paragraph) and no longer says a close acts on asks", _wt_text._ASK_RULE in cf and _wt_text._ASK_RULE in d and "applies shape" not in cf and "A dropped dependency removes nothing" in cf, None)
 import _docs
 readme = _docs.page("asks-and-answers")
 check("the docs state the limit with its After wording", "Never by the server: closing an item, writing an ask, answering for the owner, altering his words" in readme, None)
 check("the docs say the server removes an ask only on the author's own plain sentence, a dropped dependency only reminds the author, and names the reader's words",
       "only on its author's own plain sentence" in readme and "a dropped dependency only reminds" in readme and "after/once/when/until/waiting for/depends on" in readme and "two plain shapes" not in _docs.pages(), None)
 check("the docs say which parameters are read (every one of the text list, by name), which are not and why, that a part of a longer held line is new, and that the clause repeats on each write",
-      all(f"`{p}`" in readme for p in server._ASK_TEXT_PARAMS + server._ASK_NONTEXT_PARAMS if not p.startswith("clear_") and p not in ("item_id", "hold", "recycle"))
+      all(f"`{p}`" in readme for p in _wt_update._ASK_TEXT_PARAMS + _wt_update._ASK_NONTEXT_PARAMS if not p.startswith("clear_") and p not in ("item_id", "hold", "recycle"))
       and "a line that only appears inside a longer held line is new" in readme and "with each of his writes to the item for as long as the dependency stays dropped and the ask stands" in readme
-      and "an ask stored before the record has none, and then the item's mover and creator count as its author" in readme and "naming each such item once in the clause" in readme, [p for p in server._ASK_TEXT_PARAMS + server._ASK_NONTEXT_PARAMS if f"`{p}`" not in readme][:6])
-check("the ask rule never says 'nothing after it' and the config's own help says the same as the docs", "nothing after it" not in server._ASK_RULE
+      and "an ask stored before the record has none, and then the item's mover and creator count as its author" in readme and "naming each such item once in the clause" in readme, [p for p in _wt_update._ASK_TEXT_PARAMS + _wt_update._ASK_NONTEXT_PARAMS if f"`{p}`" not in readme][:6])
+check("the ask rule never says 'nothing after it' and the config's own help says the same as the docs", "nothing after it" not in _wt_text._ASK_RULE
       and "its author's write is, whole, one plain sentence" in pathlib.Path(STACK, "stackshot/core/config.py").read_text(encoding="utf-8") and "the record shows it moot" not in pathlib.Path(STACK, "stackshot/core/config.py").read_text(encoding="utf-8"), None)
 check("the example config says the same", "only on its author's own plain sentence" in pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"), None)
 

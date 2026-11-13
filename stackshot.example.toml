@@ -218,7 +218,7 @@ enabled = false                                     # (stackshot/audit/audit.py 
                                                     # is sent (`stackshot/audit/audit.py scan --dry-run` still prints what it finds). The keys below are read at each run, so a change needs no restart.
                                                     # Every key is optional; what is shown is the default.
 # terms = "tests/retired_terms.toml"                # the retired-terms list (a path relative to the checkout, or absolute); absent = that check is skipped
-# server = "stackshot/web/server.py"                              # the tools and their parameters are read from this file's `@mcp.tool` definitions, never by importing it
+# server = "stackshot/web/server.py"                              # the tools and their parameters are read from the tool definitions in this file and in the tools/ folder beside it, never by importing it
 # sala = "sala"                                     # `sala --help` is read, and `--help` of the verbs in help_verbs only (most verbs take --help as an argument)
 # help_verbs = ["op"]
 # sala_lib = "~/salamander/lib"                     # sala's code: a flag a file names that lib/<verb>.sh takes, though `sala --help` does not list it, is a help-text gap and goes to sala_keeper

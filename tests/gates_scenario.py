@@ -50,6 +50,8 @@ from stackshot.core import config as _cfg
 from stackshot.model import draft as _draft, model_guards as _mg, step_commands as _sc
 from stackshot.waits import self_wait as _selfwait
 from stackshot.web import server
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 if not MAIN: from stackshot.service import gates, telling, writes
 
 # the gate under test by its name here: gates.gate_x in this code, server._gate_x on main (a function that was public in service/gates.py has its old underscore name there)
@@ -341,7 +343,7 @@ UPDATES = (("an update that asks the owner while the item waits", dict(sender=BA
 def update_order(kw, n):
     put(int(n), mover=BACK)
     with srv(_publish=lambda *a, **k: None), tel(tell_woken=lambda *a, **k: None):
-        return recording(lambda: server.stackshot_update(f"a{n}", **kw))
+        return recording(lambda: _wt_update.stackshot_update(f"a{n}", **kw))
 # the label -> the gates in the order main ran them (GATES_MAIN=1 prints each ORDER line)
 ORDER_WANT = {
     'an update that asks the owner while the item waits':
@@ -436,7 +438,7 @@ with srv(_model_guards_on=lambda: False):
     check("4 a hook that is a function is looked up on the server when the gate runs: a patched _model_guards_on reaches gate_draft", gates._hooks().model_guards_on() is False)
 with srv(_ho_same=lambda a, b: True):
     check("4 …and _ho_same reaches the gates through ho_same", gates._hooks().ho_same("a", "b") is True)
-check("4 a value hook is the server's own value (the sentence a refused close ends with, the close rule, the outcomes)", gates._hooks().relaunch == server._RELAUNCH and gates._hooks().close_refusal == server._CLOSE_REFUSAL and gates._hooks().outcomes == server.OUTCOMES)
+check("4 a value hook is the server's own value (the sentence a refused close ends with, the close rule, the outcomes)", gates._hooks().relaunch == server._RELAUNCH and gates._hooks().close_refusal == _wt_text._CLOSE_REFUSAL and gates._hooks().outcomes == server.OUTCOMES)
 
 # ---------------------------------------------------------------- 5. shape
 GATES_SRC = pathlib.Path(STACK, "stackshot/service/gates.py").read_text(encoding="utf-8")
@@ -458,11 +460,11 @@ rebound = [a.asname or a.name for n in ast.walk(stree) if isinstance(n, ast.Impo
 check("5 …and re-exports none of them under an old name (no `from stackshot.service.gates import`, no alias assigned)", not rebound and not [n for n in old_names if re.search(rf"^{re.escape(n)}\s*=\s*_?gates\.", SERVER_SRC, re.M)], rebound)
 check("5 …and each GATES name exists in gates.py as a function", all(isinstance(getattr(gates, n), type(check)) for n in GATES) and set(GATES) <= moved_defs, sorted(set(GATES) - moved_defs))
 called = set()
-for f in ("stackshot/service/update.py", "stackshot/service/create.py", "stackshot/web/server.py"):
+for f in ("stackshot/service/update.py", "stackshot/service/create.py", "stackshot/web/server.py", "stackshot/web/tools/create.py", "stackshot/web/tools/update.py"):
     for node in ast.walk(ast.parse(pathlib.Path(STACK, f).read_text(encoding="utf-8"))):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "_gates": called.add(node.attr)
 missing = sorted(n for n in called if not hasattr(gates, n))
-check("5 every name the server and the two services take from `_gates` exists on it", not missing and {"gate_cap", "gate_model", "gate_after", "gate_close", "fix_front_mover", "until_in", "ask_pre"} <= called, (missing, sorted(called)))
+check("5 every name the server, the tool modules and the two services take from `_gates` exists on it", not missing and {"gate_cap", "gate_model", "gate_after", "gate_close", "fix_front_mover", "until_in", "ask_pre"} <= called, (missing, sorted(called)))
 hook_gates = []
 for f in ("stackshot/service/update.py", "stackshot/service/create.py"):
     for node in ast.walk(ast.parse(pathlib.Path(STACK, f).read_text(encoding="utf-8"))):

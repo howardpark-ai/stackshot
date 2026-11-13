@@ -67,9 +67,11 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.web import home as H_; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every delivery to a session the server would make (a notice to the keeper, a relay): none is expected
 class _FakePush:
     pass
@@ -112,7 +114,7 @@ mod = M.derive(it)
 check("…the item is alive with the owner as the mover: it is in his Your move list", H_.list_of(mod) == H_.YOUR_MOVE and mod.state == M.ALIVE, (mod.state, mod.mover))
 check("…and nothing else is made or told: one item, no message to any session", len(items()) == n0 + 1 and pushed == [], (len(items()) - n0, pushed))
 check("…the row owes no page: no debt is charged to the script, the keeper of record, the page's keeper or anyone (the page is older than the item, so a debt would stand)", server._owed_load() == {}, server._owed_load())
-check("…the item is in the brief as the owner's", out["item"] in server.stackshot_get(out["item"]) and "your-step" in server.stackshot_get(out["item"]), server.stackshot_get(out["item"])[:300])
+check("…the item is in the brief as the owner's", out["item"] in _wt_get.stackshot_get(out["item"]) and "your-step" in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
 
 # ---- 1b. a long pane name: the server's own subject is cut to the limit, never refused
 st, outl = tp("open", LONGNAME, Q)
@@ -210,7 +212,7 @@ ALARM = "Shall I kill the stuck run and rotate the credentials, or leave the quo
 st, oa = tp("open", question=ALARM)
 check("a question with alarming words (kill, credentials, quota) is filed: a pane's own words are not judged", st == 200 and item(oa["item"])["metadata"]["next"] == nxt("home-sparrow-builder", ALARM), (st, oa))
 create_says = ""
-try: server.stackshot_create(subject="[home] Kill the run?", description="- Goal: A thing", project="projects/alpha", owner="home-sparrow-main", next="Oliver: kill it and rotate the credentials")
+try: _wt_create.stackshot_create(subject="[home] Kill the run?", description="- Goal: A thing", project="projects/alpha", owner="home-sparrow-main", next="Oliver: kill it and rotate the credentials")
 except server.ToolError as e: create_says = str(e)
 check("…while the create tool refuses the same words (the exemption is that route's only)", "uses \"" in create_says and not getattr(writes.QUESTION, "on", False), create_says[:200])
 tp("clear", "home-sparrow-builder", None)

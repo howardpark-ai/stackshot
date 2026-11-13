@@ -55,10 +55,11 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.waits import waiting, watchers as wk; from stackshot.web import render
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
@@ -138,7 +139,7 @@ item(2, needs=[BACK], hold=True, wake=day(5), wait_kind="time", post_wake_mover=
 item(3, needs=[BACK], hold=True, wake=day(5), wait_kind="time", mover=OWN, then=HELP, subject="[zed] he picks it up")
 item(4, needs=[BACK], hold=True, wake=day(5), wait_kind="time", mover=HELP, post_wake_mover=BACK, subject="[zed] two pickers")
 item(5, needs=[BACK], mover=HELP, then=BACK, subject="[zed] an agent moves it, with a then")
-L = lambda n: server.stackshot_get(f"a{n}").split("\n")
+L = lambda n: _wt_get.stackshot_get(f"a{n}").split("\n")
 check("held_by: the picker holds a waiting item, as its mover when it is stored under that name", telling.held_by(server._load("a1")) == (HELP, "mover"), telling.held_by(server._load("a1")))
 check("held_by: …under the old name it reads as before, the word then", telling.held_by(server._load("a2")) == (HELP, "then"), telling.held_by(server._load("a2")))
 check("held_by: …when he picks it up, the then beside him holds it", telling.held_by(server._load("a3")) == (HELP, "then"), telling.held_by(server._load("a3")))

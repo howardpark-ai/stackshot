@@ -45,13 +45,19 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.web.routes import client_api as _rt_client
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.core import store as _core_store
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 check("a valid token names its machine", _rt_client._client_machine("Bearer " + tok) == "box-far" and _rt_client._client_machine("bearer " + mine) == me)
 check("a replaced token is dead", _rt_client._client_machine("Bearer " + old) == "")
 for bad in ("", "Bearer ", "Bearer short", "Basic " + tok, tok, "Bearer " + tok + "x"):
@@ -91,7 +97,7 @@ def mk(i, **meta):
                                                        "metadata": {"owner": "sparrow", "project": "projects/alpha", "next": "do the thing", **meta}}))
 def rdm(i): return json.loads((T / f"store/a/{i}.json").read_text())["metadata"]
 def upd(i, **kw):
-    try: return server.stackshot_update(item_id=f"a{i}", sender="sparrow", **kw), ""
+    try: return _wt_update.stackshot_update(item_id=f"a{i}", sender="sparrow", **kw), ""
     except server.ToolError as e: return "", str(e)
 WK = (server._pages.zone_now() + server.dt.timedelta(days=5)).strftime("%Y-%m-%d")
 BAS = "visit on " + (server._pages.zone_now() + server.dt.timedelta(days=9)).strftime("%Y-%m-%d")      # a time wait carries a reason
@@ -101,14 +107,14 @@ res, err = upd(2, hold=True, recycle=True)
 check("hold=true behaves as before: a session's hold for a pane recycle is accepted", not err and server._is_held(server._load("a2")), (err, rdm(2)))
 hs = rdm(2).get("hold_set") or {}
 check("…and records who set it and when, nothing more (the reason is the wait_basis, not in the hold record)", set(hs) == {"at", "by"} and hs["by"] == "sparrow" and abs(hs["at"] - _t.time()) < 60, hs)
-check("get shows who set the hold and when", "hold: set by sparrow " in server.stackshot_get("a2"), server.stackshot_get("a2"))
+check("get shows who set the hold and when", "hold: set by sparrow " in _wt_get.stackshot_get("a2"), _wt_get.stackshot_get("a2"))
 upd(2, clear_hold=True)
 check("clear_hold releases it and drops the record", not server._is_held(server._load("a2")) and "hold_set" not in rdm(2), rdm(2))
 res, err = upd(3, hold=True)
 check("a hold with no wake and nothing holding it is still refused as an indefinite park (the rule of main)", err.startswith("Refused: a hold names what it waits for; an unconditional or indefinite park is refused."), err)
 check("the update tool's text no longer invites a session to park its own item: no \"without asking\", no \"park it to the date\", no \"nearest date to check\"",
-      not any(x in server._UPDATE_DESC for x in ("without asking", "park it to the date", "an owner parks its own item", "nearest date to check")) and "A session does not park to defer work it could do now" in server._UPDATE_DESC,
-      server._UPDATE_DESC[:200])
+      not any(x in _wt_update._UPDATE_DESC for x in ("without asking", "park it to the date", "an owner parks its own item", "nearest date to check")) and "A session does not park to defer work it could do now" in _wt_update._UPDATE_DESC,
+      _wt_update._UPDATE_DESC[:200])
 # the server's own holds are untouched: the board button records the board as the setter
 mk(12)
 server._update("a12", hold=True, recycle=True, sender="sparrow")
@@ -156,7 +162,7 @@ mk(37, hold=True, wake="2026-11-29", hold_set={"at": _t.time() - 60, "by": "spar
 md_ = server._rmod.render(str(_core_store.STORE), "full"); br_ = server._rmod.render(str(_core_store.STORE), "brief"); rows_ = server._holds_unexplained(); rep_ = server._holds_report()
 check("a hold time outside 0 < t < year 2100 (1e12, 1.76e12, 1e300, \"1e12\", inf, negative, 2100+1 s) reads as no record: board.md, the brief, the report, get and an update all work, the item listed as before the record",
       all(server._rmod.hold_at({"metadata": {"hold_set": {"at": v}}}) == 0.0 for v in BAD.values()) and all(f"a{n} · mover sparrow · wake 2026-11-28 · set by sparrow (before the record)" in rep_ for n in BAD)
-      and all(next(r for r in rows_ if r["gid"] == f"a{n}")["at"] == 0 for n in BAD) and all(server.stackshot_get(f"a{n}") for n in BAD) and not upd(30, next="sparrow: the step that comes now", dropped=[1])[1]
+      and all(next(r for r in rows_ if r["gid"] == f"a{n}")["at"] == 0 for n in BAD) and all(_wt_get.stackshot_get(f"a{n}") for n in BAD) and not upd(30, next="sparrow: the step that comes now", dropped=[1])[1]
       and server._rmod.hold_at({"metadata": {"hold_set": {"at": _t.time() - 5}}}) > 0, (rep_[:300], rows_[:2]))
 mk(38, hold=True, recycle=True, hold_set={"at": 1790000000.0, "by": "home-first"}); upd(38, hold=True)      # a hold with a date folds into until and keeps no record; one that waits on an item or a recycle keeps its flag and record
 check("hold=true passed again on an item already held keeps the original record (who and when)", rdm(38)["hold_set"] == {"at": 1790000000.0, "by": "home-first"}, rdm(38))
@@ -164,14 +170,14 @@ mk(39, hold=True, recycle=True); upd(39, hold=True)
 check("…but a hold with no record gets one when a session passes hold=true on it", set(rdm(39).get("hold_set") or {}) == {"at", "by"}, rdm(39))
 check("a hold_set.by with newlines is collapsed to one line before it reaches board.md, the report or get: no line is injected",
       "## injected heading" not in "\n".join(l for l in md_.splitlines() if l.startswith("## ") or l.startswith("- [a1]")) and "set by sparrow ## injected heading - [a1](#x) fake" in br_.replace("\n", " ") + md_
-      and server._rmod.hold_by({"metadata": {"hold_set": {"by": "x\ny" + "z" * 200}}}) == "x y" + "z" * 77 and "\n## injected" not in rep_ and "\n## injected" not in server.stackshot_get("a37"), (md_[md_.find("a37"):][:200],))
+      and server._rmod.hold_by({"metadata": {"hold_set": {"by": "x\ny" + "z" * 200}}}) == "x y" + "z" * 77 and "\n## injected" not in rep_ and "\n## injected" not in _wt_get.stackshot_get("a37"), (md_[md_.find("a37"):][:200],))
 # a hold's record goes when the hold ends: by the wake pass, by an after closing, by a release
 mk(40, hold=True, wake=(server._pages.zone_now() - server.dt.timedelta(days=1)).strftime("%Y-%m-%d"), hold_set={"at": _t.time() - 3600, "by": "sparrow"})
 server._wake_pass()
 check("the wake pass that releases a hold drops its record too", not server._is_held(server._load("a40")) and "hold_set" not in rdm(40) and "hold" not in rdm(40), rdm(40))
 mk(41, hold=True, wake=WK, after=["a42"], hold_set={"at": _t.time() - 3600, "by": "sparrow"}); mk(42)
 check("while its after item is open, nothing is unexplained about the hold", "a41" not in [r["gid"] for r in server._holds_unexplained()])
-server.stackshot_complete("a42", sender="sparrow", outcome="done", reason="finished", description="- Finished: the thing is done")
+_wt_complete.stackshot_complete("a42", sender="sparrow", outcome="done", reason="finished", description="- Finished: the thing is done")
 check("an after item closing releases the hold and drops its record", not server._is_held(server._load("a41")) and "hold_set" not in rdm(41) and "hold" not in rdm(41) and "after" not in rdm(41), rdm(41))
 mk(43, hold=True, wake=WK, after=["a44"]); mk(44, status="completed"); mk(45, hold=True, wake=WK, after=["a46"])
 check("a held item whose after item is already closed, or missing, is listed as unexplained: nothing open holds it",
@@ -191,10 +197,10 @@ check("…and not one set three days ago, one stored before the record, a malfor
       all(f"[a{n}](#task-a-{n})" not in sect for n in (23, 13, 21, 22, 19, 1, 30, 31, 32, 33)), sect)
 check("the session-start brief lists them too", "  new hold (24 h): a3 [home] hold fixture 3" in br and "nothing holds it now" in br and "held by after a20" in br and "a23" not in br, br)
 (T / "board.md").write_text(md, encoding="utf-8")
-head = server.stackshot_brief()
+head = _wt_brief.stackshot_brief()
 check("the brief tool's head carries the section (it reads board.md up to the first lane)", head.find("## New holds") != -1 and head.find("## New holds") < head.find("All open items in full"), head[:300])
 check("a hold_set whose time is no number never raises in the renderer or in get", server._rmod.hold_at({"metadata": {"hold_set": {"at": "x"}}}) == 0.0 and server._rmod.hold_at({"metadata": {"hold_set": {"at": float("nan")}}}) == 0.0
-      and "hold: set by sparrow" in server.stackshot_get("a21") and server.stackshot_get("a22"), server.stackshot_get("a21"))
+      and "hold: set by sparrow" in _wt_get.stackshot_get("a21") and _wt_get.stackshot_get("a22"), _wt_get.stackshot_get("a21"))
 server._update("a3", clear_hold=True, sender="sparrow")
 check("a released hold is no longer new", "[a3]" not in server._rmod.render(str(_core_store.STORE), "full").split("Shared by every")[0].split("## New holds")[-1])
 for i in range(2, 50): (T / f"store/a/{i}.json").unlink(missing_ok=True)

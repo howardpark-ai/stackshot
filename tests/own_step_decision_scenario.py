@@ -48,8 +48,11 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import ids as _model_ids
-server._publish = lambda: None
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 O = server.OWNER
 DESC = "- Goal: The release of the fruit sorter\n- It lives in the sorter repo\n- Done when the release is out"
 YESNO = [{"label": "Yes", "line": "The step is done.", "recommended": True}, {"label": "No", "line": "The step is not done yet.", "recommended": False}]
@@ -63,13 +66,13 @@ def create(**kw):
     a = dict(subject="[home] Ship the sorter release", description=DESC, project="projects/kiwi", sender="home-kiwi-engineer", then="home-kiwi-engineer",
              needs=["decision"], ask=ask("whether to ship the sorter release tonight"), options=GO)
     a.update(kw)
-    try: return server.stackshot_create(**a), ""
+    try: return _wt_create.stackshot_create(**a), ""
     except server.ToolError as e: return "", str(e)
 def gid_of(out):
     m = re.search(r"\bboard#\d+|\b[a-z]\d+\b", out); assert m, out
     return m.group(0)
 def update(gid, **kw):
-    try: return server.stackshot_update(item_id=gid, sender="home-kiwi-engineer", **kw), ""
+    try: return _wt_update.stackshot_update(item_id=gid, sender="home-kiwi-engineer", **kw), ""
     except server.ToolError as e: return "", str(e)
 def says_step(e): return 'step="<his action>"' in e and 'state=' not in e and "real choice" in e and "two items" in e
 
@@ -197,10 +200,10 @@ out, e = update(g3, next=f"{nx}\n{O}: ship the release tonight")
 check("…a write that adds the very action the ask confirms is refused", says_step(e), e or out)
 
 # ---- 4. the tool text says the difference
-check("the needs text says decision vs your-step", "decision vs your-step" in server._NEEDS_FORM and "the board ticks it when he says it is done" in server._NEEDS_FORM, server._NEEDS_FORM[:200])
-check("the wait text says his call is needs=decision with an ask and his own step is step=", 'needs=[\"decision\"] with an ask; his own step is step=<one line' in server._WAIT_FORM, "")
-check("the ask text says such an ask is refused and names your-step", 'Decide: install the apps and delete the test repo?' in server._ITEM_FORM and 'use step=\\"<his action>\\" instead' in server._ITEM_FORM.replace('"', '\\"'), "")
-check("the needs text no longer counts doing it himself as a decision", "or do it himself" not in server._NEEDS_FORM, "")
+check("the needs text says decision vs your-step", "decision vs your-step" in _wt_text._NEEDS_FORM and "the board ticks it when he says it is done" in _wt_text._NEEDS_FORM, _wt_text._NEEDS_FORM[:200])
+check("the wait text says his call is needs=decision with an ask and his own step is step=", 'needs=[\"decision\"] with an ask; his own step is step=<one line' in _wt_update._WAIT_FORM, "")
+check("the ask text says such an ask is refused and names your-step", 'Decide: install the apps and delete the test repo?' in _wt_text._ITEM_FORM and 'use step=\\"<his action>\\" instead' in _wt_text._ITEM_FORM.replace('"', '\\"'), "")
+check("the needs text no longer counts doing it himself as a decision", "or do it himself" not in _wt_text._NEEDS_FORM, "")
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

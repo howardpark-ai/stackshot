@@ -63,9 +63,13 @@ def passes(name, f, *want):
 def refused_nw(name, i, f, *want, none=()):
     was = raw(i); refused(name, f, *want, none=none); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model_guards as mg
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model_guards as mg
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told: list[tuple[str, str, str, str]] = []           # every notice the server sends: (gid(s), recipient, note, tag)
 telling.tell_woken = lambda gid, owner, note, tag="wake", result=None: told.append((gid, owner, note, tag))
@@ -170,7 +174,7 @@ passes("1 refuse: …an unknown item is nothing to wait for", lambda: upd(15, ne
 passes("1 refuse: …a plain mention passes", lambda: upd(15, next="team-back: see board#61 for the list"), "updated board#15")
 passes("1 refuse: …the item's own id passes", lambda: upd(15, next="team-back: once board#15 has its page, close it"), "updated board#15")
 passes("1 refuse: …other flagged words stay a flag: accepted, noted for the auditor", lambda: upd(15, next="team-back: merge after the review"), "updated board#15")
-check("1 refuse: …no flag is stored for that one; get reads the words from next", "model_flags" not in rd(15)["metadata"] and "flag: next uses after" in server.stackshot_get("board#15"), rd(15)["metadata"])
+check("1 refuse: …no flag is stored for that one; get reads the words from next", "model_flags" not in rd(15)["metadata"] and "flag: next uses after" in _wt_get.stackshot_get("board#15"), rd(15)["metadata"])
 item(63, needs=[BACK], mover="team-back", subject="[home] a stored deferral", next=LINE)
 passes("1 refuse: a stored deferral is not rejudged by a write that does not set next", lambda: upd(63, subject="[home] a stored deferral, renamed"), "updated board#63")
 passes("1 refuse: …nor by a description write", lambda: upd(63, description=DESC + "\n- one more fact"), "updated board#63")
@@ -180,9 +184,9 @@ item(9130, needs=[BACK], mover="team-back", subject="[home] clear after", after=
 refused("1 refuse: …dropping the after link with the line set is refused", lambda: upd(9130, clear_after=True, next=LINE), "defers on board#61")
 # a create
 refused("1 refuse: a create with a deferring next is refused too, and offers only what a create can pass (no state)",
-        lambda: server._create(subject="[home] create defers", description=DESC, project="projects/alpha", owner="home-front", next=LINE, needs=[BACK], mover="team-back"),
+        lambda: _wt_create._create(subject="[home] create defers", description=DESC, project="projects/alpha", owner="home-front", next=LINE, needs=[BACK], mover="team-back"),
         "defers on board#61", 'after=["board#61"]', none=("state=blocked",))
-passes("1 refuse: …with after=[…] it is created", lambda: server._create(subject="[home] create waits", description=DESC, project="projects/alpha", owner="home-front", next=LINE, needs=[BACK], mover="team-back", after=["board#61"], ask_by=FUT), "created")
+passes("1 refuse: …with after=[…] it is created", lambda: _wt_create._create(subject="[home] create waits", description=DESC, project="projects/alpha", owner="home-front", next=LINE, needs=[BACK], mover="team-back", after=["board#61"], ask_by=FUT), "created")
 # a close and a reopen: not judged / judged
 item(16, needs=[BACK], mover="team-back", subject="[home] closing", next=LINE)
 passes("1 refuse: a close is never refused for the stored line", lambda: upd(16, status="completed", outcome="done", reason="it works", description=NEW), "updated board#16")
@@ -199,7 +203,7 @@ item(9136, needs=[PEER], mover="home-peer", subject="[home] does not name it", n
 item(9137, needs=["decision"], mover=OWN, ask="Decide: x · Recommend: y · Stakes: z · By: no date", subject="[home] his item names it", next="Oliver: check board#17 first", owner=U["home-other"])
 item(21, needs=[PEER, OTHER], mover="home-peer", subject="[home] two sessions in needs", next="home-peer: wait on the numbers in board#17")
 n0 = len(told)
-out = server.stackshot_complete("board#17", outcome="done", reason="the output is in the store", description=NEW, sender="home-front")
+out = _wt_complete.stackshot_complete("board#17", outcome="done", reason="the output is in the store", description=NEW, sender="home-front")
 ct = close_told(n0)
 by = {}
 for gid, owner, note, tag in ct: by.setdefault(owner, []).append((gid, note))
@@ -227,19 +231,19 @@ check("2 close: an item Oliver moves → the sessions its notices go to hear the
 # a close with nobody naming it says nothing, a second close of the same item (reopen and close again) is a new close
 item(22, subject="[home] nobody names it")
 n1 = len(told)
-out2 = server.stackshot_complete("board#22", outcome="done", reason="finished", description=NEW, sender="home-front")
+out2 = _wt_complete.stackshot_complete("board#22", outcome="done", reason="finished", description=NEW, sender="home-front")
 check("2 close: nothing named it → no message, no reply line", close_told(n1) == [] and "name board#22" not in out2 and "names board#22" not in out2, out2[-400:])
 # dropped and superseded
 item(23, subject="[home] will be superseded"); item(24, subject="[home] its replacement")
 item(9138, needs=[PEER], mover="home-peer", subject="[home] names the dropped one", next="home-peer: after board#23, go")
 n2 = len(told)
-server.stackshot_complete("board#23", outcome="superseded", superseded_by="board#24", reason="merged into board#24", description=NEW, sender="home-front")
+_wt_complete.stackshot_complete("board#23", outcome="superseded", superseded_by="board#24", reason="merged into board#24", description=NEW, sender="home-front")
 st = close_told(n2)
 check("2 close: a superseded item names its replacement in the message", len(st) == 1 and "superseded by board#24" in st[0][2] and "merged into board#24" in st[0][2], st)
 item(25, subject="[home] will be dropped")
 item(9139, needs=[OTHER], mover="home-other", subject="[home] names the dropped one", next="home-other: board#25 gives the input")
 n3 = len(told)
-server.stackshot_complete("board#25", outcome="dropped", reason="no longer needed", description=NEW, sender="home-front")
+_wt_complete.stackshot_complete("board#25", outcome="dropped", reason="no longer needed", description=NEW, sender="home-front")
 dt_ = close_told(n3)
 check("2 close: a dropped item says dropped", len(dt_) == 1 and "closed (dropped: no longer needed)" in dt_[0][2], dt_)
 # the close by update(status=completed) and by the mover itself
@@ -256,7 +260,7 @@ check("2 close: …and another mover is told", [t[1] for t in close_told(n5)] ==
 orig = telling.tell_close_mentions
 telling.tell_close_mentions = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
 item(64, subject="[home] closes though the notice fails")
-out3 = server.stackshot_complete("board#64", outcome="done", reason="finished", description=NEW, sender="home-front")
+out3 = _wt_complete.stackshot_complete("board#64", outcome="done", reason="finished", description=NEW, sender="home-front")
 check("2 close: a notice that fails never fails the close", rd(64)["status"] == "completed" and "updated board#64" in out3, out3[-200:])
 telling.tell_close_mentions = orig
 
@@ -265,10 +269,10 @@ item(29, subject="[home] named by many")
 for i in range(9300, 9320):
     item(i, needs=[PEER], mover="home-peer", subject=f"[home] names it {i} with a long subject " + "x" * 80, next="home-peer: build on board#29")
 n7 = len(told)
-out7 = server.stackshot_complete("board#29", outcome="done", reason="finished", description=NEW, sender="home-front")
+out7 = _wt_complete.stackshot_complete("board#29", outcome="done", reason="finished", description=NEW, sender="home-front")
 c7 = close_told(n7)
 check("2 close: 20 naming items → one message, the first 8 listed and the rest counted, well inside MSG_MAX",
-      len(c7) == 1 and "20 open items you move name it" in c7[0][2] and c7[0][2].count("\n- board#") == 8 and "- … and 12 more" in c7[0][2] and len(c7[0][2]) < server.MSG_MAX // 2, [(len(t[2]), t[2][:300]) for t in c7])
+      len(c7) == 1 and "20 open items you move name it" in c7[0][2] and c7[0][2].count("\n- board#") == 8 and "- … and 12 more" in c7[0][2] and len(c7[0][2]) < _wt_text.MSG_MAX // 2, [(len(t[2]), t[2][:300]) for t in c7])
 check("2 close: …the gids of all 20 ride on the send (the record of an undelivered line)", len(c7[0][0].split(",")) == 20, c7[0][0])
 check("2 close: …and the reply counts all 20", "20 other open items name board#29" in out7, out7[-500:])
 
@@ -281,7 +285,7 @@ server._routing.record = lambda project, **kw: (rec.append((project, kw)), "nid_
 server._router_live.stash = lambda nid, body: stash_.append((nid, body))
 n8 = len(told)
 try:
-    server.stackshot_complete("board#65", outcome="done", reason="finished", description=NEW, sender="home-front")
+    _wt_complete.stackshot_complete("board#65", outcome="done", reason="finished", description=NEW, sender="home-front")
 finally:
     server._router_live.holds, server._routing.record, server._router_live.stash = real
 mine = [r for r in rec if r[1].get("label") == "close board#65"]
@@ -291,7 +295,7 @@ check("2 close: …the full text is stashed for the router to deliver", len(stas
 
 # ================================================================ 4. get shows the live state of the items next names
 item(30, subject="[home] get names these", needs=[PEER], mover="home-peer", next=f"home-peer: check board#17 and board#62, then board#30 itself, board#68, and board#17 again; board#14 too")
-g = server.stackshot_get("board#30")
+g = _wt_get.stackshot_get("board#30")
 check("3 get: a `named in next:` block follows next", "next:\nhome-peer: check board#17" in g and "\nnamed in next:\n" in g, g)
 check("3 get: a closed item shows its close time in the instance timezone and its outcome", re.search(r"- board#17: closed \w{3} \w{3} \d+(?:st|nd|rd|th) \d\d:\d\d \(done\)", g), g)
 check("3 get: an open item shows its mover", "- board#62: open, mover " in g, g)
@@ -299,9 +303,9 @@ check("3 get: …a waiting item shows what it waits after", "- board#14: open, w
 check("3 get: …an unknown item says not found", "- board#68: not found" in g, g)
 check("3 get: …the item itself is left out, an item named twice appears once", "- board#30" not in g and g.count("- board#17:") == 1, g)
 item(31, subject="[home] names no one", next="home-peer: just do it")
-check("3 get: no board#N in next → no block", "named in next" not in server.stackshot_get("board#31"), None)
+check("3 get: no board#N in next → no block", "named in next" not in _wt_get.stackshot_get("board#31"), None)
 item(32, status="completed", outcome="done", reason="x", needs=[], next="", subject="[home] closed")
-check("3 get: a closed item shows none", "named in next" not in server.stackshot_get("board#32"), None)
+check("3 get: a closed item shows none", "named in next" not in _wt_get.stackshot_get("board#32"), None)
 nl = server._next_names_lines({"gid": "g30", "metadata": {"next": "home-peer: " + " ".join(f"board#{i}" for i in range(71, 83))}})
 check("3 get: …at most eight, then a count", len(nl) == 1 + 8 + 1 and nl[-1] == "- … and 4 more", nl)
 

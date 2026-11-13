@@ -52,10 +52,13 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.fleet import client; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from starlette.testclient import TestClient
 me = socket.gethostname(); tok = open(client.mint(me)).read().strip(); H = {"Authorization": "Bearer " + tok}
 ASK = "Decide: whether to cut the retry to three · Recommend: yes · Stakes: the run waits an hour either way · By: Fri Mar 13th"
@@ -84,7 +87,7 @@ check("the item is open, needs = decision, with the ask and the two options (one
 check("…owned by the project's -main agent (not the first front agent by name), filed under the page's key", server._session_label(m["owner"]) == "home-sparrow-main" and m["project"] == "projects/alpha", m)
 check("…the text is the description, ending with the line that says who filed it; the subject is the one given", it["description"] == desc() and it["subject"] == SUBJ, (it["description"], it["subject"]))
 check("…the sender is recorded as the creator, a script on this machine", it["filed_by"] == f"q-script (a script on {me})", it.get("filed_by"))
-check("…the item is in the board's brief as waiting on the owner's decision", out["item"] in server.stackshot_get(out["item"]) and "needs: decision" in server.stackshot_get(out["item"]), server.stackshot_get(out["item"])[:300])
+check("…the item is in the board's brief as waiting on the owner's decision", out["item"] in _wt_get.stackshot_get(out["item"]) and "needs: decision" in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
 st, out2 = q(project="projects/alpha", subject="[work] Decide the nightly retry", options=None, ask="Decide: whether to cut the retry to three · Recommend: yes · Stakes: an hour either way · By: no date")
 check("a given subject is the subject; no options is fine for a yes/no ask; the project by key", st == 200 and item(out2["item"])["subject"] == "[work] Decide the nightly retry" and "options" not in item(out2["item"])["metadata"], (st, out2))
 A_ID = server.project_ref("alpha")["id"]
@@ -107,7 +110,7 @@ def refused(name, status, needle, **kw):
     return out.get("error", "")
 def tool_says(**kw):
     a = dict(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", needs=["decision"], ask=ASK); a.update(kw)
-    try: server.stackshot_create(**a); return ""
+    try: _wt_create.stackshot_create(**a); return ""
     except server.ToolError as e: return str(e)
 e = refused("a bad ask is refused with the tool's own text", 400, "Refused: ask must read", ask="please decide")
 ALARM_ASK = "Decide: whether to kill the stuck run and rotate the credentials · Recommend: yes · Stakes: the quota is nearly spent · By: Fri Mar 13th"
@@ -168,7 +171,7 @@ OWNER_ID = server._session_id("home-sparrow-main")
 def owes(who): return {k: e for k, os_ in server._owed_load().items() for o, e in os_.items() if o == who}
 for _ in range(3): q()
 check("a burst of script filings leaves the owner owing nothing (so its own board writes are not blocked); the page's keeper carries them", owes(OWNER_ID) == {} and set(server._owed_load()) <= {"projects/alpha"}, server._owed_load())
-check("…and the tool's own create by that session, whose keeper is the page's own agent, charges nobody (a project page's keeper is never charged for its own filing; every project is the router's)", (server.stackshot_create(subject="[home] a thing by the session", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", next="home-sparrow-engineer: carry on"), owes(OWNER_ID))[1] == {}, owes(OWNER_ID))
+check("…and the tool's own create by that session, whose keeper is the page's own agent, charges nobody (a project page's keeper is never charged for its own filing; every project is the router's)", (_wt_create.stackshot_create(subject="[home] a thing by the session", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", next="home-sparrow-engineer: carry on"), owes(OWNER_ID))[1] == {}, owes(OWNER_ID))
 server._owed_save({})
 # a pilot project: the page's keeper is charged and told, the owner still is not
 pushlog = T / "push.log"
@@ -226,8 +229,8 @@ check("a request id whose item no longer exists files anew (no previous entry), 
 check("…and the same id again is a repeat of that new item", q(request_id="park-18")[1]["item"] == r7["item"])
 # the tool's own request_id, same fix
 tk = dict(subject="[home] a tool thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner="home-sparrow-main", request_id="tool-req-1", next="home-sparrow-engineer: carry on")
-t1 = server.stackshot_create(**tk); tg = _model_ids._norm_id(t1.split()[1]); server._path(tg).unlink()
-t2 = server.stackshot_create(**tk)
+t1 = _wt_create.stackshot_create(**tk); tg = _model_ids._norm_id(t1.split()[1]); server._path(tg).unlink()
+t2 = _wt_create.stackshot_create(**tk)
 check("the create tool: a request id whose item is gone creates anew instead of failing", t2.startswith("created ") and _model_ids._norm_id(t2.split()[1]) != tg, t2[:120])
 # concurrency: one triple from many threads is one item; different ids from many threads all land in the map
 import threading
@@ -247,7 +250,7 @@ check("…and leave no temporary file beside it", not [f for f in os.listdir(cre
 
 # ---- 4. get answer
 import datetime as _dt
-def W(ts): return _dt.datetime.fromtimestamp(ts, server.ZONE).isoformat(timespec="seconds")      # the line's fourth field
+def W(ts): return _dt.datetime.fromtimestamp(ts, _wt_text.ZONE).isoformat(timespec="seconds")      # the line's fourth field
 def TS(i): return 1_800_000_000 + 100 * i
 def put_answers(shown, *answers):
     gid = _model_ids._norm_id(shown); it = server._load(gid)

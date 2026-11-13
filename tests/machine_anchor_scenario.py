@@ -74,9 +74,10 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import route as _wt_route; from stackshot.anchors import machine_anchor as MA; from stackshot.anchors import anchors as ANC; from stackshot.service import create as create_svc
+from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
@@ -90,7 +91,7 @@ CFG = server._cfg.CFG.setdefault("model", {})
 CFG.update(guards=False, watchers=True, pause=False)
 def reset(): SENT.clear()
 R = server._gh.shown
-def anchors(**kw): return server._anchors("projects/alpha", who=BACK, **kw)
+def anchors(**kw): return _wt_anchors._anchors("projects/alpha", who=BACK, **kw)
 def tick(): return server._evwait_poll(time.time())
 def mstore(): return json.loads((T / "store/machine-anchors.json").read_text()) if (T / "store/machine-anchors.json").exists() else {}
 def notices(): return [x for x in SENT if x[3] == "watch"]
@@ -137,7 +138,7 @@ out = anchors(add=["machine:Box-A"], items=["a37"])
 check("tool: a machine that is online now is accepted (an anchor stays, unlike a wait) and listed online", "machine:box-a" in out and "online now" in out, out)
 refused("tool: an unknown machine is refused naming the machines the fleet knows", lambda: anchors(add=["machine:box-zz"], items=["a30"]), "names no machine of the fleet", "box-a, box-b, box-c, box-d")
 refused("tool: an empty name is refused with the form", lambda: anchors(add=["machine:"]), "machine:<name>")
-refused("tool: an item of another project is refused as for a URL", lambda: server._anchors("projects/beta", add=["machine:box-b"], items=["a30"], who=BACK), "belongs to")
+refused("tool: an item of another project is refused as for a URL", lambda: _wt_anchors._anchors("projects/beta", add=["machine:box-b"], items=["a30"], who=BACK), "belongs to")
 refused("tool: a completed item is refused as for a URL", lambda: anchors(add=["machine:box-b"], items=["a35"]), "completed")
 check("tool: nothing was stored by the refusals", len(mstore()["projects/alpha"]) == 3, mstore())
 out = anchors(add=["https://github.com/acme/widgets/pull/12", "machine:box-b"], items=["a32"])

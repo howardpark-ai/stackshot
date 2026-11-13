@@ -48,8 +48,12 @@ def put(i, project="projects/sigma", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": SMAIN, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake", **k: told.append((gid, owner, note, tag))
@@ -131,44 +135,44 @@ check("1.15 an item filed under a page of the project follows its front agent's 
 # ---- 2. one front agent hands an item to another front agent of the same project with no builder
 put(10, mover=SMAIN)
 told.clear()
-r = call(lambda: server.stackshot_update(item_id="a10", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
+r = call(lambda: _wt_update.stackshot_update(item_id="a10", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
 check("2.1 a front agent's mover= to another front agent of the same builderless project is accepted", "Refused" not in r and held(10) == SDESK and rd(10)["metadata"].get("mover") == SDESK, (r, held(10)))
 check("2.2 the reply says so, and the target is told by a notice", "no builder" in r and SDESK in r and any(t[1] == U[SDESK] and t[3] == "handoff" for t in told), (r, told))
 check("2.3 nothing is substituted: no server_fixed mark for the front-mover rule", "front_mover" not in json.dumps(rd(10)["metadata"].get("server_fixed") or ""), rd(10)["metadata"].get("server_fixed"))
 
 # the target can now hold and wake the item itself (it is the mover)
-r = refusal(lambda: server.stackshot_update(item_id="a10", sender=SDESK, hold=True, wake=WAKE, wait_reason="waiting for the vendor's reply to arrive, due on the wake day"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SDESK, hold=True, wake=WAKE, wait_reason="waiting for the vendor's reply to arrive, due on the wake day"))
 check("2.4 the target, now the mover, may hold the item with a wake", "front agent does not watch" not in r, r)
 
 told.clear()
-r = call(lambda: server.stackshot_create(subject="[home] handed to the other front agent", description=DESC, project="projects/sigma", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
+r = call(lambda: _wt_create.stackshot_create(subject="[home] handed to the other front agent", description=DESC, project="projects/sigma", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
 check("2.5 a create does the same", r.startswith("created") and held(r.split()[1]) == SDESK, r)
 
 put(11, mover=SMAIN)
-msg = refusal(lambda: server.stackshot_update(item_id="a11", sender=EMAIN, mover=SDESK, next=f"{SDESK}: take it"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a11", sender=EMAIN, mover=SDESK, next=f"{SDESK}: take it"))
 check("2.6 a front agent of another project is still refused", msg.startswith("Refused:") and "no builder and no background agent" in msg and held(11) == SMAIN, (msg, held(11)))
 
 put(12, mover=SMAIN)
-msg = refusal(lambda: server.stackshot_update(item_id="a12", sender=LONER, mover=SDESK, next=f"{SDESK}: take it"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a12", sender=LONER, mover=SDESK, next=f"{SDESK}: take it"))
 check("2.7 a session no page lists is still refused", msg.startswith("Refused:") and "no builder and no background agent" in msg and held(12) == SMAIN, (msg, held(12)))
 
 put(13, project="projects/delta", mover=DMAIN)
-r = call(lambda: server.stackshot_update(item_id="a13", sender=DMAIN, mover=DDESK, next=f"{DBUILD}: take it"))
+r = call(lambda: _wt_update.stackshot_update(item_id="a13", sender=DMAIN, mover=DDESK, next=f"{DBUILD}: take it"))
 check("2.8 in a project with a builder the builder is substituted, as before", f"mover={DBUILD}, the project's builder, was used instead" in r and held(13) == DBUILD, (r, held(13)))
 
 put(14, project="projects/echo", mover=LONER)
-msg = refusal(lambda: server.stackshot_update(item_id="a14", sender=SMAIN, mover=EMAIN, next=f"{EMAIN}: take it"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a14", sender=SMAIN, mover=EMAIN, next=f"{EMAIN}: take it"))
 check("2.9 a front agent of one project handing an item of another to that project's front agent is refused too", msg.startswith("Refused:") and held(14) == LONER, (msg, held(14)))
 
 put(15, mover=SMAIN)
-r = refusal(lambda: server.stackshot_update(item_id="a15", sender=SMAIN, mover=SMAIN, next=f"{SMAIN}: carry on"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a15", sender=SMAIN, mover=SMAIN, next=f"{SMAIN}: carry on"))
 check("2.10 a front agent naming itself stays accepted", r == "" and held(15) == SMAIN, (r, held(15)))
 
 put(16, project="projects/echo", mover=LONER)
-msg = refusal(lambda: server.stackshot_update(item_id="a16", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a16", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it"))
 check("2.11 two front agents of one project may not hand an item filed under another project", msg.startswith("Refused:") and held(16) == LONER, (msg, held(16)))
 put(17, project="projects/sigma/sub", mover=SMAIN)
-r = call(lambda: server.stackshot_update(item_id="a17", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
+r = call(lambda: _wt_update.stackshot_update(item_id="a17", sender=SMAIN, mover=SDESK, next=f"{SDESK}: take it from here"))
 check("2.12 an item filed under a page of their project passes", "Refused" not in r and held(17) == SDESK, (r, held(17)))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

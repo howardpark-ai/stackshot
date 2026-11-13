@@ -11,8 +11,9 @@ What it reads ([rulebook_scan] in stackshot.toml; every path and every keeper is
                     table names none. There is no default set: with no table, nothing is scanned and the run says so in one line. A set of
                     files whose text another project keeps takes another keeper by another [[rulebook_scan.files]] table.
     keeper          the session a set of files with no keeper of its own goes to (default "my-keeper")
-    server          the server's own source (default: stackshot/web/server.py in this checkout). The tools' names and parameters are read from
-                    its `@mcp.tool` definitions with `ast`, never by importing it: an import wants fastmcp and a store, and the server
+    server          the server's own source (default: stackshot/web/server.py in this checkout). The tools' names and parameters are read with `ast`
+                    from its `@mcp.tool` definitions and from the modules of the tools/ folder beside it, where each tool is registered with
+                    `mcp.tool(...)(function)`, never by importing it: an import wants fastmcp and a store, and the server
                     refuses to start outside the production checkout without a config. `--schema JSON` ({"tool": ["param", …]}) replaces it.
     sala            the command (default `sala`): `sala --help` is read once. `sala op --help` is read too (it prints its verbs and
                     flags). Any other verb's `--help` is NOT run: the dispatcher hands a verb its arguments, and most verbs take
@@ -121,23 +122,44 @@ def state_file() -> Path:
 
 # ======================================================================== what exists
 
-def server_tools(server_py: Path) -> dict[str, list[str]]:
-    """{tool name: [parameter names]} from the `@mcp.tool(name="…")` definitions in the server's source."""
+def _tool_registrations(tree: ast.AST) -> dict[str, list[str]]:
+    """{tool name: [parameter names]} for the tools one module registers: `@mcp.tool(name="…")` on a function, or `mcp.tool(name="…")(function)` with the function defined in the module."""
+    defs = {n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    def is_tool(fn: ast.AST) -> bool:
+        return isinstance(fn, ast.Attribute) and fn.attr == "tool" and isinstance(fn.value, ast.Name) and fn.value.id == "mcp"
+
+    def named(call: ast.AST, default: str) -> str:
+        if isinstance(call, ast.Call):
+            for kw in call.keywords:
+                if kw.arg == "name" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                    return kw.value.value
+        return default
+
+    def params(node: ast.AST) -> list[str]:
+        a = node.args
+        return [x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs) if x.arg not in ("self", "cls")]
+
     out: dict[str, list[str]] = {}
-    for node in ast.walk(ast.parse(Path(server_py).read_text(encoding="utf-8"))):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for dec in node.decorator_list:
-            fn = dec.func if isinstance(dec, ast.Call) else dec
-            if not (isinstance(fn, ast.Attribute) and fn.attr == "tool" and isinstance(fn.value, ast.Name) and fn.value.id == "mcp"):
-                continue
-            name = node.name
-            if isinstance(dec, ast.Call):
-                for kw in dec.keywords:
-                    if kw.arg == "name" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                        name = kw.value.value
-            a = node.args
-            out[name] = [x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs) if x.arg not in ("self", "cls")]
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for dec in node.decorator_list:
+                if is_tool(dec.func if isinstance(dec, ast.Call) else dec):
+                    out[named(dec, node.name)] = params(node)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Call) and is_tool(node.func.func):
+            for arg in node.args:
+                if isinstance(arg, ast.Name) and arg.id in defs:
+                    out[named(node.func, arg.id)] = params(defs[arg.id])
+    return out
+
+
+def server_tools(server_py: Path) -> dict[str, list[str]]:
+    """{tool name: [parameter names]} from the tool definitions in the server's source: the file itself and the modules of the `tools/` folder beside it (web/tools/), where each tool is registered."""
+    server_py = Path(server_py)
+    files = [server_py, *sorted((server_py.parent / "tools").glob("*.py"))]
+    out: dict[str, list[str]] = {}
+    for f in files:
+        out.update(_tool_registrations(ast.parse(f.read_text(encoding="utf-8"))))
     return out
 
 

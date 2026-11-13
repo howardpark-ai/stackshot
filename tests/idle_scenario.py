@@ -64,8 +64,12 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"      # the fleet's builder, asked at the last rung
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
@@ -78,7 +82,7 @@ clock = [now0]
 # ---- 2b. a raise stored before the last rung existed: his button answers still apply (the item page's form posts them through server._answer)
 # The server raises no question any more, so the stored raises of items 3, 6 and 7 are set up by hand, in the shape the old pass wrote them.
 told.clear()
-park = (server.dt.datetime.fromtimestamp(clock[0], server.ZONE) + server.dt.timedelta(days=3)).strftime("%Y-%m-%d")
+park = (server.dt.datetime.fromtimestamp(clock[0], _wt_text.ZONE) + server.dt.timedelta(days=3)).strftime("%Y-%m-%d")
 ASK = "Decide: what to do with this idle item · Recommend: Park until the day · Stakes: it sat idle · By: no date"
 def legacy_raise(g_, named=()):
     it_ = rd(g_); mm = it_["metadata"]
@@ -101,7 +105,7 @@ check("the answer record carries the park the server set", m3["answers"][-1].get
 check("the park he set from the board stores no hold record and no old field: the one until date is the whole wait",
       "hold_set" not in m3 and "hold" not in m3 and "wake" not in m3, m3)
 check("a park is acted on by the server itself: no answer escalation waits on it", "a3" not in server._answers_load(), server._answers_load())
-check("get shows it waiting until the day", f"until: {park}" in server.stackshot_get("a3") and "waiting on a time" in server.stackshot_get("a3"), server.stackshot_get("a3"))
+check("get shows it waiting until the day", f"until: {park}" in _wt_get.stackshot_get("a3") and "waiting on a time" in _wt_get.stackshot_get("a3"), _wt_get.stackshot_get("a3"))
 later = (server._pages.zone_now() + server.dt.timedelta(days=10)).strftime("%Y-%m-%d")
 r = server._answer("a6", rd(6)["metadata"]["options"][0]["label"], f"not before {later}, Pat is away", "")
 m6 = rd(6)["metadata"]

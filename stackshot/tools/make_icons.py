@@ -1,4 +1,4 @@
-"""Rebuild the installed app's PNG icons in icons/ from the board's mark (_ICON in server.py, the same SVG as
+"""Rebuild the installed app's PNG icons in icons/ from the board's mark (_ICON in web/app.py, the same SVG as
 <state>/site/favicon.svg). The server serves the committed PNGs as they are and needs no renderer; run this only when
 the mark changes, and commit the PNGs with it:
 
@@ -20,9 +20,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 # units. The maskable safe zone is the circle of radius 25.6 (80% of 64, halved); at 0.8 the cap reaches 19.8, 5.8 inside it.
 MASKABLE_SCALE = 0.8
 
-m = re.search(r'^_ICON = "data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)"', (ROOT / "stackshot" / "web" / "server.py").read_text(encoding="utf-8"), re.M)
+m = re.search(r'^_ICON = "data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)"', (ROOT / "stackshot" / "web" / "app.py").read_text(encoding="utf-8"), re.M)
 if not m:
-    sys.exit("make_icons: _ICON not found in server.py")
+    sys.exit("make_icons: _ICON not found in web/app.py")
 MARK = base64.b64decode(m.group(1)).decode("utf-8").strip()
 inner = re.fullmatch(r'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">(.*)</svg>', MARK, re.S)
 if not inner:

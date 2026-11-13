@@ -240,8 +240,11 @@ d.pop(N); fs.write_text(json.dumps(d))
 
 # ---- 5. the server's ledger
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
 from stackshot.web.routes import client_api as _rt_client
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 check("server: a keeper's debt is strict, an agent's is not", server._strict(S) and server._strict(B) and not server._strict(A))
 server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() - 30, "item": "s2"}}})
 time.sleep(1.1); b = T / "brain/projects/beta.md"
@@ -595,7 +598,7 @@ rc, err = bstop(S, transcript("ship it", COMMIT, "Done.\nBoard s11: no change, m
 # item the session neither owns nor is the linked agent of, or one already closed, gets a note at the next prompt, never a block
 from stackshot.web import render as _rm
 items((40, B, {}), (41, A, {"status": "completed", "meta": {"outcome": "done"}}), (42, B, {"meta": {"agent": A}}), (43, B, {"meta": {"mover": A}}))
-CLOSED = _rm.when_words(p.datetime.datetime.fromtimestamp(OLD, server.ZONE))
+CLOSED = _rm.when_words(p.datetime.datetime.fromtimestamp(OLD, _wt_text.ZONE))
 def fstop(tools, final, mode="note"):
     p.save_state(A, {}); CALLS.clear(); rc, err = bstop(A, transcript("report", tools, final), mode=mode); return rc, err, nnag(A)
 rc, err, out = fstop([], "Done.\nBoard s40: no change, its owner runs it")

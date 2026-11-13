@@ -44,10 +44,12 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import work as W; from stackshot.audit import silence as SL; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import work as W; from stackshot.audit import silence as SL; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
 from stackshot.web.ui import render as ui_render
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 STK = "projects/example"; DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 def rd(gid): return json.loads(server._path(gid).read_text())
@@ -56,7 +58,7 @@ same = lambda a, b: bool(a) and bool(b) and a == b
 real_time = time.time; t0 = real_time(); clk = [t0]; time.time = lambda: clk[0]
 MIN = 60.0
 try:
-    r = server.stackshot_create(subject="[home] a long build", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: pick stage 7")
+    r = _wt_create.stackshot_create(subject="[home] a long build", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: pick stage 7")
     g = _model_ids._norm_id(r.split()[1]); snap("create")
     m0 = rd(g)["metadata"]
     check("the item starts with one open step and no work field", [x["status"] for x in S.view(m0)] == ["open"] and "work" not in m0, m0)
@@ -155,18 +157,18 @@ try:
     check("…and a closing write's new next line stays in the same entry as its step line", any("step done" in x["html"] and "next" in x["html"] for x in log), [x["html"][:200] for x in log[:2]])
 
     # ------------------------------------------------------------ 7 a close that marks the open step itself (dropped), a legacy `id`
-    r2 = server.stackshot_create(subject="[home] a build that is called off", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
+    r2 = _wt_create.stackshot_create(subject="[home] a build that is called off", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
     g2 = _model_ids._norm_id(r2.split()[1]); snap("create2")
     clk[0] += 30 * MIN; server._update(g2, work={"text": "PR up"}, sender=ENG); snap("w2a")
     clk[0] += 30 * MIN; server._update(g2, work={"text": "review"}, sender=ENG); snap("w2b")
-    clk[0] += 30 * MIN; server.stackshot_complete(g2, outcome="dropped", reason="called off", outcome_text="- called off", sender=ENG); snap("drop2")
+    clk[0] += 30 * MIN; _wt_complete.stackshot_complete(g2, outcome="dropped", reason="called off", outcome_text="- called off", sender=ENG); snap("drop2")
     st_d = S.view(rd(g2)["metadata"], closed=True)
     check("the close marked the open step dropped, and it kept its status", [x["status"] for x in st_d] == ["dropped"] and (S.tag_of(st_d[0]) or {}).get("text") == "review", st_d)
     B = ui_render.Board(str(STORE)); log2, _m = B.item_log(B.item(g2))
     steplines = [x for x in log2 if "status update" in x["html"]]
     check("History says the step was dropped, not done, with its status updates folded under it", len(steplines) == 1 and "step dropped: " in steplines[0]["html"] and "step done" not in steplines[0]["html"]
           and "2 status updates" in steplines[0]["html"], [x["html"][:300] for x in log2])
-    r3 = server.stackshot_create(subject="[home] an old client writes", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
+    r3 = _wt_create.stackshot_create(subject="[home] an old client writes", description=DESC, project=STK, sender=ENG, owner=ENG, mover=ENG, next=f"{ENG}: build it")
     g3 = _model_ids._norm_id(r3.split()[1]); before3 = rd(g3)
     refused = []
     for spec in ({"id": "x", "state": "done"}, {"id": "migrating-ids", "text": "migrating ids", "state": "done"}, '{"id": "x", "state": "done"}'):

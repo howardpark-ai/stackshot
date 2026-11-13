@@ -56,13 +56,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.web.tools import update as _wt_update
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 server._front_sender = lambda who: False
 BACK = "team-back"
 def bupd(i, **kw):
     if kw.get("wake") or kw.get("until") or kw.get("ask_by") or kw.get("wait_kind"): kw.setdefault("wait_reason", "the vendor replies only after that date")
-    return server.stackshot_update(f"a{i}", sender=BACK, **kw)
+    return _wt_update.stackshot_update(f"a{i}", sender=BACK, **kw)
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w = lambda n: local_day(now0 + n * DAY)
 OLD = ("wake", "ask_by", "hold", "hold_set")
@@ -136,7 +137,7 @@ refused("2 a create with until and a time on a relay wait is refused the same wa
 item(8, needs=[BACK], until=w(5), wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", post_wake_mover=BACK)
 bupd(8, hold=True, wake=w(3))
 check("3 hold=true + wake on an anchor wait keeps the hold flag and the date", mt(8).get("hold") is True and W.stored_until(mt(8)) == w(3), mt(8))
-refused("3 a hold with no date on an item with a scoped anchor is still refused with the backstop-wake message", lambda: (item(10, needs=[BACK]), server.stackshot_update("a10", sender=BACK, hold=True))[1],
+refused("3 a hold with no date on an item with a scoped anchor is still refused with the backstop-wake message", lambda: (item(10, needs=[BACK]), _wt_update.stackshot_update("a10", sender=BACK, hold=True))[1],
         "still carries a backstop wake", "at most 7 days out")
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")

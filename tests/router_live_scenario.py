@@ -103,11 +103,15 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import get as _wt_get
 from stackshot.web.routes import board_pages as _rt_board
 from stackshot.service import telling
 from stackshot.anchors.anchorhub import core
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about what the router and
 # the server record and push, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
 PRESENT = [True]
@@ -558,10 +562,10 @@ check("message gate: an unmarked message to a front agent is sent to the project
 try: server._message("work-osprey-main", "unmarked", "home-beta"); e = ""
 except ToolError as x: e = str(x)
 check("…and the refusal says so", e.startswith("Refused: work-osprey-main is a front agent") and "router rules it" in e and "steward" not in e, e)
-out = server._anchors("projects/alpha", who="home-beta")
+out = _wt_anchors._anchors("projects/alpha", who="home-beta")
 check("anchors: the list names the router and the keeper, not the retired name-line session", "alpha anchors (router: rules this project; keeper: work-osprey-x" in out.replace("projects/", "") and "steward:" not in out.splitlines()[0], out.splitlines()[0])
 cfg(live=False)
-check("anchors: [router] live = false changes nothing in the list", server._anchors("projects/alpha", who="home-beta").splitlines()[0] == out.splitlines()[0], server._anchors("projects/alpha", who="home-beta").splitlines()[0])
+check("anchors: [router] live = false changes nothing in the list", _wt_anchors._anchors("projects/alpha", who="home-beta").splitlines()[0] == out.splitlines()[0], _wt_anchors._anchors("projects/alpha", who="home-beta").splitlines()[0])
 cfg()
 check("the page debt moves to the router (page call off), and says so, for every page", all("the router, which passes the page update" in server._debt_mover(k) for k in ("projects/alpha", "projects/beta")), server._debt_mover("projects/alpha"))
 _pdl = server._page_debt.live; server._page_debt.live = lambda: True
@@ -713,12 +717,12 @@ check("completion anchor on a one-session page: the keeper told is the page's ow
 (T / "store/anchors.json").write_text(json.dumps({**_an, "projects/beta": _an["projects/beta"][:-1]}))
 (T / "store/projects.json").write_text(_pj_save)
 item(21, "projects/eta", "home-beta", status="open", needs=[])
-got = server.stackshot_get("a21")
+got = _wt_get.stackshot_get("a21")
 check("get shows the -main agent as the mover of an item whose needs names no session and which has no mover stored (the creator is nothing), not the retired name-line session", "mover: home-eta-main" in got and "home-eta (" not in got and "mover: home-eta\n" not in got, got)
 try: gates.gate_needs_session("home-eta", "projects/eta", ""); e = ""
 except ToolError as x: e = str(x)
 check("…the gate refuses naming the retired name-line session", "retired name-line session of projects/eta" in e, e)
-out = server._anchors("projects/eta", who="home-beta")
+out = _wt_anchors._anchors("projects/eta", who="home-beta")
 check("anchors: the list names the keeper of the page, not the one-session name-line session", out.splitlines()[0].startswith("projects/eta anchors (router: rules this project; keeper: home-eta-main"), out.splitlines()[0])
 cfg()
 
@@ -729,7 +733,7 @@ cfg()
 # Otherwise a front owner hears nothing, as before.
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 NEWD = "- The thing works and is in use"
-def cl(i, sender="work-osprey-x", reason="PR 33 is live", description=NEWD): return server.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
+def cl(i, sender="work-osprey-x", reason="PR 33 is live", description=NEWD): return _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 ANS = [{"ts": 1.0, "kind": "decision", "choice": "Go", "via": "board"}]
 SAID = [{"tag": "Acked-by", "quote": "go ahead", "msg": "m1", "session": "s1", "ts": 1.0, "checked": True}]
 item(20, "projects/alpha", A, said=SAID); item(21, "projects/alpha", A); item(22, "projects/alpha", A, said=SAID); item(23, "projects/alpha", A, said=SAID)
@@ -780,7 +784,7 @@ check("[router] live = false is no longer read, no words of his: the owner is to
 
 cfg(live=True)
 item(30, "projects/epsilon", "work-gamma-main", said=SAID); p13e = len(pushes()); n13e = len(routing.read("projects/epsilon"))
-out30 = server.stackshot_complete("a30", outcome="done", reason="PR 34 is live", description=NEWD, sender="home-beta")
+out30 = _wt_complete.stackshot_complete("a30", outcome="done", reason="PR 34 is live", description=NEWD, sender="home-beta")
 c30 = [n for n in routing.read("projects/epsilon")[n13e:] if n.get("label") == "close a30"]
 for _n in routing.read("projects/epsilon")[n13e:]: routing.rule(_n["id"], "dropped", by="test")      # the page-update notice of the close: settled by hand, so the router's later tick makes no call for it
 settle(); p30 = [x for x in pushes()[p13e:] if x[0] == "work-gamma-main" and "a30 closed" in x[1]]
@@ -845,7 +849,7 @@ check("(c) the last other session leaves needs, the owner alone: the owner is to
       not hb_notes(67, n67) and not d67 and t67.count("a67 is back with work-osprey-main, a front agent, alone (handed back by work-osprey-docs)") == 1 and len(hb_pushes(67, p67)) == 0
       and not [x for x in pushes()[p67:] if "handed back its step" in x[1]] and "its builder work-osprey-x is passed a note that it is back with them alone, not them" in out67c, (hb_notes(67, n67), t67, pushes()[p67:], out67c[-300:]))
 item(68, "projects/alpha", A, mover=A, needs=[X, "work-osprey-docs"]); p68 = len(pushes())
-out68 = server.stackshot_complete("a68", outcome="done", reason="finished", description=NEWD, sender=BK); settle(); d68 = [x for x in hb_pushes(68, p68) if x[0] in (A, "work-osprey-main")]
+out68 = _wt_complete.stackshot_complete("a68", outcome="done", reason="finished", description=NEWD, sender=BK); settle(); d68 = [x for x in hb_pushes(68, p68) if x[0] in (A, "work-osprey-main")]
 check("(d) another session closes the item while a second session is still named: the owner's close line still reaches it, marked",
       len(d68) == 1 and d68[0][1].startswith("[for Oliver] [stackshot] a68 [home] item 68: closed by work-osprey-x: done (finished) \u2192 ") and "told at once that it was closed" in out68, (pushes()[p68:], out68[-300:]))
 item(53, "projects/alpha", A, then=A, needs=[A, X]); p53 = len(pushes()); out53 = hb(53, [A]); settle(); d53 = hb_pushes(53, p53)
@@ -861,7 +865,7 @@ out56 = hb(56, ["decision", A], ask="Decide: a or b \u00b7 Recommend: yes \u00b7
 check("needs = decision beside the owner: Oliver's, not a hand-back; nothing is told to the owner",
       not hb_pushes(56, p56) and not hb_notes(56, n56) and "back with them alone" not in out56, (pushes()[p56:], out56[-300:]))
 item(57, "projects/alpha", A, then=A, needs=[X]); p57 = len(pushes()); n57 = len(routing.read("projects/alpha"))
-out57 = server.stackshot_complete("a57", outcome="done", reason="finished", description=NEWD, sender=BK); settle()
+out57 = _wt_complete.stackshot_complete("a57", outcome="done", reason="finished", description=NEWD, sender=BK); settle()
 check("a close by the builder is no hand-back (the owner's own close line is another thing)", not hb_notes(57, n57) and "back with them alone" not in out57 and not [x for x in hb_pushes(57, p57) if "back with you alone" in x[1]], (hb_notes(57, n57), out57[-200:]))
 item(58, "projects/alpha", A, "completed", then=A, needs=[X]); p58 = len(pushes()); n58 = len(routing.read("projects/alpha"))
 out58 = server._update("a58", status="open", needs=[A], next=HB_NEXT, sender=BK, step="Review the PR and merge it"); settle()
