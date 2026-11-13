@@ -141,6 +141,9 @@ def wake_rows() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             until = _watching.WATCH_BACKOFF.get(gid, 0.0)           # a list whose end failed is not due again before its back-off ends (as the watched branch above), so the runner does not spin on it
             if until > time.time():
                 at = max(at, dt.datetime.fromtimestamp(until, _pages.zone_now().tzinfo))
+            fa = _watch.failed_at(meta)                             # …and by the note on the item, which outlives a restart (the watched branch above reads it through next_moment): a failure within the back-off puts the moment after it
+            if fa and at.timestamp() <= fa + _watch.BACKOFF:
+                at = dt.datetime.fromtimestamp(fa + _watch.BACKOFF, _pages.zone_now().tzinfo)
             out.append((gid, p, it, at))
             continue
         if not _wt.wake_value(meta):

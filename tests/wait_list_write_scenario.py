@@ -728,5 +728,23 @@ fresh(348, [Tm(w(5)), Re("a")], until=w(6))
 bupd(348, waits=[], until=w(3))
 check("7d …and beside an earlier one", not mt(348).get("waits") and mt(348)["until"] == w(3), mt(348))
 
+# ---- 7e the count is judged before the lines are read
+class Walked_(list):
+    walked = 0
+    def __iter__(self):
+        Walked_.walked += 1
+        return super().__iter__()
+big_ = Walked_([Re(f"news {i}") for i in range(200)] + [{"kind": "soon"}])
+try: WLW.parse(big_); why_ = "parsed"
+except ValueError as e: why_ = str(e)
+check("7e a list over 8 lines is refused on its count, before any line is read, with the same words (a bad line past the eighth is never reached)", why_ == "a list holds 2 to 8 lines (got 201)" and Walked_.walked == 0, (why_, Walked_.walked))
+try: WLW.parse([{"kind": "soon"}] + [Re(f"news {i}") for i in range(9)]); why_ = "parsed"
+except ValueError as e: why_ = str(e)
+check("7e …a bad first line in a list of ten says the count, as the count is judged first", why_ == "a list holds 2 to 8 lines (got 10)", why_)
+refused("7e …through create the refusal is the one it was", lambda: mk(waits=[Re(f"news {i}") for i in range(200)], until=w(5)), "Refused: a list holds 2 to 8 lines (got 200)")
+refused("7e …through update too, as JSON text", lambda: bupd(10, waits=json.dumps([Re(f"news {i}") for i in range(9)]), until=w(6)), "Refused: a list holds 2 to 8 lines (got 9)")
+check("7e …8 lines are read as before, and the count never refuses fewer", len(WLW.parse([Re(f"news {i}") for i in range(8)])) == 8 and len(WLW.parse([Re("a"), Re("b")])) == 2 and len(WLW.parse([Re("a")])) == 1, None)
+check("7e event_phrases and judged_as read a list over the limit as one that does not parse, as before (no phrase, and judged as a list)", WLW.event_phrases([Ev("recycle")] * 9) == [] and WLW.judged_as([Tm(w(5))] * 9) == "list", None)
+
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": wait list write scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

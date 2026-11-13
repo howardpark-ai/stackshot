@@ -650,6 +650,18 @@ check("legacy (watchers off): a list whose end raises is skipped and noted, and 
       and all(mt(i_).get("mover") == BACK and "wait_kind" not in mt(i_) for i_ in (230, 232, 233)) and mt(231).get("wait_kind") == "list", (woke, first_calls))
 check("legacy (watchers off): …the failed one is backed off (noted on the item, as the watchers' pass notes it) and is not tried again by the next pass", mt(231).get("watch", {}).get("failed_at", 0) > 0 and "a231" in first_calls and "a231" not in calls_ and woke2 == [], (first_calls, calls_, mt(231).get("watch")))
 check("legacy (watchers off): …and the scheduler looks at it again after the back-off, not at once (so the runner does not spin on it)", len(next_231) == 1 and next_231[0].timestamp() >= time.time() + wk.BACKOFF - 60, next_231)
+# a restart within the back-off: the in-memory back-off is gone (popped above), the note on the item stands, and the moment is still after it, as the watchers' branch reads it (the runner works at its floor, re-reading the store each round, otherwise)
+watching_svc.WATCH_BACKOFF.pop("a231", None)
+fa_ = mt(231)["watch"]["failed_at"]
+restart_ = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
+check("legacy (watchers off): …after a restart (no in-memory back-off, the failure noted on the item within the back-off) the moment is still after the back-off, never in the past (no spin at the runner's floor)",
+      len(restart_) == 1 and restart_[0].timestamp() >= fa_ + wk.BACKOFF - 1 and restart_[0].timestamp() > time.time(), (restart_, fa_))
+d_ = rd(231); d_["metadata"]["watch"]["failed_at"] = time.time() - 2 * wk.BACKOFF; put(231, d_)
+aged_ = [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"]
+check("legacy (watchers off): …a failure older than the back-off no longer holds it (the moment is past: due now)", len(aged_) == 1 and aged_[0].timestamp() <= time.time(), (aged_, time.time()))
+d_ = rd(231); d_["metadata"]["watch"]["failed_at"] = time.time() - 60; put(231, d_)
+watched_ = wk.next_moment(mt(231))
+check("legacy (watchers off): …and the moment is the one the watchers' branch gives for the same failure (the same rule)", [at for g, *_, at in wakes_svc.wake_rows() if g == "a231"][0].timestamp() >= (watched_ or 0) - 1, watched_)
 cfg(watchers=True)
 # `_watch_fire(legacy=True)` ends a list that is open and nothing else: a closed item that still stores a list is left alone
 lst(234, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d_ = rd(234); d_["status"] = "completed"; put(234, d_)
