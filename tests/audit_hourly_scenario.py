@@ -7,7 +7,7 @@ network, no model call, no message sent.
      writer are as they were; an idle, shell or unreadable pane, another agent's status line, a done or old one, and a pull request event older than an hour verify nothing
   2  due and nothing verified: `Audit hh:mm: idle, nothing verified`, kind `audit_idle`, `hourly.idle_marked`; the last-activity record is untouched
   3  not due: under 45 minutes of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the quiet-time clock (`silence.clock`) decides
-  4  twice in 45 minutes: a second pass writes nothing, the next line comes 45 minutes after the first, and a mover's write in between starts the hour again
+  4  twice in 45 minutes: a second pass writes nothing, the next line comes 45 minutes after the first, and a mover's write in between starts the 45 minutes again
   5  not on an agent: a hold (dated wake or none), a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off to a back agent are skipped; one to a front
      agent is written
   6  the switch: absent or a TOML true writes the line (on by default); false, the string "true" and 1 write nothing; the example config documents it as true; read-only copies write nothing
@@ -1234,6 +1234,38 @@ for f_ in sub3.glob("agent-*"): f_.unlink()
 
 clean_pane()
 
+# 6. the review's follow-ups: a record is cut at a newline only, a Monitor that lives hours, the parked window to the second
+wipe3()
+SEP = "\u2028"      # JSON leaves it raw inside a string (json.dumps with ensure_ascii off, as Claude Code writes it); `str.splitlines` would cut a record there
+def fin_raw(aid, extra=(), age=60, meta_age=600):
+    mp, tp = sub3 / f"agent-{aid}.meta.json", sub3 / f"agent-{aid}.jsonl"
+    mp.write_text(json.dumps({"agentType": "general-purpose", "description": f"Review {aid}", "finished": True}))
+    tp.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in [{"type": "user", "message": {"role": "user", "content": f"Review the change of {aid}"}}, *extra]) + "\n", encoding="utf-8")
+    os.utime(tp, (now0 - age, now0 - age)); os.utime(mp, (now0 - meta_age, now0 - meta_age))
+fin_raw("u1", [_res(f"Command running in background with ID: bgu001. Output is being written to: /x/bgu001.output.{SEP}You will be notified when it completes.")])
+fin_raw("u2", [BGR("bgu002")])
+fin_raw("u3", [BGR("bgu003")])
+par3.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in [ASSIST,
+      {"type": "queue-operation", "operation": "enqueue", "timestamp": iso(now0 - 100), "content": f"<task-notification>\n<task-id>bgu002</task-id>\n<status>completed</status>\n<summary>done{SEP}at last</summary>\n</task-notification>"},
+      {"type": "user", "timestamp": iso(now0 - 100), "message": {"role": "user", "content": f"a message{SEP}that mentions <task-id>bgu003</task-id> and no status"}}]) + "\n", encoding="utf-8")
+got = run3()
+check("25 a transcript record is cut at a newline and nowhere else: a task start whose result holds a raw U+2028 is still seen (pending_tasks, and the subagent parked on it runs), and an end notice that holds one still ends its task (read_parent), where a cut record is torn and says nothing",
+      TIE.pending_tasks(sub3 / "agent-u1.jsonl") == {"bgu001"} and TIE.read_parent(par3)[1] == {"bgu002"} and "u1" in got and "u2" not in got and "u3" in got, (TIE.pending_tasks(sub3 / "agent-u1.jsonl"), TIE.read_parent(par3)[1], sorted(got)))
+wipe3(); parent(ASSIST)
+mon_case("h1", "expires in 1h unless the source ends first", 61 * 60)                         # an hour-only lifetime: 61 minutes on it has ended
+mon_case("h2", "expires in 1h unless the source ends first", 59 * 60)                         # 59 minutes on it is alive
+mon_case("h3", "expires in 1h 30s unless the source ends first", 3600 + 30 + 2)                # hours and seconds: ended
+mon_case("h4", "expires in 1h 30s unless the source ends first", 3600 + 25)                    # …alive
+mon_case("h5", "expires in 2h unless the source ends first", 80 * 60)                          # a 2-hour Monitor 80 minutes on is alive
+mon_case("h6", "expires in 1h unless the source ends first", 3600 + 1, finished=None)          # no flag: not this rule's
+got = run3()
+check("25 a Monitor whose lifetime is in hours: `expires in 1h` has ended 61 minutes on and lives at 59, `1h 30s` counts its seconds, `2h` lives at 80 minutes, a subagent with no flag is not read by it",
+      "h1" not in got and "h2" in got and "h3" not in got and "h4" in got and "h5" in got and "h6" in got and TIE._life("Monitor started (task x, expires in 2h unless the source ends first)") == 7200.0, sorted(got))
+wipe3(); parent(ASSIST)
+fin("b0", [BGR("bgb000")], age=int(TIE.PARKED_S)); fin("b1", [BGR("bgb001")], age=int(TIE.PARKED_S) + 1); fin("b2", [BGR("bgb002")], age=int(TIE.PARKED_S) - 1)
+got = run3()
+check("25 the parked window to the second: a pending task in a transcript written exactly 90 minutes ago (5400 seconds) still counts, one second more does not, one second less does (a task that never reported is believed for that long and no longer)", "b0" in got and "b1" not in got and "b2" in got, sorted(got))
+
 # ================================================================ 24. a mover's status write with new text is the hourly update
 from stackshot.service import writes as WR24
 WR24.time = CLK      # the save stamps from the server's own (fake) clock
@@ -1293,9 +1325,9 @@ clean_pane(); panes["home-peer"] = "idle"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(6, mover="home-peer", act=90, steps=[tagged(None)])
 save24(6, now0 - 5 * MIN, status_of(6, "still going", ts=now0 - 5 * MIN))
-check("24 an item whose mover wrote new text 5 minutes ago is not owed a line (the update is the hour's update), the row reads its words and an age under an hour",
+check("24 an item whose mover wrote new text 5 minutes ago is not owed a line (the update is the hourly update), the row reads its words and an age under an hour",
       tick() == [] and lines(6) == [] and last_words(parts("a6", now0)[1]) == f"Last: still going at {hm(now0 - 5 * MIN)}" and 'data-b="ok"' in parts("a6", now0)[1], parts("a6", now0))
-check("24 …an hour later, when the mover has written nothing more, the audit's line is owed again (an idle one: nothing verified, the update stays the record)",
+check("24 …an hour after the write (56 minutes on), when the mover has written nothing more, the audit's line is owed again (an idle one: nothing verified, the update stays the record)",
       tick(now0 + 56 * MIN) == ["a6"] and lines(6)[0]["kind"] == "audit_idle" and rec24(6)["kind"] == "update", (lines(6), rec24(6)))
 clean_pane()
 # --- what the first review found: a status text reused on a later stage, and each way a write is no update
@@ -1419,6 +1451,15 @@ items26 = lambda: {"a1": rd(1)}
 front26 = lambda who, project: telling.front_keeper(who, project)[0]
 h46, h59, h60, h61 = (HI.due_all(items26(), now0 + m * MIN, front26) for m in (0, 13, 14, 15))
 check("26 the idle line written at 46 minutes of silence hands nothing on until the item has been silent a full hour (not at 46 or 59 minutes, handed at 60 and 61)", idle_marked26 := HR.idle_marked(mt(1)) and h46 == [] and h59 == [] and [g for g, _r in h60] == ["a1"] and [g for g, _r in h61] == ["a1"], (h46, h59, h60, h61, lines(1)))
+# the hour's two boundaries to the second: a recorded event exactly an hour old still verifies, one second older does not; a log entry dated exactly an hour ahead still counts, one second more is torn
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+panes["home-peer"] = ""
+put(1, act=70); pr_event(1, LA.CI_RESULT, "CI passed on PR 8", 60)
+put(2, act=70); pr_event(2, LA.CI_RESULT, "CI passed on PR 9", 60 + 1 / 60)
+tick()
+check("26 a CI result exactly an hour (60:00) old verifies the item, one at 60:01 does not", lines(1)[0]["kind"] == "audit" and "CI passed on PR 8" in lines(1)[0]["text"] and lines(2)[0]["kind"] == "audit_idle", (lines(1), lines(2)))
+check("26 a log entry dated exactly an hour (+60:00) ahead of the clock still counts as the newest line, one second more (+60:01) is torn",
+      HR.last_line(meta26(now0 + HR.HOUR), now0) is not None and HR.last_line(meta26(now0 + HR.HOUR + 1), now0) is None, (HR.last_line(meta26(now0 + HR.HOUR), now0), HR.last_line(meta26(now0 + HR.HOUR + 1), now0)))
 clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

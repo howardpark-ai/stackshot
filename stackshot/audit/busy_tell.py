@@ -6,7 +6,7 @@ the server writes and sends (`server._busy_tell_tick`, run from the ten-minute a
 
   enabled() / hours()                      `[audit] busy_tell` (on unless a TOML false) and `[audit] busy_tell_hours` (default 4, never under 1), both read at use
   stretch_start(meta, clock, now)           (where the busy stretch of a background mover's item counts from, the pane-only lines in it), None when it has none (or fewer than MIN_LINES)
-  due(items, gid, now, front, queue, hrs)   {"mover", "project", "kind", "since", "lines"} when the item is to be told of now, else None
+  due(items, gid, now, front, queue, hrs)   {"mover", "project", "kind", "since", "shown", "lines"} when the item is to be told of now, else None
   due_all(...)                             [(gid, row)] of every such item, in id order; reads only
   told_since(meta, since, now) / mark(meta, now, to, kind, since)   the record `metadata.busy_tell` ({"at", "to", "kind", "since"}) that keeps the once
   span(since, now, hrs)                    the length the message and the History line name: the real time since `since` in whole hours (rounded down, so it never says more than there was), never under the threshold's own wording
@@ -25,7 +25,7 @@ Two cases, told apart by who moves the item (the server's own test of a front ag
 
 The once: `metadata.busy_tell.at` is the time the agent was told; the item is told of again only when a NEW stretch starts after it (its start is later than `at`: any real activity moves the clock, a line that verified something else moves the start). It is written in the
 save before anything is sent (at most once: a crash between the save and the send loses the message), so it survives a restart, and an audit line is no activity, so the pass's own lines never reset it. A line dated ahead of `now` is not read, a record dated ahead of it by more than an hour (`hourly.HOUR`, the audit's own tolerance) is no record (it would hide the stretch until the clock caught up), and neither is
-a stretch whose newest line is older than `hand_idle.FRESH`'s span (the hourly pass is off or the item was off the agent since). The audit log keeps its last eight lines (`hourly_log.KEEP`); a stretch is judged by the lines it has. Once it has rolled past the last real activity the oldest line left is counted from the activity (`_whole`: the gap before it is unknown), so a told stretch never reads as a new one when the window moves on.
+a background mover's stretch whose newest line is older than `EXTEND_GAP` (the tell is built from lines about an hour apart up to the tell itself: a stretch whose newest line is hours old is not told on that line's word, the hourly pass is off or the item was off the agent since; a front agent's item keeps the wider `FRESH`). A recorded event newer than the stretch's start that no line has seen (the item's `last_activity`, any kind but the audit's own) holds the tell back: the message says no pull request event, and the next line, which verifies it, ends the stretch. The audit log keeps its last eight lines (`hourly_log.KEEP`); a stretch is judged by the lines it has. Once it has rolled past the last real activity the oldest line left is counted from the activity (`_whole`: the gap before it is unknown), so a told stretch never reads as a new one when the window moves on; the message and the History line measure such a stretch only from that oldest line (`shown`), never from the activity, so a stretch left untold for a day is not told as one of a day.
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -37,6 +37,7 @@ from stackshot.audit import hourly as _hourly
 from stackshot.audit import hourly_log as _log
 from stackshot.audit import silence as _silence
 from stackshot.core import config as _cfg
+from stackshot.model import last_activity as _la
 from stackshot.model import model as _model
 from stackshot.waits import waiting as _wt
 
@@ -119,7 +120,7 @@ def stretch_start(meta: dict[str, Any], clock: float, now: float) -> tuple[float
 
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[[Any, str], bool] | None = None,
         queue: dict[str, str] | None = None, hrs: float | None = None) -> dict[str, Any] | None:
-    """The row of the open item `gid` when its stretch is long enough to be told of now (see the module doc), else None: {"mover", "project", "kind", "since", "lines"}. `front(name, project)` says who is a front agent (None reads none as front; one that raises
+    """The row of the open item `gid` when its stretch is long enough to be told of now (see the module doc), else None: {"mover", "project", "kind", "since", "shown", "lines"} (`since` is where the stretch counts from, for the once; `shown` is the start the lines can vouch for, what the message measures: it is `since`, but once the log has rolled past the last real activity the oldest line left). `front(name, project)` says who is a front agent (None reads none as front; one that raises
     reads as front: the agent holding the item is then told itself, never a guess at the -main agent), `queue` is {item: the item it is queued behind} (`silence.queued`; None reads none), `hrs` the threshold in hours (None reads `[audit] busy_tell_hours`)."""
     item = items.get(gid) or {}
     if item.get("status") != "open":
@@ -136,18 +137,25 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
     except Exception:  # noqa: BLE001
         is_front = True
     lines = _lines(meta, clock, now)
-    if not lines or now - lines[-1]["at"] > FRESH:
-        return None      # no audit line since the last real activity, or none lately: nothing says the item is being watched
+    if not lines or now - lines[-1]["at"] > (FRESH if is_front else EXTEND_GAP):
+        return None      # no audit line since the last real activity, or none lately: nothing says the item is being watched. A background mover's stretch is told only while its newest line is within `EXTEND_GAP` of now, the same gap that joins its lines: the tell is built from lines about an hour apart up to the tell itself
     if is_front:
         since, n, kind = clock, len(lines), KIND_FRONT
+        shown = since
     else:
         got = stretch_start(meta, clock, now)
         if got is None:
             return None
         (since, n), kind = got, KIND_MAIN
+        shown = since
+        rec = _la.read(it, now)
+        if rec is not None and rec["kind"] != _la.AUDIT and rec["at"] > since:
+            return None      # a recorded event (a CI result, a review, a comment, a commit, an update) after the stretch began that no audit line has seen yet: the message would say there was none. The next line verifies it and ends the stretch
+        if since == clock and not _whole(meta, clock):
+            shown = max(since, lines[0]["at"])      # the log has rolled past the activity: the lines show the stretch only from the oldest one left, so that is the length the message may name
     if now - since < (_hourly.HOUR * (_cfg.audit_busy_tell_hours() if hrs is None else hrs)) or told_since(meta, since, now):
         return None
-    return {"mover": mover, "project": project, "kind": kind, "since": since, "lines": n}
+    return {"mover": mover, "project": project, "kind": kind, "since": since, "shown": shown, "lines": n}
 
 
 def due_all(items: dict[str, dict[str, Any]], now: float, front: Callable[[Any, str], bool] | None = None,

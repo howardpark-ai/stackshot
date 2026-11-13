@@ -3737,7 +3737,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
-    passes in one hour write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
+    passes within 45 minutes write one line. `now`, `items`, `env`, `pane` are for tests and the tick. → the ids written."""
     from stackshot.audit import hourly as _hourly
     from stackshot.audit import hourly_log as _hlog
     from stackshot.tools import next_report as _nr
@@ -3835,7 +3835,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 if cur is None or not _ho_same(cur["mover"], mover):
                     continue
                 meta = item.setdefault("metadata", {})
-                span = _bt.span(cur["since"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back
+                span = _bt.span(cur["shown"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back; a background mover's stretch is measured only as far back as its audit lines show (`shown`)
                 _bt.mark(meta, now, to, kind, cur["since"])
                 _stall.note(meta, now, f"{_session_label(mover)}'s item has had {'no write but the hourly audit lines' if kind == _bt.KIND_FRONT else 'only a busy pane for its hourly audit lines'} for about {span}: {_session_label(to)} was told")
                 _writes.save(gid, item, note="audit: busy stretch told")

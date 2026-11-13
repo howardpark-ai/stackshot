@@ -243,6 +243,12 @@ def probe_bare_confirm():
     wipe(); on(); put(1, act=90); panes["team-back"] = "idle"           # `confirmed` two minutes ago is set by put(): a bare confirm moves nothing
     return tick() == ["a1"]
 check("3 a bare confirm after the line is no activity: the item is still handed on", probe_bare_confirm() is True)
+def probe_full_hour():
+    # the first audit line is owed after 45 minutes, so an idle line can be younger than an hour of silence: the item is handed on only after a full hour (60:00 yes, 59:59 no)
+    wipe(); on(); put(1, act=46); panes["team-back"] = "idle"           # silent 46 minutes at now0, its idle line 5 minutes old
+    early, late = tick(), tick(now0 + 13 * MIN + 59)
+    return early == [] and late == [] and mover_of(1) == "home-peer" and sent == [] and tick(now0 + 14 * MIN) == ["a1"]
+rule("3 an item is handed on only after a full hour without activity, even with an idle line written inside the hour (59 minutes 59 seconds no, 60 minutes yes)", probe_full_hour, [(HR, "HOUR", 0.0)])
 
 # ================================================================ 4. what is left alone
 def left_alone(name, **kw):
