@@ -3856,23 +3856,15 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
 
 
 def _hand_idle_builders(project: str) -> list[str]:
-    """The sessions an idle item of `project` may be handed to, best first: the project's background agents (`_handoff_background`), then the background agents of any other project whose mandate says build."""
-    out = list(_handoff_background(project))
-    try:
-        reg = _anc.registry()
-        for n, r in _anc.session_roles(reg).items():
-            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
-            if r.get("role") == "back" and not r.get("retired") and re.search(r"\bbuild", mand, re.I) and n not in out:
-                out.append(n)
-    except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's agents are all there is
-        pass
-    return out
+    """The sessions an idle item of `project` may be handed to, best first: the project's own background agents (`_handoff_background`) and no other project's. A project's work is built, reviewed and released by its
+    own builder, so a builder of an unrelated project is never a candidate, however idle. A project with no free background agent of its own keeps the item, and `_hand_idle_tick` says so to its -main agent."""
+    return list(_handoff_background(project))
 
 
 def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                     dead: "Callable[[str], str] | None" = None) -> list[str]:
     """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, on by default), run from the ten-minute audit tick right after the hourly line: an open item on an agent whose newest audit line is
-    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its project, else of any project whose mandate builds; one whose pane is in no turn on this box and
+    `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one whose pane is in no turn on this box and
     that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff_exec` → `_handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
     line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
