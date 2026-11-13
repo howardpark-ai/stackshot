@@ -44,6 +44,7 @@ from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path, _shown_ids
 from stackshot.waits import until_write as _uw
+from stackshot.waits import wait_list as _wl
 from stackshot.waits import waiting as _wt
 
 REQUESTS = _cfg.state("requests.json")      # the request map: a request id -> the item it filed (server.py makes its folder at start)
@@ -177,6 +178,8 @@ def create_item(
     extra: dict[str, Any] | None = None,
     fixes: "list[tuple[str, str, str]] | None" = None,
     until: str = "",
+    waits: list[dict[str, Any]] | str | None = None,
+    wait_mode: str = "",
 ) -> tuple[str, str]:
     """Every gate and every write of the create tool, without its identity check (_who: the tool checks it, the client API's
     question write is proved by its machine token instead) -> (the new item's id, the tool's reply). The one place an item is
@@ -240,6 +243,12 @@ def create_item(
         until_v = _model.clean(ask_by)          # ask_by is the old name of the date (an until beside it wins)
     model_set, _ = _gates.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                      "until": until_v, "post_wake_mover": post_wake_mover}, {})   # a "none" on a create is nothing to clear
+    list_plan = _gates.gate_waits(waits, wait_mode, gid="", project=project, creating=True, stored={}, backstop=str(h.parse_wake(until_v)) if until_v else "",
+                                  others={"wait_kind": _model.clean(wait_kind), "wait_anchor": _model.clean(wait_anchor), "wait_event": _model.clean(wait_event), "ask_by": _model.clean(ask_by),
+                                          "after": after if isinstance(after, list) and after or isinstance(after, str) and after.strip().lower() not in ("", *h.ask_none) else ""},
+                                  anchor_gate=lambda tmp: h.anchor_wait_gate({}, tmp, "", creating=True), event_gate=lambda tmp: h.evwait_gate({}, tmp, creating=True))
+    if list_plan is not None:           # a list is 2 to 8 lines (a clear of a list that is not there is None; one line on a create is refused by the gate)
+        model_set["wait_kind"], model_set["wait_mode"] = "list", list_plan.mode
     if owner_name:
         meta["owner_name"] = owner_name
     contact_v = _gates.gate_contact(contact, project, (owner,)) if contact.strip() else h.contact_default(owner, project)     # a named contact is checked against the project's front agents; else the creator when it is one, else the project's -main
@@ -253,7 +262,11 @@ def create_item(
     proof_note = h.step_proof_set(meta, _steps.view(meta, keeper=owner), step_proof) if step_proof is not None else ""     # a step's proof: the event that finishes it
     _gates.gate_step_gap(meta, _steps.view(meta, keeper=owner), [])      # a step that delivers a pull request, followed by another session's step, needs its proof
     meta.update(model_set)
+    if list_plan is not None:
+        meta["waits"] = [dict(ln) for ln in list_plan.lines]
     wait_note = _uw.alias_note(alias_used, model_set.get("until", ""), alias_ends) if alias_used else ""
+    if list_plan is not None:
+        wait_note += list_plan.note + "\n(wait list: " + _wl.summary(meta, _gh.shown) + ")"
     if _uw.needs_date(meta):                                     # a kind with no date is never refused: the item's own words, else a suggestion, else tomorrow
         fb_d, _fb_how, fb_note = h.fallback_wait_date(meta, next, description, due)
         meta["until"] = fb_d

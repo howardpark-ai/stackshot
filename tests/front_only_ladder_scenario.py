@@ -69,6 +69,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -80,7 +82,7 @@ def _save_inv(gid, item, *a, **kw):
     NOTES.append((gid, kw.get("note", "")))
     out = _real_save(gid, item, *a, **kw)
     INV_SAVES[0] += 1
-    if H.stale(item, H.mover_of(item, lambda it: server._ho_derive({**it, "gid": gid})), server._ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
+    if H.stale(item, H.mover_of(item, lambda it: handoff_svc.ho_derive({**it, "gid": gid})), handoff_svc.ho_same): INV_BAD.append((gid, (item.get("metadata") or {}).get("handoff"), kw.get("note", "")))
     return out
 writes.save = _save_inv
 server._refuse_if_owing = lambda debtor: None
@@ -96,7 +98,7 @@ def _tell(gid, owner, note, tag="wake"):
 telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
-    while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)
+    while hcold_svc.HO_COLD_THREADS: hcold_svc.HO_COLD_THREADS.pop(0).join(30)
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
@@ -117,14 +119,14 @@ def cold(answer, status="ok"):
     def run(msg):
         COLD_MSGS.append(msg)
         return {"status": status, "text": json.dumps(answer) if isinstance(answer, dict) else str(answer), "duration_s": 0.1, "usage": {}, "note": "stub"}
-    server._COLD_RUNNER = run
-server._COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
+    hcold_svc.COLD_RUNNER = run
+hcold_svc.COLD_RUNNER = lambda msg: {"status": "spawn", "note": "no call expected"}
 cold("no json at all here")            # a cold call that gives nothing
 def cli_row(who, status, at):
     """The CLI's own registry row of a pane on this box: an interactive pane, status busy | idle and when it changed (ms)."""
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
-server.CLI_SESSIONS = T / "cli"
+handoff_svc.CLI_SESSIONS = T / "cli"
 OWN = server.OWNER
 FUT = time.strftime("%Y-%m-%d", time.gmtime(now0 + 5 * 86400 + ZONE_OFFSET))
 ASK = "Decide: ship the thing now · Recommend: ship it · Stakes: a week of delay · By: no date"
@@ -200,7 +202,7 @@ check("5 …`get` reads it the same way (the hand-off line)", any("the project's
 check("5 …the journal note of the History write names the -main agent", any(g == "a10" and "the project's -main agent was asked" in n for g, n in NOTES) and not any(g == "a10" and "fleet" in n and "recovery" not in n for g, n in NOTES), [n for g, n in NOTES if g == "a10"])
 check("5 …and what was tried says there was no builder (a stall record: the notice again and a fresh session's call)", any("What the ladder tried: the stall pass sent the notice again and asked a fresh session who takes it." in t for t in msgs("a10", "home-beta-front"))
       and not any("project's builder" in t for t in msgs("a10", "home-beta-front")), msgs("a10", "home-beta-front"))
-_it10 = rd(10); H.touch(_it10, "home-peer3", U["home-peer3"], T2 + 60, server._ho_same)
+_it10 = rd(10); H.touch(_it10, "home-peer3", U["home-peer3"], T2 + 60, handoff_svc.ho_same)
 check("5 …the mover writing ends the request and the record forgets who was asked", not (_it10["metadata"]["handoff"].get("recovery_at") or _it10["metadata"]["handoff"].get("recovery_by")), _it10["metadata"]["handoff"])
 close(10)
 
@@ -214,12 +216,12 @@ close(11)
 
 # (c) the hand-off ladder (a record that is no stall record): the same, in the hand-off ladder's words
 item(12, project="projects/beta", mover="home-beta-front", handoff=rec("home-beta-front"))
-server._handoff_recover("a12", "home-beta-front did not take it"); drain()
+hcold_svc.handoff_recover("a12", "home-beta-front did not take it"); drain()
 check("5 the hand-off ladder, a quiet -main agent: the fleet's builder is asked and what was tried leaves out the project's builder", len(FLEET_ONLY("a12")) == 1 and "What the ladder tried: the hand-off ladder tried a fresh session's call and the sender." in FLEET_ONLY("a12")[0][1]
       and "project's builder" not in FLEET_ONLY("a12")[0][1], FLEET_ONLY("a12"))
 close(12)
 item(13, project="projects/beta", mover="home-peer3", handoff=rec("home-peer3"))
-server._handoff_recover("a13", "home-peer3 did not take it"); drain()
+hcold_svc.handoff_recover("a13", "home-peer3 did not take it"); drain()
 check("5 the hand-off ladder, a quiet session of a front-only project: its -main agent is asked, in its words, and what was tried leaves out the project's builder", len(MAIN_ONLY("a13")) == 1 and "the hand-off ladder tried a fresh session's call and the sender." in MAIN_ONLY("a13")[0][1]
       and "project's builder" not in MAIN_ONLY("a13")[0][1] and ho(13).get("recovery_by") == "the project's -main agent", (MAIN_ONLY("a13"), ho(13)))
 close(13)

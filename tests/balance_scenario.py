@@ -62,6 +62,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
@@ -80,7 +82,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -93,9 +95,9 @@ def fake_status(who, idx=None):
     st = panes.get(who, "")
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
-server._handoff_status = fake_status
-server._handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = _wt_sessions._sessions_index = lambda: {}
+handoff_svc.handoff_status = fake_status
+handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", last=None, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. `last` = minutes ago (or (minutes, kind)) of its `last_activity` record, which the queue rule reads."""
@@ -595,29 +597,29 @@ def probe_isolated():
 check("10 a balancer that raises is a logged error in the runner's status and stops the hand-off tick and the rest", probe_isolated() is True)
 def probe_item_failure():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); put(2, act=15, **ho("home-peer", 12)); [panes.__setitem__(n, "idle") for n in ("team-back", "team-aux", "other-back")]
-    real = server._handoff_exec
+    real = handoff_svc.handoff_exec
     def exec_(steps, now, verify=True, env=None, recheck=None):
         if steps[0].gid == "a1": raise OSError("disk full")
         return real(steps, now, verify=verify, env=env, recheck=recheck)
-    server._handoff_exec = exec_
+    handoff_svc.handoff_exec = exec_
     try:
         with _Err() as e: got = tick()
-    finally: server._handoff_exec = real
+    finally: handoff_svc.handoff_exec = real
     return got == ["a2"] and mover_of(1) == "home-peer" and "a1 sending after the move failed: OSError: disk full" in e.text and len(told("balance")) == 1
-rule("10 one item's failure is a stderr line and stops the others", probe_item_failure, [(server, "_handoff_exec", lambda *a, **k: (_ for _ in ()).throw(OSError("every move fails")))])
+rule("10 one item's failure is a stderr line and stops the others", probe_item_failure, [(handoff_svc, "handoff_exec", lambda *a, **k: (_ for _ in ()).throw(OSError("every move fails")))])
 
 # the order matters: a move at ten minutes comes before the hand-off tick's reminder to the mover
 def reminders_to(name): return [x for x in sent if x[1] == U[name] and x[3] == "handoff"]
 def probe_preempt():
     wipe(); put(1, mover="team-back", act=15, **ho("team-back", 10)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
     CLK.t = now0
-    try: server._handoff_tick(now=now0, only=["a1"])      # balancer off: the hand-off tick reminds team-back, a background agent that did not take it
+    try: handoff_svc.handoff_tick(now=now0, only=["a1"])      # balancer off: the hand-off tick reminds team-back, a background agent that did not take it
     finally: CLK.t = None
     reminded = len(reminders_to("team-back"))
     wipe(); on(); put(1, mover="team-back", act=15, **ho("team-back", 10)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
     tick()
     CLK.t = now0
-    try: server._handoff_tick(now=now0, only=["a1"])
+    try: handoff_svc.handoff_tick(now=now0, only=["a1"])
     finally: CLK.t = None
     return reminded == 1 and mover_of(1) == "team-aux" and not reminders_to("team-back") and len(told("balance", "team-back")) == 1
 rule("10 the balancer ahead of the hand-off tick: an untaken hand-off 10 minutes old moves, and its mover gets the disregard notice, not the hand-off tick's reminder", probe_preempt, [(HI, "balance_all", lambda *a, **k: [])])
@@ -653,7 +655,7 @@ check("11 a hand-off record with no readable time is no wait: nothing moves and 
 # ================================================================ 12. builders only
 def probe_builders_list():
     return server._balance_builders("projects/alpha") == ["team-back", "team-aux"] and "team-rev" not in server._balance_builders("projects/alpha")
-rule("12 the candidates are builders only (a mandate that says build, maintain, merge or engineer), the item's own project's; a reviewer is none", probe_builders_list, [(server, "_handoff_ranked", lambda project: [(2, i, n) for i, n in enumerate(("team-back", "team-aux", "team-rev"))])])
+rule("12 the candidates are builders only (a mandate that says build, maintain, merge or engineer), the item's own project's; a reviewer is none", probe_builders_list, [(handoff_svc, "handoff_ranked", lambda project: [(2, i, n) for i, n in enumerate(("team-back", "team-aux", "team-rev"))])])
 def probe_reviewer_no_target():
     wipe(); on(); put(1, mover="team-back", act=15, **ho("team-back", 12)); [busy_on(n, 1, first=60 + 10 * k) for k, n in enumerate(("team-aux", "other-back", "home-peer"))]
     for n in ("team-rev", "team-aux", "team-back", "other-back", "home-peer"): panes[n] = "idle"
@@ -708,7 +710,7 @@ def probe_handoff_off():
     server._cfg.CFG.setdefault("model", {})["handoff"] = False
     try: return tick() == [] and mover_of(1) == "home-peer" and sent == []
     finally: server._cfg.CFG["model"].pop("handoff", None)
-rule("14 with `[model] handoff` off the balancer stands still, as the hand-off tick does", probe_handoff_off, [(server, "_handoff_on", lambda: True)])
+rule("14 with `[model] handoff` off the balancer stands still, as the hand-off tick does", probe_handoff_off, [(handoff_svc, "handoff_on", lambda: True)])
 def probe_audit_disabled():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
     old = server._cfg.CFG["audit"].get("enabled"); server._cfg.CFG["audit"]["enabled"] = False
@@ -724,7 +726,7 @@ def probe_dead_former():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; dead["home-peer"] = "a retired session, its pane gone"
     got = tick()
     return got == ["a1"] and mover_of(1) == "team-back" and told("balance") == [] and "undelivered" not in mt(1)
-rule("14 a former mover whose pane is gone is not sent the disregard notice (nothing is left undelivered on the item that moved)", probe_dead_former, [(server, "_handoff_pane", lambda who, idx=None: "")])
+rule("14 a former mover whose pane is gone is not sent the disregard notice (nothing is left undelivered on the item that moved)", probe_dead_former, [(handoff_svc, "handoff_pane", lambda who, idx=None: "")])
 
 # ================================================================ 15. what the mover took before still counts
 HIST = lambda to, taken=now0 - 50 * MIN: [{"to": to, "from": "home-stew", "at": now0 - 60 * MIN, "delivered_at": now0 - 59 * MIN, "taken_at": taken, "ended_at": now0 - 40 * MIN, "ended": "x"}]
@@ -752,7 +754,7 @@ rule("16 a maintainer of another project is a builder (its item may be balanced)
 
 # ================================================================ 17. only the builders of the item's own project
 def old_builders(project):      # the reverted rule: the project's own builders, then the `build` builders of every other project
-    out = [n for c, _o, n in server._handoff_ranked(project) if c < 2]
+    out = [n for c, _o, n in handoff_svc.handoff_ranked(project) if c < 2]
     reg = server._anc.registry()
     return out + [n for n, r in server._anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
                   and re.search(r"\bbuild", str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""), re.I)]

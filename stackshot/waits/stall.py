@@ -2,7 +2,7 @@
 
 The pure half: no server import, no clock read, no file. server.py reads the signal and acts; this module decides.
 
-The signal is the CLI's registry, read by server._handoff_status: a live pane's `status` (busy | idle | shell) and when it last changed (`statusUpdatedAt`). "No turn running for N minutes" is
+The signal is the CLI's registry, read by service/handoff.py `handoff_status`: a live pane's `status` (busy | idle | shell) and when it last changed (`statusUpdatedAt`). "No turn running for N minutes" is
 `status` idle or shell and the status changed N minutes ago or more. `shell` is what the CLI writes for a pane whose turn is over but which has a `run_in_background` Bash task still running
 (`co === "idle" && tasks ? "shell" : co`): the turn is over, so it counts as idle. A background subagent keeps the pane `busy`, which is left alone. A pane the registry does not show on this box
 gives ("", 0.0): nothing can be told, and the item is left alone.

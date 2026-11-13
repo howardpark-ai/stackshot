@@ -207,7 +207,10 @@ item when the last `after` item closes; an anchor when the anchor watcher's noti
 and any new notice at the anchor that reaches the server and passes the project's keeper wakes the item; an event when
 the server is told of it; a relay on its ask_by day, when it comes to {{OWNER}} as a question (arrived / not yet, ask
 again on a date / drop); a date beside it is its backstop. The item then turns alive with its post_wake_mover. A moved
-ask_by or wake resets the backstop.
+ask_by or wake resets the backstop. Several waits at once are a list: waits (2 to 8 lines), wait_mode all | any, until as its backstop day; the item is
+back when every line has arrived (all) or the first has (any), at its until at the latest. Example:
+update(waits=[{"kind": "item", "after": "board#N"}, {"kind": "event", "event": "pr_merged <n>"}], wait_mode="any",
+until="2099-03-02"). Send the lines that remain to edit it: one left is a single wait, waits=[] ends it.
 
 ## text MACHINE_FORM trail
 A step of next that names a machine of the fleet which is offline now (its fleet name or hostname as a whole word, an
@@ -307,6 +310,14 @@ backstop day (ask_by or a wake). An anchor wait wakes the item on any new notice
 and passes the project's keeper, not only on the awaited event, so it fits something quiet apart from that event (a
 PR, a thread, a file) and not a busy channel or DM; for a busy channel use a relay wait (it is put to someone on a
 day) or a time wait (check back on a date). "none" clears it.
+
+## param WAITS
+A wait on a list: 2 to 8 lines {"kind": time | anchor | item | relay | event, plus that kind's fields: until; anchor
+and event; after; event}. Needs until (the backstop day) beside it, and no wait_kind, wait_anchor, wait_event, after,
+wake, ask_by or hold. It replaces the stored list: send the lines that remain, [] ends it.
+
+## param WAIT_MODE
+With waits: all (the default, or the stored list's) = every line has arrived; any = the first has.
 
 ## param WAIT_EVENT
 The event the wait expects. An anchor wait: what you expect at the anchor, which the post-wake mover checks, since any

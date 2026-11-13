@@ -100,7 +100,7 @@ def text_files_at(root: Path, rev: str) -> list[str]:
 # `touched` gate watches every one of them (and every function registered with @mcp.tool, found by itself) for a changed body. A new helper that builds a returned line
 # goes in here, in the same PR: this is the one list.
 _ITEM_LINES = [   # the item as get shows it, which create, update and complete return after their own first line, and the brief returns one per open item
-    ("stackshot/web/server.py", "_fmt"), ("stackshot/web/server.py", "_mover_lines"), ("stackshot/web/server.py", "_model_lines"), ("stackshot/web/server.py", "_handoff_lines"),
+    ("stackshot/web/server.py", "_fmt"), ("stackshot/web/server.py", "_mover_lines"), ("stackshot/web/server.py", "_model_lines"), ("stackshot/service/handoff.py", "handoff_lines"),
     ("stackshot/web/server.py", "_state_check_notes"), ("stackshot/web/server.py", "_next_names_lines"), ("stackshot/web/server.py", "_check_words"), ("stackshot/web/answers.py", "_answer_words"), ("stackshot/web/page_debts.py", "_nag"),
     ("stackshot/model/states.py", "words"), ("stackshot/model/states.py", "carry_of"), ("stackshot/model/model.py", "words"), ("stackshot/waits/handoff.py", "words"), ("stackshot/waits/watchers.py", "woke_line"),
     ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"),
@@ -113,7 +113,7 @@ _GET_ONLY = [("stackshot/web/tools/get.py", "stackshot_get"), ("stackshot/web/se
 HELPERS: dict[str, list[tuple[str, str]]] = {
     "get": _GET_ONLY + _ITEM_LINES,
     "brief": [("stackshot/web/tools/brief.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/tools/brief.py", "_world_waits_text"),
-              ("stackshot/web/server.py", "_handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
+              ("stackshot/service/handoff.py", "handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
     "create": [("stackshot/web/tools/create.py", "stackshot_create"), ("stackshot/web/tools/create.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/web/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
     "update": [("stackshot/web/tools/update.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
                ("stackshot/web/server.py", "_command_note"), ("stackshot/web/server.py", "_watch_on_write"), ("stackshot/service/telling.py", "mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,

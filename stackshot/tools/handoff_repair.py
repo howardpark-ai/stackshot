@@ -2,14 +2,14 @@
 
 An item has one hand-off record (metadata.handoff, handoff.py). Until the record followed the mover, a mover that changed by any path but a session's own hand-off (a wake that made
 the post-wake mover the mover, an event wake, a script's save, a close, a wait) left the old record open, naming a mover the item had left: `get` and the brief then said the item was
-"handed to X, not yet taken" while Y moved it. The record follows the mover from now on (server._handoff_follow, on every save); this repairs the ones already stored.
+"handed to X, not yet taken" while Y moved it. The record follows the mover from now on (service/handoff.py `handoff_follow`, on every save); this repairs the ones already stored.
 
     tools/handoff_repair.py --store <copy>          the dry run (the default): reads the copy's items and prints every item whose OPEN record (nobody has taken it) names someone
                                                     other than the item's effective mover, with what the repair would do to it: end the record into the item's history. Writes nothing.
     tools/handoff_repair.py --store <copy> --apply  writes those endings into the COPY (a test of the repair itself).
     tools/handoff_repair.py --live                  the dry run against the live store: read only, allowed while the server runs.
     tools/handoff_repair.py --live --apply          refused while the server is running (the user unit stackshot.service is active): stop the service, or just let it start: the server runs
-                                                    this same repair itself once on every start (server._handoff_repair_pass, idempotent, before any thread starts), so this is only for
+                                                    this same repair itself once on every start (service/handoff.py `handoff_repair_pass`, idempotent, before any thread starts), so this is only for
                                                     a repair by hand with the service stopped.
 
 The rehearsal is the --store run on a copy: its dry run lists what the start-time pass will end, and --apply on the copy shows the result.
@@ -108,8 +108,9 @@ def main(argv: list[str]) -> int:
         point_at_copy(a.store)
     elif not a.apply:
         os.environ.setdefault("STACKSHOT_AUTH", "off")
-    from stackshot.web import server  # noqa: PLC0415
-    rows = server._handoff_repair(apply=a.apply)
+    from stackshot.web import server  # noqa: PLC0415,F401  (importing the server installs the hooks the hand-off passes use)
+    from stackshot.service import handoff  # noqa: PLC0415
+    rows = handoff.handoff_repair(apply=a.apply)
     if a.json:
         print(json.dumps(rows, indent=1, default=str))
         return 0

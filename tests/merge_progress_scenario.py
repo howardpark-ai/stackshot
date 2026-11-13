@@ -68,6 +68,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -84,7 +86,7 @@ def _tell(gid, owner, note, tag="wake"):
 telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
-    while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)
+    while hcold_svc.HO_COLD_THREADS: hcold_svc.HO_COLD_THREADS.pop(0).join(30)
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
@@ -99,12 +101,12 @@ def cold(answer, status="ok"):
     def run(msg):
         COLD_MSGS.append(msg)
         return {"status": status, "text": json.dumps(answer) if isinstance(answer, dict) else str(answer), "duration_s": 0.1, "usage": {}, "note": "stub"}
-    server._COLD_RUNNER = run
+    hcold_svc.COLD_RUNNER = run
 cold("no json at all here")
 def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
-server.CLI_SESSIONS = T / "cli"
+handoff_svc.CLI_SESSIONS = T / "cli"
 server._stall_since(B)
 def log_of(i): return S.log_of(mt(i))
 ROLES = {"home-peer": {"role": "background"}, "home-peer2": {"role": "background"}, "home-peer3": {"role": "background"}, "team-back": {"role": "background"}, "home-front": {"role": "front"}}
@@ -125,7 +127,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK; writes.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK; writes.time = CLK
 def save_at(ts, i, mutate, writer="home-peer", **kw):
     """A real `writes.save` of item `i` at the fake time `ts`, `mutate` changing the loaded item first: the stamp is the one a live write takes."""
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts

@@ -17,6 +17,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -43,6 +44,7 @@ from stackshot.model import step_commands as _sc
 from stackshot.model import step_proof as _sp
 from stackshot.model import steps as _steps
 from stackshot.projects import pages as _pages
+from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _path
@@ -51,6 +53,8 @@ from stackshot.waits import handover as _hv
 from stackshot.waits import self_wait as _selfwait
 from stackshot.waits import server_fixes as _sf
 from stackshot.waits import until_write as _uw
+from stackshot.waits import wait_list as _wl
+from stackshot.waits import wait_list_write as _wlw
 from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
 
@@ -73,14 +77,8 @@ class Hooks:
     front_held: Callable[..., Any]            # audit/front_step.held: the front agent a step opens with when the write check refuses it (service/ imports no audit/)
     front_pair_ok: Callable[..., Any]
     gate_description: Callable[..., Any]            # field_gates._gate_description (web/): the description's own checks, a close's outcome_text goes through them
-    handoff_background: Callable[..., Any]
-    handoff_builder: Callable[..., Any]
-    handoff_on: Callable[..., Any]
-    handoff_pane: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     handover_kind: Callable[..., Any]
-    ho_derive: Callable[..., Any]
-    ho_same: Callable[..., Any]
     hub_sessions: Callable[..., Any]
     item_mover: Callable[..., Any]
     main_agent: Callable[..., Any]
@@ -144,7 +142,7 @@ def _front_mover_case(field: str, value: str, sender: str, project: str, current
                 return None
         proj = roles[key]["project"]
         hub, _stew, back, _front, _keeper = h.hub_sessions(project) if project else ("", "", [], [], "")
-        builder = (h.handoff_builder(project) if project else []) or back[:1]
+        builder = (_handoff.handoff_builder(project) if project else []) or back[:1]
     except Exception as e:  # noqa: BLE001  — the gate is an extra: a failure in it lets the write through
         print(f"front-mover gate: roles read for {field}={v} failed ({e.__class__.__name__}: {e}); the write passes", file=sys.stderr, flush=True)
         return None
@@ -213,11 +211,11 @@ def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]]
             return
         for text in new:
             roles, key = h.role_of(_steps.opener(text))
-            front = h.front_held(text, mover, lambda _n: bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired"), h.ho_same)
+            front = h.front_held(text, mover, lambda _n: bool(key) and roles[key].get("role") == "front" and not roles[key].get("retired"), _handoff.ho_same)
             if not front:
                 continue
             mv = _session_label(mover) or mover
-            tail = (f"Keep the step with {mv} and message {key} for what only it can give." if h.ho_same(sender, mover)
+            tail = (f"Keep the step with {mv} and message {key} for what only it can give." if _handoff.ho_same(sender, mover)
                     else f"Give the step to {mv} (open it with \"{mv}:\") or send {mv} a message asking for it.")
             raise ToolError(f"Refused: the step \"{_clip_line(_steps.first_line(text), 90)}\" opens with {key}, a user-facing agent of {roles[key]['project']}: it gets no work notice and its own wakes are refused, "
                             f"so nothing would wake it for the step, and {mv} moves {_gh.shown(gid) if gid else 'the item'}. {tail}")
@@ -416,6 +414,121 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
     return setv, drop
 
 
+@dataclass
+class WaitsPlan:
+    """What the `waits` argument of a write comes to (`gate_waits`): kind `list` (2 to 8 lines, stored as a list), `one` (a list that is left with one line: stored as the single wait that line is), or `clear` (the
+    list is cleared, or the one line left has arrived: the wait ends as clear_wait ends it); `lines` are the lines to store (item ids as stored, an arrival carried from the stored list), `mode` all or any,
+    `note` the reply's lines."""
+    kind: str
+    lines: list[dict[str, Any]]
+    mode: str = ""
+    note: str = ""
+
+
+def waits_clash(names: list[str]) -> ToolError:
+    """The refusal of a list passed beside single-wait parameters (one way to say a wait): the names passed, and what to do instead."""
+    return ToolError(f"Refused: waits is a wait on a list and does not go with {', '.join(names)}: put each thing waited on in a line of waits and the backstop day in until ({_wlw.FORM}); "
+                     "clear_wait=true ends a wait on its own")
+
+
+def _line_refusal(i: int, e: ToolError) -> ToolError:
+    return ToolError(f"Refused: waits[{i}]: " + str(e).removeprefix("Refused: "))
+
+
+def _no_repeat(lines: list[dict[str, Any]], held: "Counter[tuple[str, ...]]") -> None:
+    """Refuse a wait given twice in one list, naming both lines; a line the stored list holds that many times is not a repeat when the list is sent again."""
+    dup = _wlw.duplicate(lines, held)
+    if dup:
+        raise ToolError(f"Refused: waits[{dup[1]}] repeats waits[{dup[0]}] (the same {lines[dup[1] - 1]['kind']} line twice); give each wait once")
+
+
+def gate_time_lines(dated: list[tuple[int, str]], backstop: str) -> None:
+    """Refuse a time line (its 1-based position in the list, its date) that falls later than the backstop day: it could never arrive before the item comes back."""
+    for i, until in dated:
+        if _wlw.time_before(backstop, until):
+            raise ToolError(f"Refused: waits[{i}] is a date ({until}) later than the backstop day {backstop}, so it could never arrive before the item comes back: give an earlier date or a later until")
+
+
+def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: bool, stored: dict[str, Any], backstop: str, others: dict[str, Any],
+               anchor_gate: Callable[[dict[str, Any]], Any], event_gate: Callable[[dict[str, Any]], str]) -> "WaitsPlan | None":
+    """The `waits` and `wait_mode` arguments of a create or update (a wait on a list of waits: waits/wait_list_write.py) → what they come to, or None when the call passes neither (or clears a list that is not
+    there). Everything the single waits are judged by is reused, line by line, on the lines that are new or changed (a line the stored list already holds is not judged again, and keeps what has arrived):
+    the item of an item line by `gate_after`, the anchor of an anchor line and the event of an event line by the gates of the single waits (`anchor_gate`, `event_gate`: callables that take the metadata of that one
+    wait), the date of a time line against now. Refused, naming the line (waits[2]) and the way out: a list passed beside single-wait parameters (`others`: name → value), a line that is no line (kind, fields,
+    an anchor or an item id over 300 characters, an `arrived`), a repeated line, fewer than 2 or more than 8 lines (one line is allowed only as what an edit leaves of a stored list), a list with no backstop day
+    (`backstop`: the day the call or the item gives), a time line later than the backstop day, a wait_mode that is not all or any. `stored` = the item's metadata as it stands (empty for a create)."""
+    h = _hooks()
+    mode_given = bool(_model.clean(wait_mode)) and _model.clean(wait_mode).lower() not in h.ask_none
+    if not _wlw.passed(waits):
+        if mode_given:
+            raise ToolError("Refused: wait_mode is the mode of a list and goes with waits; to change the mode of a list the item stores, send its lines again with the new wait_mode (what has arrived is kept)")
+        return None
+    clash = [k for k, v in others.items() if v]
+    if clash:
+        raise waits_clash(clash)
+    try:
+        lines = _wlw.parse(waits)
+    except ValueError as e:
+        raise ToolError(f"Refused: {e}")
+    holds = _wl.valid(stored)
+    if not lines:
+        if mode_given:
+            raise ToolError("Refused: wait_mode does not go with a clear of the list (waits=[])")
+        return WaitsPlan("clear", []) if holds else None
+    try:
+        mode = _wlw.mode_of(wait_mode, stored)
+    except ValueError as e:
+        raise ToolError(f"Refused: {e}")
+    held = Counter(_wl.line_key(ln) for ln in _wl.lines(stored))
+    have = set(held)
+    for i, ln in enumerate(lines, 1):
+        if ln["kind"] == "item":
+            try:
+                nid = _norm_id(str(ln["after"]))
+            except Exception:  # noqa: BLE001  — an id that no form reads is refused below, by gate_after, with its own words
+                nid = ""
+            if nid and ("item", nid) in have:
+                ln["after"] = nid        # a line the stored list holds already: kept as it is (its item may have closed since, which the watchers end the line for)
+            else:
+                try:
+                    ln["after"] = gate_after([ln["after"]], gid)[0]
+                except ToolError as e:
+                    raise _line_refusal(i, e)
+        elif ln["kind"] == "time":
+            try:
+                ln["until"] = str(h.parse_wake(ln["until"]))
+            except ToolError:
+                raise ToolError(f"Refused: waits[{i}]: a time line's until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {ln['until']!r})")
+            if _wl.line_key(ln) not in have and h.wake_at(ln["until"]) <= _pages.zone_now():
+                raise ToolError(f"Refused: waits[{i}]: a time line's until must be in the future ({_cfg.tz_abbr()})")
+    _no_repeat(lines, held)
+    lines = _wlw.carry_arrived(lines, stored)
+    kind, why = _wlw.shape(lines, holds)
+    if not kind:
+        raise ToolError(f"Refused: {why}")
+    if kind == "none":
+        return WaitsPlan("clear", [], note="\n(the one line left had already arrived, so the wait is over and is cleared)")
+    if kind == "list":
+        if not backstop:
+            raise ToolError("Refused: a list needs its backstop day, the day the item comes back at the latest whatever has arrived: pass until=YYYY-MM-DD (or YYYY-MM-DDTHH:MM) beside waits")
+        gate_time_lines([(i, ln["until"]) for i, ln in enumerate(lines, 1) if ln["kind"] == "time"], backstop)
+    note = ""
+    for i, ln in enumerate(lines, 1):
+        if ln.get("arrived") or _wl.line_key(ln) in have:
+            continue
+        try:
+            if ln["kind"] == "anchor":
+                anchor_gate({"wait_kind": "anchor", "wait_anchor": ln["anchor"], "wait_event": ln["event"], "project": project})
+            elif ln["kind"] == "event":
+                tmp = {"wait_kind": "event", "wait_event": ln["event"], "wake": backstop}
+                note += event_gate(tmp)
+                ln["event"] = _model.clean(tmp.get("wait_event")) or ln["event"]
+        except ToolError as e:
+            raise _line_refusal(i, e)
+    _no_repeat(lines, held)      # …and again now that an event line is in its canonical form (`Recycle` and `recycle` are one wait)
+    return WaitsPlan(kind, lines, mode, note)
+
+
 def gate_ask_on_wait(gid: str, item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], closing: bool) -> None:
     """An update that asks the owner for a decision (needs gains decision) on an item that stores a wait (wait_kind) leaves a wait and an ask side by side, and the wait
     wins in the model (get lists it as a model conflict). It is refused with one line saying how to resolve it, instead of being left for get to show: clear_wait=true in the same update drops
@@ -544,7 +657,7 @@ def gate_owner_step(item: dict[str, Any], gid: str = "", create: bool = False, s
     if create:      # a create has no state or step parameter
         raise ToolError(head + ". Set needs=decision with an ask (a create stores no state or step), or open next with the agent who takes the step." + tail)
     writer = (_nl.writers_of(m, keeper) or [""])[0]
-    if sender and writer and not h.ho_same(writer, sender):      # the first line is another session's, kept at its place by nextlines.write: opening next with an agent cannot move it
+    if sender and writer and not _handoff.ho_same(writer, sender):      # the first line is another session's, kept at its place by nextlines.write: opening next with an agent cannot move it
         raise ToolError(head + f". That line was written by {writer}, not by this write's sender. Drop the step (dropped=[its number]), or pass clear_next=true, or pass step=<his step in one line> if it is truly his step (step='none' releases an item that stands in his step). Mark it done only when {who}'s own words for it are recorded on the item." + tail)
     raise ToolError(head + ". Pass step=<his step in one line>, or needs=decision with an ask; or open next with the agent who takes the step." + tail)
 
@@ -843,7 +956,7 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
         if _after_of({"after": after if isinstance(after, list) else _needs_list(after)}):
             return
         today = dt.datetime.now(_cfg.tz())
-        mine = lambda n: hk.ho_same(n, sender)       # noqa: E731
+        mine = lambda n: _handoff.ho_same(n, sender)       # noqa: E731
         wake_given = ""
         if wake.strip() and not clear_wake:
             try:
@@ -878,7 +991,7 @@ def gate_self_wait(gid: str, sender: str, *, next_text: str = "", wake: str = ""
             if state.strip():
                 meta["state"] = state.strip()
             mod = _model.derive({**item, "metadata": meta}, after_open=lambda i_: hk.after_open(i_.get("metadata") or {}), anchored=lambda i_: False)
-            if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not hk.ho_same(mod.mover, sender):
+            if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not _handoff.ho_same(mod.mover, sender):
                 return
             stored_wake = str(_wt.wake_value(item.get("metadata") or {}) or "")
             wake_new = bool(wake_given) and wake_given != stored_wake.strip()      # re-sending the stored wake sets nothing
@@ -959,24 +1072,23 @@ def gate_contact(name: str, project: str, keep: tuple[str, ...] = ()) -> str:
 def gate_handoff(gid: str, before: dict[str, Any] | None, after: dict[str, Any], writer: str) -> None:
     """The send-time guard (design section 3): a hand-off made by a write (needs, mover or then set to a session) is refused when that session has no live pane, with the
     project's background agent named: the message tool's rule since an earlier change. A failure of the check itself lets the write through."""
-    h = _hooks()
-    if not h.handoff_on() or after.get("status") != "open" or not writer or _ho.is_script(writer):
+    if not _handoff.handoff_on() or after.get("status") != "open" or not writer or _ho.is_script(writer):
         return
     try:
-        derive = lambda it: h.ho_derive({**it, "gid": gid})
-        to = _ho.detect(before, {**after, "gid": gid}, _session_label(writer) or writer, writer if _anc.is_id(writer) else "", derive, h.ho_same)
+        derive = lambda it: _handoff.ho_derive({**it, "gid": gid})
+        to = _ho.detect(before, {**after, "gid": gid}, _session_label(writer) or writer, writer if _anc.is_id(writer) else "", derive, _handoff.ho_same)
         if not to or _model.is_owner(to):
             return
         am = after.get("metadata") or {}
         dflt = _telling.fallback_mover(str(am.get("project") or ""))      # D9: a `then` the server defaulted to the project's builder is no hand-off the writer made
-        named = [x for x in (_model.norm_who(am.get("mover")), _model.norm_who(am.get("then")), *_needs_sessions(am)) if x and not (dflt and h.ho_same(x, dflt) and x == _model.norm_who(am.get("then")) and x != _model.norm_who(am.get("mover")))]
-        if not any(h.ho_same(to, x) for x in named):      # a session the write did not name (the project's builder or -main agent, which an item with no mover falls to) is no hand-off the writer made
+        named = [x for x in (_model.norm_who(am.get("mover")), _model.norm_who(am.get("then")), *_needs_sessions(am)) if x and not (dflt and _handoff.ho_same(x, dflt) and x == _model.norm_who(am.get("then")) and x != _model.norm_who(am.get("mover")))]
+        if not any(_handoff.ho_same(to, x) for x in named):      # a session the write did not name (the project's builder or -main agent, which an item with no mover falls to) is no hand-off the writer made
             return
-        why = h.handoff_pane(to)
+        why = _handoff.handoff_pane(to)
         if not why:
             return
         project = str((after.get("metadata") or {}).get("project") or "")
-        live = [n for n in h.handoff_background(project) if not h.ho_same(n, to) and not h.handoff_pane(n)]
+        live = [n for n in _handoff.handoff_background(project) if not _handoff.ho_same(n, to) and not _handoff.handoff_pane(n)]
     except Exception as e:  # noqa: BLE001
         print(f"handoff: {gid} send-time check failed, writing as before: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return
@@ -1215,7 +1327,7 @@ def gate_step_gap(meta: dict[str, Any], steps_new: list[dict[str, Any]], steps_o
         return
     had = {_steps.key(x["text"]) for x in steps_old if x["status"] == _steps.OPEN}
     proofs = meta.get("step_proof") if isinstance(meta.get("step_proof"), dict) else {}
-    gaps = [g for g in _sp.proof_gaps(steps_new, proofs, _steps.opener, h.ho_same, _steps.key, skip=lambda nm: _model.is_owner(nm) or h.handover_kind(nm) == _hv.OTHER, own=h.own_repo(),
+    gaps = [g for g in _sp.proof_gaps(steps_new, proofs, _steps.opener, _handoff.ho_same, _steps.key, skip=lambda nm: _model.is_owner(nm) or h.handover_kind(nm) == _hv.OTHER, own=h.own_repo(),
                            released={a for r in _cfg.released_repos() for a in _cfg.repo_aliases(r)})
             if _steps.key(steps_new[g[0] - 1]["text"]) not in had]
     if gaps:
