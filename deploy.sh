@@ -23,7 +23,8 @@
 # What restarts, by the files the fast-forward changed:
 #   stackshot.service        any module the server imports (every *.py but the hub's, the clients' and the one-off scripts; the paths are the package's, stackshot/<area>/<module>.py, and the old root forwarders),
 #                            server.py.lock, its unit, icons/* (their URLs carry a version read at the start, render.py ICON_V), fonts/*
-#                            (the code font's, render.py font_href), or shared/* (the shared color tool, read at import by ui/colortool.py)
+#                            (the code font's, render.py font_href), shared/* (the shared color tool, read at import by ui/colortool.py), or
+#                            stackshot/web/tools/text/*.md (the tools' text files, read at import by web/tools/textfile.py)
 #   anchor-hub.service       anchor-hub.py, anchor-hub.py.lock, anchorhub/*, anchors.py, project_registry.py, projects.py (apply() reaches it), push.py, fleet.py, liveness.py, routing.py, inbox.py, sessions_registry.py, interp.py, config.py, or its unit
 #   stackshot-puller.service puller.py, client.py, config.py, or its unit
 # Code is restarted here, deliberately; stackshot-reload.path only reloads the config file (SIGHUP). It is still held
@@ -112,6 +113,7 @@ while IFS= read -r f; do
         stackshot/anchors/event_log.py) server=1; hub=1 ;;      # the same for the event log (events.jsonl): the hub writes it, the server's last-activity pass reads it
         pyproject.toml|uv.lock) server=1; hub=1 ;;      # the units' pinned dependencies (uv run --project --locked): a new pin takes effect at the restart
         stackshot/cli.py) server=1; hub=1 ;;      # the units start the server and the hub through it (the audit's oneshot reads it fresh)
+        stackshot/web/tools/text/*.md) server=1 ;;      # the tools' text files: read once at import by stackshot/web/tools/textfile.py
         icons/*) server=1 ;;             # a new icon is a new ?v= in the manifest and the pages' links, read at the start
         fonts/*) server=1 ;;             # the code font's ?v= is in the pages' stylesheet, read at the start (render.py font_href)
         shared/*) server=1 ;;            # the shared color tool (shared/colortool.js) is read at import and inlined in every page (stackshot/web/ui/colortool.py)

@@ -6,17 +6,17 @@ import json
 
 from stackshot.anchors import anchors as _anc
 from stackshot.core import cloud as _cloud, config as _cfg
-from stackshot.core.instance import OWNER
 from stackshot.fleet import clients as _clients, fleet as _fleet, liveness as _lv, sessions_registry as _sr
 from stackshot.fleet.sessions_registry import _sessions_index
 from stackshot.service import telling as _telling
 from stackshot.web.auth import oauth as _oauth
-from stackshot.web.tools.text import ZONE, _FOR_OWNER, _lead
+from stackshot.web.tools.text import ZONE, _lead, load_text
 
 _fleet_names = None      # set by register: the server's own, looked up at each call
 
 
 OPERATOR = str(_cfg.get("fleet", "operator_label") or "operator session")
+_T = load_text("sessions", {"OPERATOR": OPERATOR})
 
 
 def _machine_states() -> dict[str, str]:
@@ -99,4 +99,4 @@ def register(mcp, *, fleet_names) -> None:
     """Adds the tool of this module to `mcp`, and takes the server's callables the bodies use."""
     global _fleet_names
     _fleet_names = fleet_names
-    mcp.tool(name="sessions", description=_lead(f"{OWNER}'s Claude sessions and machines, from the live fleet state on the server box — for a session that cannot read it itself (on another machine, in the cloud, in Cowork). Each session: its name, its link (for a pane, the URL the fleet tool's store gives it, where one is configured; for a cloud or Cowork session, its claude.ai link; link a session by it; empty = no link, name it plainly), its machine, and its role where a project page names it (front agent or background agent of <project>; a front agent takes a message only with {_FOR_OWNER} on its first line). Each machine: online or offline, its Claude Code CLI version, and on the box that runs it the {OPERATOR} (the session a recycle or CLI-update cue goes to — from a cloud or Cowork session, relay the cue with message(to=<that name>)), live or not running. Cloud and Cowork sessions are listed when they own an open board item. name: optional case-insensitive filter on session names."))(stackshot_sessions)
+    mcp.tool(name="sessions", description=_lead(_T.description("sessions")))(stackshot_sessions)
