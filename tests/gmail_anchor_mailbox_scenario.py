@@ -549,6 +549,10 @@ class Live(Many):
     """A Many whose getProfile answers the mailbox's current position (its last history id), as Gmail's does: a start that resets the cursor to `now` skips what the mailbox gained meanwhile."""
     def handle(self, key, kw):
         if key == "gmail.users.getProfile": return {"historyId": str(self.n)}
+        if key == "gmail.users.history.list":
+            try: return super().handle(key, kw)
+            finally:
+                if self.lists >= self.stop_lists: self.stop()      # also when the call raised (a position it cannot read): the run ends, a failing check and not a hang
         return super().handle(key, kw)
 class Flaky(Many):
     """A Many whose messages.get fails (a 500) for the mail ids in `fail`, that many times each; it asks for another poll after each history.list until its last, and counts the attempts per id."""
@@ -626,7 +630,7 @@ with block("wrong types"):
     BADH = [5, 5.5, True, "", "abc", "3x", "-3", [], ["3"], {}, {"a": 1}, None]
     BADP = [5, True, "", [], {}, ["d3"], None]
     BADS = [None, 5, 5.5, True, "m4-0", {}, {"m4-0": 1}, [1, 2], ["m4-0", 5], [["m4-0"]]]
-    BADR = [None, 5, True, "abc", {}, {"m": 1}, [["m4-0"]], [["m4-0", "t4-0"]], [["m4-0", "t4-0", "1"]], [["m4-0", "t4-0", 0]], [["m4-0", "t4-0", 99]], [["m4-0", "t4-0", True]], [[1, 2, 3]], [5], ["m4-0"]]
+    BADR = [None, 5, True, "abc", {}, {"m": 1}, [["zz"]], [["zz", "tzz"]], [["zz", "tzz", "1"]], [["zz", "tzz", 0]], [["zz", "tzz", 99]], [["zz", "tzz", True]], [["zz", "tzz", 1.0]], [["zz", "", 1]], [["", "tzz", 1]], [[1, 2, 3]], [5], ["zz"]]      # "zz" is no mail of the mailbox: fetched, it would be delivered
     for v in BADH:
         got, pg, sv, _m = run_fake(lambda: Live(ADA, 5, stop_lists=1), [UN], saved={"hist": v, "sent": []})
         check(f"wrong type: a saved hist {v!r} is ignored (a first binding: from now), with no crash", got == [] and sv["hist"] == "5", (got, sv))
@@ -666,6 +670,11 @@ with block("retry"):
     check("retry: at most RETRY_KEEP failed gets are kept, the newest", sv["retry"] == [["m3-0", "t3-0", 1], ["m4-0", "t4-0", 1], ["m5-0", "t5-0", 1]], sv)
     got, pg, sv, _m = run_fake(lambda: Flaky(ADA, 3, fail={"m2-0": 99}, stop_lists=1), ["gmail:q@home:from:pat"], saved={"hist": "3", "retry": [["m2-0", "t2-0", 1]]})
     check("retry: a saved failed get nobody reads any more is dropped without a get", pg.attempts == {} and sv["retry"] == [] and got == [], (pg.attempts, got, sv))
+    got, pg, sv, more = run_fake(lambda: Flaky(ADA, 2, stop_lists=1), [UN], saved={"hist": "0", "retry": [["r1", "tr1", 1], ["r2", "tr2", 1], ["r3", "tr3", 1]]}, MESSAGE_GETS=3)
+    check("retry: the tried-again gets count against MESSAGE_GETS: a poll that used the cap on them reads no new record, and goes on from where it was at once",
+          heardids(got) == ["r1", "r2", "r3"] and sv["hist"] == "0" and more and sv["retry"] == [], (got, sv, more))
+    got, pg, sv, more = run_fake(lambda: Flaky(ADA, 2, stop_lists=1), [UN], saved={"hist": "2", "sent": ["r1"], "retry": [["r1", "tr1", 1]]})
+    check("retry: a saved failed get whose mail is already handled is not fetched again", pg.attempts == {} and got == [] and sv["retry"] == [], (pg.attempts, got, sv))
 with block("oversize"):
     got, pg, sv, _m = run_fake(lambda: Sized(ADA, [250, 1, 1], stop_lists=6), [UN], total=252)
     check("oversize: one history record holding more mails than MESSAGE_GETS is handled whole in one poll (250 gets against the cap of 200); the next record waits for the next poll",
