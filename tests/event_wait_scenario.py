@@ -377,7 +377,7 @@ try:
                                  wait_kind="event", wait_event="pr_merged o/r#12", ask_by=day(4), post_wake_mover=BACK, mover="none", request_id="evw-create-3")
 except Exception as e:
     g2 = None
-check("gate: a create takes the same path (the early read is the tool's, ahead of its lock; _create_item itself reads the cache only)", g2 is not None and all(c is False for c in LOCKED_CALLS), (g2, LOCKED_CALLS))
+check("gate: a create takes the same path (the early read is the tool's, ahead of its lock; create_item (service/create.py) itself reads the cache only)", g2 is not None and all(c is False for c in LOCKED_CALLS), (g2, LOCKED_CALLS))
 server._pr_merged = fake_pr_merged
 
 # ================================================================ review fixes: a backstop must be after now; which events are live

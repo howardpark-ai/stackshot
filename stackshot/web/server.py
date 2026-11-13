@@ -1295,7 +1295,7 @@ def _gate_observers(observers: Any) -> list[str]:
 
 def _finishes_own_line(work: Any, meta: dict[str, Any], writer: str, open_item: bool = True) -> bool:
     """Does this `work` argument only finish the writer's own step (state done, no other change)? Such a write is the writer closing out its own part: it is no new work on the item, so it
-    names the writer in no needs (_update_unlocked). Only on an open item; the spec carries no other session (`agent` is the writer or absent) and no remove; the writer has an open step
+    names the writer in no needs (update_unlocked in service/update.py). Only on an open item; the spec carries no other session (`agent` is the writer or absent) and no remove; the writer has an open step
     (the first open step that opens with its name is the one the write ticks)."""
     if not open_item or not writer or work is None or (isinstance(work, str) and not work.strip()):
         return False
@@ -10849,7 +10849,7 @@ _create_svc.install(_create_svc.Hooks(
     lift_ask=_late("_lift_ask"),
     machine_note=_late("_machine_note"),
     model_guards_on=_late("_model_guards_on"),
-    nag=_late("_nag"),
+    nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     next_put=_late("_next_put"),
     options_note=_late("_options_note"),
     owed_mark=_late("_owed_mark"),
@@ -12410,7 +12410,7 @@ _update_svc.install(_update_svc.Hooks(
     model_apply=_late("_model_apply"),
     model_guards_on=_late("_model_guards_on"),
     model_of=_late("_model_of"),
-    nag=_late("_nag"),
+    nag=lambda *a, **k: _pdebts._nag(*a, **k),      # the owner module's own function, looked up at each call: a suite that replaces it in page_debts reaches the create and the update
     name_on_write=_late("_name_on_write"),
     next_put=_late("_next_put"),
     nl_text_without=_late("_nl_text_without"),
