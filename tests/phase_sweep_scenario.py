@@ -60,6 +60,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.service import runner as runner_svc
 from stackshot.service import telling
 from stackshot.core import store as _core_store
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -174,7 +175,7 @@ check("2 E6: …and the sweep that follows finds nothing", sweep(TL) == [], None
 with contextlib.redirect_stderr(buf), frozen(TL):
     server._on_hup()
 check("2 E6: …the reload that puts it back restamps it waiting", pair(50) == ("waiting", "time"), pair(50))
-check("2 the start runs the sweep after the wake pass and before the runner starts", (lambda s: 0 < s.index("_wake_pass()") < s.index("_phase_tick()") < s.index("_RUNNER[:]"))(inspect.getsource(server._start_background)), None)
+check("2 the start runs the sweep after the wake pass and before the runner starts", (lambda s: 0 < s.index("_wake_pass()") < s.index("_phase_tick()") < s.index("_runner.start()"))(inspect.getsource(server._start_background)), None)
 
 # ---- 3. no item lock unless something is stamped
 res = {}
@@ -262,7 +263,7 @@ check("7 STACKSHOT_READ_ONLY: the sweep and the tick return nothing, count no ru
 check("7 …off the standby the same sweep stamps it", sweep(TL) == ["g10"] and pair(10) == ("waiting", "time"), pair(10))
 
 # ---- 8. the tick and the status
-ticks = server._minute_ticks(); names = [t.name for t in ticks]
+ticks = runner_svc.ticks(); names = [t.name for t in ticks]
 tk = ticks[names.index("phase_sweep")]
 check("8 the tick is in the minute set right after the anchor pass, in the settle group, paced, skipped while the board is held", names[names.index("anchor_pass") + 1] == "phase_sweep" and (tk.group, tk.pace, tk.board) == ("settle", "paced", True), names)
 d = raw(10); d["metadata"].pop("hold"); d["metadata"].pop("wake")

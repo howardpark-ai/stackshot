@@ -101,6 +101,7 @@ c = routing.counts(["projects/beta"]); check("beta counts: 1 in, 1 pending (a on
 
 # ---- 3. rulings
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import complete as _wt_complete
@@ -1170,10 +1171,10 @@ today = server._pages.zone_now().date(); D = lambda n: (today + datetime.timedel
 NEW_FORM = "Refused: status must be open | completed; on hold is a property of an open item: hold=true (with an optional wake); clear_hold=true releases it"
 HINT = "\nstill on hold: pass clear_hold=true to release it"
 for i in (5, 6, 7, 8): item(i, "projects/beta", B)
-server._WAKE_EVENT.clear(); e = refusal(lambda: server._update("a3", hold=True, sender="home-beta"))
+runner_svc.WAKE_EVENT.clear(); e = refusal(lambda: server._update("a3", hold=True, sender="home-beta"))
 check("hold: hold=true with no wake, after, anchor or recycle is refused, naming the four conditions",
       e.startswith("Refused: a hold names what it waits for; an unconditional or indefinite park is refused.") and all(x in e for x in ("wake=", "after=[\"board#N\"]", "anchors(project, add=[url], items=[\"a3\"])", "recycle=true"))
-      and not held_("a3") and not server._WAKE_EVENT.is_set(), e)
+      and not held_("a3") and not runner_svc.WAKE_EVENT.is_set(), e)
 check("minute loop: no next wake while nothing is on hold", server._next_wake() is None, server._next_wake())
 # an item waiting on the owner is never held. The refusal
 # names the after form; a hold whose next says it waits on him is noted, never refused (a wake on an item he has answered is fine)
@@ -1191,10 +1192,10 @@ check("hold (owner wait): the matcher stays narrow", [server._waits_on_owner(t) 
       f"for {server.OWNER} to pick A or B", f"held until {server.OWNER}'s trip ends, then ship", f"{server.OWNER}'s decision of Mon: ship it", f"ask {server.OWNER} about the logo on Thu",
       f"waiting on the CI run {server.OWNER} asked for")] == [True, True, True, True, False, False, False, False])
 for i in (74, 75, 76): (T / f"store/a/{i}.json").unlink()   # out of the fixture again: the sections below count the held items
-server._WAKE_EVENT.clear()
+runner_svc.WAKE_EVENT.clear()
 res = server._update("a3", hold=True, wake=D(2), sender="home-beta")
 check("hold: hold=true with a wake parks an open item; status stays open", held_("a3") and wk_(rd("a3")["metadata"]) == D(2) and res.startswith("updated a3.\na3 [open · on hold] "), res)
-check("hold: hold=true wakes the minute loop", server._WAKE_EVENT.is_set())
+check("hold: hold=true wakes the minute loop", runner_svc.WAKE_EVENT.is_set())
 check("hold: the hold is a state change (the writer owes the page)", "a3" in json.dumps(server._owed_load().get("projects/beta", {})), server._owed_load())
 res = server._update("a3", wake=D(3), sender="home-beta")
 check("hold: a wake set on an item already waiting on a date, shown as the until", wk_(rd("a3")["metadata"]) == D(3) and f"until: {D(3)}" in res and held_("a3"), res)
@@ -1309,11 +1310,11 @@ check("wake pass: a failed owner notice is logged to stderr, the item released a
 server._update("a7", hold=True, wake=D(5), sender="home-beta")
 # a time of day (2099-01-09, "hold until noon"): stored with a T, due at that minute, fired by the minute loop
 item(9, "projects/beta", B); now_ = server._pages.zone_now(); d2 = D(2); tz_ = now_.tzinfo; n9 = len(wait_push(0))
-server._WAKE_EVENT.clear(); res = server._update("a9", hold=True, wake=f"{d2} 12:00", sender="home-beta")
+runner_svc.WAKE_EVENT.clear(); res = server._update("a9", hold=True, wake=f"{d2} 12:00", sender="home-beta")
 check("timed wake: a time of day in the future is accepted (a space for the T) and stored with a T", held_("a9") and wk_(rd("a9")["metadata"]) == f"{d2}T12:00" and f"until: {d2}T12:00" in res, res)
-check("timed wake: the update that set it wakes the minute loop", server._WAKE_EVENT.is_set())
-server._WAKE_EVENT.clear(); server._update("a9", priority="p2", sender="home-beta")
-check("timed wake: a filing edit does not wake the minute loop", not server._WAKE_EVENT.is_set())
+check("timed wake: the update that set it wakes the minute loop", runner_svc.WAKE_EVENT.is_set())
+runner_svc.WAKE_EVENT.clear(); server._update("a9", priority="p2", sender="home-beta")
+check("timed wake: a filing edit does not wake the minute loop", not runner_svc.WAKE_EVENT.is_set())
 res = server._update("a9", wake=f"{d2}T13:30", sender="home-beta")
 check("timed wake: the T form is accepted as given", wk_(rd("a9")["metadata"]) == f"{d2}T13:30", res)
 e0 = refusal(lambda: server._update("a9", wake=(now_ - datetime.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"), sender="home-beta"))
@@ -1392,11 +1393,11 @@ check("migration: a second run finds nothing", server._migrate_holds() == [])
 # ---- 16b. a wake alone is no hold (items kept showing while their work was live). hold=true parks, as before; a wake without it leaves the item in its lane,
 # and at its moment the owner and the sessions in its needs are told once and the wake goes. An item that needs decision is never on hold.
 for i in (30, 25, 34, 31, 35, 36, 37): item(i, "projects/beta", B)
-server._WAKE_EVENT.clear()
+runner_svc.WAKE_EVENT.clear()
 res = server._update("a30", wake=D(2), next="home-beta: review the draft", sender="home-beta"); m_ = rd("a30")["metadata"]
 check("wake alone: a wake alone is stored as the wait on that date and is no hold; its own step passes; the reply shows the item waiting",
       wk_(m_) == D(2) and "hold" not in m_ and m_.get("next") == "home-beta: review the draft" and res.startswith("updated a30.\na30 [open · on hold] ") and f"until: {D(2)}" in res, res)
-check("wake alone: it wakes the minute loop and is on its list", server._WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
+check("wake alone: it wakes the minute loop and is on its list", runner_svc.WAKE_EVENT.is_set() and "a30" in [g for g, *_ in server._wakes()])
 b_ = ui_render.Board(str(T / "store")); ip_ = b_.item_html("a30")
 check("wake alone: a wake alone is a wait on that date: parked out of the active lane", "a30" in [r["gid"] for r in b_.held] and "a30" not in [r["gid"] for r in b_.agent + b_.n_call + b_.n_relay], ([r["gid"] for r in b_.held], [r["gid"] for r in b_.agent]))
 _wk30 = re.search(r"<dt>Wake</dt><dd>([^<]*)</dd>", ip_)

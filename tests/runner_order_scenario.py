@@ -1,4 +1,4 @@
-"""Scenario test for the order of the minute set at its one-minute pace (runner.py, server._minute_ticks). Fixture data, no live store, no network.
+"""Scenario test for the order of the minute set at its one-minute pace (core/runner.py, service/runner.py `ticks`). Fixture data, no live store, no network.
 The real Runner runs the server's real table on a fake clock, with every tick function replaced by a recorder, and the order the recorders are called in is what is checked:
 
   1  the table: the events that end a wait first (watchers' pass, anchor pass, the phase sweep, event waits, done check, step proof), then the hand-off tick, the answers, the stall pass and the
@@ -41,6 +41,7 @@ def check(name, cond, got=None):
 from stackshot.core import runner as R
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
@@ -58,8 +59,8 @@ ORDER = EXPECT + TEN
 SERVER_FNS = {"wake_pass": "_minute_wake_pass", "anchor_pass": "_minute_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick",
               "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick", "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick",
               "pilot_fallback_tick": "_pilot_fallback_tick", "stall_tick": "_stall_tick",
-              "handback_tick": "handback_tick", "fleet_publish": "_minute_fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return telling if fn == "handback_tick" else server       # the owner of a tick function: the hand-back tick is the telling's, the rest are the server's
+              "handback_tick": "handback_tick", "fleet_publish": "fleet_publish", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
+def own(fn): return {"handback_tick": telling, "fleet_publish": runner_svc}.get(fn, server)       # the owner of a tick function: the hand-back tick is the telling's, the publish step is the runner's, the rest are the server's
 clk = Clock()
 log: list[tuple[str, float]] = []
 saved = {}
@@ -79,7 +80,7 @@ def restore():
 
 def new_runner(pace=None):
     kw = {} if pace is None else {"pace": pace}
-    return R.Runner(server._minute_ticks(), holding=lambda: False, wake_wait=server._minute_wake_wait, event=threading.Event(), clock=clk, **kw)
+    return R.Runner(runner_svc.ticks(), holding=lambda: False, wake_wait=server._minute_wake_wait, event=threading.Event(), clock=clk, **kw)
 
 def rounds_of(entries):
     """The log cut into rounds: a run of ticks ends when the table starts over (a name at or before the previous one in the table's order)."""
@@ -92,7 +93,7 @@ def rounds_of(entries):
     return out
 
 # ---- 1. the table
-names = [t.name for t in server._minute_ticks()]
+names = [t.name for t in runner_svc.ticks()]
 check("1 table: the minute set's order, wait-enders first, then the hand-off tick, the answers, then the fleet's clocks and the publish, then the ten-minute set", names == ORDER, names)
 check("1 table: every wait-ender is ahead of the hand-off tick and of the stall pass", all(names.index(w) < names.index("handoff_tick") < names.index("stall_tick")
       for w in ("wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick")), names)

@@ -155,7 +155,7 @@ class Hooks:
     update: Callable[..., Any]
     wait_end_sent_back: Callable[..., Any]
     wake_at: Callable[..., Any]
-    wake_event_set: Callable[[], None]     # wake the minute loop at once (server._WAKE_EVENT.set()) when a wake or a hold changed
+    wake_event_set: Callable[[], None]     # wake the minute loop at once (runner.WAKE_EVENT.set()) when a wake or a hold changed
     wake_park_line: Callable[..., Any]
     wake_step_note: Callable[..., Any]
     wake_window_note: Callable[..., Any]

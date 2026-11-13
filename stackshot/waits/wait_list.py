@@ -30,31 +30,44 @@ LIST = "list"
 KINDS = ("time", "anchor", "item", "relay", "event")       # the kinds a line may be (the five single waits)
 MODES = ("all", "any")
 MIN_LINES, MAX_LINES = 2, 8
-LINE_MAX = 300                                              # the most a line's free text (an anchor, an event) and an arrival's words keep: longer is clipped
+LINE_MAX = 300                                              # a LIMIT, not a cosmetic clip: the most a line's free text (an anchor, an event), an item id and an arrival's words keep (read: the first 300 characters). An anchor or item id longer than that
+                                                            # would no longer match the notice or item it names, so the write path (a later change) refuses a longer one; docs/item-model.md and docs/waiting-and-doing.md say so
+WORD_MAX = 40                                               # the most of a kind, a mode, a date or a stored word that is read at all: every one of them is shorter when it is valid, so a longer text is invalid whatever follows the 40th character
 ARRIVED_AT_MAX = 253402300800 - 86400                       # the latest arrival time a stored line may carry (epoch seconds: a day short of year 10000, the last moment Python can draw as a date); a later one is no time
 MALFORMED: dict[str, int] = {"count": 0}                   # reads of an item that stores wait_kind=list with a list that does not hold (the model counts each one it ignores)
 
 _FIELDS = {"time": ("until",), "anchor": ("anchor", "event"), "item": ("after",), "relay": ("event",), "event": ("event",)}
 
 
-def _one(v: Any) -> str:
-    return " ".join(str(v or "").split())
+def _one(v: Any, cap: int | None = None) -> str:
+    """`v` on one line (runs of whitespace are one space, the ends trimmed); with `cap`, only its first `cap` characters, and the same ones as clipping the whole line would give. A stored line can be a megabyte,
+    so the cap is applied BEFORE the whole text is normalised: a head of the raw text is normalised, and the head grows only while its normalised form is still short of `cap` (a text that is mostly
+    whitespace). Cutting a raw head anywhere leaves a normalised head that is a prefix of the whole one, so the clip is exact."""
+    s = str(v or "")
+    if cap is None:
+        return " ".join(s.split())
+    n = cap * 4
+    while True:
+        head = " ".join(s[:n].split())
+        if len(head) >= cap or len(s) <= n:
+            return head[:cap]
+        n *= 4
 
 
 def stored(meta: dict[str, Any]) -> bool:
     """Does the item say it waits on a list (wait_kind=list)? True whether or not the list holds; `valid` says that."""
-    return _one((meta or {}).get("wait_kind")).lower() == LIST
+    return _one((meta or {}).get("wait_kind"), WORD_MAX).lower() == LIST
 
 
 def mode(meta: dict[str, Any]) -> str:
     """The list's mode, all or any; "" when it is neither."""
-    m = _one((meta or {}).get("wait_mode")).lower()
+    m = _one((meta or {}).get("wait_mode"), WORD_MAX).lower()
     return m if m in MODES else ""
 
 
 def backstop(meta: dict[str, Any]) -> str:
-    """The backstop day: the item's stored `until`, "" when it has none."""
-    return _wt.stored_until(meta or {})
+    """The backstop day: the item's stored `until` (waiting.stored_until, read to its first WORD_MAX characters: a date is never longer, so a longer text is no date either way and is not normalised whole), "" when it has none."""
+    return _one((meta or {}).get("until"), WORD_MAX)
 
 
 def backstop_epoch(meta: dict[str, Any]) -> float | None:
@@ -67,7 +80,7 @@ def _line(raw: Any) -> tuple[dict[str, Any] | None, str]:
     """One stored line → (the line as read, "") or (None, why it is no line)."""
     if not isinstance(raw, dict):
         return None, "a line is an object"
-    kind = _one(raw.get("kind")).lower()
+    kind = _one(raw.get("kind"), WORD_MAX).lower()
     if kind not in KINDS:
         return None, f"a line's kind is one of {' | '.join(KINDS)} (got {kind!r})"
     out: dict[str, Any] = {"kind": kind, "until": "", "anchor": "", "event": "", "after": "", "arrived_at": 0.0, "arrived_what": ""}
@@ -75,12 +88,12 @@ def _line(raw: Any) -> tuple[dict[str, Any] | None, str]:
         v = raw.get(f)
         if f == "after" and not isinstance(v, str):
             return None, "an item line names ONE item id, a string"
-        v = _one(v)
+        v = _one(v, LINE_MAX if f in ("anchor", "event", "after") else WORD_MAX)      # clipped as it is read: a megabyte is never normalised whole
         if not v:
             return None, f"a {kind} line needs {f}"
         if f == "until" and _wt.wake_epoch(v) is None:
             return None, f"a time line's until is YYYY-MM-DD or YYYY-MM-DDTHH:MM, a real date (got {v!r})"
-        out[f] = v[:LINE_MAX] if f in ("anchor", "event", "after") else v      # free text and an item id are clipped (a stored line can be long; what a reader sees never is)
+        out[f] = v          # free text and an item id keep their first LINE_MAX characters (a stored line can be long; what a reader sees never is): the limit, see LINE_MAX
     arr = raw.get("arrived")
     if isinstance(arr, dict):
         at_raw = arr.get("at")
@@ -89,7 +102,7 @@ def _line(raw: Any) -> tuple[dict[str, Any] | None, str]:
         except (TypeError, ValueError, OverflowError):      # OverflowError: an integer too large for a float
             at = 0.0
         if math.isfinite(at) and 0 < at <= ARRIVED_AT_MAX:      # a torn record (no usable time: none, zero, negative, inf, nan or a moment no date can show) is no arrival
-            out["arrived_at"], out["arrived_what"] = at, _one(arr.get("what"))[:LINE_MAX]
+            out["arrived_at"], out["arrived_what"] = at, _one(arr.get("what"), LINE_MAX)
     return out, ""
 
 
@@ -108,7 +121,7 @@ def problem(meta: dict[str, Any]) -> str:
         if got is None:
             return why
     if not mode(m):
-        return f"wait_mode is all or any (got {_one(m.get('wait_mode'))!r})"
+        return f"wait_mode is all or any (got {_one(m.get('wait_mode'), WORD_MAX)!r})"
     b = backstop(m)
     if not b or _wt.wake_epoch(b) is None:
         return "a list needs its backstop day: until=YYYY-MM-DD"
@@ -173,7 +186,7 @@ def mark_arrived(meta: dict[str, Any], idx: int, what: str, at: float) -> bool:
     if not 0 <= idx < len(ls) or arrived(ls[idx]):
         return False
     raw = [dict(r) for r in meta["waits"]]
-    raw[idx]["arrived"] = {"at": float(at), "what": _one(what)[:LINE_MAX]}
+    raw[idx]["arrived"] = {"at": float(at), "what": _one(what, LINE_MAX)}
     meta["waits"] = raw
     return True
 

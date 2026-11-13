@@ -1,4 +1,4 @@
-"""Scenario test for the minute set's runner (runner.py, server._minute_ticks): one thread and one lock run the watchers' and anchor passes and the
+"""Scenario test for the minute set's runner (core/runner.py, service/runner.py `ticks`): one thread and one lock run the watchers' and anchor passes and the
 fleet's clocks in a fixed order. Fixture data, no live store, no network, no GitHub; the only threads are the runner's own and short-lived test threads.
 
   1  the Runner on its own (fake clock): the ticks run in the table's order · a tick that raises is logged and recorded and never stops the next · a paced tick waits for its pace
@@ -303,12 +303,13 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import rules as _wt_rules
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
-ticks = server._minute_ticks()
+ticks = runner_svc.ticks()
 names = [t.name for t in ticks]
 check("3 order: the settle events come first, in order: the watchers' pass, the anchor pass, the phase sweep, the event waits, the done check, the step proof",
       names[:6] == ["wake_pass", "anchor_pass", "phase_sweep", "evwait_tick", "check_tick", "proof_tick"] and {t.group for t in ticks[:6]} == {"settle"}, names)
@@ -332,7 +333,7 @@ check("3 board: the clocks that read items are marked to stand still while the m
 TICK_FUNCS = {"wake_pass": "_wake_pass", "anchor_pass": "_anchor_pass", "phase_sweep": "_phase_tick", "evwait_tick": "_evwait_tick", "check_tick": "_check_tick", "proof_tick": "_proof_tick", "balance_tick": "_balance_tick", "handoff_tick": "_handoff_tick",
               "answer_tick": "_answer_tick", "roles_sync_safe": "_roles_sync_safe", "clients_tick": "_clients_tick", "pilot_fallback_tick": "_pilot_fallback_tick",
               "stall_tick": "_stall_tick", "handback_tick": "handback_tick", "filing_tick": "_filing_tick", "dates_tick": "_dates_tick", "wake_catchup": "_minute_wake_catchup", "silence_tick": "_silence_tick", "archive_tick": "_archive_tick"}
-def own(fn): return telling if fn == "handback_tick" else server       # the owner of a tick function: the hand-back tick is the telling's, the rest are the server's
+def own(fn): return {"handback_tick": telling, "fleet_stamp": runner_svc}.get(fn, server)       # the owner of a function the spies set: the hand-back tick is the telling's, the fleet stamp is the runner's, the rest are the server's
 counts: dict[str, int] = {}
 order_seen: list[str] = []
 saved = {}
@@ -342,15 +343,15 @@ def spy_all():
         setattr(own(fn), fn, (lambda label=label: (counts.__setitem__(label, counts.get(label, 0) + 1), order_seen.append(label), [])[-1]))
     saved["_next_wake"] = server._next_wake
     server._next_wake = lambda: dt.datetime(2000, 1, 1, tzinfo=server._pages.zone_now().tzinfo)       # a wake is due, so the watchers' pass runs
-    saved["_fleet_stamp"] = server._fleet_stamp
-    server._fleet_stamp = lambda: 1.0
+    saved["fleet_stamp"] = runner_svc.fleet_stamp
+    runner_svc.fleet_stamp = lambda: 1.0
 def unspy_all():
     for fn, f in saved.items(): setattr(own(fn), fn, f)
     saved.clear(); counts.clear(); order_seen.clear()
 
 spy_all()
 try:
-    rs3 = server._make_runner()
+    rs3 = runner_svc.make()
     rs3.run_round(event=True)
     check("3 late binding: replacing a tick function on the server (as the suites do) is what the table calls; one round runs every clock once, in order (the ten-minute set in the first round)",
           order_seen == list(TICK_FUNCS) and all(v == 1 for v in counts.values()) and len(counts) == len(TICK_FUNCS), (order_seen, counts))
@@ -429,7 +430,7 @@ server._runners = types.SimpleNamespace(PERSIST=False, AUTOSTART=False, ON_CHANG
 def start_mode(runner_section):
     """_start_background with the threads faked (so none runs); `runner_section` is put into the config as the stale [runner] table (None: no such table).
     → (the names it returned, the targets started, the Runners made, the stderr)."""
-    FakeThread.made.clear(); server._RUNNER[:] = []
+    FakeThread.made.clear(); runner_svc.RUNNER[:] = []
     if runner_section is None: _cfg.CFG.pop("runner", None)
     else: _cfg.CFG["runner"] = runner_section
     threading.Thread = FakeThread
@@ -438,7 +439,7 @@ def start_mode(runner_section):
             names_ = server._start_background()
     finally:
         threading.Thread = real_thread
-    return names_, [t.target for t in FakeThread.made], list(server._RUNNER), err.getvalue()
+    return names_, [t.target for t in FakeThread.made], list(runner_svc.RUNNER), err.getvalue()
 
 import tomllib
 example = tomllib.loads(pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8"))
@@ -452,7 +453,7 @@ for label, section in (("absent", None), ("enabled = true", {"enabled": True}), 
           names_ == ["runner", "publish", "watchdog", "router", "search", "ghsync-worker", "ghsync-comments"], names_)
     check(f"4 start with {label}: …no thread more than the runner's loop and the six others is started", len(targets) == 7 and runners_[0].loop in targets, [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …the other loops are untouched: publish, watchdog, router, search, the mirror's worker and comments",
-          all(f in targets for f in (server._publish_loop, server._runner_watchdog_loop, server._router_live.loop, server._search.loop, server._gh.worker_loop, server._gh.comments_loop)), [getattr(t, "__name__", t) for t in targets])
+          all(f in targets for f in (runner_svc.publish_loop, runner_svc.watchdog_loop, server._router_live.loop, server._search.loop, server._gh.worker_loop, server._gh.comments_loop)), [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …no thread of the page-debt call is started: the audit run's pages stage asks the server for it", not hasattr(server, "_page_debt_loop") and not any(getattr(t, "__name__", "") == "_page_debt_loop" for t in targets), [getattr(t, "__name__", t) for t in targets])
     check(f"4 start with {label}: …the start says the runner runs, and says nothing of a mode or the flag", "stackshot: minute set: runner (one thread, one lock, paced rounds every 60 s)" in err and "old threads" not in err, err[-600:])
     if section is not None:
@@ -466,10 +467,10 @@ try:
         server._start_background()
 finally:
     threading.Thread = real_thread
-check("4 a second start in the same process reuses the runner it has: one Runner, the same one, not overwritten", len(server._RUNNER) == 1 and server._RUNNER[0] is first_runner, server._RUNNER)
-check("4 …the runner runs on the wake event _update sets, and over the server's table", runners_[0].wake is server._WAKE_EVENT and [t.name for t in runners_[0].ticks] == names)
-check("4 …the status is the runner's (enabled, mode runner, a record for every tick)", server._runner_status()["enabled"] is True and server._runner_status()["mode"] == "runner"
-      and len(server._runner_status()["ticks"]) == len(names), server._runner_status())
+check("4 a second start in the same process reuses the runner it has: one Runner, the same one, not overwritten", len(runner_svc.RUNNER) == 1 and runner_svc.RUNNER[0] is first_runner, runner_svc.RUNNER)
+check("4 …the runner runs on the wake event _update sets, and over the server's table", runners_[0].wake is runner_svc.WAKE_EVENT and [t.name for t in runners_[0].ticks] == names)
+check("4 …the status is the runner's (enabled, mode runner, a record for every tick)", runner_svc.status()["enabled"] is True and runner_svc.status()["mode"] == "runner"
+      and len(runner_svc.status()["ticks"]) == len(names), runner_svc.status())
 _cfg.CFG.pop("runner", None)
 
 # a stale key in a file: the config module loads it and `check` exits 0 (the server start does not read the key)
@@ -484,7 +485,7 @@ check("4 …and its notes (the start, doctor, a reload) carry the one line about
 spy_all()
 try:
     # the runner: one round of each kind, back to back
-    rn = server._make_runner()
+    rn = runner_svc.make()
     rn.run_round(event=True)
     rn.run_round(); rn.run_round()
     check("4 runner: a round and the calls after it inside the same pace run every clock exactly once (none twice, none dropped); the For-you look runs as the dates pass, not beside it", counts == {n: 1 for n in TICK_FUNCS}, counts)
@@ -492,7 +493,7 @@ try:
     counts.clear(); order_seen.clear()
     # a tick that raises in the real table: the next still runs, and the status says which
     server._check_tick = lambda: (_ for _ in ()).throw(RuntimeError("check broke"))
-    rb = server._make_runner()
+    rb = runner_svc.make()
     with stderr_lines() as err:
         safe_round(rb, event=True)
     stb = {t["name"]: t for t in rb.status()["ticks"]}
@@ -506,14 +507,14 @@ finally:
 # ---- 5. the board's reads, the hold, the publish step, the watchers' pass
 from starlette.testclient import TestClient
 app = server.mcp.http_app()
-server._RUNNER[:] = []
+runner_svc.RUNNER[:] = []
 with TestClient(app, base_url=BOARD) as c:
     try:
         j = c.get("/audit/status").json()
         jr = j.get("runner") or {}
         check("5 /audit/status: before a runner has started the record is there, enabled, not running, with no round and a record for every tick",
               jr.get("enabled") is True and jr.get("mode") == "runner" and jr.get("running") is False and jr.get("rounds") == 0 and [t["name"] for t in jr.get("ticks", [])] == names, jr)
-        rst = server._make_runner(); server._RUNNER[:] = [rst]
+        rst = runner_svc.make(); runner_svc.RUNNER[:] = [rst]
         spy_all()
         try:
             server._check_tick = lambda: (_ for _ in ()).throw(RuntimeError("check broke"))
@@ -527,14 +528,14 @@ with TestClient(app, base_url=BOARD) as c:
               j["enabled"] is True and j["mode"] == "runner" and j["pace_seconds"] == R.PACE and j["rounds"] == 1 and len(j["ticks"]) == len(names)
               and byname["check_tick"]["last_error"] == "RuntimeError: check broke" and byname["proof_tick"]["last_error"] is None and byname["proof_tick"]["last_run"] is not None, j)
     finally:
-        server._RUNNER[:] = []
+        runner_svc.RUNNER[:] = []
 
 # the migration's hold, on the server's table
 spy_all()
 try:
     real_hold = server._watch.holding
     server._watch.holding = lambda: True
-    rh = server._make_runner()
+    rh = runner_svc.make()
     rh.run_round(event=True)
     check("5 hold: while the migration holds the board only the registry sync, the clients' tick and the two wake passes (which check for themselves) run",
           set(counts) == {"wake_pass", "anchor_pass", "roles_sync_safe", "clients_tick"}, counts)
@@ -546,38 +547,38 @@ finally:
 published = []
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append(1)
 fleet_file = T / "fleet/a/machine.json"
-server._MINUTE_STAMP[0] = None
-server._minute_fleet_publish()
-check("5 fleet publish: its first look only takes the stamp (nothing is published)", published == [] and server._MINUTE_STAMP[0] is not None)
-server._minute_fleet_publish()
+runner_svc.MINUTE_STAMP[0] = None
+runner_svc.fleet_publish()
+check("5 fleet publish: its first look only takes the stamp (nothing is published)", published == [] and runner_svc.MINUTE_STAMP[0] is not None)
+runner_svc.fleet_publish()
 check("5 fleet publish: nothing moved, nothing published", published == [])
 os.utime(fleet_file, (time.time() + 50, time.time() + 50))
-server._minute_fleet_publish(); server._minute_fleet_publish()
+runner_svc.fleet_publish(); runner_svc.fleet_publish()
 check("5 fleet publish: a fleet file that moved publishes the board once", published == [1], published)
-server._MINUTE_STAMP[0] = None
-server._make_runner()
-check("5 fleet publish: a runner takes the stamp when it is made, so its first look publishes nothing", server._MINUTE_STAMP[0] == server._fleet_stamp() and (server._minute_fleet_publish() or published == [1]), (published, server._MINUTE_STAMP))
+runner_svc.MINUTE_STAMP[0] = None
+runner_svc.make()
+check("5 fleet publish: a runner takes the stamp when it is made, so its first look publishes nothing", runner_svc.MINUTE_STAMP[0] == runner_svc.fleet_stamp() and (runner_svc.fleet_publish() or published == [1]), (published, runner_svc.MINUTE_STAMP))
 
 # a publish that raises: tried once per change of the stamp, not every round; the stamp is never lowered
 tries = []
 def bad_publish(): tries.append(1); raise RuntimeError("publish broke")
 server._publish = _wt_anchors._publish = _wt_route._publish = bad_publish
-server._MINUTE_STAMP[0] = None
-server._minute_fleet_publish()
+runner_svc.MINUTE_STAMP[0] = None
+runner_svc.fleet_publish()
 os.utime(fleet_file, (time.time() + 200, time.time() + 200))
 errs = []
 for _ in range(4):
-    try: server._minute_fleet_publish()
+    try: runner_svc.fleet_publish()
     except RuntimeError as e: errs.append(str(e))
 check("5 fleet publish: a publish that keeps raising is tried once for one change of the stamp, not on every round after it", len(tries) == 1 and errs == ["publish broke"], (tries, errs))
-high = server._MINUTE_STAMP[0]
+high = runner_svc.MINUTE_STAMP[0]
 os.utime(fleet_file, (time.time() + 100, time.time() + 100))
-server._minute_fleet_publish()
-check("5 fleet publish: …the stamp is a high-water mark: an older stamp (a file replaced by an older one) does not lower it, and publishes nothing", server._MINUTE_STAMP[0] == high and len(tries) == 1, (high, server._MINUTE_STAMP, tries))
+runner_svc.fleet_publish()
+check("5 fleet publish: …the stamp is a high-water mark: an older stamp (a file replaced by an older one) does not lower it, and publishes nothing", runner_svc.MINUTE_STAMP[0] == high and len(tries) == 1, (high, runner_svc.MINUTE_STAMP, tries))
 os.utime(fleet_file, (time.time() + 400, time.time() + 400))
-try: server._minute_fleet_publish()
+try: runner_svc.fleet_publish()
 except RuntimeError: pass
-check("5 fleet publish: …and the next real change is tried once again", len(tries) == 2 and server._MINUTE_STAMP[0] > high, (tries, server._MINUTE_STAMP))
+check("5 fleet publish: …and the next real change is tried once again", len(tries) == 2 and runner_svc.MINUTE_STAMP[0] > high, (tries, runner_svc.MINUTE_STAMP))
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
 
 # the watchers' pass wrapper
@@ -639,43 +640,43 @@ sent6 = []
 real_flag, real_audit_cfg = server._inbox_flag_send, dict(_cfg.CFG.get("audit") or {})
 server._inbox_flag_send = lambda to, text: sent6.append((to, text))
 _cfg.CFG["audit"] = {**real_audit_cfg, "builder": "builder-x"}
-server._RUNNER[:] = [rn6]; server._RUNNER_STALL[0] = False
+runner_svc.RUNNER[:] = [rn6]; runner_svc.RUNNER_STALL[0] = False
 try:
     with stderr_lines() as err:
-        r0 = server._runner_watchdog()
+        r0 = runner_svc.watchdog()
     check("6 watchdog: a current runner sends nothing and logs nothing", r0 == "" and sent6 == [] and "stalled" not in err.getvalue(), (r0, sent6, err.getvalue()))
     clk6.advance(240)
     with stderr_lines() as err:
-        r1 = server._runner_watchdog()
+        r1 = runner_svc.watchdog()
     check("6 watchdog: stalled 4 minutes -> exactly one message to the builder and exactly one log line", r1 == "told" and len(sent6) == 1 and sent6[0][0] == "builder-x"
           and err.getvalue().count("stalled") == 1 and len(err.getvalue().strip().splitlines()) == 1, (r1, sent6, err.getvalue()))
     check("6 watchdog: ...the message says how long, asks nothing of the owner and owes no reply", "4 min" in sent6[0][1] and "no reply is owed" in sent6[0][1], sent6[0][1])
     clk6.advance(600)
     with stderr_lines() as err:
-        r2 = server._runner_watchdog()
+        r2 = runner_svc.watchdog()
     check("6 watchdog: a second look while it is still stalled sends no second message and logs nothing more", r2 == "noted" and len(sent6) == 1 and err.getvalue() == "", (r2, sent6, err.getvalue()))
     rn6.run_round(event=True)
-    check("6 watchdog: a completed round re-arms it (no message, the episode is over)", server._runner_watchdog() == "" and server._RUNNER_STALL[0] is False and len(sent6) == 1)
+    check("6 watchdog: a completed round re-arms it (no message, the episode is over)", runner_svc.watchdog() == "" and runner_svc.RUNNER_STALL[0] is False and len(sent6) == 1)
     clk6.advance(300)
     with stderr_lines() as err:
-        r3 = server._runner_watchdog()
+        r3 = runner_svc.watchdog()
     check("6 watchdog: a new stall after the re-arm is told again, once", r3 == "told" and len(sent6) == 2 and err.getvalue().count("stalled") == 1, (r3, sent6))
     # no builder configured: the line is logged, nobody is messaged
-    rn6.run_round(event=True); server._runner_watchdog(); clk6.advance(300)
+    rn6.run_round(event=True); runner_svc.watchdog(); clk6.advance(300)
     _cfg.CFG["audit"] = {**real_audit_cfg, "builder": ""}
     n_before = len(sent6)
     with stderr_lines() as err:
-        r4 = server._runner_watchdog()
+        r4 = runner_svc.watchdog()
     check("6 watchdog: with the builder unset the config default still names one (the message goes there, once)", r4 == "told" and len(sent6) == n_before + 1 and sent6[-1][0] == _cfg.audit_builder() and err.getvalue().count("stalled") == 1, (r4, sent6))
     _cfg.CFG["audit"] = {**real_audit_cfg, "builder": "builder-x"}
-    server._RUNNER[:] = []
-    check("6 watchdog: with no runner started it does nothing", server._runner_watchdog() == "")
+    runner_svc.RUNNER[:] = []
+    check("6 watchdog: with no runner started it does nothing", runner_svc.watchdog() == "")
 
     # where the stall sits: the message names the tick that is running
     rn8 = R.Runner([R.Tick("noop", lambda: None, "settle")], clock=clk6, label="runner"); rn8.started = clk6(); rn8.run_round(event=True)
-    server._RUNNER[:] = [rn8]; server._RUNNER_STALL[0] = False; sent6.clear(); rn8.current = "evwait_tick"; clk6.advance(400)
+    runner_svc.RUNNER[:] = [rn8]; runner_svc.RUNNER_STALL[0] = False; sent6.clear(); rn8.current = "evwait_tick"; clk6.advance(400)
     with stderr_lines():
-        server._runner_watchdog()
+        runner_svc.watchdog()
     check("6 watchdog: ...the message names the tick the runner is stuck in", len(sent6) == 1 and "stuck in the tick evwait_tick" in sent6[0][1], sent6)
     seen_cur = []
     rn9 = R.Runner([R.Tick("probe", lambda: seen_cur.append(rn9.current), "settle")], clock=clk6, label="runner"); rn9.run_round(event=True)
@@ -685,18 +686,18 @@ try:
     class Stop:
         def __init__(self, n): self.n, self.waits = n, []
         def wait(self, every): self.waits.append(every); self.n -= 1; return self.n < 0
-    server._RUNNER[:] = [rn8]; server._RUNNER_STALL[0] = False; sent6.clear()
+    runner_svc.RUNNER[:] = [rn8]; runner_svc.RUNNER_STALL[0] = False; sent6.clear()
     stop = Stop(2)
     with stderr_lines() as err:
-        server._runner_watchdog_loop(stop)
+        runner_svc.watchdog_loop(stop)
     check("6 watchdog loop: two looks of a stalled runner, a minute apart, send one message and log one line", stop.waits == [60.0, 60.0, 60.0] and len(sent6) == 1 and err.getvalue().count("stalled") == 1, (stop.waits, sent6, err.getvalue()))
-    real_wd = server._runner_watchdog
-    server._runner_watchdog = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("wd broke"))
+    real_wd = runner_svc.watchdog
+    runner_svc.watchdog = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("wd broke"))
     try:
         with stderr_lines() as err:
-            server._runner_watchdog_loop(Stop(2))
+            runner_svc.watchdog_loop(Stop(2))
     finally:
-        server._runner_watchdog = real_wd
+        runner_svc.watchdog = real_wd
     check("6 watchdog loop: a look that raises is logged and the loop goes on", err.getvalue().count("runner watchdog failed: RuntimeError: wd broke") == 2, err.getvalue())
 
     # the publish loop: no wake pass and no watchdog of its own (the runner's ten-minute set and the watchdog's thread do those)
@@ -705,22 +706,22 @@ try:
     real_wp7, real_pn, real_sleep = server._wake_pass, server._publish_now, time.sleep
     server._wake_pass = lambda *a, **k: woke.append(1) or []
     server._publish_now = _wt_rules._publish_now = lambda **k: pubs.append(k)
-    sent6.clear(); server._RUNNER_STALL[0] = False
+    sent6.clear(); runner_svc.RUNNER_STALL[0] = False
     def fake_sleep(sec):
         sleeps.append(sec)
         if len(sleeps) > 2: raise StopLoop()
     time.sleep = fake_sleep
     try:
         with stderr_lines() as err:
-            try: server._publish_loop()
+            try: runner_svc.publish_loop()
             except StopLoop: pass
     finally:
         time.sleep, server._wake_pass, server._publish_now = real_sleep, real_wp7, real_pn; _wt_rules._publish_now = real_pn
     check("6 publish loop: two passes publish twice (always probing versions) and call no wake pass and no watchdog", woke == [] and sent6 == [] and len(pubs) == 2 and all(p.get("force_versions") for p in pubs), (woke, sent6, pubs))
     import inspect
-    check("6 publish loop: its source holds neither the wake pass nor the watchdog", "_wake_pass(" not in inspect.getsource(server._publish_loop) and "_runner_watchdog" not in inspect.getsource(server._publish_loop))
+    check("6 publish loop: its source holds neither the wake pass nor the watchdog", "_wake_pass(" not in inspect.getsource(runner_svc.publish_loop) and "watchdog(" not in inspect.getsource(runner_svc.publish_loop))
 finally:
-    server._inbox_flag_send = real_flag; _cfg.CFG["audit"] = real_audit_cfg; server._RUNNER[:] = []; server._RUNNER_STALL[0] = False
+    server._inbox_flag_send = real_flag; _cfg.CFG["audit"] = real_audit_cfg; runner_svc.RUNNER[:] = []; runner_svc.RUNNER_STALL[0] = False
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed" + ("" if not fails else f"; FAILED: {len(fails)}"))
 sys.exit(1 if fails else 0)

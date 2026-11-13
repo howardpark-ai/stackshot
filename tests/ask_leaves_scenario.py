@@ -102,7 +102,7 @@ def check(name, cond, got=None):
 def rd(i, L="a"): return json.loads((T / f"store/{L}/{i}.json").read_text())
 
 
-from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.model import ask_leaves as AL; from stackshot.model import note_read as NR; from stackshot.waits import watchers; from stackshot.model import needs as _model_needs
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -685,9 +685,9 @@ check("his note 'ran it' ticks his step as a Done does", res == "stepreply" and 
 check("the item goes to the then-mover and the notice says what was applied, not 'judge the note'", m.get("mover") == "home-agent" and told and "Judge the note" not in told[-1][2] and "ticked his step" in told[-1][2], told)
 told.clear()
 tomorrow_ = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
-server._WAKE_EVENT.clear()
+runner_svc.WAKE_EVENT.clear()
 res = server._answer("a31", "", "I'll do it tomorrow evening", "send"); m = rd(31)["metadata"]
-check("his note 'tomorrow evening' wakes the minute loop and stores the one until date, with no hold and no old wake", server._WAKE_EVENT.is_set() and m.get("until") == f"{tomorrow_}T19:00" and "hold" not in m and "wake" not in m, (server._WAKE_EVENT.is_set(), m))
+check("his note 'tomorrow evening' wakes the minute loop and stores the one until date, with no hold and no old wake", runner_svc.WAKE_EVENT.is_set() and m.get("until") == f"{tomorrow_}T19:00" and "hold" not in m and "wake" not in m, (runner_svc.WAKE_EVENT.is_set(), m))
 tomorrow = (__import__("stackshot.projects.pages", fromlist=["_"]).zone_now() + dt.timedelta(days=1)).strftime("%Y-%m-%d")
 check("his note 'tomorrow evening' holds the item until then: hold, wake, his words behind the wake", hd_(m) is True and str(wk_(m)) == f"{tomorrow}T19:00" and (m.get("cap_ok") or {}).get("quote") == "I'll do it tomorrow evening", (hd_(m), wk_(m), m.get("cap_ok")))
 check("the notice names the hold and the time, and asks nothing before then", told and "Judge the note" not in told[-1][2] and f"on hold until {tomorrow}T19:00" in told[-1][2] and "nothing is asked of you before then" in told[-1][2], told)

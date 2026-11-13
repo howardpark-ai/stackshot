@@ -62,6 +62,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -576,13 +577,13 @@ telling.front_keeper = _real_fk
 # ================================================================ 10. the tick: its place, and a failure that stops nothing
 from stackshot.core import runner as R
 import dataclasses
-names10 = [t.name for t in server._minute_ticks()]
+names10 = [t.name for t in runner_svc.ticks()]
 check("10 the balancer is its own minute tick, right before the hand-off tick, in the hand-off group, standing still while the board is held", names10.index("balance_tick") == names10.index("handoff_tick") - 1
-      and next(t for t in server._minute_ticks() if t.name == "balance_tick").group == "handoff" and next(t for t in server._minute_ticks() if t.name == "balance_tick").board is True, names10)
+      and next(t for t in runner_svc.ticks() if t.name == "balance_tick").group == "handoff" and next(t for t in runner_svc.ticks() if t.name == "balance_tick").board is True, names10)
 def probe_isolated():
     ran10 = []
     ticks10 = []
-    for t in server._minute_ticks():
+    for t in runner_svc.ticks():
         if t.name == "balance_tick": ticks10.append(dataclasses.replace(t, fn=lambda: (_ for _ in ()).throw(OSError("store gone"))))
         else: ticks10.append(dataclasses.replace(t, fn=lambda n=t.name: ran10.append(n)))
     clk = [1000.0]

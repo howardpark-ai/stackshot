@@ -15,7 +15,7 @@ Where the numbers come from:
   * the findings log, `<paths.state>/audit/findings-log.jsonl` (audit_run.log_findings): one row per appearance of a finding, with its time, the pass that made it (`source`), its kind and its item.
     It is kept while `[audit] pattern_review` is not "off", for 14 days. With the review off no log is written, so no group has a count: every found is None and the page says so.
   * the run records, `<paths.state>/audit/run-*.json` (audit.runs): when a run started and took, how many items it read, its findings and its model calls.
-  * the runner's record (server._runner_status, passed in): when each tick last ran. Absent when the page is drawn without a server (a test), and the page then leaves "last" out.
+  * the runner's record (service/runner.py status, passed in): when each tick last ran. Absent when the page is drawn without a server (a test), and the page then leaves "last" out.
 
 A group whose audits keep no findings log (Fleet and services, Text and rules: they report to a machine or to CI, not to an item) has found None everywhere, whatever the log holds.
 Standard library plus the repo's config and audit modules."""

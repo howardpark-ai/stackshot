@@ -143,7 +143,7 @@ from stackshot.waits import mover_state as _mover_state  # noqa: E402  — the i
 from stackshot.fleet import liveness as _lv  # noqa: E402  — one clock and one answer for "is this session or machine up, unreachable, idle-live", and for a pane's idle time (liveness.py)
 from stackshot.model import activity as _activity  # noqa: E402  — the item's `activity` clock: when something real last happened on the work, and which saves count (activity.py)
 from stackshot.model import progress as _progress  # noqa: E402  — the item's `progress` clock: when the work last moved (a step marked, a state change, a merge), not when it was last written to (progress.py)
-from stackshot.core import runner as _minute  # noqa: E402  — the minute set's one thread and one lock (runner.py)
+from stackshot.service import runner as _runner  # noqa: E402  — the minute tick table, the wake event and the background threads (service/runner.py)
 from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line a front agent's notice always leaves on the item (quiet.py)
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
@@ -1928,64 +1928,7 @@ def _gate_options(options: Any) -> list[dict[str, Any]] | None:
 # their names are imported at `_OPT_FORM` above.
 
 
-_RUNNER_STALL = [False]     # True while a stall episode is told: set when the builder is messaged, cleared by the first look that finds the runner current again
-
-
-def _runner_watchdog(now: float | None = None) -> str:
-    """The runner's watchdog, asked by its own thread (`_runner_watchdog_loop`) every minute. A runner whose last completed round is older than runner.STALL_AFTER (3 minutes) is hung inside a tick: ONE stderr
-    line and ONE message to the builder per stall (the episode is marked before the send, so a failed send is not retried every minute); the next look that finds a round completed again
-    re-arms it. The message asks nothing of the owner and no board item is made. → "" (runner current, or no runner started), "told" (the message was started), "noted" (stalled, already told),
-    "nobody" (no builder configured). `now` is for tests."""
-    rn = _RUNNER[0] if _RUNNER else None
-    if rn is None:
-        return ""
-    now = rn.clock() if now is None else now
-    if not rn.stalled(now):
-        _RUNNER_STALL[0] = False
-        return ""
-    if _RUNNER_STALL[0]:
-        return "noted"
-    _RUNNER_STALL[0] = True
-    ref = rn.last_round if rn.last_round is not None else rn.started
-    mins = max(0.0, now - float(ref or now)) / 60.0
-    cur = rn.current
-    print(f"{rn.label}: stalled: no round has completed for {mins:.0f} min (a tick is blocking the one thread); the builder is told once", file=sys.stderr, flush=True)
-    to = _cfg.audit_builder()
-    if not to:
-        return "nobody"
-    _inbox_flag_send(to, f"[stackshot] The minute set's runner has completed no round for {mins:.0f} min (its last round ended at {dt.datetime.fromtimestamp(float(ref), _pages.zone_now().tzinfo):%a %H:%M %Z}): "
-                         f"{('it is stuck in the tick ' + cur) if cur else 'no tick is running, so the loop itself is stuck'}, and no wake, anchor, event wait or hand-off runs meanwhile (GET /audit/status has each tick's last_run). "
-                         f"Sent once for this stall; nothing here is for {OWNER} and no reply is owed.")
-    return "told"
-
-
-_WATCHDOG_EVERY = 60.0      # seconds between the watchdog's looks
-
-
-def _runner_watchdog_loop(stop: "threading.Event | None" = None, every: float = _WATCHDOG_EVERY) -> None:
-    """The watchdog's thread, started beside the runner by _start_background: a look every `every` seconds, in a thread of its own so that a stuck publish (git push, ssh probes) or a stuck
-    runner never silences it. A look that raises is a stderr line. `stop` ends the loop (a test passes an Event whose wait it controls)."""
-    stop = stop or threading.Event()
-    while not stop.wait(every):
-        try:
-            _runner_watchdog()
-        except Exception as e:  # noqa: BLE001
-            print(f"runner watchdog failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _publish_loop() -> None:
-    """The server's own periodic publish: picks up other machines' heartbeats and the version tracker's cache expiry. It runs no wake pass of its own: the runner's ten-minute set does (`wake_catchup`), and the runner's watchdog has a thread of its own."""
-    # On the dot: fire at the wall-clock multiples of [publish] every_minutes (:00 :10 :20 … for 10 min),
-    # 20 s after the mark so anchor-hub's quarter-hour receiver check has written status.json first.
-    while True:
-        now = time.time()
-        every = _publish_every()
-        time.sleep(every - (now - 20) % every)
-        _publish_now(force_versions=True)   # the timer publish always probes the fleet's versions; the version cache only serves the write-triggered publishes in between
-
-
 _WAKE_RE = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})(?:[T ]([0-9]{2}:[0-9]{2}))?")
-_WAKE_EVENT = threading.Event()     # set by _update when a wake or a hold changes: the minute loop recomputes its next wake at once
 _WAKE_LOCK = threading.Lock()       # one wake pass at a time (the runner's watchers' tick and its ten-minute catch-up, the start's pass, the migration pass's end)
 
 
@@ -2072,9 +2015,13 @@ def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             continue
         if _wl.valid(meta):                  # a list is the watchers' alone, so with them off only its backstop day is looked at (the wake pass ends it there: _watch_fire(legacy=True)); the date as a time wait's wake would drop half the list
             try:
-                out.append((gid, p, it, _wake_at(_wl.backstop(meta))))
+                at = _wake_at(_wl.backstop(meta))
             except ValueError:
                 continue
+            until = _WATCH_BACKOFF.get(gid, 0.0)           # a list whose end failed is not due again before its back-off ends (as the watched branch above), so the runner does not spin on it
+            if until > time.time():
+                at = max(at, dt.datetime.fromtimestamp(until, _pages.zone_now().tzinfo))
+            out.append((gid, p, it, at))
             continue
         if not _wt.wake_value(meta):
             continue
@@ -2126,12 +2073,14 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 continue
             meta = it.get("metadata") or {}
             if _wl.valid(meta):                # a list with the watchers off: its backstop day has come, so it ends as the watchers would end it there (the same words, an open relay line asks the owner)
-                try:
+                try:                           # a list whose turn failed is not due again before its back-off ends (_wakes moves its moment, as it does for a watched wait)
                     cause = _watch.due(it, epoch)       # the backstop day, or (a list edited by hand so that every line has arrived) the kind of the line that completed the group
                     if cause and _watch_fire(gid, cause, epoch, wout, recheck=True, legacy=True):
                         woke.append(gid)
-                except _WatchStuck as e:
-                    print(f"watch: {e}", file=sys.stderr, flush=True)
+                        _WATCH_BACKOFF.pop(gid, None)
+                except Exception as e:  # noqa: BLE001  — as _watch_pass: one bad item never stops the pass, so the lists after it are still ended
+                    print(f"watch: {gid} skipped this pass: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+                    _watch_failed(gid, epoch)
                 continue
             wake = _wt.wake_value(meta)
             had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
@@ -3512,17 +3461,7 @@ def _watch_answer(item: dict[str, Any], meta: dict[str, Any], eff: dict[str, str
     return ""
 
 
-def _fleet_stamp() -> float:
-    """The newest change in the fleet's files (and the routing log: a delivered notice or a ruling moves a row's count); the runner publishes when it moves."""
-    from stackshot.fleet import fleet as _fl
-    return max(max((p.stat().st_mtime for p in _fl.FLEET_DIR.glob("*/*.json")), default=0.0), _routing.stamp())
-
-
-# ----------------------------------------------------------------------------- the minute set's runner (runner.py)
-# One thread and one lock run the clocks that end a wait and move work along, in an order the table states. Each tick is a plain server function, called as it is, keeping its own
-# interval gate. `_minute_ticks()` is the table.
-_RUNNER: "list[_minute.Runner]" = []        # the running runner (at most one), for the status
-_MINUTE_STAMP: "list[float | None]" = [None]    # the fleet stamp at the last look, for the runner's publish step
+# ----------------------------------------------------------------------------- the minute set's tick bodies that stay here (the table and the threads are service/runner.py)
 
 
 def _minute_wake_pass() -> None:
@@ -3564,46 +3503,6 @@ def _minute_wake_wait() -> float:
     """How long the runner sleeps after a pass: until the earliest wake, at most 60 s (60 s when none, or while [model] pause holds every wake)."""
     nxt = _next_wake()
     return 60.0 if nxt is None or _watch.paused() else min(max((nxt - _pages.zone_now()).total_seconds(), 0.0), 60.0)
-
-
-def _minute_fleet_publish() -> None:
-    """The runner's last step: the board is republished when the fleet files (or the routing log) moved since the last look."""
-    now = _fleet_stamp()
-    last = _MINUTE_STAMP[0]
-    if last is None or now > last:
-        _MINUTE_STAMP[0] = now          # taken before the publish, as an earlier look took it (last = now first), and never lowered: a publish that keeps raising is tried once per change, not every round
-        if last is not None:
-            _publish()
-
-
-def _minute_ticks() -> "list[_minute.Tick]":
-    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (on by default; an item not started or queued for ten minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
-    the dates pass, the wake catch-up, the audit tick (the hourly line and the idle hand-over). Each lambda names its function
-    when it runs, so a replaced function is the one called. `board=True`: skipped while the migration's pass holds the board (the registry sync and the
-    clients' tick go on; the two wake passes have their own check)."""
-    T = _minute.Tick
-    return [
-        T("wake_pass", lambda: _minute_wake_pass(), "settle", "event"),
-        T("anchor_pass", lambda: _minute_anchor_pass(), "settle", "event"),
-        T("phase_sweep", lambda: _phase_tick(), "settle", board=True),
-        T("evwait_tick", lambda: _evwait_tick(), "settle", board=True),
-        T("check_tick", lambda: _check_tick(), "settle", board=True),
-        T("proof_tick", lambda: _proof_tick(), "settle", board=True),
-        T("balance_tick", lambda: _balance_tick(), "handoff", board=True),
-        T("handoff_tick", lambda: _handoff_tick(), "handoff", board=True),
-        T("answer_tick", lambda: _answer_tick(), "answers", board=True),
-        T("roles_sync_safe", lambda: _roles_sync_safe(), "fleet"),
-        T("clients_tick", lambda: _clients_tick(), "fleet"),
-        T("pilot_fallback_tick", lambda: _pilot_fallback_tick(), "fleet", board=True),
-        T("stall_tick", lambda: _stall_tick(), "fleet", board=True),
-        T("handback_tick", lambda: _telling.handback_tick(), "fleet", board=True),
-        T("fleet_publish", lambda: _minute_fleet_publish(), "fleet"),
-        T("filing_tick", lambda: _filing_tick(), "tenmin", "tenmin", board=True),
-        T("dates_tick", lambda: _dates_tick(), "tenmin", "tenmin", board=True),
-        T("wake_catchup", lambda: _minute_wake_catchup(), "tenmin", "tenmin", board=True),
-        T("silence_tick", lambda: _silence_tick(), "tenmin", "tenmin", board=True),
-        T("archive_tick", lambda: _archive_tick(), "tenmin", "tenmin", board=True),
-    ]
 
 
 def _front_step_mark(gid: str, h: "str | None", now: float, mover: str = "") -> bool:
@@ -4212,20 +4111,6 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         except Exception as e:  # noqa: BLE001
             print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return moved
-
-
-def _make_runner() -> "_minute.Runner":
-    """The runner over the table, on the wake event `_update` sets; the fleet stamp is read once now."""
-    try:
-        _MINUTE_STAMP[0] = _fleet_stamp()
-    except Exception as e:  # noqa: BLE001
-        print(f"runner: fleet stamp not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    return _minute.Runner(_minute_ticks(), holding=lambda: _watch.holding(), wake_wait=_minute_wake_wait, event=_WAKE_EVENT)
-
-
-def _runner_status() -> dict[str, Any]:
-    """The runner's record for `GET /audit/status`: per tick its last run and last error (a process that has not run the start reports a runner that has not started)."""
-    return (_RUNNER[0] if _RUNNER else _minute.Runner(_minute_ticks(), holding=lambda: _watch.holding(), wake_wait=_minute_wake_wait, event=_WAKE_EVENT)).status()
 
 
 def _clients_tick() -> None:
@@ -5317,7 +5202,7 @@ mcp = _app.build(
     recycle_wanted_tokens=lambda *a, **k: _recycle_wanted_tokens(*a, **k),
     answer=lambda *a, **k: _answer(*a, **k),
     contact_label=lambda *a, **k: _contact_label(*a, **k),
-    runner_status=lambda *a, **k: _runner_status(*a, **k),
+    runner_status=lambda *a, **k: _runner.status(*a, **k),
     phase_sweep_status=lambda *a, **k: _phase_sweep_status(*a, **k),
 )
 
@@ -5873,7 +5758,7 @@ def _arrival_when(ts: float) -> str:
     """The time a line of a wait on a list arrived, for the `model:` line: YYYY-MM-DD HH:MM and the zone's name (as the refusals that give a time name it), in the board's zone; "" for a time no date can show,
     so the line keeps its arrival words and drops the time (a get never loses its model line over one)."""
     try:
-        t = dt.datetime.fromtimestamp(float(ts), ZONE)
+        t = dt.datetime.fromtimestamp(float(ts), _cfg.tz())      # the zone read at the call, as tz_abbr reads it (ZONE is fixed at import): the clock and its name never come from two zones
         return f"{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}"
     except (ValueError, OverflowError, OSError):
         return ""
@@ -8045,6 +7930,35 @@ _telling.install(_telling.Hooks(
 ))
 
 
+# What the minute set still reaches on this module (service/runner.py holds the tick table and the background threads): the tick functions and the publish. A hook leaves this table when the area that holds it
+# moves under service/.
+_runner.install(_runner.Hooks(
+    wake_pass=_late("_minute_wake_pass"),
+    anchor_pass=_late("_minute_anchor_pass"),
+    phase_tick=_late("_phase_tick"),
+    evwait_tick=_late("_evwait_tick"),
+    check_tick=_late("_check_tick"),
+    proof_tick=_late("_proof_tick"),
+    balance_tick=_late("_balance_tick"),
+    handoff_tick=_late("_handoff_tick"),
+    answer_tick=_late("_answer_tick"),
+    roles_sync_safe=_late("_roles_sync_safe"),
+    clients_tick=_late("_clients_tick"),
+    pilot_fallback_tick=_late("_pilot_fallback_tick"),
+    stall_tick=_late("_stall_tick"),
+    filing_tick=_late("_filing_tick"),
+    dates_tick=_late("_dates_tick"),
+    wake_catchup=_late("_minute_wake_catchup"),
+    silence_tick=_late("_silence_tick"),
+    archive_tick=_late("_archive_tick"),
+    wake_wait=_late("_minute_wake_wait"),
+    publish=_late("_publish"),
+    publish_now=_late("_publish_now"),
+    publish_every=_late("_publish_every"),
+    inbox_flag_send=_late("_inbox_flag_send"),
+))
+
+
 # What a create still reaches on this module (service/create.py runs the create in its order): the gates and notices the update tool, the close and the telling share, the three thread-local flags
 # and two constants. A hook leaves this table when the area that holds it moves under service/.
 _create_svc.install(_create_svc.Hooks(
@@ -9233,7 +9147,7 @@ def _migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
             fired = list(_wake_pass())
         except Exception as e:  # noqa: BLE001
             print(f"migrate: the wake pass after the pass failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        _WAKE_EVENT.set()
+        _runner.WAKE_EVENT.set()
         rows = [r for r in (spec.get("residue") or []) if isinstance(r, dict) and (r.get("fields") or r.get("kind") == "anchor_seen")]
         detail = _migrate_wake(rows) if rows else {}
         if pass_id:
@@ -9404,7 +9318,7 @@ _update_svc.install(_update_svc.Hooks(
     update=_late("_update"),
     wait_end_sent_back=_late("_wait_end_sent_back"),
     wake_at=_late("_wake_at"),
-    wake_event_set=lambda: _WAKE_EVENT.set(),
+    wake_event_set=lambda: _runner.WAKE_EVENT.set(),
     wake_park_line=_late("_wake_park_line"),
     wake_step_note=_late("_wake_step_note"),
     wake_window_note=_late("_wake_window_note"),
@@ -12699,7 +12613,7 @@ def _answer(gid: str, choice: str, text: str, act: str) -> str:
         item["updated"] = now
         _writes.save(gid, item, note=_answer_note(rec) + (f"\n\n(effect: {effect})" if kind == "decision" and eff["do"] and effect else ""), author=(OWNER, "board"))
         if parked or until or (kind == "decision" and eff["do"] == "wait"):
-            _WAKE_EVENT.set()           # the minute loop takes the new wake in
+            _runner.WAKE_EVENT.set()           # the minute loop takes the new wake in
         if kind == "decision" and eff["do"] == "drop":
             try:
                 _release_after(gid, "dropped", "", "")      # the items that waited on this one
@@ -12890,14 +12804,7 @@ def _start_background() -> list[str]:
         _phase_tick()                       # a stored phase the down time left behind (a wait that ended, a deploy that changed the reading) is true before the first publish; the runner's first sweep is a minute away
     except Exception as e:
         print(f"phase sweep failed: {e}", file=sys.stderr, flush=True)
-    print(f"stackshot: minute set: runner (one thread, one lock, paced rounds every {_minute.PACE:g} s)", file=sys.stderr, flush=True)
-    if not _RUNNER:                         # a second start in the same process reuses the runner it has (start() is a no-op while its thread lives): never a second one, never an overwritten one
-        _RUNNER[:] = [_make_runner()]
-    _RUNNER[0].start()                      # the watchers' and anchor passes at their minute, the settle events, hand-off, answers and the fleet's clocks, in that order (runner.py)
-    # The timer publish starts here with the runner, never at import: a test that imported the module
-    # fired a publish at a 10-min mark and rebuilt its fixture registry.
-    threading.Thread(target=_publish_loop, daemon=True).start()
-    threading.Thread(target=_runner_watchdog_loop, name="runner-watchdog", daemon=True).start()   # the runner's watchdog: a look a minute, in a thread of its own (a stuck publish never silences it)
+    started = _runner.start()               # the minute set's runner, the timer publish and the runner's watchdog (service/runner.py)
     threading.Thread(target=_router_live.loop, daemon=True).start()   # the router's ticks (a call takes minutes), in a thread of their own
     _runners.PERSIST = True             # the last runners snapshot is kept in a file under the state dir, and taken back here: the Runners pages draw it at once after a restart
     _runners.restore()
@@ -12906,7 +12813,7 @@ def _start_background() -> list[str]:
     threading.Thread(target=_search.loop, daemon=True).start()      # step 3: the search index's first build and its passes after a save, in a thread of its own
     threading.Thread(target=_gh.worker_loop, daemon=True).start()   # the GitHub mirror's worker; it idles while [github] sync is off (the default), so a reload can turn the mirror on
     threading.Thread(target=_gh.comments_loop, daemon=True).start() # phase 3: the reader of the owner's comments on the issues, beside the worker; idles the same way
-    return ["runner", "publish", "watchdog", "router", "search", "ghsync-worker", "ghsync-comments"]
+    return [*started, "router", "search", "ghsync-worker", "ghsync-comments"]
 
 
 if __name__ == "__main__":
