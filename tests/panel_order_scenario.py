@@ -61,6 +61,7 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
@@ -156,7 +157,7 @@ check("…and nothing was dropped: the file is as it was, not moved aside, no te
 UI.unlink()
 
 # ---- 2. the page
-COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
+COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
 SAME = {"Origin": BOARD}
 JSON_H = {**SAME, "Content-Type": "application/json"}
 PAGES = [("home", "/"), ("item", "/items/a1"), ("project", "/projects/alpha"), ("landed", "/closed"), ("search", "/search?q=item")]
@@ -172,11 +173,11 @@ def shape(h):
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, who=MINA):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.get(path, follow_redirects=False)
     def post(body, who=MINA, headers=JSON_H, raw=None, path="/prefs/panel-order"):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.post(path, content=raw if raw is not None else json.dumps(body), headers=headers, follow_redirects=False)
 
     base = {n: get(p).text for n, p in PAGES}
@@ -211,7 +212,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("saved: the home's shell and block fingerprints are the default page's (the in-place update keeps working)", all(
         re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', ordered["home"]).group(1) == re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', base["home"]).group(1) for k in ("shell", "blocks")))
     check("saved: the kept draw of the root home is still in the default order (the order is put in per person on the way out)", sections(_web_board_home._BOARD_HOME["html"])[0] == DEFAULT)
-    c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA]); rr = c.get("/")
+    c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[MINA]); rr = c.get("/")
     check("saved: Content-Length matches the body served", int(rr.headers["content-length"]) == len(rr.content), (rr.headers["content-length"], len(rr.content)))
     check("another signed-in person gets the default order", sections(get("/", NOOR).text)[0] == DEFAULT)
     check("nobody signed in (auth off) gets the default order", sections(get("/", None).text)[0] == DEFAULT)
@@ -282,7 +283,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("reset: back to the default, the entry removed", r.status_code == 200 and r.json() == {"order": DEFAULT, "default": True} and MINA not in json.loads(UI.read_text())["users"], r.text)
     r = post({"order": ["audit-panel"], "reset": True})
     check("reset wins over an order in the same body", r.status_code == 200 and r.json()["order"] == DEFAULT, r.text)
-    c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA])
+    c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[MINA])
     check("GET on the save route is not served a page (405)", c.get("/prefs/panel-order").status_code in (404, 405))
     r = post({"order": ["runners"]}, headers={"Referer": BOARD + "/", "Content-Type": "application/json"})
     check("save: a Referer from the board's own page is accepted when the browser sent no Origin", r.status_code == 200, r.status_code)
@@ -306,7 +307,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     import asyncio
     from starlette.requests import Request
     def raw_post(length, chunks):
-        hs = [(b"host", b"board.example.org"), (b"origin", BOARD.encode()), (b"content-type", b"application/json"), (b"cookie", f"{server._UI_COOKIE}={COOKIE[MINA]}".encode())]
+        hs = [(b"host", b"board.example.org"), (b"origin", BOARD.encode()), (b"content-type", b"application/json"), (b"cookie", f"{_signin._UI_COOKIE}={COOKIE[MINA]}".encode())]
         if length is not None: hs.append((b"content-length", str(length).encode()))
         scope = {"type": "http", "method": "POST", "path": "/prefs/panel-order", "raw_path": b"/prefs/panel-order", "query_string": b"", "headers": hs, "scheme": "https",
                  "server": ("board.example.org", 443), "client": ("203.0.113.9", 5000), "http_version": "1.1", "root_path": ""}

@@ -5220,8 +5220,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
 
 
 # ----------------------------------------------------------------------------- auth
-from stackshot.web import signin as _signin  # noqa: E402  — the board's sign-in (signin.py), with the auth mode it reads: `_signin._auth_mode()` is read and set there, never here
-from stackshot.web.server_auth import _auth, _who  # noqa: E402,F401  — the auth section (server_auth.py): `_auth()` is called below, by `mcp = FastMCP(...)`, so this import stays above it; `_env` is read only there
+from stackshot.web.auth import oauth as _oauth, signin as _signin  # noqa: E402  — the MCP sign-in provider (auth/oauth.py: `_oauth._auth()` is called below, by `mcp = FastMCP(...)`, so this import stays above it; `_oauth._who()` is what every tool asks) and the board's own sign-in (auth/signin.py, whose names are read and set there)
 
 
 # ----------------------------------------------------------------------------- MCP surface
@@ -5250,7 +5249,7 @@ mcp = FastMCP(
         f"that shown form, never a store id such as {_gh.letter()}7. A board change that reflects a state change is matched by a project-page "
         f"update in the same turn, the page first (a page write up to five minutes before the change counts). If your session did not load {OWNER}'s standing rulebook at start (a cloud or Cowork session), call the rules tool first and follow it: it overrides any default behaviour. A Claude Code session on the owner's machines has it already through CLAUDE.md and does not call it."
     ),
-    auth=_auth(),
+    auth=_oauth._auth(),
 )
 
 
@@ -5380,7 +5379,7 @@ def _request_lang(request) -> str:
         got = getattr(request.state, "ui_lang", None)
         if got is not None:
             return got
-        email = _ui_email(request) if request.method in ("GET", "HEAD") else ""
+        email = _signin._ui_email(request) if request.method in ("GET", "HEAD") else ""
         lang = _uiprefs.lang_of(email) if email else _i18n.DEFAULT
         lang = _i18n.norm(lang) if lang != _i18n.DEFAULT else lang
         request.state.ui_lang = lang
@@ -5399,7 +5398,7 @@ def _panel_ordered(request, resp):
         if (request.method != "GET" or not isinstance(resp, HTMLResponse)
                 or resp.status_code != 200 or not str(resp.media_type or "").startswith("text/html")):
             return resp
-        email = _ui_email(request)
+        email = _signin._ui_email(request)
         from stackshot.web.ui import render as r2
         if not email:       # not signed in: nothing of a person's to put in, and the language switch (it saves per person) comes out
             page = bytes(resp.body).decode("utf-8")
@@ -8065,7 +8064,7 @@ _BRIEF_DESC = (
 
 @mcp.tool(name="brief", description=_lead(_BRIEF_DESC))
 def stackshot_brief() -> str:
-    _who()
+    _oauth._who()
     md = _cfg.path("paths", "markdown")
     head = ""
     if md.exists():
@@ -8201,7 +8200,7 @@ _STALL_SHORT = f" A wrong `stall:` step is undone with update (mover, next, clea
                                          "a notice not ruled yet shows that it is still held for the router and when that is `expected:`, and a `last try:` line when the router's last judgment of it failed (a notice the router gave up on shows `ruling: none, stuck` and its `reason:`); an id no routing log holds answers \"no notice <id>\"." + _STALL_FORM))
 def stackshot_get(item_id: Annotated[str, Field(description="An item id (board#N; a bare number N is read as board#N; <letter><n> for an older item), or a notice id: the six hex characters a message to a project returns (\"notice a1b2c3\"), which shows the router's ruling of that notice.")]) -> str:
     """Read one item by id as shown (board#N, or the older letter-and-number form for an older item). It shows `needs:` (whose move it is: decision, external and the sessions named), `after:` (the items that must close first, each with its state), and `observers:`. It leads with `mover:` (who moves the item now) and `then:` (who takes it after the answer or the wait); History says who created it. `model:` says alive or waiting, the mover and what it waits on (a time, the close of other items, an anchor, an answer relayed to a person, or a fleet event, shown as `a fleet event (<the event>; backstop <day>)`); on a doing item the board lists as waiting it ends with `· the board lists it as waiting until <time> (<why>)` (stored as doing, but its wake is more than an hour away and every open step is dated for that day or later, or its wake carries a wait_basis and is still ahead; a wake kept as a hand-off's backstop, with no wait_basis, is no wait; a date alone is a wait until it), so it is listed as waiting until then. After `next:` a `named in next:` block gives each board#N the next names with its live state (closed with the time and outcome, open with its mover, waiting, or not found), so a status is never relayed from the words of next. The item model is on docs/design. item_id can also be a notice id (the six hex characters a message to a project returns): it then shows who sent the notice and when, its project, a one-line excerpt, the router's ruling with its reason, rule and item, when it was ruled, or that it is still held and when the router rules it."""
-    _who()
+    _oauth._who()
     nid = _notice_asked(item_id)
     if nid:
         return _notice_report(nid)
@@ -8642,7 +8641,7 @@ def stackshot_create(
     wait_reason: Annotated[str, Field(description="What the step waits on that is not available now (a reply, a build or test still running, a window the work needs, a resource that is down), at least " + str(_cfg.WAIT_GUARD_REASON_MIN) + " characters. Required when this write sets a wake, or a line of your own next dated later than today, on an item you move: without it the write is refused, and a model may refuse it when the step could be done now. Not stored on the item. A park (hold=true with wait_basis), a wait on another item (after) and needs decision or external need none. A date after by, due or before is a deadline, not a wait.")] = "",
     contact: _CONTACT_PARAM = "",
 ) -> str:
-    _who()
+    _oauth._who()
     note = _owner_param("create", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
     _sender_not_owner(sender)
     owner = str(sender or "").strip() or str(owner or "").strip()    # the creator: the record's keeper
@@ -10326,7 +10325,7 @@ def stackshot_update(
     """The update tool; its description is _UPDATE_DESC + _SELF_WAIT_FORM + _WAIT_FORM."""
     if rank or clear_rank:
         raise ToolError(RANK_RETIRED)       # a stale caller is told, never silently ignored
-    _who()
+    _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
     note = _owner_param("update", owner)           # step 4b: owner is accepted with a note until [model] owner_param_until, then refused
@@ -10382,7 +10381,7 @@ def stackshot_complete(item_id: str, outcome: _OUTCOME_PARAM = "", reason: _REAS
                        outcome_text: _OUTCOME_TEXT_PARAM = "") -> str:
     """Close an item with how it ended; its description is _COMPLETE_DESC. The fields default to empty so that a pane with
     an older cached schema gets the refusal that says what is missing and how to close through the portal, not a schema error."""
-    _who()
+    _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
     return _update_svc.complete_item(item_id, outcome=outcome, reason=reason, description=description, superseded_by=superseded_by, sender=sender, said=said, outcome_text=outcome_text)
@@ -10398,7 +10397,7 @@ _FD = _cfg.freshness_days()
                                              "sender = your own session (name or cse_… id). item_id = board#N (a bare number N is read as board#N). " + _SENDER_MIRROR.strip()))
 def stackshot_confirm(item_id: str, sender: str = "") -> str:
     """Mark an item still true: sets its `confirmed` clock only. item_id: board#N (a bare number N is read as board#N)."""
-    _who()
+    _oauth._who()
     _sender_required(sender)
     _sender_not_owner(sender)
     return _update_svc.confirm_item(item_id, sender)
@@ -10439,7 +10438,7 @@ def _machine_states() -> dict[str, str]:
 
 @mcp.tool(name="sessions", description=_lead(f"{OWNER}'s Claude sessions and machines, from the live fleet state on the server box — for a session that cannot read it itself (on another machine, in the cloud, in Cowork). Each session: its name, its link (for a pane, the URL the fleet tool's store gives it, where one is configured; for a cloud or Cowork session, its claude.ai link; link a session by it; empty = no link, name it plainly), its machine, and its role where a project page names it (front agent or background agent of <project>; a front agent takes a message only with {_FOR_OWNER} on its first line). Each machine: online or offline, its Claude Code CLI version, and on the box that runs it the {OPERATOR} (the session a recycle or CLI-update cue goes to — from a cloud or Cowork session, relay the cue with message(to=<that name>)), live or not running. Cloud and Cowork sessions are listed when they own an open board item. name: optional case-insensitive filter on session names."))
 def stackshot_sessions(name: str = "") -> str:
-    _who()
+    _oauth._who()
     return _sessions_listing(name.strip().lower())
 
 
@@ -10864,7 +10863,7 @@ def stackshot_message(to: Annotated[str, Field(description="Who gets it: a sessi
                       text: Annotated[str, Field(description=f"The message, at most {MSG_MAX} characters. To a front agent its first line is {_FOR_OWNER}, then what is needed; a plain result goes to projects/<slug> or onto the item.")],
                       sender: Annotated[str, Field(description="Your own session name or id.")],
                       fyi: Annotated[bool, Field(description="True when the message asks nothing of its receiver (news, a result, a status). A background agent then gets it with its next turn instead of a turn of its own; a front agent is unaffected. Default false.")] = False) -> str:
-    out = _message(to, text, sender, auth=_who(), fyi=fyi)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
+    out = _message(to, text, sender, auth=_oauth._who(), fyi=fyi)      # `sender` is the caller's own label; `auth` is the signed-in account the server checked, kept in the log
     return out + _off_map_note_to(sender, to)       # a message to a project page: the sender may be off that project's map
 
 
@@ -10903,7 +10902,7 @@ def _route(notice: str, ruling: str, to: str = "", reason: str = "", sender: str
 
 @mcp.tool(name="route", description=_lead(f"A ruling on a notice delivered for a project. The router rules every notice of every project by itself (rules in code, then one thin call), so call this to overrule a ruling that was wrong. `notice` = the id at the end of the notice (\"notice a1b2c3\"); `ruling` = passed (handed to an agent: name it in `to`) | merged (folded into a digest) | held (kept for later) | dropped (not worth anyone's attention); `reason` = one line {OWNER} can skim; `sender` = your own session. Right call: route(notice=\"a1b2c3\", ruling=\"passed\", to=\"my-x\", reason=\"belongs to the export work\", sender=\"my-x\"). Call it once per notice, after acting on it; call it again to overrule an earlier ruling. The project's routing page (behind its number in the board's anchors column) lists every notice with its ruling and reason, and the board flags notices left without a ruling for over an hour."))
 def stackshot_route(notice: str, ruling: str, to: str = "", reason: str = "", sender: str = "") -> str:
-    _who()
+    _oauth._who()
     return _route(notice, ruling, to, reason, sender)
 
 
@@ -10927,7 +10926,7 @@ def stackshot_anchors(project: Annotated[str, Field(description="The project pag
                       add: Annotated[list[str] | None, Field(description="URLs to watch: add=[\"https://github.com/acme/widgets/pull/12\"]; a Gmail query as gmail:q:<query> (every mailbox the anchors service reads) or gmail:q@<mailbox>:<query> (only that mailbox, as the list names it), whose query joins from:/to:/cc:/subject:/person: terms with AND, OR and parentheses (from:(a OR b) for one key over several values; see the tool description); or a machine of the fleet as machine:<name>, add=[\"machine:laptop\"], whose check-ins (offline to online) tell the mover of each item in scope. Omit to list the anchors.")] = None,
                       items: Annotated[list[str] | None, Field(description="Open items of this project the added URLs are about, items=[\"board#N\"]; omit for a project-wide anchor. Every URL in add is scoped to every id in items (several URLs with several ids give each URL all the items).")] = None,
                       remove: Annotated[list[str] | None, Field(description="URLs to stop watching, or machine:<name> to drop a machine anchor.")] = None) -> str:
-    return _anchors(project, add, items, remove, _who())
+    return _anchors(project, add, items, remove, _oauth._who())
 
 
 def _gmail_boxes() -> dict[str, str]:
@@ -11218,7 +11217,7 @@ def _rules_text(profile: str = "cowork") -> str:
 
 @mcp.tool(name="rules", description=f"{OWNER}'s standing rules — the rulebook every Claude Code session on the owner's machines loads through CLAUDE.md ({_cfg.path('paths', 'rules').name}, git-synced). A session that did not load it at start (cloud, Cowork) calls this once at the start of a task and follows it; a session that has it does not. profile=\"cowork\" (default) = the Cowork view: CLI-only sections replaced by their Cowork equivalents, incident notes stripped; profile=\"full\" = the whole file. The rulebook parts named in config (skill files that CLI sessions load through hooks) are appended after the rulebook, each under \"## Part: <name>\".")
 def stackshot_rules(profile: str = "cowork") -> str:
-    _who()
+    _oauth._who()
     return _rules_text("full" if profile == "full" else "cowork")
 
 
@@ -11234,93 +11233,21 @@ _SITE_TYPES = {".html": "text/html", ".svg": "image/svg+xml", ".txt": "text/plai
 @mcp.tool(name="bump_versions", description=_lead("Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."))
 def stackshot_bump_versions(host: str = "") -> str:
     """Refresh the latest-available versions (npm claude-code, gbrain releases) and republish the board now. Installed versions come from each machine's heartbeat (the fleet tool pushes it before calling this after a CLI update). `host` is accepted and ignored."""
-    _who()
+    _oauth._who()
     return "published: " + _publish_now(force_versions=True, host=host)
 
 
 # ----------------------------------------------------------------------------- the board's own sign-in, step e)
-# [auth] ui_open = true (today): the web UI is served to whoever reaches it, and the edge decides who that is (Cloudflare
-# Access in front of the hostname). ui_open = false: the server asks for a sign-in itself, with the OAuth it already runs
-# for /mcp — the board is one more client of its own /authorize, so no second OAuth app and no new redirect URI at Google.
-# The signed-in address is kept in a signed cookie; only [auth] allowed_emails get in.
-# The cookie, the guard and the board's own OAuth client are signin.py's (imported here, where they were defined, apart from `_auth_mode`, `_ui_now`, `_ui_http` and `_ui_client_id`: those four
-# are read and set on that module (`_signin.`), as the suites set them there). The three /ui/ routes and `_ui_exchange` stay here: they use `mcp`.
-from stackshot.web.signin import (_APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_COOKIE, _UI_FLOW, _UI_PUBLIC, _UI_CLIENT, _ui_days, _ui_email, _ui_guard, _ui_is_board_client,  # noqa: E402,F401
-                                  _ui_is_navigation, _ui_key, _ui_open, _ui_redirect_uri, _ui_renewed, _ui_session, _ui_set_session, _ui_sign, _ui_unsign)
+# The cookie, the guard, the board's own OAuth client and the three /ui/ routes (/ui/login, /ui/callback, /ui/logout) are auth/signin.py's; the routes are added to `mcp` by `register`, here, where they were declared.
+from stackshot.web.auth.signin import _APP_ICON_DIR, _APP_ICONS, _FONT_PATH, _UI_PUBLIC, _ui_guard, _ui_key, _ui_open, _ui_renewed  # noqa: E402
+
+_signin.register(mcp)
 
 
 def _ui_mods():
     """The page renderers: (render, search, runners) of the board (ui/render.py, ui/search.py, ui/runners.py)."""
     from stackshot.web.ui import render as r2, runners as n2, search as s2
     return r2, s2, n2
-
-
-def _ui_exchange(code: str, verifier: str) -> str:
-    """An authorization code → the address that signed in ('' when the exchange or the token does not hold)."""
-    import asyncio
-    status, d = _signin._ui_http("POST", "/token", {"grant_type": "authorization_code", "code": code, "redirect_uri": _ui_redirect_uri(),
-                                             "client_id": _signin._ui_client_id(), "code_verifier": verifier}, form=True)
-    tok = str(d.get("access_token") or "") if status == 200 else ""
-    if not tok:
-        return ""
-    at = asyncio.run(mcp.auth.verify_token(tok))
-    return str((getattr(at, "claims", None) or {}).get("email") or "")
-
-
-@mcp.custom_route("/ui/login", methods=["GET"])
-async def ui_login(request: Request):
-    """Start the board's sign-in: send the browser to this server's own /authorize (which hands on to Google)."""
-    import base64, hashlib, secrets as _s
-    from urllib.parse import urlencode
-    from starlette.concurrency import run_in_threadpool
-    from starlette.responses import RedirectResponse
-    if _ui_open() or _signin._auth_mode() == "off":
-        return RedirectResponse("/", status_code=302)
-    if not _ui_is_navigation(request):          # a script's request starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
-        return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
-    nxt = str(request.query_params.get("next") or "/")
-    if not nxt.startswith("/") or nxt.startswith("//"):
-        nxt = "/"
-    try:
-        cid = await run_in_threadpool(_signin._ui_client_id)
-    except Exception as e:  # noqa: BLE001
-        return PlainTextResponse(f"sign-in is not available: {e}", status_code=503)
-    verifier = _s.token_urlsafe(48); state = _s.token_urlsafe(16)
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-    q = urlencode({"response_type": "code", "client_id": cid, "redirect_uri": _ui_redirect_uri(), "code_challenge": challenge, "code_challenge_method": "S256",
-                   "state": state, "scope": "openid https://www.googleapis.com/auth/userinfo.email"})
-    r = RedirectResponse(str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/authorize?" + q, status_code=302)
-    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": _signin._ui_now() + 600})), max_age=600,
-                 httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/ui")
-    return r
-
-
-@mcp.custom_route("/ui/callback", methods=["GET"])
-async def ui_callback(request: Request):
-    """Finish the board's sign-in: the code this server's /authorize sent back becomes a signed session cookie."""
-    from starlette.concurrency import run_in_threadpool
-    from starlette.responses import RedirectResponse
-    try:
-        flow = json.loads(_ui_unsign(request.cookies.get(_UI_FLOW, "")) or "{}")
-    except Exception:
-        flow = {}
-    code, state = str(request.query_params.get("code") or ""), str(request.query_params.get("state") or "")
-    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _signin._ui_now():
-        return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
-    email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
-    if email not in _cfg.CFG["auth"]["allowed_emails"]:
-        return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
-    r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)
-    _ui_set_session(r, email)
-    r.delete_cookie(_UI_FLOW, path="/ui")
-    return r
-
-
-@mcp.custom_route("/ui/logout", methods=["GET"])
-async def ui_logout(request: Request):
-    r = PlainTextResponse("signed out")
-    r.delete_cookie(_UI_COOKIE, path="/")
-    return r
 
 
 _RO_BOARD: dict[str, Any] = {"at": 0.0, "r": None}
@@ -14006,7 +13933,7 @@ def _item_page(request: Request, gid: str):
     g = _ui_guard(request)
     if g is not None:
         return g
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     rmod = _ui_mods()[0]
     box = {"action": f"/items/{_gh.href_id(gid)}/answer", "token": _answer_token(email, gid),
            "sent": str(request.query_params.get("sent") or "")} if email else None
@@ -14466,7 +14393,7 @@ async def item_answer(request: Request):
     raw = str(request.path_params.get("key") or "")
     if not re.fullmatch(_ITEM_KEY, raw):
         return PlainTextResponse("no such item", status_code=404)
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return PlainTextResponse("sign in to the board to answer an item", status_code=403)
     if not _answer_same_origin(request):
@@ -14508,7 +14435,7 @@ async def answer_tokens(request: Request):
     g = _ui_guard(request)
     if g is not None:
         return g
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     out: dict[str, str] = {}
     if email:
         for raw in str(request.query_params.get("ids") or "").split(",")[:_ANSWER_TOKENS_MAX]:
@@ -14541,7 +14468,7 @@ async def item_watch(request: Request):
     raw = str(request.path_params.get("key") or "")
     if not re.fullmatch(_ITEM_KEY, raw):
         return PlainTextResponse("no such item", status_code=404)
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return PlainTextResponse("sign in to the board to watch or mute an item", status_code=403)
     if not _answer_same_origin(request):
@@ -14571,7 +14498,7 @@ async def for_you_seen(request: Request):
     """The owner marks a row of the For you list seen (id=<row id>, or id=all): it leaves the list. The board's page is one file for
     everyone allowed, so there is no per-page token: signed in to the board, from its own origin (the same origin check as his
     answer), the cookie is SameSite=Lax. Then 303 to the board; a fetch from the page's script reads the status only."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email and not (_ui_open() or _signin._auth_mode() == "off"):
         return PlainTextResponse("sign in to the board", status_code=403)
     if not _answer_same_origin(request):
@@ -14595,7 +14522,7 @@ async def _prefs_body(request: Request, what: str):
     """The gates every save under /prefs/ shares, for a body of JSON: (the signed-in person's address, the decoded JSON, None), or (None, None, the refusal to answer with). Signed in to
     the board (403 otherwise: with no address there is no person to keep it for, so a viewer let in without sign-in cannot save), from the board's own origin (403), a JSON content type
     (415), a body of at most 4 KB (413, judged from Content-Length before the body is read, or as a body with none arrives), valid JSON (400). `what` names the setting in the refusals."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return None, None, PlainTextResponse(f"sign in to the board to keep the panel {what}", status_code=403)
     if not _answer_same_origin(request):
@@ -14755,7 +14682,7 @@ async def _colors_body(request: Request) -> dict[str, Any] | JSONResponse:
 async def _colors_browser(request: Request, op: str):
     """The board's own page: signed in (403 otherwise, a read too: nothing here is public), and a write from the board's own origin (403)."""
     from starlette.concurrency import run_in_threadpool
-    if not _ui_email(request):
+    if not _signin._ui_email(request):
         return _colors_err(403, "sign in to the board to use the saved colors")
     body: dict[str, Any] = {}
     if op != "list":
@@ -14917,7 +14844,7 @@ async def _landed_change(request: Request, change):
     """The Landed page's buttons: Clear, Clear all and Undo post here through `change` (landed.clear or landed.unclear), which takes the comma-separated landed.key values of the `keys` field. The gates are the For you
     seen route's: signed in to the board (or the board open), from its own origin; the body is capped at 64 KB. A change that changed something republishes the board (debounced; the home Landed count follows with it).
     A form post (no JavaScript) gets a 303 back to the page; the page's own script asks with `Accept: application/json` and gets {"ok": true, "changed": n}, and keeps the line where it is. No keys changes nothing (it is not a clear-everything call)."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email and not (_ui_open() or _signin._auth_mode() == "off"):
         return PlainTextResponse("sign in to the board", status_code=403)
     if not _answer_same_origin(request):
@@ -14969,7 +14896,7 @@ def _runners_token_maker(request: Request):
     """The page's token maker for the viewer (None draws no button: no switch script configured, or this copy is read-only)."""
     if _ro.is_read_only() or not _runners.switch_enabled():
         return None
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return None                        # the route needs a real signed-in address, so an open board draws no button that would only be refused
     return lambda box: _runners_switch_token(email, box)
@@ -15011,7 +14938,7 @@ async def site_runners_switch(request: Request):
     Disable lets a running job finish and then takes no new job. The gates are the other state-changing actions': a read-only copy answers 503 first (the route wrapper), then a real signed-in address (an open board is refused too, as /answer and /watch do), from its own origin,
     the form's token (an HMAC over the viewer and the machine); the body is capped at 4096 bytes; the action and the machine are checked (the machine against runners.switch_boxes: the fleet's names, plus a [runners] boxes entry named in [runners.ssh_hosts]) before anything runs. The page's script asks with
     `Accept: application/json` and gets {"ok": bool, "text": "..."} to show; a form post gets the same text as plain text."""
-    email = _ui_email(request)
+    email = _signin._ui_email(request)
     if not email:
         return PlainTextResponse("sign in to the board to disable or enable a CI machine", status_code=403)
     if not _answer_same_origin(request):

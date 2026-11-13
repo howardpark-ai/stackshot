@@ -1,7 +1,7 @@
 # fonts/
 
 The code font of the board and the item pages (command blocks, inline code). The server serves it itself, at
-`/fonts/D2Coding-Regular.woff2?v=<first 12 hex of the file's SHA-256>` (`stackshot/web/signin.py` `_FONT_PATH`, public like the icons, kept a year
+`/fonts/D2Coding-Regular.woff2?v=<first 12 hex of the file's SHA-256>` (`stackshot/web/auth/signin.py` `_FONT_PATH`, public like the icons, kept a year
 when `?v=` is the version of the bytes on disk), and `render.py` names it in an `@font-face` (`font-display:swap`) ahead of the
 `ui-monospace,...` stack, which stays as the fallback.
 

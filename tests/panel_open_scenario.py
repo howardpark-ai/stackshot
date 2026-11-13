@@ -58,6 +58,7 @@ def check(name, cond, got=None):
 
 from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
@@ -149,7 +150,7 @@ check("an unreadable settings file: a save raises, a read gives open (the defaul
 UI.unlink()
 
 # ---- 2. the page
-COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
+COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
 SAME = {"Origin": BOARD}
 JSON_H = {**SAME, "Content-Type": "application/json"}
 PAGES = [("home", "/"), ("item", "/items/a1"), ("project", "/projects/alpha"), ("projects", "/projects"), ("closed", "/closed"), ("audits", "/audits"), ("search", "/search?q=item")]
@@ -174,11 +175,11 @@ def same_but_panel(a, b):
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, who=MINA):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.get(path, follow_redirects=False)
     def post(body, who=MINA, headers=JSON_H, raw=None, path="/prefs/panel-open"):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.post(path, content=raw if raw is not None else json.dumps(body), headers=headers, follow_redirects=False)
 
     base = {}
@@ -199,7 +200,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("closed: the home's shell and block fingerprints are the open page's (the in-place update keeps working)", all(
         re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', shut["home"]).group(1) == re.search(rf'<meta name="stackshot-{k}" content="([^"]*)">', base["home"]).group(1) for k in ("shell", "blocks")))
     check("closed: the kept draw of the home is still open (the state is put in per person on the way out)", state(_web_board_home._BOARD_HOME["html"]) == "open")
-    c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA]); rr = c.get("/")
+    c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[MINA]); rr = c.get("/")
     check("closed: Content-Length matches the body served", int(rr.headers["content-length"]) == len(rr.content), (rr.headers["content-length"], len(rr.content)))
     check("another signed-in person still gets it open, on every page", all(state(get(p, NOOR).text) == "open" for _, p in PAGES))
     check("nobody signed in still gets it open, on every page", all(state(get(p, None).text) == "open" for _, p in PAGES))
@@ -281,7 +282,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("save: an extra key is ignored", r.status_code == 200 and users() == {MINA: {"panel_open": False}}, r.text)
     r = post({"open": True})
     check("save: open removes the key", r.status_code == 200 and r.json() == {"open": True} and users() == {}, r.text)
-    c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[MINA])
+    c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[MINA])
     check("GET on the save route is not served a page (405)", c.get("/prefs/panel-open").status_code in (404, 405))
     r = post({"open": False}, headers={"Referer": BOARD + "/", "Content-Type": "application/json"})
     check("save: a Referer from the board's own page is accepted when the browser sent no Origin", r.status_code == 200 and users() == {MINA: {"panel_open": False}}, r.status_code)
@@ -299,7 +300,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     import asyncio
     from starlette.requests import Request
     def raw_post(length, chunks):
-        hs = [(b"host", b"board.example.org"), (b"origin", BOARD.encode()), (b"content-type", b"application/json"), (b"cookie", f"{server._UI_COOKIE}={COOKIE[MINA]}".encode())]
+        hs = [(b"host", b"board.example.org"), (b"origin", BOARD.encode()), (b"content-type", b"application/json"), (b"cookie", f"{_signin._UI_COOKIE}={COOKIE[MINA]}".encode())]
         if length is not None: hs.append((b"content-length", str(length).encode()))
         scope = {"type": "http", "method": "POST", "path": "/prefs/panel-open", "raw_path": b"/prefs/panel-open", "query_string": b"", "headers": hs, "scheme": "https",
                  "server": ("board.example.org", 443), "client": ("203.0.113.9", 5000), "http_version": "1.1", "root_path": ""}

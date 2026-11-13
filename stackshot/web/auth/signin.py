@@ -1,12 +1,11 @@
-"""signin.py: the board's own sign-in, the part of it that needs nothing of server.py: [auth] ui_open and ui_session_days, the signed session and flow cookies (key, signature, renewal),
-who is signed in, the guard a page asks, the board's own OAuth client (its registration, its callback, how it is told apart from any other client) and the files a signed-out page may fetch;
-`_auth_mode`, which the guard and the server both read, is here too.
+"""signin.py: the board's own sign-in: [auth] ui_open and ui_session_days, the signed session and flow cookies (key, signature, renewal), who is signed in, the guard a page asks, the board's
+own OAuth client (its registration, its callback, how it is told apart from any other client), the files a signed-out page may fetch, and the three routes /ui/login, /ui/callback and
+/ui/logout (with `_ui_exchange`, which verifies the token with the server's `mcp.auth`). `_auth_mode`, which the guard and the server both read, is here too.
 
-server.py is being split into one module per area (CONTRIBUTING.md, Layout). What stays in server.py is what needs its `mcp` object or its other functions, which a module under server.py cannot
-import: the three /ui/ routes (`ui_login`, `ui_callback`, `ui_logout`), `_ui_exchange` (it verifies the token with `mcp.auth`) and `_ui_mods`; the provider `_auth` builds is in `server_auth.py` (stage 11).
-A suite that pins the sign-in's clock (`_ui_now`), replaces its call to the server's own OAuth endpoints (`_ui_http`, `_ui_client_id`) or sets the auth mode (`_auth_mode`) sets it on this module
-(`server._signin._ui_now = ...`), the one place the readers look it up: the server's own reads of those four go through `_signin.` as well, and are not imported back. The rest is imported back by
-server.py, so `server._ui_guard`, `server._ui_email`, `server._ui_sign` and the others stay the names the routes and the tests use."""
+The module cannot import server.py, which imports it, so it has no `mcp` of its own: `register(mcp)` is called once by server.py, where the routes were declared, and adds the three routes in
+that order. A suite that pins the sign-in's clock (`_ui_now`), replaces its call to the server's own OAuth endpoints (`_ui_http`, `_ui_client_id`) or the token exchange (`_ui_exchange`), or sets the
+auth mode (`_auth_mode`) sets it on this module, the one place the readers look it up. What server.py's own routes read (`_ui_guard`, `_ui_email`, `_ui_open`, `_ui_renewed`, `_ui_key`, the public
+files) it imports from here."""
 from __future__ import annotations
 
 import json
@@ -188,3 +187,79 @@ def _ui_is_board_client(client_id: str, redirect_uri: str) -> bool:
     """True for the one client the board registered for its own sign-in in this run, asking for its own callback; a client that merely looks like it is not."""
     cid = _UI_CLIENT.get("id")
     return bool(cid) and str(client_id) == cid and str(redirect_uri) == _ui_redirect_uri()
+
+
+_SERVER: dict[str, Any] = {}                                                # the server's `mcp`, set once by register(): _ui_exchange verifies the token with its `auth`
+
+
+def _ui_exchange(code: str, verifier: str) -> str:
+    """An authorization code → the address that signed in ('' when the exchange or the token does not hold)."""
+    import asyncio
+    status, d = _ui_http("POST", "/token", {"grant_type": "authorization_code", "code": code, "redirect_uri": _ui_redirect_uri(),
+                                             "client_id": _ui_client_id(), "code_verifier": verifier}, form=True)
+    tok = str(d.get("access_token") or "") if status == 200 else ""
+    if not tok:
+        return ""
+    at = asyncio.run(_SERVER["mcp"].auth.verify_token(tok))
+    return str((getattr(at, "claims", None) or {}).get("email") or "")
+
+
+async def ui_login(request: Request):
+    """Start the board's sign-in: send the browser to this server's own /authorize (which hands on to Google)."""
+    import base64, hashlib, secrets as _s
+    from urllib.parse import urlencode
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import RedirectResponse
+    if _ui_open() or _auth_mode() == "off":
+        return RedirectResponse("/", status_code=302)
+    if not _ui_is_navigation(request):          # a script's request starts nothing: no OAuth transaction, and no flow cookie that would replace the one of a sign-in under way in another tab
+        return PlainTextResponse("signed out: open the board in the browser to sign in again", status_code=401, headers={"Cache-Control": "no-store"})
+    nxt = str(request.query_params.get("next") or "/")
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/"
+    try:
+        cid = await run_in_threadpool(_ui_client_id)
+    except Exception as e:  # noqa: BLE001
+        return PlainTextResponse(f"sign-in is not available: {e}", status_code=503)
+    verifier = _s.token_urlsafe(48); state = _s.token_urlsafe(16)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    q = urlencode({"response_type": "code", "client_id": cid, "redirect_uri": _ui_redirect_uri(), "code_challenge": challenge, "code_challenge_method": "S256",
+                   "state": state, "scope": "openid https://www.googleapis.com/auth/userinfo.email"})
+    r = RedirectResponse(str(_cfg.CFG["auth"]["base_url"]).rstrip("/") + "/authorize?" + q, status_code=302)
+    r.set_cookie(_UI_FLOW, _ui_sign(json.dumps({"state": state, "verifier": verifier, "next": nxt, "exp": _ui_now() + 600})), max_age=600,
+                 httponly=True, secure=str(_cfg.CFG["auth"]["base_url"]).startswith("https"), samesite="lax", path="/ui")
+    return r
+
+
+async def ui_callback(request: Request):
+    """Finish the board's sign-in: the code this server's /authorize sent back becomes a signed session cookie."""
+    from starlette.concurrency import run_in_threadpool
+    from starlette.responses import RedirectResponse
+    try:
+        flow = json.loads(_ui_unsign(request.cookies.get(_UI_FLOW, "")) or "{}")
+    except Exception:
+        flow = {}
+    code, state = str(request.query_params.get("code") or ""), str(request.query_params.get("state") or "")
+    if not code or not flow or state != flow.get("state") or float(flow.get("exp") or 0) < _ui_now():
+        return PlainTextResponse("sign-in failed: this link is not part of a sign-in that started here (or it took longer than ten minutes). Open the board again.", status_code=400)
+    email = await run_in_threadpool(_ui_exchange, code, str(flow.get("verifier") or ""))
+    if email not in _cfg.CFG["auth"]["allowed_emails"]:
+        return PlainTextResponse(f"{email or 'this account'} is not allowed on this board", status_code=403)
+    r = RedirectResponse(str(flow.get("next") or "/"), status_code=302)
+    _ui_set_session(r, email)
+    r.delete_cookie(_UI_FLOW, path="/ui")
+    return r
+
+
+async def ui_logout(request: Request):
+    r = PlainTextResponse("signed out")
+    r.delete_cookie(_UI_COOKIE, path="/")
+    return r
+
+
+def register(mcp) -> None:
+    """Add the three sign-in routes to the server's `mcp`, in the order they were declared in server.py. Called once."""
+    _SERVER["mcp"] = mcp
+    mcp.custom_route("/ui/login", methods=["GET"])(ui_login)
+    mcp.custom_route("/ui/callback", methods=["GET"])(ui_callback)
+    mcp.custom_route("/ui/logout", methods=["GET"])(ui_logout)

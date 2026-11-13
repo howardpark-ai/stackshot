@@ -61,6 +61,7 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg
 from stackshot.web import i18n, search, server
+from stackshot.web.auth import signin as _signin
 from stackshot.web import runners as R
 from stackshot.web.runners import RunnersError
 from stackshot.web import search as WS
@@ -173,7 +174,7 @@ else:
     print("note: node is not installed; the colour tool's snippet was not run")
 
 # ---- 4. the pages, English and the test locale
-COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
+COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
 search.sync(__import__("stackshot.web.render", fromlist=["_"]).Board(str(T / "store")))
 def visible(h): return re.sub(r"<script\b.*?</script>|<style\b.*?</style>", "", h, flags=re.S)
 def plain(h): return re.sub(r"\s+", " ", re.sub(r"<[^>]*>", "", visible(h)))
@@ -278,10 +279,10 @@ def settle(limit=10):
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, who=MINA):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.get(path, follow_redirects=False)
     def post_lang(lang, who=MINA):
-        c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.post("/prefs/lang", content=json.dumps({"lang": lang}), headers={"Origin": BOARD, "Content-Type": "application/json"}, follow_redirects=False)
     R.reset(); BROKEN.clear(); CLOCK[0] = T0
     # the first request answers from nothing (the placeholder) and kicks the rebuild; the next one has the table

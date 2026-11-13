@@ -70,6 +70,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld
 from stackshot.web import server; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.web import board_home as _web_board_home
 from stackshot.web import ui as ui_pkg
@@ -94,7 +95,7 @@ from stackshot.web.ui import releasing as _rel2
 _rel2._run = lambda argv: ""             # the release queue is the host's systemd units: none are read here (ui_kit_scenario drives the queue)
 
 # ---- 1. the pages
-COOKIE =server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE =_signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 SAME = {"Origin": BOARD}
 tok = lambda g: server._answer_token(EMAIL, g)
 wtok = lambda g: server._watch_token(EMAIL, g)
@@ -126,11 +127,11 @@ def addresses(h):
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, cookie=COOKIE, headers=None):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path, headers=headers or {}, follow_redirects=False)
     def post(path, data, headers=SAME, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.post(path, data=data, headers=headers, follow_redirects=False)
     got = {}
     for name, path in PAGES:
@@ -222,10 +223,10 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         for name, path in PAGES:
             r = get(path, cookie=None)
             check(f"{name} page, not signed in: 302 to /ui/login with next= the address", r.status_code == 302 and r.headers.get("location") == "/ui/login?next=" + quote(path, safe=""), (r.status_code, r.headers.get("location")))
-        server._signin._ui_client_id = lambda: "test-client"                 # the board's own sign-in service is not reached from a test
+        _signin._ui_client_id = lambda: "test-client"                 # the board's own sign-in service is not reached from a test
         for nxt in ("/items/a1", "/", "/items/a1"):
             rl = get("/ui/login?next=" + quote(nxt, safe=""), cookie=None)
-            flow = json.loads(server._ui_unsign(rl.cookies.get(server._UI_FLOW) or "") or "{}")
+            flow = json.loads(_signin._ui_unsign(rl.cookies.get(_signin._UI_FLOW) or "") or "{}")
             check(f"the login started from {nxt} comes back to {nxt} (its flow cookie keeps the address)", rl.status_code == 302 and flow.get("next") == nxt, (rl.status_code, flow))
         for p in ("/projects", "/receivers.json", "/render-stamp", "/answer-tokens?ids=a1", "/runners.json", "/no-such-page"):
             r = get(p, cookie=None)

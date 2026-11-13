@@ -63,6 +63,7 @@ from stackshot.core import config as _cfg
 from stackshot.audit import audit_overview as ov
 from stackshot.router import routing
 from stackshot.web import foryou, i18n, landed as ld, server
+from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 server._publish = lambda: None
@@ -141,7 +142,7 @@ foryou.add(key="t1", kind="check_failed", gid="a1", what=FY, urgent=True, ts=now
 foryou.add(key="t2", kind="closed", gid="a2", what="closed: a thing", ts=now - 50)
 SAID_META = {"said": [{"tag": "Acked-by", "quote": SAID_QUOTE, "session": A, "ts": now - 30, "checked": True}, {"tag": "Acked-by", "quote": "an unproved line", "session": "", "ts": now - 20, "checked": False, "why": "no transcript"}]}
 
-COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
+COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
 def visible(h): return re.sub(r"<script\b.*?</script>|<style\b.*?</style>", "", h, flags=re.S)
 def unmarked(h):
     """The page's visible text with the markup, the markers `[x:...]` (a marker may hold another: innermost first) and the ASCII date and age forms taken out: what is left is the words the page did not route."""
@@ -166,10 +167,10 @@ for _r in rows_: DATA |= set(re.findall(r"[a-z']{3,}", " ".join(str(v) for v in 
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, who=MINA):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.get(path, follow_redirects=False)
     def post_lang(lang, who=MINA):
-        c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.post("/prefs/lang", content=json.dumps({"lang": lang}), headers={"Origin": BOARD, "Content-Type": "application/json"}, follow_redirects=False)
     PAGES = ("/audits", "/projects", "/projects/alpha", "/closed")
     # ---- 5. English, no catalog loaded: every word is the catalog's, no marker

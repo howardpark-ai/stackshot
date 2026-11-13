@@ -48,7 +48,7 @@ from stackshot import paths as _paths  # noqa: E402
 HERE = _paths.ROOT
 EXAMPLE = HERE / "stackshot.example.toml"
 HOOKS_DIR = HERE / "client" / "hooks"
-CALLBACK_PATH = "/auth/callback"                                  # FastMCP's GoogleProvider default redirect path (stackshot/web/server_auth.py _auth)
+CALLBACK_PATH = "/auth/callback"                                  # FastMCP's GoogleProvider default redirect path (stackshot/web/auth/oauth.py _auth)
 METADATA_PATH = "/.well-known/oauth-authorization-server"         # the OAuth metadata FastMCP serves at the base URL
 CONNECTOR_TOOLS = "mcp__.*"       # every MCP tool: pages.py tells a board write from the rest, on the direct connector or inside a portal script (connectors.py)
 OAUTH_KEYS = ("STACKSHOT_GOOGLE_CLIENT_ID", "STACKSHOT_GOOGLE_CLIENT_SECRET")
