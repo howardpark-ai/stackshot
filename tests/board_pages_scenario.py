@@ -70,13 +70,16 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld
 from stackshot.web import server; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.web.routes import answers as _rt_answers
+from stackshot.web.routes import board_pages as _rt_board
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.web import board_home as _web_board_home
 from stackshot.web import ui as ui_pkg
 from stackshot.web.ui import render as r2, search as s2, runners as n2
 from starlette.testclient import TestClient
-pub = [0]; server._publish = lambda: pub.__setitem__(0, pub[0] + 1)
+from stackshot.web.routes import ui_api as _rt_ui
+pub = [0]; server._publish = _rt_answers._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the routes (web/routes/) look the publish up on their own modules
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
@@ -98,7 +101,7 @@ _rel2._run = lambda argv: ""             # the release queue is the host's syste
 COOKIE =_signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 SAME = {"Origin": BOARD}
 tok = lambda g: server._answer_token(EMAIL, g)
-wtok = lambda g: server._watch_token(EMAIL, g)
+wtok = lambda g: _rt_answers._watch_token(EMAIL, g)
 PAGES = [("home", "/"), ("item", "/items/a1"), ("project", "/projects/alpha"), ("landed", "/closed"), ("search", "/search?q=needle"), ("runners", "/runners")]
 search.sync(render.Board(str(T / "store")))                        # the search index is built from the fixture before the first query
 STATIC = re.compile(r"/(favicon\.svg|fonts/[^?\s]*|manifest\.webmanifest|apple-touch-icon[^?\s]*\.png|icon-[^?\s]*\.png)(\?v=[0-9a-f]+)?")
@@ -268,9 +271,9 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     r = post("/items/a2/answer", {"token": tok("a2"), "text": "noted", "back": "/items/a2"}, cookie=None)
     check("an answer without sign-in is refused", r.status_code == 403, r.status_code)
     check("an answer with a back of //evil or a lookalike of a page is not followed", all(
-        server._answer_back(b) is None for b in ("//evil.example.net/x", "/items/a1?x=1", "https://evil.example.net/", "/items/%2e%2e/x", "/../items/a1", "/items//x"))
-        and server._answer_back("/") == ("/", "") and server._answer_back("/#a1") == ("/", "#a1") and server._answer_back("/projects/alpha#x") == ("/projects/alpha", "#x")
-        and server._answer_back("/items/a1") == ("/items/a1", ""))
+        _rt_answers._answer_back(b) is None for b in ("//evil.example.net/x", "/items/a1?x=1", "https://evil.example.net/", "/items/%2e%2e/x", "/../items/a1", "/items//x"))
+        and _rt_answers._answer_back("/") == ("/", "") and _rt_answers._answer_back("/#a1") == ("/", "#a1") and _rt_answers._answer_back("/projects/alpha#x") == ("/projects/alpha", "#x")
+        and _rt_answers._answer_back("/items/a1") == ("/items/a1", ""))
 
     r = post("/items/a2/watch", {"token": wtok("a2"), "mode": "watch"})
     check("watch from the root: 303 to the item's page", r.status_code == 303 and r.headers["location"] == "/items/a2", (r.status_code, r.headers.get("location"), r.text[:100]))
@@ -502,14 +505,14 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     class _Boom:
         calls = 0
         def __init__(self, *a, **k): type(self).calls += 1; raise RuntimeError("draw failed (test)")
-    real_board, real_backoff = r2.Board, server._BOARD_FAIL_BACKOFF_S
+    real_board, real_backoff = r2.Board, _rt_board._BOARD_FAIL_BACKOFF_S
     try:
         good = get("/").text; server._board_home_drop(); r2.Board = _Boom
         rs = [get("/") for _ in range(5)]
         check("a failed draw: one attempt for five requests, each served the last good copy (200)", _Boom.calls == 1 and all(x.status_code == 200 and x.text == good for x in rs), (_Boom.calls, [x.status_code for x in rs]))
         server._board_home_drop(); get("/")
         check("a drop (a write) during the back-off does not draw again", _Boom.calls == 1, _Boom.calls)
-        _web_board_home._BOARD_HOME["failed"] -= server._BOARD_FAIL_BACKOFF_S + 1; get("/")
+        _web_board_home._BOARD_HOME["failed"] -= _rt_board._BOARD_FAIL_BACKOFF_S + 1; get("/")
         check("...after the back-off one more attempt is made (and a failure starts it again)", _Boom.calls == 2 and get("/").status_code == 200 and _Boom.calls == 2, _Boom.calls)
         _web_board_home._BOARD_HOME.update(html=None, at=0.0, failed=0.0); _Boom.calls = 0
         rs = [get("/") for _ in range(4)]
@@ -517,7 +520,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         r2.Board = real_board; _web_board_home._BOARD_HOME["failed"] = 0.0
         check("...and once the draw works again the page is served", get("/").status_code == 200)
     finally:
-        r2.Board = real_board; server._BOARD_FAIL_BACKOFF_S = real_backoff; _web_board_home._BOARD_HOME["failed"] = 0.0
+        r2.Board = real_board; _rt_board._BOARD_FAIL_BACKOFF_S = real_backoff; _web_board_home._BOARD_HOME["failed"] = 0.0
 
     # a slow draw that then fails backs off from the moment it failed, not from the moment it started
     class _SlowBoom:
@@ -533,8 +536,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     import threading
     def settle(limit=10.0):
         dl = time.time() + limit
-        while server._BOARD_HOME_LOCK.locked() and time.time() < dl: time.sleep(0.02)
-        return not server._BOARD_HOME_LOCK.locked()
+        while _rt_board._BOARD_HOME_LOCK.locked() and time.time() < dl: time.sleep(0.02)
+        return not _rt_board._BOARD_HOME_LOCK.locked()
     class _Count:
         calls = 0
         def __init__(self, *a, **k): _Count.calls += 1; self.b = real_board(*a, **k)
@@ -574,12 +577,12 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         r2.Board = _Count
         # the lock held elsewhere (a draw by a page request): the poll does not wait for it and starts nothing
         server._board_home_drop(); n3 = _Count.calls; r2.Board = _Count
-        server._BOARD_HOME_LOCK.acquire()
+        _rt_board._BOARD_HOME_LOCK.acquire()
         try:
             t0 = time.time(); r = get("/render-stamp")
             check("render-stamp while a draw holds the lock: answered at once, no second draw", r.status_code == 200 and time.time() - t0 < 5 and _Count.calls == n3, (r.status_code, _Count.calls, n3))
         finally:
-            server._BOARD_HOME_LOCK.release()
+            _rt_board._BOARD_HOME_LOCK.release()
         _web_board_home._BOARD_HOME["at"] = time.time()
         # a failing draw: polls within the back-off start no more than the one attempt
         server._board_home_drop(); _web_board_home._BOARD_HOME["failed"] = 0.0; r2.Board = _Boom; _Boom.calls = 0

@@ -98,6 +98,7 @@ def check(name, cond, got=None):
 from stackshot.web import colorcombos as cc
 WL = cc.WEB_LABEL         # the label the web form sends: the code's own constant, so this file names none of its own
 from stackshot.web import server
+from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from starlette.requests import Request
 from starlette.testclient import TestClient
@@ -401,9 +402,9 @@ try:
             return asyncio.run(fn(Request(scope, receive))), len(reads)
         cookie_h = {"Origin": BOARD, "Cookie": f"{_signin._UI_COOKIE}={COOKIE[MINA]}"}
         mach_h = {"Authorization": "Bearer " + TOK[HOST]}
-        for label, fn, path, hd, extra in (("board", server.colors_combos_save, "/colors/combos", cookie_h, {}), ("board delete", server.colors_combos_delete, "/colors/combos/delete", cookie_h, {}),
-                                           ("machine", server.client_colors_combos_save, "/client/colors/combos", mach_h, {"sender": WL}),
-                                           ("machine delete", server.client_colors_combos_delete, "/client/colors/combos/delete", mach_h, {"sender": WL})):
+        for label, fn, path, hd, extra in (("board", _rt_ui.colors_combos_save, "/colors/combos", cookie_h, {}), ("board delete", _rt_ui.colors_combos_delete, "/colors/combos/delete", cookie_h, {}),
+                                           ("machine", _rt_ui.client_colors_combos_save, "/client/colors/combos", mach_h, {"sender": WL}),
+                                           ("machine delete", _rt_ui.client_colors_combos_delete, "/client/colors/combos/delete", mach_h, {"sender": WL})):
             resp, nread = raw_call(fn, path, 10_000_000, [b"x" * 100], hd); body = json.loads(resp.body)
             check(f"{label}: a Content-Length over 4 KB is 413 before any of the body is read", resp.status_code == 413 and nread == 0 and set(body) == {"error", "field"} and body["field"] is None, (resp.status_code, nread, body))
             resp, nread = raw_call(fn, path, "12abc", [b"{}"], hd)
@@ -411,7 +412,7 @@ try:
             resp, nread = raw_call(fn, path, None, [b"x" * 3000, b"x" * 3000, b"x" * 3000], hd)
             check(f"{label}: a body with no Content-Length is cut off as it passes 4 KB (413), the rest not read", resp.status_code == 413 and nread == 2, (resp.status_code, nread))
         reset()
-        resp, nread = raw_call(server.colors_combos_save, "/colors/combos", None, [json.dumps(S)[:30].encode(), json.dumps(S)[30:].encode()], cookie_h)
+        resp, nread = raw_call(_rt_ui.colors_combos_save, "/colors/combos", None, [json.dumps(S)[:30].encode(), json.dumps(S)[30:].encode()], cookie_h)
         check("board POST: a small chunked body is read whole and saved", resp.status_code == 200 and json.loads(resp.body)["combos"][0]["name"] == "Dusk", resp.body[:200])
         big = json.dumps({"name": "Big", "values": V, "pad": "x" * 4100})
         r = bpost(None, raw=big)

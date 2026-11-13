@@ -103,6 +103,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web.routes import board_pages as _rt_board
 from stackshot.service import telling
 from stackshot.anchors.anchorhub import core
 for _bg in ("work-osprey-x", "work-osprey-docs", "work-zeta-lib"): held.mark_client(_bg)      # the rollout gate: these background agents' hooks fetch held lines (a notice is held only for such a session)
@@ -1068,12 +1069,12 @@ check("17: uv is found on this box (the fallback below runs for real)", interp._
 real_exe = sys.executable
 sys.executable = DEAD
 try:
-    st = interp.interpreter_status(); body = server._healthz_body()
+    st = interp.interpreter_status(); body = _rt_board._healthz_body()
 finally:
     sys.executable = real_exe
 check("17: the self-check says the interpreter is missing and what stands in for it", st["exists"] is False and st["path"] == DEAD and st["fallback"], st)
 check("17: /healthz stays 'ok' on its first line and names the missing path on the second", body.splitlines()[0] == "ok" and DEAD in body.splitlines()[1], body)
-check("17: /healthz is a bare 'ok' while the interpreter exists", server._healthz_body() == "ok" and interp.interpreter_status()["exists"] is True)
+check("17: /healthz is a bare 'ok' while the interpreter exists", _rt_board._healthz_body() == "ok" and interp.interpreter_status()["exists"] is True)
 
 n0 = len(pushes())
 check("17: deliver_via with a dead interpreter delivers through the fallback", live.deliver_via([DEAD, FAKE], "work-osprey", "no env, still delivered") == "delivered → work-osprey", None)

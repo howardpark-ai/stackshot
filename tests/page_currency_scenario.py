@@ -240,6 +240,7 @@ d.pop(N); fs.write_text(json.dumps(d))
 
 # ---- 5. the server's ledger
 from stackshot.web import server
+from stackshot.web.routes import client_api as _rt_client
 server._publish = lambda: None
 check("server: a keeper's debt is strict, an agent's is not", server._strict(S) and server._strict(B) and not server._strict(A))
 server._owed_save({"projects/beta": {B: {"ts": time.time() - 30, "item": "s1"}, A: {"ts": time.time() - 30, "item": "s2"}}})
@@ -402,7 +403,7 @@ class _Items(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlparse(self.path); what = u.path.rsplit("/", 1)[-1]; q = dict(urllib.parse.parse_qsl(u.query))
         CALLS.append((what, q.get("key", "")))
-        if not server._client_machine(self.headers.get("Authorization", "")): st, body = 401, "unauthorized"
+        if not _rt_client._client_machine(self.headers.get("Authorization", "")): st, body = 401, "unauthorized"
         else: st, _, body = server._client_get(what, q)
         b = body.encode(); self.send_response(st); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 IS = ThreadingHTTPServer(("127.0.0.1", 0), _Items); IS.daemon_threads = True; threading.Thread(target=IS.serve_forever, daemon=True).start()

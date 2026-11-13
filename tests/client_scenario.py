@@ -45,17 +45,18 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.web.routes import client_api as _rt_client
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.core import store as _core_store
 server._publish = lambda: None
-check("a valid token names its machine", server._client_machine("Bearer " + tok) == "box-far" and server._client_machine("bearer " + mine) == me)
-check("a replaced token is dead", server._client_machine("Bearer " + old) == "")
+check("a valid token names its machine", _rt_client._client_machine("Bearer " + tok) == "box-far" and _rt_client._client_machine("bearer " + mine) == me)
+check("a replaced token is dead", _rt_client._client_machine("Bearer " + old) == "")
 for bad in ("", "Bearer ", "Bearer short", "Basic " + tok, tok, "Bearer " + tok + "x"):
-    check(f"refused: {bad[:14]!r}", server._client_machine(bad) == "", bad[:20])
-client.revoke("box-far"); check("a revoked machine is refused", server._client_machine("Bearer " + tok) == "" and not os.path.exists(path))
+    check(f"refused: {bad[:14]!r}", _rt_client._client_machine(bad) == "", bad[:20])
+client.revoke("box-far"); check("a revoked machine is refused", _rt_client._client_machine("Bearer " + tok) == "" and not os.path.exists(path))
 tok = open(client.mint("box-far")).read().strip()
 
 # ---- 3. the reads
@@ -296,7 +297,7 @@ async def _held_poll_cancelled():
     async def receive(): return {"type": "http.request", "body": body, "more_body": False}
     req = Request({"type": "http", "method": "POST", "path": "/client/poll", "query_string": b"", "path_params": {"what": "poll"},
                    "headers": [(b"authorization", ("Bearer " + tok).encode()), (b"content-type", b"application/json")]}, receive)
-    t = asyncio.create_task(server.client_write(req))
+    t = asyncio.create_task(_rt_client.client_write(req))
     await asyncio.sleep(1.5); held = not t.done()
     t.cancel()
     try: return held, await t

@@ -164,6 +164,7 @@ check("2 a healthy second brain reports no problem", brains.problem(brains.for_k
 
 # ---- 3. the second copy is missing: fail open everywhere
 from stackshot.web import server
+from stackshot.web.routes import client_api as _rt_client
 server._publish = lambda: None
 shutil.move(str(T / "second"), str(T / "second-away"))
 with stderr() as err:
@@ -347,15 +348,15 @@ check("9 distinct names get no such note", not any("repeats" in x for x in notes
 # ---- 10. client config: each brain's mirror and slug rules reach a client box, and its page links go to the right mirror
 import importlib.machinery, importlib.util, tomllib
 set_brains(SECOND)
-cc = server._client_config()
+cc = _rt_client._client_config()
 check("10 the client config carries the brain's name, mirror and slug rules", cc.get("brains") == [{"name": "second", "path": str(T / "second"), "mirror_url": SECOND["mirror_url"],
       "slugs": ["projects/gamma"], "prefixes": ["projects/beta-"]}], cc.get("brains"))
 check("10 and not the gbrain home", all("home" not in b for b in cc["brains"]) and str(T / "home-second") not in json.dumps(cc), cc.get("brains"))
 set_brains()
-check("10 with no [[brains]] the client config has no brains key", "brains" not in server._client_config())
+check("10 with no [[brains]] the client config has no brains key", "brains" not in _rt_client._client_config())
 set_brains(SECOND)
 from stackshot import cli
-text = cli.client_config_text(server._client_config(), "https://board.example.com")
+text = cli.client_config_text(_rt_client._client_config(), "https://board.example.com")
 parsed = tomllib.loads(text)
 check("10 client install writes the brain into the client's config", parsed.get("brains") == [{"name": "second", "path": str(T / "second"), "mirror_url": SECOND["mirror_url"],
       "slugs": ["projects/gamma"], "prefixes": ["projects/beta-"], "remote": True}], parsed.get("brains"))
@@ -441,7 +442,7 @@ check("14 the calls worked (put ok, page read, timeline accepted)", st == "ok" a
 check("14 the server's own environment never holds it", "GBRAIN_REMOTE_CLIENT_SECRET" not in os.environ and MADE not in json.dumps(dict(os.environ)))
 given = {"PATH": "/x"}; brains.gbrain_env(env=given, brain=brains.by_name("second"))
 check("14 gbrain_env returns a copy: the env passed in is untouched", given == {"PATH": "/x"}, given)
-cc = server._client_config()
+cc = _rt_client._client_config()
 check("14 the client config carries neither the value, the file's path nor the key", not leaks(json.dumps(cc)) and str(SF) not in json.dumps(cc) and "secret" not in json.dumps(cc), cc)
 check("14 no log line, note or repr carries the value or the path", not leaks(err.getvalue(), _cfg.notes(), repr(brains.extra()), repr(brains.all_brains())) and str(SF) not in repr(brains.extra()),
       (err.getvalue(), _cfg.notes()))
