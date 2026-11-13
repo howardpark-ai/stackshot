@@ -27,15 +27,45 @@ A builder is free when it is not the mover of any open item that is on an agent 
 background agents, best first; when none of them is free, the background agents of any project whose mandate says build. With none free nothing is handed on and -main is told that none was, once per
 item per 24 hours. At most `MAX_PER_TICK` items are handed on in one pass.
 
+THE BALANCER (`[audit] balance`, off by default; `server._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
+builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance_minutes` (default 10) goes to the builder with the FEWEST open items; the former mover is told to disregard it.
+
+  balance_enabled() / balance_minutes()         `[audit] balance` (only a TOML true) and `[audit] balance_minutes` (default 10, floor 1), both read at use
+  balance_queue(items, now, window, front)      the queue rule (model/queued.py) read over the balancer's own window, whatever `[model] queued_behind` says: {queued item: the item it waits behind}
+  balance_due(items, gid, now, minutes, front, behind, same, anchored)    the row of an item to move now, else None
+  balance_all(...)                              [(gid, row)] in id order; reads only
+  load_counts / load_of / shift                 open items per builder (`busy_movers`, names merged with `same`), updated as the pass moves items
+  pick_least(...) / balance_ok(kind, to, frm)   the least-loaded builder, and whether moving to it is an improvement
+  mark_balanced / mark_balance_none / mark_balance_capped    the record `metadata.balance` ({"at", "from", "to", "count"} and `none_at` / `capped_at`), apart from `metadata.hand_idle`
+
+An item is moved when all of these hold:
+
+  - it is open, on an agent as the board shows it (`silence.reading`), not held, and its mover is a session that is no front agent;
+  - it waited the whole time: its hand-off (when its latest one names the mover) was delivered, else made, at least `balance_minutes` ago, and `silence.clock` is that old too;
+  - it is NOT STARTED (an untaken hand-off to a session, `handoff.awaiting_session`) or QUEUED (`balance_queue`: the mover has another item in hand with activity inside the window and this one has none);
+  - the mover has NOT STARTED it: no `taken_at`, no step status in progress or done and no step marked done on a step that opens with the mover's name, no subagent running (`silence.subagent_running`), no anchor scoped to it, and
+    no pull request event (a CI result, review, comment, merge or commit) as its last activity;
+  - it was not moved by the balancer in the last 24 hours and has been moved fewer than `BALANCE_LIFETIME` (2) times; one at the lifetime cap is left to the ladders, and -main is told once (`capped_at`).
+
+Which builder: the candidates are the item's project's builders (`server._hand_idle_builders`) less any whose pane is known dead, the item's own mover, and every name in the hand-off record's `tried`; the pick is the one with the fewest
+open items (a busy pane only breaks a tie: an idle one first; then the candidates' order). An untaken hand-off moves when the pick has strictly fewer open items than the mover (`to < from`, the mover's count includes the item);
+a queued item only when `to + 1 < from`, so the move does not just swap the queue. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With no such builder the item stays, one History line says so and -main is told once per
+item per 24 hours (`none_at`).
+
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from stackshot.audit import audit_checks as _ac
 from stackshot.audit import hourly as _hourly
 from stackshot.audit import silence as _silence
 from stackshot.core import config as _cfg
+from stackshot.model import last_activity as _la
+from stackshot.model import model as _model
+from stackshot.model import queued as _queued
+from stackshot.model import steps as _steps
+from stackshot.model import work as _work
 from stackshot.waits import handoff as _ho
 from stackshot.waits import waiting as _wt
 
@@ -43,6 +73,10 @@ KEY = "hand_idle"
 DAY = 24 * 3600.0                 # an item is handed on by this pass once in this long; -main is told that no builder was free once in this long
 MAX_PER_TICK = 3                  # items handed on in one pass of the ten-minute tick
 FRESH = _hourly.SLOW_EVERY + 900.0      # an idle line older than this is no news (see the module doc)
+BALANCE_KEY = "balance"
+BALANCE_MAX_PER_TICK = 3          # items the balancer moves in one pass
+BALANCE_LIFETIME = 2              # moves of one item by the balancer, ever: after that the existing ladders have it
+PR_KINDS = (_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED, _la.COMMIT)      # the kinds of `last_activity` that are an event on a tied pull request: a build is in flight
 WHY = "no activity for an hour, nothing verified"      # the reason the History line and the new mover's notice carry
 
 
@@ -145,3 +179,207 @@ def pick_free(candidates: list[str], busy: list[str], status: Callable[[str], st
             continue
         return c
     return ""
+
+
+# ---------------------------------------------------------------------------------------------------------------- the balancer
+def balance_enabled() -> bool:
+    """`[audit] balance`, only a TOML true. Read at use."""
+    return _cfg.audit_balance()
+
+
+def balance_minutes() -> float:
+    """`[audit] balance_minutes`: 10 by default, never under 1. Read at use."""
+    return _cfg.audit_balance_minutes()
+
+
+def _brec(meta: dict[str, Any] | None) -> dict[str, Any]:
+    r = (meta or {}).get(BALANCE_KEY)
+    return r if isinstance(r, dict) else {}
+
+
+def _num(v: Any) -> float:
+    """A stamp as a number, 0.0 for one that is not (a bool, text, nothing): a torn value is no signal."""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else 0.0
+
+
+def balance_count(meta: dict[str, Any] | None) -> int:
+    """How often the balancer moved the item (a torn count reads as 0)."""
+    c = _brec(meta).get("count")
+    return c if isinstance(c, int) and not isinstance(c, bool) and c > 0 else 0
+
+
+def balanced_recently(meta: dict[str, Any] | None, now: float) -> bool:
+    return _within(_brec(meta).get("at"), now)
+
+
+def balance_none_told_recently(meta: dict[str, Any] | None, now: float) -> bool:
+    return _within(_brec(meta).get("none_at"), now)
+
+
+def balance_capped_told(meta: dict[str, Any] | None) -> bool:
+    return _num(_brec(meta).get("capped_at")) > 0
+
+
+def mark_balanced(meta: dict[str, Any], now: float, frm: str, to: str) -> None:
+    """The item was moved by the balancer now: `count` goes up by one; the day's notes that no builder was found are over. Written in the save of the move itself, before anything is sent."""
+    meta[BALANCE_KEY] = {"at": now, "from": str(frm or "")[:80], "to": str(to or "")[:80], "count": balance_count(meta) + 1}
+
+
+def _kept(meta: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in _brec(meta).items() if k in ("at", "from", "to", "count", "capped_at")}
+
+
+def mark_balance_none(meta: dict[str, Any], now: float) -> None:
+    """No builder could take the item now and -main was told; the last move is kept."""
+    meta[BALANCE_KEY] = {**_kept(meta), "none_at": now}
+
+
+def mark_balance_capped(meta: dict[str, Any], now: float) -> None:
+    """The item is at its lifetime cap, left to the ladders, and -main was told once."""
+    meta[BALANCE_KEY] = {**_kept(meta), "capped_at": now}
+
+
+def started_reason(item: dict[str, Any], mover: str, now: float, same: Callable[[Any, Any], bool], anchored: Callable[[dict[str, Any]], bool] | None = None) -> str:
+    """Why the mover is taken to have STARTED the item ("" when it has not): the hand-off was taken, a step opening with the mover's name has a status in progress or done or is marked done, a subagent is running on it,
+    an anchor is scoped to it, or a pull request event is its last activity. Such an item is never taken from its mover."""
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    r = _ho.record_of(item)
+    if r and r.get("taken_at") and same(r.get("to"), mover):
+        return "its hand-off was taken"
+    if any(l["state"] in ("in progress", "done") and same(l["agent"], mover) for l in _work.lines_of(meta)):
+        return "a step of the mover has a status in progress or done"
+    if any(s["status"] == _steps.DONE and same(_steps.opener(s["text"]), mover) for s in _steps.view(meta)):
+        return "a step of the mover is marked done"
+    if _silence.subagent_running(item, now):
+        return "a subagent is running"
+    if anchored is not None and anchored(item):
+        return "an anchor is scoped to it"
+    la = _la.read(item, now)
+    if la and la.get("kind") in PR_KINDS:
+        return "a pull request event is its last activity"
+    return ""
+
+
+def balance_queue(items: dict[str, dict[str, Any]], now: float, window: float, front: Callable[[Any, str], bool] | None = None) -> dict[str, str]:
+    """{queued item: the item it is queued behind} over the open items the board shows on an agent, by the queue rule of model/queued.py read over `window` seconds, whatever `[model] queued_behind` says (the balancer reads the
+    queue itself; the board's reading stays at an hour). An item that cannot be read is no candidate."""
+    cands = []
+    for gid in sorted(items, key=_ac._num):
+        if items[gid].get("status") != "open":
+            continue
+        try:
+            it, _meta, after_open, mover = _ac._item_view(items, gid)
+            if _silence.reading(it, mover, after_open, now) == "agent" and not _wt.is_held(it):
+                cands.append(_queued.candidate(gid, it, mover, now))
+        except Exception:  # noqa: BLE001
+            continue
+    return _queued.queue(cands, now, front, window)
+
+
+def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes: float, front: Callable[[Any, str], bool] | None, behind: dict[str, str], same: Callable[[Any, Any], bool],
+                anchored: Callable[[str, dict[str, Any]], bool] | None = None) -> dict[str, Any] | None:
+    """The row of the open item `gid` when the balancer is to move it now (see the module doc), else None: {"mover", "project", "kind" ("untaken" | "queued"), "tried", "told_none", "capped"}. `behind` is the queue
+    (`balance_queue`); `anchored(gid, item)` says whether an anchor is scoped to the item. A row with `capped` true is an item at its lifetime cap whose -main agent is not yet told: it is not to be moved."""
+    item = items.get(gid) or {}
+    if item.get("status") != "open":
+        return None
+    it, meta, after_open, mover = _ac._item_view(items, gid)
+    if not mover or _model.is_owner(mover) or _silence.reading(it, mover, after_open, now) != "agent" or _wt.is_held(it):
+        return None
+    project = str(meta.get("project") or "")
+    if front is not None and front(mover, project):
+        return None      # an item a front agent moves is the owner's work, never moved
+    window = max(_num(minutes), 0.0) * 60.0
+    rec = _ho.record_of(it)
+    if rec and not same(rec.get("to"), mover):
+        rec = None      # an older hand-off, to someone else: it says nothing about this mover
+    if rec:
+        since = _num(rec.get("delivered_at")) or _num(rec.get("at"))
+        if since <= 0 or now - since < window:
+            return None      # a hand-off waits the whole time from its delivery
+    if now - _silence.clock(it, mover) < window:
+        return None
+    if _ho.awaiting_session(it, mover, same):
+        kind = "untaken"
+    elif gid in behind:
+        kind = "queued"
+    else:
+        return None
+    if started_reason(it, mover, now, same, (lambda x: anchored(gid, x)) if anchored is not None else None):
+        return None
+    if balanced_recently(meta, now):
+        return None
+    capped = balance_count(meta) >= BALANCE_LIFETIME
+    if capped and balance_capped_told(meta):
+        return None
+    tried = [str(t) for t in ((rec or {}).get("tried") or []) if isinstance(t, str)]
+    return {"mover": mover, "project": project, "kind": kind, "tried": tried, "told_none": balance_none_told_recently(meta, now), "capped": capped}
+
+
+def balance_all(items: dict[str, dict[str, Any]], now: float, minutes: float, front: Callable[[Any, str], bool] | None, behind: dict[str, str], same: Callable[[Any, Any], bool],
+                anchored: Callable[[str, dict[str, Any]], bool] | None = None) -> list[tuple[str, dict[str, Any]]]:
+    """[(gid, row)] of every item the balancer is to deal with now, in id order; reads only. An item that cannot be read is left out."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    for gid in sorted(items, key=_ac._num):
+        if items[gid].get("status") != "open":
+            continue
+        try:
+            row = balance_due(items, gid, now, minutes, front, behind, same, anchored)
+        except Exception:  # noqa: BLE001
+            continue
+        if row is not None:
+            out.append((gid, row))
+    return out
+
+
+def load_counts(movers: Iterable[str], same: Callable[[Any, Any], bool]) -> dict[str, int]:
+    """Open items per mover, from `busy_movers`: names that are one session (`same`) are one entry."""
+    out: dict[str, int] = {}
+    for m in movers:
+        key = next((k for k in out if same(k, m)), m)
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
+def load_of(load: dict[str, int], who: str, same: Callable[[Any, Any], bool]) -> int:
+    return sum(n for k, n in load.items() if same(k, who))
+
+
+def shift(load: dict[str, int], frm: str, to: str, same: Callable[[Any, Any], bool]) -> None:
+    """One item moved from `frm` to `to`: the counts follow, so the next item of the pass sees the new load."""
+    for who, d in ((to, 1), (frm, -1)):
+        key = next((k for k in load if same(k, who)), who)
+        load[key] = max(load.get(key, 0) + d, 0)
+
+
+def pick_least(candidates: list[str], load: dict[str, int], status: Callable[[str], str], dead: Callable[[str], str], same: Callable[[Any, Any], bool], frm: str = "",
+               tried: Iterable[str] = (), front: Callable[[Any, str], bool] | None = None, project: str = "") -> str:
+    """The candidate with the fewest open items, "" when none can take the item. Left out: a name with no pane (`dead` says why; one that raises is left out too), the item's own mover (`frm`), any name in `tried`, a front agent.
+    A pane in a turn only breaks a tie between equal loads (an idle one first); then the candidates' order (the project's own first). Never an exclusion for being busy."""
+    tried = [t for t in tried if t]
+    best: tuple[int, int, int] | None = None
+    pick = ""
+    for i, c in enumerate(candidates):
+        if not c or (frm and same(c, frm)) or any(same(c, t) for t in tried):
+            continue
+        try:
+            if dead(c) or (front is not None and front(c, project)):
+                continue
+            busy = 1 if status(c) == "busy" else 0
+        except Exception:  # noqa: BLE001
+            continue
+        key = (load_of(load, c, same), busy, i)
+        if best is None or key < best:
+            best, pick = key, c
+    return pick
+
+
+def balance_ok(kind: str, to_load: int, from_load: int) -> bool:
+    """Is a move to a builder with `to_load` open items an improvement for an item whose mover has `from_load` (the item itself counted)? An untaken hand-off: strictly fewer (`to < from`). A queued item: `to + 1 < from`,
+    since the item will count for the builder it goes to."""
+    return to_load + 1 < from_load if kind == "queued" else to_load < from_load
+
+
+def balance_why(kind: str, minutes: float) -> str:
+    """The reason the History line and the new mover's notice carry."""
+    return (f"not started in {minutes:g} min" if kind == "untaken" else f"queued behind another item for {minutes:g} min") + ", so it goes to the builder with the fewest open items"

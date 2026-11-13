@@ -2147,7 +2147,7 @@ def _front_sender(who: str) -> bool:
 # purpose through the message tool are not touched.
 PRESENCE_MINUTES = 30.0
 _FRONT_TAG_KIND = {"answer": "exempt", "handoff": "exempt", "migration": "exempt", "recycle": "exempt", "needs": "exempt",
-                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
+                   "wake": "exempt", "watch": "exempt", "idle": "exempt", "wait": "exempt", "comment": "exempt", "stall": "exempt", "release": "exempt", "ask": "exempt", "balance": "exempt",      # these ask the mover to act (its own timer fired, a wait ended, the owner commented): held, the item would sit unmoved
                    "close": "close", "check": "close",      # a notice's tag names its kind unless the sender passes one
                    "owner": "progress", "observer": "progress"}      # news about the item: progress (named here so a new, unmapped tag is a decision the tag-coverage test catches)
 
@@ -5753,7 +5753,7 @@ def _minute_fleet_publish() -> None:
 
 
 def _minute_ticks() -> "list[_minute.Tick]":
-    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
+    """The minute set in its order: (1) the events that end a wait, then the phase sweep (the stored phase brought up to the clock), (2) the balancer (off by default; an item not started or queued for ten minutes moves before the hand-off tick would remind its mover) and the hand-off tick, (3) the answers, (4) the fleet's clocks; then the ten-minute set: (5) the filing pass,
     the dates pass, the wake catch-up, the silence pass. Each lambda names its function
     when it runs, so a replaced function is the one called. `board=True`: skipped while the migration's pass holds the board (the registry sync and the
     clients' tick go on; the two wake passes have their own check)."""
@@ -5765,6 +5765,7 @@ def _minute_ticks() -> "list[_minute.Tick]":
         T("evwait_tick", lambda: _evwait_tick(), "settle", board=True),
         T("check_tick", lambda: _check_tick(), "settle", board=True),
         T("proof_tick", lambda: _proof_tick(), "settle", board=True),
+        T("balance_tick", lambda: _balance_tick(), "handoff", board=True),
         T("handoff_tick", lambda: _handoff_tick(), "handoff", board=True),
         T("answer_tick", lambda: _answer_tick(), "answers", board=True),
         T("roles_sync_safe", lambda: _roles_sync_safe(), "fleet"),
@@ -6137,6 +6138,128 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         except Exception as e:  # noqa: BLE001
             print(f"audit: {main} not told of the idle items: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     return handed
+
+
+def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
+                  dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
+    """The balancer (audit/hand_idle.py, `[audit] balance`, off by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
+    untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder with the fewest open
+    items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
+    why. The mover it left is told ONCE, by `_tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
+    subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
+    in all (then the existing ladders have it and -main is told once), three per pass. With no builder that has fewer open items the item stays, one History line says so and -main is told once per item per 24 hours.
+    Stands still while the audit is off or runs in agent mode, while the board is paused, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
+    from stackshot.audit import hand_idle as _hi
+    from stackshot.tools import next_report as _nr
+    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff_paused():
+        return []
+    now = time.time() if now is None else now
+    items = items if items is not None else _nr.load_all(None)
+    env = env if env is not None else _silence_env()
+    front = getattr(env, "is_front_safe", None) or env.is_front      # a front test that cannot answer counts as front: nothing moves on a guess
+    minutes = _hi.balance_minutes()
+    cells: dict[str, Any] = {}
+
+    def anchors_of(gid: str, item: dict[str, Any]) -> bool:      # an anchor scoped to the item says a build is in flight; an anchor store that cannot be read counts as one
+        try:
+            if "anchors" not in cells:
+                cells["anchors"] = _anc.load()
+            return bool(_scoped_anchors(str((item.get("metadata") or {}).get("project") or ""), gid, cells["anchors"]))
+        except Exception:  # noqa: BLE001
+            return True
+    anchored = anchored or anchors_of
+    behind = _hi.balance_queue(items, now, minutes * 60.0, front)
+    rows = _hi.balance_all(items, now, minutes, front, behind, _ho_same, anchored)
+    if not rows:
+        return []
+    if status is None or dead is None:
+        idx = _sessions_index()
+        status = status or (lambda who: _handoff_status(who, idx)[0])
+        dead = dead or (lambda who: _handoff_pane(who, idx))
+    load = _hi.load_counts(_hi.busy_movers(items, now), _ho_same)
+    moved: list[str] = []
+    gone: list[tuple[str, str, str]] = []      # (the mover it left, the item, who has it now): the former mover's notice
+    told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
+    builders: dict[str, list[str]] = {}      # per project, read once a pass
+    mains: dict[str, str] = {}
+    for gid, row in rows:
+        if len(moved) >= _hi.BALANCE_MAX_PER_TICK:
+            break
+        try:
+            project = row["project"]
+            if project not in builders:
+                builders[project] = _hand_idle_builders(project)
+                mains[project] = _main_agent(project)
+            main = mains[project]
+            if main and _model.is_owner(main):
+                main = ""      # the owner is told nothing by this pass
+            lead = f"{_gh.shown(gid)} \"{items[gid].get('subject') or ''}\" ({project})"
+            if row["capped"]:
+                with _writes.ITEM_LOCK:
+                    item = _load(gid)
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored)
+                    if cur is None or not cur["capped"] or not _ho_same(cur["mover"], row["mover"]):
+                        continue
+                    meta = item.setdefault("metadata", {})
+                    _hi.mark_balance_capped(meta, now)
+                    _stall.note(meta, now, f"already moved {_hi.BALANCE_LIFETIME} times by the balancer, so it stays with {_session_label(row['mover'])} and the ladders have it: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _writes.save(gid, item, note="balance: at its lifetime cap")
+                if main:
+                    told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_session_label(row['mover'])} to the ladders"))
+                print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
+                continue
+            to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
+            if to and _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
+                def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
+                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored)
+                    if cur is None or cur["capped"] or not _ho_same(cur["mover"], st.frm):
+                        return False
+                    _hi.mark_balanced(item.setdefault("metadata", {}), now, st.frm, st.to)
+                    return True
+                st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
+                if not _handoff_exec([st], now, verify=False, recheck=still):
+                    continue
+                moved.append(gid)
+                _hi.shift(load, row["mover"], to, _ho_same)
+                gone.append((row["mover"], gid, to))
+                print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
+            elif not row["told_none"]:
+                with _writes.ITEM_LOCK:
+                    item = _load(gid)
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored)
+                    if cur is None or cur["capped"] or cur["told_none"] or not _ho_same(cur["mover"], row["mover"]):
+                        continue
+                    meta = item.setdefault("metadata", {})
+                    _hi.mark_balance_none(meta, now)
+                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no builder has fewer open items, so it stays with {_session_label(row['mover'])}: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _writes.save(gid, item, note="balance: no builder with fewer open items")
+                if main:
+                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no builder has fewer open items, so it stays with {_session_label(row['mover'])}"))
+                print(f"balance: {gid} no builder with fewer open items", file=sys.stderr, flush=True)
+        except Exception as e:  # noqa: BLE001  — one item never stops the others
+            print(f"balance: {gid} not balanced: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for frm in dict.fromkeys(f for f, _g, _t in gone):      # the former mover is told once per item it left, in one message however many: only for an item this pass moved
+        try:
+            if _front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm):
+                continue
+            mine = [(g, t) for f, g, t in gone if f == frm]
+            if len(mine) == 1:
+                text = f"Disregard: {_gh.shown(mine[0][0])} is now with {_session_label(mine[0][1])}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."
+            else:
+                text = (f"Disregard: {len(mine)} items are now with other sessions:\n" + "\n".join(f"- {_gh.shown(g)} is now with {_session_label(t)}" for g, t in mine)
+                        + "\nDrop them, stop any work or subagent on them, and write nothing to them. No reply is owed.")
+            _tell_woken(",".join(g for g, _t in mine), _session_id(frm) or frm, text, tag="balance")
+        except Exception as e:  # noqa: BLE001
+            print(f"balance: {frm} not told to disregard: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    for main, pairs in told.items():
+        try:
+            gids, lines = [g for g, _l in pairs], [l for _g, l in pairs]
+            body = lines[0] + "." if len(lines) == 1 else f"{len(lines)} items stay where they are:\n" + "\n".join("- " + x for x in lines)
+            _tell_woken(",".join(gids), _session_id(main) or main, f"{_FOR_OWNER}\n[stackshot] {body}\nNothing is asked of you and no reply is owed; nothing here is for {OWNER}. → "
+                        + (_notice_link(gids[0]) if len(gids) == 1 else _inst.BOARD_URL), tag="stall")
+        except Exception as e:  # noqa: BLE001
+            print(f"balance: {main} not told: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+    return moved
 
 
 _BACKSTOP_EVERY = 3600.0      # seconds between the backstop's looks; the ten-minute silence tick calls it, and its own gate lets one look through an hour
