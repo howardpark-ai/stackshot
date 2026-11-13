@@ -240,6 +240,19 @@ for at_ in NOT_A_DATE:
           and plain(hb_).count("arrived arrived") == 0 and "arrived · arrived" not in plain(hb_), (wb_, plain(hb_)[:300]))
 check("hostile: the time of an arrival is empty (never an error) for a time no date can show, in the server's `model:` line, and the zone follows a real one", all(server._arrival_when(x) == "" for x in (float("inf"), 1e20, 1e300, 253402300800.0, float("nan")))
       and server._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}" and b.arrival_when(float("inf")) == "" and b.arrival_when(GOT) == W_(GOT), (server._arrival_when(float("inf")), server._arrival_when(GOT)))
+# the brief's model line (short) carries the arrival time of a line as get's does: the same time formatter
+sh312 = server._model_lines({**json.loads((T / "store/a/312.json").read_text()), "gid": "a312"}, short=True)
+check("brief: the short model line of a list with arrived lines carries the time of each arrival and the zone's name, as get's line does (one line, no conflicts)",
+      len(sh312) == 1 and f"(its date came, {day(0)} 08:30 {ZLAB})" in sh312[0] and sh312[0].startswith("model: waiting on several things (all of 6, 2 arrived: "), sh312)
+# the time and its zone's name come from one source, read at the call (the instance zone can change under a running server, ZONE is fixed at import)
+_tz0 = _cfg.CFG["instance"]["timezone"]
+try:
+    _cfg.CFG["instance"]["timezone"] = "Asia/Tokyo"
+    at_tokyo = server._arrival_when(GOT)
+finally:
+    _cfg.CFG["instance"]["timezone"] = _tz0
+tk = datetime.datetime.fromtimestamp(GOT, zoneinfo.ZoneInfo("Asia/Tokyo"))
+check("zone: the arrival time is drawn in the zone the instance has at the call, with that zone's own name (never the clock of one zone with the name of another)", at_tokyo == f"{tk:%Y-%m-%d %H:%M} JST" and server._arrival_when(GOT) == f"{day(0)} 08:30 {ZLAB}", (at_tokyo, server._arrival_when(GOT)))
 # an item id of a megabyte in a line is clipped everywhere it is drawn
 c347, p347, h347, g347 = wait_cell("a347"), page_wait("a347"), b.item_html("a347"), get_line("a347")
 check("clip: a line that names an item with a one-megabyte id is drawn with the id clipped (the home cell, the item page, get's model line), never the megabyte", len(c347) < 4000 and len(p347) < 8000 and len(h347) < len(b.item_html("a310")) + 5000 and len(g347) < 2000

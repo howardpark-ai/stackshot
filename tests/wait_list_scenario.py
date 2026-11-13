@@ -11,7 +11,8 @@ day at the latest. This part of the feature is storage, the model and the ending
     path); mixed kinds; two lines on one item or anchor; `all` ends on the last arrival and `any` on the first; a repeated delivery changes nothing; an item already turned is not turned again
   * the backstop day, with and without an open relay line (the owner is asked then, and "not yet" puts the list back with what had arrived)
   * the end drops the wait's fields (waits and wait_mode with the rest), and the mover is told what arrived and what did not
-  * a legacy path never owns a list item; a single wait is not touched (the existing suites are the proof)
+  * with the watchers off, a legacy path marks no line of a list (the `after` release and the held-anchor release never take one) but the legacy wake pass still ends a list at its backstop day, by the
+    watchers' own path and in their words; a single wait is not touched (the existing suites are the proof)
 
     tests/run-suite wait_list        → exit 0 / 1"""
 import datetime, json, os, re, sys, pathlib, time, logging
@@ -625,6 +626,50 @@ check("kind_of: a stored list that does not hold is the date alone to waiting.ki
       _WT.kind_of(BADL) == "time" and _WT.kind_of({k: v for k, v in BADL.items() if k != "until"}) == "" and UW.kind_of(BADL) == "" and _WT.kind_of(GOOD) == "list" and UW.kind_of(GOOD) == "list"
       and _WT.kind_of({"wait_kind": "relay"}) == "relay" and UW.kind_of({"wait_kind": "relay"}) == "relay", (_WT.kind_of(BADL), UW.kind_of(BADL)))
 check("kind_of: …whatever is wrong with the list (not a list of lines, a mode that is neither, no backstop day)", all(not UW.kind_of({**BADL, **bad}) and _WT.kind_of({**BADL, **bad}) in ("time", "") for bad in ({"waits": "x"}, {"wait_mode": "some", "waits": GOOD["waits"]}, {"until": "", "waits": GOOD["waits"]})), None)
+
+# ================================================================ the lows of the display follow-up
+# one list whose end fails never stops the lists after it, with the watchers off (the legacy wake pass, as the watchers' pass does it)
+reset()
+for i_ in (230, 231, 232, 233): lst(i_, [Tm(day(9)), It("a206")], mode="all", until=day(-1))
+cfg(watchers=False)
+calls_ = []
+def flaky(gid, *a, **k):
+    calls_.append(gid)
+    if gid == "a231": raise RuntimeError("disk")
+    return orig_fire(gid, *a, **k)
+server._watch_fire = flaky
+try:
+    woke = server._wake_pass()
+    first_calls = list(calls_); calls_.clear()
+    woke2 = server._wake_pass()
+finally:
+    server._watch_fire = orig_fire; server._WATCH_BACKOFF.pop("a231", None)
+check("legacy (watchers off): a list whose end raises is skipped and noted, and the lists after it (and before it) are still ended", "a231" not in woke and all(g in woke for g in ("a230", "a232", "a233"))
+      and all(mt(i_).get("mover") == BACK and "wait_kind" not in mt(i_) for i_ in (230, 232, 233)) and mt(231).get("wait_kind") == "list", (woke, first_calls))
+check("legacy (watchers off): …the failed one is backed off (noted on the item, as the watchers' pass notes it) and is not tried again by the next pass", mt(231).get("watch", {}).get("failed_at", 0) > 0 and "a231" in first_calls and "a231" not in calls_ and woke2 == [], (first_calls, calls_, mt(231).get("watch")))
+cfg(watchers=True)
+# `_watch_fire(legacy=True)` ends a list that is open and nothing else: a closed item that still stores a list is left alone
+lst(234, [Tm(day(9)), It("a206")], mode="all", until=day(-1)); d_ = rd(234); d_["status"] = "completed"; put(234, d_)
+cfg(watchers=False); b234 = raw(234); out_ = {}
+try: got_ = server._watch_fire("a234", "backstop", time.time(), out_, legacy=True); why_ = ""
+except Exception as e_: got_, why_ = None, f"{e_.__class__.__name__}: {e_}"
+cfg(watchers=True)
+check("legacy: _watch_fire(legacy=True) on a closed item that stores a list does nothing (False, no message, no save, the item as it was)", got_ is False and not out_ and raw(234) == b234, (got_, why_, out_))
+# hostile data: a megabyte in every field of every line is clipped before it is normalised, and what is kept is what normalising the whole would keep
+HUGE = ("ab cd " * 170000)[:1_000_000]
+big_ = {"wait_kind": "list", "wait_mode": "all", "until": "2026-12-01", "waits": [{**An(HUGE, HUGE), "arrived": {"at": 5.0, "what": HUGE}}, {**Ev(HUGE), "arrived": {"at": 6.0, "what": HUGE}}, Re(HUGE), It(HUGE)] * 2}
+t0_ = time.perf_counter()
+for _ in range(5): ok_ = WL.valid(big_) and bool(WL.lines(big_)) and bool(WL.summary(big_)) and _WT.kind_of(big_) == "list"
+spent_ = time.perf_counter() - t0_
+cl_ = WL.lines(big_)
+check("hostile: eight lines of a megabyte each are read in no time (5 rounds of valid, lines, summary and kind_of in under half a second; it took seconds when the whole text was normalised first)", ok_ and spent_ < 0.5, spent_)
+check("hostile: …what is kept is the first LINE_MAX characters of the normalised text, as before", cl_[0]["anchor"] == " ".join(HUGE.split())[:300] and cl_[0]["event"] == " ".join(HUGE.split())[:300] and cl_[0]["arrived_what"] == " ".join(HUGE.split())[:300]
+      and cl_[3]["after"] == " ".join(HUGE.split())[:300], [len(cl_[0]["anchor"]), len(cl_[3]["after"])])
+for text_ in ("a" + " " * 5000 + "b" * 400, " " * 4000, "x" * 700, " ".join(["\t\n word"] * 400), "é" * 301 + "\u00a0" * 900 + "tail"):
+    lines_ = WL.lines({**GOOD, "waits": [An("https://x/" + text_, text_), Ev(text_)]}) if text_.strip() else ()
+    if lines_: check(f"hostile: clipping before normalising keeps what clipping after kept (a text of {len(text_)} characters, mostly whitespace or not)", lines_[1]["event"] == " ".join(text_.split())[:300] and lines_[0]["anchor"] == (" ".join(("https://x/" + text_).split()))[:300], lines_[1]["event"][:40])
+check("hostile: a megabyte of whitespace-only text in a field is no text (the line needs it), and a megabyte kind, mode or backstop day is no kind, mode or day", not WL.valid({**GOOD, "waits": [Re(" " * 1_000_000), It("a1")]}) and not WL.valid({**GOOD, "waits": [{"kind": HUGE, "event": "x"}, It("a1")]})
+      and not WL.valid({**GOOD, "wait_mode": HUGE}) and not WL.valid({**GOOD, "until": HUGE}) and not WL.stored({"wait_kind": HUGE}) and WL.stored({"wait_kind": "  List "}), None)
 
 # ================================================================ nothing changed for a single wait
 check("single: the model's fields, kinds and words for the five single kinds are what they were (an item with one wait stores no list, reads no lines, and the five-kind write check is the same)",
