@@ -61,14 +61,17 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import states
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.projects import pages as pg
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told_ = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told_.append((tag, gid, owner, note))
@@ -87,7 +90,7 @@ def refused_nw(name, i, f, *want):
     was = raw(i)
     refused(name, f, *want)
     check(name + " (nothing written)", raw(i) == was, None)
-get = lambda i: server.stackshot_get(f"a{i}")
+get = lambda i: _wt_get.stackshot_get(f"a{i}")
 ASK = "Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date"
 ASK2 = "Decide: ship the thing next week · Recommend: yes · Stakes: two weeks of delay · By: no date"
 TODAY_D = server._pages.zone_now().date()
@@ -128,10 +131,10 @@ check("3: …but `Oliver to …` is", NOTE3.format(s="doing") in get(16), get(16
 check("3: the opener rule, as a function", [states.next_names_owner(x) for x in ("Oliver: x", "home: x", "AE: x", "you: x", "You: x", "オリバー: x", "AE to x", "Oliver approved x", "Oliver's x", "AE-UX x", "you can x")] == ["Oliver", "", "Oliver", "Oliver", "Oliver", "Oliver", "Oliver", "", "", "", ""], None)
 item(11, status="completed", needs=[], next="Oliver: closed")
 check("3: …and a closed item", "next names" not in server._fmt({**rd(11), "gid": "a11"}), None)
-b = server.stackshot_brief()
+b = _wt_brief.stackshot_brief()
 check("3: the brief carries it for items 1 to 4 and 16 (five open items name Oliver under an agent's state)", b.count("next names Oliver but the state is") == 5, b.count("next names Oliver but the state is"))
 # the refusal on create and update, the fix accepted, and a legacy item fixed step by step
-CR = lambda **kw: server._create(subject="[home] oliver step", description=DESC, project="projects/alpha", owner="home-front", **kw)
+CR = lambda **kw: _wt_create._create(subject="[home] oliver step", description=DESC, project="projects/alpha", owner="home-front", **kw)
 was_ids = sorted(p_.name for p_ in (T / "store/a").iterdir())
 refused("3: a create whose next opens with Oliver under a derived doing is refused, naming the fix", lambda: CR(next="Oliver: merge the PR", needs=[BACK]),
         "Refused", "Oliver's step", "state is doing", "needs=decision with an ask", "open next with the agent who takes the step", "Nothing was written")
@@ -264,7 +267,7 @@ upd(50, sender="home-stew", hold=True, wake=day(3), wait_basis=BAS)
 ns = mt(50).get("next_stale") or {}
 check("5a: a write by a session that is neither the owner nor named by next, changing hold and wake and not next, marks next", ns.get("fields") == ["hold", "wake"] and ns.get("by") == "home-stew" and ns.get("at"), mt(50))
 check("5a: …get shows it: who, what, when", re.search(r"\(next may be stale: home-stew changed hold, wake \w{3} \w{3} \d+\w\w \d\d:\d\d\)", get(50)) is not None, get(50))
-check("5a: …and the brief", "(next may be stale: home-stew changed hold, wake" in server.stackshot_brief(), None)
+check("5a: …and the brief", "(next may be stale: home-stew changed hold, wake" in _wt_brief.stackshot_brief(), None)
 upd(50, priority="p2")
 check("5a: the owner's later write that leaves next alone keeps the mark", "next_stale" in mt(50), mt(50))
 upd(50, next="team-back: build it after the wake")
@@ -329,7 +332,7 @@ check("5b: a yearless date rolls into next year only when more than 90 days past
       and states.passed_dates("Dec 24th", datetime.date(2026, 10, 24)) == [] and states.passed_dates("Jan 5th", datetime.date(2026, 12, 20)) == [], None)
 check("5b: the end of an inner line ends a bare day (re.M)",
       [d for _, d in states.named_dates("reply by Oct 5\nsecond line", datetime.date(2026, 10, 24))] == [datetime.date(2026, 10, 5)], None)
-b = server.stackshot_brief()
+b = _wt_brief.stackshot_brief()
 check("5b: the brief flags it too", f"it names {past.isoformat()}, which has passed" in b, None)
 upd(57, next=f"team-back: reply by {fut.isoformat()}")
 check("5b: …and a write that rewrites next ends it", "may be stale" not in get(57), get(57))
@@ -385,7 +388,7 @@ rows = {x["shown"]: x for x in json.loads(server._client_items(U["home-front"])[
 check("7: the client items read carries no state_hint and no state_derived, and no state for an item that stores none; the stored one keeps its state", all("state_hint" not in r and "state_derived" not in r for r in rows.values()) and "state" not in rows["a80"] and rows["a82"]["state"] == "doing", {k: (rows[k].get("state"), rows[k].get("state_hint")) for k in ("a80", "a81", "a82")})
 rows_f = {x["shown"]: x for x in json.loads(server._client_items(U["home-front"])[2])["items"]}
 check("7: …a session named in needs is the item's mover and its row still has the role, with no hint", rows_f["a83"].get("role") == "agent" and "state_hint" not in rows_f["a83"], rows_f["a83"])
-b = server.stackshot_brief()
+b = _wt_brief.stackshot_brief()
 check("7: the brief and get carry no hint to store a state, and no derived state word", "state hint:" not in b and "no stored state:" not in b and "state hint:" not in get(80) and "(derived)" not in get(80), None)
 due = [rows["a80"], rows["a81"], rows["a82"], rows_f["a83"]]
 check("7: the hook's board question has no state-hint lines (pages.state_hints is gone)", not hasattr(pg, "state_hints") and "Items with no stored state" not in pg.board_ask(["a write"], due), None)

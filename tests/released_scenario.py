@@ -117,8 +117,11 @@ def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]                       # this checkout's origin, as the fixture's repository
 server._HERE = T / "repo"
 check("the last-good path is release.sh's ($LOGDIR/last-good, LOGDIR = config.py state releases)", server._cfg.state("releases", "last-good") == LAST_GOOD)
@@ -413,8 +416,8 @@ rel = pathlib.Path(STACK, "release.sh").read_text(encoding="utf-8")
 check("release.sh's help says what it does once main's full run passed, and which steps count",
       "`client.py released --pr <url> --sha <merge>`" in rel and "PR #N is live; its step is ticked; the item's other open steps remain" in rel and "do the step after it and close the item" not in rel and "pre-release" in rel and '"release PR #N", "release #N", or "release" before its URL' in rel
       and "--project projects/example" not in rel)
-check("the update/create check text says exactly which steps count", "`release PR #<n>`, `release #<n>`, or `release` before the PR's URL" in server._CHECK_FORM
-      and "only mentions the PR" in server._CHECK_FORM)
+check("the update/create check text says exactly which steps count", "`release PR #<n>`, `release #<n>`, or `release` before the PR's URL" in _wt_text._CHECK_FORM
+      and "only mentions the PR" in _wt_text._CHECK_FORM)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} passed" + (f" — FAILED: {', '.join(fails)}" if fails else ""))
 sys.exit(1 if fails else 0)

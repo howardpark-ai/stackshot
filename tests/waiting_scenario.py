@@ -64,7 +64,12 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.audit import audit as _audit_mod
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
@@ -72,7 +77,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
 real_tell = telling.tell_woken
@@ -120,7 +125,7 @@ check("waiting.py computes no date: compute, the rollout floor and jitter, the w
 gone_s = [n for n in ("_waiting_of", "_capped_note", "_due_cap_words", "_retire_afters", "RETIRE_EB_SLOP") if hasattr(server, n)]
 check("…nor does the server keep a wait reader, the capped note or the retire pass's wait reading", not gone_s, gone_s)
 check("the [waiting] defaults hold only what is still read: the cap, the basis weekday and the dated-wait minimum", set(W.DEFAULTS) == {"cap_days", "cap_needs_owner", "basis_weekday", "dated_wait_min_hours"}, sorted(W.DEFAULTS))
-g2 = server.stackshot_get("a2"); b0 = server.stackshot_brief()
+g2 = _wt_get.stackshot_get("a2"); b0 = _wt_brief.stackshot_brief()
 check("get and the brief print no `waiting:` line and no expected-by time, however old the item", "waiting:" not in g2 and "expected" not in g2.lower() and "waiting:" not in b0 and "past due" not in g2, g2)
 for i in range(1, 20): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 
@@ -129,7 +134,7 @@ import inspect
 for i in range(1, 20): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 LATE = 30
 item(LATE, hold=True, wake=wk(-3600), su=now0 - 1 * DAY)
-g30 = server.stackshot_get(f"a{LATE}")
+g30 = _wt_get.stackshot_get(f"a{LATE}")
 check("get shows a hold ten minutes past its wake as it is: no waiting line, no past-due mark, no step of a ladder and no stuck mark", "waiting: " not in g30 and "past due" not in g30 and not re.search(r"step \d of \d|\(stuck\)|stuck list", g30), g30)
 check("no waiting tick is left: it is not on the runner's table, and the server has no function of that name nor of its plan, send or record",
       not any("waiting" in t.name for t in server._minute_ticks()) and not any(hasattr(server, n) for n in ("_waiting_tick", "_wait_plan", "_wait_record", "_wait_raise", "_wait_text", "_wait_options", "_wait_recipient", "_wait_hint", "_waiting_counts", "_WAIT_LAST", "_DOWN_SINCE")),
@@ -145,7 +150,7 @@ check("a state change on a late item sends the server's ordinary notices only: n
 for i in range(30, 60): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 item(60, hold=True, wake=wk(5 * DAY), after=["a61"], su=now0 - DAY, wait_failed={"what": "after a99", "why": "an old failure", "at": now0 - 82}); item(61, wake=wk(3 * DAY))
 told.clear()
-server.stackshot_complete("a61", outcome="dropped", reason="not needed", description="- Dropped", sender="home-owner")
+_wt_complete.stackshot_complete("a61", outcome="dropped", reason="not needed", description="- Dropped", sender="home-owner")
 m60 = rd(60)["metadata"]
 check("the last prerequisite dropped: the item is released, so nothing is waited on and nothing failed: no wait_failed (a stale one included), no old ladder record, hold, wake and after gone",
       not any(k in m60 for k in ("wait_failed", "waiting", "hold", "wake", "after")), m60)
@@ -154,11 +159,11 @@ check("…the item's default mover (the project's builder: no mover is stored) i
 told.clear()
 item(63, hold=True, wake=wk(5 * DAY), after=["a64", "a65"], su=now0 - DAY); item(64, wake=wk(3 * DAY)); item(65, wake=wk(4 * DAY))
 told.clear()
-server.stackshot_complete("a64", outcome="dropped", reason="not needed", description="- Dropped", sender="home-owner")
+_wt_complete.stackshot_complete("a64", outcome="dropped", reason="not needed", description="- Dropped", sender="home-owner")
 m63 = rd(63)["metadata"]
 check("a prerequisite dropped while another still stands: the wait goes on, on the one left; nothing failed, nobody is told", m63.get("after") == ["a65"] and "wait_failed" not in m63 and hd_(m63) is True and not [t for t in told if t[1] == "a63"], (m63, told))
 item(66, hold=True, wake=wk(5 * DAY), after=["a67"], su=now0 - DAY); item(67, wake=wk(3 * DAY))
-server.stackshot_complete("a67", outcome="superseded", superseded_by="a61", reason="replaced", description="- Replaced", sender="home-owner")
+_wt_complete.stackshot_complete("a67", outcome="superseded", superseded_by="a61", reason="replaced", description="- Replaced", sender="home-owner")
 check("a prerequisite superseded by an item that is not open is no failure either: the item is released", "after" not in rd(66)["metadata"] and "wait_failed" not in rd(66)["metadata"], rd(66)["metadata"])
 for i in range(60, 70): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 
@@ -236,7 +241,7 @@ item(75, su=now0 - DAY)
 r75 = server._update("a75", due=day(20), sender="home-owner")
 check("a due date is a deadline, not a wait: one three weeks out is accepted on update", rd(75)["metadata"].get("due") == day(20), rd(75)["metadata"])
 check("…as it is: the reply says nothing of a cap or an expected-by, and no record of his words is kept for it", "capped" not in r75 and "expected-by" not in r75 and "cap_ok" not in rd(75)["metadata"], r75)
-out = server._create(subject="[home] far due", description=DESC, project="projects/alpha", owner="home-owner", next="home-owner: x", due=day(30))
+out = _wt_create._create(subject="[home] far due", description=DESC, project="projects/alpha", owner="home-owner", next="home-owner: x", due=day(30))
 check("…and on create", out.startswith("created ") and "capped" not in out and "expected-by" not in out, out)
 told.clear()
 server._update("a75", next="home-owner: moved on", sender="home-owner")
@@ -264,7 +269,7 @@ item(43, su=now0 - DAY, wake=day(10), cap_ok={"wake": day(10), "by": "a board an
 server._update("a43", clear_wake=True, sender="home-owner")
 check("clear_wake drops the record of his words", "cap_ok" not in rd(43)["metadata"] and "wake" not in rd(43)["metadata"], rd(43)["metadata"])
 item(44, su=now0 - DAY, wake=day(10), due=day(20), cap_ok={"wake": day(10), "by": "a board answer", "due": day(20), "due_by": "a board answer"})
-server.stackshot_complete("a44", outcome="done", reason="finished", description="- Done", sender="home-owner")
+_wt_complete.stackshot_complete("a44", outcome="done", reason="finished", description="- Done", sender="home-owner")
 check("completing an item drops the record", "cap_ok" not in rd(44)["metadata"] and rd(44)["status"] == "completed", rd(44)["metadata"])
 
 fleet_gone(False)
@@ -274,8 +279,8 @@ async def create_desc():
         return next((x.description or "" for x in await c.list_tools() if x.name == "create"), "")
 from fastmcp import Client
 cr = asyncio.run(create_desc())
-check("create's description carries the cap sentence", server._CAP_FORM.strip() in cr and "7 days" in cr and "accepted as it is" in cr, cr[-400:])
-check("the update description carries the rule, the cap and clear_after, and no ladder and no timed-in-days wait: the other texts keep their form", all(x in server._WAIT_FORM for x in ("real dates only", "7 days", "clear_after=true")) and not re.search(r"stuck list|ladder|timed in days", server._WAIT_FORM), server._WAIT_FORM)
+check("create's description carries the cap sentence", _wt_create._CAP_FORM.strip() in cr and "7 days" in cr and "accepted as it is" in cr, cr[-400:])
+check("the update description carries the rule, the cap and clear_after, and no ladder and no timed-in-days wait: the other texts keep their form", all(x in _wt_update._WAIT_FORM for x in ("real dates only", "7 days", "clear_after=true")) and not re.search(r"stuck list|ladder|timed in days", _wt_update._WAIT_FORM), _wt_update._WAIT_FORM)
 _gd = asyncio.run(server.mcp.get_tool("get")).description if hasattr(server.mcp, "get_tool") else ""
 _bd = asyncio.run(server.mcp.get_tool("brief")).description if hasattr(server.mcp, "get_tool") else ""
 check("get and brief no longer describe a `waiting:` line or an expected-by, and teach no ladder, step or stuck list",
@@ -313,7 +318,7 @@ check("a notice that could not be delivered is recorded on the item: who, which 
 check("…a filing record: the state clock stays", rd(90)["state_updated"] == now0 - DAY, rd(90))
 for _ in range(6): real_tell("a90", "home-stew", "[stackshot] again", tag="idle").join()
 check("only the last five are kept", len(rd(90)["metadata"]["undelivered"]) == 5, rd(90)["metadata"]["undelivered"])
-check("get lists them", "undelivered notices:" in server.stackshot_get("a90") and "(idle) to " in server.stackshot_get("a90"), server.stackshot_get("a90"))
+check("get lists them", "undelivered notices:" in _wt_get.stackshot_get("a90") and "(idle) to " in _wt_get.stackshot_get("a90"), _wt_get.stackshot_get("a90"))
 (T / "failpush.py.mode").write_text("ok")
 item(91, su=now0 - DAY); real_tell("a91", "home-stew", "[stackshot] fine", tag="wait").join()
 check("a delivered notice records nothing", "undelivered" not in rd(91)["metadata"], rd(91)["metadata"])
@@ -343,7 +348,7 @@ for i in range(85, 400): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 check("a due date at the end of time is no date, not an exception: 9999-12-31 and 3000-01-01 give none, a normal one a date",
       W.due_epoch("9999-12-31") is None and W.due_epoch("3000-01-01") is None and W.due_epoch("2026-12-31") is not None and W.wake_epoch("9999-12-31T23:59") is None and "unreadable" in W.when_words(1e30), (W.due_epoch("9999-12-31"),))
 item(89, due="9999-12-31", su=now0 - 10 * DAY)
-check("an item with such a due date reads as any item: get shows it, the items API lists it and the board builds", "item 89" in server.stackshot_get("a89"), server.stackshot_get("a89")[:200])
+check("an item with such a due date reads as any item: get shows it, the items API lists it and the board builds", "item 89" in _wt_get.stackshot_get("a89"), _wt_get.stackshot_get("a89")[:200])
 bad = {"id": "9", "subject": "[home] bad", "status": "open", "metadata": 5, "state_updated": "garbage"}
 check("a stored value that makes the mover reading raise gives that row no mover fields and fails no list: the reading is guarded", server._wait_fields("a9", bad, server._WaitCtx(now0)) == {}, server._wait_fields("a9", bad, server._WaitCtx(now0)))
 check("the board builds with the item of such a due date on it, and shows it", "a89" in ui_render.Board(f"{tmp}/store").markdown(), None)
@@ -406,7 +411,7 @@ check("board.md carries no row for the ladder's last step: the mover of a past-d
       "## Stuck" not in md and "(the ladder's last step" not in md, md[:300])
 check("the brief has no stuck line for it either, and no id of the mover", "  stuck: a82" not in br and _own not in br, br)
 check("the stale tip of a stale item prints no date and no past-due mark", "past due" not in ui_render.stale_tip(r_old, bd.mover_name) and "expected by" not in ui_render.stale_tip(r_old, bd.mover_name), ui_render.stale_tip(r_old, bd.mover_name))
-check("get shows a held item with no waiting line", "waiting:" not in server.stackshot_get("a82"), server.stackshot_get("a82"))
+check("get shows a held item with no waiting line", "waiting:" not in _wt_get.stackshot_get("a82"), _wt_get.stackshot_get("a82"))
 check("an id that resolves to no session stays the raw id", bd.mover_name("deadbeef-0000-4000-8000-000000000000") == "deadbeef-0000-4000-8000-000000000000")
 
 # ---- 9. what is gone: an old waiting.json is never read or rewritten, and a store with an item in every state shows no ladder stuck line and no expected time
@@ -437,7 +442,7 @@ check("the board builds with an item of every state and none of them reads stale
 check("…a verifying item waiting on its end day, past it or not, is held too, and a doing item stored with a long-passed time reads as any doing item", bd9.item("a43")["_fresh"] == "held" and bd9.item("a42")["_fresh"] != "held", (bd9.item("a43")["_fresh"], bd9.item("a42")["_fresh"]))
 check("board.md has no stuck word at all: no Stuck section, no ladder line, whatever the item's state", not re.search("stuck", md9, re.I), [m for m in md9.split("\n") if re.search("stuck", m, re.I)][:5])
 check("the brief has no stuck count and no stuck line", not re.search("stuck", br9, re.I), [m for m in br9.split("\n") if re.search("stuck", m, re.I)][:5])
-g_a = server.stackshot_get("a45")
+g_a = _wt_get.stackshot_get("a45")
 check("an item carrying an old ladder record at step 3 reads as any late hold: no step line, no stuck mark in get, no waiting line and no past-due mark", not re.search(r"step \d of \d|stuck", g_a) and "waiting: " not in g_a and "past due" not in g_a, g_a)
 st_9, ct_9, body_9 = server._client_get("items", {"key": U["home-owner"]})
 items9 = {i["gid"]: i for i in json.loads(body_9)["items"]}

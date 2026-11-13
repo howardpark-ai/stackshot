@@ -14,7 +14,7 @@ update means. This suite installs hooks that record each call and return what a 
   9  the helpers     the private helpers that moved with the write, called directly: the retired-input note, the hand-off line test, the stale-next mark, the hand-off list, the contact after a move, the doing note, the loose wait reason, the time-wait reading, each on a non-default input and an edge, expected values taken from main's own functions
   10 the table       the table the server builds holds every hook and looks each up when it is called (a patch of the server's name, or of the nag's owner, after the install reaches the update); every `_late("<name>")` target of its two tables is a name of the server; the zone is the server's own;
                      a write with no hooks installed is refused
- 11  the layers      service/update.py imports nothing from web/, and web/server.py defines none of the moved bodies (the three tools are thin wrappers)
+ 11  the layers      service/update.py imports nothing from web/, and web/server.py defines none of the moved bodies (the three tools, in web/tools/, are thin wrappers)
 
     tests/run-suite update_write        -> exit 0 / 1"""
 import ast, dataclasses, datetime, json, os, pathlib, re, sys, threading, time
@@ -382,6 +382,7 @@ check("10 a hook table with a hook missing cannot be built", short is not None, 
 for _n, _f in REAL_GATES.items(): setattr(gates, _n, _f)      # the real write gates back, as the server imports them
 for _n, _f in REAL_TELLING.items(): setattr(telling, _n, _f)      # and the real notices
 from stackshot.web import server, page_debts
+from stackshot.web.tools import text as _wt_text
 tbl = update._hooks()
 check("10 no write gate is a hook of the update: the update calls each on service/gates.py, where a suite patches it", not ({f.name for f in dataclasses.fields(update.Hooks)} & set(REAL_GATES)) and len(REAL_GATES) >= 25, sorted(REAL_GATES))
 srv_tree = ast.parse(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"))
@@ -525,13 +526,19 @@ check("11 web/server.py defines none of the moved bodies and keeps no copy under
 here = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
 check("11 each of them is defined once, in service/update.py (with the public names for the three writes)", {"update_unlocked", "_completion_anchor_prompt", "_handover_by_hand", "_wait_is_bare", "_hands_on", "_retired_note", "_next_names_session", "_wait_refs", "_stale_wait_notes",
       "_mark_next_stale", "_handoff_to", "_contact_after_move", "_doing_wait_note", "_fix_loose_reason", "_reads_time_wait", "update_item", "complete_item", "confirm_item"} <= here, sorted(here))
-tools = {n.name: n for n in srv.body if isinstance(n, ast.FunctionDef) and n.name in ("stackshot_complete", "stackshot_confirm", "stackshot_update", "_update")}
+_tool_src = {rel: pathlib.Path(STACK, rel).read_text(encoding="utf-8") for rel in ("stackshot/web/server.py", "stackshot/web/tools/complete.py", "stackshot/web/tools/update.py")}
+_tool_src_of = {}
+tools = {}
+for _rel, _src in _tool_src.items():
+    for n in ast.parse(_src).body:
+        if isinstance(n, ast.FunctionDef) and n.name in ("stackshot_complete", "stackshot_confirm", "stackshot_update", "_update"):
+            tools[n.name] = n; _tool_src_of[n.name] = _src
 def calls(fn): return {f"{c.func.value.id}.{c.func.attr}" for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name)}
 check("11 the complete tool is a thin wrapper: its identity checks, then the service's complete", "_update_svc.complete_item" in calls(tools["stackshot_complete"]), calls(tools["stackshot_complete"]))
 check("11 the confirm tool is a thin wrapper: its identity checks, then the service's confirm", "_update_svc.confirm_item" in calls(tools["stackshot_confirm"]), calls(tools["stackshot_confirm"]))
 check("11 the server's `_update` is a thin wrapper over the service's entry", "_update_svc.update_item" in calls(tools["_update"]), calls(tools["_update"]))
 check("11 the update tool still goes through `_update` (its own checks stay on the server)", any(isinstance(c, ast.Name) and c.id == "_update" for c in ast.walk(tools["stackshot_update"])), None)
-check("11 the tools' bodies stay short", all(len(ast.get_source_segment(pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8"), tools[n]).splitlines()) < 400 for n in ("stackshot_complete", "stackshot_confirm", "_update")), None)
+check("11 the tools' bodies stay short", all(len(ast.get_source_segment(_tool_src_of[n], tools[n]).splitlines()) < 400 for n in ("stackshot_complete", "stackshot_confirm", "_update")), None)
 
 writes.save = real_save
 print(f"update write scenario: {len(ran) - len(fails)}/{len(ran)} checks")

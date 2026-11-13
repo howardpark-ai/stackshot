@@ -61,9 +61,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
@@ -167,8 +168,8 @@ check("3 nothing was closed, woken or told", all(raw(i)["status"] == "open" for 
 
 # ---- 4. the writers store the same wait
 put(41, needs=[BACK]); put(42, needs=[BACK], after=["g31"])
-server.stackshot_update("g41", sender=BACK, hold=True, wake=day(4), wait_basis=BASIS["text"])
-server.stackshot_update("g42", sender=BACK, ask_by=day(5), wait_reason="the vendor replies only after that date")
+_wt_update.stackshot_update("g41", sender=BACK, hold=True, wake=day(4), wait_basis=BASIS["text"])
+_wt_update.stackshot_update("g42", sender=BACK, ask_by=day(5), wait_reason="the vendor replies only after that date")
 strip = lambda m: {k: v for k, v in m.items() if k in ("until", "wait_kind", "wake", "ask_by", "hold")}      # the pass also keeps the hold's stamp (hold_set); update drops it with the hold
 check("4 hold + wake + a reason: update stores the wait keys the pass left", strip(mt(41)) == strip(mt(2)) and W.basis_of(mt(41)) == W.basis_of(mt(2)), (strip(mt(41)), strip(mt(2))))
 check("4 an after link with ask_by: update stores until and the kind item, as the pass did", strip(mt(42)) == strip(mt(3)), (strip(mt(42)), strip(mt(3))))
@@ -223,7 +224,7 @@ check("7 …the undo file names each item with its keys before and after and the
 check("7 the pass left each touched file as the route wrote it: until stored, no old field", all(W.stored_until(mt(i)) and "wake" not in mt(i) for i in (1, 2, 3, 4, 5, 10)), None)
 rc2, out2 = cli(UM.apply)
 check("7 a second apply rewrites nothing", rc2 == 3 and out2["rewritten"] == 0 and BOARD + "11" in out2["left_over"], (rc2, out2))
-server.stackshot_update("g3", sender=BACK, until=day(3), wait_reason="the vendor replies only after that date")     # a session changes a key the pass wrote, on one item
+_wt_update.stackshot_update("g3", sender=BACK, until=day(3), wait_reason="the vendor replies only after that date")     # a session changes a key the pass wrote, on one item
 rc3, out3 = cli(UM.undo, undo=str(undo_file))
 vals_back = all({k: v for k, v in mt(i).items() if k != "stall"} == {k: v for k, v in json.loads(snapS0[f"{i}.json"])["metadata"].items() if k != "stall"} for i in (1, 2, 4, 5, 10))
 check("7 --undo puts the keys back value for value on the items still as the pass left them, and keeps the one a later save changed", rc3 == 0 and vals_back and out3["results"] == {"set": 5, "kept": 1} and out3["kept_because_a_later_save_changed_them"] == [BOARD + "3"] and mt(3).get("until") == day(3), (rc3, out3))
@@ -383,7 +384,7 @@ put(91, needs=[BACK], wait_kind="time", hold=True, wake=day(3), state="parked")
 st_, d_ = call(op="until", items=["g91"])
 ent91 = {k: d_["results"][0][k] for k in ("item", "before", "after", "history", "dropped")}
 check("12 the entry names every wait key, changed or not", d_["results"][0]["action"] == "set" and set(ent91["before"]) == set(UP.KEYS) == set(ent91["after"]), ent91)
-server.stackshot_update("g91", sender=BACK, after=["g31"], wait_kind="item")          # a session changes the kind, a key the pass did not change
+_wt_update.stackshot_update("g91", sender=BACK, after=["g31"], wait_kind="item")          # a session changes the kind, a key the pass did not change
 neighbour = wk(mt(91))
 st_, d_ = call(op="ununtil", items=[ent91])
 check("12 a later save that changed a key the pass left alone makes the undo answer kept, and the item is untouched (no hold beside the after link)", d_["results"][0]["action"] == "kept" and wk(mt(91)) == neighbour and "hold" not in mt(91) and "wake" not in mt(91), (d_["results"][0]["action"], wk(mt(91))))

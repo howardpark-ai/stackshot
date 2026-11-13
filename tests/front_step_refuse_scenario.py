@@ -50,9 +50,11 @@ def put(i, **meta):
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing\n- It lives here\n- Done when done", "status": "open",
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
-from stackshot.web import server; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.audit import audit_run as AR
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import front_step as FS; from stackshot.model import steps as ST; from stackshot.audit import audit_run as AR
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
@@ -67,56 +69,56 @@ def refused(msg): return msg.startswith("Refused:") and "opens with" in msg and 
 def stored_next(i): return rd(i)["metadata"].get("next") or ""
 
 # ---- 1. create: refused, whoever writes the step
-msg = refusal(lambda: server.stackshot_create(subject="[home] waits on the handback", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, needs=[BUILD],
+msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] waits on the handback", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, needs=[BUILD],
                                               next=f"{BUILD}: build it\n{MAIN}: after the handback, check it"))
 check("1 create: a front agent's own step on an item a background agent moves is refused", refused(msg) and f'"{MAIN}: after the handback, check it"' in msg and f"{MAIN}, a user-facing agent of projects/delta" in msg, msg)
 check("1 …the refusal names the mover and the way out: give the step to the mover or message it", f"{BUILD} moves the item" in msg and f'open it with "{BUILD}:"' in msg and f"send {BUILD} a message" in msg, msg)
 check("1 …and no item is stored", not (T / "store/a/40.json").exists() and not (T / "store/a/41.json").exists(), sorted(os.listdir(T / "store/a")))
-msg = refusal(lambda: server.stackshot_create(subject="[home] the builder gives the front a step", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, needs=[BUILD],
+msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] the builder gives the front a step", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, needs=[BUILD],
                                               next=f"{MAIN}: confirm the wording\n{BUILD}: then build it"))
 check("1 create: the mover writing a front agent's step on its own item is refused too, told to keep the step and message the front agent", refused(msg) and f"Keep the step with {BUILD} and message {MAIN}" in msg and "send " not in msg.split("Keep the step")[-1][:20], msg)
-msg = refusal(lambda: server.stackshot_create(subject="[home] a second front agent", description=DESC, project="projects/delta", sender=REVIEW, mover=BUILD, needs=[BUILD], next=f"{SIDE}: look at it\n{BUILD}: then build it"))
+msg = refusal(lambda: _wt_create.stackshot_create(subject="[home] a second front agent", description=DESC, project="projects/delta", sender=REVIEW, mover=BUILD, needs=[BUILD], next=f"{SIDE}: look at it\n{BUILD}: then build it"))
 check("1 create: another front agent's step is refused the same way", refused(msg) and SIDE in msg, msg)
 
 # ---- 2. allowed
-r = server.stackshot_create(subject="[home] the front agent's own item", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on\n{MAIN}: then close")
+r = _wt_create.stackshot_create(subject="[home] the front agent's own item", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on\n{MAIN}: then close")
 check("2 create: the item's own mover as the opener of its steps is accepted", r.startswith("created"), r)
-r = server.stackshot_create(subject="[home] a background agent's step", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, needs=[BUILD], next=f"{REVIEW}: review it\n{BUILD}: then build it")
+r = _wt_create.stackshot_create(subject="[home] a background agent's step", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, needs=[BUILD], next=f"{REVIEW}: review it\n{BUILD}: then build it")
 check("2 create: a background agent's step on another session's item is accepted", r.startswith("created"), r)
-r = refusal(lambda: server.stackshot_create(subject="[home] the owner's call", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
+r = refusal(lambda: _wt_create.stackshot_create(subject="[home] the owner's call", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
                                             ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", then=BUILD))
 check("2 create: an item the owner moves, with a front agent's next on it, is not judged as a session's (control: the owner's own create passes)", r == "", r)
 put(9, mover=BUILD, needs=[BUILD], next=f"{BUILD}: the item a check can name")
 put(1, project="projects/solo", needs=[], next=f"{MAIN}: look at the page")           # a project with no builder and no -main agent: nobody moves the item
-r = refusal(lambda: server.stackshot_update(item_id="a1", sender=SIDE, next=f"{MAIN}: look at the page\n{MAIN}: and the other page"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=SIDE, next=f"{MAIN}: look at the page\n{MAIN}: and the other page"))
 check("2 update: a front agent's new step on an item nobody moves is accepted", r == "" and "other page" in stored_next(1), (r, server._item_mover(rd(1))))
 
 # ---- 3. update
 put(2, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
 was = raw(2)
-msg = refusal(lambda: server.stackshot_update(item_id="a2", sender=MAIN, next=f"{BUILD}: build it\n{MAIN}: after the handback, look at it"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a2", sender=MAIN, next=f"{BUILD}: build it\n{MAIN}: after the handback, look at it"))
 check("3 update: a front agent adding its own step to an item a background agent moves is refused", refused(msg) and "after the handback" in msg and f"{BUILD} moves " in msg, msg)
 check("3 …and the item is byte for byte as it was", raw(2) == was)
-msg = refusal(lambda: server.stackshot_update(item_id="a2", sender=BUILD, next=f"{BUILD}: build it\n{SIDE}: check the wording", check="item_closed a1"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a2", sender=BUILD, next=f"{BUILD}: build it\n{SIDE}: check the wording", check="item_closed a1"))
 check("3 update: a builder adding a front agent's step is refused", refused(msg) and SIDE in msg and raw(2) == was, msg)
 put(3, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it\n{BUILD}: then test it")
 was = raw(3)
-msg = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, reword={"2": f"{MAIN}: then test it"}))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, reword={"2": f"{MAIN}: then test it"}))
 check("3 update: reword of an open step to one that opens with a front agent is refused", refused(msg) and "then test it" in msg and raw(3) == was, msg)
-r = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, reword={"2": f"{REVIEW}: then test it"}))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, reword={"2": f"{REVIEW}: then test it"}))
 check("3 update: reword of an open step to a background agent is accepted", r == "" and f"{REVIEW}: then test it" in stored_next(3), (r, stored_next(3)))
-r = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, done=[1]))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, done=[1]))
 check("3 update: marking a step done is not judged", r == "" and stored_next(3) == f"{REVIEW}: then test it", (r, stored_next(3)))
 
 # ---- 4. what a front agent already holds is not judged again
 put(4, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it\n{MAIN}: look at it once built")
-r = refusal(lambda: server.stackshot_update(item_id="a4", sender=BUILD, priority="p2"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a4", sender=BUILD, priority="p2"))
 check("4 an unrelated write to an item that carries a front agent's step passes", r == "" and rd(4)["metadata"]["priority"] == "p2", r)
-r = refusal(lambda: server.stackshot_update(item_id="a4", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it once built\n{BUILD}: then close it"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a4", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it once built\n{BUILD}: then close it"))
 check("4 a new line of the builder's own next beside the held front step passes", r == "" and stored_next(4).endswith(f"{BUILD}: then close it"), (r, stored_next(4)))
-r = refusal(lambda: server.stackshot_update(item_id="a4", sender=BUILD, next=f"- {BUILD}: build it\n- **{MAIN}:** look at it once built\n- {BUILD}: then close it"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a4", sender=BUILD, next=f"- {BUILD}: build it\n- **{MAIN}:** look at it once built\n- {BUILD}: then close it"))
 check("4 the same lines re-sent with list markers and bold marks are the same steps", r == "", r)
-r = refusal(lambda: server.stackshot_update(item_id="a4", sender=BUILD, dropped=[3], next=f"{BUILD}: build it\n{MAIN}: look at it once built", check="item_closed a9"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a4", sender=BUILD, dropped=[3], next=f"{BUILD}: build it\n{MAIN}: look at it once built", check="item_closed a9"))
 check("4 dropping a line while the held front step stays passes", r == "", r)
 
 # ---- 5. not judged: the server's own write, a script, a failing roles read
@@ -130,7 +132,7 @@ server._anc.session_roles = boom
 errbuf = io.StringIO()
 try:
     with contextlib.redirect_stderr(errbuf):
-        msg = refusal(lambda: server.stackshot_update(item_id="a6", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
+        msg = refusal(lambda: _wt_update.stackshot_update(item_id="a6", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
 finally:
     server._anc.session_roles = real_roles
 check("5 a failing roles read lets the write through and says so once on stderr", "no work notice" not in msg and "front-step gate" in errbuf.getvalue() and "roles unreadable" in errbuf.getvalue(), (msg, errbuf.getvalue()[:300]))
@@ -138,7 +140,7 @@ put(8, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
 def retired_build(*a, **k): return {**real_roles(*a, **k), BUILD: {**real_roles(*a, **k)[BUILD], "retired": True}}
 server._anc.session_roles = retired_build
 try:
-    msg = refusal(lambda: server.stackshot_update(item_id="a8", sender=MAIN, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
+    msg = refusal(lambda: _wt_update.stackshot_update(item_id="a8", sender=MAIN, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
 finally:
     server._anc.session_roles = real_roles
 check("5 a mover that is retired (not running) leaves a front agent's step allowed", "no work notice" not in msg and msg == "" and MAIN in stored_next(8), (msg, stored_next(8)))
@@ -146,7 +148,7 @@ guards_was = server._cfg.CFG.setdefault("model", {}).get("guards")
 server._cfg.CFG["model"]["guards"] = False
 try:
     put(7, mover=BUILD, needs=[BUILD], next=f"{BUILD}: build it")
-    msg = refusal(lambda: server.stackshot_update(item_id="a7", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
+    msg = refusal(lambda: _wt_update.stackshot_update(item_id="a7", sender=BUILD, next=f"{BUILD}: build it\n{MAIN}: look at it", check="item_closed a1"))
 finally:
     if guards_was is None: server._cfg.CFG["model"].pop("guards", None)
     else: server._cfg.CFG["model"]["guards"] = guards_was

@@ -72,14 +72,17 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.github import ghsync
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 ST = T / "state/waiting.json"
@@ -105,7 +108,7 @@ check("A: a filing edit: the state clock and the confirm did not move", rd(13)["
 check("A: the answers on the item are as they were", rd(13)["metadata"]["answers"] == before["metadata"]["answers"], rd(13)["metadata"]["answers"])
 out2 = server._record_cap_words({"sender": "home-test", "item": "a13", "ts": TS}, "testbox")
 check("A: again with the same entry: already, nothing changes", out2["action"] == "already" and rd(13)["metadata"] == m, out2)
-g = server.stackshot_get("a13")
+g = _wt_get.stackshot_get("a13")
 check("A: get shows his words behind the wake, with the quote and its source", f"{OWNER}'s words behind the wake {day(30)}: “park this until Jun 4th”" in g and "answer on the board" in g, g)
 bd = ui_render.Board(f"{tmp}/store")
 ph = bd.item_html("a13")
@@ -189,7 +192,7 @@ m = rd(22)["metadata"]; wb = m.get("wait_basis") or {}
 check("B: on a wake already stored the basis is recorded for that wake: text, wake, who, when", wb.get("text") == B(33) and wk_(wb) == day(30) and wb.get("by") and wb.get("at"), m)
 check("B: it lifts the cap for that wake: the basis is read for it", W.basis_of(rd(22)["metadata"]) == B(33), rd(22)["metadata"])
 check("B: it is a filing edit: the state clock did not move, and no cap_ok words are claimed", rd(22)["state_updated"] == sc and "cap_ok" not in m, rd(22))
-g = server.stackshot_get("a22")
+g = _wt_get.stackshot_get("a22")
 check("B: get shows the wait basis and what it lifts", f"wait basis: {B(33)} (lifts the 7-day cap for the wake {day(30)} only; set by " in g and "waiting:" not in g, g)
 ph = ui_render.Board(f"{tmp}/store").item_html("a22")
 check("B: the item page shows it in its sidebar", f"<dt>Waits on</dt><dd>{B(33)}</dd>" in ph, re.findall(r"<dt>Waits on</dt>.{0,200}", ph))
@@ -278,7 +281,7 @@ item(66, hold=True, wake=day(30), wait_basis={"text": B(33), "wake": day(30), "b
 item(34, hold=True, wake=day(31), wait_basis={"text": "stale basis " + day(33), "wake": day(30), "by": "home-owner", "at": now0})   # for another wake: no basis
 item(212, hold=True, wake=day(5))
 item(35, status="completed", outcome="done", wait_basis={"text": B(33), "wake": day(30), "by": "x", "at": now0})
-ZONE = server.ZONE
+ZONE = _wt_text.ZONE
 mon, tue = datetime.datetime(2026, 10, 26, 9, 0, tzinfo=ZONE), datetime.datetime(2026, 10, 27, 9, 0, tzinfo=ZONE)
 check("digest: the Monday of 2026-10-26 is a Monday", mon.weekday() == 0 and tue.weekday() == 1, None)
 bm = ui_render.Board(f"{tmp}/store", now=mon); bt = ui_render.Board(f"{tmp}/store", now=tue)
@@ -356,8 +359,10 @@ check("API: an agent's entry is a 400", st == 400 and "own words" in d["error"],
 # the only writers of metadata.answers are the board's answer form and the GitHub reader: not create, update or said
 import inspect
 from stackshot.service import update as _upd_svc
+from stackshot.web.tools import complete as _wt_complete, create as _wt_create, update as _wt_update
+_OWNER = {"stackshot_create": _wt_create, "stackshot_update": _wt_update, "stackshot_complete": _wt_complete, "_create": _wt_create, "_update": server, "update_unlocked": _upd_svc}
 for fn in ("stackshot_create", "stackshot_update", "stackshot_complete", "_create", "_update", "update_unlocked"):
-    ps = inspect.signature(getattr(_upd_svc if fn == "update_unlocked" else server, fn)).parameters
+    ps = inspect.signature(getattr(_OWNER[fn], fn)).parameters
     check(f"writers: {fn} has no parameter that writes answers", "answers" not in ps and not any(x.kind is inspect.Parameter.VAR_KEYWORD for x in ps.values()), list(ps))
 item(38, hold=True, wake=day(30), answers=[park])
 ans0 = rd(38)["metadata"]["answers"]
@@ -368,7 +373,7 @@ except Exception:
     pass
 check("writers: update (and said) leave the item's answers as they were", rd(38)["metadata"]["answers"] == ans0, rd(38)["metadata"]["answers"])
 try:
-    server._create(subject="[home] new one", description=DESC, project="projects/alpha", sender="home-owner", answers=[{"ts": 1.0}])
+    _wt_create._create(subject="[home] new one", description=DESC, project="projects/alpha", sender="home-owner", answers=[{"ts": 1.0}])
     check("writers: create refuses an answers argument", False)
 except TypeError:
     check("writers: create refuses an answers argument", True)

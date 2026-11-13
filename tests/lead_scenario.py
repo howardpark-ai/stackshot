@@ -26,6 +26,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from fastmcp import Client
 LEAD = "If your session did not load"   # only a session without the rulebook (cloud, Cowork) is told to call rules
 
@@ -41,7 +43,7 @@ check("rules does not carry the lead (its own text already says to call it)", no
 check("no description carries the lead twice", all(d.count(LEAD) <= 1 for d in tools.values()), [n for n, d in tools.items() if d.count(LEAD) > 1])
 check("the lead is addressed to sessions without the rulebook only", all("call the rules tool first" in d[:200] and "FIRST, once per task" not in d for n, d in tools.items() if n != "rules"), [n for n, d in tools.items() if "FIRST, once per task" in d])
 check("the lead names the owner, not a placeholder", all(server.OWNER in d[:200] for n, d in tools.items() if n != "rules"), server.OWNER)
-check("the text after the lead is each tool's own description (get: the lead, then its own text from \"Read one item by id as shown\", ending with the stall form)", tools.get("get", "").startswith(server._lead("Read one item by id as shown")) and tools.get("get", "").endswith(server._STALL_FORM), tools.get("get"))
+check("the text after the lead is each tool's own description (get: the lead, then its own text from \"Read one item by id as shown\", ending with the stall form)", tools.get("get", "").startswith(_wt_text._lead("Read one item by id as shown")) and tools.get("get", "").endswith(_wt_get._STALL_FORM), tools.get("get"))
 
 instr = server.mcp.instructions or ""
 check("the instructions teach the shown id form: board#<n>, the temporary one, and the older letter ids, never a store id",

@@ -58,6 +58,7 @@ p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
 from stackshot.web import server; from stackshot.fleet import client
+from stackshot.web.tools import message as _wt_message
 server._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
 _orig_run = server.subprocess.run
@@ -233,7 +234,7 @@ out = send(GBUILD, "a103 is yours: build it")
 check("103 control: another session stored as the mover still declines", not needs(103) and f"{MAIN} already moves it" in out, (needs(103), out))
 
 # ---- 10. the tool text and the notes say it
-check("90 the message tool's text says the naming can be declined for a second mover and what to do then", "second mover" in server._MESSAGE_DESC and "update(mover=<agent>)" in server._MESSAGE_DESC, server._MESSAGE_DESC[:300])
+check("90 the message tool's text says the naming can be declined for a second mover and what to do then", "second mover" in _wt_message._message_desc() and "update(mover=<agent>)" in _wt_message._message_desc(), _wt_message._message_desc()[:300])
 src = (pathlib.Path(STACK) / "docs" / "overview.md").read_text(encoding="utf-8")
 check("91 the overview says it", "never leaves the item with a second mover" in src and "update(mover=<agent>)" in src, None)
 

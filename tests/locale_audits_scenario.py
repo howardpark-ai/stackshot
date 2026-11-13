@@ -63,10 +63,13 @@ from stackshot.core import config as _cfg
 from stackshot.audit import audit_overview as ov
 from stackshot.router import routing
 from stackshot.web import foryou, i18n, landed as ld, server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 EN = i18n.EN
 LOC = T / "locales"
 MARK = lambda v: f"[x:{v}]"
@@ -135,7 +138,7 @@ NEWD = "- The thing works and is in use"
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 server._refuse_if_owing = lambda debtor: None
 for i in (2, 3, 4):
-    server.stackshot_complete(f"a{i}", outcome="done", reason="the change is live", description=NEWD, sender="alpha-x")
+    _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason="the change is live", description=NEWD, sender="alpha-x")
 check("the fixture has closes on the Closed list", len(ld.records()) == 3, ld.records())
 FY = "the nightly check turned red"
 foryou.add(key="t1", kind="check_failed", gid="a1", what=FY, urgent=True, ts=now - 100)

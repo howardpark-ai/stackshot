@@ -56,8 +56,8 @@ def tool(*args, store=None):
     r = subprocess.run(TOOL + list(args), capture_output=True, text=True, env=os.environ, cwd=str(T))
     return r.returncode, r.stdout, r.stderr
 
-from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server; from stackshot.model import ids as _model_ids
-server._publish = lambda: None
+from stackshot.projects import pages as p; from stackshot.projects import projects as prj; from stackshot.projects import project_registry as pr; from stackshot.anchors import anchors; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.model import ids as _model_ids
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 p.cmd_registry(quiet=True)
 ids = {k: e["id"] for k, e in reg().items()}
 A, A_SUB, Z, G = (ids[k] for k in ("projects/alpha", "projects/alpha/sub", "projects/zeta", "projects/gamma"))
@@ -283,7 +283,7 @@ for label, f in (("registry", prj.registry), ("build", prj.build), ("list_projec
     except Exception as ex: crash.append((label, repr(ex)))
 check("no page: no reader of the registry crashes on it", not crash, crash)
 check("no page: it adds no row to a registry keyed by page (it is reached by resolve), and the others are as they were", set(prj.registry()) == keys0 and prj.ref(NOPAGE) is None and prj.id_to_key(NOPAGE) == "" and server._registry_hits("projects", NOPAGE) == [])
-def create(project, owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, owner=owner, **{"next": f"{owner}: carry on", "mover": owner, **kw})
+def create(project, owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, owner=owner, **{"next": f"{owner}: carry on", "mover": owner, **kw})
 def refusal(project, owner="home-nopage-main"):
     try: create(project, owner); return ""
     except server.ToolError as ex: return str(ex)

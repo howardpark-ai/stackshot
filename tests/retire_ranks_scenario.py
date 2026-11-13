@@ -52,9 +52,12 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:700]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 ST = T / "state/waiting.json"
@@ -100,12 +103,12 @@ check("load: get of an item that still stores a rank shows no rank line, no queu
 check("load: …and no `queued` state", "state: queued" not in g1 and "queued" not in g1, g1[-500:])
 
 # ================================================================ update refuses rank
-refused("update: rank=2 is refused, saying ranks are retired", lambda: server.stackshot_update("a4", sender="home-front", rank=2), "Refused", "ranks are retired", "starts every item handed to it")
-refused("update: clear_rank=true is refused the same way", lambda: server.stackshot_update("a4", sender="home-front", clear_rank=True), "Refused", "ranks are retired")
-refused("update: …also next to arguments that would be fine alone", lambda: server.stackshot_update("a4", sender="home-front", next="team-back: go", rank=1), "ranks are retired")
+refused("update: rank=2 is refused, saying ranks are retired", lambda: _wt_update.stackshot_update("a4", sender="home-front", rank=2), "Refused", "ranks are retired", "starts every item handed to it")
+refused("update: clear_rank=true is refused the same way", lambda: _wt_update.stackshot_update("a4", sender="home-front", clear_rank=True), "Refused", "ranks are retired")
+refused("update: …also next to arguments that would be fine alone", lambda: _wt_update.stackshot_update("a4", sender="home-front", next="team-back: go", rank=1), "ranks are retired")
 check("update: …none of the refusals wrote anything", rd(4) == before[4] and (T / "store/a/4.json").read_bytes() == orig_bytes[4], rd(4))
 import inspect
-check("update: create takes no rank, and the server's own _update takes none", "rank" not in inspect.signature(server.stackshot_create.fn if hasattr(server.stackshot_create, "fn") else server.stackshot_create).parameters
+check("update: create takes no rank, and the server's own _update takes none", "rank" not in inspect.signature(_wt_create.stackshot_create.fn if hasattr(_wt_create.stackshot_create, "fn") else _wt_create.stackshot_create).parameters
       and "rank" not in inspect.signature(__import__("stackshot.service.update", fromlist=["update_unlocked"]).update_unlocked).parameters, None)
 
 async def mcp_checks():
@@ -138,7 +141,7 @@ def reads():
     """Every surface that used to show the rank → {name: text}"""
     out = {}
     out["get"] = "\n".join(server._fmt({**rd(i), "gid": f"a{i}"}) for i in (1, 2, 3, 4, 6))
-    out["brief"] = server.stackshot_brief()
+    out["brief"] = _wt_brief.stackshot_brief()
     out["client"] = json.dumps(json.loads(server._client_items(UB)[2])["items"]) + json.dumps(json.loads(server._client_items(UO)[2])["items"])
     B_ = r2.Board(str(T / "store"))
     out["page"] = "\n".join(B_.item_html(f"a{i}") for i in (1, 2, 3, 4, 6))

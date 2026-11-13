@@ -71,9 +71,12 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
-from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS; from stackshot.web import itempage as IP; from stackshot.model import next_backfill as NB
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import owner_steps as HS; from stackshot.web import itempage as IP; from stackshot.model import next_backfill as NB
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
@@ -83,7 +86,7 @@ def refused(name, f, *want, i=None):
         out = f(); check(name, False, out)
     except server.ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
-def upd(i, **kw): return server.stackshot_update(f"a{i}", sender="home-agent", **kw)
+def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def st(i): return [(x["status"], x["text"]) for x in S.view(mt(i), keeper=OWNER)]
 def his(i): return [(s, t) for s, t in st(i) if t.startswith("Oliver:")]
 def writers(i): return dict(NL.resolve(mt(i), OWNER))
@@ -100,7 +103,7 @@ check("a session's next write replaces its own lines and leaves his step", his(1
 upd(1, description="- Goal: A thing, finished when it works\n- one more fact")
 check("a write that touches neither the ask nor the next adds no second step", len(his(1)) == 1 and mt(1)["next"].count(H1) == 1, st(1))
 
-r = server.stackshot_create(subject="[home] decide the thing", description=DESC, project="projects/alpha", needs="decision", ask=ASK, options=OPTS, next="home-agent: build it", sender="home-agent")
+r = _wt_create.stackshot_create(subject="[home] decide the thing", description=DESC, project="projects/alpha", needs="decision", ask=ASK, options=OPTS, next="home-agent: build it", sender="home-agent")
 cid = re.match(r"created (\S+)", r).group(1)
 cm = server._load(cid)["metadata"]
 check("a create with an ask: his step is on the list from the first save, written by the server", [(x["status"], x["text"]) for x in S.view(cm, keeper=OWNER) if x["text"].startswith("Oliver:")] == [OPEN(H1)]
@@ -266,7 +269,7 @@ r = upd(10, needs="decision", ask=ASK, options=OPTS)
 p = T / "store/a/10.json"; j = json.loads(p.read_text()); j["metadata"].pop("steps", None); j["metadata"]["next"] = "home-agent: build it"; j["metadata"].pop("next_by", None); j["metadata"].pop("owner_step", None); p.write_text(json.dumps(j))
 upd(10, description="- Goal: A thing, finished when it works\n- a second fact")
 check("an item that waits on him with no step of his on its list gets one on any save (N5: the fields decide)", his(10) == [OPEN(H1)], st(10))
-r = server.stackshot_complete("a10", outcome="done", reason="shipped as asked", description="- Goal: A thing, shipped", sender="home-agent") if hasattr(server, "stackshot_complete") else ""
+r = _wt_complete.stackshot_complete("a10", outcome="done", reason="shipped as asked", description="- Goal: A thing, shipped", sender="home-agent")
 check("a close settles his open step (N8: done with the outcome), the server adds nothing", rd(10)["status"] == "completed" and all(x["status"] != "open" for x in S.view(mt(10), closed=True, keeper=OWNER)), S.view(mt(10), closed=True, keeper=OWNER))
 
 # ---- 8. the router and a hold's wake create and tick nothing wrongly

@@ -59,13 +59,16 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W; from stackshot.model import states
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.model import states
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
@@ -85,7 +88,7 @@ def stamp_t(ts): return time.strftime("%Y-%m-%dT%H:%M", time.gmtime(ts + ZONE_OF
 item(1, needs=[BACK], state="doing", su=now0 - 3 * DAY)
 out = upd(1, priority="p2")
 check("doing: a stored doing item has no expected time and a write's reply does not mention one", mt(1)["state"] == "doing" and mt(1)["priority"] == "p2" and "expected_by" not in mt(1) and "expected_reason" not in mt(1) and "expected_by" not in out and "the default" not in out and "no longer kept" not in out, (mt(1), out))
-txt = server.stackshot_get("a1")
+txt = _wt_get.stackshot_get("a1")
 check("doing: get shows no expected_by under the state", "state: doing" in txt and "expected_by" not in txt, txt[:600])
 
 # ================================================================ 2. expected_by and expected_reason are accepted and not stored
@@ -102,7 +105,7 @@ o_ = upd(26, expected_reason="the builder subagent runs the full test suite and 
 check("retired: …a reason passed alone on a doing item is accepted, not stored, with the note", "expected_reason" not in mt(26) and o_.count("no longer kept") == 1, (mt(26), o_[-300:]))
 o_ = upd(26, priority="p2")
 check("retired: …a call that passes neither carries no note", "no longer kept" not in o_ and mt(26)["priority"] == "p2", o_[-300:])
-check("retired: …the brief shows no expected_reason", "expected_reason" not in server.stackshot_brief(), None)
+check("retired: …the brief shows no expected_reason", "expected_reason" not in _wt_brief.stackshot_brief(), None)
 upd(2, needs=["decision"], ask="Decide: ship the thing now · Recommend: yes · Stakes: a week of delay · By: no date")
 check("retired: a later write that sets his decision keeps the item clean (nothing was stored, nothing to drop)", "expected_by" not in mt(2) and "expected_reason" not in mt(2), mt(2))
 
@@ -111,7 +114,7 @@ for p in (T / "store/a").glob("*.json"): p.unlink()          # the items of the 
 LD = 30
 eb_ld = now0 - 2 * HOUR
 item(LD, needs=[BACK], state="doing", expected_by=stamp(eb_ld), su=now0 - 6 * HOUR)          # stored before the time was dropped, and long past
-check("past due: …get does not show it as past due, and shows no step of a ladder", not re.search(r"past due", server.stackshot_get(f"a{LD}")) and not re.search(r"step \d of \d|stuck", server.stackshot_get(f"a{LD}")), server.stackshot_get(f"a{LD}"))
+check("past due: …get does not show it as past due, and shows no step of a ladder", not re.search(r"past due", _wt_get.stackshot_get(f"a{LD}")) and not re.search(r"step \d of \d|stuck", _wt_get.stackshot_get(f"a{LD}")), _wt_get.stackshot_get(f"a{LD}"))
 
 # ================================================================ 5. every other wait keeps its day-based default and cap
 for p in (T / "store/a").glob("*.json"): p.unlink()
@@ -187,7 +190,7 @@ item(89, needs=[BACK], state="doing", next="team-back: " + OVERNIGHT)
 out = upd(89, priority="p2")
 check("wait note: a write that sets neither the state nor next stays quiet about a stored next", NOTE_HEAD not in out and mt(89)["priority"] == "p2", out)
 # create: a create takes no state (agent work starts with an update), so a create carries no such note, even with wait wording in next and the write still goes through
-out = server._create(subject="[home] wait not doing", description=DESC, project="projects/alpha", owner="home-front", needs=[BACK], next="team-back: read the counts in the morning")
+out = _wt_create._create(subject="[home] wait not doing", description=DESC, project="projects/alpha", owner="home-front", needs=[BACK], next="team-back: read the counts in the morning")
 check("wait note: a create (never doing) carries no note and is created", NOTE_HEAD not in out and out.startswith("created"), out)
 # the matcher, alone: one assertion per phrase (a builder waiting on its own CI or review, or running until green, is work in hand under)
 from stackshot.model import model_guards as MG
@@ -377,7 +380,7 @@ check("legacy: a write that does not touch it does not rewrite it", mt(50)["expe
 item(51, needs=[BACK], state="doing", expected_by=time.strftime("%Y-%m-%d", time.gmtime(now0 + ZONE_OFFSET - 2 * DAY)), su=now0 - 3 * DAY)
 check("legacy: a lapsed date-only value: a write that leaves it alone is not refused for it", (upd(51, priority="p2") is not None) and mt(51)["priority"] == "p2", mt(51))
 item(52, needs=[BACK], state="doing", expected_by="garbage", su=now0 - DAY)
-check("legacy: a stored value that is no time breaks nothing: get still reads the item", "state: doing" in server.stackshot_get("a52"), server.stackshot_get("a52")[:300])
+check("legacy: a stored value that is no time breaks nothing: get still reads the item", "state: doing" in _wt_get.stackshot_get("a52"), _wt_get.stackshot_get("a52")[:300])
 
 # ================================================================ 8. the routes and the text
 item(60, needs=[BACK])

@@ -46,10 +46,12 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 PATH = "/probe/sala-link"
 URL = f"{SALA}/#s=zeta-main"          # the first live session's view, from the template

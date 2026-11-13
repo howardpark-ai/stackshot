@@ -170,7 +170,11 @@ def check(name, cond, got=None):
 def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
-from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.web.routes import answers as _rt_answers
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
@@ -179,7 +183,7 @@ hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
@@ -627,7 +631,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           "a41" in server._answers_load() and not any("comment" in x for x in jobs()), jobs()[-1:])
     check("History and `get` show the note as his note on the step, never as Done",
           "note on his step" in ui_render.Board(str(STORE)).item_html("a41") and "<b>Done</b>" not in ui_render.Board(str(STORE)).item_html("a41")
-          and "note on his step: which box do I run it on?" in server.stackshot_get("a41"), None)
+          and "note on his step: which box do I run it on?" in _wt_get.stackshot_get("a41"), None)
     # a note that names a later time the server does not read (no date or day part in it): the notice carries the third branch, and the tools it names put the item on hold with a wake
     told.clear(); r_s45 = post("/items/a45/answer", {"token": tok("a45"), "act": "send", "text": "I will do this after the trip, so wait until then", "back": "/#task-a-45"}); m45 = rd("a", 45)["metadata"]
     n45 = {t[1]: t[2] for t in told}[AGENT]
@@ -640,8 +644,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("the server does not read a time out of a note that names none: the item is with the then-mover, not on hold, no wake (the instruction is the notice's text, carried out by the mover's update)",
           r_s45.headers["location"] == "/?sent=stepreply&item=a45&then=home-agent#task-a-45" and m45.get("mover") == "home-agent" and "hold" not in m45 and "wake" not in m45
           and [a["kind"] for a in m45["answers"]] == ["step-reply"], m45)
-    _when = (server.dt.datetime.now(server.ZONE) + server.dt.timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
-    r_u45 = server.stackshot_update("a45", hold=True, wake=_when, wait_reason="Oliver said he will do the step tomorrow evening", sender="home-agent")
+    _when = (server.dt.datetime.now(_wt_text.ZONE) + server.dt.timedelta(days=1)).replace(hour=19, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    r_u45 = _wt_update.stackshot_update("a45", hold=True, wake=_when, wait_reason="Oliver said he will do the step tomorrow evening", sender="home-agent")
     i45 = rd("a", 45); m45 = i45["metadata"]
     check("following the notice (update hold=true, wake, wait_reason) is accepted: the item is on hold with that wake, the same mover, and no step handed back to him",
           r_u45.startswith("updated a45") and hd_(m45) is True and wk_(m45) == _when and m45.get("mover") == "home-agent" and "step" not in m45 and m45.get("state") != "your-step"
@@ -654,8 +658,8 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
           and "put the item on hold until" in n47 and "Judge the note" not in n47 and [a["kind"] for a in m47["answers"]] == ["step-reply"], (m47, n47))
     # a wake past the cap: his note, given since the item's last move, is the words that let it stand
     told.clear(); post("/items/a46/answer", {"token": tok("a46"), "act": "send", "text": "after the trip, next month", "back": "/#task-a-46"})
-    _far = (server.dt.datetime.now(server.ZONE) + server.dt.timedelta(days=server._wt.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
-    r_u46 = server.stackshot_update("a46", hold=True, wake=_far, wait_reason="Oliver said he will do the step after the trip", sender="home-agent")
+    _far = (server.dt.datetime.now(_wt_text.ZONE) + server.dt.timedelta(days=server._wt.cap_days() + 12)).replace(hour=9, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    r_u46 = _wt_update.stackshot_update("a46", hold=True, wake=_far, wait_reason="Oliver said he will do the step after the trip", sender="home-agent")
     i46 = rd("a", 46); m46 = i46["metadata"]
     check("a note that names a time beyond the usual wait cap: the same update is accepted on his note's words, and the item waits until then",
           r_u46.startswith("updated a46") and hd_(m46) is True and wk_(m46) == _far and "after the trip" in str((m46.get("cap_ok") or {}).get("quote")) and server._model.derive(i46).state == "waiting", (r_u46[:300], m46))
@@ -734,8 +738,8 @@ check("History: a comment's line is marked comment; a choice with a note shows b
       "Oliver (board): What about the\nother box? <span class=\"dim\">· comment</span>" in h5 and "Oliver (board): <b>Approve</b> — go, but tell Pat first" in h2,
       (re.findall(r'<li class="ev ev-answer">.*?</li>', h5, re.S), re.findall(r'<li class="ev ev-answer">.*?</li>', h2)))
 check("get shows his answers to the session reading the item, with the chosen option's line, and no options or ask any more",
-      "Oliver's answers on the board:\n- " in server.stackshot_get("a1") and "answer: Ship [chosen option: Ship: Ship it now as it is]" in server.stackshot_get("a1")
-      and "options:" not in server.stackshot_get("a1") and "ask:" not in server.stackshot_get("a1"), server.stackshot_get("a1"))
+      "Oliver's answers on the board:\n- " in _wt_get.stackshot_get("a1") and "answer: Ship [chosen option: Ship: Ship it now as it is]" in _wt_get.stackshot_get("a1")
+      and "options:" not in _wt_get.stackshot_get("a1") and "ask:" not in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
 
 # ---- 8. the escalation: 30 min without a write by a session it was sent to → the keeper, once
 st = server._answers_load()
@@ -760,10 +764,10 @@ check("a second pass tells nobody again", server._answer_tick(time.time() + 7200
 
 # ---- 9. no session writes as Oliver
 for nm in ("Oliver", "oliver", " OLIVER ", "Oliver · board"):
-    refused(f"update refuses sender={nm!r}", lambda: server.stackshot_update("a3", next="x", sender=nm), "sender names Oliver")
-refused("complete refuses sender='Oliver'", lambda: server.stackshot_complete("a3", outcome="done", reason="r", description="Done.", sender="Oliver"), "sender names Oliver")
-refused("confirm refuses sender='Oliver'", lambda: server.stackshot_confirm("a3", sender="Oliver"), "sender names Oliver")
-check("a session's own name still writes", server.stackshot_update("a3", next="home-here: y", dropped=[1], sender="home-here").startswith("updated a3"))
+    refused(f"update refuses sender={nm!r}", lambda: _wt_update.stackshot_update("a3", next="x", sender=nm), "sender names Oliver")
+refused("complete refuses sender='Oliver'", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="r", description="Done.", sender="Oliver"), "sender names Oliver")
+refused("confirm refuses sender='Oliver'", lambda: _wt_complete.stackshot_confirm("a3", sender="Oliver"), "sender names Oliver")
+check("a session's own name still writes", _wt_update.stackshot_update("a3", next="home-here: y", dropped=[1], sender="home-here").startswith("updated a3"))
 
 # ---- 10. a pick among the options clears ask and options; anything else leaves them as it did
 for g in ("a8", "a9", "a10", "a11"): assert rd("a", int(g[1:]))["metadata"]["options"] == OPTS
@@ -799,21 +803,21 @@ check("a comment on an item with options changes neither the options nor the ask
 # ---- 11. the update tool clears options and ask without a recommended one
 BAD1, BAD2 = OPTS[:1], [{**o, "recommended": True} for o in OPTS[:2]]
 for why, o_ in (("one entry", BAD1), ("two recommended", BAD2), ("none recommended", [{**o, "recommended": False} for o in OPTS[:2]])):
-    refused(f"update: a bad options list ({why}) is still refused", lambda o_=o_: server.stackshot_update("a11", options=o_, sender="home-here"), "Refused")
+    refused(f"update: a bad options list ({why}) is still refused", lambda o_=o_: _wt_update.stackshot_update("a11", options=o_, sender="home-here"), "Refused")
     check(f"…and nothing changed ({why})", rd("a", 11)["metadata"].get("options") == OPTS)
-refused("update: clear_options does not go with a new list", lambda: server.stackshot_update("a11", options=OPTS[:2], clear_options=True, sender="home-here"), "clear_options")
-refused("update: clear_ask does not go with a new ask", lambda: server.stackshot_update("a11", ask=YESNO, clear_ask=True, sender="home-here"), "clear_ask")
-r_ = server.stackshot_update("a11", options=[], sender="home-here")
+refused("update: clear_options does not go with a new list", lambda: _wt_update.stackshot_update("a11", options=OPTS[:2], clear_options=True, sender="home-here"), "clear_options")
+refused("update: clear_ask does not go with a new ask", lambda: _wt_update.stackshot_update("a11", ask=YESNO, clear_ask=True, sender="home-here"), "clear_ask")
+r_ = _wt_update.stackshot_update("a11", options=[], sender="home-here")
 check("update: options=[] clears the options and leaves the ask", r_.startswith("updated a11") and "options" not in rd("a", 11)["metadata"] and rd("a", 11)["metadata"].get("ask") == ASK, r_)
 server._update("a11", options=OPTS, sender="home-here")
 check("fixture: the options are back", rd("a", 11)["metadata"].get("options") == OPTS)
-r_ = server.stackshot_update("a11", clear_options=True, sender="home-here")
+r_ = _wt_update.stackshot_update("a11", clear_options=True, sender="home-here")
 check("update: clear_options=true clears them too", r_.startswith("updated a11") and "options" not in rd("a", 11)["metadata"] and rd("a", 11)["metadata"].get("ask") == ASK, r_)
-r_ = server.stackshot_update("a11", clear_ask=True, sender="home-here")
+r_ = _wt_update.stackshot_update("a11", clear_ask=True, sender="home-here")
 check("update: clear_ask=true clears the ask", r_.startswith("updated a11") and "ask" not in rd("a", 11)["metadata"], r_)
 check("the update tool's description and parameters name the new flags",
-      "clear_options=true" in server._UPDATE_DESC and "clear_ask=true" in server._UPDATE_DESC
-      and {"clear_options", "clear_ask"} <= set(__import__("inspect").signature(server.stackshot_update.fn if hasattr(server.stackshot_update, "fn") else server.stackshot_update).parameters))
+      "clear_options=true" in _wt_update._UPDATE_DESC and "clear_ask=true" in _wt_update._UPDATE_DESC
+      and {"clear_options", "clear_ask"} <= set(__import__("inspect").signature(_wt_update.stackshot_update.fn if hasattr(_wt_update.stackshot_update, "fn") else _wt_update.stackshot_update).parameters))
 
 # ---- 12. the decision hand-over: a decision answer hands the item to its `then`, as a Done does on a step
 told.clear()
@@ -970,7 +974,7 @@ finally:
 # ---- a your-step set by an update that also names the mover (mover=Oliver) still gets the server's step, so his note ticks it
 STEP90 = "Run the 8 run deletions yourself: my gh DELETE call is refused by the permission layer"
 _ol = lambda g: [(x["status"], x["text"]) for x in server._hs._steps.view(rd("a", g)["metadata"], keeper=OWNER) if x["text"].startswith("Oliver:")]
-server.stackshot_update("a90", sender="home-agent", step=STEP90, mover="Oliver", next="home-agent: confirm the runs are gone\nOliver: `for id in 1 2; do gh api -X DELETE runs/$id; done`")
+_wt_update.stackshot_update("a90", sender="home-agent", step=STEP90, mover="Oliver", next="home-agent: confirm the runs are gone\nOliver: `for id in 1 2; do gh api -X DELETE runs/$id; done`")
 _m90 = rd("a", 90)["metadata"]
 check("named mover, setup: step= and mover=Oliver in one update: his step is on the list as the server's own (owner_step), beside the session's own Oliver line",
       _m90.get("state") == "your-step" and _m90.get("mover") == "Oliver" and _m90.get("owner_step") == f"Oliver: {STEP90}"
@@ -981,7 +985,7 @@ check("named mover: his note on that step ticks the server's step (done, his wor
       and [s_ for s_, t_ in _ol(90) if t_.startswith(f"Oliver: {STEP90}")] == ["done"] and [s_ for s_, t_ in _ol(90) if t_.startswith("Oliver: `for id")] == ["open"]
       and any("Judge the note" in t[2] for t in told), (r_s90, _ol(90), _m90.get("owner_step"), [t[2][:80] for t in told]))
 # a session that wrote its own Oliver line saying the same as the step: the equality rule adopts it (no second step), and his note ticks it
-server.stackshot_update("a91", sender="home-agent", step=STEP90, mover="Oliver", next=f"home-agent: confirm the runs are gone\nOliver: {STEP90}")
+_wt_update.stackshot_update("a91", sender="home-agent", step=STEP90, mover="Oliver", next=f"home-agent: confirm the runs are gone\nOliver: {STEP90}")
 check("named mover: the session's own `Oliver: <step>` line equal to the step is his one step (adopted, none added beside it)", len(_ol(91)) == 1 and rd("a", 91)["metadata"].get("owner_step") == f"Oliver: {STEP90}", (_ol(91), rd("a", 91)["metadata"].get("owner_step")))
 server._answer("a91", "", "why does this fail?", "send")
 check("named mover: his note ticks that one line by equality", [s_ for s_, _ in _ol(91)] == ["done"], _ol(91))

@@ -70,8 +70,11 @@ def accepted(name, f):
         check(name, False, str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 CFG = server._cfg.CFG.setdefault("model", {})
@@ -117,7 +120,7 @@ accepted("update: the listed anchor with a #fragment is the same anchor", lambda
 item(64, subject="[home] add first, then wait", needs=[BACK])
 anchors(projects_alpha=[])
 refused("order: the wait is refused before the anchor is added", lambda: wait("a64", A5), "anchors(project=")
-server._anchors("projects/alpha", add=[A5], items=["a64"])
+_wt_anchors._anchors("projects/alpha", add=[A5], items=["a64"])
 accepted("order: …and accepted once the anchors tool has added it scoped to the item", lambda: wait("a64", A5))
 
 # ================================================================ an unchanged re-save, a changed anchor
@@ -134,12 +137,12 @@ refused("change: a stored wait of another kind turned into an anchor wait on an 
 
 # ================================================================ a create
 refused("create: an unlisted anchor is refused, the message offers the project-wide add",
-        lambda: server._create(subject="[home] new anchor wait", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
+        lambda: _wt_create._create(subject="[home] new anchor wait", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
                                wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"),
         "Refused", A1, 'anchors(project="projects/alpha", add=["' + A1 + '"])', "without the wait")
 anchors(projects_alpha=[entry(A1)])
 accepted("create: a project-wide anchor of the project is accepted",
-         lambda: server._create(subject="[home] new anchor wait, listed", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
+         lambda: _wt_create._create(subject="[home] new anchor wait, listed", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
                                 wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"))
 
 # ================================================================ an unreadable anchors file, a value that is no anchor shape
@@ -154,7 +157,7 @@ for label, content in (("corrupt JSON", "{not json"), ("a JSON list", "[1, 2]"),
 item(81, subject="[home] anchors file unreadable, create", needs=[BACK]); AF.write_text("{not json", encoding="utf-8")
 with contextlib.redirect_stderr(io.StringIO()) as err2:
     accepted("unreadable file: a create with an anchor wait is written too",
-             lambda: server._create(subject="[home] new anchor wait, file unreadable", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
+             lambda: _wt_create._create(subject="[home] new anchor wait, file unreadable", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
                                     wait_kind="anchor", wait_anchor=A1, wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"))
 check("unreadable file: …with its stderr line", "not judged" in err2.getvalue(), err2.getvalue())
 item(82, subject="[home] anchors file missing", needs=[BACK]); AF.unlink()
@@ -172,7 +175,7 @@ for label, val in (("free text", "the merge of the release PR"), ("an unparseabl
         check(f"no shape: …and advises no anchors(add=...) call", "add=[" not in msg and "anchors(project=" not in msg, msg)
 check("no shape: …nothing was stored", raw(83) == before83, mt(83))
 refused("no shape: a create with free text is refused the same way",
-        lambda: server._create(subject="[home] new anchor wait, free text", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
+        lambda: _wt_create._create(subject="[home] new anchor wait, free text", description=DESC, project="projects/alpha", owner=FRONT, next="team-back: do it", needs=[BACK],
                                wait_kind="anchor", wait_anchor="the release PR", wait_event="PR merged", ask_by=day(6), post_wake_mover=BACK, mover="none"),
         "not an anchor shape the anchors tool accepts")
 anchors(projects_alpha=[])

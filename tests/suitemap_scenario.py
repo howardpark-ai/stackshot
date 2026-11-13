@@ -1847,14 +1847,23 @@ def doc_forms(src):
     return out
 # (file, form): (number of uses, why the rule covers them). A module's own docstring (`client.__doc__`, `prj.__doc__`) is read by name and is not part of the rule.
 DOCUSE_ALLOW = {
-    ("stackshot/web/server.py", ".tool("): (12, "the @mcp.tool(...) decorators: a decorated function keeps the old rule (its docstring is a decorator's read)"),
-    ("stackshot/web/server.py", ".resource("): (1, "the @mcp.resource decorator: a decorated function keeps the old rule"),
+    ("stackshot/web/tools/brief.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/get.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/create.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/update.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/complete.py", ".tool("): (2, "the mcp.tool(...)(function) registrations in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/sessions.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/message.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/route.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/anchors.py", ".tool("): (1, "the mcp.tool(...)(function) registration in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/rules.py", ".tool("): (2, "the mcp.tool(...)(function) registrations in this tool's register: the function is called by name, and the description is given in the call, so its docstring is not a registry's read"),
+    ("stackshot/web/tools/rules.py", ".resource("): (1, "the mcp.resource(...)(function) registration of the rules resource: given its description in the call"),
     ("tests/audit_run_scenario.py", ".prompt("): (3, "AR.prompt(...) is the audit's own function that builds a text, not a registry"),
     ("tests/release_queue_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
     ("tests/release_scenario.py", "import *"): (1, "the release harness's own helpers; no function of the checkout is read through them by a docstring"),
     ("tests/event_wait_scenario.py", "__doc__"): (2, "client.__doc__ twice, a module docstring: read by name, unchanged rule"),
     ("tests/locale_pages_scenario.py", "__doc__"): (1, "i18n.__doc__, a module docstring: read by name, unchanged rule"),
-    ("tests/model_scenario.py", "__doc__"): (1, "server.stackshot_get.__doc__, a decorated tool: unchanged rule"),
+    ("tests/model_scenario.py", "__doc__"): (1, "_wt_get.stackshot_get.__doc__, a decorated tool: unchanged rule"),
     ("tests/project_record_scenario.py", "__doc__"): (1, "prj.__doc__, a module docstring: read by name, unchanged rule"),
     ("tests/question_scenario.py", "__doc__"): (2, "client.__doc__ (module, by name) and telling.pilot_charge.__doc__ (a function it names: the name rule selects the suite)"),
     ("tests/rebullet_scenario.py", "__doc__"): (1, "rd_tool.__doc__, a module docstring: read by name, unchanged rule"),
@@ -1948,7 +1957,8 @@ def ann_forms(src):
             out["subscript of __annotations__"] += 1   # f.__dict__["__annotations__"], vars(f)["__annotations__"]
     return +out
 ANNUSE_ALLOW = {
-    ("stackshot/web/server.py", "wraps"): (2, "functools.wraps twice: a decorator's wrapper, and the update tool's own signature kept visible; the function it copies from (update_unlocked, in service/update.py) is used as a value there, so its annotation names stay reads"),
+    ("stackshot/web/app.py", "wraps"): (1, "functools.wraps once: the standby wrapper of custom_route, a decorator's wrapper"),
+    ("stackshot/web/server.py", "wraps"): (1, "functools.wraps once: the update tool's own signature kept visible; the function it copies from (update_unlocked, in service/update.py) is used as a value there, so its annotation names stay reads"),
     ("tests/read_only_scenario.py", "getattr of __annotations__ or __wrapped__"): (2, "hasattr(endpoint, '__wrapped__') twice: whether a route is wrapped, nothing is evaluated"),
 }
 def ann_uses(files):
@@ -1979,7 +1989,7 @@ for what, code, form in (("typing.get_type_hints", "import typing\nh = typing.ge
     check(f"TRIPWIRE fires on a new use of an annotation reader: {what} in a new suite", form in flagged, flagged)
 real_s = "stackshot/web/server.py"
 check("TRIPWIRE a new use in a file that already has an entry for that form fails (one more functools.wraps appended to server.py)",
-      ann_uses({real_s: scan[real_s]}) == [] and ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}) == [(real_s, "wraps", 3, 2)],
+      ann_uses({real_s: scan[real_s]}) == [] and ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}) == [(real_s, "wraps", 2, 1)],
       ann_uses({real_s: scan[real_s] + "\nimport functools\nz = functools.wraps(len)\n"}))
 check("TRIPWIRE stays quiet on the listed uses and on a bare function def (def f(x: int) -> int)",
       ann_uses({f: scan[f] for f, _ in ANNUSE_ALLOW}) == [] and ann_uses({"tests/new_scenario.py": "def f(x: int) -> int:\n    return x"}) == [])

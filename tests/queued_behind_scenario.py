@@ -61,6 +61,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, home
+from stackshot.web.tools import sessions as _wt_sessions
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
 from stackshot.web.ui import render as UI
 from stackshot.web import render as MD
@@ -68,7 +71,7 @@ from stackshot.audit import hourly as HR, silence as SL, audit_run as AR, audit_
 from stackshot.audit import hourly_log as HL
 from stackshot.model import queued as Q, model as MODEL
 from stackshot.tools import next_report as NR
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
@@ -84,7 +87,7 @@ telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
 REAL = {n: getattr(server, n) for n in ("_handoff_status", "_sessions_index")}      # the stall pass below reads the real ones
 server._handoff_status = lambda who, idx=None: ("", 0.0)
-server._sessions_index = lambda: {}
+server._sessions_index = _wt_sessions._sessions_index = lambda: {}
 FRONT = {"home-front"}
 REAL_HOOK = Q.front_hook()                                         # what the server installed (`front_keeper`, strict), before the fixture's own answer replaces it
 Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `front_keeper` is replaced by the one front agent of the fixture

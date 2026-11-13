@@ -63,13 +63,13 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.github import ghsync; from stackshot.model import model
+from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.github import ghsync; from stackshot.model import model
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 day = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * DAY + ZONE_OFFSET))
@@ -219,16 +219,16 @@ upd(16, BACK, next="home-other: build it", wake=FUT)
 check("10 gate: …and passes with a wake", wk_(mt(16)) == FUT, mt(16))
 
 # ================================================================ create's check: unchanged, it sets no wake
-def mk(owner, **kw): return server._create(subject="[home] watch create", description=DESC, project="projects/alpha", owner=owner, next="home-front: look", **kw)
+def mk(owner, **kw): return _wt_create._create(subject="[home] watch create", description=DESC, project="projects/alpha", owner=owner, next="home-front: look", **kw)
 out = mk(FRONT, needs=[BACK], check="unit_active watchtest.service")
 check("11 create: a front agent's check on an item it creates for team-back is allowed (a done check is the server-run push)", "created" in out, out)
-check("11 create: …and create has no watch_reason parameter", "watch_reason" not in _inspect.signature(server.stackshot_create).parameters, None)
+check("11 create: …and create has no watch_reason parameter", "watch_reason" not in _inspect.signature(_wt_create.stackshot_create).parameters, None)
 
 # ================================================================ the tool text says the rule, once, and no longer teaches a front agent to check
-upd_d = server._UPDATE_DESC; cre_d = server._CHECK_FORM      # create's description carries _CHECK_FORM whole
+upd_d = _wt_update._UPDATE_DESC; cre_d = _wt_text._CHECK_FORM      # create's description carries _CHECK_FORM whole
 check("12 text: update and create describe the rule and watch_reason", all("does not watch handed-off work itself" in d and "watch_reason" in d for d in (upd_d, cre_d)), (upd_d[-400:], cre_d[-300:]))
-check("12 text: …the old teaching is gone", all("when you check on the work" not in d and "check on work handed to another session" not in d for d in (upd_d, cre_d, server._CHECK_FORM)), None)
-check("12 text: …update takes the parameter", "watch_reason" in _inspect.signature(server.stackshot_update).parameters, None)
+check("12 text: …the old teaching is gone", all("when you check on the work" not in d and "check on work handed to another session" not in d for d in (upd_d, cre_d, _wt_text._CHECK_FORM)), None)
+check("12 text: …update takes the parameter", "watch_reason" in _inspect.signature(_wt_update.stackshot_update).parameters, None)
 check("12 text: …the wording says what is pushed (a close or a hand-back), not 'writes to it'", all("closes the item or hands it back to you" in d and "writes to it" not in d for d in (upd_d, cre_d)) and "hands it back to you" in gates._WATCH_RULE, None)
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)

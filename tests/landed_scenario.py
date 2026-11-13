@@ -72,19 +72,23 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import update as _wt_update
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render
 from starlette.testclient import TestClient
 from stackshot.web.routes import ui_api as _rt_ui
-pub = [0]; server._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the Landed routes (web/routes/ui_api.py) look the publish up on their own module
+pub = [0]; server._publish = _wt_anchors._publish = _wt_route._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)      # the Landed routes (web/routes/ui_api.py) look the publish up on their own module
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 NEWD = "- Goal: The thing works and is in use"
 def cl(i, sender="work-osprey-x", outcome="done", reason="PR 80 is live", **kw):
-    return server.stackshot_complete(f"a{i}", outcome=outcome, reason=reason, description=NEWD, sender=sender, **kw)
+    return _wt_complete.stackshot_complete(f"a{i}", outcome=outcome, reason=reason, description=NEWD, sender=sender, **kw)
 def board(): return render.Board(str(T / "store"))
 def hdr(b=None):
     h = (b or board()).html(); return h[h.find('<nav class="hcards"'):h.find("</nav>", h.find('<nav class="hcards"')) + 6]
@@ -487,7 +491,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     cl(10, sender="home-beta", reason="first close")
     ld.clear(None)
     check("an item closed once and cleared: not counted", board().landed_count() == 0 and recs() == {} and ld._load()["a10"]["cleared"] > 0)
-    server.stackshot_update("a10", status="open", sender="home-beta", description="- Goal: A thing\n- It lives here\n- Finished when it really works", next="home-beta: look at it again")
+    _wt_update.stackshot_update("a10", status="open", sender="home-beta", description="- Goal: A thing\n- It lives here\n- Finished when it really works", next="home-beta: look at it again")
     check("a reopen takes the item's record off: it has not landed (any more), and the page does not list it", rd(10)["status"] == "open" and "a10" not in ld._load()
           and "a10" not in {r["gid"] for r, _ in board().landed_rows()}, ld._load().keys())
     time.sleep(1.1)       # the close's clock is whole seconds: a second close in the same second would be the same close
@@ -498,7 +502,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     g3 = get("/closed")
     check("…opening the page does not clear it", board().landed_count() == 1 and cards() == base(1) and page_lines(g3.text) == 1)
     # a close by Oliver of an item an agent closed before and that was reopened: no record
-    server.stackshot_update("a10", status="open", sender="home-beta", description="- Goal: A thing\n- It lives here\n- Finished when it is done for good", next="home-beta: once more")
+    _wt_update.stackshot_update("a10", status="open", sender="home-beta", description="- Goal: A thing\n- It lives here\n- Finished when it is done for good", next="home-beta: once more")
     it10 = rd(10); it10["status"] = "completed"; it10["metadata"].update(outcome="done", reason="he closed it"); it10["updated"] = it10["state_updated"] = time.time()
     writes.save("a10", it10, author=(server.OWNER, "board"))
     check("a close by Oliver after a reopen: no record, nothing on the page", "a10" not in recs() and board().landed_count() == 0)

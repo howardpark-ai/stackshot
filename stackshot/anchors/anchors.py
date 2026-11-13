@@ -394,7 +394,7 @@ def session_hubs(name: str, reg: dict[str, dict[str, Any]] | None = None, nm: di
 
 
 def off_map(session: str, project: str, reg: dict[str, dict[str, Any]] | None = None, nm: dict[str, str] | None = None, live: set[str] | None = None) -> str:
-    """The session's name when it is a session the project's agents map has no line for, else "": one rule for the note a write carries (server.py) and the audit's finding (tools/page_agent_report.py).
+    """The session's name when it is a session the project's agents map has no line for, else "": one rule for the note a write carries (web/tools/notes.py) and the audit's finding (tools/page_agent_report.py).
     A session is off the map of `project` when no page of that project's hub (`session_hubs`: the page, its parent and the `hub:` page; `agents:` entries of both kinds, a `display-name:` or `agent:` line) lists it AND
     it is either listed on no page at all (a session nobody knows the project of) or named for this project (`<project>-<role>`: it belongs here, the map forgot it). A session listed on another project's map is a
     visitor and is left alone. Never off the map: the owner, a server or audit label (`stackshot…`), a cloud session, and a label that is no session the fleet knows (a script). `live` = the names sala lists now

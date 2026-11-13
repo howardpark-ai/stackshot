@@ -71,7 +71,8 @@ def item(i, nxt, mover="home-one", status="open", **meta):      # the mover is s
     (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[home] item {i}", "description": "- A thing. It lives here. Done when done.",
                                                        "status": status, "updated": now - 7200, "state_updated": now - 7200, "confirmed": now - 7200,
                                                        "metadata": {"owner": U["home-builder"], "mover": mover, "project": "projects/alpha", "next": nxt, **meta}}))
-from stackshot.web import server; from stackshot.model import needs as _model_needs
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import needs as _model_needs
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
 OWNER = server.OWNER
@@ -99,7 +100,7 @@ fixtures()
 logging.disable(logging.INFO)
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def raw(i): return (T / f"store/a/{i}.json").read_text()
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]
 server._HERE = T / "repo"
 GH = {key(11): ("merged", "")}
@@ -233,7 +234,7 @@ def accepts(name, fn):
         with writes.session_write(): fn()
         check(name, True)
     except server.ToolError as e: check(name, False, str(e))
-def mk(nxt, **kw): return lambda: server._create(subject="[home] made", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder", mover="home-one", next=nxt, **kw)
+def mk(nxt, **kw): return lambda: _wt_create._create(subject="[home] made", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder", mover="home-one", next=nxt, **kw)
 refused("write check: a create whose step delivers a PR and is followed by another session's step is refused with the one-line fix",
         mk("home-one: merge PR #12 and restart the unit\nhome-two: verify the pages"), "step 1", "delivers #12", "another session's step follows", 'step_proof=[{"step": 1, "proof": "pr_merged #12"}]')
 accepts("…the same create with the proof passes", mk("home-one: merge PR #12 and restart the unit\nhome-two: verify the pages", step_proof=[{"step": 1, "proof": "pr_merged #12"}]))
@@ -243,7 +244,7 @@ accepts("…a delivery step followed by the same session's step is not judged", 
 accepts("…nor one followed by the owner's step", mk(f"home-one: merge PR #15 and restart the unit\n{OWNER}: pick the colour"))
 refused("…a release step with a follow-up, a URL and a second gap: the first is named and the count of the rest", mk("home-one: release #16 and restart\nhome-two: ship PR #17 and tell\nhome-three: verify"),
         "step 1", "delivers #16", 'step_proof=[{"step": 1, "proof": "pr_released #16"}]', "(and 1 more step)")
-_scr = lambda: server._create(subject="[home] made by a script", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder",
+_scr = lambda: _wt_create._create(subject="[home] made by a script", description="- Goal: a thing works. It lives here.", project="projects/alpha", owner="home-builder",
                                                                                  mover="home-one", next="home-one: merge PR #18 and restart the unit\nhome-two: verify the pages")
 try: _scr(); check("…a script's write (no session's) is not judged", True)
 except server.ToolError as e: check("…a script's write (no session's) is not judged", False, str(e))

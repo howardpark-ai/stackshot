@@ -69,7 +69,9 @@ def refused(name, f, *want):
 def refused_nw(name, i, f, *want):
     was = raw(i); refused(name, f, *want); check(name + " (nothing written)", raw(i) == was, None)
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import draft as D; from stackshot.github import ghsync; from stackshot.web import home; from stackshot.model import model
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 
@@ -78,11 +80,11 @@ def live_tools():
     sentences below name the owner as "the owner", so his name is put back to that form here; everything else is the live text, which is why a change to the shell sentences still fails these checks."""
     import asyncio
     return {t.name: {"description": (t.description or "").replace("Oliver", "the owner")} for t in asyncio.run(server.mcp.list_tools())}
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
-get = lambda i: server.stackshot_get(f"a{i}")
+get = lambda i: _wt_get.stackshot_get(f"a{i}")
 
 from stackshot.model import step_commands as SC; from stackshot.model import states
 GUARDS = server._cfg.CFG.setdefault("model", {})
@@ -440,10 +442,10 @@ GUARDS["guards"] = True
 # ---- create
 ASK12 = "Decide: run the script now · Recommend: yes · Stakes: a day of delay · By: no date"      # a create has no state to store, so a Oliver next line goes with needs=decision and an ask (an agent state under it would be refused)
 refused("12 create: a Oliver next line with a bare box-a command is refused with the step's text",
-        lambda: server._create(subject="[home] case-a bare", description=DESC, project="projects/alpha", owner="home-front", next=BARE, needs=["decision"], ask=ASK12), "next line: `bash /home/user/notes/x.sh` is bash for box-a")
-out12 = server._create(subject="[home] case-a wrapped", description=DESC, project="projects/alpha", owner="home-front", next=WRAP, needs=["decision"], ask=ASK12)
+        lambda: _wt_create._create(subject="[home] case-a bare", description=DESC, project="projects/alpha", owner="home-front", next=BARE, needs=["decision"], ask=ASK12), "next line: `bash /home/user/notes/x.sh` is bash for box-a")
+out12 = _wt_create._create(subject="[home] case-a wrapped", description=DESC, project="projects/alpha", owner="home-front", next=WRAP, needs=["decision"], ask=ASK12)
 check("12 create: the wrapped line passes", "Refused" not in str(out12) and "case-a wrapped" in str(out12) or "created" in str(out12).lower(), out12)
-out12 = server._create(subject="[home] case-a other session", description=DESC, project="projects/alpha", owner="home-front", next="team-back: run `bash /home/user/notes/x.sh` on box-a", needs=["team-back"])
+out12 = _wt_create._create(subject="[home] case-a other session", description=DESC, project="projects/alpha", owner="home-front", next="team-back: run `bash /home/user/notes/x.sh` on box-a", needs=["team-back"])
 check("12 create: another session's line with the same command passes", "Refused" not in str(out12), out12)
 # ---- the model guards name it
 rep12 = mg.check({"status": "open", "subject": "[home] x", "metadata": {"project": "projects/alpha", "owner": U["home-front"], "next": BARE}}, mg.Ctx(), touched={"next"})[0]
@@ -629,13 +631,13 @@ try:
 except Exception as e:
     got14 = str(e)
 check("14 next: …the whole refusal is `Refused: ` + the pane text for `next line`", got14 == "Refused: " + SC.pane_problem("! sala reauth x", "next line") and got14.startswith("Refused: next line: a `! ` line (`! sala reauth x`)"), got14)
-refused("14 create: a Oliver: next line with a pane-form command is refused", lambda: server._create(subject="[home] case-b bang", description=DESC, project="projects/alpha", owner="home-front", next="Oliver: ! sala reauth x", needs=["team-back"]), "Refused: next line: a `! ` line", PANE_FIX)
+refused("14 create: a Oliver: next line with a pane-form command is refused", lambda: _wt_create._create(subject="[home] case-b bang", description=DESC, project="projects/alpha", owner="home-front", next="Oliver: ! sala reauth x", needs=["team-back"]), "Refused: next line: a `! ` line", PANE_FIX)
 upd(151, next="team-back: ! sala reauth x\nteam-back: run `! ls`")
 check("14 next: another agent's line with the pane form is allowed", "team-back: ! sala reauth x" in mt(151)["next"], mt(151)["next"])
 for k_, ln_ in enumerate(("Oliver: open the page and say done!", "Oliver: wow! the page is up", "Oliver: the prefix `! ` types into a pane", "Oliver: In PowerShell run `ssh -t box-a 'sala op ready x'`", "Oliver: !important is a CSS word")):
     upd(151, next=ln_)
     check(f"14 next: a Oliver: line with a `!` that no command follows, or the ssh form, is allowed ({k_})", nx(151) == ln_, mt(151)["next"])
-out14 = server._create(subject="[home] case-b ok", description=DESC, project="projects/alpha", owner="home-front", next="team-back: build it\nOliver: In PowerShell run `ssh -t box-a 'ls'`", needs=["team-back"])      # his line is not first, so the item stays an agent's
+out14 = _wt_create._create(subject="[home] case-b ok", description=DESC, project="projects/alpha", owner="home-front", next="team-back: build it\nOliver: In PowerShell run `ssh -t box-a 'ls'`", needs=["team-back"])      # his line is not first, so the item stays an agent's
 check("14 create: the ssh form passes", "Refused" not in str(out14), out14)
 rep14 = mg.check({"status": "open", "subject": "[home] x", "metadata": {"project": "projects/alpha", "owner": U["home-front"], "next": "Oliver: ! sala reauth x"}}, mg.Ctx(), touched={"next"})[0]
 check("14 guard: the model guard names it next_windows", [p.key for p in rep14] == ["next_windows"] and "`! ` line" in mg.LABELS["next_windows"], rep14)

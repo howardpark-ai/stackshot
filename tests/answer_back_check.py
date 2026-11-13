@@ -62,10 +62,10 @@ def git(*a): subprocess.run(["git", "-C", str(T / "store"), *a], check=True, cap
 git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "user.name", "t"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-import uvicorn; from stackshot.web import server
+import uvicorn; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())

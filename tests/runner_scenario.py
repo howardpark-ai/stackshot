@@ -303,8 +303,11 @@ check("2 …and when stop() was asked at the same time, the loop ends instead of
 # ---- 3. the server's table
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.web.tools import rules as _wt_rules
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 ticks = server._minute_ticks()
 names = [t.name for t in ticks]
 check("3 order: the settle events come first, in order: the watchers' pass, the anchor pass, the phase sweep, the event waits, the done check, the step proof",
@@ -541,7 +544,7 @@ finally:
 
 # the publish step
 published = []
-server._publish = lambda: published.append(1)
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append(1)
 fleet_file = T / "fleet/a/machine.json"
 server._MINUTE_STAMP[0] = None
 server._minute_fleet_publish()
@@ -558,7 +561,7 @@ check("5 fleet publish: a runner takes the stamp when it is made, so its first l
 # a publish that raises: tried once per change of the stamp, not every round; the stamp is never lowered
 tries = []
 def bad_publish(): tries.append(1); raise RuntimeError("publish broke")
-server._publish = bad_publish
+server._publish = _wt_anchors._publish = _wt_route._publish = bad_publish
 server._MINUTE_STAMP[0] = None
 server._minute_fleet_publish()
 os.utime(fleet_file, (time.time() + 200, time.time() + 200))
@@ -575,10 +578,10 @@ os.utime(fleet_file, (time.time() + 400, time.time() + 400))
 try: server._minute_fleet_publish()
 except RuntimeError: pass
 check("5 fleet publish: …and the next real change is tried once again", len(tries) == 2 and server._MINUTE_STAMP[0] > high, (tries, server._MINUTE_STAMP))
-server._publish = lambda: published.append("p")
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
 
 # the watchers' pass wrapper
-server._publish = lambda: published.append("p")
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: published.append("p")
 woke = []; published.clear()
 real_nw, real_wp, real_ap = server._next_wake, server._wake_pass, server._anchor_pass
 ZONE_TZ = server._pages.zone_now().tzinfo
@@ -701,7 +704,7 @@ try:
     woke, pubs, sleeps = [], [], []
     real_wp7, real_pn, real_sleep = server._wake_pass, server._publish_now, time.sleep
     server._wake_pass = lambda *a, **k: woke.append(1) or []
-    server._publish_now = lambda **k: pubs.append(k)
+    server._publish_now = _wt_rules._publish_now = lambda **k: pubs.append(k)
     sent6.clear(); server._RUNNER_STALL[0] = False
     def fake_sleep(sec):
         sleeps.append(sec)
@@ -712,7 +715,7 @@ try:
             try: server._publish_loop()
             except StopLoop: pass
     finally:
-        time.sleep, server._wake_pass, server._publish_now = real_sleep, real_wp7, real_pn
+        time.sleep, server._wake_pass, server._publish_now = real_sleep, real_wp7, real_pn; _wt_rules._publish_now = real_pn
     check("6 publish loop: two passes publish twice (always probing versions) and call no wake pass and no watchdog", woke == [] and sent6 == [] and len(pubs) == 2 and all(p.get("force_versions") for p in pubs), (woke, sent6, pubs))
     import inspect
     check("6 publish loop: its source holds neither the wake pass nor the watchdog", "_wake_pass(" not in inspect.getsource(server._publish_loop) and "_runner_watchdog" not in inspect.getsource(server._publish_loop))

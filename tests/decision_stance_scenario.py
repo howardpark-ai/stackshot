@@ -78,14 +78,15 @@ def refused_nc(name, f, *want):
 def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import watchers as wk
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as wk
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
-mk = lambda **kw: server._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
+mk = lambda **kw: _wt_create._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
                                     "next": "Oliver: answer the ask", "needs": ["decision"], "ask": YN, **kw})
 
 tail = " · Stakes: low · By: Fri"
@@ -130,7 +131,7 @@ try:
     check("2 create: …stored, and no note (the label is named)", stored(out) and "(note:" not in (out or ""), out)
     out = passes("2 create: options listed with a Recommend that is no stance and names no label is the note's business (never a refusal here)", lambda: mk(ask=ASK(GUEST, "Elena"), options=OPTS))
     check("2 create: …stored with the note", stored(out) and "(note: the ask's Recommend part does not name the recommended option" in (out or ""), out)
-    passes("2 create: an item that is no decision is not read", lambda: server._create(subject="[home] build the guest list", description=DESC, project="projects/alpha", owner="home-front",
+    passes("2 create: an item that is no decision is not read", lambda: _wt_create._create(subject="[home] build the guest list", description=DESC, project="projects/alpha", owner="home-front",
                                                                                           next="team-back: build it", needs=["team-back"], ask=ASK(GUEST, "Elena")))
 
     # ================================================================ 3. the words come from configuration

@@ -164,8 +164,10 @@ check("2 a healthy second brain reports no problem", brains.problem(brains.for_k
 
 # ---- 3. the second copy is missing: fail open everywhere
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.web.routes import client_api as _rt_client
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 shutil.move(str(T / "second"), str(T / "second-away"))
 with stderr() as err:
     fms, _rels, skipped_ = _pg.read_pages_ex()

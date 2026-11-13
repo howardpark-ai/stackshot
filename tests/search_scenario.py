@@ -76,10 +76,10 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-from stackshot.web import server; from stackshot.service import writes; from stackshot.web import render; from stackshot.web import search
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.web import render; from stackshot.web import search
 from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import search as ui_search, render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from starlette.testclient import TestClient
 
 SEL = lambda q: {k: [x["key"] for x in v] for k, v in search.query(q).items() if v}      # {kind: [keys]} of a query

@@ -115,8 +115,10 @@ os.environ.update(ANTHROPIC_API_KEY="test-not-a-real-key", ANTHROPIC_AUTH_TOKEN=
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.anchors import anchors as a
 import shadow_harness as H; from stackshot.router import router_live
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 def router_cfg(**kw): _cfg.CFG["router"] = {"shadow": True, "command": [sys.executable, str(T / "fake_claude.py")], "timeout_seconds": 20, **kw}
 def rec(project, kind, text, **kw):
     """A notice the way anchor-hub and the server record one: delivered to the keeper, pilot."""
@@ -267,10 +269,10 @@ mm = [n for n in routing.read("projects/alpha") if n["kind"] == "message" and no
 check("a message to a project is routed, not delivered to a keeper name: recorded for the router (live, no recipient), with the page key in its label and no 'waits for your ruling as keeper' footer", len(mm) == 5 and all(n.get("live") is True and not n.get("to") for n in mm)
       and not p and all("as keeper" not in (router_live.stashed(n["id"]) or "") for n in mm) and all(" · to projects/alpha" in (router_live.stashed(n["id"]) or "") for n in mm), (p, mm[:2]))
 check("every message was recorded once and its full text is kept for the router", len({n["id"] for n in mm}) == 5 and all(router_live.stashed(n["id"]) for n in mm))
-res = server._route(n_chat, "merged", reason="keeper: channel talk", sender="work-osprey")
-res = server._route(n_scoped, "passed", to="work-osprey-main", reason="keeper: their thread", sender="work-osprey")
-res = server._route(m_a2, "dropped", reason="keeper: noise", sender="work-osprey")
-res = server._route(n_board, "merged", reason="keeper: page updated", sender="work-osprey")
+res = _wt_route._route(n_chat, "merged", reason="keeper: channel talk", sender="work-osprey")
+res = _wt_route._route(n_scoped, "passed", to="work-osprey-main", reason="keeper: their thread", sender="work-osprey")
+res = _wt_route._route(m_a2, "dropped", reason="keeper: noise", sender="work-osprey")
+res = _wt_route._route(n_board, "merged", reason="keeper: page updated", sender="work-osprey")
 n_in = {n["id"]: n for n in routing.read("projects/alpha")}
 check("the keeper's rulings are the keeper's own: ruled_by, no router line in the routing log", n_in[n_chat]["ruled_by"] == "work-osprey" and n_in[n_chat]["ruling"] == "merged"
       and not any("router" in json.dumps(l) for l in (json.loads(x) for p_ in routing.DIR.glob("*.jsonl") for x in p_.read_text().splitlines())), n_in[n_chat])
@@ -552,7 +554,7 @@ check("repeat: normal_text masks hashes, the quoted subject, digits, dates and w
 check("repeat: a text cut shorter by the log is the same message, a short text that is a prefix is not", router.same_text("a" * 150, "a" * 150 + "bc") and not router.same_text("ok thanks", "ok thanks a lot, see you at the meeting tomorrow"))
 now_ = time.time()
 r1 = rec("projects/alpha", "message", psc("0163c0d", "provision: Windows provisions itself", 10, "Sun Oct 11th"), who=PSC, ts=now_ - 300)
-server._route(r1, "dropped", reason="keeper: job notice again", sender="work-osprey")
+_wt_route._route(r1, "dropped", reason="keeper: job notice again", sender="work-osprey")
 r2 = rec("projects/alpha", "message", psc("0164c0d", "agents: deep-engineer runs on Opus, not Fable (Oliver, weekly limit)", 11, "Mon Oct 12th"), who=PSC, ts=now_ - 100)
 r2x = rec("projects/alpha", "message", psc("0165c0d", "agents: executor runs on Sonnet", 12, "Tue Oct 13th"), who="somebody-else", ts=now_ - 90)
 rtxt = "the nightly run finished cleanly after 11 s: pending 0, keep 5, move 0, rule 0, archive 2; read the sheet and apply what is sound"
@@ -561,7 +563,7 @@ b2 = rec("projects/alpha", "message", "[nightly-job] " + rtxt.replace("pending 0
 a3 = rec("projects/alpha", "message", "[weekly-job] " + rtxt.replace("nightly", "weekly"), who="check-job (a script on box-a)", ts=now_ - 240)
 b3 = rec("projects/alpha", "message", "[weekly-job] " + rtxt.replace("nightly", "weekly").replace("keep 5", "keep 7"), who="check-job (a script on box-a)", ts=now_ - 40)
 c1 = rec("projects/alpha", "message", "[old-job] " + rtxt.replace("nightly", "old"), who="old-job (a script on box-a)", ts=now_ - 25 * 3600)
-server._route(c1, "dropped", reason="keeper: noise", sender="work-osprey")
+_wt_route._route(c1, "dropped", reason="keeper: noise", sender="work-osprey")
 c2 = rec("projects/alpha", "message", "[old-job] " + rtxt.replace("nightly", "old"), who="old-job (a script on box-a)", ts=now_ - 20)
 fake("echo"); n0 = len(calls()); out = H.tick(); sh = shadow(); cl = calls()[n0:]
 check("repeat: a message like one the keeper ruled is dropped in code, reason 'repeat of <id>', though it names Oliver; no call for it",
@@ -579,14 +581,14 @@ check("repeat: a message like one the router ruled (its ruling is in the routing
 check("repeat: a sender that is a fleet session is a session, a script is not", router.is_session("home-beta", router.Context()) and router.is_session("work-osprey-x", router.Context()) and not router.is_session(PSC, router.Context()))
 dtxt = lambda k: f"board#{k} needs your decision on the vendor quote and the schedule for the release next week, please look at it today"
 s1 = rec("projects/alpha", "message", dtxt(12), who="home-beta", ts=time.time() - 60)
-server._route(s1, "passed", to="work-osprey-main", reason="keeper: for Oliver", sender="work-osprey")
+_wt_route._route(s1, "passed", to="work-osprey-main", reason="keeper: for Oliver", sender="work-osprey")
 s2 = rec("projects/alpha", "message", dtxt(13), who="home-beta", ts=time.time() - 50)
 ptxt = lambda k: f"the vendor sends the revised quote on friday and wants {k} copies of the signed contract in the office before the release next week"
 s3 = rec("projects/alpha", "message", ptxt(2), who="home-beta", ts=time.time() - 40)
-server._route(s3, "merged", reason="keeper: noted", sender="work-osprey")
+_wt_route._route(s3, "merged", reason="keeper: noted", sender="work-osprey")
 s4 = rec("projects/alpha", "message", ptxt(3), who="home-beta", ts=time.time() - 30)
 d1 = rec("projects/alpha", "message", "[deploy-watch] " + dtxt(21).replace("your decision", "needs: decision"), who="deploy-watch (a script on box-a)", ts=time.time() - 20)
-server._route(d1, "merged", reason="keeper: noted", sender="work-osprey")
+_wt_route._route(d1, "merged", reason="keeper: noted", sender="work-osprey")
 d2 = rec("projects/alpha", "message", "[deploy-watch] " + dtxt(22).replace("your decision", "needs: decision"), who="deploy-watch (a script on box-a)", ts=time.time() - 10)
 fake("echo"); H.tick(); sh = shadow()
 check("repeat: a session's 'board#<a> needs your decision' after 'board#<b> needs your decision' is not dropped as a repeat", sh[s2]["rule"] != "repeat" and sh[s2]["source"] in ("call", "code"), sh.get(s2))

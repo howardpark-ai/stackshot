@@ -76,8 +76,11 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import held; from stackshot.fleet import client
 from stackshot.router import router as _router; from stackshot.router import router_live as _live
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import message as _wt_message
 from stackshot.service import telling
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
 KEY = "projects/alpha"
@@ -326,8 +329,8 @@ if ln:
     check("5j: an audit batch whose sender marked it fyi is still delivered to the background keeper: a finding is a task", len(reach(X, n0)) == 1 and held.count(X) == 0 and res["ruling"] == "passed", (res, pushes()[n0:], held.count(X)))
 
 # ---- 6. the message tool's fyi
-check("6a: the message tool takes fyi (default false) and its text says what it does", "fyi" in inspect.signature(server.stackshot_message).parameters
-      and inspect.signature(server.stackshot_message).parameters["fyi"].default is False)
+check("6a: the message tool takes fyi (default false) and its text says what it does", "fyi" in inspect.signature(_wt_message.stackshot_message).parameters
+      and inspect.signature(_wt_message.stackshot_message).parameters["fyi"].default is False)
 desc = next(t for t in server.mcp._tool_manager._tools.values() if t.name == "message").description if hasattr(server.mcp, "_tool_manager") else ""
 check("…the description names fyi and its effect on a background agent, a project and a front agent", not desc or ("fyi=true" in desc and "next turn" in desc and "front agent it changes nothing" in desc), desc[-400:])
 fresh(); n0 = len(pushes()); out = server._message("work-osprey-x", "the PR is merged, nothing to do", "home-beta", fyi=True); settle()

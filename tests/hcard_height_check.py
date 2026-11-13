@@ -66,9 +66,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web import app as _wapp
 from stackshot.web.auth import signin as _signin
 import uvicorn
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 srv = uvicorn.Server(uvicorn.Config(server.mcp.http_app(), host="127.0.0.1", port=PORT, log_level="critical", lifespan="on"))
 th = threading.Thread(target=srv.run, daemon=True); th.start()
@@ -97,7 +100,7 @@ def fixture(n_closed, n_new):
         (T / f"store/a/{i}.json").write_text(json.dumps({"id": str(i), "subject": f"[work] An older piece of work number {i}", "description": "- done", "status": "completed", "updated": ts, "state_updated": ts, "confirmed": ts,
                                                          "metadata": {"owner": A, "project": "projects/alpha", "outcome": "done", "reason": f"piece {i} shipped"}}))
         ld.record(f"a{i}", ts, "done", "alpha-main", "projects/alpha")
-    server._board_home_drop()
+    _wapp._board_home_drop()
 MEASURE = """() => {
   const nav = document.querySelector('nav#counts'), cs = [...nav.querySelectorAll('a.hcard')];
   const shown = (e) => { const r = document.createRange(), more = e.querySelector('.more'), cut = more && more.getBoundingClientRect().width <= 1; r.selectNodeContents(e); const nw = e.querySelector('i.hnew'); if (cut) r.setEndBefore(more); if (nw && getComputedStyle(nw).position === 'absolute') r.setEndBefore(nw); return [...r.getClientRects()].filter(q => q.width > 0); };    // the text on show: the short form leaves the clipped rest out
@@ -257,7 +260,7 @@ try:
     # the layout of every page: cards, title spacing and the panel's border, pinned and closed, with and without a classic scrollbar
     fixture(40, 3)
     (T / "store/a/41.json").write_text(json.dumps({"id": "41", "subject": "[work] An open piece of work", "description": "- do it", "status": "open", "updated": time.time() - 900, "state_updated": time.time() - 900, "confirmed": time.time() - 900,
-                                                  "metadata": {"owner": A, "project": "projects/alpha", "next": "the next step"}})); server._board_home_drop()
+                                                  "metadata": {"owner": A, "project": "projects/alpha", "next": "the next step"}})); _wapp._board_home_drop()
     PAGES = {"home": "/", "item": "/items/a41", "project": "/projects/alpha", "Projects": "/projects", "Closed": "/closed", "Search": "/search?q=piece", "runners": "/runners"}
     LAYOUT = """() => {
       const R = e => e.getBoundingClientRect(), q = s => document.querySelector(s), nav = q('nav#counts'), cs = [...nav.querySelectorAll('a.hcard')], pn = q('#panel'), hd = q('header.top');

@@ -36,9 +36,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web import middleware as _wmw
 from stackshot.service import telling
 from stackshot.core import instance as _core_instance
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 from fastmcp import Client
 L = lambda gid: f"[{gid}](https://board.example.org/items/{gid})"
 
@@ -54,7 +57,7 @@ async def call(name, args):
 def run(tool, **args): return asyncio.run(call(tool, args))
 
 # ---- the link itself (_link_ids)
-lk = server._link_ids
+lk = _wmw._link_ids
 check("an item id → a link to its page, from [instance] board_url (its trailing slash dropped)", lk("see a1 now") == f"see {L('a1')} now", lk("see a1 now"))
 check("each id in a line; punctuation around it kept", lk("a1, a2. (a1)") == f"{L('a1')}, {L('a2')}. ({L('a1')})", lk("a1, a2. (a1)"))
 check("an id already linked is left alone (no double link)", lk(f"see {L('a1')}") == f"see {L('a1')}" and lk(lk("a1")) == L("a1"), lk(f"see {L('a1')}"))
@@ -82,7 +85,7 @@ check("update: the relay line to the writer links nothing that is no item, and k
 err, out = run("update", item_id="a1", description=f"- Goal: Copied from a reply: see {L('a2')}.\n- It lives here\n- Done when done", sender="home-x-main")
 check("a linked id copied back into a write is stored plain", json.loads((T / "store/a/1.json").read_text())["description"] == "- Goal: Copied from a reply: see a2.\n- It lives here\n- Done when done", (T / "store/a/1.json").read_text())
 check("…and shown linked again in the reply", f"see {L('a2')}." in out, out)
-check("an unrelated markdown link in a write is kept", server._unlink_ids("[a2](https://x.example/items/a2) and [x](https://board.example.org/items/a3)") == "[a2](https://x.example/items/a2) and [x](https://board.example.org/items/a3)")
+check("an unrelated markdown link in a write is kept", _wmw._unlink_ids("[a2](https://x.example/items/a2) and [x](https://board.example.org/items/a3)") == "[a2](https://x.example/items/a2) and [x](https://board.example.org/items/a3)")
 err, out = run("confirm", item_id="a2", sender="home-x")
 check("confirm: linked", not err and out.startswith(f"confirmed {L('a2')} at"), out)
 err, out = run("complete", item_id="a2")

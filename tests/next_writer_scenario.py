@@ -42,15 +42,19 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import nextlines as NL; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture sessions the guards would judge; the write guards have their own suite
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 STK = "projects/example"
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
 def create(next, sender=MAIN, **kw):
-    r = server.stackshot_create(subject="[home] a thing", description=DESC, project=STK, sender=sender, next=next, **kw)
+    r = _wt_create.stackshot_create(subject="[home] a thing", description=DESC, project=STK, sender=sender, next=next, **kw)
     return _model_ids._norm_id(r.split()[1])
 def upd(gid, sender, **kw): return server._update(gid, sender=sender, **kw)
 def rd(gid): return json.loads(server._path(gid).read_text())
@@ -73,7 +77,7 @@ check("create: next is stored as given", nx(g) == K1, nx(g))
 check("create: the writer is the creator, the keeper of record", who(g) == [MAIN], who(g))
 check("create: the pair holds the canonical id, not the name", rd(g)["metadata"]["next_by"][0][0] == U[MAIN], rd(g)["metadata"].get("next_by"))
 refused("create with no next is refused for a session (N6)", lambda: create(""), "has no open step in next")
-g_none = _model_ids._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN).split()[1])     # the server's own write is not judged
+g_none = _model_ids._norm_id(_wt_create._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN).split()[1])     # the server's own write is not judged
 check("create with no next stores neither next nor next_by", "next" not in rd(g_none)["metadata"] and "next_by" not in rd(g_none)["metadata"], rd(g_none)["metadata"])
 
 # ================================================================ two senders each keep their lines
@@ -180,13 +184,13 @@ m6 = rd(g6)["metadata"]
 check("a close (update) clears next and the writers", "next" not in m6 and "next_by" not in m6, m6)
 upd(g6, ENG, status="open", next=B1)
 check("reopen: the new next is the reopener's", lines(g6) == [B1] and who(g6) == [ENG], (nx(g6), who(g6)))
-server.stackshot_complete(g6, outcome="done", reason="finished", description="- Goal: A thing\n- Done a second time", sender=ENG)
+_wt_complete.stackshot_complete(g6, outcome="done", reason="finished", description="- Goal: A thing\n- Done a second time", sender=ENG)
 check("the complete tool clears them too", "next_by" not in rd(g6)["metadata"] and "next" not in rd(g6)["metadata"], rd(g6)["metadata"])
 
 # ================================================================ get is unchanged
 g7 = create(K1)
 upd(g7, GEN, next=A1)
-got = server.stackshot_get(g7)
+got = _wt_get.stackshot_get(g7)
 check("get shows the lines as one list, as before", f"next:\n{K1}\n{A1}" in got, got[-400:])
 check("…with no writer shown: the text after `next:` is the lines and nothing else", "next_by" not in got and got.split("next:\n", 1)[1].strip() == f"{K1}\n{A1}" and U[GEN] not in got, got[-400:])
 g8 = create("  - home-x: indented bullet\n\n  - home-y: another\n")
@@ -309,7 +313,7 @@ check("notice: setting a line identical to another session's says nothing about 
 telling.tell_woken = _tw
 
 # the migration's own write: a nameless line given a name keeps its writer
-gm = _model_ids._norm_id(server._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
+gm = _model_ids._norm_id(_wt_create._create(subject="[home] a thing", description=DESC, project=STK, owner=MAIN, next="nameless line").split()[1])     # a line stored before N1: only the server's own write can make one now
 upd(gm, GEN, next=f"{GEN}: second")
 it = server._load(gm)
 res = server._migrate_one({"item": gm, "set": {"next": f"{MAIN}: nameless line\n{GEN}: second"}, "drop": [], "expect": it["updated"], "expect_sig": server._migrate_sig(gm, it), "kind": "named"})
@@ -323,7 +327,7 @@ nowt = time.time() - 86400
                                               "metadata": {"owner": U[MAIN], "project": STK, "next": "do the thing (an unnamed line stored before the guard)"}}))
 upd("a41", GEN, next=f"{MAIN}: a named line by the engineer")
 check("guards: a session's valid line is not refused for the keeper's old nameless line beside it", lines("a41") == ["do the thing (an unnamed line stored before the guard)", f"{MAIN}: a named line by the engineer"], nx("a41"))
-refused("guards: …but a nameless line of the sender's own is still refused", lambda: server.stackshot_update("a41", sender=GEN, next="a nameless line of mine"), "names no one")
+refused("guards: …but a nameless line of the sender's own is still refused", lambda: _wt_update.stackshot_update("a41", sender=GEN, next="a nameless line of mine"), "names no one")
 check("…and the refused write changed nothing", len(lines("a41")) == 2 and who("a41") == [MAIN, GEN], (nx("a41"), who("a41")))
 server._cfg.CFG["model"]["guards"] = False
 
