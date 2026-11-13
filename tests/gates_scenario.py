@@ -422,6 +422,13 @@ check("4 the table the server installed has every hook of the dataclass", gates.
 try: gates.Hooks(**{f: None for f in fields[:-1]}); built = True
 except TypeError: built = False
 check("4 a table with a hook missing cannot be built", not built)
+_first = gates._hooks_
+try:
+    _other = dataclasses.replace(_first, relaunch="a later table")
+    gates.install(_other)
+    replaced = gates._hooks_ is _other and gates._hooks().relaunch == "a later table"
+finally: gates.install(_first)
+check("4 install replaces the table (the last one installed is the one the gates read), and the first can be put back", replaced and gates._hooks_ is _first, replaced)
 with srv(_model_guards_on=lambda: False):
     check("4 a hook that is a function is looked up on the server when the gate runs: a patched _model_guards_on reaches gate_draft", gates._hooks().model_guards_on() is False)
 with srv(_ho_same=lambda a, b: True):
