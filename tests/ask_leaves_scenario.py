@@ -696,8 +696,8 @@ check("a question naming a time is neither a tick nor a hold: it goes to the ses
 told.clear()
 res = server._answer("a33", "", "ran it but it says forbidden", "send"); m = rd(33)["metadata"]
 check("a longer note that goes on is not a tick", not m["answers"][-1].get("applied") and told and "Judge the note" in told[-1][2], (m, told))
-res = server._answer("a34", "", "", "send")
-check("an empty Send still finishes the step as before", res == "done" and "step" not in rd(34)["metadata"], res)
+res = server._answer("a34", "", "", "done")
+check("Done with an empty box still finishes the step as before", res == "done" and "step" not in rd(34)["metadata"], res)
 
 # ---- 8. the texts agents learn it from
 d = server._UPDATE_DESC

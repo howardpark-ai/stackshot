@@ -115,6 +115,19 @@ for word in ("stuck state", "Nag again", "stuck_to", "stuck list"):
     got = rt.lint(plant, pathlib.Path(SCR, "retired_terms.toml"))
     check(f"retired: \"{word}\" in a string of server.py is a hit, and the nearby \"a stuck item\" is not", len(got) == 1 and got[0].file == "server.py" and got[0].term == word, [str(h) for h in got])
 
+# the step form's one Send (a note box that read "A note, or nothing to finish the step", an empty Send that finished the step, a draft dropped by "his Send on the step") is retired for the two buttons Done and Send note:
+# each old phrase is a hit when it comes back in a string a session reads, and the replacement wording is not
+STEP_SEND_TERMS = ("A note, or nothing to finish the step", "Send with an empty box finishes the step", "his Send on the step")
+check("the live list names the step form's three retired Send phrases, each with the two-button wording to use instead",
+      set(STEP_SEND_TERMS) <= set(byname) and all(("Done" in byname[w].use) and ("Send note" in byname[w].use or "Note (optional)" in byname[w].use) for w in STEP_SEND_TERMS), [(w, byname.get(w) and byname[w].use) for w in STEP_SEND_TERMS])
+for word in STEP_SEND_TERMS:
+    plant = T / ("plant-step-" + str(STEP_SEND_TERMS.index(word))); plant.mkdir()
+    (plant / "server.py").write_text(f'LINE = "a close drops it, and {word} again"\nOK = "a close drops it, and so does his Done or Send note on the step"\n')
+    (plant / "tests").mkdir(); (plant / "tests" / "tool_text.snapshot.json").write_text(json.dumps({"tools": {"create": {"description": f"text with {word} inside"}}}, indent=2) + "\n")
+    got = rt.lint(plant, pathlib.Path(SCR, "retired_terms.toml"))
+    check(f"retired: \"{word}\" in a string of server.py and in the tool-text snapshot is a hit (two, one per file), and the two-button wording beside it is not",
+          sorted((h.file, h.term) for h in got) == [("server.py", word), ("tests/tool_text.snapshot.json", word)], [str(h) for h in got])
+
 import shutil; shutil.rmtree(T, ignore_errors=True)
 left = sorted(p.name for p in BASE.iterdir())
 check("a run leaves nothing behind: its scratch folder is removed at exit", not left, left)

@@ -1,6 +1,6 @@
 """note_read.py — what the owner's note on his step says, read by the server so it can apply it (a pure module, no config and no store).
 
-The owner's Send box on a step takes a note. Two kinds of note say what the owner did or will do, and the server applies them itself instead of leaving the session that takes the item to
+The owner's note box on a step (the Send note button) takes a note. Two kinds of note say what the owner did or will do, and the server applies them itself instead of leaving the session that takes the item to
 read them:
 
   done   the whole note says he did the step ("ran it", "done", "I did it"; "I ran it and will check tomorrow" too, which ticks and holds nothing): his step is ticked as a Done ticks it. A

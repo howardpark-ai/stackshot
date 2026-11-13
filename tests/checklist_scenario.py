@@ -8,13 +8,13 @@ held; a mark with a next, a mark alone (next becomes the open steps left), a mar
 two, a step in both lists and a step still listed in next are refused; `[metadata.next] require_marks = false` reads an unmarked removal as dropped, nobody and no time;
 a line that left next by a write that knows nothing of steps reads as dropped; a close marks the open steps (done when the outcome is done, dropped otherwise) and keeps the checklist as the record (get and the page show it), marks on
 a closed item are refused and a reopening drops the steps an old close left open; get lists the done and dropped steps with their positions, who and when; History says `step done: …` and
-`step dropped: …` (the page's and the GitHub mirror's comment); Oliver's Send with an empty box checks his open step (the one that holds the Your step block's text, else the
+`step dropped: …` (the page's and the GitHub mirror's comment); Oliver's Done checks his open step (the one that holds the Your step block's text, else the
 first that is his), a note leaves it open, and a step that is not a line of next checks nothing; the page draws the checklist as CSS boxes (no form input), open / done (checked,
 muted, who · when) / dropped (struck through), with a hidden word for a screen reader, and escapes hostile text in a step and in who marked it.
 
 Since (nextlines) a step is a line as nextlines.split groups it and knows its writer: a mark reaches any open step and the marked line leaves next with its writer pair; an unmarked drop is refused for
 the sender's own lines only (next replaced, or next="none"); clear_next=true is a deliberate wipe that marks every line dropped by the sender. Since the Your step block shows his own open Next lines (section 12),
-his Send with an empty box checks all of them, and the step field is a one-line summary (step_scenario, section 12, refuses a command in it).
+his Done checks all of them, and the step field is a one-line summary (step_scenario, section 12, refuses a command in it).
 
     tests/run-suite checklist        → exit 0 / 1"""
 import json, logging, os, pathlib, re, subprocess, sys, time
@@ -60,7 +60,7 @@ def item(i, status="open", **meta):
                                                      "metadata": {"owner": OWNER, "project": "projects/alpha", "needs": ["home-agent"], "next": L4, **meta}}))
 for i in (1, 2, 3, 4, 5, 6, 7, 8, 9, 20):
     item(i)                                                       # a legacy item: four next lines, no stored steps
-item(10, state="your-step", step=STEP, next="home-agent: prepare it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: verify it")        # Oliver's Send with an empty box
+item(10, state="your-step", step=STEP, next="home-agent: prepare it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: verify it")        # Oliver's Done
 item(11, state="your-step", step=STEP, next="home-agent: prepare it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: verify it")        # …and with a note
 item(12, state="your-step", step=STEP, next="home-agent: look at it")                                                          # his step is not a line of next
 item(13, state="your-step", step=STEP, next="Oliver: look at the page first\nOliver: In PowerShell run `ssh -t box-a 'ls'` on the box\nhome-agent: verify it")      # the line that holds the step's text
@@ -218,19 +218,19 @@ ev3 = [re.sub(r"<[^>]+>", "", h) for _t, k, h in bd.item_events(bd.item("a3"))[0
 check("…and 'step dropped: …' for one dropped", "step dropped: home-agent: test it" in ev3 and "step done: home-agent: build the thing" in ev3, ev3)
 check("a step that left next with nobody marking it is no step event (the next line says it)", S.changes({"next": L4}, {"next": "home-agent: test it"}) == [])
 
-# ---- 10. Oliver's Send
-r = server._answer("a10", "", "", "send")
+# ---- 10. Oliver's Done and Send note (the two buttons of the step form)
+r = server._answer("a10", "", "", "done")
 m10 = mt(10)
-check("Send with an empty box: the item goes on, and his open step (the line that is his) is checked, by Oliver and now; the rest of next stays",
+check("Done with an empty box: the item goes on, and his open step (the line that is his) is checked, by Oliver and now; the rest of next stays",
       r == "done" and [x["status"] for x in m10["steps"]] == ["open", "done", "open"] and m10["steps"][1]["by"] == "Oliver" and abs(m10["steps"][1]["at"] - time.time()) < 60
       and m10["next"] == "home-agent: prepare it\nhome-agent: verify it" and "state" not in m10, (r, m10))
-r = server._answer("a11", "", "which box?", "send")
+r = server._answer("a11", "", "which box?", "note")
 m11 = mt(11)
-check("Send with a note leaves his step open: the session that takes the item marks it", r == "stepreply" and "steps" not in m11 and m11["next"] == "home-agent: prepare it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: verify it", (r, m11))
-r = server._answer("a12", "", "", "send")
+check("Send note leaves his step open: the session that takes the item marks it", r == "stepreply" and "steps" not in m11 and m11["next"] == "home-agent: prepare it\nOliver: In PowerShell run `ssh -t box-a 'ls'`\nhome-agent: verify it", (r, m11))
+r = server._answer("a12", "", "", "done")
 check("a step that is not a line of next (no line of his) checks nothing; the item still goes on", r == "done" and "steps" not in mt(12) and mt(12)["next"] == "home-agent: look at it", (r, mt(12)))
-r = server._answer("a13", "", "", "send")
-check("with two lines of his, both are checked (the Your step block shows both; his Send finishes the step), the agent's line stays", st(13) == [("done", "Oliver: look at the page first"), ("done", "Oliver: In PowerShell run `ssh -t box-a 'ls'` on the box"), OPEN("home-agent: verify it")]
+r = server._answer("a13", "", "", "done")
+check("with two lines of his, both are checked (the Your step block shows both; his Done finishes the step), the agent's line stays", st(13) == [("done", "Oliver: look at the page first"), ("done", "Oliver: In PowerShell run `ssh -t box-a 'ls'` on the box"), OPEN("home-agent: verify it")]
       and mt(13)["next"] == "home-agent: verify it" and mt(13)["next_by"] == [[OWNER, NL.key_of("home-agent: verify it")]], (st(13), mt(13)))
 snap()
 ev10 = [re.sub(r"<[^>]+>", "", h) for _t, k, h in ui_render.Board(str(STORE)).item_events(ui_render.Board(str(STORE)).item("a10"))[0] if k == "step"]
@@ -293,10 +293,10 @@ check("Next stays whole: every step of the checklist, his and the agent's, open,
 p22, p23 = bd.item_html("a22", answer={**BOX, "action": "/items/a22/answer"}), bd.item_html("a23", answer={**BOX, "action": "/items/a23/answer"})
 check("with no line of his in next the block has no list; an unnamed line is his",
       'class="istepnext"' not in p22 and 'class="iask istep"' in p22 and '<div class="istepnext"><ol' in p23 and "run the command below and say so" in p23, p23[p23.find("istepnext") - 40:][:400])
-r = server._answer("a21", "", "", "send")
+r = server._answer("a21", "", "", "done")
 m21 = mt(21)
 p21b = ui_render.Board(str(STORE)).item_html("a21", answer=BOX)
-check("his Send with an empty box checks his three open steps: checked, by Oliver and now; the agent's stay open; the item goes on",
+check("his Done checks his three open steps: checked, by Oliver and now; the agent's stay open; the item goes on",
       r == "done" and [x["status"] for x in m21["steps"]] == ["open", "done", "done", "done", "open"] and m21["steps"][1]["by"] == "Oliver" and "state" not in m21 and 'class="istepnext"' not in p21b,
       (r, [x["status"] for x in m21.get("steps", [])]))
 nx21b = nx(ui_render.Board(str(STORE)).item_html("a21"))
