@@ -147,6 +147,16 @@ FLAGS.update(reformat=True)
 upd(g2, description="- Goal: Done when it is done\n- Changed by a script", sender=OWNER)
 check("2 a re-bullet of the description reads its flag through the hook", names().count("reformat") >= 1, names().count("reformat"))
 FLAGS.update(reformat=False)
+g2r = put(13)
+RET["pilot_charge"] = ("stew-session", "name")
+upd(g2r, description="- Goal: Done when it is done\n- A real change of the description", sender=OWNER)
+check("2 a real change of the description owes the page: the keeper is asked who is charged", called("pilot_charge") and rd(g2r)["state_updated"] > time.time() - 60, names())
+FLAGS.update(reformat=True)
+g2s = put(14); was_su = rd(g2s)["state_updated"]
+upd(g2s, description="- Goal: Done when it is done\n- Only re-bulleted", sender=OWNER)
+check("2 …and a re-bullet owes none and leaves the state clock where it was (a re-bullet changes the form of the text, never what it says)", not called("pilot_charge") and rd(g2s)["state_updated"] == was_su, (names(), rd(g2s)["state_updated"], was_su))
+RET.pop("pilot_charge")
+FLAGS.update(reformat=False)
 FLAGS.update(terminal_row=True)
 FLAGS.update(session_next=False)
 g2b = put(4)
@@ -255,16 +265,17 @@ update.install(make_hooks(update=fake_update))
 update._completion_anchor_prompt = lambda gid, item: f"\n[anchors] prompt for {gid} ({item.get('status')})"
 LOG.clear()
 out_c = update.complete_item(g7, outcome="done", reason="it is done", description="", superseded_by="", sender=OWNER, said=None, outcome_text="- done")
-check("7 the complete makes the update through the hook, with status=completed and the fields it was given, the description empty", UPDATES and UPDATES[0][0] == g7 and UPDATES[0][1]["status"] == "completed" and UPDATES[0][1]["outcome"] == "done" and UPDATES[0][1]["reason"] == "it is done"
-      and UPDATES[0][1]["outcome_text"] == "- done" and UPDATES[0][1]["sender"] == OWNER and UPDATES[0][1]["description"] == "", UPDATES)
+check("7 the complete makes the update through the hook, with status=completed and the fields it was given, the description empty", UPDATES and UPDATES[0][0] == g7 and UPDATES[0][1].get("status") == "completed" and UPDATES[0][1].get("outcome") == "done" and UPDATES[0][1].get("reason") == "it is done"
+      and UPDATES[0][1].get("outcome_text") == "- done" and UPDATES[0][1].get("sender") == OWNER and UPDATES[0][1].get("description") == "", UPDATES)
 check("7 …and the anchors prompt is appended to the reply, read from the item as it stood before the close", out_c == f"updated by the hook.\n\n[anchors] prompt for {g7} (open)", out_c)
 update._completion_anchor_prompt = lambda gid, item: (_ for _ in ()).throw(RuntimeError("prompt broke"))
-out_c2 = update.complete_item(g7, outcome="done", reason="r", sender=OWNER)
+try: out_c2 = update.complete_item(g7, outcome="done", reason="r", sender=OWNER)
+except Exception as e: out_c2 = f"raised {e!r}"
 check("7 a prompt that fails never fails the close: it is told in the reply", out_c2.endswith("\n[anchors] prompt failed: prompt broke") and out_c2.startswith("updated by the hook."), out_c2)
 update._completion_anchor_prompt = real_prompt
 UPDATES.clear()
 update.complete_item(g7, sender=OWNER)
-check("7 a complete from a pane with an older tool list (no fields) still makes the update, so its refusal says what is missing", UPDATES and UPDATES[0][1]["outcome"] == "" and UPDATES[0][1]["status"] == "completed", UPDATES)
+check("7 a complete from a pane with an older tool list (no fields) still makes the update, so its refusal says what is missing", UPDATES and UPDATES[0][1].get("outcome") == "" and UPDATES[0][1].get("status") == "completed", UPDATES)
 try: update.complete_item("a99999", sender=OWNER); nf = None
 except ToolError as e: nf = str(e)
 check("7 a complete of an item that does not exist is refused before the update is made", nf is not None and not UPDATES[1:], (nf, UPDATES))
@@ -280,7 +291,7 @@ it8 = rd(g8)
 sv8 = called("save")
 check("8 a confirm moves the confirmed clock and no other clock", it8["confirmed"] >= t_c - 1 and it8["updated"] == was["updated"] and it8["state_updated"] == was["state_updated"], (it8, was))
 check("8 it saves quietly under the confirm activity, written by the sender", len(sv8) == 1 and sv8[0][1]["ctx"] is writes.QUIET and sv8[0][1]["activity"] == update._activity.CONFIRM and sv8[0][1]["writer"] == OWNER, sv8)
-check("8 it publishes after the save, and the reply says the item is confirmed, with the formatter's text and the nag", names().index("save") < names().index("publish") and out_f.startswith("confirmed ") and "<item>" in out_f, (names(), out_f))
+check("8 it publishes after the save, and the reply says the item is confirmed, with the formatter's text and the nag", "publish" in names() and "save" in names() and names().index("save") < names().index("publish") and out_f.startswith("confirmed ") and "<item>" in out_f, (names(), out_f))
 LOG.clear()
 update.confirm_item(g8)
 check("8 a confirm with no sender is written by the item's mover (the holder hook)", called("save")[0][1]["writer"] == MOVER and called("holder"), called("save"))
@@ -305,6 +316,7 @@ check("9 an item waiting on nothing has no wait notes", update._stale_wait_notes
 update.install(None)
 try: update.update_item(g1, subject="[home] x"); bare = None
 except RuntimeError as e: bare = str(e)
+except Exception as e: bare = f"not the install's refusal: {e!r}"
 check("10 an update with no hooks installed is refused, naming the install", bare is not None and "no hooks installed" in bare, bare)
 try: update.confirm_item(g1, OWNER); bare2 = None
 except RuntimeError as e: bare2 = str(e)
@@ -327,7 +339,9 @@ finally: server._gate_subject = real_gate
 check("10 …and a gate that stays on the server is looked up late too (a suite's patch of the server's name reaches the update)", via_gate == "<patched gate>", via_gate)
 real_upd = server._update
 server._update = lambda *a, **k: "<patched update>"
-try: via_update = tbl.update("a1")
+try:
+    try: via_update = tbl.update("a1")
+    except Exception as e: via_update = f"raised {e!r}"
 finally: server._update = real_upd
 check("10 the complete reaches the server's `_update` by a late lookup (a suite that replaces it there still reaches the close)", via_update == "<patched update>", via_update)
 check("10 the flags the server keeps are read through the hooks it gives (the thread-local's own value, not a copy)", tbl.session_next() is False and tbl.reformat() is False and tbl.terminal_row() is False, (tbl.session_next(), tbl.reformat(), tbl.terminal_row()))
