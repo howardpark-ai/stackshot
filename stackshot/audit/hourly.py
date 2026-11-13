@@ -17,8 +17,10 @@ An item is owed a line when all of these hold, using the silence pass's own scop
     treated like any other: the pass sends nobody anything, it writes a History line, so there is no notice to hold back from a front agent;
   - the item has had no real activity for an hour: `silence.clock`, the clock the silence pass reads (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
     a write by the mover). A bare confirm ("no change") and the audit's own and the ladder's lines do not move it, so a "no change" reply is no update;
-  - no audit line was written on it lately: one an hour for the first 24 hours of silence, then one every 6 hours (`SLOW_EVERY`), so a week of silence is about fifty lines, not 168. The newest line of
-    `metadata.hourly_audit.log` is the clock, so a second pass in the same hour writes nothing and a clock that goes backwards only delays the next line.
+  - no audit line was written on it lately: the next line is owed 45 minutes after the last (`FAST_GAP`) for the first 24 hours of silence, then one every 6 hours (`SLOW_EVERY`), so a week of silence is about
+    sixty lines, not 168. The ten-minute tick lands it on the first tick from then on, 50 minutes after the last line on an exact grid and at most about 56 minutes with a late round and jitter, so the row of a
+    verified item, which reads red only strictly past an hour since its last activity (the line's time), never turns red between two lines. The newest line of `metadata.hourly_audit.log` is the clock, so a
+    second pass in the same 45 minutes writes nothing and a clock that goes backwards only delays the next line.
 
 What the pass verifies, from data the server already holds, and says in the line (`Audit hh:mm: verified …`):
 
@@ -52,10 +54,11 @@ from stackshot.model import last_activity as _la
 from stackshot.waits import handoff as _ho
 from stackshot.waits import waiting as _wt
 
-EVERY = 3600.0           # an item on an agent is owed a line after this long without activity, and again this long after the last line
+EVERY = 3600.0           # an item on an agent is owed a line after this long without activity
+FAST_GAP = 45 * 60.0     # …and the next line this long after the last (not an hour): the ten-minute tick lands it 50 minutes on (at most about 56 with a late round and jitter), so the On agent row, which reads the line's time as the item's last activity and turns red strictly past an hour, never reads "idle over 1 h" between two lines
 LONG_AFTER = 24 * 3600.0     # …until it has been silent this long; then the lines thin out to one every SLOW_EVERY
 SLOW_EVERY = 6 * 3600.0
-SLACK = 300.0            # the ten-minute tick reads its clock a few seconds later or earlier each time: a line is owed once this much less than the gap has passed, so an hour on the tick grid is never missed by seconds and pushed a whole tick on (half a tick)
+SLACK = 300.0            # in the slow stretch (a line every SLOW_EVERY): the ten-minute tick reads its clock a few seconds later or earlier each time, so the line is owed once this much less than the gap has passed and 6 hours on the tick grid is never missed by seconds and pushed a whole tick on
 PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:05: verified …`
 KIND_OK, KIND_IDLE = _log.KIND_OK, _log.KIND_IDLE      # the `kind` of the log entry of a line that verified something, and of one that did not
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
@@ -127,6 +130,19 @@ def stamp_signal(line: dict[str, Any] | None, now: float) -> dict[str, Any] | No
     return _la.audit_signal(words, now)
 
 
+def stamp(item: dict[str, Any], line: dict[str, Any] | None, now: float) -> bool:
+    """Stamp the line as the item's `last_activity` (`stamp_signal`, then `last_activity.apply`: newest wins) → True when the record changed. The record never goes backwards for an audit line: a stored record dated
+    ahead of `now` that still reads (within `last_activity.SKEW_S`: a clock stepped back a little, or an event the hub dated just ahead) stays, where `last_activity.record` alone would ignore a time past `now` and
+    replace it with the earlier one. A record dated further ahead than that is no record (`last_activity.read`), and is replaced as everywhere."""
+    sig = stamp_signal(line, now)
+    if sig is None:
+        return False
+    cur = _la.read(item, now)
+    if cur is not None and cur["at"] > sig["at"]:
+        return False
+    return _la.apply(item, [sig], now)
+
+
 def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
     """The line: `Audit hh:mm: verified a, b` or `Audit hh:mm: idle, nothing verified`, the time in the instance zone. A line that rests on live states alone (nothing in `recorded`) says so."""
     hm = dt.datetime.fromtimestamp(now, _cfg.tz()).strftime("%H:%M")
@@ -153,8 +169,8 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     if not (last > 0 and now - last >= EVERY):
         return None
     prior = last_line(meta, now)
-    if prior is not None and now - prior["at"] < (SLOW_EVERY if now - last >= LONG_AFTER else EVERY) - SLACK:
-        return None      # a line was written lately, within the gap less the slack (a clock that went backwards lands here too: the next line is only delayed)
+    if prior is not None and now - prior["at"] < (SLOW_EVERY - SLACK if now - last >= LONG_AFTER else FAST_GAP):
+        return None      # a line was written lately, within the gap (a clock that went backwards lands here too: the next line is only delayed)
     def tied() -> bool:
         if subagents is None:
             return False
