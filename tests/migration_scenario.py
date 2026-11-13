@@ -132,7 +132,7 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 (cp4 / "store/github.json").write_text(json.dumps({"repo": "o/r", "issues": {f"g{n}": n for n in (2, 3, 4, 5, 6)}, "aliases": {}}))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import gates; from stackshot.web import server; from stackshot.service import runner as runner_svc; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
@@ -288,11 +288,11 @@ check("begin: the board-wide pause is held by the server itself, the config's ow
 def _spied_runner():
     """The server's runner over its own table, every tick's function replaced by a recorder, so the table's board flags and the real hold are what is under test."""
     from stackshot.core import runner as _rn
-    r = server._make_runner(); _calls.clear()
+    r = runner_svc.make(); _calls.clear()
     r.ticks = [_rn.Tick(t.name, (lambda n_: (lambda *a, **k: _calls.append(n_)))(t.name), t.group, t.pace, t.board) for t in r.ticks]
     return r
 _calls: list[str] = []
-_all_ticks = [t.name for t in server._minute_ticks()]
+_all_ticks = [t.name for t in runner_svc.ticks()]
 _spied_runner().run_round(event=True); held_calls = list(_calls)
 wk.release(); _spied_runner().run_round(event=True); free_calls = list(_calls); wk.hold(BY, 600, begin=True)
 check("begin: every clock that reads or notifies about items stands still while it is held (the ladder, the checks, the answer escalation, the hand-off pass, the For you look, the filing pass); the registry sync, the clients' tick, the two wake passes (which check for themselves) and the fleet publish go on",

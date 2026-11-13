@@ -68,6 +68,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import route as _wt_route
@@ -193,8 +194,8 @@ item(94, wait_kind="item", after=["a95"], post_wake_mover=BACK, ask_by=day(9), n
 item(95, status="completed", outcome="done", reason="r")
 reset(); server._minute_wake_pass()
 check("item: the minute tick's gate (no wake due) leaves a wait whose blockers all closed unseen, with a far ask-by", mt(94).get("wait_kind") == "item" and not mt(94).get("mover"), mt(94))
-ten_ticks = [t for t in server._minute_ticks() if t.pace == "tenmin" and t.name == "wake_catchup"]
-check("item: the runner's table has the ten-minute wake catch-up", len(ten_ticks) == 1 and ten_ticks[0].group == "tenmin", [t.name for t in server._minute_ticks()])
+ten_ticks = [t for t in runner_svc.ticks() if t.pace == "tenmin" and t.name == "wake_catchup"]
+check("item: the runner's table has the ten-minute wake catch-up", len(ten_ticks) == 1 and ten_ticks[0].group == "tenmin", [t.name for t in runner_svc.ticks()])
 reset(); RUN.Runner(ten_ticks).run_round()
 check("item: …and its tick, run by the runner, releases that wait to the post-wake mover", mt(94).get("mover") == BACK and "wait_kind" not in mt(94), mt(94))
 

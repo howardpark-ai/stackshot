@@ -109,6 +109,7 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import create as _wt_create
@@ -332,7 +333,7 @@ with_switch(True); server._PROOF_LAST[0] = 0.0
 done = server._proof_tick(now + 3)
 check("[step_proof] live = true: the very first pass acts", "a1" in done and rd(1)["status"] == "completed", done)
 with_switch(None); fixtures()
-check("…the tick is one of the runner's clocks, in its settle group", [t.group for t in server._minute_ticks() if t.name == "proof_tick"] == ["settle"])
+check("…the tick is one of the runner's clocks, in its settle group", [t.group for t in runner_svc.ticks() if t.name == "proof_tick"] == ["settle"])
 fixtures()
 
 # ---- 8. writing the proof: update and create take step_proof

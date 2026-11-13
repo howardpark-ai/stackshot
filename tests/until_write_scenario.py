@@ -58,6 +58,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.service import runner as runner_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
@@ -352,9 +353,9 @@ telling.pilot_charge = lambda project, who: ("home-stew", "name")
 server._writer_owes = lambda: False
 telling.pilot_relay = lambda project, gid, item, what, debtor, stew, role, tail="": (rel12.append(what), "told")[1]
 try:
-    item(69, needs=[BACK]); server._WAKE_EVENT.clear()
+    item(69, needs=[BACK]); runner_svc.WAKE_EVENT.clear()
     bupd(69, until=w(3))
-    woke12 = server._WAKE_EVENT.is_set()
+    woke12 = runner_svc.WAKE_EVENT.is_set()
     bupd(69, clear_hold=True)
 finally:
     telling.pilot_charge, telling.pilot_relay, server._writer_owes = real_charge, real_relay, real_owes
