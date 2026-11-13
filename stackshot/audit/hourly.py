@@ -28,7 +28,11 @@ What the pass verifies, from data the server already holds, and says in the line
     verifies an item only when it is the mover's one item on an agent (`alone`: no other open item of the mover is on an agent as the board shows it); a mover with several items has none verified by its pane;
   - a subagent is running ON THIS ITEM: one of the mover's running subagents, read from the transcript Claude Code keeps on this box, has a description or brief that names the item or a pull request anchored to it
     (audit/subagent_tie.py). A step status in progress is no proof (the mover wrote it, and one mover can carry it on several items while one subagent runs), and neither is a busy pane, which says the
-    mover works, not on which item: with one subagent running, only the item it is tied to reads verified for it; the mover's other items read idle unless something else verifies them;
+    mover works, not on which item: with one subagent running, only the item it is tied to reads verified for it; the mover's other items read idle unless something else verifies them. Two exceptions. A
+    front agent's busy pane still verifies each of its items (its items are never handed on, and a stream of idle lines for a session the owner talks to says nothing true). And when the audit cannot tell, the
+    item is UNKNOWN, not idle: the mover has a running subagent that is tied to none of its items (a brief that names no item and no pull request, a Build subagent started before its pull request exists), or the
+    mover's subagents could not be read at all (an error, a transcript this box does not hold for a pane in a turn). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
+    verified`, kind `audit_unknown`) stamps nothing and is not `audit_idle`, so the row stays as it is and audit/hand_idle.py does not hand the item on while a subagent may be building it;
   - a pull request tied to the item had a CI result, a review, a comment by a person or a merge in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
 
 The first two are live states; the third is a recorded event, one the activity record already counts. A line that rests on live states alone says so in its words
@@ -60,7 +64,7 @@ LONG_AFTER = 24 * 3600.0     # …until it has been silent this long; then the l
 SLOW_EVERY = 6 * 3600.0
 SLACK = 300.0            # in the slow stretch (a line every SLOW_EVERY): the ten-minute tick reads its clock a few seconds later or earlier each time, so the line is owed once this much less than the gap has passed and 6 hours on the tick grid is never missed by seconds and pushed a whole tick on
 PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:05: verified …`
-KIND_OK, KIND_IDLE = _log.KIND_OK, _log.KIND_IDLE      # the `kind` of the log entry of a line that verified something, and of one that did not
+KIND_OK, KIND_IDLE, KIND_UNKNOWN = _log.KIND_OK, _log.KIND_IDLE, _log.KIND_UNKNOWN      # the `kind` of the log entry of a line that verified something, of one that verified nothing, and of one that could not tell
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
 PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED})      # the recorded signals that are a tied pull request's events
 
@@ -75,7 +79,7 @@ def last_line(meta: dict[str, Any] | None, now: float | None = None) -> dict[str
     `EVERY` ahead of it is torn too (a clock set far ahead once, or a bad write): it would otherwise hide every line until real time caught up. A clock stepped back by less than that only delays the next line."""
     best = None
     for e in _log.log_of(meta):
-        if e.get("kind") in (KIND_OK, KIND_IDLE) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (now is None or e["at"] <= now + EVERY) and (best is None or e["at"] >= best["at"]):
+        if e.get("kind") in (KIND_OK, KIND_IDLE, KIND_UNKNOWN) and isinstance(e.get("at"), (int, float)) and not isinstance(e.get("at"), bool) and (now is None or e["at"] <= now + EVERY) and (best is None or e["at"] >= best["at"]):
             best = e
     return best
 
@@ -153,8 +157,8 @@ def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
 
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,
         subagents: Callable[[str], list[dict[str, Any]]] | None = None, anchored: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind"}. `env.is_front(name, project)` says who is a front agent (None reads none as front).
-    `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], subagent_tie.running; None reads none), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
+    """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind" (audit, audit_idle or audit_unknown)}. `env.is_front(name, project)` says who is a front agent (None reads none as front).
+    `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], subagent_tie.running; None reads none; one that raises reads the mover's subagents as unknown), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
     the item or one of those pull requests."""
     item = items.get(gid) or {}
     if item.get("status") != "open":
@@ -171,26 +175,44 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
     prior = last_line(meta, now)
     if prior is not None and now - prior["at"] < (SLOW_EVERY - SLACK if now - last >= LONG_AFTER else FAST_GAP):
         return None      # a line was written lately, within the gap (a clock that went backwards lands here too: the next line is only delayed)
-    def tied() -> bool:
-        if subagents is None:
-            return False
-        from stackshot.tools import next_report as _nr  # noqa: PLC0415
-        return _tie.tied(subagents(mover), _nr.shown(gid), (anchored or {}).get(gid, ()))
-    def alone() -> bool:
-        eq = same or (lambda a, b: str(a or "").casefold() == str(b or "").casefold())
-        n = 0
-        for g in items:
-            if g == gid or items[g].get("status") != "open":
+    from stackshot.tools import next_report as _nr  # noqa: PLC0415
+    eq = same or (lambda a, b: str(a or "").casefold() == str(b or "").casefold())
+    mine: list[str] = []          # the mover's other open items (any state): what a running subagent may be tied to
+    busy_elsewhere = False        # …and whether one of them is on an agent as the board shows it (then a busy pane says nothing of this item)
+    for g in items:
+        if g == gid or items[g].get("status") != "open":
+            continue
+        try:
+            it2, _m2, after2, mover2 = _ac._item_view(items, g)
+            if not (mover2 and eq(mover2, mover)):
                 continue
-            try:
-                it2, _m2, after2, mover2 = _ac._item_view(items, g)
-                if mover2 and eq(mover2, mover) and _silence.reading(it2, mover2, after2, now) and not _wt.is_held(it2):
-                    return False
-            except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
-                continue
-        return True
-    what, recorded = verified(it, meta, mover, now, pane, same, tied, alone)
-    return {"text": text(now, what, recorded), "verified": what, "recorded": recorded, "kind": KIND_OK if what else KIND_IDLE}
+            mine.append(g)
+            if _silence.reading(it2, mover2, after2, now) and not _wt.is_held(it2):
+                busy_elsewhere = True
+        except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
+            continue
+    is_front = bool(front is not None and front(mover, str(meta.get("project") or "")))
+    subs: list[dict[str, Any]] = []
+    readable = True
+    if subagents is not None:
+        try:
+            subs = [s for s in (subagents(mover) or []) if isinstance(s, dict)]
+        except Exception:  # noqa: BLE001  (a read error is no proof that nothing runs)
+            readable = False
+    anch = anchored or {}
+    tied_here = readable and _tie.tied(subs, _nr.shown(gid), anch.get(gid, ()))
+    # a busy pane verifies the item when it is the mover's one item on an agent, or the mover is a front agent (the owner's own session: its items are never handed on, and its pane in a turn is the old, honest claim)
+    what, recorded = verified(it, meta, mover, now, pane, same, lambda: tied_here, lambda: is_front or not busy_elsewhere)
+    if what:
+        return {"text": text(now, what, recorded), "verified": what, "recorded": recorded, "kind": KIND_OK}
+    why = ""
+    if not readable:
+        why = "the mover's subagents could not be read"
+    elif any(not any(_tie.tied([s], _nr.shown(g), anch.get(g, ())) for g in [gid, *mine]) for s in subs):
+        why = "a subagent of the mover is running, not tied to an item"
+    if why:      # unknown, not idle: nothing is verified and nothing is stamped, but the item is not marked idle either (audit/hand_idle.py reads `audit_idle` alone), so it is not handed on over a subagent that may be building it
+        return {"text": f"{PREFIX}{dt.datetime.fromtimestamp(now, _cfg.tz()).strftime('%H:%M')}: {why}, nothing verified", "verified": [], "recorded": [], "kind": KIND_UNKNOWN}
+    return {"text": text(now, [], []), "verified": [], "recorded": [], "kind": KIND_IDLE}
 
 
 def pass_(items: dict[str, dict[str, Any]], now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,

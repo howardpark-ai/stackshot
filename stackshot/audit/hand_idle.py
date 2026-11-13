@@ -15,7 +15,7 @@ this module reads that mark and decides which items are handed on. It decides an
 
 An item is handed on when all of these hold:
 
-  - the newest audit line on it is `idle, nothing verified` (`hourly.idle_marked`), and not older than `FRESH` (the pass writes one at least every 6 hours while the item is on an agent and silent; an older
+  - the newest audit line on it is `idle, nothing verified` (`hourly.idle_marked`: kind `audit_idle` alone; a line that could not tell, kind `audit_unknown`, because a running subagent of the mover is tied to no item or the subagents could not be read, is no idle mark and the item stays), and not older than `FRESH` (the pass writes one at least every 6 hours while the item is on an agent and silent; an older
     line means the hourly pass is off or the item was off the agent since), and nothing has moved the item since that line (`silence.clock` is not later than it: a step done, a state change, the
     mover's own write, an event on an anchor, the owner's answer all count);
   - it is open and on an agent as the board shows it, not held, and its hand-off, if it has one, was taken (an untaken hand-off is the hand-off audit's);

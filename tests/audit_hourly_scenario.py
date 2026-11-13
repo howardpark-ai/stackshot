@@ -557,7 +557,11 @@ for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90)
 def boom_subs(who): raise OSError("transcript unreadable")
 with _Err() as e17: got17c = tick(subagents=boom_subs)
-check("17 a subagent view that cannot be read verifies nothing and stops no line", got17c == ["a1", "a2"] and all(lines(i)[0]["kind"] == "audit_idle" for i in (1, 2)), (got17c, [lines(i) for i in (1, 2)]))
+check("17 a subagent view that cannot be read fails safe: a line is written, it reads UNKNOWN (kind audit_unknown, not audit_idle), says the subagents could not be read, stamps nothing, and the item is not idle-marked",
+      got17c == ["a1", "a2"] and all(lines(i)[0]["kind"] == "audit_unknown" and "could not be read" in lines(i)[0]["text"] and not HR.idle_marked(mt(i)) and "last_activity" not in mt(i) for i in (1, 2)), (got17c, [lines(i) for i in (1, 2)]))
+for i in (1, 2): put(i, mover="home-peer2", act=90)
+tick(subagents=lambda who: [{"id": "x", "text": "", "at": 0.0, "unreadable": True}])
+check("17 a subagent whose own files cannot be read (listed running with no words) ties to nothing: the mover's items read unknown, not idle", all(lines(i)[0]["kind"] == "audit_unknown" for i in (1, 2)), [lines(i) for i in (1, 2)])
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, mover="home-peer2", act=90, work=work("in progress", 20, agent="home-peer2"))
 tick(subagents=lambda who: [])
@@ -591,10 +595,27 @@ agent("done1", "Old work", f"{BID(3)}", finished=True)
 agent("stale1", "Left behind", f"{BID(4)}", age=int(TIE.RUNNING_S) + 60)
 agent("badmeta", "x", f"{BID(5)}", meta_ok=False)
 got_run = {x["id"]: x for x in TIE.running(SID, [str(T / "transcripts")], now0)}
-check("17 the reader lists the running subagents of a session's transcript: no finished flag and a transcript written within 90 minutes, the description and the brief (a string or text blocks) as its text; a finished one, a stale one and a meta that cannot be read are left out",
-      sorted(got_run) == ["blocks", "run1"] and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree" and BID(2) in got_run["blocks"]["text"] and got_run["run1"]["at"] == now0 - 60, got_run)
-check("17 …a session with no transcript here, no subagents folder, a name that is no uuid and no roots give none", TIE.running(str(_uuid.uuid4()), [str(T / "transcripts")], now0) == [] and TIE.running("home-peer", [str(T / "transcripts")], now0) == [] and TIE.running(SID, [], now0) == []
+check("17 the reader lists the running subagents of a session's transcript: no finished flag and a transcript written within 90 minutes, the description and the brief (a string or text blocks) as its text; a finished one and a stale one are left out, a meta that cannot be read is listed running with no words (it may be running)",
+      sorted(got_run) == ["badmeta", "blocks", "run1"] and got_run["badmeta"] == {"id": "badmeta", "text": "", "at": 0.0, "unreadable": True} and got_run["run1"]["text"] == f"Build the thing\nGoal: {BID(1)} in the worktree" and BID(2) in got_run["blocks"]["text"] and got_run["run1"]["at"] == now0 - 60, got_run)
+def raises(fn, exc):
+    try: fn()
+    except exc: return True
+    except Exception: return False
+    return False
+check("17 …a session with no transcript on this box, a name that is no uuid and no roots cannot be read (Unreadable: unknown, not nothing running); a transcript with no subagents folder and a clock three hours on give none",
+      raises(lambda: TIE.running(str(_uuid.uuid4()), [str(T / "transcripts")], now0), TIE.Unreadable) and raises(lambda: TIE.running("home-peer", [str(T / "transcripts")], now0), TIE.Unreadable) and raises(lambda: TIE.running(SID, [], now0), TIE.Unreadable)
       and TIE.running(SID, [str(T / "transcripts")], now0 + 3 * H) == [])
+SID2 = str(_uuid.UUID("00000000-0000-4000-8000-0000000000bb")); (proj / f"{SID2}.jsonl").write_text("{}\n")
+check("17 …a transcript that has never had a subagent (no subagents folder) has none running: known, not unknown", TIE.running(SID2, [str(T / "transcripts")], now0) == [])
+# a first line nested past the parser's depth (a RecursionError) and one that is not JSON, a truncated one, a list that is no text: the subagent is still listed, naming nothing
+agent("deep", "Deep one", "x"); (proj / SID / "subagents" / "agent-deep.jsonl").write_text("[" * 200000 + "\n"); os.utime(proj / SID / "subagents" / "agent-deep.jsonl", (now0 - 60, now0 - 60))
+agent("junk", "Junk one", "x"); (proj / SID / "subagents" / "agent-junk.jsonl").write_text("not json at all\n"); os.utime(proj / SID / "subagents" / "agent-junk.jsonl", (now0 - 60, now0 - 60))
+try: got_deep = {x["id"]: x for x in TIE.running(SID, [str(T / "transcripts")], now0)}; err_deep = None
+except BaseException as e_: got_deep, err_deep = {}, e_
+check("17 a first line nested too deep (RecursionError) or not JSON never raises out of the reader: the subagent is listed running with its description and no brief, so it ties to nothing and the mover reads unknown",
+      err_deep is None and got_deep.get("deep", {}).get("text") == "Deep one\n" and got_deep.get("junk", {}).get("text") == "Junk one\n" and not TIE.tied([got_deep["deep"]], BID(1)), (err_deep, got_deep.get("deep")))
+for n_ in ("deep", "junk", "badmeta"):
+    for ext_ in ("meta.json", "jsonl"): (proj / SID / "subagents" / f"agent-{n_}.{ext_}").unlink()
 check("17 the pure tie: the id whole, a pull request by its URL or `PR n`/`#n` for the repository it is anchored in, never another number, another repository or a longer id; no text and no keys tie nothing",
       TIE.names_item(f"x {BID(1)}.", BID(1)) and TIE.names_item(f"X {BID(1).upper()}", BID(1)) and not TIE.names_item(BID(12), BID(1)) and not TIE.names_item("x" + BID(1), BID(1)) and not TIE.names_item("x" + BID(1), BID(1))
       and TIE.names_item("see PR 160", BID(9), ["acme/widgets#160"]) and TIE.names_item("see #160", BID(9), ["acme/widgets#160"]) and TIE.names_item(f"{WI}/pull/160", BID(9), ["Acme/Widgets#160"]) and not TIE.names_item("see PR 1600", BID(9), ["acme/widgets#160"])
@@ -609,8 +630,9 @@ try:
     registry("idle"); a_ = server._mover_subagents("home-peer", {}, now0)
     registry("shell"); b_ = server._mover_subagents("home-peer", {}, now0)
     registry("busy", kind="headless"); c_ = server._mover_subagents("home-peer", {}, now0)
-    registry("busy", sid=str(_uuid.uuid4())); d_ = server._mover_subagents("home-peer", {}, now0)
-    check("17 …and none when the pane is idle or showing a shell, is no interactive pane, has no transcript here, or the mover has no pane on this box", a_ == [] and b_ == [] and c_ == [] and d_ == [] and server._mover_subagents("home-front", {}, now0) == [], (a_, b_, c_, d_))
+    registry("busy", sid=str(_uuid.uuid4())); d_ = "a pane in a turn with no transcript here"
+    check("17 …and none when the pane is idle or showing a shell, is no interactive pane, or the mover has no pane on this box (known: nothing runs, or nothing can be claimed)", a_ == [] and b_ == [] and c_ == [] and server._mover_subagents("home-front", {}, now0) == [], (a_, b_, c_))
+    check("17 …and Unreadable (unknown) for a pane in a turn whose transcript this box does not hold, or whose registry row names no session", raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable) and (registry("busy", sid=""), raises(lambda: server._mover_subagents("home-peer", {}, now0), TIE.Unreadable))[1], d_)
     registry("busy")
     clean_pane(); panes["home-peer"] = "busy"
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
@@ -662,5 +684,55 @@ tick(now0 + 2 * H); stamped2 = mt(1)["last_activity"]
 tick(now0 + 2 * H - 30 * MIN)                                        # the clock stepped back half an hour: the line is not owed (it is within 45 minutes of the last), and nothing moves the record back
 tick(now0 + 2 * H + 3 * H)
 check("18 a clock stepped back never moves the record to an earlier time: the stamp of the later line stays through passes at earlier clocks", stamped2["at"] == now0 + 2 * H and mt(1)["last_activity"]["at"] >= stamped2["at"], (stamped2, mt(1).get("last_activity")))
+
+# ================================================================ 19. a subagent tied to no item leaves the mover's items unknown, not idle (and not handed on); a front agent's busy pane still verifies
+from stackshot.audit import hand_idle as HI
+def handed_on(now_):
+    items_ = {f"a{i}": rd(i) for i in range(1, 12) if (T / f"store/a/{i}.json").exists()}
+    return [g for g, _r in HI.due_all(items_, now_, lambda who, project: server._front_keeper(who, project)[0])]
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i in (1, 2, 3): put(i, act=90)
+run_on("home-peer", "Build part D", "Goal: build it in the worktree and open a pull request. Nothing here names an item.")
+tick()
+check("19 one subagent that names nothing and three items on the mover: all three read unknown (a subagent of the mover is running, not tied to an item), none is idle-marked, none is stamped",
+      all(lines(i)[0]["kind"] == "audit_unknown" and lines(i)[0]["text"] == f"Audit {hm(now0)}: a subagent of the mover is running, not tied to an item, nothing verified" and not HR.idle_marked(mt(i)) and "last_activity" not in mt(i) for i in (1, 2, 3)), [lines(i) for i in (1, 2, 3)])
+check("19 …none is handed on: the hand-over reads audit_idle alone (the control below is handed on)", handed_on(now0 + 60) == [], handed_on(now0 + 60))
+check("19 the unknown line is a line like the others: it is the newest line (the next one is owed 45 minutes on), and the log keeps it as audit_unknown", HR.last_line(mt(1))["kind"] == "audit_unknown" and tick(now0 + 30 * MIN) == [] and "a1" in tick(now0 + 45 * MIN))
+# (b) the live case: one subagent tied to the first item, two other items of the mover
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i in (1, 2, 3): put(i, act=90, work=work("in progress", 20))
+run_on("home-peer", f"Build {BID(1)}: the thing")
+tick()
+check("19 one subagent tied to the first of three items: the first reads verified, the other two idle, are idle-marked and are handed on",
+      lines(1)[0]["kind"] == "audit" and all(lines(i)[0]["kind"] == "audit_idle" and HR.idle_marked(mt(i)) for i in (2, 3)) and sorted(handed_on(now0 + 60)) == ["a2", "a3"], ([lines(i) for i in (1, 2, 3)], handed_on(now0 + 60)))
+# two subagents, one tied and one naming nothing: an untied item is unknown (it may be what the second builds)
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i in (1, 2): put(i, act=90)
+run_on("home-peer", f"Build {BID(1)}"); run_on("home-peer", "Build part D")
+tick()
+check("19 two subagents, one tied to the first item and one naming nothing: the first is verified, the second unknown", lines(1)[0]["kind"] == "audit" and lines(2)[0]["kind"] == "audit_unknown", [lines(1), lines(2)])
+# a subagent tied to an item of the mover's that is on hold: it is tied to an item, so the mover's other item is idle
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90); put(3, act=90); put(2, act=90, hold=True, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 9 * H + 4 * H)))
+run_on("home-peer", f"Build {BID(2)}")
+tick()
+check("19 a subagent tied to another item of the mover's (here one on hold) is tied to an item: the two due items read idle, as built", lines(1)[0]["kind"] == "audit_idle" and lines(3)[0]["kind"] == "audit_idle" and lines(2) == [], [lines(1), lines(2), lines(3)])
+# front agent: its busy pane still verifies every item, so no stream of idle lines
+clean_pane(); panes["home-front"] = "busy"; panes["team-back"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i in (1, 2, 3): put(i, mover="home-front", act=90)
+for i in (4, 5, 6): put(i, mover="team-back", act=90)
+tick()
+check("19 a front agent with three items on an agent and its pane in a turn: each is verified by the pane (the old phrase, live state only), none is idle; a back agent with three (the control) reads all three idle",
+      all(lines(i)[0]["kind"] == "audit" and lines(i)[0]["text"] == f"Audit {hm(now0)}: verified the mover's pane is in a turn" + HR.LIVE_ONLY for i in (1, 2, 3)) and all(lines(i)[0]["kind"] == "audit_idle" for i in (4, 5, 6)), [lines(i) for i in range(1, 7)])
+check("19 …the front agent's items are never handed on either way, and the back agent's three are", sorted(handed_on(now0 + 60)) == ["a4", "a5", "a6"], handed_on(now0 + 60))
+panes["home-front"] = "idle"
+for i in (1, 2, 3): put(i, mover="home-front", act=90)
+tick(now0 + 3 * H)
+check("19 a front agent whose pane is not in a turn reads idle as before (nothing to verify), and still is not handed on", all(lines(i)[-1]["kind"] == "audit_idle" for i in (1, 2, 3)) and not any(g in handed_on(now0 + 3 * H + 60) for g in ("a1", "a2", "a3")), [lines(i) for i in (1, 2, 3)])
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

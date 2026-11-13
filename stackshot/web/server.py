@@ -6093,14 +6093,16 @@ def _silence_pass_tick() -> "dict[str, Any] | None":
 
 def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
     """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
-    the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle, a session this box does not run and a session
-    with no transcript here give []: nothing can be verified there, and nothing is claimed."""
+    the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
+    run give []: nothing is claimed there. A pane in a turn whose transcript this box does not hold, or whose registry row names no session, raises `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle."""
     from stackshot.audit import subagent_tie as _tie
     row = _handoff_pane_row(who, idx)
     if not row or str(row[1].get("status") or "") != "busy":
         return []
     sid = str(row[1].get("sessionId") or "")
-    return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now) if sid else []
+    if not sid:
+        raise _tie.Unreadable("the pane's registry row names no session")
+    return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
 
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
