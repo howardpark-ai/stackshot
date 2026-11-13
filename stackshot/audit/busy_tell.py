@@ -8,7 +8,8 @@ the server writes and sends (`server._busy_tell_tick`, run from the ten-minute a
   stretch_start(it, meta, mover, now)      where the busy stretch of a background mover's item counts from, None when it has none
   due(items, gid, now, front, queue, hrs)   {"mover", "project", "kind", "since", "lines"} when the item is to be told of now, else None
   due_all(...)                             [(gid, row)] of every such item, in id order; reads only
-  told_since(meta, since) / mark(meta, now, to, kind, since)   the record `metadata.busy_tell` ({"at", "to", "kind", "since"}) that keeps the once
+  told_since(meta, since, now) / mark(meta, now, to, kind, since)   the record `metadata.busy_tell` ({"at", "to", "kind", "since"}) that keeps the once
+  span(since, now, hrs)                    the length the message and the History line name: the real time since `since` in whole hours (rounded down, so it never says more than there was), never under the threshold's own wording
 
 Two cases, told apart by who moves the item (the server's own test of a front agent, as the hourly line uses it):
 
@@ -21,7 +22,7 @@ Two cases, told apart by who moves the item (the server's own test of a front ag
     whatever the lines said. The -main agent is not told of an item a front agent holds, and the owner never is.
 
 The once: `metadata.busy_tell.at` is the time the agent was told; the item is told of again only when a NEW stretch starts after it (its start is later than `at`: any real activity moves the clock, a line that verified something else moves the start). It is written in the
-save before anything is sent (at most once: a crash between the save and the send loses the message), so it survives a restart, and an audit line is no activity, so the pass's own lines never reset it. A line dated ahead of `now` is not read, and neither is
+save before anything is sent (at most once: a crash between the save and the send loses the message), so it survives a restart, and an audit line is no activity, so the pass's own lines never reset it. A line dated ahead of `now` is not read, a record dated ahead of it by more than an hour (`hourly.HOUR`, the audit's own tolerance) is no record (it would hide the stretch until the clock caught up), and neither is
 a stretch whose newest line is older than `hand_idle.FRESH`'s span (the hourly pass is off or the item was off the agent since). The audit log keeps its last eight lines (`hourly_log.KEEP`); a stretch is judged by the lines it has.
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
@@ -62,10 +63,18 @@ def _stamp(v: Any) -> float:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else 0.0
 
 
-def told_since(meta: dict[str, Any] | None, since: float) -> bool:
-    """Was the agent told at or after `since` (the start of the stretch)? Then this stretch is told of. A torn record is no record."""
+def told_since(meta: dict[str, Any] | None, since: float, now: float) -> bool:
+    """Was the agent told at or after `since` (the start of the stretch)? Then this stretch is told of. A torn record is no record, and neither is one dated ahead of `now` by more than `hourly.HOUR` (a clock set far ahead once, or a bad
+    write: it would otherwise hide every stretch until real time caught up)."""
     at = _stamp(_record(meta).get("at"))
-    return at > 0 and at >= since
+    return at > 0 and at >= since and at <= now + _hourly.HOUR
+
+
+def span(since: float, now: float, hrs: float) -> str:
+    """How long the stretch has lasted, as the message and the History line say it: the real time since `since` in whole hours, rounded down so it never says more than there was, and never under the threshold (`hrs`, in its own wording: "4 hours", "2.5 hours", "1 hour"). A front agent's item counts from its last real
+    activity, so the first pass after a deploy can find one that has been quiet for days: it is told so, not "about 4 hours"."""
+    h = max(float(hrs), float(int((now - since) / _hourly.HOUR)))
+    return "1 hour" if h == 1 else f"{h:g} hours"
 
 
 def mark(meta: dict[str, Any], now: float, to: str, kind: str, since: float) -> None:
@@ -118,7 +127,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, front: Callable[
         if got is None:
             return None
         (since, n), kind = got, KIND_MAIN
-    if now - since < (_hourly.HOUR * (_cfg.audit_busy_tell_hours() if hrs is None else hrs)) or told_since(meta, since):
+    if now - since < (_hourly.HOUR * (_cfg.audit_busy_tell_hours() if hrs is None else hrs)) or told_since(meta, since, now):
         return None
     return {"mover": mover, "project": project, "kind": kind, "since": since, "lines": n}
 

@@ -371,5 +371,81 @@ check("9 the hourly log marks a pane-only line and no other (an idle, a subagent
 m9 = {}; HL.note(m9, 5.0, "a", "audit", pane_only=True); HL.note(m9, 6.0, "b", "audit"); HL.note(m9, 7.0, "c", "audit_idle")
 check("9 the entry carries pane_only only when it is true, and a later note keeps the earlier marks", HL.log_of(m9)[0].get("pane_only") is True and "pane_only" not in HL.log_of(m9)[1] and "pane_only" not in HL.log_of(m9)[2])
 
+# ================================================================ 10. a recorded commit, how long it says, a future record, and the lines no other check pinned
+def commit_event(m):
+    if m == 140:
+        d = rd(1); d["metadata"]["last_activity"] = {"at": at(138), "kind": "commit", "what": "commit on PR 5"}; wr(1, d)      # a new head commit on the tied pull request: recorded, and it moves no clock
+wipe(); put(1, act=0); pane_busy("team-back")
+told = run(10, 400, each=commit_event)
+other = [l for l in lines(1) if not l.get("pane_only")]
+check("10 a recorded commit with a busy pane verifies the line besides the pane (the line names both), so it carries no pane_only mark", len(other) == 1 and other[0]["kind"] == "audit" and "commit on PR 5" in other[0]["text"] and "pane is in a turn" in other[0]["text"], other)
+check("10 …and it ends the stretch like a CI result does: nobody is told at 4 h after the first activity, the tell comes 4 h after that line", told == ["a1"] and first_told() > 240 and sent_at[0] >= other[-1]["at"] + 4 * H - 1, (told, first_told(), [(l["at"] - now0) / 60 for l in other]))
+item_c = {"metadata": {"last_activity": {"at": now0 - 600, "kind": "commit", "what": "commit on PR 5"}}}
+vc, rc = HR.verified(item_c, item_c["metadata"], "team-back", now0, lambda who: "busy", None, None, None)
+check("10 hourly.verified: a commit newer than an hour verifies (recorded) and makes the line no pane-only one; one older than an hour verifies nothing", rc == ["commit on PR 5"] and not HR.pane_only({"kind": "audit", "verified": vc, "recorded": rc})
+      and HR.verified({"metadata": {"last_activity": {"at": now0 - 2 * H, "kind": "commit", "what": "commit on PR 5"}}}, {"last_activity": {"at": now0 - 2 * H, "kind": "commit", "what": "commit on PR 5"}}, "team-back", now0, lambda who: "idle", None, None, None) == ([], []), (vc, rc))
+
+# the length it says is the real one (whole hours, never under the threshold)
+wipe(); put(1, mover="beta-main", act=3000, project="projects/beta", log=[(2900, "pane")])
+check("10 a front agent's item quiet for 50 hours is told so (about 50 hours), in the message and the History line, not as the threshold's 4", tick(now0) == ["a1"] and "about 50 hours" in S0()[2] and "about 4 hours" not in S0()[2] and "about 50 hours" in history(1)[0] and "about 4 hours" not in history(1)[0], (sent, history(1)))
+wipe(); put(1, act=400, log=SEVEN)
+check("10 a background mover's stretch that is 6 h 40 min old when first seen says about 6 hours (the real time in whole hours, rounded down)", tick(now0) == ["a1"] and "about 6 hours" in S0()[2] and "about 6 hours" in history(1)[0], (sent, history(1)))
+wipe(); put(1, act=0); pane_busy("team-back"); run(10, 235); told = run(240, 250)
+check("10 …and a stretch told on the tick it turns 4 h still says about 4 hours", told == ["a1"] and "about 4 hours" in S0()[2] and "about 4 hours" in history(1)[0], (sent, history(1)))
+wipe(); put(1, act=70, log=[(50, "pane"), (60, "pane")]); server._cfg.CFG["audit"]["busy_tell_hours"] = 1
+check("10 a one-hour threshold reads `about 1 hour`, never `1 hours`", tick(now0) == ["a1"] and "about 1 hour (" in S0()[2] and "1 hours" not in S0()[2] and "about 1 hour:" in history(1)[0], (sent, history(1)))
+wipe(); put(1, act=0); pane_busy("team-back"); server._cfg.CFG["audit"]["busy_tell_hours"] = 2.5; run(10, 140)
+check("10 a threshold of 2.5 hours keeps its own wording when the stretch is just that long (never below it: 2 h 30 min is not `2 hours`)", tick(at(150)) == ["a1"] and "about 2.5 hours" in S0()[2], sent)
+check("10 BT.span: the real hours rounded down, never under the threshold", BT.span(0.0, 4 * H, 4) == "4 hours" and BT.span(0.0, 4 * H + 60, 4) == "4 hours" and BT.span(0.0, 50.3 * H, 4) == "50 hours" and BT.span(0.0, 3 * H, 4) == "4 hours"
+      and BT.span(0.0, 3.2 * H, 2.5) == "3 hours" and BT.span(0.0, 2.6 * H, 2.5) == "2.5 hours" and BT.span(0.0, 2.5 * H, 2.5) == "2.5 hours" and BT.span(0.0, 6.9 * H, 4) == "6 hours" and BT.span(0.0, H, 1) == "1 hour", [BT.span(0.0, x * H, 4) for x in (4, 50.3, 3)])
+
+# a record dated in the future is no record
+wipe(); put(1, act=400, log=SEVEN); d = rd(1); d["metadata"]["busy_tell"] = {"at": now0 + 3 * H, "to": "home-main", "kind": "main", "since": now0 - 400 * MIN}; wr(1, d)
+check("10 a told-record dated 3 hours ahead of now is no record: the stretch is told, and the new record is dated now", tick(now0) == ["a1"] and len(to_main()) == 1 and mt(1)["busy_tell"]["at"] == now0, (sent, mt(1).get("busy_tell")))
+wipe(); put(1, act=400, log=SEVEN); d = rd(1); d["metadata"]["busy_tell"] = {"at": now0 + 30 * MIN, "to": "home-main", "kind": "main", "since": now0 - 400 * MIN}; wr(1, d)
+check("10 …a record dated half an hour ahead (a clock skew inside the audit's hour) still counts: told once, not again", tick(now0) == [] and sent == [], sent)
+check("10 BT.told_since: a record at or after the start counts, one before it, a torn one and one more than an hour ahead do not",
+      BT.told_since({"busy_tell": {"at": 100.0}}, 100.0, 200.0) and not BT.told_since({"busy_tell": {"at": 99.0}}, 100.0, 200.0) and not BT.told_since({"busy_tell": {"at": "x"}}, 100.0, 200.0)
+      and BT.told_since({"busy_tell": {"at": 200.0 + H}}, 100.0, 200.0) and not BT.told_since({"busy_tell": {"at": 201.0 + H}}, 100.0, 200.0) and not BT.told_since(None, 100.0, 200.0))
+
+# lines older than the item's last activity make nothing due
+wipe(); put(1, act=100, log=[(-250, "idle"), (-20, "pane")])
+check("10 a background item whose only lines are older than its last activity is not due (an old idle line would otherwise start a stretch 6 h back)", tick(now0) == [] and sent == [], sent)
+wipe(); put(1, mover="beta-main", act=250, log=[(-10, "pane")])
+check("10 a front agent's item whose only line is older than its last activity is not told (the lines must come after the activity)", tick(now0) == [] and sent == [], sent)
+
+# the newest line must be a pane-only one, over 4 h old included (the slow cadence reaches it)
+for label, lg in (("a line that verified something else", [(50, "pane"), (100, "pane"), (150, "pane"), (200, "other")]), ("an idle line", [(50, "pane"), (100, "pane"), (150, "idle")]),
+                  ("an unknown line", [(50, "pane"), (100, "pane"), (200, "unknown")])):
+    wipe(); put(1, act=520, log=lg)
+    check(f"10 a stretch whose newest line is {label} is not told as busy, though it started over 4 h ago", tick(now0) == [] and sent == [] and "busy_tell" not in mt(1), (sent, lg))
+
+# a line that verified something else, or an idle one, in the middle resets the run
+def due_row(i, front_test=None):
+    return BT.due(NR.load_all(None), f"a{i}", now0, front_test if front_test is not None else (lambda who, project: False), None, 4.0)
+wipe(); put(1, act=450, log=seed([("pane", 50), ("pane", 100), ("idle", 150), ("pane", 200), ("pane", 250), ("pane", 300), ("pane", 350), ("pane", 400)]))
+r13 = due_row(1)
+check("10 an idle line in the middle resets the run: the lines of the stretch are the five after it", r13 is not None and r13["lines"] == 5 and r13["kind"] == "main" and r13["since"] == now0 - 300 * MIN, r13)
+wipe(); put(1, act=450, log=seed([("pane", 50), ("pane", 100), ("other", 150), ("pane", 200), ("pane", 250), ("pane", 300), ("pane", 350), ("pane", 400)]))
+r13 = due_row(1)
+check("10 a line that verified something else in the middle resets the run too (five lines, counted from it)", r13 is not None and r13["lines"] == 5 and r13["since"] == now0 - 300 * MIN, r13)
+wipe(); put(1, act=450, log=seed([("pane", 50), ("pane", 100), ("unknown", 150), ("pane", 200), ("pane", 250), ("pane", 300), ("pane", 350), ("pane", 400)]))
+r13 = due_row(1)
+check("10 …and an unknown line the same", r13 is not None and r13["lines"] == 5 and r13["since"] == now0 - 300 * MIN, r13)
+
+# a front test that raises reads as front (the holder is told, never a guess at -main)
+def front_raises(who, project): raise OSError("roles unreadable")
+wipe(); put(1, act=400, log=SEVEN)
+r16 = due_row(1, front_raises); r16b = due_row(1)
+check("10 BT.due with a front test that raises reads the mover as front (kind front, counted from the last activity); the same item with a front test that says no is a -main case", r16 is not None and r16["kind"] == BT.KIND_FRONT and r16["since"] == now0 - 400 * MIN and r16["mover"] == "team-back"
+      and r16b is not None and r16b["kind"] == BT.KIND_MAIN, (r16, r16b))
+check("10 BT.due with no front test at all reads none as front", BT.due(NR.load_all(None), "a1", now0, None, None, 4.0)["kind"] == BT.KIND_MAIN)
+
+# the open check: an item that closes between the pass's read and the locked re-read is not told
+wipe(); put(1, act=400, log=SEVEN); snap = NR.load_all(None); d = rd(1); d["status"] = "completed"; d["metadata"]["outcome"] = "done"; wr(1, d)
+check("10 an item closed after the pass read it is not told (the re-read under the lock sees it closed)", tick(now0, items=snap) == [] and sent == [] and "busy_tell" not in mt(1), (sent, mt(1).get("busy_tell")))
+closed = NR.load_all(None)
+check("10 BT.due itself refuses a closed item and a missing one (the check is its own, not only due_all's)", BT.due(closed, "a1", now0, lambda w, p: False, None, 4.0) is None and BT.due(closed, "a99", now0, lambda w, p: False, None, 4.0) is None)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

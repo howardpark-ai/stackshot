@@ -34,14 +34,14 @@ What the pass verifies, from data the server already holds, and says in the line
     item is UNKNOWN, not idle: the mover has a running subagent that is tied to none of its items (a brief that names no item and no pull request, a Build subagent started before its pull request exists), or the
     mover's subagents could not be read at all (an error, a transcript this box does not hold for a pane in a turn). An unknown line (`Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing
     verified`, kind `audit_unknown`) stamps nothing and is not `audit_idle`, so the row stays as it is and audit/hand_idle.py does not hand the item on while a subagent may be building it;
-  - a pull request tied to the item had a CI result, a review, a comment by a person or a merge in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
+  - a pull request tied to the item had a CI result, a review, a comment by a person, a merge or a new head commit in the last hour, as `metadata.last_activity` records it (model/last_activity.py).
 
 The first two are live states; the third is a recorded event, one the activity record already counts. A line that rests on live states alone says so in its words
 (`… (live state only, nothing recorded on the item)`). A line that verified something is the hourly update the item promises, so it is stamped as the item's `last_activity` (kind `audit`, the words
 `audit verified …`, `stamp_signal`; newest wins, so it never replaces a newer real event) and the On agent row reads its time and words. A line that verified nothing is no update and stamps nothing; a phrase that
 rests on a recorded event alone stamps nothing, since that event is in the record already at its own time. The audit's write still moves no `activity` clock (model/activity.py): only `last_activity`.
 
-No pull request is read from GitHub here: the audit uses recorded data only. A commit or push to a tied pull request is not recorded by anything, so it is not a signal yet. When nothing is
+No pull request is read from GitHub here: the audit uses recorded data only (a new head commit is one of the recorded events: it breaks a busy stretch, audit/busy_tell.py). When nothing is
 verified the line reads `Audit hh:mm: idle, nothing verified` and its log entry carries kind `audit_idle`, which audit/hand_idle.py reads to hand the item on.
 
 Pure: no server import, no file, no clock read but the zone for the hour and minute in the line. Stdlib plus the repo's modules."""
@@ -69,7 +69,7 @@ PREFIX = "Audit "        # every line starts with it, then the time: `Audit 14:0
 KIND_OK, KIND_IDLE, KIND_UNKNOWN = _log.KIND_OK, _log.KIND_IDLE, _log.KIND_UNKNOWN      # the `kind` of the log entry of a line that verified something, of one that verified nothing, and of one that could not tell
 PANE = "the mover's pane is in a turn"      # the phrase of a busy pane; a line whose only phrase it is is `pane_only` (audit/busy_tell.py)
 LIVE_ONLY = " (live state only, nothing recorded on the item)"
-PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED})      # the recorded signals that are a tied pull request's events
+PR_KINDS = frozenset({_la.CI_RESULT, _la.REVIEW, _la.COMMENT, _la.PR_MERGED, _la.COMMIT})      # the recorded signals that are a tied pull request's events (a new head commit included, as in audit/hand_idle.py)
 
 
 def enabled() -> bool:
