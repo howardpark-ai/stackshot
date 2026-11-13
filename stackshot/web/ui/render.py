@@ -862,7 +862,7 @@ _THEME_HEAD = ("<script>(function(){var p='system';try{p=localStorage.getItem('"
                "if(p!=='light'&&p!=='dark')p='system';var r=document.documentElement;r.setAttribute('data-pref',p);"
                "if(p!=='system')r.setAttribute('data-theme',p)})();</script>")
 # The board as an installed app (Chrome "Install page as app", display standalone). The manifest (/manifest.webmanifest,
-# served by server.py) is fetched with credentials: Chrome fetches a manifest without cookies unless the link says
+# served by routes/board_pages.py) is fetched with credentials: Chrome fetches a manifest without cookies unless the link says
 # use-credentials, and the hostname sits behind Cloudflare Access, which turns a cookieless request away. In an app window a
 # target="_blank" link opens another app window whose Back closes it, so there a click on a same-origin _blank link
 # navigates the window itself; links to other origins keep opening outside the app, and an ordinary browser tab is
@@ -876,7 +876,7 @@ _THEME_HEAD = ("<script>(function(){var p='system';try{p=localStorage.getItem('"
 # versions are read once, when this module is imported (the server's start; deploy.sh restarts it when icons/ changes),
 # from the committed icons/ (auth/signin.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
 # file names stay: the Cloudflare Access bypass names the icons' exact paths, which a query string keeps and a new name would
-# not. server.py serves a request whose ?v= is the version of the bytes it sends as immutable; any other, as before.
+# not. routes/board_pages.py serves a request whose ?v= is the version of the bytes it sends as immutable; any other, as before.
 # The icon and font files, their versions and addresses are the shared ones (render.py): static files at their root addresses, served once for both UIs.
 from stackshot.web.render import ICON_DIR, asset_version, ICON_V, icon_href, FONT_DIR, FONT_FILE, font_href
 _D2_FACE = '@font-face{font-family:"D2Coding";src:url("' + font_href() + '") format("woff2");font-weight:400;font-style:normal;font-display:swap}'

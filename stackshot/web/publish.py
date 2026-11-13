@@ -28,7 +28,7 @@ from stackshot.core import config as _cfg  # noqa: E402
 from stackshot.projects import pages as _pages  # noqa: E402
 from stackshot.projects import project_registry as _preg  # noqa: E402  — roles.json and projects.json follow a publish
 from stackshot.web.board_home import _board_home_drop  # noqa: E402  — a publish drops the board's kept home
-from stackshot.core import readonly as _ro  # noqa: E402  — a warm standby copy renders in memory only (server._ro_board), never here
+from stackshot.core import readonly as _ro  # noqa: E402  — a warm standby copy renders in memory only (_ro_board in web/routes/board_pages.py), never here
 from stackshot.fleet import versions as _ver  # noqa: E402
 from stackshot.web.render import render, render_all  # noqa: E402
 
