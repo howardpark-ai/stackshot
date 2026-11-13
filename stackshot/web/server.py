@@ -13527,8 +13527,19 @@ def _itemopen_post(machine: str, body: dict[str, Any]) -> tuple[int, dict[str, A
     by = f"{sender} (a script on a client machine)"
     prefixes = list(_cfg.CFG["subject"]["prefixes"])
     subject = _shown_ids(subject)
-    while (hit := next((p for p in prefixes if p and subject.startswith(p)), "")):      # every prefix the caller wrote comes off: the scope's prefix is the server's to choose, and goes on once
+    bare = [p.strip() for p in prefixes if p.strip()]
+    def _prefix_at_start(text: str) -> str:
+        """the instance prefix the text starts with, when it is a prefix of its own: a space, the end of the text or another prefix follows it (so `[work]-style fix` keeps its bracket word)"""
+        for b in bare:
+            if text.startswith(b):
+                rest = text[len(b):]
+                if not rest or rest[0].isspace() or any(rest.startswith(o) for o in bare):
+                    return b
+        return ""
+    while (hit := _prefix_at_start(subject)):      # every prefix the caller wrote comes off: the scope's prefix is the server's to choose, and goes on once
         subject = subject[len(hit):].lstrip()
+    if not subject:
+        return 400, {"error": "subject is only an instance prefix: write the action and its object after it (the server puts the project's prefix on)"}
     subject = _terminal_subject_prefix(str(rec.get("scope") or "")) + subject
     desc = _terminal_bullets(*lines, _ITEMOPEN_ATTRIBUTION.format(sender=sender))
     try:

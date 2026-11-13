@@ -187,6 +187,19 @@ st, o = io_(marker="test_trim:prefix", subject="[work] Wrong prefix")
 check("a prefix the caller wrote is replaced by the project scope's own", st == 200 and item(o["item"])["subject"] == "[home] Wrong prefix", (st, o)); close(o["item"]) if st == 200 else None
 st, o = io_(marker="test_trim:twice", subject="[work] [home] twice")
 check("every prefix the caller wrote is taken off and the scope's goes on once", st == 200 and item(o["item"])["subject"] == "[home] twice", (st, o)); close(o["item"]) if st == 200 else None
+st, o = io_(marker="test_trim:nospace", subject="[work][home] z")
+check("prefixes written with no space between them are all taken off, the scope's goes on once", st == 200 and item(o["item"])["subject"] == "[home] z", (st, o)); close(o["item"]) if st == 200 else None
+for i_, (subj, want, why) in enumerate((("[work]z", "[home] [work]z", "a bracket word with text glued to it is part of the subject, not a prefix"), ("[home]-style fix", "[home] [home]-style fix", "a bracket word followed by a hyphen keeps its word"),
+                                        ("[work][home]-style fix", "[home] [home]-style fix", "prefixes in a row come off, the bracket word glued to text after them stays"))):
+    st, o = io_(marker=f"test_trim:glued{i_}", subject=subj)
+    check(f"{why}: {subj!r}", st == 200 and item(o["item"])["subject"] == want, (st, o)); close(o["item"]) if st == 200 else None
+st, o = io_(marker="test_trim:inner", subject="Fix [work] things")
+check("a prefix inside the subject, not at its start, is left alone", st == 200 and item(o["item"])["subject"] == "[home] Fix [work] things", (st, o)); close(o["item"]) if st == 200 else None
+for name, subj in (("only an instance prefix", "[work] "), ("only an instance prefix, no space", "[work]"), ("only two prefixes", "[work] [home] "), ("only prefixes with no space between", "[work][home]"),
+                   ("only a prefix and spaces", "   [home]   ")):
+    n5b = len(items())
+    st, e = io_(marker="test_trim:onlyprefix", subject=subj)
+    check(f"a subject that is {name}: 400 that says so, nothing filed", st == 400 and "only an instance prefix" in e["error"] and open_for("test_trim:onlyprefix") == [] and len(items()) == n5b, (st, e))
 st, o = io_(marker="test_trim:s60", sender="s" * 60, description=["- a fact"])
 oi = item(o["item"]) if st == 200 else {"description": ""}
 check("a sender of exactly 60 characters is taken and its attribution line is whole (not clipped by the line limit)", st == 200 and oi["description"].splitlines()[-1] == "- Opened by " + "s" * 60 + " (a script on a client machine)"
