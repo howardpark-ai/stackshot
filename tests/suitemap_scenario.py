@@ -1534,16 +1534,21 @@ STUB = T / "stubbin"; STUB.mkdir()
 # stands for `uv run --locked --only-group tests python tests/suitemap.py ...`: the suitemap commands run for real; a `run` only says what it would run
 shift 4; shift
 script=$1; shift
+case "$script" in /*) ;; *) script="$STUB_ROOT/$script";; esac
 if [ "$1" = run ]; then echo "WOULD $*"; exit 0; fi
 exec {sys.executable} "$script" "$@"
 """)
 os.chmod(STUB / "uv", 0o755)
-CHECKOUT = os.path.join(SCR, "..")
-def step_sh(step, **env):
-    """(exit code, stdout+stderr, the lines the step wrote to $GITHUB_OUTPUT) of a workflow step's `run`, in the checkout, `bash -e` as GitHub runs it"""
+CHECKOUT = os.path.realpath(os.path.join(SCR, ".."))
+# The steps run in a throwaway folder with no `.suitemap`, never in the checkout: `.suitemap/` is gitignored, and CI restores the cache's map into
+# <checkout>/.suitemap/map.json, so a step that looks for `.suitemap/map.json` in the checkout would select a subset there and these checks would fail on an
+# ordinary pull request. The stub runs tests/suitemap.py of `root` (the checkout, or a copy of it) by its own path, so the folder the step starts in holds only what the check puts there.
+NOMAP_DIR = T / "cwd-nomap"; NOMAP_DIR.mkdir()
+def step_sh(step, root=CHECKOUT, cwd=None, **env):
+    """(exit code, stdout+stderr, the lines the step wrote to $GITHUB_OUTPUT) of a workflow step's `run`, `bash -e` as GitHub runs it, started in `cwd` (default: a folder with no map)"""
     out = T / "gh_output"; out.write_text("")
-    e = {"PATH": f"{STUB}:{os.environ['PATH']}", "HOME": str(T), "GITHUB_OUTPUT": str(out), "SUITEMAP_STRACE": "0", **env}
-    r = subprocess.run(["bash", "-e", "-c", step["run"]], capture_output=True, text=True, env=e, cwd=CHECKOUT)
+    e = {"PATH": f"{STUB}:{os.environ['PATH']}", "HOME": str(T), "GITHUB_OUTPUT": str(out), "SUITEMAP_STRACE": "0", "STUB_ROOT": str(root), **env}
+    r = subprocess.run(["bash", "-e", "-c", step["run"]], capture_output=True, text=True, env=e, cwd=str(cwd or NOMAP_DIR))
     return r.returncode, r.stdout + r.stderr, out.read_text().splitlines()
 sel_rc, sel_out, sel_lines = step_sh(select_step)
 sel_names = (sel_lines[0].split("=", 1)[1].split() if len(sel_lines) == 1 and sel_lines[0].startswith("selected=") else None)
@@ -1576,6 +1581,22 @@ check("suites job, a pull request whose plan job failed: it selects for itself (
 check("suites job: a handed-on selection of no suite runs nothing and passes; one with anything but names and spaces fails the step",
       a3[0] == 0 and "no suite is reached" in a3[1] and "WOULD" not in a3[1] and a4[0] == 2 and "WOULD" not in a4[1], (a3[:2], a4[:2]))
 check("suites job, a queue branch's push (no plan job): it selects for itself, as ever", a5[0] == 0 and would(a5[1]) == sorted(every), a5[1][-200:])
+# a copy of the checkout whose gitignored `.suitemap/map.json` holds a real-looking map of its own commit, as CI's cache restore leaves it: no change to select, so a step that read it would select nothing
+COPY = T / "checkout-copy"
+subprocess.run(["git", "clone", "-q", "--no-checkout", "--shared", CHECKOUT, str(COPY)], check=True, capture_output=True)
+subprocess.run(["git", "-C", str(COPY), "read-tree", "HEAD"], check=True, capture_output=True)
+COPY_HEAD = subprocess.run(["git", "-C", str(COPY), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+(COPY / "tests").mkdir(); shutil.copy(os.path.join(SCR, "suitemap.py"), COPY / "tests" / "suitemap.py")   # the index has the tracked files; the one script the steps run is put in place
+(COPY / ".suitemap").mkdir()
+(COPY / ".suitemap" / "map.json").write_text(json.dumps({"format": sm.FORMAT, "commit": COPY_HEAD, "strace": True,
+    "suites": {n: {"ok": True, "seconds": 16, "py": {}} for n in every}}))
+ctl = step_sh(select_step, root=COPY, cwd=COPY)
+iso = [step_sh(select_step, root=COPY), selection_sh(EVENT="pull_request", PLAN="failure", HANDED="aa bb", root=COPY), selection_sh(EVENT="push", PLAN="skipped", HANDED="", root=COPY)]
+check("isolation: the same steps started where a restored `.suitemap/map.json` sits select a subset (here none: the map is of this very commit), so that is what the checks above would have met on an ordinary pull request",
+      ctl[0] == 0 and ctl[2] == ["selected="], (ctl[0], ctl[2], ctl[1][-200:]))
+check("isolation: with such a map in the checkout (a copy of it), the select step, the suites job's own selection after a failed plan job and a queue push still give every suite, because the steps start in a folder with no `.suitemap`",
+      iso[0][0] == 0 and sorted(iso[0][2][0].split("=", 1)[1].split()) == sorted(every) and iso[1][0] == 0 and would(iso[1][1]) == sorted(every) and iso[2][0] == 0 and would(iso[2][1]) == sorted(every),
+      ([x[0] for x in iso], iso[0][2][:1], iso[1][1][-150:], iso[2][1][-150:]))
 b1 = step_sh(pr_shard_step, SUITE_T="900", SHARD="2", SELECTED="aa bb")
 b2 = step_sh(pr_shard_step, SUITE_T="900", SHARD="2", SELECTED="")
 b3 = step_sh(pr_shard_step, SUITE_T="900", SHARD="2", SELECTED="aa;bb")
@@ -1604,6 +1625,20 @@ MUTATIONS = {
 for what, (old, new) in MUTATIONS.items():
     mutated = WF_TEXT.replace(old, new)
     check(f"mutation: with {what} taken out of tests.yml, the pull request structure check fails (and the text did contain it)", old in WF_TEXT and mutated != WF_TEXT and not pr_ok(yaml.safe_load(mutated)), what)
+# the verdict step's wiring: its shell judges $PLAN (the plan job) and $SHARDS (the shard jobs), so its env must hand it exactly those results; swapped, a failed shard would be read as the plan's result and the other way round
+def wired(yy):
+    step = next((s for s in yy["jobs"]["suites"]["steps"] if s.get("name") == SHARDED), {})
+    return step.get("env", {}).get("PLAN") == "${{ needs.shards.result }}" and step.get("env", {}).get("SHARDS") == "${{ needs.measure.result }}"
+check("tests.yml: the step 'run the selection, sharded' reads PLAN from `needs.shards.result` (the plan job) and SHARDS from `needs.measure.result` (the shard jobs)", wired(y))
+WIRE_OLD = "          PLAN: ${{ needs.shards.result }}\n          SHARDS: ${{ needs.measure.result }}\n        run: |\n          [ \"$PLAN\" = success ] || { echo \"::error::the plan of the selection was"
+WIRE_MUT = {
+    "the two results swapped (PLAN from the shard jobs, SHARDS from the plan job)": WIRE_OLD.replace("PLAN: ${{ needs.shards.result }}", "PLAN: ${{ needs.measure.result }}", 1).replace("SHARDS: ${{ needs.measure.result }}", "SHARDS: ${{ needs.shards.result }}", 1),
+    "SHARDS read from the plan job as well (a failed shard would pass)": WIRE_OLD.replace("SHARDS: ${{ needs.measure.result }}", "SHARDS: ${{ needs.shards.result }}", 1),
+    "PLAN read from the shard jobs as well (a failed plan would pass)": WIRE_OLD.replace("PLAN: ${{ needs.shards.result }}", "PLAN: ${{ needs.measure.result }}", 1),
+}
+for what, new in WIRE_MUT.items():
+    mutated = WF_TEXT.replace(WIRE_OLD, new, 1)
+    check(f"mutation: with {what} in tests.yml, the wiring check fails (and the text did contain the step's env)", WF_TEXT.count(WIRE_OLD) == 1 and mutated != WF_TEXT and not wired(yaml.safe_load(mutated)), what)
 # merge, in the throwaway repo: its suites split over two shard maps
 here = tool("list").stdout.split(); whole = json.loads(MAP.read_text())
 def part(names, commit=None, p=None):
