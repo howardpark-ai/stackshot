@@ -11,7 +11,7 @@ writes the line itself, so the owner never sees an item on an agent idle for ove
 An item is owed a line when all of these hold, using the silence pass's own scope (`silence.reading`, `silence.clock`):
 
   - it is open and on an agent as the board shows it: a session is its mover, its state is not the owner's move, and the board does not show it waiting. A hold, a parked item and any stored
-    wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) are left alone, exactly as the silence pass leaves them;
+    wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) and an item queued behind its mover's other item (`[model] queued_behind`, model/queued.py) are left alone, exactly as the silence pass leaves them;
   - an untaken hand-off to a back agent is left alone (the hand-off audit clocks it); an untaken hand-off to a front agent is not, as in the silence pass. A front agent's item is otherwise
     treated like any other: the pass sends nobody anything, it writes a History line, so there is no notice to hold back from a front agent;
   - the item has had no real activity for an hour: `silence.clock`, the clock the silence pass reads (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
