@@ -204,11 +204,11 @@ clean_pane(); panes["home-peer"] = "busy"
 for i in range(1, 12): (T / f"store/a/{i}.json").unlink(missing_ok=True)
 put(1, act=90)
 first = tick()
-second = tick(now0 + 10 * MIN); third = tick(now0 + 54 * MIN)
-check("4 a second and a third pass inside the hour (10 and 54 minutes after the line) write nothing: one line", first == ["a1"] and second == [] and third == [] and len(lines(1)) == 1, (first, second, third, lines(1)))
-check("4 an hour after the first line, an item still silent gets the next", tick(now0 + 60 * MIN) == ["a1"] and len(lines(1)) == 2 and lines(1)[1]["at"] == now0 + 60 * MIN)
-put(9, act=90); tick(); b1 = tick(now0 + 54 * MIN + 59); b2 = tick(now0 + 55 * MIN)
-check("4 the gap is judged with five minutes of slack (tick jitter): 54 minutes 59 seconds after the line nothing, 55 minutes the next line", "a9" not in b1 and "a9" in b2 and [e["at"] for e in lines(9)] == [now0, now0 + 55 * MIN], (b1, b2, lines(9)))
+second = tick(now0 + 10 * MIN); third = tick(now0 + 44 * MIN)
+check("4 a second and a third pass inside 45 minutes (10 and 44 minutes after the line) write nothing: one line", first == ["a1"] and second == [] and third == [] and len(lines(1)) == 1, (first, second, third, lines(1)))
+check("4 45 minutes after the first line (`FAST_GAP`), an item still silent gets the next", tick(now0 + 45 * MIN) == ["a1"] and len(lines(1)) == 2 and lines(1)[1]["at"] == now0 + 45 * MIN)
+put(9, act=90); tick(); b1 = tick(now0 + 44 * MIN + 59); b2 = tick(now0 + 45 * MIN)
+check("4 the gap is exact: 44 minutes 59 seconds after the line nothing, 45 minutes the next line", "a9" not in b1 and "a9" in b2 and [e["at"] for e in lines(9)] == [now0, now0 + 45 * MIN], (b1, b2, lines(9)))
 put(2, act=90); tick(); d2 = rd(2); d2["activity"] = now0 + 5 * MIN; (T / "store/a/2.json").write_text(json.dumps(d2))
 r62, r66 = tick(now0 + 62 * MIN), tick(now0 + 66 * MIN)
 check("4 a write by the mover after the line starts the hour again: 57 minutes after it nothing, 61 minutes after it (and 66 after the line) the next line",
@@ -326,8 +326,8 @@ while t_ <= now0 + 7 * 24 * H:
     t_ += 10 * MIN                                                  # the ten-minute tick, for a week
 silent_at = lambda t: t - (now0 - 90 * MIN)
 gaps = [b_ - a_ for a_, b_ in zip(stamps, stamps[1:])]
-check("10 a week of silence on a busy pane writes 47 lines (23 in the first day, one an hour from 1.5 hours of silence; then one every 6 hours from 29.5), not 168", len(stamps) == 47, len(stamps))
-check("10 …one an hour for the first 24 hours of silence, then one every 6 hours", gaps[:22] == [H] * 22 and gaps[22:] == [6 * H] * 24 and all(silent_at(a_) < 24 * H for a_ in stamps[:23]) and silent_at(stamps[23]) >= 24 * H, (len(gaps), gaps[20:25]))
+check("10 a week of silence on a busy pane writes 51 lines (27 in the first day, one every 50 minutes on the ten-minute grid from 1.5 hours of silence; then one every 6 hours), not 168", len(stamps) == 51, len(stamps))
+check("10 …one every 50 minutes (the first ten-minute tick past 45) for the first 24 hours of silence, then one every 6 hours", gaps[:26] == [50 * MIN] * 26 and gaps[26:] == [6 * H] * 24 and all(silent_at(a_) < 24 * H for a_ in stamps[:27]) and silent_at(stamps[27]) >= 24 * H, (len(gaps), gaps[24:29]))
 check("10 …the log keeps its last eight and the item's last-activity record is the newest line (every line of a busy pane verified something and is stamped)", len(lines(1)) == 8 and mt(1)["last_activity"] == {"at": stamps[-1], "kind": "audit", "what": "audit verified the mover's pane is in a turn"}, (len(lines(1)), mt(1).get("last_activity")))
 # a clock that goes backwards delays the next line and never doubles it
 put(2, act=90); tick(now0 + 5 * H); k0 = len(lines(2))
@@ -383,8 +383,8 @@ while t_ <= now0 + 3 * 24 * H:
 # (the stamp is the grid time; the line itself is dated by the jittered clock)
 gaps14 = [b_ - a_ for a_, b_ in zip(stamps14, stamps14[1:])]
 first_day = [a_ for a_ in stamps14 if a_ - (now0 - 90 * MIN) < 24 * H]
-check("14 on a ten-minute grid with 0 to 8 seconds of jitter an item silent for 3 days gets 23 lines in the first 24 hours of silence, as on an exact grid, not 20", len(first_day) == 23, (len(first_day), len(stamps14)))
-check("14 …one an hour on the grid: every gap in the first day is exactly 60 minutes (never 70), then one every 6 hours (never 6 hours 10 minutes)", gaps14[:22] == [H] * 22 and gaps14[22:] and all(g == 6 * H for g in gaps14[22:]), (gaps14[:3], gaps14[20:25]))
+check("14 on a ten-minute grid with 0 to 8 seconds of jitter an item silent for 3 days gets 27 lines in the first 24 hours of silence, as on an exact grid, not 23", len(first_day) == 27, (len(first_day), len(stamps14)))
+check("14 …one every 50 minutes on the grid: every gap in the first day is exactly 50 minutes (never 60), then one every 6 hours (never 6 hours 10 minutes)", gaps14[:26] == [50 * MIN] * 26 and gaps14[26:] and all(g == 6 * H for g in gaps14[26:]), (gaps14[:3], gaps14[24:29]))
 
 # ================================================================ 15. a torn entry in the log never raises
 clean_pane(); panes["home-peer"] = "busy"
@@ -498,8 +498,51 @@ check("16 stamp_signal: a verified line gives the audit signal at its time, a li
       sg({"kind": "audit", "verified": ["a subagent is running on it"], "recorded": []}, 50.0) == {"at": 50.0, "kind": "audit", "what": "audit verified a subagent is running on it"}
       and sg({"kind": "audit", "verified": ["the mover's pane is in a turn", "CI failed on PR 5"], "recorded": ["CI failed on PR 5"]}, 50.0)["what"] == "audit verified the mover's pane is in a turn, CI failed on PR 5"
       and sg({"kind": "audit_idle", "verified": [], "recorded": []}, 50.0) is None and sg({"kind": "audit", "verified": [], "recorded": []}, 50.0) is None
+      and sg({"kind": "audit_idle", "verified": ["a subagent is running on it"], "recorded": []}, 50.0) is None and sg({"kind": "other", "verified": ["x"], "recorded": []}, 50.0) is None
       and sg({"kind": "audit", "verified": ["CI failed on PR 5"], "recorded": ["CI failed on PR 5"]}, 50.0) is None and sg(None, 50.0) is None and sg({}, 50.0) is None
       and len(sg({"kind": "audit", "verified": ["x" * 200], "recorded": []}, 50.0)["what"]) == LA.MAX_WHAT and sg({"kind": "audit", "verified": ["x"], "recorded": []}, "soon") is None)
 
+
+# ================================================================ 18. the row never reads "idle over 1 h" between two lines; the record never goes backwards
+clean_pane(); panes["team-back"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+rng18 = random.Random(11)
+put(1, mover="team-back", act=90)
+t_ = now0; landed = []
+while t_ <= now0 + 24 * H:
+    at_ = t_ + rng18.uniform(0, 68)                                  # the ten-minute set runs in the first paced round after the tenth minute (up to a minute late) and reads its clock a few seconds late
+    if tick(at_): landed.append(at_)
+    t_ += 10 * MIN
+gaps18 = [b_ - a_ for a_, b_ in zip(landed, landed[1:])]
+check("18 on the ten-minute grid with a late round and jitter, the next line lands 50 minutes on and never later than 56 minutes 10 seconds after the last (an hour would turn the row red)", len(landed) > 20 and max(gaps18) <= 50 * MIN + 10 * MIN + 68 and min(gaps18) >= 45 * MIN, (max(gaps18), min(gaps18), len(landed)))
+worst = max(gaps18)
+i_worst = gaps18.index(worst)
+d18 = rd(1); d18["metadata"]["last_activity"] = {"at": landed[i_worst], "kind": "audit", "what": "audit verified the mover's pane is in a turn"}; (T / "store/a/1.json").write_text(json.dumps(d18))
+row18 = parts("a1", landed[i_worst] + worst - 0.5)                    # the row an instant before the next line lands: the longest it ever shows one line's time
+check("18 …the row read at that worst landing time (through act_parts and band) is not red: it is amber at most, and carries the audit's time", row18 is not None and 'data-b="bad"' not in row18[0] and 'data-b="bad"' not in row18[1] and LA.band(worst) != LA.BAD and 'data-b="warn"' in row18[1], (worst, row18))
+check("18 …and the old gap would have shown it: a line landing an hour and a tick-jitter after the last is red", LA.band(H + 8) == LA.BAD and LA.band(H) == LA.WARN)
+
+# a stamp never moves the record to an earlier time
+TIME_ = 1.0e9
+ahead = {"status": "open", "metadata": {"last_activity": {"at": now0 + 20 * MIN, "kind": "comment", "what": "comment on #5"}}}
+line_ok = {"kind": "audit", "verified": ["the mover's pane is in a turn"], "recorded": []}
+check("18 a stored record dated ahead of the clock by less than the skew (a clock stepped back, an event dated just ahead) stays: the audit line at an earlier time does not replace it", HR.stamp(ahead, line_ok, now0) is False and ahead["metadata"]["last_activity"]["kind"] == "comment" and ahead["metadata"]["last_activity"]["at"] == now0 + 20 * MIN, ahead)
+far = {"status": "open", "metadata": {"last_activity": {"at": now0 + 5 * H, "kind": "comment", "what": "comment on #5"}}}
+check("18 …a record dated further ahead than the skew is no record (a clock that jumped once): the line replaces it, as every signal does", HR.stamp(far, line_ok, now0) is True and far["metadata"]["last_activity"]["kind"] == "audit" and far["metadata"]["last_activity"]["at"] == now0, far)
+older = {"status": "open", "metadata": {"last_activity": {"at": now0 - 5 * MIN, "kind": "comment", "what": "comment on #5"}}}
+same_t = {"status": "open", "metadata": {"last_activity": {"at": now0, "kind": "comment", "what": "comment on #5"}}}
+check("18 an older record is replaced by the line, a record at the very time of the line is kept (strictly later wins), and an idle line or no line changes nothing",
+      HR.stamp(older, line_ok, now0) is True and older["metadata"]["last_activity"]["kind"] == "audit" and HR.stamp(same_t, line_ok, now0) is False and same_t["metadata"]["last_activity"]["kind"] == "comment"
+      and HR.stamp({"status": "open", "metadata": {}}, {"kind": "audit_idle", "verified": ["x"], "recorded": []}, now0) is False and HR.stamp({"status": "open", "metadata": {}}, None, now0) is False)
+clean_pane(); panes["team-back"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, mover="team-back", act=90, last_activity={"at": now0 + 20 * MIN, "kind": "comment", "what": "comment on #5"})
+tick()
+check("18 through the tick: a line written while the item's record stands 20 minutes ahead is written and the record stays as it was", len(lines(1)) == 1 and lines(1)[0]["kind"] == "audit" and mt(1)["last_activity"] == {"at": now0 + 20 * MIN, "kind": "comment", "what": "comment on #5"}, (lines(1), mt(1).get("last_activity")))
+put(2, mover="team-back", act=90); put(1, mover="home-peer2", act=90); panes["home-peer2"] = "busy"
+tick(now0 + 2 * H); stamped2 = mt(1)["last_activity"]
+tick(now0 + 2 * H - 30 * MIN)                                        # the clock stepped back half an hour: the line is not owed (it is within 45 minutes of the last), and nothing moves the record back
+tick(now0 + 2 * H + 3 * H)
+check("18 a clock stepped back never moves the record to an earlier time: the stamp of the later line stays through passes at earlier clocks", stamped2["at"] == now0 + 2 * H and mt(1)["last_activity"]["at"] >= stamped2["at"], (stamped2, mt(1).get("last_activity")))
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

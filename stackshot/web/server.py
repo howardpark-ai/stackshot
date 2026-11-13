@@ -6093,7 +6093,7 @@ def _silence_pass_tick() -> "dict[str, Any] | None":
 
 def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
-    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one an hour for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
+    hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit` or `audit_idle`).
     What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
     request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
@@ -6120,9 +6120,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
-                sig = _hourly.stamp_signal(line, now)      # a line that verified something is the hourly update: it is the item's last activity too, newest wins (an idle line stamps nothing)
-                if sig is not None:
-                    _lastact.apply(item, [sig], now)
+                _hourly.stamp(item, line, now)      # a line that verified something is the hourly update: it is the item's last activity too, newest wins and never backwards (an idle line stamps nothing)
                 _writes.save(gid, item, note="audit: hourly line")
             written.append(gid)
             print(f"audit: {gid} hourly line: {line['text']}", file=sys.stderr, flush=True)
