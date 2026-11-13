@@ -56,8 +56,14 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def refused(name, f, *want):
     try:
@@ -68,33 +74,33 @@ NEW = "- The thing works and is in use"
 
 # ---- 1. refusals
 refused("an old cached schema (complete with the id alone): names what is missing and the portal path, never a relaunch",
-        lambda: server.stackshot_complete("a1"), "closing a1 needs outcome, reason, outcome_text", "a relaunch does not",
+        lambda: _wt_complete.stackshot_complete("a1"), "closing a1 needs outcome, reason, outcome_text", "a relaunch does not",
         "portal_codemode_execute with codemode.stackshot_complete({item_id, outcome, reason, outcome_text, superseded_by})")
 refused("update status=completed alone: the same", lambda: server._update("a1", status="completed"), "closing a1 needs outcome, reason, outcome_text", "codemode.stackshot_complete")
-refused("no reason", lambda: server.stackshot_complete("a1", outcome="done", outcome_text=NEW), "needs reason")
-refused("no outcome_text", lambda: server.stackshot_complete("a1", outcome="done", reason="it works"), "needs outcome_text")
-refused("no outcome", lambda: server.stackshot_complete("a1", reason="it works", outcome_text=NEW), "needs outcome")
-refused("an unknown outcome", lambda: server.stackshot_complete("a1", outcome="finished", reason="it works", outcome_text=NEW), "outcome must be one of done | dropped | superseded")
-refused("a reason of two lines", lambda: server.stackshot_complete("a1", outcome="done", reason="it works\nand more", outcome_text=NEW), "reason is one line")
-refused("an outcome_text that is not bullets", lambda: server.stackshot_complete("a1", outcome="done", reason="it works", outcome_text="It works now."), "outcome_text line is not a `- ` bullet")
-refused("superseded without superseded_by", lambda: server.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW), "needs superseded_by")
-refused("superseded_by with outcome done", lambda: server.stackshot_complete("a1", outcome="done", reason="it works", outcome_text=NEW, superseded_by="a2"), "superseded_by goes with outcome=superseded")
-refused("superseded by itself", lambda: server.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="A1"), "cannot be superseded by itself")
-refused("superseded by an item that does not exist", lambda: server.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="a99"), "a99, which does not exist")
+refused("no reason", lambda: _wt_complete.stackshot_complete("a1", outcome="done", outcome_text=NEW), "needs reason")
+refused("no outcome_text", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works"), "needs outcome_text")
+refused("no outcome", lambda: _wt_complete.stackshot_complete("a1", reason="it works", outcome_text=NEW), "needs outcome")
+refused("an unknown outcome", lambda: _wt_complete.stackshot_complete("a1", outcome="finished", reason="it works", outcome_text=NEW), "outcome must be one of done | dropped | superseded")
+refused("a reason of two lines", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works\nand more", outcome_text=NEW), "reason is one line")
+refused("an outcome_text that is not bullets", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works", outcome_text="It works now."), "outcome_text line is not a `- ` bullet")
+refused("superseded without superseded_by", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW), "needs superseded_by")
+refused("superseded_by with outcome done", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="it works", outcome_text=NEW, superseded_by="a2"), "superseded_by goes with outcome=superseded")
+refused("superseded by itself", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="A1"), "cannot be superseded by itself")
+refused("superseded by an item that does not exist", lambda: _wt_complete.stackshot_complete("a1", outcome="superseded", reason="moved", outcome_text=NEW, superseded_by="a99"), "a99, which does not exist")
 refused("outcome on an open item without a close", lambda: server._update("a1", outcome="done"), "go with a close")
 refused("outcome_text on an open item without a close", lambda: server._update("a1", outcome_text=NEW), "go with a close")
 refused("reason outside a close", lambda: server._update("a1", next="x", reason="why"), "go with a close")
 check("nothing above changed the item", rd(1)["status"] == "open" and rd(1)["metadata"]["next"] == "do the thing" and rd(1)["description"] == DESC, rd(1))
 
 # ---- 2. a close: done, through complete
-out = server.stackshot_complete("a1", outcome="Done", reason="PR #11 live at 010bc0d", outcome_text=NEW)
+out = _wt_complete.stackshot_complete("a1", outcome="Done", reason="PR #11 live at 010bc0d", outcome_text=NEW)
 m = rd(1)["metadata"]
 check("complete closes it, keeps the description and stores the outcome text", rd(1)["status"] == "completed" and rd(1)["description"] == DESC and m.get("outcome_text") == NEW, rd(1))
 check("the close clears next, ask and needs", not any(k in m for k in ("next", "ask", "needs")), m)
 check("due stays as a record", m.get("due") == "2026-10-20", m)
 check("outcome (lower-cased) and reason are stored, no superseded_by", m.get("outcome") == "done" and m.get("reason") == "PR #11 live at 010bc0d" and "superseded_by" not in m, m)
 check("the reply shows outcome, reason and outcome_text", "outcome: done" in out and "reason: PR #11 live at 010bc0d" in out and f"outcome text:\n{NEW}" in out and "next:" not in out, out)
-check("get shows them", "outcome: done" in server.stackshot_get("a1"), server.stackshot_get("a1"))
+check("get shows them", "outcome: done" in _wt_get.stackshot_get("a1"), _wt_get.stackshot_get("a1"))
 refused("outcome on an already completed item", lambda: server._update("a1", status="completed", outcome="dropped"), "already completed",
         "to correct its close, reopen it (status=open with a next) and close it again")
 snap("a1 done")
@@ -105,9 +111,9 @@ m = rd(8)["metadata"]
 check("update status=completed closes a held item: hold and wake go", rd(8)["status"] == "completed" and "hold" not in m and "wake" not in m and m.get("outcome") == "dropped", m)
 
 # ---- 4. superseded, by an open item and by a completed one
-server.stackshot_complete("a2", outcome="superseded", reason="merged into a3", outcome_text="- Merged into a3, which carries the work", superseded_by="A3")
+_wt_complete.stackshot_complete("a2", outcome="superseded", reason="merged into a3", outcome_text="- Merged into a3, which carries the work", superseded_by="A3")
 check("superseded by an open item: stored, normalised", rd(2)["metadata"].get("superseded_by") == "a3" and rd(2)["metadata"].get("outcome") == "superseded", rd(2)["metadata"])
-server.stackshot_complete("a4", outcome="superseded", reason="reworded as a1", outcome_text="- Reworded as a1", superseded_by="a1")
+_wt_complete.stackshot_complete("a4", outcome="superseded", reason="reworded as a1", outcome_text="- Reworded as a1", superseded_by="a1")
 check("superseded by a completed item is fine", rd(4)["metadata"].get("superseded_by") == "a1", rd(4)["metadata"])
 snap("a2 a4 superseded")
 
@@ -118,7 +124,7 @@ m = rd(4)["metadata"]
 check("reopening drops outcome, outcome_text, reason and superseded_by and takes the new next",
       rd(4)["status"] == "open" and not any(k in m for k in ("outcome", "outcome_text", "reason", "superseded_by")) and rd(4)["description"] == DESC and m.get("next", "").split("\n")[0] == "Oliver: pick it up again", m)      # the server's step of his follows it on the list
 snap("a4 reopened")
-server.stackshot_complete("a4", outcome="dropped", reason="not needed after all", outcome_text="- Not needed after all")
+_wt_complete.stackshot_complete("a4", outcome="dropped", reason="not needed after all", outcome_text="- Not needed after all")
 check("a reopened item closes again", rd(4)["metadata"].get("outcome") == "dropped", rd(4)["metadata"])
 snap("a4 dropped")
 
@@ -157,9 +163,9 @@ check("board.md: a completed item with no session names no one: no backticked la
 
 # ---- 7. the descriptions say what a close carries
 check("the complete and update descriptions carry the close form", all("outcome: done | dropped" in d and "clears next, ask and needs" in d
-                                                                         for d in (server._COMPLETE_DESC, server._UPDATE_DESC)))
-check("…inside the first 2048 characters, where the CLI cuts a tool description", all(0 < server._lead(d).find("drops outcome, outcome_text, reason and superseded_by") < 2048 - 40
-                                                                                  for d in (server._COMPLETE_DESC, server._UPDATE_DESC)))
+                                                                         for d in (_wt_complete._COMPLETE_DESC, _wt_update._UPDATE_DESC)))
+check("…inside the first 2048 characters, where the CLI cuts a tool description", all(0 < _wt_text._lead(d).find("drops outcome, outcome_text, reason and superseded_by") < 2048 - 40
+                                                                                  for d in (_wt_complete._COMPLETE_DESC, _wt_update._UPDATE_DESC)))
 
 import shutil; shutil.rmtree(tmp, ignore_errors=True)
 print(("ok" if not fails else "FAILED") + f": close scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else ""))

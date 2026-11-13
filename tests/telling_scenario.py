@@ -52,6 +52,7 @@ from stackshot.anchors import anchors as _anc
 from stackshot.core import config as _cfg
 from stackshot.github import ghsync as _gh
 from stackshot.web import server
+from stackshot.web.tools import text as _wt_text
 if not MAIN: from stackshot.service import telling, writes
 
 MOVED = {      # the telling's name here -> the name it had on server.py (a function that is public here has its old underscore name there)
@@ -385,7 +386,7 @@ check("5 a hook that is a function is looked up on the server when the notice is
 with srv(_model_of=lambda it: type("M", (), {"state": "none", "wait": None, "mover": "", "then": ""})()):
     held = plain(lambda: telling.held_by(item("1", mover=BACK)))
 check("5 …and _model_of reaches held_by through model_of (the model is the server's to read)", held[0] == "ok" and held[1][0] == BACK, held)
-check("5 a value hook is the server's own value (the time zone, the For you list's failed set)", telling._hooks().zone() is server.ZONE and telling._hooks().foryou_failed() is server._FORYOU_FAILED)
+check("5 a value hook is the server's own value (the time zone, the For you list's failed set)", telling._hooks().zone() is _wt_text.ZONE and telling._hooks().foryou_failed() is server._FORYOU_FAILED)
 
 # ---------------------------------------------------------------- 6. shape
 TELLING_SRC = pathlib.Path(STACK, "stackshot/service/telling.py").read_text(encoding="utf-8")

@@ -54,6 +54,7 @@ if len(sys.argv) > 2 and sys.argv[1] == "--standby-child":
     os.environ.update(STACKSHOT_CONFIG=f"{root}/stackshot.toml", STACKSHOT_AUTH="off", STACKSHOT_FLEET_DIR=f"{root}/fleet"); os.environ.pop("STACKSHOT_URL", None)
     sys.path.insert(0, STACK); logging.disable(logging.CRITICAL)
     from stackshot.web import server
+    from stackshot.web import app as _wapp
     from stackshot.web.auth import signin as _signin
     from stackshot.web.colorcombos import WEB_LABEL as WL
     from starlette.testclient import TestClient
@@ -98,6 +99,7 @@ def check(name, cond, got=None):
 from stackshot.web import colorcombos as cc
 WL = cc.WEB_LABEL         # the label the web form sends: the code's own constant, so this file names none of its own
 from stackshot.web import server
+from stackshot.web import app as _wapp
 from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from starlette.requests import Request
@@ -322,8 +324,8 @@ try:
     MH = {"Authorization": "Bearer " + TOK[HOST], "Content-Type": "application/json"}
     OH = {"Authorization": "Bearer " + TOK[OTHER], "Content-Type": "application/json"}
     drops = []
-    real_drop = server._board_home_drop
-    server._board_home_drop = lambda *a, **k: drops.append(1)
+    real_drop = _wapp._board_home_drop
+    _wapp._board_home_drop = lambda *a, **k: drops.append(1)
     with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
         def who(w):
             c.cookies.clear()
@@ -361,7 +363,7 @@ try:
               all(not r.matches({"type": "http", "path": p, "method": m})[0].name == "FULL" for r in app.routes if r.path == "/client/{what}" for m, p in PATHS if p.startswith("/client/"))
               and any(r.matches({"type": "http", "path": "/client/whoami", "method": "GET"})[0].name == "FULL" for r in app.routes if r.path == "/client/{what}")
               and any(r.matches({"type": "http", "path": "/client/poll", "method": "POST"})[0].name == "FULL" for r in app.routes if r.path == "/client/{what}"))
-        check("the paths are not under /prefs/ and not in _UI_WRITES (a post does not drop the kept home page)", not any(p.startswith(server._UI_WRITES) for _, p in PATHS))
+        check("the paths are not under /prefs/ and not in _UI_WRITES (a post does not drop the kept home page)", not any(p.startswith(_wapp._UI_WRITES) for _, p in PATHS))
 
         # -- the board: who may
         r = bget(None)
@@ -572,7 +574,7 @@ try:
         r = mpost({"id": mid, "sender": WL}, path="/client/colors/combos/delete")
         check("machine delete: the right call removes it, the list is empty", r.status_code == 200 and listing_of(r) == [] and cc.listing() == [])
         check("the machine and board routes' answers have the same shape: {combos, max}", js(mget()).keys() == js(bget()).keys() == {"combos", "max"})
-    server._board_home_drop = real_drop
+    _wapp._board_home_drop = real_drop
     reset()
 
     # ---- 3. a standby copy, in a process of its own
@@ -594,7 +596,7 @@ try:
               and sb["mget"][0] == 200 and json.loads(sb["mget"][1]) == {"combos": [], "max": 50}, (sb["get"], sb["mget"]))
         check("standby: nothing was written (no file, no temporary file, nothing moved aside)", not FILE.exists() and not tmp_files() and not bad_files())
 finally:
-    try: server._board_home_drop = real_drop
+    try: _wapp._board_home_drop = real_drop
     except NameError: pass
     try: reset()
     except Exception: pass

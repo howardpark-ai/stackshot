@@ -59,10 +59,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.core import runner as R; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP
 from stackshot.service import telling
 from stackshot.core import store as _core_store
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
@@ -271,13 +271,13 @@ held = [True]; clk = [100000.0]
 rn = R.Runner([tk], holding=lambda: held[0], clock=lambda: clk[0]); rn.run_round()
 st = rn.status()["ticks"][0]; b = bytes_of(10)
 check("8 while the migration holds the board the tick is skipped and writes nothing", st["skipped"] == 1 and st["runs"] == 0 and bytes_of(10) == b, st)
-held[0] = False; pubs = []; server._publish = lambda: pubs.append(1)
+held[0] = False; pubs = []; server._publish = _wt_anchors._publish = _wt_route._publish = lambda: pubs.append(1)
 try:
     with frozen(TL):
         clk[0] += 61; rn.run_round()
         clk[0] += 61; rn.run_round()
 finally:
-    server._publish = lambda: None
+    server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 check("8 …released, the first round stamps it and publishes once; the second finds nothing and publishes nothing", pair(10) == ("alive", None) and pubs == [1], (pair(10), pubs))
 from starlette.testclient import TestClient
 with TestClient(server.mcp.http_app()) as tc:

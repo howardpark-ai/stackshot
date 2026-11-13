@@ -54,10 +54,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.model import activity as A
-from stackshot.web import server; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import create as create_svc
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 assert server._cfg.audit_agent() == AUDIT_AGENT, server._cfg.audit_agent()
 AUDIT = [AUDIT_AGENT, "stackshot audit"]
@@ -136,7 +138,7 @@ check("5 a session's update moves it to now", act(1) >= t0, act(1))
 a1 = act(1)
 time.sleep(0.02)
 # a bare confirm
-server.stackshot_confirm("a1", sender="home-peer")
+_wt_complete.stackshot_confirm("a1", sender="home-peer")
 check("5 a bare confirm moves `confirmed` and leaves `activity`", rd(1)["confirmed"] > a1 and act(1) == a1, (rd(1)["confirmed"], a1, act(1)))
 # the server's own passes
 save(1, note="stall: handed to the builder")
@@ -199,9 +201,9 @@ loaded = server._load("a40")
 check("6 an item with no field loads unchanged (no key added by the load)", "activity" not in loaded and loaded == OLD_ONLY)
 check("6 …and reads as its last update", A.at(loaded) == OLD)
 check("6 …and the file is the same bytes after the reads (no migration pass)", (T / "store/a/40.json").read_bytes() == raw0)
-out_without = server.stackshot_get("a40")
+out_without = _wt_get.stackshot_get("a40")
 (T / "store/a/40.json").write_text(json.dumps({**OLD_ONLY, "activity": OLD + 5}))        # the same item, the field added
-out_with = server.stackshot_get("a40")
+out_with = _wt_get.stackshot_get("a40")
 check("6 `get` shows the same item the same with and without the field", out_without == out_with and "activity" not in out_with, (out_without, out_with))
 (T / "store/a/40.json").write_bytes(raw0)
 a_with = {**OLD_ONLY, "activity": OLD + 5}

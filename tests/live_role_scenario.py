@@ -45,9 +45,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web import middleware as _wmw
 from stackshot.projects import pages as pg
 from fastmcp.exceptions import ToolError
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 # --- 1: the live roles in the end-of-turn texts ---
 item(1, "home-front", mover="home-front")                       # the asking session moves it
@@ -101,7 +104,7 @@ def run_mw(name, args, call):
     ctx = types.SimpleNamespace(message=types.SimpleNamespace(name=name, arguments=args))
     buf = io.StringIO()
     with contextlib.redirect_stderr(buf):
-        try: out = asyncio.run(server._RefusalLog().on_call_tool(ctx, nxt))
+        try: out = asyncio.run(_wmw._RefusalLog().on_call_tool(ctx, nxt))
         except ToolError as e: out = e
     return out, buf.getvalue()
 def refuse_update():
@@ -113,7 +116,7 @@ check("2: …and the refusal reaches the caller with its own text", isinstance(o
 long = "Refused: " + "word " * 200
 out, err = run_mw("complete", {"item_id": "a2", "sender": "home-front", "outcome": "SECRET-OUTCOME-VALUE", "reason": "SECRET-REASON-VALUE"}, lambda: (_ for _ in ()).throw(ToolError(long)))
 reason = err.split("sender=home-front: ", 1)[1].rstrip("\n") if "sender=home-front: " in err else ""
-check("2: a long reason is clipped to REFUSAL_LOG_MAX characters", server.REFUSAL_LOG_MAX == 300 and 0 < len(reason) <= server.REFUSAL_LOG_MAX and reason.endswith("…"), (len(err), err[-80:]))
+check("2: a long reason is clipped to REFUSAL_LOG_MAX characters", _wmw.REFUSAL_LOG_MAX == 300 and 0 < len(reason) <= _wmw.REFUSAL_LOG_MAX and reason.endswith("…"), (len(err), err[-80:]))
 check("2: …only tool, item, sender and reason are logged: no other argument of the call", "SECRET" not in err and "outcome" not in err and err.startswith("refused: complete item=a2 sender=home-front: "), err)
 out, err = run_mw("confirm", {}, lambda: (_ for _ in ()).throw(ToolError("Refused: sender is required\nsecond line")))
 check("2: a call with no item or sender logs dashes, and a multi-line reason folds to one line", err == "refused: confirm item=- sender=-: Refused: sender is required second line\n", err)

@@ -131,10 +131,12 @@ def check(name, cond, got=None):
 STORE = T / "store"
 DESC = "- A thing\n- It lives here\n- Finished when it works"
 
-from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
@@ -150,11 +152,11 @@ def round_trip(label):
     """Every kind of call the mirror makes for the issues repo, through the server's own paths and the process's client:
     a create (the id allocator), an edit and a close (the queue worker), the issue and list reads, the comment reader, a merged-PR check.
     → (the item's id, its issue number)."""
-    out = server._create(subject=f"[home] {label}", description=DESC, project="projects/alpha", owner="home-here", next="x")
+    out = _wt_create._create(subject=f"[home] {label}", description=DESC, project="projects/alpha", owner="home-here", next="x")
     gid = G.norm(re.search(r"created (\S+)", out).group(1)); n = G.issue_of(gid, STORE)
     server._update(gid, description=f"- {label}, edited\n- It lives here\n- Finished when it works", sender="home-here")
     r1 = G.drain(None, STORE, say=lambda s: None); edited = "edited" in F.issues.get(n, {}).get("body", "")
-    server.stackshot_complete(gid, outcome="done", reason="it worked", description="- Done", sender="home-here")
+    _wt_complete.stackshot_complete(gid, outcome="done", reason="it worked", description="- Done", sender="home-here")
     r2 = G.drain(None, STORE, say=lambda s: None)
     G.client().get_issue(n); G.client().list_issues()
     rp = G.poll_comments(None, STORE, say=lambda s: None)

@@ -74,12 +74,15 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 def files(): return sorted(p.name for p in (T / "store/a").glob("*.json"))
 
-from stackshot.web import server; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def _no_claude(*a, **k): raise AssertionError("the real model was called")
 R.run_call = _no_claude
@@ -103,10 +106,10 @@ ZONE_OFFSET = dt.timedelta(hours=4)      # the instance zone is Asia/Dubai: UTC+
 TODAY = dt.datetime.now(dt.timezone(ZONE_OFFSET)).date()
 D = lambda n: (TODAY + dt.timedelta(days=n)).isoformat()
 REASON = "the vendor's build has to finish before the part can be applied"
-def upd(i, **kw): return server.stackshot_update(f"a{i}", sender="home-agent", **kw)
+def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def mk(**kw):
     kw = {"subject": "[home] a new thing", "description": DESC, "project": "projects/alpha", "next": "home-agent: build it", "sender": "home-agent", "mover": "home-agent", **kw}
-    return server.stackshot_create(**kw)
+    return _wt_create.stackshot_create(**kw)
 def refused(name, f, *want, i=None, calls=None):
     was = rd(i) if i is not None else None
     try:
@@ -204,8 +207,8 @@ j = rd(14); j["metadata"]["wake"] = D(3); (T / "store/a/14.json").write_text(jso
 quiet("scope: a wake the item already carries is no new wait", lambda: upd(14, wake=D(3)))
 j = rd(15); j["metadata"]["next"] = f"home-agent: apply on {D(3)}"; (T / "store/a/15.json").write_text(json.dumps(j))
 quiet("scope: a dated step the item already carried is no new wait", lambda: upd(15, next=f"home-agent: apply on {D(3)}"))
-quiet("scope: a sender that is not the mover makes no call", lambda: server.stackshot_update("a16", sender="home-here", wake=D(3)))
-quiet("scope: a close makes no call", lambda: server.stackshot_complete("a17", sender="home-agent", outcome="done", reason="finished by " + D(1)))
+quiet("scope: a sender that is not the mover makes no call", lambda: _wt_update.stackshot_update("a16", sender="home-here", wake=D(3)))
+quiet("scope: a close makes no call", lambda: _wt_complete.stackshot_complete("a17", sender="home-agent", outcome="done", reason="finished by " + D(1)))
 quiet("scope: an undated write makes no call", lambda: upd(18, next="home-agent: build it, then test it"))
 quiet("scope: a past date is no wait", lambda: upd(19, next=f"home-agent: the build of {D(-3)} failed, fix it"))
 

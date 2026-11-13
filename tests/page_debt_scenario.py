@@ -103,8 +103,11 @@ os.environ.update(ANTHROPIC_API_KEY="[masked secret]", ANTHROPIC_AUTH_TOKEN="tok
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import page_debt; from stackshot.projects import pages as _pg
 _ct_changed_since = _pg.ct_changed_since       # the real one: section 9 patches it
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]; server._pdebts._page_ts = lambda key: 0.0
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]; server._pdebts._page_ts = lambda key: 0.0
 server._cfg.CFG.setdefault("pilot", {})["writer_owes_page"] = True
 ZONE = _cfg.tz()
 DAY = lambda h, m=0, d=16: dt.datetime(2026, 10, d, h, m, tzinfo=ZONE).timestamp()
@@ -234,7 +237,7 @@ def fallback_case(name, mode, text, why_has, *, io_mode="", timeout=20, page=Non
     if no_call: check(f"{name}: no call was started", len(calls()) == nc, len(calls()) - nc)
     check(f"{name}: the reason is logged ({why_has!r}) and -main is named", why_has in last["why"] and last["to"] == main, last)
     check(f"{name}: -main gets one message in today's relay words, marked for the owner, with the reason, the item and its notice",
-          len(p) == 1 and p[0][0] == main and p[0][1].startswith(f"{server._FOR_OWNER} [board] 1 page update on {key} is yours to write: the writer left it undone past 30 min and the audit's page call could not write it (")
+          len(p) == 1 and p[0][0] == main and p[0][1].startswith(f"{_wt_text._FOR_OWNER} [board] 1 page update on {key} is yours to write: the writer left it undone past 30 min and the audit's page call could not write it (")
           and "or hand it to the agent that keeps the page." in p[0][1].split("\n")[0]
           and why_has in p[0][1].split("\n")[0] and re.search(rf"^- {gid} changed \(description\) by \S+ — \[home\] item \d+ \({key}\) → https://stackshot\.example\.com/items/{gid} · notice [0-9a-f]{{6}}$", p[0][1], re.M), p)
     check(f"{name}: the debt is the -main agent's now (not dropped, not moved again), the keeper is not told", list(led) == [main] and "moved" not in led[main] and led[main]["item"] == gid and led[main]["settle"] == "ct"
@@ -272,7 +275,7 @@ def route_case(name, key, to, marked, *, moves="work-osprey", mode="good", text=
     last = dlog()[-1]; led = server._owed_load().get(key, {}); first = p[0][1].split("\n")[0] if p else ""
     check(f"{name}: falls back to {to}, in one message", out.get("fallback") == 1 and last["to"] == to and len(p) == 1 and p[0][0] == to, (out, last, p))
     check(f"{name}: the message {'opens with the [for Oliver] mark' if marked else 'is the plain relay text, no mark'}",
-          first.startswith(server._FOR_OWNER + f" [board] 1 page update on {key} is yours to write") if marked else first.startswith(f"[board] 1 page update on {key} is yours to write"), first)
+          first.startswith(_wt_text._FOR_OWNER + f" [board] 1 page update on {key} is yours to write") if marked else first.startswith(f"[board] 1 page update on {key} is yours to write"), first)
     check(f"{name}: the debt is {to}'s now, not moved again", list(led) == [to] and "moved" not in led[to] and led[to]["settle"] == "ct", led)
     nid = re.search(r"notice ([0-9a-f]{6})", p[0][1]).group(1) if p else ""
     n = next((x for x in routing.read(key) if x["id"] == nid), {})
@@ -328,7 +331,7 @@ check("put_state: the older (bool, note) form still reads", page_debt.put_state(
 reset(); rcfg(page_debt=True, page_debt_shadow=False)
 owe("projects/alpha", A, "a1", "changed (description)"); owe("projects/alpha", X, "a2", "changed (next)", settle="any"); server._pilot_fallback_tick(); time.sleep(0.4)
 fake("good", CANNOT); n0 = len(pushes()); server._page_debt_pass(now=DAY(10), io=FakeIO(**{"projects/alpha": alpha_page()})); p = wait_push(n0 + 1)[n0:]
-check("two debts of one page: one message for the two, listing each with its notice", len(p) == 1 and p[0][1].startswith(f"{server._FOR_OWNER} [board] 2 page updates on projects/alpha are yours to write: the writers left them undone") and "- a1 changed (description)" in p[0][1] and "- a2 changed (next)" in p[0][1], p)
+check("two debts of one page: one message for the two, listing each with its notice", len(p) == 1 and p[0][1].startswith(f"{_wt_text._FOR_OWNER} [board] 2 page updates on projects/alpha are yours to write: the writers left them undone") and "- a1 changed (description)" in p[0][1] and "- a2 changed (next)" in p[0][1], p)
 
 # ---- 8. the mark (the day when a pass names no run): shadow and live count apart; a crash before the call does not repeat it
 reset(); rcfg(page_debt=True, page_debt_shadow=True); owe("projects/alpha", A, "a1", "changed (description)"); server._pilot_fallback_tick(); time.sleep(0.3)

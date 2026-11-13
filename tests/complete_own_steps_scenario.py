@@ -40,6 +40,8 @@ DESC = "- A thing\n- It lives here\n- Done when done"
 OUT = "- The thing works now\n- It lives here\n- Finished when it ships"
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.model import steps as S; from stackshot.model import nextlines as NL
+from stackshot.web.tools import update as _wt_update
+from stackshot.web.tools import complete as _wt_complete
 OWNER = server.OWNER
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -67,9 +69,9 @@ def sts(i): return [(x["status"], x.get("by") or "") for x in rd(i)["metadata"].
 def kinds(i): return [k for k, _ in sts(i)]
 def ref(i): return "board" + "#" + str(i)      # the tools take the item as board#N: built here, so the text carries no literal id shape
 def complete(i, who="home-front", outcome="done", sup=""):
-    return server.stackshot_complete(ref(i), outcome=outcome, reason="it ended", outcome_text=OUT, superseded_by=sup, sender=who)
+    return _wt_complete.stackshot_complete(ref(i), outcome=outcome, reason="it ended", outcome_text=OUT, superseded_by=sup, sender=who)
 def close_update(i, who="home-front", outcome="done", **kw):
-    return server.stackshot_update(ref(i), status="completed", outcome=outcome, reason="it ended", outcome_text=OUT, sender=who, **kw)
+    return _wt_update.stackshot_update(ref(i), status="completed", outcome=outcome, reason="it ended", outcome_text=OUT, sender=who, **kw)
 def refused(name, f, *want):
     try:
         out = f(); check(name, False, out)
@@ -161,7 +163,7 @@ item(15, lines=(MINE, f"{OWNER}: read it", ), writers=[U["home-front"], U["team-
 complete(15)
 check(f"an owner's step ({OWNER}'s) never holds the close up: it is settled by the close, as before", rd(15)["status"] == "completed" and kinds(15) == ["done", "done"], sts(15))
 item(16)
-out16 = server.stackshot_update(ref(16), sender="home-front", done=[1])
+out16 = _wt_update.stackshot_update(ref(16), sender="home-front", done=[1])
 check("marking your own step with update leaves the item open and the other's step open (the way the refusal points to)", rd(16)["status"] == "open" and rd(16)["metadata"]["next"] == THEIRS and kinds(16) == ["done", "open"], (sts(16), rd(16)["metadata"]))
 complete(16, who="team-back")
 check("…then the other session closes it: its own step is ticked, by it", rd(16)["status"] == "completed" and kinds(16) == ["done", "done"] and sts(16)[1][1] == "team-back", sts(16))

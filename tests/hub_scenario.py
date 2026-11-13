@@ -109,11 +109,16 @@ check("roles file: a keeper of an inactive page that also keepers an active one 
 # ---- 2. the server's note
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.service import telling
 from stackshot.projects import project_registry as _projects_registry
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # this suite files items under owners the fleet does not know (the note is what it tests); the write guards have their own suite: model_guards
-server._publish = lambda: None
-def create(project, owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, sender=owner, **{"next": f"{owner}: carry on", **kw})
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+def create(project, owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project=project, sender=owner, **{"next": f"{owner}: carry on", **kw})
 r = create("ops/example-hub", "falcon-anchors"); fold1 = r.split()[1]
 check("create: an agent of the hub, on a folded page: no note", "(note:" not in r, r)
 r = create("ops/example-hub/roster-notes", "falcon-main"); fold2 = r.split()[1]
@@ -122,14 +127,14 @@ check("create: the hub's -main agent, on a sub-page of a folded page: no note", 
 r = create("ops/example-hub/roster-notes", "falcon"); keeper_out = r.split()[1]
 check("create: the keeper of a hub with agents may create an item (the creator is only a History fact)", r.startswith("created") and "(note:" not in r, r)
 r = create("ops/example-hub/roster-notes", "falcon-main"); stew_out = r.split()[1]
-check("get shows no creator check line, whoever made the item", "keeper of record" not in server.stackshot_get(stew_out), server.stackshot_get(stew_out))
+check("get shows no creator check line, whoever made the item", "keeper of record" not in _wt_get.stackshot_get(stew_out), _wt_get.stackshot_get(stew_out))
 r = create("projects/example", "falcon-maintainer")
 check("create: a background agent may create an item (no refusal pointing at needs)", r.startswith("created") and "Refused" not in r and "(note:" not in r, r)
 r = create("projects/ops", "harbor-ops")
 check("create: a hub not yet converted (no agents:): no note", "(note:" not in r, r)
 r = create("projects/example", "harbor-ops"); g_out = r.split()[1]
 check("create: a session from elsewhere gets no note naming its hub: the item was created", r.startswith("created") and "(note:" not in r and server._path(g_out).exists(), r)
-check("get shows no check line for it either", "keeper of record" not in server.stackshot_get(g_out), server.stackshot_get(g_out))
+check("get shows no check line for it either", "keeper of record" not in _wt_get.stackshot_get(g_out), _wt_get.stackshot_get(g_out))
 r = server._update(g_out, next="harbor-ops: carry on\nharbor-ops: a new step", sender="harbor-ops")
 check("update: a change that is not a re-filing stays quiet", "(note:" not in r, r)
 # the creator is not moved by a hand-over and moves nothing; mover= says who moves the item
@@ -168,7 +173,7 @@ check("a cloud session may create an item", "(note:" not in r, r)
 r = create("projects/nobody", "harbor-ops")
 check("a hub that names nobody has nothing to check against", "(note:" not in r, r)
 completed = create("projects/example", "harbor-ops").split()[1]; server._update(completed, status="completed", sender="harbor-ops", outcome="done", reason="the work landed", description="- Goal: The test item's work is in place")
-check("get on a completed item shows no creator line", "keeper of record" not in server.stackshot_get(completed))
+check("get on a completed item shows no creator line", "keeper of record" not in _wt_get.stackshot_get(completed))
 nm = A.names()
 check("keeper: a folded page with no keeper of its own is kept by the hub's keeper (its builder, not the retired name-line session)", telling.project_keeper("ops/bare", U["harbor-ops"]) == "falcon-maintainer", telling.project_keeper("ops/bare", U["harbor-ops"]))
 check("keeper: a page's own top-level keeper otherwise", telling.project_keeper("projects/other/x", U["harbor-ops"]) == "home-other")
@@ -203,7 +208,7 @@ check("client.py knows the read", "roles" in _client.READS)
 check("the server's own gates keep session_roles: a one-session project's keeper may be named in needs, takes messages unmarked, "
       "and is no front agent for its notices", gates.gate_needs_session("harbor-ops", "projects/ops", "falcon-main") == "harbor-ops"
       and telling.front_keeper("harbor-ops", "projects/ops") == (False, "") and server._gate_front("harbor-ops", "a plain note", server._sessions_index()) is None)
-ls = server._sessions_listing("").split("\n")
+ls = _wt_sessions._sessions_listing("").split("\n")
 row = lambda n: next((l for l in ls if l.startswith(f"- {n} — ")), "")
 check("sessions tool: each session's role and project", row("falcon-anchors").endswith(" · testbox · front agent of projects/example")
       and row("falcon").endswith(" · testbox · keeper of projects/example") and row("falcon-maintainer").endswith(" · testbox · background agent of projects/example")

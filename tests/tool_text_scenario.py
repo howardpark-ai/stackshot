@@ -22,7 +22,7 @@ def check(name, cond, got=None):
 
 import tool_text as tt
 live = tt.live_snapshot()              # imports server.py on a throwaway config (state under its temp dir)
-import ast; from stackshot.web import server; from stackshot.web import whatschanged as wc
+import ast; from stackshot.web import server; from stackshot.web.tools import brief as _wt_brief; from stackshot.web import whatschanged as wc
 kept = tt.stored()
 
 # ================================================================= 1. the snapshot is the live text
@@ -46,8 +46,10 @@ check("owner: is not a label (the creator is no line at all), and create, update
 check("brief adds its own labels (mover gone:, pages owed:); message returns no labelled line", {"mover gone:", "waits no watcher owns:", "pages owed:"} <= set(lab["brief"]) and lab["message"] == [], lab["brief"])
 names_ok = tt.labels_by_tool()
 check("every output helper in HELPERS is defined (a renamed or removed one fails loudly, naming the list)", set(names_ok) == set(tt.HELPERS) and names_ok["get"] == lab["get"], None)
-tools_ast = tt.tool_functions(ast.parse((pathlib.Path(STACK) / "stackshot" / "web" / "server.py").read_text(encoding="utf-8")))
-check("the touched check finds every registered tool function by its @mcp.tool decorator", len(tools_ast) == len(names) and "stackshot_brief" in tools_ast and "stackshot_complete" in tools_ast, sorted(tools_ast))
+tools_ast = set()
+for _rel in (tt.SERVER_REL, *tt.TOOL_FILES):
+    tools_ast.update(tt.tool_functions(ast.parse((pathlib.Path(STACK) / _rel).read_text(encoding="utf-8"))))
+check("the touched check finds every registered tool function by its mcp.tool registration", len(tools_ast) == len(names) and "stackshot_brief" in tools_ast and "stackshot_complete" in tools_ast, sorted(tools_ast))
 
 # ================================================================= 2. a failing check: readable, with the refresh command
 chg = copy.deepcopy(live)
@@ -279,7 +281,7 @@ st.mkdir(parents=True, exist_ok=True)
 for f in (st / wc.HISTORY, st / wc.RELEASED):
     if f.exists(): f.unlink()
 snap.write_text(tt.render(A)); wc.record(snap, today, st); snap.write_text(tt.render(B)); wc.record(snap, today, st)
-first = [l for l in server.stackshot_brief().split("\n") if l.startswith("stackshot changed on")]
+first = [l for l in _wt_brief.stackshot_brief().split("\n") if l.startswith("stackshot changed on")]
 check("the brief tool carries the generated line from the default history under the state dir (and the seeds while they are live)", f"stackshot changed on {wc.day_words(today)}: {want}; see {wc.PAGE}" in first, first)
 src = (pathlib.Path(STACK) / "stackshot" / "web" / "server.py").read_text(encoding="utf-8")
 check("the server's start calls whatschanged.record with the committed snapshot (the mark of a release), and deploy.sh is not part of it", '_wc.record(_paths.ROOT / "tests" / "tool_text.snapshot.json")' in src and "tool_text" not in (pathlib.Path(STACK) / "deploy.sh").read_text(encoding="utf-8"))

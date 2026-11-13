@@ -91,10 +91,13 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 STORE = T / "store"
 
-from stackshot.web import server; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G; from stackshot.model import steps as S; from stackshot.web import home as H; from stackshot.web import itempage as IP; from stackshot.model import nextlines as NL
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((gid, owner, note, tag))
@@ -104,8 +107,8 @@ def refused(name, f, *want, i=None):
         out = f(); check(name, False, out)
     except server.ToolError as e:
         check(name, all(w in str(e) for w in want) and (was is None or rd(i) == was), str(e))
-def upd(i, **kw): return server.stackshot_update(f"a{i}", sender="home-here", **kw)
-def upa(i, **kw): return server.stackshot_update(f"a{i}", sender="home-agent", **kw)
+def upd(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-here", **kw)
+def upa(i, **kw): return _wt_update.stackshot_update(f"a{i}", sender="home-agent", **kw)
 def upi(i, **kw): return server._update(f"a{i}", sender="home-agent", **kw)           # the server's own write: N6 (an open item keeps an open step) judges a session's write only
 def st(i): return [(x["status"], S.first_line(x["text"])) for x in S.view(mt(i), closed=rd(i)["status"] == "completed")]
 OPEN = lambda t: ("open", t)
@@ -196,7 +199,7 @@ check("view(): a vanished open step reads as dropped, a new line as open at the 
 
 # ---- 8. closing marks the open steps and keeps the record; reopening keeps the marks and takes the new next as an open step
 upd(8, done=[1])
-r = server.stackshot_complete("a8", outcome="done", reason="finished", description="- All done", sender="home-here")
+r = _wt_complete.stackshot_complete("a8", outcome="done", reason="finished", description="- All done", sender="home-here")
 m8 = mt(8)
 check("closing marks the open steps: next is gone, the checklist is done all through, by the closer", "next" not in m8 and [x["status"] for x in m8["steps"]] == ["done", "done", "done", "done"] and all(x["by"] == "home-here" and x["at"] for x in m8["steps"]), m8)
 g8 = server._fmt({**rd(8), "gid": "a8"})
@@ -205,9 +208,9 @@ bd = ui_render.Board(str(STORE))
 p8 = bd.item_html("a8")
 check("the closed item's page keeps the checklist as a record", 'class="cl-done"' in p8 and p8.count('class="cl-open"') == 0 and p8.count('class="cl-done"') >= 4 and "<h2>Next</h2>" in p8)
 refused("a mark on a closed item is refused: reopen it first", lambda: upd(8, done=[2]), "closed", "reopen", i=8)
-r = server.stackshot_update("a8", status="open", next="home-here: a fresh start", sender="home-here")
+r = _wt_update.stackshot_update("a8", status="open", next="home-here: a fresh start", sender="home-here")
 check("reopening: the steps the close marked stay as marked, the new next is the open step", [s for s, _ in st(8)] == ["done", "done", "done", "done", "open"] and mt(8)["next"] == "home-here: a fresh start", st(8))
-r = server.stackshot_update("a9", status="completed", outcome="done", reason="finished", description="- All done", done=[1], sender="home-here")
+r = _wt_update.stackshot_update("a9", status="completed", outcome="done", reason="finished", description="- All done", done=[1], sender="home-here")
 check("a mark passed with the close counts; the other open steps are marked done by the close (outcome done)", [s for s, _ in st(9)] == ["done", "done", "done", "done"] and "next" not in mt(9), st(9))
 snap()
 
@@ -483,7 +486,7 @@ refused("a new text another open step already reads is refused", lambda: upd(57,
 refused("reword that is not a mapping is refused with the form", lambda: upd(57, reword=[1, 2]), "reword takes a mapping", i=57)
 refused("reword with a string that is not a mapping is refused", lambda: upd(57, reword="not json"), "reword takes a mapping", i=57)
 refused("reword with clear_next is refused", lambda: upd(57, reword={1: "home-agent: other words here"}, clear_next=True), "clear_next=true", i=57)
-server.stackshot_complete("a58", outcome="done", reason="finished", outcome_text="- All done", sender="home-here")
+_wt_complete.stackshot_complete("a58", outcome="done", reason="finished", outcome_text="- All done", sender="home-here")
 refused("reword on a closed item is refused (the checklist is the record)", lambda: upd(58, reword={1: "home-agent: other words here"}), "is closed", "reopen it", i=58)
 refused("reword in a close is refused", lambda: upd(59, status="completed", outcome="done", reason="finished", outcome_text="- All done", reword={1: "home-agent: other words here"}), "reword changes the words of a step that stays open", i=59)
 refused("the refusal of an unmarked step left out of next prints the retry calls with the number filled in, in one line", lambda: upd(4, next="home-agent: test it\n" + OL + "\nhome-agent: tell the keeper"),
@@ -521,12 +524,12 @@ check("nextlines.reword changes one line in place with its writer; a text that i
       NL.reword(tx, "b: two", "b: 2", "k") and tx["next"] == "a: one\nb: 2" and tx["next_by"] == [["k", NL.key_of("a: one")], ["w", NL.key_of("b: 2")]] and not NL.reword(tx, "zz: none", "z: x", "k"), tx)
 
 # ---- 15. the tools' text
-sig = __import__("inspect").signature(server.stackshot_update.fn if hasattr(server.stackshot_update, "fn") else server.stackshot_update)
-check("update takes done and dropped; its description teaches the checklist", {"done", "dropped"} <= set(sig.parameters) and "next is a checklist" in server._lead(server._UPDATE_DESC + server._CHECKLIST_FORM)
-      and "done=[…]" in server._CHECKLIST_FORM and "dropped=[…]" in server._CHECKLIST_FORM and "step done: …" in server._CHECKLIST_FORM, list(sig.parameters)[-4:])
+sig = __import__("inspect").signature(_wt_update.stackshot_update.fn if hasattr(_wt_update.stackshot_update, "fn") else _wt_update.stackshot_update)
+check("update takes done and dropped; its description teaches the checklist", {"done", "dropped"} <= set(sig.parameters) and "next is a checklist" in _wt_text._lead(_wt_update._UPDATE_DESC + _wt_update._CHECKLIST_FORM)
+      and "done=[…]" in _wt_update._CHECKLIST_FORM and "dropped=[…]" in _wt_update._CHECKLIST_FORM and "step done: …" in _wt_update._CHECKLIST_FORM, list(sig.parameters)[-4:])
 check("update takes reword; the parameter's description, the checklist text and the refusals' text teach it and the retry call",
-      "reword" in sig.parameters and "reword={n:" in server._CHECKLIST_FORM and "done=[n], dropped=[n] or reword={n:" in server._CHECKLIST_FORM and "reword={n:" in server._NEXT_REFUSALS
-      and "keeps its number" in server._REWORD_PARAM.__metadata__[0].description and "same action in other words" in server._CHECKLIST_FORM and "after its `<actor>: ` prefix" in server._ITEM_FORM,
-      server._REWORD_PARAM.__metadata__[0].description[:300])
+      "reword" in sig.parameters and "reword={n:" in _wt_update._CHECKLIST_FORM and "done=[n], dropped=[n] or reword={n:" in _wt_update._CHECKLIST_FORM and "reword={n:" in _wt_text._NEXT_REFUSALS
+      and "keeps its number" in _wt_update._REWORD_PARAM.__metadata__[0].description and "same action in other words" in _wt_update._CHECKLIST_FORM and "after its `<actor>: ` prefix" in _wt_text._ITEM_FORM,
+      _wt_update._REWORD_PARAM.__metadata__[0].description[:300])
 
 print(("ok" if not fails else "FAILED") + f": checklist scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

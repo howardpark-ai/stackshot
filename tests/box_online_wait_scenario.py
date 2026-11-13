@@ -68,13 +68,14 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.waits import stall as S; from stackshot.web import itempage; from stackshot.service import create as create_svc
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
@@ -134,7 +135,7 @@ try:
 except Exception as e:
     why = str(e)
 m_seen = re.search(r"last checked in at (\d{4}-\d\d-\d\d \d\d:\d\d) (\S+)\)", why); m_after = re.search(r"that check-in, that is after (\d{4}-\d\d-\d\d \d\d:\d\d) (\S+);", why)
-_tfmt = lambda t: datetime.datetime.fromtimestamp(t, server.ZONE).strftime("%Y-%m-%d %H:%M")
+_tfmt = lambda t: datetime.datetime.fromtimestamp(t, _wt_text.ZONE).strftime("%Y-%m-%d %H:%M")
 _seen_ts = server._lv.ts(json.loads((T / "state/clients/state.json").read_text())["machines"]["host-a"]["puller"])
 check("write: ...the refusal says when the machine last checked in and the time after which the same write is accepted (check-in + online_minutes), in the instance zone, and no UTC beside it",
       m_seen and m_after and m_seen.group(1) == _tfmt(_seen_ts) and m_after.group(1) == _tfmt(_seen_ts + 600) and m_seen.group(2) == m_after.group(2) == server._cfg.tz_abbr() and "UTC" not in why, why)

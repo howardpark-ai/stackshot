@@ -109,6 +109,11 @@ def item(i, nxt, project="projects/alpha", status="open", **meta):
                                                        "metadata": {"owner": U["home-builder"], "mover": U["home-builder"], "project": project, "next": nxt, **meta}}))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 OWNER = server.OWNER
 OTHER = "other-owner/other"
@@ -163,7 +168,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def raw(i): return (T / f"store/a/{i}.json").read_text()
 def snap(): return {i: raw(i) for i in ALL}
 def same(s): return [i for i in s if raw(i) != s[i]]
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._OWN_REPO[:] = [REPO]
 server._HERE = T / "repo"
 GH = {key(39): ("merged", ""), key(40): ("dead", ""), key(41): ("err", "GitHub refused the read (404)"), key(7, OTHER): ("merged", "")}
@@ -238,8 +243,8 @@ check("a PR closed without a merge ticks nothing: the step stays open, the mover
       and len(pushes_for("a4")) == 1 and "PR #40 was closed without being merged, so its step \"home-builder: merge PR #40\" will never be ticked by it" in pushes_for("a4")[0][1], (rows.get("a4"), a4["metadata"], pushes_for("a4")))
 a21 = rd(21)
 check("…the same for an explicit proof, and `get` marks the proof dead in its step proof line",
-      rows["a21"][0]["action"] == "told" and len(pushes_for("a21")) == 1 and f"1. home-builder: wait for the fix ← pr_merged {key(40)} (dead: that pull request was closed without being merged; reword or drop the step)" in server.stackshot_get("a21")
-      and "the server ticks the step when it happens" not in server.stackshot_get("a21").split("step proof:")[1].split("\n")[0], server.stackshot_get("a21")[:1500])
+      rows["a21"][0]["action"] == "told" and len(pushes_for("a21")) == 1 and f"1. home-builder: wait for the fix ← pr_merged {key(40)} (dead: that pull request was closed without being merged; reword or drop the step)" in _wt_get.stackshot_get("a21")
+      and "the server ticks the step when it happens" not in _wt_get.stackshot_get("a21").split("step proof:")[1].split("\n")[0], _wt_get.stackshot_get("a21")[:1500])
 check("a PR GitHub cannot read (refused, 404): nothing happens, not even a row", raw(5) == s0[5] and "a5" not in rows)
 check("a bare #39 on an unanchored item without the URL: untouched (it could be another repository's)", raw(6) == s0[6] and "a6" not in rows)
 a7 = rd(7)
@@ -341,7 +346,7 @@ m30 = rd(30)["metadata"]
 check("update stores the proofs under the steps' keys, as 'kind owner/repo#n', and says so",
       m30.get("step_proof") == {"home-builder: restart the unit": f"pr_released {key(45)}", "home-builder: check the pages": f"pr_merged {key(7, OTHER)}"}
       and f"(step 1 proof: pr_released {key(45)}" in out and f"(step 3 proof: pr_merged {key(7, OTHER)}" in out, (m30, out))
-check("get shows them under 'step proof:'", f"step proof: 1. home-builder: restart the unit ← pr_released {key(45)}; 3. home-builder: check the pages ← pr_merged {key(7, OTHER)} (the server ticks the step when it happens)" in server.stackshot_get("a30"), server.stackshot_get("a30")[:1500])
+check("get shows them under 'step proof:'", f"step proof: 1. home-builder: restart the unit ← pr_released {key(45)}; 3. home-builder: check the pages ← pr_merged {key(7, OTHER)} (the server ticks the step when it happens)" in _wt_get.stackshot_get("a30"), _wt_get.stackshot_get("a30")[:1500])
 upd(30, step_proof=[{"step": 1, "proof": "none"}])
 check("a proof of 'none' clears that step's", rd(30)["metadata"].get("step_proof") == {"home-builder: check the pages": f"pr_merged {key(7, OTHER)}"}, rd(30)["metadata"])
 upd(30, step_proof="none")
@@ -369,12 +374,12 @@ refused("his own step takes no proof", lambda: upd(32, step_proof=[{"step": 1, "
 check("nothing above wrote a proof", all("step_proof" not in rd(i)["metadata"] for i in (31, 32)), (rd(31)["metadata"], rd(32)["metadata"]))
 item(33, "home-builder: merge PR #39", status="completed", outcome="done", reason="earlier")
 refused("a closed item's checklist is the record", lambda: upd(33, step_proof=[{"step": 1, "proof": "pr_merged #5"}]), "is closed and its checklist is the record")
-out = server._create(subject="[home] made with a proof", description="- A thing. It lives here. Done when done.", project="projects/alpha", owner="home-builder", mover="home-builder",
+out = _wt_create._create(subject="[home] made with a proof", description="- A thing. It lives here. Done when done.", project="projects/alpha", owner="home-builder", mover="home-builder",
                      next="home-builder: confirm their fix\nhome-builder: update the docs", step_proof=[{"step": 1, "proof": f"pr_merged {url(7, OTHER)}"}])
 gid = re.search(r"created (\S+)", out).group(1)
 mc = json.loads((T / f"store/{gid[0]}/{gid[1:]}.json").read_text())["metadata"]
 check("create takes step_proof for the steps of its next", mc.get("step_proof") == {"home-builder: confirm their fix": f"pr_merged {key(7, OTHER)}"} and f"(step 1 proof: pr_merged {key(7, OTHER)}" in out, (mc, out))
-refused("create refuses a proof for a step that is not there", lambda: server._create(subject="[home] bad proof", description="- A thing. It lives here. Done when done.", project="projects/alpha", owner="home-builder", mover="home-builder",
+refused("create refuses a proof for a step that is not there", lambda: _wt_create._create(subject="[home] bad proof", description="- A thing. It lives here. Done when done.", project="projects/alpha", owner="home-builder", mover="home-builder",
                                                                                      next="home-builder: do x", step_proof=[{"step": 4, "proof": "pr_merged #5"}]), "there is no step 4")
 upd(30, status="open")
 item(34, "home-builder: restart the unit", step_proof={"home-builder: restart the unit": f"pr_merged {key(7, OTHER)}"})
@@ -449,8 +454,8 @@ check("step_proof's schema carries a one-line description", all(((TOOLS[n].param
 import asyncio
 TOOLS = {t.name: t for t in asyncio.run(server.mcp.list_tools())}
 check("update's and create's descriptions teach the step's proof, the events and the explicit form",
-      all(server._STEP_PROOF_FORM in TOOLS[n].description for n in ("update", "create")) and all(x in server._STEP_PROOF_FORM for x in (
-          "step_proof=[{", "pr_released", "pr_merged", "release PR #<n>", "A pull request closed without a merge ticks nothing", "once #<n> is released")), server._STEP_PROOF_FORM[:300])
+      all(_wt_text._STEP_PROOF_FORM in TOOLS[n].description for n in ("update", "create")) and all(x in _wt_text._STEP_PROOF_FORM for x in (
+          "step_proof=[{", "pr_released", "pr_merged", "release PR #<n>", "A pull request closed without a merge ticks nothing", "once #<n> is released")), _wt_text._STEP_PROOF_FORM[:300])
 check("…and both take the step_proof parameter", all("step_proof" in (TOOLS[n].parameters or {}).get("properties", {}) for n in ("update", "create")))
 
 # ---- 10. the client verb and the route

@@ -59,8 +59,8 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
-server._publish = lambda: None
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
 _orig_run = server.subprocess.run
 def _fake_run(cmd, *a, **kw):

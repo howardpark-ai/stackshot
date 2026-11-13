@@ -196,10 +196,10 @@ ro = pathlib.Path(STACK, "stackshot/core/readonly.py").read_text(encoding="utf-8
 check("the read-only page's amber (#c98a00, #3a2d00, #fff6df) is amber, outside the band", all(o in ro and not in_band(C.hsl(o)) and C.hsl(o)[0] >= 40 for o in ("#c98a00", "#3a2d00", "#fff6df")))
 
 # ---- the favicon: the icon orange stays
-srv = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
+srv = pathlib.Path(STACK, "stackshot/web/app.py").read_text(encoding="utf-8")
 ico = re.search(r'^_ICON = "(data:image/svg\+xml;base64,[A-Za-z0-9+/=]+)"', srv, re.M)
 svg = decoded_icons(ico.group(1))[0] if ico else ""
-check("the favicon (server.py _ICON) draws its mark in the icon orange #f0a06a, which is also the board's dark orange", ICON_ORANGE in svg and ICON_ORANGE == ORANGE["dark"], svg[:200])
+check("the favicon (web/app.py _ICON) draws its mark in the icon orange #f0a06a, which is also the board's dark orange", ICON_ORANGE in svg and ICON_ORANGE == ORANGE["dark"], svg[:200])
 
 # ---- 2. the values
 raw = C.themes(css)

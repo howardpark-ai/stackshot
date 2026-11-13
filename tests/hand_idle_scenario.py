@@ -64,11 +64,15 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web.tools import sessions as _wt_sessions
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.audit import hourly as HR, hand_idle as HI, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
@@ -91,7 +95,7 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 server._handoff_status = fake_status
 server._handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = lambda: {}
+server._sessions_index = _wt_sessions._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", idle_line=True, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. With `idle_line` it carries the hourly audit's idle line, written 5 minutes before now0."""
@@ -175,7 +179,7 @@ h1 = history(1)
 check("2 ONE History line says why and names the mover it left", len(h1) == 1 and h1[0] == "handed to team-back: no activity for an hour, nothing verified (it was with home-peer)", h1)
 check("2 the builder is told (the hand-off notice) and told once", len(to_builder("team-back")) == 1 and to_builder("team-back")[0][3] == "handoff" and "no activity for an hour, nothing verified" in to_builder("team-back")[0][2], to_builder("team-back"))
 tm = to_main()
-check("2 -main gets ONE message, through the notice path the ladder uses for it (tag stall, the front agent's mark on line 1)", len(tm) == 1 and tm[0][3] == "stall" and tm[0][2].startswith(server._FOR_OWNER + "\n") and tm[0][0] == "a1", tm)
+check("2 -main gets ONE message, through the notice path the ladder uses for it (tag stall, the front agent's mark on line 1)", len(tm) == 1 and tm[0][3] == "stall" and tm[0][2].startswith(_wt_text._FOR_OWNER + "\n") and tm[0][0] == "a1", tm)
 check("2 …it says what happened and names both movers, and asks nothing", all(x in tm[0][2] for x in ("home-peer", "team-back", "no activity for an hour")) and "Nothing is asked of you" in tm[0][2] and "?" not in tm[0][2].split("\n", 1)[1], tm[0][2])
 check("2 nobody else is told: every notice went to the builder or to -main, none to the owner, a message, a flag or anyone else", sorted(x[1] for x in sent) == sorted([U["team-back"], U["home-main"]]) and not any(x[3] in ("message", "flag") for x in sent), sent)
 check("2 the owner is not put in the item: no decision or step of his, the next lines and the ask as they were, the item's state still doing",

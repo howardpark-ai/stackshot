@@ -90,9 +90,13 @@ git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web import app as _wapp
+from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 from stackshot.core import config as _cfg
 _cfg.CFG["router"] = {"command": [sys.executable, "-c", "pass"], "timeout_seconds": 20, "live": True}
@@ -102,7 +106,7 @@ for i, oc, why in ((10, "done", "Live at 0168c0d: the sample shows once in the l
     kw = dict(outcome=oc, reason=why, sender="alpha-builder")
     if oc == "superseded": kw["superseded_by"] = "a4"
     kw["description"] = "- The thing works and is in use"
-    r = server.stackshot_complete(f"a{i}", **kw)
+    r = _wt_complete.stackshot_complete(f"a{i}", **kw)
 from stackshot.web.ui import render as r2, search as s2
 from stackshot.web import search as sm
 Bd = lambda: r2.Board(str(T / "store"), now=None)
@@ -498,9 +502,9 @@ class _Req:      # a bare request: what _request_lang reads is the method, the s
 _ue0 = _signin._ui_email
 try:
     _signin._ui_email = lambda request: "nobody-saved@example.org"      # signed in, never picked a language
-    _lang_nosaved = server._request_lang(_Req())
+    _lang_nosaved = _wapp._request_lang(_Req())
     _signin._ui_email = lambda request: ""                              # not signed in
-    _lang_anon = server._request_lang(_Req())
+    _lang_anon = _wapp._request_lang(_Req())
 finally:
     _signin._ui_email = _ue0
 check("language default: with no locale folder English is the only language (no switch drawn), a person with no saved language and a visitor read English, and a code that is not available reads English too",

@@ -68,9 +68,10 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:97]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.waits import stall as S
+from stackshot.web.tools import get as _wt_get
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 # the record follows the mover (handoff.stale): checked after every save of the run, the stall pass's moves and raises included
 _real_save = writes.save
 INV_BAD = []; INV_SAVES = [0]
@@ -232,7 +233,7 @@ close(14)
 
 # (e) the text a session reads in `get`'s description (the stall form) names the -main agent as well as the fleet's builder
 check("5 the served stall form says where a recovery message goes: a front-only project's -main agent, else the fleet's builder (it said the fleet's builder only)",
-      "the project's -main agent when the project lists no background agent, to the fleet's builder otherwise" in server._STALL_FORM and "the fleet's builder is sent one message" not in server._STALL_FORM, server._STALL_FORM[:200])
+      "the project's -main agent when the project lists no background agent, to the fleet's builder otherwise" in _wt_get._STALL_FORM and "the fleet's builder is sent one message" not in _wt_get._STALL_FORM, _wt_get._STALL_FORM[:200])
 
 # ================================================================ 4. the choice on its own
 tgt = server._recovery_target

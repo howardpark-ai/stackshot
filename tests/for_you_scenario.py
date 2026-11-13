@@ -90,6 +90,9 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.routes import answers as _rt_answers
 from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
@@ -97,7 +100,7 @@ from stackshot.service import writes
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 from stackshot.web.routes import client_api as _rt_client, ui_api as _rt_ui
-server._publish = server._fyev._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = server._fyev._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 # a front agent is told of a close only while Oliver is there and it touched the item (tests/front_quiet_scenario.py covers the gate). These checks are about the notice's shape and
 # who is named in it, so Oliver is there for every front pane unless a check flips PRESENT; with it off the gate's own verdict is used (this fixture runs no panes: nobody is told).
@@ -109,9 +112,9 @@ slack = []
 REAL_SLACK_POST, REAL_SLACK_ON = server._fyslack._for_you_slack_post, server._fyslack._for_you_slack_on
 server._fyslack._for_you_slack_post = lambda text: slack.append(text) or ""      # the Slack hook is stubbed: nothing leaves this process
 server._fyslack._for_you_slack_on = lambda: True
-pub = [0]; server._publish = server._fyev._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)
+pub = [0]; server._publish = _wt_anchors._publish = _wt_route._publish = server._fyev._publish = _rt_answers._publish = _rt_client._publish = _rt_ui._publish = lambda: pub.__setitem__(0, pub[0] + 1)
 NEWD = "- The thing works and is in use"
-def cl(i, sender="osprey-x", reason="PR 14 is live", description=NEWD): return server.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
+def cl(i, sender="osprey-x", reason="PR 14 is live", description=NEWD): return _wt_complete.stackshot_complete(f"a{i}", outcome="done", reason=reason, description=description, sender=sender)
 def rows(): return fy.rows()
 def of(gid, kind=None): return [r for r in rows() if r.get("gid") == gid and (kind is None or r["kind"] == kind)]
 def to_front(since): return [x for x in pushes()[since:] if x[0] in (A, "osprey-main")]

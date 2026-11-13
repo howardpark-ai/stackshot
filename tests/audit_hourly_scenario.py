@@ -75,12 +75,15 @@ def check(name, cond, got=None):
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web.tools import sessions as _wt_sessions
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.service import telling
 from stackshot.audit import hourly as HR, silence as SL
 from stackshot.waits import stall as ST, handoff as HO
 from stackshot.audit import hourly_log as HL
 from stackshot.model import last_activity as LA, activity as ACT
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.PUSH = [sys.executable, "-c", "pass"]
 class _Clock:
@@ -101,7 +104,7 @@ def fake_status(who, idx=None):
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
 server._handoff_status = fake_status
-server._sessions_index = lambda: {}
+server._sessions_index = _wt_sessions._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0 (a bare confirm and the server's saves are recent)."""
@@ -806,9 +809,9 @@ try:
     check("20 …and past the cap, tied or not, it is dropped: both read idle", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     # an ABSENT registry row is idle as before; a PRESENT one that is no interactive pane reads unknown
     one_agent("Build part D", "nothing", 60)
-    row_path.unlink(missing_ok=True); real_idx0 = server._sessions_index; server._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
+    row_path.unlink(missing_ok=True); real_idx0 = server._sessions_index; server._sessions_index = _wt_sessions._sessions_index = lambda: OTHER_ROW      # a whole fleet index that holds no row of the mover
     try: k_, t_ = kinds20()
-    finally: server._sessions_index = real_idx0
+    finally: server._sessions_index = _wt_sessions._sessions_index = real_idx0
     check("20 a mover with NO registry row on this box (gone, or elsewhere), in a fleet index that was read whole, reads idle as built: nothing is claimed for it, and the orphan and idle hand-overs may act", k_ == ["audit_idle", "audit_idle"], (k_, t_))
     registry("busy", kind="headless"); k_, t_ = kinds20()
     check("20 a PRESENT registry row that is no interactive pane (headless) reads UNKNOWN, never idle: not idle-marked, so not handed on", k_ == ["audit_unknown", "audit_unknown"] and all("could not be read" in x for x in t_) and not any(HR.idle_marked(mt(i)) for i in (1, 2)), (k_, t_))
@@ -819,10 +822,10 @@ try:
     real_idx = server._sessions_index
     def hb(**rows): return {u_: {"machine": "b", "name": n_, "seen": "2026-01-01T00:00:00Z", **extra_} for u_, (n_, extra_) in rows.items()}
     def tick_with_index(idx_):
-        server._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
+        server._sessions_index = _wt_sessions._sessions_index = idx_ if callable(idx_) else (lambda: idx_)
         try:
             with _Err(): out_ = kinds20()
-        finally: server._sessions_index = real_idx
+        finally: server._sessions_index = _wt_sessions._sessions_index = real_idx
         return out_
     live_hb = hb(u1=("home-peer", {})); gone_hb = hb(u1=("home-peer", {"gone": "2026-01-01T00:00:00Z"})); other_hb = hb(u1=("home-stew", {}))
     r_live = raises(lambda: server._mover_subagents("home-peer", live_hb, now0), TIE.Unreadable)
@@ -830,7 +833,7 @@ try:
     r_none = server._mover_subagents("home-peer", OTHER_ROW, now0) == [] and server._mover_subagents("home-peer", other_hb, now0) == []
     def no_index(): raise OSError("heartbeat unreadable")
     server_idx_none = raises(lambda: (setattr(server, "_sessions_index", no_index), server._mover_subagents("home-peer", None, now0))[1], TIE.Unreadable)
-    server._sessions_index = real_idx
+    server._sessions_index = _wt_sessions._sessions_index = real_idx
     check("20 no registry row on this box: the fleet heartbeat holds the session running (on another machine) → Unreadable (unknown); marked gone → none; no row anywhere (or only another session's) → none; the index cannot be read → Unreadable", r_live and r_gone and r_none and server_idx_none, (r_live, r_gone, r_none, server_idx_none))
     k_live = tick_with_index(live_hb); k_gone = tick_with_index(gone_hb); k_none = tick_with_index(OTHER_ROW); k_bad = tick_with_index(no_index)
     check("20 …through the audit: a mover on another machine (live heartbeat row, no local row) reads UNKNOWN on every item, not idle-marked (so never handed on to a second builder); a gone row, no row anywhere → idle as built; an unreadable index → unknown",

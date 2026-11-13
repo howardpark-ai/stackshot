@@ -189,14 +189,17 @@ check("title: no names, a pure call: unscoped is the query, scoped by an address
 
 # ---- the anchors tool
 from stackshot.web import server
-server._publish = lambda: None
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import text as _wt_text
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
-def anchors(**kw): return server._anchors("projects/alpha", who="tester", **kw)
+def anchors(**kw): return _wt_anchors._anchors("projects/alpha", who="tester", **kw)
 def stored(): return [e["url"] for e in json.loads((T / "store/anchors.json").read_text()).get("projects/alpha", [])]
 def refuse(name, f, *want):
     try: out = f(); check(name, False, out)
     except Exception as e: check(name, all(w in str(e) for w in want), str(e))
-check("tool: the anchors service's mailboxes reach the server through the status file", server._gmail_boxes() == {"home": BO, "work": ADA}, server._gmail_boxes())
+check("tool: the anchors service's mailboxes reach the server through the status file", _wt_anchors._gmail_boxes() == {"home": BO, "work": ADA}, _wt_anchors._gmail_boxes())
 out = anchors(add=["gmail:q:from:pat"])
 check("tool: an unscoped add is stored as typed; the reply and the list name every mailbox", stored() == ["gmail:q:from:pat"] and "Gmail from:pat · home, work" in out and "reads the mailboxes: home, work" in out, out)
 out = anchors(add=["gmail:q@WORK:from:pat"])
@@ -228,13 +231,13 @@ saved_status = pathlib.Path(core.STATUS).read_text()
 os.remove(core.STATUS)
 (T / "store/anchors.json").write_text("{}")
 out = anchors(add=["gmail:q@Whatever:from:pat"])
-check("tool: with no mailbox known a scope is stored as typed (the anchors service reports one it cannot read)", "gmail:q@Whatever:from:pat" in stored() and server._gmail_boxes() == {}, (stored(), out))
+check("tool: with no mailbox known a scope is stored as typed (the anchors service reports one it cannot read)", "gmail:q@Whatever:from:pat" in stored() and _wt_anchors._gmail_boxes() == {}, (stored(), out))
 refuse("tool: with no mailbox known a space in a scope is still refused", lambda: anchors(add=["gmail:q@work, home:from:pat"]), "commas with no spaces")
 anchors(add=["gmail:q@WORK:from:pat", "gmail:q:from:pat"])
 check("tool: a scope typed with its own case is stored as typed while no mailbox is known", stored() == ["gmail:q@Whatever:from:pat", "gmail:q@WORK:from:pat", "gmail:q:from:pat"], stored())
 # the service now reports its mailboxes: the entry stored as typed and the canonical spelling are one anchor
 pathlib.Path(core.STATUS).write_text(saved_status)
-check("tool: the mailboxes are known again", server._gmail_boxes() == {"home": BO, "work": ADA}, server._gmail_boxes())
+check("tool: the mailboxes are known again", _wt_anchors._gmail_boxes() == {"home": BO, "work": ADA}, _wt_anchors._gmail_boxes())
 anchors(add=["gmail:q@work:from:pat"])
 check("tool: adding the canonical spelling of a scope stored as typed makes no second entry", stored().count("gmail:q@WORK:from:pat") == 1 and "gmail:q@work:from:pat" not in stored() and len(stored()) == 3, stored())
 anchors(add=["gmail:q@Work:from:pat"], items=None)
@@ -313,7 +316,7 @@ check("tool grammar: …and removed", stored() == [], stored())
 gate = lambda url: server._anchor_wait_gate({}, {"wait_kind": "anchor", "wait_anchor": url, "project": "projects/alpha"}, creating=True)
 refuse("wait gate: a query the matcher cannot evaluate is refused with the reason", lambda: gate("gmail:q:from:pat AND"), "cannot evaluate", "AND has nothing after it", "can never be on the list")
 refuse("wait gate: a good query that is not on the list still gets the add-first refusal", lambda: gate("gmail:q:from:pat OR from:amy"), "is not on projects/alpha's anchors list")
-check("tool text: the description teaches the grammar and the refusal", all(s in server._ANCHORS_DESC for s in ("AND", "OR", "key:(a OR b)", "in capitals", "no negation", "is refused when added")), server._ANCHORS_DESC[:200])
+check("tool text: the description teaches the grammar and the refusal", all(s in _wt_anchors._ANCHORS_DESC for s in ("AND", "OR", "key:(a OR b)", "in capitals", "no negation", "is refused when added")), _wt_anchors._ANCHORS_DESC[:200])
 
 # ---- a scope is a set: the same mailboxes in another order are one anchor
 (T / "store/anchors.json").write_text("{}")
@@ -374,10 +377,10 @@ check("restart: gmail_names is read at start, so a changed value waits for a res
       _cfgmod._restart_only("anchor_hub.gmail_names") is not None and _cfgmod._restart_only("anchor_hub.gmail_poll_seconds") is None, (_cfgmod._restart_only("anchor_hub.gmail_names"), _cfgmod._restart_only("anchor_hub.gmail_poll_seconds")))
 # the removal on a project whose page is gone takes the same spellings as the removal on a page
 (T / "store/anchors.json").write_text(json.dumps({"projects/gone": [{"url": "gmail:q@home,work:from:pat", "items": None, "added": 1, "by": "t"}, {"url": "gmail:q@work:from:amy", "items": None, "added": 1, "by": "t"}]}))
-txt = server._anchors("projects/gone", remove=["gmail:q@Work,HOME:from:pat"], who="tester")
+txt = _wt_anchors._anchors("projects/gone", remove=["gmail:q@Work,HOME:from:pat"], who="tester")
 left = [e["url"] for e in json.loads((T / "store/anchors.json").read_text()).get("projects/gone", [])]
 check("gone page: a removal in another case and order finds the anchor, as on a page that exists", left == ["gmail:q@work:from:amy"] and "names no page any more" in txt, (left, txt))
-refuse("gone page: nothing can be added to it", lambda: server._anchors("projects/gone", add=["gmail:q:from:pat"], who="tester"), "still holds anchors")
+refuse("gone page: nothing can be added to it", lambda: _wt_anchors._anchors("projects/gone", add=["gmail:q:from:pat"], who="tester"), "still holds anchors")
 (T / "store/anchors.json").write_text("{}")
 
 # ---- the reader pages Gmail's history
@@ -768,9 +771,9 @@ with block("oversize"):
           pg.gets_at[:2] == [0, 250] and pg.starts == ["0", "1"] and len(got) == 252 and sv["hist"] == "3", (pg.gets_at, pg.starts, len(got), sv))
 
 # ---- the tool text teaches the syntax
-desc = server._ANCHORS_DESC
+desc = _wt_anchors._ANCHORS_DESC
 check("text: the tool description teaches the scope and says the list names the mailboxes", "gmail:q@<mailbox>:<query>" in desc and "every mailbox" in desc and "mailboxes each Gmail anchor reads" in desc, desc[:300])
-check("text: the shapes a refusal lists include the scoped form", "gmail:q@<mailbox>:<query>" in server._ANCHOR_SHAPES, server._ANCHOR_SHAPES)
+check("text: the shapes a refusal lists include the scoped form", "gmail:q@<mailbox>:<query>" in _wt_text._ANCHOR_SHAPES, _wt_text._ANCHOR_SHAPES)
 
 print(f"{len(ran)} checks, {len(fails)} failed")
 sys.exit(1 if fails else 0)

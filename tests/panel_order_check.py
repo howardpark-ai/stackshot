@@ -54,10 +54,11 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
-from stackshot.web import server; from stackshot.web import uiprefs as up
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import uiprefs as up
+from stackshot.web import app as _wapp
 from stackshot.web.auth import signin as _signin
 import uvicorn
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 DEFAULT = list(up.PANEL_SECTIONS); LAB = {"machines": "Machines", "runners": "Runners", "anchorhub": "Anchor hub", "audit-panel": "Audit", "projects-panel": "Projects"}
 COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 srv = uvicorn.Server(uvicorn.Config(server.mcp.http_app(), host="127.0.0.1", port=PORT, log_level="critical", lifespan="on"))
@@ -172,7 +173,7 @@ try:
     hub_json = T / "state/anchor-hub/status.json"; bumps = [0]
     def bump_hub():       # a new receiver has reported: the Anchor hub block of the next draw differs
         bumps[0] += 1; d = json.loads(hub_json.read_text()); d["receivers"][f"hook-new{bumps[0]}"] = {"ok": True, "checked": "2026-10-30 10:00:00"}
-        hub_json.write_text(json.dumps(d)); time.sleep(1.1); server._board_home_drop()
+        hub_json.write_text(json.dumps(d)); time.sleep(1.1); _wapp._board_home_drop()
     def tick(pg):
         pg.evaluate("window.dispatchEvent(new Event('focus'))"); pg.wait_for_timeout(2300)      # the first poll starts the new draw, the second sees its stamp
         pg.evaluate("window.dispatchEvent(new Event('focus'))"); pg.wait_for_timeout(1500)
@@ -203,7 +204,7 @@ try:
     check("live update: with no menu or drag the changed block is swapped in place (once), and the grip that had the focus has it again", pg.evaluate("window.__sw") == 1 and "hook-new2" in pg.inner_text("#anchorhub")
           and pg.evaluate("document.activeElement.id") == "pgrip-anchorhub" and not pg.evaluate(conn_new), (pg.evaluate("window.__sw"), pg.evaluate("document.activeElement.outerHTML.slice(0,80)"), pg.inner_text("#anchorhub")[:80], pg.evaluate("[!!document.querySelector('details.ag[open]'), String(getSelection()), !!document.querySelector('#panel[data-pbusy],#panel-menu:not([hidden])'), document.getElementById('conn').className]")))
     # 5. a tick that finds a newer draw with no block changed swaps nothing and says nothing
-    time.sleep(1.1); server._board_home_drop(); tick(pg)
+    time.sleep(1.1); _wapp._board_home_drop(); tick(pg)
     check("live update: a newer draw with no changed block fires no 'swapped' (a menu opened now would not be closed)", pg.evaluate("window.__sw") == 1)
     pg.click("#audit-panel .pgrip"); settle(pg, 100); tick(pg)
     check("…a tick with the menu open and nothing new leaves it open", pg.is_visible("#panel-menu")); pg.keyboard.press("Escape")

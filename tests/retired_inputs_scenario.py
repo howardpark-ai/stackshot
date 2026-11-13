@@ -57,9 +57,11 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.core import retired_inputs as RI; from stackshot.model import states; from stackshot.waits import watchers; from stackshot.fleet import client as _client
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import retired_inputs as RI; from stackshot.model import states; from stackshot.waits import watchers; from stackshot.fleet import client as _client
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 (T / "state/waiting.json").write_text(json.dumps({"baseline": now0 - 100 * DAY, "seen": {}, "reported": []}))
@@ -122,13 +124,13 @@ check("empty_ok: …and is stored without a state word", "state" not in mt(2), m
 import inspect
 fn = lambda t: getattr(t, "fn", t)
 GONE = RI.RETIRED
-for tool in (server.stackshot_update, server.stackshot_create):
+for tool in (_wt_update.stackshot_update, _wt_create.stackshot_create):
     params = inspect.signature(fn(tool)).parameters
     check(f"gone: {fn(tool).__name__} takes none of the retired inputs", not [k for k in GONE if k in params], [k for k in GONE if k in params])
 from stackshot.service import update as _upd_svc
 params = inspect.signature(_upd_svc.update_unlocked).parameters
 check("gone: the update's own update_unlocked (service/update.py) takes none", not [k for k in GONE if k in params], [k for k in GONE if k in params])
-check("gone: supplies and step stay", "supplies" in inspect.signature(fn(server.stackshot_update)).parameters and "step" in inspect.signature(fn(server.stackshot_update)).parameters, None)
+check("gone: supplies and step stay", "supplies" in inspect.signature(fn(_wt_update.stackshot_update)).parameters and "step" in inspect.signature(fn(_wt_update.stackshot_update)).parameters, None)
 async def schemas():
     async with Client(server.mcp) as c:
         return {t.name: t for t in await c.list_tools()}

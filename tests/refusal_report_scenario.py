@@ -4,7 +4,7 @@ Checked here against a scratch state folder and config (no port, no real server,
 
   1  call_log: one line per counted call (went through, went through with a correction, refused) in `<state>/calls/<YYYY-MM>.jsonl`; a refusal keeps tool, item, sender and the clipped, folded reason and
      no other argument; an uncounted tool writes nothing; a line that does not parse is skipped on read; the range read takes the month files it spans; kind_of names the refusal kinds and folds the rest
-  2  the middleware (web/middleware.py _RefusalLog, run as server._RefusalLog): a refused write is logged as refused and records no correction; a write that went through with a correction carries one reply line saying what the server
+  2  the middleware (web/middleware.py _RefusalLog, run as _wmw._RefusalLog): a refused write is logged as refused and records no correction; a write that went through with a correction carries one reply line saying what the server
      did and how to keep the field as written, and is logged with the fix kinds; a write with none is logged plain and its reply is as it was
   3  the corrections: a bare item number is read as board#N; a full ISO wake (seconds, a fraction, Z or an offset) is converted to that minute in the instance zone; a subject with no scope prefix
      takes the project's scope prefix (else the fallback); a script's item (`by`) and a subject that already has a prefix are left alone; a field sent again as written is not touched (it is refused as before)
@@ -47,10 +47,14 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import call_log as CL; from stackshot.tools import refusal_report as RR; from stackshot.core import config as CFG; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web import middleware as _wmw
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from fastmcp.exceptions import ToolError
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.front_sender = lambda who: False
 CALLS = T / "state/calls"
@@ -107,7 +111,7 @@ def run_mw(name, args, call):
     ctx = types.SimpleNamespace(message=types.SimpleNamespace(name=name, arguments=args))
     buf = io.StringIO()
     with contextlib.redirect_stderr(buf):
-        try: out = asyncio.run(server._RefusalLog().on_call_tool(ctx, nxt))
+        try: out = asyncio.run(_wmw._RefusalLog().on_call_tool(ctx, nxt))
         except ToolError as e: out = e
     return out, buf.getvalue()
 def reply(text): return types.SimpleNamespace(content=[types.SimpleNamespace(type="text", text=text)], structured_content={"result": text})
@@ -163,22 +167,22 @@ for given in ("12", "\u00b2", "\u0663", "1 2", ""):
         want_bad = not (bare and given == "12")
         check(f"3 id: {given!r} bare={bare} is {'a bad id' if want_bad else 'read'}", bad.startswith("bad item id") if want_bad else bad == "", bad)
 rd5 = lambda: json.loads((T / "store/g/5.json").read_text())
-try: server.stackshot_complete("5", outcome="done", reason="because", sender="team-back"); cref = ""
+try: _wt_complete.stackshot_complete("5", outcome="done", reason="because", sender="team-back"); cref = ""
 except ToolError as e: cref = str(e)
 check("3 id: complete refuses a bare number (a close is not undone by a resend), and the item stays open", cref.startswith("bad item id '5'") and rd5()["status"] == "open", (cref, rd5()["status"]))
 tok = CL.begin()
-try: server.stackshot_confirm("5", sender="team-back")
+try: _wt_complete.stackshot_confirm("5", sender="team-back")
 finally: fx = CL.end(tok)
 check("3 id: confirm reads a bare number, and says so", rd5()["confirmed"] > 1.0 and [k for k, _ in fx] == ["item-id"], (rd5()["confirmed"], fx))
 tok = CL.begin()
-try: got = server.stackshot_get("5")
+try: got = _wt_get.stackshot_get("5")
 finally: fx = CL.end(tok)
 check("3 id: get reads a bare number, and says so", "item five" in got and [k for k, _ in fx] == ["item-id"], (got[:80], fx))
-try: server.stackshot_update("5", status="completed", outcome="done", reason="because it is done", sender="team-back", outcome_text="- done"); uref = ""
+try: _wt_update.stackshot_update("5", status="completed", outcome="done", reason="because it is done", sender="team-back", outcome_text="- done"); uref = ""
 except ToolError as e: uref = str(e)
 check("3 id: update with status=completed refuses a bare number as complete does, and the item stays open", uref.startswith("bad item id '5'") and rd5()["status"] == "open", (uref, rd5()["status"]))
 tok = CL.begin()
-try: out_ = server.stackshot_update("5", sender="team-back", priority="p3")
+try: out_ = _wt_update.stackshot_update("5", sender="team-back", priority="p3")
 finally: fx = CL.end(tok)
 check("3 id: …while a note-only update of the same bare number lands, with the fix noted", rd5()["metadata"].get("priority") == "p3" and rd5()["status"] == "open" and "item-id" in [k for k, _ in fx], (rd5()["metadata"], fx))
 tok = CL.begin()

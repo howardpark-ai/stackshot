@@ -122,12 +122,13 @@ check("2 a negation passes", ww(alive("home-agent: no waiting for a slot, run it
 check("2 a waiting item has none (its next is the record of its wait)", ww(item(21, wrote=now - H, state="blocked", needs=["home-agent"], after=["a6"], next="home-agent: waiting for the build when it closes")[1]) == ([], []))
 check("2 a closed item has none", ww(item(22, status="completed", wrote=now - H, state="doing", next="home-agent: wait for it", outcome="done")[1]) == ([], []))
 from stackshot.web import server
+from stackshot.web.tools import get as _wt_get
 server._cfg.CFG["audit"]["mode"] = "script"
 (T / "store/a/30.json").write_text(json.dumps(item(30, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: ship it when the build is green")[1]))
-g = server.stackshot_get("a30")
+g = _wt_get.stackshot_get("a30")
 check("2 get carries the note for the broad words, read from next (the flag is stored nowhere)", "flag: next uses when, words that can hide a wait" in g and "model_flags" not in json.loads((T / "store/a/30.json").read_text())["metadata"], g[-400:])
 (T / "store/a/31.json").write_text(json.dumps(item(31, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: build it now", model_flags={"next_wait_words": ["when"]})[1]))
-check("2 …a flag an older write stored is ignored: no words, no note", "flag: next uses" not in server.stackshot_get("a31"))
+check("2 …a flag an older write stored is ignored: no words, no note", "flag: next uses" not in _wt_get.stackshot_get("a31"))
 for p in (T / "store/a").glob("*.json"): p.unlink()
 
 # ---- 3. the pass

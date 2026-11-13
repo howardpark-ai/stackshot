@@ -45,8 +45,13 @@ def put(i, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
@@ -65,74 +70,74 @@ def fixed(reply, front, field="mover"):
             and f"send {field}={front} again" in reply)
 
 # ---- create
-r = server.stackshot_create(subject="[home] handed to the front", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{BUILD}: look at it")
+r = _wt_create.stackshot_create(subject="[home] handed to the front", description=DESC, project="projects/delta", sender=BUILD, mover=MAIN, next=f"{BUILD}: look at it")
 g = r.split()[1]
 check("create: another session's front-agent mover becomes the builder, and the reply says so", r.startswith("created") and telling.holder(rd(g)) == BUILD and fixed(r, MAIN), r)
 check("create: the fix is on the item: server_fixed names it", MAIN in json.dumps(rd(g)["metadata"].get("server_fixed")), rd(g)["metadata"].get("server_fixed"))
-r = server.stackshot_create(subject="[home] handed to the side desk", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{BUILD}: look at it")
+r = _wt_create.stackshot_create(subject="[home] handed to the side desk", description=DESC, project="projects/delta", sender=MAIN, mover=SIDE, next=f"{BUILD}: look at it")
 check("create: one front agent handing to another front agent gets the builder too", r.startswith("created") and telling.holder(rd(r.split()[1])) == BUILD and fixed(r, SIDE), r)
 
-r = server.stackshot_create(subject="[home] the front agent's own", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on")
+r = _wt_create.stackshot_create(subject="[home] the front agent's own", description=DESC, project="projects/delta", sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on")
 check("create: a front agent naming itself as mover is accepted", r.startswith("created") and telling.holder(rd(r.split()[1])) == MAIN, r)
-r = server.stackshot_create(subject="[home] the front agent's own by id", description=DESC, project="projects/delta", sender=U[MAIN], mover=MAIN, next=f"{MAIN}: carry on")
+r = _wt_create.stackshot_create(subject="[home] the front agent's own by id", description=DESC, project="projects/delta", sender=U[MAIN], mover=MAIN, next=f"{MAIN}: carry on")
 check("create: a front agent naming itself by name while sending by its id is accepted", r.startswith("created"), r)
-r = server.stackshot_create(subject="[home] built by the builder", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, next=f"{BUILD}: build it")
+r = _wt_create.stackshot_create(subject="[home] built by the builder", description=DESC, project="projects/delta", sender=MAIN, mover=BUILD, next=f"{BUILD}: build it")
 check("create: a background mover set by a front agent is accepted", r.startswith("created") and telling.holder(rd(r.split()[1])) == BUILD, r)
-r = server.stackshot_create(subject="[home] reviewed by the reviewer", description=DESC, project="projects/delta", sender=BUILD, mover=REVIEW, next=f"{REVIEW}: review it")
+r = _wt_create.stackshot_create(subject="[home] reviewed by the reviewer", description=DESC, project="projects/delta", sender=BUILD, mover=REVIEW, next=f"{REVIEW}: review it")
 check("create: a background mover set by another background agent is accepted", r.startswith("created"), r)
-r = refusal(lambda: server.stackshot_create(subject="[home] the owner decides", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
+r = refusal(lambda: _wt_create.stackshot_create(subject="[home] the owner decides", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
                                             ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", then=BUILD))
 check("create: the owner as mover (with his decision) is accepted", r == "", r)
-r = server.stackshot_create(subject="[home] then the front", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
+r = _wt_create.stackshot_create(subject="[home] then the front", description=DESC, project="projects/delta", sender=BUILD, mover=OWNER, needs=["decision"],
                             ask="Decide: a or b · Recommend: yes · Stakes: none · By: no date", then=MAIN)
 check("create: then=<front agent> by another session becomes the builder, and the reply says so", r.startswith("created") and fixed(r, MAIN, "then") and rd(r.split()[1])["metadata"].get("then") == BUILD, r)
 
 # ---- update
 put(1, mover=BUILD)
 before = (T / "store/a/1.json").read_bytes()
-r = server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{BUILD}: check it")
+r = _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{BUILD}: check it")
 check("update: another session's front-agent mover becomes the builder, and the reply says so", fixed(r, MAIN) and telling.holder(rd(1)) == BUILD, r)
 check("update: the fix is on the item", MAIN in json.dumps(rd(1)["metadata"].get("server_fixed")), rd(1)["metadata"].get("server_fixed"))
-r = server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN)
+r = _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN)
 check("update: sending the same front-agent mover again keeps it as sent, with a note", telling.holder(rd(1)) == MAIN and "kept as you sent it" in r, r)
 put(1, mover=BUILD)
-r = server.stackshot_update(item_id="a1", sender=BUILD, then=MAIN)
+r = _wt_update.stackshot_update(item_id="a1", sender=BUILD, then=MAIN)
 check("update: then=<front agent> by another session becomes the builder", fixed(r, MAIN, "then") and rd(1)["metadata"].get("then") == BUILD, r)
-r = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, mover=REVIEW))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=REVIEW))
 check("update: a background mover is accepted", r == "" and telling.holder(rd(1)) == REVIEW, r)
 put(2, mover=BUILD)
-r = server.stackshot_update(item_id="a2", sender=MAIN, mover=MAIN, next=f"{MAIN}: take it over")
+r = _wt_update.stackshot_update(item_id="a2", sender=MAIN, mover=MAIN, next=f"{MAIN}: take it over")
 check("update: a front agent naming itself as mover is accepted", "Refused" not in r and telling.holder(rd(2)) == MAIN, r)
 put(3, mover=BUILD)
-r = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, mover=OWNER, step="press the button"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, mover=OWNER, step="press the button"))
 check("update: the owner as mover is accepted", r == "", r)
 put(4, mover=MAIN)
-r = refusal(lambda: server.stackshot_update(item_id="a4", sender=BUILD, mover="none", next=f"{BUILD}: carry on"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a4", sender=BUILD, mover="none", next=f"{BUILD}: carry on"))
 check("update: clearing the mover is not a hand to a front agent", r == "", r)
 
 # ---- re-sending what the item already holds changes nothing hands, so it passes; an unrelated update on a front-held item passes
 put(6, mover=MAIN)
-r = refusal(lambda: server.stackshot_update(item_id="a6", sender=BUILD, mover=MAIN, next=f"{MAIN}: carry on"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a6", sender=BUILD, mover=MAIN, next=f"{MAIN}: carry on"))
 check("update: re-sending the item's current front-agent mover is not refused", "no hand-off notice" not in r and "Refused: " + MAIN not in r, r)
 put(7, mover=MAIN)
-r = refusal(lambda: server.stackshot_update(item_id="a7", sender=BUILD, next=f"{MAIN}: a note from the builder"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a7", sender=BUILD, next=f"{MAIN}: a note from the builder"))
 check("update: a next-only update on a front-held item is not refused", "no hand-off notice" not in r, r)
 put(8, mover=BUILD, then=MAIN)
-r = refusal(lambda: server.stackshot_update(item_id="a8", sender=REVIEW, then=MAIN))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a8", sender=REVIEW, then=MAIN))
 check("update: re-sending the item's current front-agent then is not refused", "no hand-off notice" not in r, r)
 
 # ---- post_wake_mover is the mover once a wait ends: gated like mover and then
 put(9, mover=BUILD)
-r = server.stackshot_update(item_id="a9", sender=BUILD, post_wake_mover=MAIN)
+r = _wt_update.stackshot_update(item_id="a9", sender=BUILD, post_wake_mover=MAIN)
 check("update: post_wake_mover=<front agent> by another session becomes the builder", fixed(r, MAIN, "post_wake_mover"), r)
-r = server.stackshot_create(subject="[home] wake to the front", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, post_wake_mover=MAIN, next=f"{BUILD}: wait")
+r = _wt_create.stackshot_create(subject="[home] wake to the front", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, post_wake_mover=MAIN, next=f"{BUILD}: wait")
 check("create: post_wake_mover=<front agent> by another session becomes the builder", r.startswith("created") and fixed(r, MAIN, "post_wake_mover"), r)
-r = refusal(lambda: server.stackshot_update(item_id="a9", sender=MAIN, post_wake_mover=MAIN))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a9", sender=MAIN, post_wake_mover=MAIN))
 check("update: a front agent naming itself as post_wake_mover is not refused here", "no hand-off notice" not in r, r)
 
 # ---- a project with no builder and no background agent: the refusal says so once, without a placeholder
 put(10, mover=SIDE, project="projects/echo")
-msg = refusal(lambda: server.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
 check("no builder: the refusal says there is no builder or background agent, with no placeholder", msg.startswith("Refused:") and "no builder and no background agent" in msg and "<background agent>" not in msg
       and msg.count("background agent") == 1 and "builder, " not in msg, msg)
 
@@ -141,11 +146,11 @@ from stackshot.projects import projects as _P
 _PID = _P.ensure_ids(["projects/echo"])["projects/echo"]
 (T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"},
     "pending_agents": {_PID: {"home-echo-engineer": {"mandate_line": "takes the build work", "front": False, "role": "engineer"}}}}))
-msg = refusal(lambda: server.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
 check("owed background agent: the refusal says it is not on the page yet, never that there is none", msg.startswith("Refused:") and "not on its page yet" in msg and "no builder and no background agent" not in msg
       and "keep the item with its current mover" in msg and "<background agent>" not in msg, msg)
 (T / "store/project-record.json").write_text(json.dumps({"schema": 1, "ids": {_PID: "projects/echo"}, "pending_agents": {}}))
-msg = refusal(lambda: server.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a10", sender=SIDE, mover=ECHO))
 check("owed agent gone: the plain refusal is back", msg.startswith("Refused:") and "no builder and no background agent" in msg, msg)
 
 # ---- a failing roles read lets the write through (one stderr line)
@@ -156,7 +161,7 @@ server._anc.session_roles = _boom
 errbuf = io.StringIO()
 try:
     with contextlib.redirect_stderr(errbuf):
-        msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{MAIN}: check it"))
+        msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, mover=MAIN, next=f"{MAIN}: check it"))
 finally:
     server._anc.session_roles = _real_roles
 check("roles read fails: the front-mover gate lets the write through and says so on stderr", "no hand-off notice" not in msg and "front-mover gate" in errbuf.getvalue() and "roles unreadable" in errbuf.getvalue(), (msg, errbuf.getvalue()))
@@ -178,30 +183,30 @@ def shape(i):
 for i, rec in ((30, {}), (31, {"recovery_at": now0 - 20, "recovery_reason": "nobody can take it"})):
     put_his(i, record=rec)
     raw, was = (T / f"store/a/{i}.json").read_bytes(), shape(i)
-    msg = refusal(lambda: server.stackshot_update(item_id=f"a{i}", sender=REVIEW, mover=BUILD, next=f"{BUILD}: take it"))
+    msg = refusal(lambda: _wt_update.stackshot_update(item_id=f"a{i}", sender=REVIEW, mover=BUILD, next=f"{BUILD}: take it"))
     check(f"refused hand-off ({'recovery-asked record' if rec else 'open record'}): the refusal text comes back", msg.startswith("Refused:") and "your-call" in msg and BUILD in msg, msg)
     check(f"refused hand-off ({'recovery-asked record' if rec else 'open record'}): mover, state, needs and handoff are unchanged", shape(i) == was and was["needs"] == ["decision"], (was, shape(i)))
     check(f"refused hand-off ({'recovery-asked record' if rec else 'open record'}): the stored item is byte for byte as it was", (T / f"store/a/{i}.json").read_bytes() == raw)
 # a hand-off by a line of next with no check is refused after the gates that read the needs list: the writer is not named in needs by it either
 put(32, mover=REVIEW, needs=[REVIEW])
 raw, was = (T / "store/a/32.json").read_bytes(), shape(32)
-msg = refusal(lambda: server.stackshot_update(item_id="a32", sender=BUILD, next=f"{BUILD}: prepare it\n{SIDE}: do the work"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a32", sender=BUILD, next=f"{BUILD}: prepare it\n{SIDE}: do the work"))
 check("refused hand-off by a line of next: the refusal text comes back, nothing is stored", msg.startswith("Refused:") and "check" in msg and shape(32) == was and (T / "store/a/32.json").read_bytes() == raw, (msg, shape(32)))
 # an accepted hand-off still works: the mover changes, the hand-off is recorded, and the writer is named in needs as its own save
 put(33, mover=REVIEW, needs=[REVIEW])
-r = refusal(lambda: server.stackshot_update(item_id="a33", sender=REVIEW, mover=BUILD, next=f"{REVIEW}: handed it over", check="item_closed a1"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a33", sender=REVIEW, mover=BUILD, next=f"{REVIEW}: handed it over", check="item_closed a1"))
 m33 = rd(33)["metadata"]
 check("accepted hand-off: the mover changes and the hand-off to it is recorded", r == "" and telling.holder(rd(33)) == BUILD and (m33.get("handoff") or {}).get("to") == BUILD and (m33.get("handoff") or {}).get("from"), (r, m33))
 put_his(34)
-r = refusal(lambda: server.stackshot_update(item_id="a34", sender=REVIEW, mover=OWNER, then=BUILD, next=f"{OWNER}: pick one"))
+r = refusal(lambda: _wt_update.stackshot_update(item_id="a34", sender=REVIEW, mover=OWNER, then=BUILD, next=f"{OWNER}: pick one"))
 check("accepted write on an item that waits on his call: stored, the writer named in needs", r == "" and REVIEW in (rd(34)["metadata"].get("needs") or []), (r, shape(34)))
 
 # ---- the needs gate reads roles through the same helper and still refuses a front agent
-msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=REVIEW, needs=[MAIN]))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=REVIEW, needs=[MAIN]))
 check("needs: a user-facing agent is still refused there", "is a user-facing agent of" in msg and BUILD in msg, msg)
 
 # ---- the tool text says it
-form = server._MODEL_FORM
+form = _wt_text._MODEL_FORM
 check("tool text: mover and then say a front agent is named only by itself and another session's write is refused", "a front agent (a session" in form and "only by itself" in form and "gets the project's builder instead" in form and "then=<front agent> from another session gets the builder the same way" in form, form[:800])
 
 snap = json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))
@@ -210,12 +215,12 @@ check("tool text: the mover and then parameters of create and update carry the f
       and snap_s.count("from another session that sets then=<front agent> gets the project's builder instead") >= 2, snap_s[:300])
 
 check("tool text: post_wake_mover says a front agent only by itself", "post_wake_mover=<who moves it when the wait ends; a front agent only by itself" in form, form[:200])
-check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in server._UPDATE_DESC, server._UPDATE_DESC[:200])
+check("tool text: update's own hand-over sentence says a front agent is not told and the builder is used", "an update from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in _wt_update._UPDATE_DESC, _wt_update._UPDATE_DESC[:200])
 
 check("tool text: the post_wake_mover parameter of create and update carries the fix (snapshot)",
       json.dumps(json.loads(pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))).count("sets post_wake_mover=<front agent> gets the project's builder instead") >= 2)
 
-_cdecl = server._CREATE_DESC
+_cdecl = _wt_create._CREATE_DESC
 check("tool text: create's own description says another session's front-agent mover, then or post_wake_mover gets the builder",
       "a create from another session that sets mover, then or post_wake_mover to a front agent gets the project's builder instead" in _cdecl, _cdecl[:300])
 
