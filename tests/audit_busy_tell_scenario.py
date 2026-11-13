@@ -611,5 +611,23 @@ wipe(); put(1, mover="beta-main", act=2000, log=[(1600 + 50 * k, "pane") for k i
 r = BT.due(NR.load_all(None), "a1", now0, lambda w, p: True, None, 4.0)
 check("12 a front agent's item keeps counting from its last real activity (its length is the activity's, the lines are not the measure)", r is not None and r["kind"] == "front" and r["shown"] == r["since"] == now0 - 2000 * MIN, r)
 
+# ================================================================ 13. a config that still carries the retired [ladder] keys (main_hours, silence): the rule tells exactly as before, once each
+# The ladder's old four-hour hand-up is gone and its key is read by nothing; with the keys present (and the ladder on) a long busy stretch tells -main once for a background mover and the front agent itself once for a front agent's item, and nothing else tells.
+server._cfg.CFG["ladder"] = {"enabled": True, "main_hours": 1, "silence": True}
+try:
+    wipe(); put(1, act=0); pane_busy("team-back")
+    told = run(10, 230)
+    check("13 with [ladder] main_hours = 1 and silence = true present, nobody is told before 4 h (the retired key does not make the rule, or anything else, tell sooner)", told == [] and sent == [], (told, sent))
+    check("13 …at 4 h the -main agent is told, once", tick(at(240)) == ["a1"] and len(sent) == 1 and S0()[1] == U["home-main"], sent)
+    run(250, 480)
+    check("13 …and at 6 h and 8 h still only that one message (once per stretch)", len(sent) == 1 and mt(1).get("busy_tell", {}).get("kind") == "main", (sent, mt(1).get("busy_tell")))
+    wipe(); put(1, mover="beta-main", act=0); pane_busy("beta-main")
+    told = run(10, 230)
+    check("13 a front agent's item with the keys present: nobody is told before 4 h", told == [] and sent == [], (told, sent))
+    check("13 …at 4 h the front agent itself is told, once, never -main", tick(at(240)) == ["a1"] and len(sent) == 1 and S0()[1] == U["beta-main"] and to_main() == [], sent)
+    run(250, 480)
+    check("13 …and nothing more at 6 h and 8 h", len(sent) == 1, sent)
+finally: server._cfg.CFG.pop("ladder", None)
+
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

@@ -521,17 +521,27 @@ check("11g action: …a pane that stops being live still reaches the cold call, 
 check("11g action: a mover that is not a background agent never gets 'main' (the pane rule stands)", LD.action(live_rec, "busy", 1.0, 0.0, 9e9, 10.0, 30.0, live=True) == "", None)
 
 # ================================================================ 12. a config that still carries the retired keys ([ladder] main_hours and silence) loads and does nothing
-# The old hand-up of an alive item that had not moved for `main_hours` is gone: nothing reads the key, and an item a busy mover has held for many hours, with no ladder entry, is told to nobody.
-set_live("home-peer"); ladder_cfg(True, main_hours=4, silence=True)
+# The old hand-up of an alive item that had not moved for `main_hours` is gone: nothing reads the key (a value other than the old 4 shows it), and an item a busy mover has held for many hours, with no ladder entry, is told to no one.
+set_live("home-peer"); set_live("home-docs"); ladder_cfg(True, main_hours=1, silence=True)
 clear_records(); put(9080, act=30, mover="home-peer"); cli_row("home-peer", "busy", now0 - 20 * MIN)
 n_before = len(pushes())
 done = [stk(now0 + 31 * MIN), stk(now0 + 5 * H), stk(now0 + 9 * H), stk(now0 + 30 * H)]
-check("12 a config that carries main_hours = 4 and silence = true: an alive item with a busy live mover that has not moved for 30 hours is told to no one, by any pass",
+check("12 a config that carries main_hours = 1 and silence = true: an alive item with a busy live mover that has not moved for 30 hours is told to no one, by any pass",
       done == [[], [], [], []] and len(pushes()) == n_before and not pushes_to("home-front", "a9080") and not any("has not moved for" in p_[1] for p_ in pushes()[n_before:]), (done, pushes()[n_before:]))
-check("12 …and nothing is written to the item or the ladder's record: no History line, no mark, no rung taken (the entry the stall pass keeps stays at the ask, with no `main_at`)", mt(9080).get("progress_up_at") is None and "stall" not in mt(9080) and (entry(9080) or {}).get("step", 0) == 0 and not (entry(9080) or {}).get("main_at") and not hasattr(server, "_ladder_stuck"), (mt(9080), entry(9080)))
-check("12 …and the live mover's own rung is the same with the keys present: its silence after the look still goes to -main, every ladder.MAIN_EVERY (4 hours), not every main_hours",
-      LD.MAIN_EVERY == 4 * 3600.0 and not hasattr(server, "_ladder_main_hours") and "main_every" not in __import__("inspect").signature(LD.action).parameters, None)
+check("12 …and nothing is written to the item or the ladder's record: no History line, no mark, no rung taken (the entry the stall pass keeps stays at the ask, with no `main_at`)",
+      mt(9080).get("progress_up_at") is None and "stall" not in mt(9080) and (entry(9080) or {}).get("step", 0) == 0 and not (entry(9080) or {}).get("main_at") and not hasattr(server, "_ladder_stuck"), (mt(9080), entry(9080)))
 close(9080)
+# the live mover's own rung is unchanged with the keys present: ONE notice to -main `minutes` after the look, the next only every ladder.MAIN_EVERY (4 hours), never every main_hours (1 hour here)
+clear_records(); put(9081, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
+enter([9081]); stk(now0 + 31 * MIN); stk(now0 + 41 * MIN)
+n_first = len(main_notices(9081))
+for off in (41 * MIN + 1 * H + 1, 41 * MIN + 2 * H, 41 * MIN + 3 * H, 41 * MIN + 4 * H - 60):
+    stk(now0 + off)
+check("12 …a silent live mover's item: ONE notice to -main at the first due time, and none an hour, 2 hours or 3 hours 59 minutes after it (main_hours = 1 is not its interval)", n_first == 1 and len(main_notices(9081)) == 1, pushes_to("home-front", "a9081"))
+stk(now0 + 41 * MIN + 4 * H)
+check("12 …and the next one goes 4 hours after the first, as ladder.MAIN_EVERY says (a fixed interval, no key)", len(main_notices(9081)) == 2 and LD.MAIN_EVERY == 4 * 3600.0 and not hasattr(server, "_ladder_main_hours")
+      and "main_every" not in __import__("inspect").signature(LD.action).parameters, pushes_to("home-front", "a9081"))
+close(9081)
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
