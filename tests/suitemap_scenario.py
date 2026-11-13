@@ -22,9 +22,15 @@ def git(*a): return subprocess.run(["git", "-C", str(R), "-c", "user.name=t", "-
 def write(rel, text): p = R / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
 def commit(msg): git("add", "-A"); git("commit", "-qm", msg); return git("rev-parse", "HEAD").strip()
 
+def harness_stub(repo):
+    """the harness file of a throwaway repo: a few lines, not the 160 KB real one. The tool under test is always run from this checkout (tool() below), and what a throwaway
+    repo's own tests/suitemap.py must be is a file the selection counts as the harness (a change to it reaches all) that holds the line the one case below edits. The real file's
+    size was most of what each select cost, because the selection parses every .py of both trees."""
+    (repo / "tests" / "suitemap.py").write_text('"""stand-in for the harness file of the throwaway repo"""\nFORMAT = 1\n', encoding="utf-8")
+
 R.mkdir()
 git("init", "-q", "-b", "main")
-(R / "tests").mkdir(); shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+(R / "tests").mkdir(); harness_stub(R)
 # the suites run with this interpreter, which has coverage: the stand-in for tests/run-suite's shared environment
 write("tests/run-suite", f"""
     #!/bin/sh
@@ -271,9 +277,9 @@ def traced():
     except Exception: return True
 use_strace = shutil.which("strace") is not None and not traced()
 ENV = {k: v for k, v in os.environ.items() if not k.startswith(("COVERAGE_", "SUITEMAP_", "GITHUB_"))}
-ENV.update(SUITEMAP_ROOT=str(R), SUITEMAP_STRACE="1" if use_strace else "0")
+ENV.update(SCENARIO_TESTS=SCR, SUITEMAP_ROOT=str(R), SUITEMAP_STRACE="1" if use_strace else "0")
 def tool(*a, env=None):
-    return subprocess.run([sys.executable, str(R / "tests/suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
+    return subprocess.run([sys.executable, os.path.join(SCR, "suitemap.py"), *a], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
 
 r = tool("list")
 check("list: the four suites, sorted", r.stdout.split() == ["a", "b", "c", "z"], (r.stdout, r.stderr))
@@ -396,6 +402,7 @@ def _run_parts():
 _run_parts()
 os._exit(1)   # the last part ends the script with its own os._exit: a run that gets here ended without it
 # [fork]
+# [ahead sel c]
 out, err, _ = sel_after(lambda: sub("mod.py", "return LIMIT + 1", "return LIMIT + 2"), "f body")
 check("a function body reaches the suites that ran it (and the text reader)", out.split() == ["a", "c"], (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", 'return "h"', 'return "h" '), "h body")
@@ -457,7 +464,7 @@ out, err, _ = sel_after(lambda: sub("mod.py", "the tool's description", "the too
 check("a decorated function's docstring is module level (a decorator reads it at import)", out == "all", (out, err))
 out, err, _ = sel_after(lambda: sub("mod.py", "a static method's docstring", "a static method's new docstring"), "static docstring")
 check("a docstring under a decorator that only wraps (@staticmethod) is the function's own body", out.split() == ["a", "c"], (out, err))
-# [ahead docstrings b]
+# [ahead docstrings c]
 # ---- Docstrings (Wed Nov 11th 2026): the docstring of an undecorated module-level function is not code; deep() is run by b (through g), named by nobody;
 # documented() is never run, and z reads its __doc__; the K.s case above and the decorated one are the rule's other side
 out, err, _ = sel_after(lambda: sub("mod.py", "the helper's docstring", "the helper's new docstring"), "undecorated docstring")
@@ -508,7 +515,7 @@ git("checkout", "-q", "-B", f"t{len(ran)}", base)
 for nm, extra in (("w1", ""), ("w2", "\nprint(mod.f.__doc__)"), ("w3", "\nmod.deep()")):
     write(f"tests/{nm}_scenario.py", "import sys\nimport mod\ngetattr(mod, sys.argv[0])" + extra + "\n")
 wide_head = commit("wide readers")
-r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = (s.Names(sys.argv[1]),); "
+r = subprocess.run([sys.executable, "-c", "import sys, os; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; N = (s.Names(sys.argv[1]),); "
                     "print(' '.join(sorted(s.doc_readers(N, {('mod', 'deep')}))))", wide_head], capture_output=True, text=True, env=ENV, cwd=str(R))
 check("DOC13 a suite that reads names wide is not chosen for a docstring by that (w1, w2), a suite that names the function is (w3)",
       r.stdout.split() == ["w3"], (r.stdout, r.stderr[-600:]))
@@ -579,7 +586,7 @@ git("checkout", "-q", "-B", f"t{len(ran)}", base)
 write("docs/broken", "#!/usr/bin/env python3\nthis is ( not python\n")
 rm("Iterable")()
 head_b = commit("ann param, a script that does not parse")
-r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(N.blind)", head_b], capture_output=True, text=True, env=ENV, cwd=str(R))
+r = subprocess.run([sys.executable, "-c", "import sys, os; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; N = s.Names(sys.argv[1]); print(N.blind)", head_b], capture_output=True, text=True, env=ENV, cwd=str(R))
 out_b = tool("select", "--map", str(MAP), "--to", head_b).stdout.split()
 check("BLIND a script that does not parse makes every def count as reached by it (blind): the removal of Iterable (ANN1) selects a again (c is the new file in the directory it lists)", r.stdout.strip() == "True" and out_b == ["a", "c"], (r.stdout, r.stderr[-400:], out_b))
 for v in ("I", "N"):
@@ -593,7 +600,7 @@ write("tests/w3_scenario.py", "names = ['pl']\n")
 write("tests/w4_scenario.py", "import pmod\n@pmod.pd\ndef x(): pass\n")
 write("bin/runner", "#!/usr/bin/env python3\nimport pmod\nf = pmod.pc\n")
 esc_head = commit("escapes")
-r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
+r = subprocess.run([sys.executable, "-c", "import sys, os; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
                     esc_head, "pa", "pr", "pl", "pd", "pc", "pg", "pq", "pj", "pu", "pm", "pdd"], capture_output=True, text=True, env=ENV, cwd=str(R))
 check("ESC1 a def used as a value (alias, attribute, string, decorator, a script's shebang, get_type_hints argument) escapes; one only called does not",
       r.stdout.split("|")[0].split() == ["pa", "pc", "pd", "pg", "pl", "pr"] and r.stdout.split("|")[1].strip() == "False", (r.stdout, r.stderr[-600:]))
@@ -619,7 +626,7 @@ out, err, head = sel_after(lambda: sub("qmod.py", "from os.path import join\n", 
 check("IMP13 a name added from the stdlib or an installed package cannot be looked up: it keeps the narrowing (a pure addition, nothing selected; the old rule chose a through join)", out == "" and old_rule(head, I1) == ["a"], (out, err, old_rule(head, I1)))
 # the cases that cannot be a suite's measured file here (a package, a star import, import a.b): py_change on two commits, with the new files marked as run by b
 def whole_of(a, b, path, ran=(), env=None):
-    code = ("import sys, json; sys.path.insert(0, 'tests'); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
+    code = ("import sys, os, json; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
             "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
             "print(json.dumps(sorted(s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[3])))")
     r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
@@ -688,7 +695,7 @@ check("IMP28 a __main__ below a stdlib package (`import unittest.__main__` would
 # the second round of the review: names that fail at runtime are no binding, two `as` imports of one local, a plain statement beside an import
 def pc_of(a, b, path, ran=(), env=None):
     """the whole py_change result for one file, as sorted strings: (fns, bound, own, whole)"""
-    code = ("import sys, json; sys.path.insert(0, 'tests'); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
+    code = ("import sys, os, json; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; a, b, p, mp = sys.argv[1:5]; S = json.load(open(mp))['suites']\n"
             "for r in sys.argv[5:]: S['b']['py'][r] = ['']\n"
             "print(json.dumps([sorted(map(str, x)) for x in s.py_change((s.Names(a), s.Names(b)), S, a, b, p, p)[:4]]))")
     r = subprocess.run([sys.executable, "-c", code, a, b, path, str(MAP), *ran], capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
@@ -737,7 +744,7 @@ write("tests/w1_scenario.py", "from pmod import pr as h\n")
 write("tests/w2_scenario.py", "import typing\nfrom w1_scenario import h\ntyping.get_type_hints(h)\n")
 chain_head = commit("rename chain")
 def escaped(rev, names, shebang=None):
-    r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
+    r = subprocess.run([sys.executable, "-c", "import sys, os; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; N = s.Names(sys.argv[1]); print(' '.join(sorted(N.escaped & set(sys.argv[2:]))), '|', N.blind)",
                         rev, *names], capture_output=True, text=True, env=ENV, cwd=str(R))
     return r.stdout.split("|")[0].split(), r.stdout.split("|")[-1].strip(), r.stderr[-400:]
 check("ESC3 a def re-exported under another name (w1: `from pmod import pr as h`) and used as a value in another file (w2: get_type_hints(h)) escapes with it: h and pr",
@@ -771,7 +778,7 @@ def class_read(script, env=None, extra=None):
     write("cp/__init__.py", ""); write("cp/m.py", "from __future__ import annotations\nT = int\n\n\nclass C:\n    def __init__(self, x: T):\n        self.x = x\n\n    def __call__(self, y: T):\n        return y\n")
     if script is not None: write("tests/w5_scenario.py", script)
     rev = commit("class-keyed escape")
-    r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; N = s.Names(sys.argv[1]); m = N.files['cp/m.py']; print(any(('cp.m', 'T') in ks for ks in m.refs.values()))", rev],
+    r = subprocess.run([sys.executable, "-c", "import sys, os; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; N = s.Names(sys.argv[1]); m = N.files['cp/m.py']; print(any(('cp.m', 'T') in ks for ks in m.refs.values()))", rev],
                        capture_output=True, text=True, env={**ENV, **(env or {})}, cwd=str(R))
     return r.stdout.strip() == "True" if r.returncode == 0 else (r.stdout, r.stderr[-400:])
 HINTS = "import typing\nimport cp.m\n"
@@ -803,7 +810,7 @@ out, err, _ = sel_after(lambda: sub("data.txt", "one", "two"), "data")
 check("a data file reaches the suites that opened it", out.split() == ["a"], (out, err))
 # a suite that runs other suites as its checks (INNER: scratch runs rename, redact, lead, migration) is selected with them
 git("checkout", "-q", "-B", f"t{len(ran)}", base); sub("data.txt", "one", "two"); inner_head = commit("data for inner")
-r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'tests'); import suitemap as s; s.INNER = {'z': ('a',)}; "
+r = subprocess.run([sys.executable, "-c", "import sys, os; sys.path.insert(0, os.environ['SCENARIO_TESTS']); import suitemap as s; s.INNER = {'z': ('a',)}; "
                     "m = s.load_map(sys.argv[1]); sel, why = s.selection(m, m['commit'], sys.argv[2]); print(' '.join(sorted(sel)))", str(MAP), inner_head],
                    capture_output=True, text=True, env=ENV, cwd=str(R))
 check("a suite that runs another suite (INNER) is chosen when its inner suite is: z runs a, a opened the data file", r.stdout.split() == ["a", "z"], (r.stdout, r.stderr[-600:]))
@@ -877,7 +884,7 @@ EX = '''
 '''
 write("stackshot.example.toml", EX); write("data.txt", "one\n")
 for s in ("direct", "fx1", "fx2", "other"): write(f"tests/{s}_scenario.py", "print('x')\n")
-os.symlink("../stackshot.example.toml", R / "tests/example_base.toml"); shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+os.symlink("../stackshot.example.toml", R / "tests/example_base.toml"); harness_stub(R)
 shutil.copy(os.path.join(SCR, "_instance.py"), R / "tests" / "_instance.py")   # the names the selection reads (what apply() sets or appends) are this checkout's own
 base2 = commit("base of the example config cases")
 def fmap(fixture_path):
@@ -1019,7 +1026,7 @@ write_raw = lambda rel, text: (R / rel).parent.mkdir(parents=True, exist_ok=True
 write_raw("stackshot.example.toml", REAL_EX); write_raw("data.txt", "one\n")
 for s in ("direct", "fx1", "fx2", "other"): write(f"tests/{s}_scenario.py", "print('x')\n")
 os.symlink("../stackshot.example.toml", R / "tests/example_base.toml")
-shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py"); shutil.copy(os.path.join(SCR, "_instance.py"), R / "tests" / "_instance.py")
+harness_stub(R); shutil.copy(os.path.join(SCR, "_instance.py"), R / "tests" / "_instance.py")
 base3 = commit("real example config")
 m3 = json.loads(MAP2.read_text()); m3["commit"] = base3; MAP4 = T / "map4.json"; MAP4.write_text(json.dumps(m3))
 def cur(): return (R / "stackshot.example.toml").read_text(encoding="utf-8")
@@ -1209,7 +1216,7 @@ if use_strace:
     git("checkout", "-q", "main")
 
 # strace's log, read: threads belong to their process, a Python that left no coverage data is read whole, a split clone
-sys.path.insert(0, str(R / "tests")); os.environ["SUITEMAP_ROOT"] = str(R)
+sys.path.insert(0, SCR); os.environ["SUITEMAP_ROOT"] = str(R)
 import importlib; sm = importlib.import_module("suitemap")
 cl = {"ok": True, "py": {"x.py": [""]}, "files": ["f"], "whole": [], "dirs": [""], "traced": "2026-11-02T07:00:00+00:00"}
 pv = {"commit": "c" * 40, "suites": {"clean": cl, "bad": {**cl, "ok": False, "carry": {**cl, "at": "d" * 40}}, "bad0": {**cl, "ok": False}, "gone": {**cl, "failed": True},
@@ -2036,7 +2043,7 @@ RSUITES = {
     "dg": "import rmod\nname = input()\ngetattr(rmod.reg, name)\n",
 }
 for s, body in RSUITES.items(): write(f"tests/{s}_scenario.py", body)
-shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+harness_stub(R)
 base4 = commit("base of the route cases")
 RRAN = {"ur": ["", "hello"], "nm": ["", "ping"], "rs": ["", "serve"], "hb": ["", "builder"], "lb": ["", "lister"]}
 RM = T / "map4.json"
@@ -2089,6 +2096,7 @@ bad = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_ROUTE_RULE": "r3"})
 check("ROUTE 10 a route rule that is not R1 or R2 is an error", bad.returncode != 0 and "SUITEMAP_ROUTE_RULE" in bad.stderr, (bad.returncode, bad.stderr[-300:]))
 okr = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_ROUTE_RULE": " r1 "})
 check("ROUTE 10b ... and r1 in lower case with spaces is R1", okr.returncode == 0, (okr.returncode, okr.stderr[-300:]))
+# [ahead class c]
 # ---- class attributes (Thu Nov 12th 2026): an edit of a literal assignment in the body of a plain class binds the attribute (cmod, ".K"), not the class, and is read by
 # `.K`, by a string that names it, by a format token, and by every dynamic access. A synthetic map, nothing measured: the suites are named for what they read, and each
 # one's scopes are what the map says it ran. Cfg is the plain class. ra, rst: `Cfg.K` read and stored in the suite's own file; rs: getattr(c, "K"); rf: "{c.K}";
@@ -2432,7 +2440,7 @@ for nm_ in ("setattr", "hasattr", "delattr", "vars", "dir"):
 for cls_, (_l, _n, meth_, _w) in WHOLE.items():
     CSUITES[f"w{cls_.lower()}"] = ("import cmod\n", ["", f"{cls_}.{meth_}"]) if meth_ else (f"import cmod\ncmod.{cls_}()\n", [""])
 for s, (body, _ran) in CSUITES.items(): write(f"tests/{s}_scenario.py", body)
-shutil.copy(os.path.join(SCR, "suitemap.py"), R / "tests" / "suitemap.py")
+harness_stub(R)
 base5 = commit("base of the class cases")
 CM = T / "map5.json"
 CM.write_text(json.dumps({"format": 1, "commit": base5, "strace": True, "suites": {
@@ -2496,7 +2504,6 @@ bad = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_CLASS_RULE": "c3"})
 check("CLASS 8 a class rule that is not C1 or C2 is an error", bad.returncode != 0 and "SUITEMAP_CLASS_RULE" in bad.stderr, (bad.returncode, bad.stderr[-300:]))
 okc = tool("list", env={"SUITEMAP_ROOT": str(R), "SUITEMAP_CLASS_RULE": " c1 "})
 check("CLASS 8b ... and c1 in lower case with spaces is C1", okc.returncode == 0, (okc.returncode, okc.stderr[-300:]))
-R = R_MAIN
 
 # [final]
 shutil.rmtree(tmp, ignore_errors=True)
