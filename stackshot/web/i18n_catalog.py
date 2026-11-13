@@ -391,7 +391,7 @@ CATALOG: dict[str, str] = {
     "home.draft.email": "Email text to paste",
     "home.draft.message": "Message to paste",
     "home.resize_box": "Resize the answer box",
-    "home.step_note_aria": "Note for the next owner (optional)",
+    "home.step_note_aria": "Note for the next mover (optional)",
     "home.step_note": "Note (optional)",
     "home.step_done": "Done",
     "home.step_send_note": "Send note",

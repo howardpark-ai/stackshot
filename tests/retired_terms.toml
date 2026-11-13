@@ -13,6 +13,7 @@
 #   files     = [ "<glob>", ... ]   from the repository root; `*` stays in one directory, `**` crosses them
 #   exclude   = [ "<glob>", ... ]   optional
 #   skip_keys = [ "<key>", ... ]    optional, json only: keys whose values are names, not text
+#   skip_terms = [ "<retired word>", ... ]   optional: terms this scan does not check (a scan whose files use the word in the sense the `use` line sanctions throughout)
 #   kind      = "python" | "json" | "text"   optional: how to read the files (default by suffix: .py python, .json json, else text)
 #
 # A python file is read by its string literals only (never a comment, a docstring or a string statement, a print to stderr, or a literal that is one
@@ -169,6 +170,16 @@ allow = [
     # itempage.py's History splitter reads those same old lines back: its patterns name the field (rank) a revision once set or cleared.
     "needs|after|rank|state|mover",
     "(?:state|rank|due|after|step)",
+    # The catalog's History line for a rank an old revision set (the same line the "rank set to" entry above covers, with its `{rank}` slot).
+    "rank set to {rank}",
+    # docs/item-model.md records the retirement itself: the route and the two stored/refused fields it names, and the state that stood on the rank alone.
+    # They are the names of a route and a field and the account of what was removed, so they stay as they are.
+    "/client/rank",
+    "takes `rank` and `clear_rank`",
+    "`metadata.rank`",
+    "stood on the rank alone",
+    # docs/asks-and-answers.md lists the stored fields an ask-leaving write may carry; `rank` is one of them, still a stored field name.
+    "`dropped`, `rank`)",
 ]
 
 [[scan]]
@@ -178,6 +189,18 @@ skip_keys = ["name", "type"]
 [[scan]]
 files = ["stackshot"]
 kind = "python"
+
+# The server, the web UI and the other modules of the package: text a session reads. `stackshot/*.py` reaches the package's own files, `stackshot/**/*.py`
+# the subpackages such as stackshot/web/server.py.
+[[scan]]
+files = ["stackshot/*.py", "stackshot/**/*.py"]
+
+# The guides, read line by line (a phrase wrapped across two lines is for a person to catch). They are written about the instance's person, whom they call
+# "the owner" on almost every page (the `[instance] owner` key; the `owner` term's `use` above sanctions the word for that person), so the `owner` term is not
+# checked here: its allow list is the code's and the tools' text, phrase by phrase, and cannot hold a guide's prose. Every other retired word is.
+[[scan]]
+files = ["docs/*.md"]
+skip_terms = ["owner"]
 
 [[scan]]
 files = ["client/hooks/*"]
@@ -222,7 +245,7 @@ allow = []
 
 [[term]]
 retired = "Send with an empty box finishes the step"
-use = "Done finishes the step (a note in the box goes along to the next owner); Send note keeps it open"
+use = "Done finishes the step (a note in the box goes along to the next mover); Send note keeps it open"
 allow = []
 
 [[term]]
