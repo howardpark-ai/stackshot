@@ -41,8 +41,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""), flush=True)
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.web.auth import signin as _signin
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from starlette.testclient import TestClient
 
 EMAIL, DAY = "you@example.com", 86400

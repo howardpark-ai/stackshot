@@ -67,13 +67,17 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
@@ -256,11 +260,11 @@ check("relay: the ask-by day turns the item to the owner with the fixed ask", "a
 check("relay: …its three options map to the board's buttons", [o["label"] for o in render.options_of(rd(50))] == ["arrived", "not yet, ask again on <date>", "drop"], m.get("options"))
 check("relay: …the item reads alive with the owner as mover, then the post-wake mover", server._model_of({**rd(50), "gid": "a50"}).owner_moves and server._model_of({**rd(50), "gid": "a50"}).then == BACK, server._model_of({**rd(50), "gid": "a50"}))
 check("relay: …nobody is messaged (his queue is the board)", not sent("watch"), sent())
-g = server.stackshot_get("a50")
+g = _wt_get.stackshot_get("a50")
 check("relay: get shows the question and what turned it", "countersigned NDA" in g and re.search(r"woke: .*ask-by day .* came → the owner", g), g)
 check("relay: …a write by a session is not nagged for the ask's shape", "[ask]" not in server._update("a50", sender=FRONT, next="team-back: look at it"), None)
 check("relay: the item that is not due is untouched", mt(51).get("wait_kind") == "relay", mt(51))
-br = server.stackshot_brief()
+br = _wt_brief.stackshot_brief()
 check("relay: the brief lists the relay waits as waiting on the world: what, ask-by date", "Waiting on the world (1;" in br and f"the lease, ask by {day(4)}" in br, br[:1500])
 
 reset()
@@ -375,7 +379,7 @@ check("ask-back: a pick that arrives after its day has passed asks again with ne
 # ================================================================ chases
 item(60, wait_kind="relay", wait_event="the signed copy", ask_by=day(4), post_wake_mover=BACK, needs=[], subject="[home] chased relay", chases=[{"at": now0, "by": BACK, "note": "mailed Robin a reminder"}])      # a stored chase: fixture data (no tool logs one any more)
 reset()
-g = server.stackshot_get("a60")
+g = _wt_get.stackshot_get("a60")
 check("chase: get shows chases: n with the last note of a stored chase", "chases: 1 (last by team-back: mailed Robin a reminder)" in g, g)
 out = server._update("a60", sender=BACK, ask_by=day(5))
 check("chase: a moved ask_by resets the backstop and the chases (they were about the old date)", "chases" not in mt(60) and ab_(mt(60)) == day(5), mt(60))
@@ -431,7 +435,7 @@ check("pause off: …the recipient with three watched items and a plain wake get
 mo = next(x for x in w if x[1] == UO)
 check("pause off: …one item alone is one line", "\n" not in mo[2] and "a73" in mo[2], mo[2])
 mf = next(x for x in w if x[1] == UF)
-check("pause off: …a front agent gets the mark a front agent takes", mf[2].startswith(server._FOR_OWNER), mf[2])
+check("pause off: …a front agent gets the mark a front agent takes", mf[2].startswith(_wt_text._FOR_OWNER), mf[2])
 check("pause off: …the messages that carry only watched items are tagged watch, the merged one is the wake pass's", [x[3] for x in w if x[1] == UO] == ["watch"] and [x[3] for x in w if x[1] == UB] == ["wake"], [(x[1], x[3]) for x in w])
 check("pause off: today's wake pass released the plain hold in the same pass", "hold" not in mt(75) and "a75" in woke, mt(75))
 SENT_COUNT = len(SENT); server._wake_pass()
@@ -466,11 +470,11 @@ close(89)
 check("gate: an `after` close does not turn a watched wait of another kind", mt(88).get("wait_kind") == "anchor" and "mover" not in mt(88), mt(88))
 
 # ================================================================ display: the arrival is shown until a session writes
-g = server.stackshot_get("a10")
+g = _wt_get.stackshot_get("a10")
 check("display: get shows woke: what arrived → the mover", re.search(r"woke: its wake \S+ came → team-back", g) is not None, g)
 server._update("a10", sender=BACK, next="team-back: take it")
-check("display: …until a session writes to the item", "woke" not in mt(10) and "woke:" not in server.stackshot_get("a10"), mt(10))
-check("display: a closed item shows none of it", "chases:" not in server.stackshot_get("a64") and "woke:" not in server.stackshot_get("a64"), None)
+check("display: …until a session writes to the item", "woke" not in mt(10) and "woke:" not in _wt_get.stackshot_get("a10"), mt(10))
+check("display: a closed item shows none of it", "chases:" not in _wt_get.stackshot_get("a64") and "woke:" not in _wt_get.stackshot_get("a64"), None)
 
 # ================================================================ the write guards still read a watched wait (a real write, guards on)
 cfg(guards=True)
@@ -591,7 +595,7 @@ item(68, wait_kind="anchor", hold=True, wake=day(-1), needs=[BACK], subject="[ho
 item(69, wait_kind="time", needs=[BACK], subject="[home] time kind, no date")
 reset(); woke = server._wake_pass()
 check("review 6: an anchor wait with no stored anchor is released by today's wake pass (the hold goes, no watcher mover)", "a68" in woke and "hold" not in mt(68) and "mover" not in mt(68) and not any("a68" in x[0] for x in sent("watch")), mt(68))
-br = server.stackshot_brief()
+br = _wt_brief.stackshot_brief()
 check("review 6: the brief lists the waits no watcher can end", "Waits no watcher can end" in br and "a68" in br and "a69" in br, br[:1800])
 
 # --- 8. the item turned to the owner passes the second-mover guard
@@ -689,7 +693,7 @@ server._anc.save({"projects/alpha": [{"url": A5, "items": ["a39", "a49"], "added
 item(39, wait_kind="anchor", wait_anchor=A5, wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] route: watched", watch=WATCHED())
 item(49, hold=True, wake=day(9), needs=[BACK], subject="[home] route: held")
 nid = server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="a reply on PR 79", anchor="github:o/r#79", pilot=True)
-reply = server._route(nid, "passed", to=BACK, reason="for the builder", sender="home-stew")
+reply = _wt_route._route(nid, "passed", to=BACK, reason="for the builder", sender="home-stew")
 check("review 12: _route's reply says a watched item turned to its mover, and a held one was released from hold", "a39 turned to team-back" in reply and "a49 waited on this anchor and is released from hold" in reply and "a39 waited" not in reply, reply)
 item(196, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/97", wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], project="projects/beta", subject="[home] pre-filter", watch={"set_at": now0 - 56})
 _read0, _since = server._routing.read, []

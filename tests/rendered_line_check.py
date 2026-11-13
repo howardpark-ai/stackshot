@@ -61,9 +61,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web import app as _wapp
 from stackshot.web.auth import signin as _signin
 import uvicorn
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 srv = uvicorn.Server(uvicorn.Config(server.mcp.http_app(), host="127.0.0.1", port=PORT, log_level="critical", lifespan="on"))
 th = threading.Thread(target=srv.run, daemon=True); th.start()
@@ -71,7 +74,7 @@ for _ in range(100):
     try: socket.create_connection(("127.0.0.1", PORT), timeout=0.2).close(); break
     except OSError: time.sleep(0.1)
 else: raise SystemExit("the app did not start")
-server._board_home_drop()
+_wapp._board_home_drop()
 
 SHOTS = os.environ.get("RENDERED_LINE_SHOTS", "")
 if SHOTS: pathlib.Path(SHOTS).mkdir(parents=True, exist_ok=True)

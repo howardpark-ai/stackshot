@@ -46,8 +46,11 @@ def rd(g):
     return json.loads((T / f"store/{g[0]}/{g[1:]}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 DESC = "- Goal: A thing\n- It lives here\n- Done when done"
@@ -62,7 +65,7 @@ def conf(table):
 
 def filed(project, n, **kw):
     """Create an item on `project` with no mover (the creator is the project's first builder) -> the session that holds it."""
-    r = server.stackshot_create(subject=f"[home] filed {n}", description=DESC, project=project, sender=CORE if project.startswith("projects/delta") else CORE2,
+    r = _wt_create.stackshot_create(subject=f"[home] filed {n}", description=DESC, project=project, sender=CORE if project.startswith("projects/delta") else CORE2,
                                 next=f"{CORE if project.startswith('projects/delta') else CORE2}: look at it", **kw)
     assert r.startswith("created"), r
     return telling.holder(rd(r.split()[1]))
@@ -106,9 +109,9 @@ check("a mapped agent no page lists falls back to the first builder", telling.fa
 
 # ---- an explicit mover wins
 conf(MAP)
-r = server.stackshot_create(subject="[home] named mover", description=DESC, project="projects/delta/ui", sender=CORE, mover=OTHER, next=f"{OTHER}: look at it")
+r = _wt_create.stackshot_create(subject="[home] named mover", description=DESC, project="projects/delta/ui", sender=CORE, mover=OTHER, next=f"{OTHER}: look at it")
 check("an explicit mover on a create wins over the map", r.startswith("created") and telling.holder(rd(r.split()[1])) == OTHER, r)
-r = server.stackshot_create(subject="[home] named first builder", description=DESC, project="projects/delta/ui", sender=CORE, mover=CORE, next=f"{CORE}: look at it")
+r = _wt_create.stackshot_create(subject="[home] named first builder", description=DESC, project="projects/delta/ui", sender=CORE, mover=CORE, next=f"{CORE}: look at it")
 check("…even when it names the project's first builder", r.startswith("created") and telling.holder(rd(r.split()[1])) == CORE, r)
 
 # ---- the same default serves the `then` of an item that waits on a call
@@ -123,7 +126,7 @@ check("the example config has no uncommented entry for it", not any(re.match(r'\
 import _docs
 rm = _docs.page("configuration-integrations")
 check("the docs say how to set it", "`handoff.builder_by_page`" in rm and "[handoff.builder_by_page]" in _docs.page("item-model") and "falls back to the first builder" in rm)
-_cdecl = server._CREATE_DESC
+_cdecl = _wt_create._CREATE_DESC
 check("create's description names the mapped builder", "for a page the instance maps to a builder, that one when the project lists it" in _cdecl, _cdecl[:200])
 check("the tool-text snapshot carries it", "for a page the instance maps to a builder, that one when the project lists it" in pathlib.Path(SCR, "tool_text.snapshot.json").read_text(encoding="utf-8"))
 

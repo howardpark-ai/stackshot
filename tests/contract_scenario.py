@@ -233,13 +233,16 @@ check("…a line addressed by that name records the live session's id", line["uu
 iid = inbox.put(U(1), "for the retired pane", "hub"); d = inbox.take({U(31): "work-y2"})
 check("a line addressed by id to a session gone past the grace follows its name to the live namesake (a retired id strands nothing)", len(d) == 1 and d[0]["session"] == U(31) and d[0]["ids"] == [iid], d); inbox.ack([iid])
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.auth import signin as _signin
 from stackshot.core import store as _core_store
-ls = server._sessions_listing("", now=T3 + 2).split("\n"); ly = [l for l in ls if l.startswith("- work-y2 ")]
+ls = _wt_sessions._sessions_listing("", now=T3 + 2).split("\n"); ly = [l for l in ls if l.startswith("- work-y2 ")]
 check("sessions tool: the live namesake plain, the gone owner of an open item kept with its last sign of life",
       len(ly) == 2 and any(l == f"- work-y2 — {NEW} · box-far" for l in ly) and any(re.fullmatch(rf"- work-y2 — {re.escape(LINK)} · box-far · not running \(last seen \d\d-\d\d \d\d:\d\d \+04; kept as the mover of open items\)", l) for l in ly), ly)
 check("sessions tool: a session gone for less than the grace is listed as not running now", any(l.startswith("- work-old ") and l.endswith("not running now (relaunching, or retired; shown as last known)") for l in ls), [l for l in ls if "work-old" in l])
-ls2 = server._sessions_listing("", now=T3 + 1 + 601).split("\n")
+ls2 = _wt_sessions._sessions_listing("", now=T3 + 1 + 601).split("\n")
 check("sessions tool: past the grace a gone session nobody's item names is left out, the kept owner stays", not any("work-old" in l for l in ls2) and sum("work-y2" in l for l in ls2) == 2 and U(32) in rd(V / "b/sessions.json"), ls2)
 # ---- a pane's term link from sala, end to end with its bridge down: the sessions tool, a board row, the item page, a mention;
 # a cloud session (cse_…) keeps its claude.ai link from cloud.py
@@ -248,7 +251,7 @@ sala("b", {**SB, U(31): ("work-y2", NEW), U(40): ("work-term", TERM)})
 cl.checkin("box-far", [{"uuid": U(40), "name": "work-term", "name_source": "user", "bridge": ""}], {}, partial=True, now=T3 + 2)
 (T / "store/a/3.json").write_text(json.dumps({"id": "3", "subject": "[home] item 3", "description": "Ask work-term about it. It lives here. Done when done.", "status": "open", "metadata": {"owner": U(40), "mover": U(40), "project": "projects/alpha"}}))
 (T / "store/a/4.json").write_text(json.dumps({"id": "4", "subject": "[home] item 4", "description": "A cloud thing. It lives here. Done when done.", "status": "open", "metadata": {"owner": "cse_01XYZ", "mover": "cse_01XYZ", "project": "projects/alpha"}}))
-ls3 = server._sessions_listing("work-term", now=T3 + 3).split("\n")
+ls3 = _wt_sessions._sessions_listing("work-term", now=T3 + 3).split("\n")
 check("term link: the sessions tool gives sala's url unchanged, with the bridge down", f"- work-term — {TERM} · box-far" in ls3, ls3)
 bt = render.Board(str(T / "store")); r3 = next(x for x in bt.rows if x["gid"] == "a3"); r4 = next(x for x in bt.rows if x["gid"] == "a4")
 check("term link: board.md's owner link is sala's url", bt.url(r3) == TERM and bt.lab(r3) == "b/work-term", (bt.lab(r3), bt.url(r3)))
@@ -397,7 +400,7 @@ push.send, push.resolve, push.SRC, push.Q = _send, _resolve, _src, _q
 
 # ================================================================= 5. the client API's writes, over HTTP
 from stackshot.fleet import client; from stackshot.web import server
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 tok_b = open(client.mint("box-far")).read().strip(); tok_me = open(client.mint(ME)).read().strip()
 from starlette.testclient import TestClient
 app = server.mcp.http_app()

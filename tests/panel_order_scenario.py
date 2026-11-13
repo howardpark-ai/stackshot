@@ -61,12 +61,15 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg; from stackshot.web import search; from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web import app as _wapp
 from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 DEFAULT = ["machines", "runners", "anchorhub", "audit-panel", "projects-panel"]
 UI = up.path()
 
@@ -234,7 +237,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     for f in UI.parent.glob("ui-prefs.json.bad-*"): f.unlink()
 
     # a page that draws no Anchor hub (no receiver has reported): its place is empty, the others move
-    os.rename(T / "state/anchor-hub/status.json", T / "state/anchor-hub/status.off"); server._board_home_drop()
+    os.rename(T / "state/anchor-hub/status.json", T / "state/anchor-hub/status.off"); _wapp._board_home_drop()
     UI.write_text(json.dumps({"users": {MINA: {"panel_order": ["audit-panel", "anchorhub", "machines", "runners"]}}}), encoding="utf-8")
     h_ = get("/").text
     check("no Anchor hub drawn: four sections in the saved order, the empty place wrapped, the grips four", sections(h_)[1] == ["audit-panel", "projects-panel", "machines", "runners"] and sections(h_)[0] == ["audit-panel", "projects-panel", "anchorhub", "machines", "runners"]
@@ -242,7 +245,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     UI.write_text(json.dumps({"users": {MINA: {"panel_order": ["anchorhub", "machines", "runners", "audit-panel"]}}}), encoding="utf-8")
     h_ = get("/").text
     check("…an order that differs only in where the empty place sits is drawn the same way", sections(h_)[1] == ["machines", "runners", "audit-panel", "projects-panel"] and not NORESET.search(h_))
-    UI.unlink(); os.rename(T / "state/anchor-hub/status.off", T / "state/anchor-hub/status.json"); server._board_home_drop()
+    UI.unlink(); os.rename(T / "state/anchor-hub/status.off", T / "state/anchor-hub/status.json"); _wapp._board_home_drop()
 
     # ---- 3. the save route
     GOOD = {"order": ["runners", "machines"]}

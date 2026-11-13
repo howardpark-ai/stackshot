@@ -243,11 +243,18 @@ def check(name, cond, got=None):
 def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
-from stackshot.web import server; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes as _wr; from stackshot.web import render; from stackshot.github import ghsync as G; from stackshot.model import ids as _model_ids
+from stackshot.web import middleware as _wmw
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import notes as _wt_notes
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.core import instance as _core_instance
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 telling.tell_woken = lambda *a, **k: None            # no push.py
@@ -281,7 +288,7 @@ def budget_back(b):
 
 # ---- 1. the switch off: a write sends nothing, queues nothing
 check("[github] sync is off by default", not G.enabled() and not G.issue_ids())
-out = server._create(subject="[home] made with the mirror off", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out = _wt_create._create(subject="[home] made with the mirror off", description=DESC, project="projects/alpha", owner="home-here", next="x")
 gid0 = re.search(r"created (\S+)", out).group(1); snap("s21 created")
 server._update(gid0, next="y", sender="home-here")
 check("off: the item was created under the [ids] letter, nothing queued, nothing sent", gid0 == "s21" and qlen() == 0 and not F.log, (gid0, qlen(), F.log))
@@ -316,9 +323,9 @@ check("_norm_id: the old id, the board form, the hash form and g<n> all name the
       and _model_ids._norm_id("#3") == "g3" and _model_ids._norm_id("G4") == "g4" and _model_ids._norm_id("a2") == "a2", [_model_ids._norm_id(x) for x in ("a1", "board#2", "#3", "G4", "a2")])
 refused("a bad id names the board#<n> form", lambda: _model_ids._norm_id("board5"), "board#<n>")
 check("_path resolves an old id kept in a field", server._path("a1") == STORE / "g/1.json" and server._path("a2") == STORE / "a/2.json", server._path("a1"))
-check("get by the old id answers with the item, shown as board#1", server.stackshot_get("a1").startswith("board#1 [open] [home] item a1"), server.stackshot_get("a1"))
+check("get by the old id answers with the item, shown as board#1", _wt_get.stackshot_get("a1").startswith("board#1 [open] [home] item a1"), _wt_get.stackshot_get("a1"))
 check("the board renders the moved items", ui_render.Board(str(STORE)).item("g1")["subject"] == "[home] item a1" and "[home] item a1" in ui_render.Board(str(STORE)).item_html("g1"))
-lk = server._link_ids
+lk = _wmw._link_ids
 L = lambda shown, gid: f"[{shown}](https://board.example.org/items/{gid})"
 check("href_id: an issue-numbered item's page is its bare number (g1 → 1); an old id keeps its own", G.href_id("g1") == "1" and G.href_id("a2") == "a2" and G.href_id("g") == "g",
       (G.href_id("g1"), G.href_id("a2")))
@@ -326,9 +333,9 @@ check("replies link board#<n> to /items/<n> and an old id to its own page; an un
       lk(f"see board#1, a1 and board#{BID_A}") == f"see {L('board#1', '1')}, {L('a1', 'a1')} and board#{BID_A}", lk(f"see board#1, a1 and board#{BID_A}"))
 check("a bare store id g<n> in a reply is linked as it is shown, [board#<n>](…/items/<n>), never [g<n>]",
       lk("see g1 and board#1") == f"see {L('board#1', '1')} and {L('board#1', '1')}" and "[g1]" not in lk("g1"), lk("see g1 and board#1"))
-check("…and copied back into a write it is stored plain, board#<n>", server._unlink_ids(lk("see g1")) == "see board#1", server._unlink_ids(lk("see g1")))
+check("…and copied back into a write it is stored plain, board#<n>", _wmw._unlink_ids(lk("see g1")) == "see board#1", _wmw._unlink_ids(lk("see g1")))
 check("a linked board#<n> copied back into a write is stored plain, at /items/<n> and in the older /items/g<n> form",
-      server._unlink_ids(f"{L('board#1', '1')}, {L('board#2', 'g2')} and {L('a2', 'a2')}") == "board#1, board#2 and a2", server._unlink_ids(f"{L('board#1', '1')}, {L('board#2', 'g2')} and {L('a2', 'a2')}"))
+      _wmw._unlink_ids(f"{L('board#1', '1')}, {L('board#2', 'g2')} and {L('a2', 'a2')}") == "board#1, board#2 and a2", _wmw._unlink_ids(f"{L('board#1', '1')}, {L('board#2', 'g2')} and {L('a2', 'a2')}"))
 # the HTML board: an issue-numbered item is written #<n> on the board (board#<n> in board.md and the brief, which sessions read), and its page is /items/<n>; old ids as before
 item("a", 7, status="completed", outcome="superseded", superseded_by="g1", reason="merged into the first")
 d4 = rd("g", 4); d4["description"] = f"Waits on board#1 and g2; a2 was done; board#{BID_A} and board-tmp-other#1 are no items; board#4 is this one."
@@ -386,7 +393,7 @@ write_toml(sync=True, issue_ids=False)
 changed = server._cfg.reload()
 check("a reload turns the mirror on", G.enabled() and "github.sync" in (changed or []), changed)
 F.log.clear(); paced0 = len(GH._writes)                 # the pacer's stamps so far: the pace check below reads the ones from here on
-out = server._create(subject="[home] made with the mirror on", description=DESC, project="projects/alpha", owner="home-here", next="first step", needs="decision", ask=ASK)
+out = _wt_create._create(subject="[home] made with the mirror on", description=DESC, project="projects/alpha", owner="home-here", next="first step", needs="decision", ask=ASK)
 gid = re.search(r"created (\S+)", out).group(1)
 check("the create is under the [ids] letter (issue_ids off) and queued one job, sent nothing yet", gid == "s22" and qlen() == 1 and not writes(), (gid, qlen(), writes()))
 job = json.loads(G.pending()[0].read_text())
@@ -415,7 +422,7 @@ server._update("s22", next="second step\nthird step", sender="home-here")
 server._update("s22", needs="none", sender="home-here")
 server._update("s22", hold=True, wake="2027-01-01", sender="home-here")
 server._update("s22", clear_hold=True, sender="home-here")
-server.stackshot_confirm("s22", sender="home-here")
+_wt_complete.stackshot_confirm("s22", sender="home-here")
 server._update("s22", needs="decision", ask=ASK, options=OPTS, due="2026-12-24", sender="home-here")
 server._update("s22", work={"text": "migrating the ids"}, sender="home-here")
 m22 = rd("s", 22)["metadata"]
@@ -433,7 +440,7 @@ server._update("s22", subject="[home] renamed with the mirror on", sender="home-
 check("a new subject is one more PATCH: the title follows, nothing else is sent", issue(6)["title"] == "[home] renamed with the mirror on" and len(mine(6)) == 2 and not comments(6), (issue(6)["title"], mine(6)))
 server._update("s22", description=D("changed text"), sender="home-here")
 check("the same description written again is no change of the issue: no job", qlen() == 0 and len(mine(6)) == 2, (qlen(), mine(6)))
-server.stackshot_complete("s22", outcome="done", reason="it shipped", outcome_text="- Shipped and in use", sender="home-here"); job = json.loads(G.pending()[0].read_text()); G.drain(GH, STORE, say=lambda s: None)
+_wt_complete.stackshot_complete("s22", outcome="done", reason="it shipped", outcome_text="- Shipped and in use", sender="home-here"); job = json.loads(G.pending()[0].read_text()); G.drain(GH, STORE, say=lambda s: None)
 check("a close: urgent, the issue closed as completed; its body is the description the item keeps and then an Outcome section with the outcome text, no comment, no label",
       job["urgent"] is True and issue(6)["state"] == "closed" and issue(6)["state_reason"] == "completed" and "- changed text" in issue(6)["body"]
       and "\n\n## Outcome\n\n- Shipped and in use\n\n<sub>Mirrored from" in issue(6)["body"] and issue(6)["body"].index("- changed text") < issue(6)["body"].index("## Outcome")
@@ -446,7 +453,7 @@ check("body_of: a closed item with an outcome text gets the Outcome section afte
       f"- Kept background\n- It lives here\n\n## Outcome\n\n- Ended with board#{BID_B}\n- Fine\n\n<sub>Mirrored from" in _bo("completed", outcome_text=f"- Ended with board#{BID_B}\n- Fine"), _bo("completed", outcome_text=f"- Ended with board#{BID_B}"))
 check("body_of: no section for an open item (a reopen), for a close with no outcome text (stored before the field: its description is the end state) or an empty one",
       all("## Outcome" not in b for b in (_bo("open", outcome_text="- stray"), _bo("completed"), _bo("completed", outcome_text="  "))))
-server.stackshot_complete("s22", outcome="dropped", reason="no longer needed", outcome_text="- Not needed after the redesign", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+_wt_complete.stackshot_complete("s22", outcome="dropped", reason="no longer needed", outcome_text="- Not needed after the redesign", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("dropped closes as not planned", issue(6)["state"] == "closed" and issue(6)["state_reason"] == "not_planned" and not comments(6), issue(6))
 # the server's own act: a wake that has come releases the hold. The hold and the wake are not on the issue: nothing is sent
 it = server._load("g3"); it["metadata"]["wake"] = "2020-01-01"; _wr.save("g3", it)
@@ -461,7 +468,7 @@ check("a write that changes nothing a person would call a change (an idle mark) 
 
 # ---- 3b. the server's other passes (the item phase 2 prep) change fields the issue does not carry: a release from hold, an after-release, an anchor release and a recycle done send nothing; the closing item's own PATCH is the only write
 def made(subject, **kw):
-    out = server._create(subject=subject, description=DESC, project="projects/alpha", owner="home-here", next="x", **kw)
+    out = _wt_create._create(subject=subject, description=DESC, project="projects/alpha", owner="home-here", next="x", **kw)
     g = re.search(r"created (\S+)", out).group(1); G.drain(GH, STORE, say=lambda s: None); return g, G.issue_of(g, STORE)
 # the confirmed pin: an item woken without a `confirmed` field gets one, and nothing goes to GitHub
 g_pin, n_pin = made("[home] held without a confirm"); server._update(g_pin, hold=True, wake="2099-01-01", sender="home-here")
@@ -472,7 +479,7 @@ check("a wake that also pins `confirmed` (a re-confirm) is stored and sends noth
 # a release by the last `after` closing, and an item that still waits on another
 g_rel, n_rel = made("[home] waits on g2", after="g2"); g_two, n_two = made("[home] waits on g1 and g2", after="g1, g2")
 w_before = len(writes())
-server.stackshot_complete("g2", outcome="done", reason="it is in", description="- The third thing is in", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+_wt_complete.stackshot_complete("g2", outcome="done", reason="it is in", description="- The third thing is in", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("the last `after` closing releases the item (stored) and the one that still waits on another keeps its list; GitHub saw one write, the closing item's PATCH, and no comment anywhere",
       rd(g_rel[0], int(g_rel[1:]))["metadata"].get("after") is None and rd(g_two[0], int(g_two[1:]))["metadata"]["after"] == ["g1"]
       and writes()[w_before:] == [("PATCH", REPO + "/issues/2")] and issue(2)["state"] == "closed" and issue(2)["state_reason"] == "completed" and not comments(n_rel) and not comments(n_two) and not comments(2),
@@ -498,19 +505,19 @@ check("the queue is empty after the passes", qlen() == 0, G.pending())
 g_ns, n_ns = made("[home] written without a sender")
 f_ns = STORE / g_ns[0] / f"{g_ns[1:]}.json"; before_ns = f_ns.read_bytes(); log_ns = len(F.log)   # F.log is not cleared: the pace check below counts it
 HINT = ("Refused: pass sender=<your session name or id>", "the GitHub mirror", "must name who made it")
-refused("mirror on: an update without a sender is refused, with the sender hint and why", lambda: server.stackshot_update(g_ns, next="nobody's step"), *HINT)
-refused("mirror on: a blank sender is no sender", lambda: server.stackshot_update(g_ns, next="nobody's step", sender="  "), *HINT)
-refused("mirror on: a confirm without a sender is refused", lambda: server.stackshot_confirm(g_ns), *HINT)
-refused("mirror on: a complete without a sender is refused", lambda: server.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- In"), *HINT)
+refused("mirror on: an update without a sender is refused, with the sender hint and why", lambda: _wt_update.stackshot_update(g_ns, next="nobody's step"), *HINT)
+refused("mirror on: a blank sender is no sender", lambda: _wt_update.stackshot_update(g_ns, next="nobody's step", sender="  "), *HINT)
+refused("mirror on: a confirm without a sender is refused", lambda: _wt_complete.stackshot_confirm(g_ns), *HINT)
+refused("mirror on: a complete without a sender is refused", lambda: _wt_complete.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- In"), *HINT)
 check("the refusals changed nothing: the file as it was, no job queued, nothing sent", f_ns.read_bytes() == before_ns and qlen() == 0 and len(F.log) == log_ns, (qlen(), F.log[log_ns:]))
-check("the tool descriptions say sender is required while the mirror is on", all(server._SENDER_MIRROR.strip() in d for d in (server._UPDATE_DESC, server._COMPLETE_DESC)))
-server.stackshot_update(g_ns, next="home-here: the sender's step", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+check("the tool descriptions say sender is required while the mirror is on", all(_wt_notes._SENDER_MIRROR.strip() in d for d in (_wt_update._UPDATE_DESC, _wt_complete._COMPLETE_DESC)))
+_wt_update.stackshot_update(g_ns, next="home-here: the sender's step", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("with a sender the update goes through (a next line is not on the issue: no job, no call)", rd(g_ns[0], int(g_ns[1:]))["metadata"]["next"] == "home-here: the sender's step" and qlen() == 0 and len(F.log) == log_ns, (qlen(), F.log[log_ns:]))
-server.stackshot_confirm(g_ns, sender="home-here")
+_wt_complete.stackshot_confirm(g_ns, sender="home-here")
 check("with a sender the confirm goes through", qlen() == 0 and len(F.log) == log_ns)
 r_due = server._recycle_due("testbox", item=g_ns); G.drain(GH, STORE, say=lambda s: None)
 check("the client API's recycle-due (no session sender) is not refused", r_due["items"][0]["action"] == "set" and qlen() == 0, r_due)
-server.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- In", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+_wt_complete.stackshot_complete(g_ns, outcome="done", reason="it is in", description="- In", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("with a sender the complete goes through: the issue is closed, still no comment", issue(n_ns)["state"] == "closed" and not comments(n_ns), (issue(n_ns)["state"], comments(n_ns)))
 check("the mirror has posted no comment on any issue so far", all(not i["_comments"] for i in F.issues.values()), [(n_, len(i["_comments"])) for n_, i in F.issues.items() if i["_comments"]])
 
@@ -528,7 +535,7 @@ wev = [h for _t, k, h in evs if k == "work"]
 check("the item page's History has one line for the step with its three status updates folded under it, from the store's git",
       len(wev) == 1 and "step done: " in wev[0] and "3 status updates" in wev[0] and "migrating the ids" in wev[0] and "PR 83 up" in wev[0], evs)
 check("a step status owes no page", server._owed_load() == owed_w, server._owed_load())
-refused("mirror on: a status write without a sender is refused like any other", lambda: server.stackshot_update(g_w, work="another line"), *HINT)
+refused("mirror on: a status write without a sender is refused like any other", lambda: _wt_update.stackshot_update(g_w, work="another line"), *HINT)
 check("the queue is empty after the work writes, and no label, field, blocked-by or comment call has reached GitHub so far", qlen() == 0 and F.forbidden == [], (G.pending(), F.forbidden))
 
 # ---- 4. an outage, a rate limit, a refusal, the marker guard, the pace
@@ -576,7 +583,7 @@ F.ratelimit = False
 r = G.drain(GH, STORE, say=lambda s: None)
 check("GitHub back: the job drains, the body carries the update, no second issue", r == {"done": 1, "left": 0, "down": ""} and "while GitHub is down" in issue(1)["body"] and F.next == n_out, (r, F.next))
 # the marker guard: a create whose answer was lost (the issue exists, the map does not know) makes no second issue
-out = server._create(subject="[home] answer lost", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out = _wt_create._create(subject="[home] answer lost", description=DESC, project="projects/alpha", owner="home-here", next="x")
 g_lost = re.search(r"created (\S+)", out).group(1)
 G.drain(GH, STORE, say=lambda s: None)
 n_lost = G.issue_of(g_lost, STORE)
@@ -722,10 +729,10 @@ seq = (STORE / "next-id").read_text().strip()
 write_toml(sync=True, issue_ids=True); server._cfg.reload()
 check("a reload turns the id switch on", G.issue_ids())
 F.log.clear(); nxt = F.next
-out = server._create(subject="[home] numbered by GitHub", description=DESC, project="projects/alpha", owner="home-here", next="x", needs="external")
+out = _wt_create._create(subject="[home] numbered by GitHub", description=DESC, project="projects/alpha", owner="home-here", next="x", needs="external")
 check("the create waited for the issue: the id is its number, shown board#<n>, the file under g/", out.startswith(f"created board#{nxt} —") and (STORE / f"g/{nxt}.json").exists()
       and rd("g", nxt)["id"] == str(nxt) and issue(nxt)["title"] == "[home] numbered by GitHub" and G.issue_of(f"g{nxt}", STORE) == nxt, (out[:100], F.next))
-check("get takes board#<n>", server.stackshot_get(f"board#{nxt}").startswith(f"board#{nxt} [open] [home] numbered by GitHub"))
+check("get takes board#<n>", _wt_get.stackshot_get(f"board#{nxt}").startswith(f"board#{nxt} [open] [home] numbered by GitHub"))
 r = G.drain(GH, STORE, say=lambda s: None)
 check("the queued create then only brings the body up (the marker), no comment", r["done"] == 1 and f"<!-- stackshot:g{nxt} -->" in issue(nxt)["body"] and not comments(nxt), (r, issue(nxt)["body"][:60], comments(nxt)))
 check("the [ids] letter sequence was not touched", (STORE / "next-id").read_text().strip() == seq, (STORE / "next-id").read_text())
@@ -749,7 +756,7 @@ check("a machine that is not a lowercase name of letters, digits and hyphens rea
 _inst["machine"] = _kept
 check("[instance] machine is restart-only", server._cfg._restart_only("instance.machine") is not None)
 F.down = True; nxt2 = F.next
-out = server._create(subject="[home] during an outage", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out = _wt_create._create(subject="[home] during an outage", description=DESC, project="projects/alpha", owner="home-here", next="x")
 check("a create during an outage is not refused: the item is l1 in the store and board-tmp-boxa#1 in the reply (which says it is temporary), the file is under l/, the create is queued, no issue yet",
       out.startswith("created board-tmp-boxa#1 — ") and "board-tmp-boxa#1 is a temporary id" in out and "board-tmp-boxa#1 stays as an alias" in out
       and not re.search(r"(?<![\w/-])l1\b", out) and (STORE / "l/1.json").exists() and rd("l", 1)["id"] == "1" and qlen() == 1
@@ -758,9 +765,9 @@ check("the create reply, as the connector sends it, links board-tmp-boxa#1 to /i
       lk(out).startswith(f"created {L('board-tmp-boxa#1', 'board-tmp-boxa-1')} — ") and "/items/l1" not in lk(out), lk(out)[:200])
 check("a bare l1 in a reply is written and linked as board-tmp-boxa#1; a written-out one copied back into a write is stored as written",
       lk("waits on l1") == f"waits on {L('board-tmp-boxa#1', 'board-tmp-boxa-1')}" and lk("see board-tmp-boxa#1") == f"see {L('board-tmp-boxa#1', 'board-tmp-boxa-1')}"
-      and lk("see board-tmp-other#1") == "see board-tmp-other#1" and server._unlink_ids(f"see {L('board-tmp-boxa#1', 'board-tmp-boxa-1')}") == "see board-tmp-boxa#1",
+      and lk("see board-tmp-other#1") == "see board-tmp-other#1" and _wmw._unlink_ids(f"see {L('board-tmp-boxa#1', 'board-tmp-boxa-1')}") == "see board-tmp-boxa#1",
       (lk("waits on l1"), lk("see board-tmp-other#1")))
-out2 = server._create(subject="[home] waits on the first", description=DESC, project="projects/alpha", owner="home-here", next="x", after="board-tmp-boxa#1")
+out2 = _wt_create._create(subject="[home] waits on the first", description=DESC, project="projects/alpha", owner="home-here", next="x", after="board-tmp-boxa#1")
 check("a second one is l2, and its after, given as board-tmp-boxa#1, names l1", out2.startswith("created board-tmp-boxa#2 — ") and rd("l", 2)["metadata"]["after"] == ["l1"]
       and G.load_map(STORE)["local_last"] == 2, (out2[:80], rd("l", 2)["metadata"]))
 server._update("board-tmp-boxa#1", description=D("edited while down"), sender="home-here")
@@ -769,9 +776,9 @@ with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/board-tmp-boxa-1", follow_redirects=False); r0 = c.get("/items/l1", follow_redirects=False)
     r5 = c.get("/items/board-tmp-boxa-1/", follow_redirects=False); r6 = c.get("/items/board-tmp-other-1", follow_redirects=False)
 check("while temporary, the tools take board-tmp-boxa#1, board-tmp-boxa-1 and l1 alike, and update by board-tmp-boxa#1 reached it",
-      all(server.stackshot_get(x).startswith("board-tmp-boxa#1 [open] [home] during an outage") for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1"))
+      all(_wt_get.stackshot_get(x).startswith("board-tmp-boxa#1 [open] [home] during an outage") for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1"))
       and all(_model_ids._norm_id(x) == "l1" for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")) and rd("l", 1)["description"] == D("edited while down"),
-      [server.stackshot_get(x)[:50] for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")])
+      [_wt_get.stackshot_get(x)[:50] for x in ("board-tmp-boxa#1", "board-tmp-boxa-1", "l1")])
 check("the issue link: a temporary item (no issue yet) shows none on its page, with sync on", G.enabled() and r1.status_code == 200 and ghl(r1.text) == [], ghl(r1.text))
 check("while temporary, /items/board-tmp-boxa-1 serves the item; /items/l1 and the trailing-slash form → 301 there; another machine's prefix is 404",
       r1.status_code == 200 and "[home] during an outage" in r1.text
@@ -814,7 +821,7 @@ check("l2 followed as the issue after, and its after list now names g<n>", (STOR
 with TestClient(server.mcp.http_app()) as c:
     r1 = c.get("/items/l1", follow_redirects=False); r2 = c.get(f"/items/g{n1}"); r3 = c.get("/items/board-tmp-boxa-1", follow_redirects=False)
 check("lookups by l1, board-tmp-boxa#1 and board-tmp-boxa-1 resolve to the item: _norm_id, get (shown board#<n>), and /items/l1 and /items/board-tmp-boxa-1 → 301 to its page /items/<n>",
-      all(_model_ids._norm_id(x) == f"g{n1}" and server.stackshot_get(x).startswith(f"board#{n1} [open] [home] during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
+      all(_model_ids._norm_id(x) == f"g{n1}" and _wt_get.stackshot_get(x).startswith(f"board#{n1} [open] [home] during an outage") for x in ("l1", "board-tmp-boxa#1", "board-tmp-boxa-1"))
       and server._path("l1") == STORE / f"g/{n1}.json"
       and r1.status_code == 301 and r1.headers["location"] == f"/items/{n1}" and r3.status_code == 301 and r3.headers["location"] == f"/items/{n1}" and r2.status_code == 200,
       (r1.status_code, r1.headers.get("location"), r3.status_code, r3.headers.get("location"), r2.status_code))
@@ -824,7 +831,7 @@ check("the owner was told the new id in one plain line, through the owner-notice
       any(t[0] == f"g{n1}" and t[1] == OWNER and t[2].startswith(f"[stackshot] board-tmp-boxa#1 is now board#{n1} (") and "board-tmp-boxa#1 still names it" in t[2]
           and t[2].endswith(f"https://board.example.org/items/{n1}") and t[3] == "owner" for t in told) and len(told) == 2, told)
 telling.tell_woken = lambda *a, **k: None
-out = server._create(subject="[home] after the outage", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out = _wt_create._create(subject="[home] after the outage", description=DESC, project="projects/alpha", owner="home-here", next="x")
 check("with GitHub up a create takes its issue number straight away, no local id", out.startswith(f"created board#{nxt2 + 2} — ")
       and not list((STORE / "l").glob("*.json")) and G.load_map(STORE)["local_last"] == 2, (out[:60], list((STORE / "l").glob("*.json"))))
 G.drain(GH, STORE, say=lambda s: None)
@@ -833,7 +840,7 @@ sub = subprocess.run([sys.executable, "-c", f"import sys, pathlib; sys.path.inse
                      capture_output=True, text=True, env=os.environ, timeout=60)
 check("the local counter is not reused after a restart: a fresh process hands out l3", sub.stdout.strip() == "l3" and G.load_map(STORE)["local_last"] == 3, (sub.stdout, sub.stderr[-300:]))
 # a re-key a crash cut short (the map saved, the old file left behind) is finished by the next job
-server._create(subject="[home] cut short", description=DESC, project="projects/alpha", owner="home-here", next="x"); G.drain(GH, STORE, say=lambda s: None)
+_wt_create._create(subject="[home] cut short", description=DESC, project="projects/alpha", owner="home-here", next="x"); G.drain(GH, STORE, say=lambda s: None)
 n_cut = F.next - 1; stale = STORE / "l/9.json"; stale.write_text(json.dumps({**rd("g", n_cut), "id": "9", "updated": rd("g", n_cut)["updated"] - 100}))
 mp = G.load_map(STORE); mp["aliases"]["l9"] = f"g{n_cut}"; mp["local_last"] = 9; G.save_map(mp, STORE)
 G.enqueue({"ts": time.time(), "gid": "l9", "kind": "changed", "comment": "[author: home-here · x]\nnext:\n> y"}); r = G.drain(GH, STORE, say=lambda s: None)
@@ -854,7 +861,7 @@ check("a wake notice (a time wait ending) names the item board#<n>, links its it
           and not re.search(rf"(?<![\w/-]){g_wk}\b", t[2]) for t in told), told)
 # an after-release: the last item it waited on closes
 g_first = mk("[home] closes first"); g_aft = mk("[home] waits on the first", after=g_first, mover="home-other")
-told.clear(); server.stackshot_complete(g_first, outcome="done", reason="it is in", description="- In", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
+told.clear(); _wt_complete.stackshot_complete(g_first, outcome="done", reason="it is in", description="- In", sender="home-here"); G.drain(GH, STORE, say=lambda s: None)
 check("an after-release notice names both items board#<n>",
       any(t[0] == g_aft and t[2].startswith(f"[stackshot] board#{num(g_aft)} woke: board#{num(g_first)}, the last item it waited on, closed (done) by home-here")
           and not re.search(rf"(?<![\w/-])({g_aft}|{g_first})\b", t[2]) for t in told), told)
@@ -887,7 +894,7 @@ check("a move to decision on a front agent's item tells nobody (neither the owne
       told_dec == [] and quiet_d == "\n(its mover home-here is a front agent: not told; the board shows it)" and heard_f == [server._session_id("home-here")], (told_dec, quiet_d, heard_f))
 check("a move to decision on a non-front owner's item tells the owner, unmarked, and the reply says so",
       len(told_dec_n) == 1 and told_dec_n[0][1] == server._session_id("home-here") and told_dec_n[0][3] == "owner"
-      and told_dec_n[0][2].startswith(f"[stackshot] board#{num(g_own)} now needs the owner's call (ask: pick one), set by home-other: ") and server._FOR_OWNER not in told_dec_n[0][2]
+      and told_dec_n[0][2].startswith(f"[stackshot] board#{num(g_own)} now needs the owner's call (ask: pick one), set by home-other: ") and _wt_text._FOR_OWNER not in told_dec_n[0][2]
       and said_n == "\n(its mover home-here has been told)" and heard_n == [server._session_id("home-here")], (told_dec_n, said_n, heard_n))
 # a recycle done: two items waiting for it, one held only for it
 g_r1 = mk("[home] waits for a recycle too"); server._update(g_r1, recycle=True, sender="home-here")
@@ -1168,7 +1175,7 @@ check("the item page: the History line of that write carries the tag 'Acked-by <
       f'<span class="smeta">{OWN} in home-here · {MSG_AT} · checked against the transcript</span></div></details>' in p_t
       and "Acked-by: " not in p_t and 'id="said-1"' in p_t and "hashchange" in p_t, re.findall(r'<details class="said".*?</details>', p_t))
 check("…the entry's bullet is the next text alone", '<div class="eb">next: ship it' in p_t, re.findall(r'<div class="eb">.*?</div>', p_t, re.S))
-check("get shows the entry: the tag, the session, the time, checked, the quote", f"Acked-by: {OWN} · home-here · {MSG_AT} · checked · “ok, acked-by it is”" in server.stackshot_get(g_t), server.stackshot_get(g_t))
+check("get shows the entry: the tag, the session, the time, checked, the quote", f"Acked-by: {OWN} · home-here · {MSG_AT} · checked · “ok, acked-by it is”" in _wt_get.stackshot_get(g_t), _wt_get.stackshot_get(g_t))
 # a typed one; whitespace aside the quote must be verbatim
 server._update(g_t, sender="home-here", said=[{"tag": "Suggested-by", "quote": "do the second one too   and the third", "msg": U(2)}]); G.drain(GH, STORE, say=lambda s: None)
 e2 = said_of(g_t)
@@ -1226,7 +1233,7 @@ check("…and the page's tag itself reads 'Acked-by <owner> · unchecked', with 
       f'<details class="said" id="said-8"><summary><span class="badge said unchecked">Acked-by {OWN} · unchecked</span></summary><div class="sbody"><blockquote>said in the cloud</blockquote>'
       f'<span class="smeta">{OWN} in cse_01ABC · unchecked: no transcript for this session on this box</span></div></details>' in p_t,
       re.findall(r'<details class="said" id="said-8".*?</details>', p_t))   # a cloud session has no pane: its name is text, as any session's without a live pane
-check("…get says unchecked", f"Acked-by: {OWN} · cse_01ABC · unchecked · “said in the cloud”" in server.stackshot_get(g_t), server.stackshot_get(g_t))
+check("…get says unchecked", f"Acked-by: {OWN} · cse_01ABC · unchecked · “said in the cloud”" in _wt_get.stackshot_get(g_t), _wt_get.stackshot_get(g_t))
 # relayed: his words reached the writer through another session; session names where he said it (a pane name, resolved to its transcript)
 server._update(g_t, sender="home-here", said=[{"tag": "Acked-by", "quote": "yes, go with the trailers", "msg": U(21), "session": "home-front"}]); G.drain(GH, STORE, say=lambda s: None)
 e9 = said_of(g_t)[-1]
@@ -1252,14 +1259,14 @@ check("a session name no live pane carries (another machine): stored unchecked u
 server._update(g_t, sender="home-here", said=json.dumps({"tag": "acked-by", "quote": "ok, acked-by it is", "msg": U(1)})); G.drain(GH, STORE, say=lambda s: None)
 check("said as a JSON string of one object, the tag in any case: parsed, the tag stored in its canonical spelling", said_of(g_t)[-1]["tag"] == "Acked-by" and said_of(g_t)[-1]["checked"], said_of(g_t)[-1])
 # all three tags in one write, on a create and on a complete
-out = server._create(subject="[home] born with his words", description=DESC, project="projects/alpha", owner="home-here", next="x",
+out = _wt_create._create(subject="[home] born with his words", description=DESC, project="projects/alpha", owner="home-here", next="x",
                      said=[{"tag": "Suggested-by", "quote": "do the second one too", "msg": U(2)}, {"tag": "Reported-by", "quote": "and the third", "msg": U(2)}, {"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(1)}])
 g_b = G.norm(re.search(r"created (\S+)", out).group(1)); n_b = G.issue_of(g_b, STORE); G.drain(GH, STORE, say=lambda s: None)
 check("a create with his words: the three entries stored in order, by the owner; the reply says each was checked",
       [x["tag"] for x in said_of(g_b)] == ["Suggested-by", "Reported-by", "Acked-by"] and all(x["checked"] and x["by"] == OWNER for x in said_of(g_b)) and out.count("checked against home-here's transcript") == 3, (said_of(g_b), out))
 check("…the page shows the birth line and the line with the three tags", [t for t in re.findall(r'<span class="badge said[^"]*">([^<]*)</span>', page(g_b))] == [f"Suggested-by {OWN}", f"Reported-by {OWN}", f"Acked-by {OWN}"]
       and 'class="ev ev-created"' in page(g_b), re.findall(r'<span class="badge said[^"]*">([^<]*)</span>', page(g_b)))
-server.stackshot_complete(g_b, outcome="done", reason="he said so", description="- Done, as he said", sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(1)}]); G.drain(GH, STORE, say=lambda s: None)
+_wt_complete.stackshot_complete(g_b, outcome="done", reason="he said so", description="- Done, as he said", sender="home-here", said=[{"tag": "Acked-by", "quote": "ok, acked-by it is", "msg": U(1)}]); G.drain(GH, STORE, say=lambda s: None)
 check("a complete with his words: the entry appended after the create's three, and the issue is closed with no comment", len(said_of(g_b)) == 4 and issue(n_b)["state"] == "closed" and not comments(n_b), (len(said_of(g_b)), comments(n_b)))
 snap("trailers")
 
@@ -1303,7 +1310,7 @@ r_mv3 = G.drain(GH, STORE, say=lambda s: None)
 check("the repo's home known again: the edit lands once and the job is gone", r_mv3 == {"done": 1, "left": 0, "down": ""} and "edited while the repo moves" in issue(n_mv)["body"] and mine(n_mv)[-1:] == [("PATCH", REPO + f"/issues/{n_mv}")], (r_mv3, mine(n_mv)))
 # the create path: the tool's create during the move
 F.moved = True; nxt_mv = F.next; F.log.clear()
-out_mv = server._create(subject="[home] while the repo moves", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out_mv = _wt_create._create(subject="[home] while the repo moves", description=DESC, project="projects/alpha", owner="home-here", next="x")
 l_mv = G.norm(re.search(r"created (\S+)", out_mv).group(1))
 check("a create answered with a redirect is neither a crash nor a refusal: the item takes a temporary id, its create is queued, no issue is made",
       out_mv.startswith("created board-tmp-boxa#") and "is a temporary id" in out_mv and "redirected" in out_mv and l_mv.startswith("l")
@@ -1328,7 +1335,7 @@ check("the repo's home known again: the marker is looked for first, one issue is
 # ---- 7. the switches off again: with no queue an outage create is refused as in phase 1, and a server pass queues nothing
 write_toml(sync=False, issue_ids=True); server._cfg.reload(); F.down = True
 refused("with the mirror off there is no queue to carry the create, so an outage refuses it, with why",
-        lambda: server._create(subject="[home] no queue", description=DESC, project="projects/alpha", owner="home-here", next="x"), "GitHub did not answer", "issue_ids")
+        lambda: _wt_create._create(subject="[home] no queue", description=DESC, project="projects/alpha", owner="home-here", next="x"), "GitHub did not answer", "issue_ids")
 F.down = False
 write_toml(sync=False, issue_ids=False); server._cfg.reload(); F.log.clear()
 server._update(f"g{n1}", hold=True, wake="2026-12-01", sender="home-here")
@@ -1361,7 +1368,7 @@ check("_shown_ids: left alone inside inline code, a fenced block, a markdown lin
 glued = f"g999 g12abc xg12 {gk}abc x{gk} board#{gk} s27/{gk} x-{gk} {gk}-x {gk}/y {gk}.json @{gk} G{n1}"
 check("_shown_ids: an unknown g999, g12abc, xg12 and every glued or path-like token stay as written", sw(glued) == glued, sw(glued))
 check("_shown_ids: the other stored forms stay as they are (s<n>, l<n>, board#<n>)", sw("s21, l1 and board#1") == "s21, l1 and board#1", sw("s21, l1 and board#1"))
-out = server._create(subject=f"[home] follow up {gk}", description=f"- Waits on {gk}\n- Not `{gk}`, nor g999\n- Finished when it works", project="projects/alpha",
+out = _wt_create._create(subject=f"[home] follow up {gk}", description=f"- Waits on {gk}\n- Not `{gk}`, nor g999\n- Finished when it works", project="projects/alpha",
                      owner="home-here", next=f"ping {gk} owner", ask="", needs="decision", options=[{"label": f"After {gk}", "line": f"Wait for {gk} to close", "recommended": True},
                                                                                          {"label": "Now", "line": "Go now", "recommended": False}])
 gw = _model_ids._norm_id(re.search(r"created (\S+)", out).group(1)); dw = rd(gw[0], gw[1:])
@@ -1476,7 +1483,7 @@ g_mc = mk("[home] merge then close"); n_mc = G.issue_of(g_mc, STORE); F.log.clea
 server._update(g_mc, description=D("before the close"), sender="home-here")
 r = G.drain(GH, STORE, say=lambda s: None, now=T2 + 5)
 check("an update inside the window waits", r.get("held") == 1 and mine(n_mc) == [] and qlen() == 1, (r, mine(n_mc)))
-server.stackshot_complete(g_mc, outcome="done", reason="it shipped", outcome_text="- Shipped", sender="home-here")
+_wt_complete.stackshot_complete(g_mc, outcome="done", reason="it shipped", outcome_text="- Shipped", sender="home-here")
 r = G.drain(GH, STORE, say=lambda s: None, now=T2 + 6)
 check("a close goes at once, window or not, and takes the waiting update with it: the issue closed as completed, one PATCH, no comment",
       r["done"] == 2 and qlen() == 0 and issue(n_mc)["state"] == "closed" and issue(n_mc)["state_reason"] == "completed" and [w[0] for w in mine(n_mc)] == ["PATCH"] and "- before the close" in issue(n_mc)["body"] and "## Outcome\n\n- Shipped" in issue(n_mc)["body"] and not comments(n_mc), (r, mine(n_mc)))
@@ -1486,7 +1493,7 @@ r = G.drain(GH, STORE, say=lambda s: None, now=T3 + 1)
 check("a reopening goes at once too: the issue open again, one PATCH, no window", r["done"] == 1 and "held" not in r and issue(n_mc)["state"] == "open" and [w[0] for w in mine(n_mc)] == ["PATCH"] and not comments(n_mc), (r, mine(n_mc)))
 # a create goes at once (here the one that waited out an outage); the update made after it waits its window
 F.down = True; F.log.clear()
-out = server._create(subject="[home] created at once", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out = _wt_create._create(subject="[home] created at once", description=DESC, project="projects/alpha", owner="home-here", next="x")
 g_n = re.search(r"created (\S+)", out).group(1); T4 = time.time()
 server._update(G.norm(g_n), description=D("after the create"), sender="home-here")
 F.down = False; nx0 = F.next
@@ -1664,7 +1671,7 @@ try:
     check("the worker spent the hour's last write on the first update and now waits for room (holding the line)", bool(waiting_) and waiting_[0] > 1000 and _gb.wait("w") > 1000, (waiting_, _gb.wait("w")))
     G.CREATE_WAIT = 0.3
     posts0 = [w_ for w_ in writes() if w_ == ("POST", REPO + "/issues")]
-    t0_ = time.monotonic(); out_h = server._create(subject="[home] created while the hour's writes are spent", description=DESC, project="projects/alpha", owner="home-here", next="x"); took_ = time.monotonic() - t0_
+    t0_ = time.monotonic(); out_h = _wt_create._create(subject="[home] created while the hour's writes are spent", description=DESC, project="projects/alpha", owner="home-here", next="x"); took_ = time.monotonic() - t0_
     g_tmp = G.norm(re.search(r"created (\S+)", out_h).group(1))
     check("the create answers within moments, not after the hour: a temporary id, and the reply says so and why",
           took_ < 5 and out_h.startswith("created board-tmp-boxa#") and "is a temporary id" in out_h and "taking no new write right now" in out_h and "when GitHub has room" in out_h, (took_, out_h[:300]))
@@ -1696,7 +1703,7 @@ check("the waiting worker took the place that freed, then the create queued whil
 check("the temporary item has its issue and is re-keyed: board#<n>, the temporary id an alias, the local file gone",
       g_new.startswith("g") and n_new and issue(n_new)["title"] == "[home] created while the hour's writes are spent"
       and G.load_map(STORE)["aliases"].get(g_tmp) == g_new and not (STORE / "l" / f"{g_tmp[1:]}.json").exists() and (STORE / g_new[0] / f"{g_new[1:]}.json").exists(), (g_new, n_new))
-out_ok = server._create(subject="[home] created with room again", description=DESC, project="projects/alpha", owner="home-here", next="x")
+out_ok = _wt_create._create(subject="[home] created with room again", description=DESC, project="projects/alpha", owner="home-here", next="x")
 check("with room under the budget a create takes its issue number straight away", out_ok.startswith("created board#") and "temporary" not in out_ok, out_ok[:120])
 G.CREATE_WAIT = 5.0; G._CLIENT.clear(); set_caps(writes=100000); G.drain(GH, STORE, say=lambda s: None)
 check("CREATE_WAIT is a few seconds", G.CREATE_WAIT == 5.0)

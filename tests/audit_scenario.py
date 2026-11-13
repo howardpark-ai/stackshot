@@ -244,10 +244,12 @@ check("…the CLI's cue was logged like any other", n0 == 5 and json.loads((D / 
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.audit import audit as _audit_mod
 from stackshot.web.auth import signin as _signin
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from starlette.testclient import TestClient
 calls = []
 _audit_mod.cue = lambda reason: (calls.append(reason), (202, "audit cued to falcon-audit"))[1]

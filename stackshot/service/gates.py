@@ -2,7 +2,7 @@
 
 Every gate raises `ToolError` itself, with the sentence the writer reads, and returns nothing (a few return what they normalized: the stored form of a list, the replacing item's id of a close). A gate judges the item a
 write leaves, or the arguments it passes, against a rule of the model (model/, waits/, anchors/) and never writes. `service/create.py` and `service/update.py` call them in the order those modules keep; the order is part
-of what a write means. The checks that come before the lock (`fix_front_mover`, `until_in`, `ask_pre`, `gate_self_wait`) are called by the tool wrappers on the surface, which stay in web/server.py and only parse input.
+of what a write means. The checks that come before the lock (`fix_front_mover`, `until_in`, `ask_pre`, `gate_self_wait`) are called by the tool wrappers on the surface, which are in web/tools/ and only parse input.
 
 What stays on server.py, and is reached through `Hooks` (which server.py fills once with `install`; this module cannot import server.py, the surface sits above it): the per-write thread-local flags (`question`,
 `terminal_row`, `reformat`, `session_next`, read through accessors until the telling and the routes that set them move), the helpers of the areas that still sit there (the hand-off machinery, the roster and the contact

@@ -64,13 +64,13 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
+from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import update as _wt_update; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.waits import dated_wait as DW; from stackshot.model import model as MODEL
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.front_sender = lambda who: False
 BACK = "team-back"
@@ -160,35 +160,35 @@ def refusal(fn):
     except Exception as e:  # noqa: BLE001
         return str(e)
 fput(201, mover=BUILD, needs=[BUILD])
-out = server.stackshot_update(item_id="a201", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a201", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("2 another session's mover=<front agent> goes through with the project's builder as mover", "Refused" not in out and holder(201) == BUILD, (out[:300], mt(201)))
 check("2 …the reply says what was wrong, names the builder and how to keep the front agent", f"mover={BUILD}" in out and f"mover={FRONT}" in out and "no hand-off notice" in out and "send mover=" in out, out)
 check("2 …History has a line naming both, and the fix is recorded", len(log(201)) == 1 and FRONT in log(201)[0] and BUILD in log(201)[0] and fm_marked(mt(201)), (log(201), mt(201).get(SF.MARK)))
-out = server.stackshot_update(item_id="a201", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a201", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("2 the same value sent again is the mover's no: kept as sent, the front agent is the mover", "Refused" not in out and holder(201) == FRONT and not fm_marked(mt(201)), (out[:300], mt(201)))
 check("2 …and the reply says so", "as you sent it" in out, out)
 fput(202, mover=OWN, needs=["decision"], ask="Decide: a or b - Recommend: a - Stakes: none - By: no date", then=BUILD, state="your-call")
-out = server.stackshot_update(item_id="a202", sender=OTHER, then=FRONT)
+out = _wt_update.stackshot_update(item_id="a202", sender=OTHER, then=FRONT)
 check("2 then=<front agent> becomes the builder; the item the owner moves is otherwise as it was (his mover, his decision, his ask)", "Refused" not in out and mt(202).get("then") == BUILD and mt(202).get("mover") == OWN
       and mt(202).get("needs") == ["decision"] and mt(202).get("ask") == "Decide: a or b - Recommend: a - Stakes: none - By: no date", (out[:300], mt(202)))
 DESC2 = "- Goal: A thing\n- It lives here\n- Done when done"
-r = server.stackshot_create(subject="[home] handed to the front", description=DESC2, project="projects/alpha", sender=OTHER, mover=FRONT, next=f"{BUILD}: look at it")
+r = _wt_create.stackshot_create(subject="[home] handed to the front", description=DESC2, project="projects/alpha", sender=OTHER, mover=FRONT, next=f"{BUILD}: look at it")
 new_gid = re.search(r"created (\w+) ", r).group(1)
 new_item = server._load(new_gid)
 new_log = [e["text"] for e in ((new_item["metadata"].get("stall") or {}).get("log") or [])]
 check("2 create: the same fix; the item is made with the builder as mover and the reply says so", r.startswith("created") and telling.holder(new_item) == BUILD and f"mover={BUILD}" in r and "no hand-off notice" in r, r[:400])
 check("2 …History has the line on the new item, and the fix is recorded", any(FRONT in x and BUILD in x for x in new_log) and fm_marked(new_item["metadata"]), (new_log, new_item["metadata"]))
 fput(203, mover=FRONT)
-out = server.stackshot_update(item_id="a203", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a203", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("2 re-sending the mover the item already holds changes nothing and says nothing", holder(203) == FRONT and "no hand-off notice" not in out and not log(203), out[:300])
 fput(204, mover=BUILD)
-out = server.stackshot_update(item_id="a204", sender=FRONT, mover=FRONT, next=f"{FRONT}: take it over")
+out = _wt_update.stackshot_update(item_id="a204", sender=FRONT, mover=FRONT, next=f"{FRONT}: take it over")
 check("2 a front agent naming itself is as it was: no fix, no line", holder(204) == FRONT and not log(204) and "no hand-off notice" not in out, out[:300])
 fput(205, mover=BUILD)
-out = server.stackshot_update(item_id="a205", sender=FRONT, mover=OTHER)
+out = _wt_update.stackshot_update(item_id="a205", sender=FRONT, mover=OTHER)
 check("2 …a background mover set by a front agent", holder(205) == OTHER and not log(205), out[:200])
 fput(207, mover=OTHER, project="projects/echo")
-msg = refusal(lambda: server.stackshot_update(item_id="a207", sender=OTHER, mover="home-echo-main", next=f"{OTHER}: x"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a207", sender=OTHER, mover="home-echo-main", next=f"{OTHER}: x"))
 check("2 a project with no builder keeps the refusal, as before (nothing to substitute)", msg.startswith("Refused:") and "no builder and no background agent" in msg and holder(207) == OTHER, (msg, mt(207)))
 
 # ================================================================ 3. wait_reason
@@ -277,16 +277,16 @@ check("6.2 …with the History line and the record", len(log(9200)) == 1 and "pa
 
 # 6.3 the front_mover mark is bound to the session whose write was fixed, and lasts a day
 fput(210, mover=BUILD, needs=[BUILD])
-out = server.stackshot_update(item_id="a210", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a210", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 the first send is substituted and marked for its sender", holder(210) == BUILD and fm_marked(mt(210)), (out[:200], mt(210).get(SF.MARK)))
 fput(211, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", server._session_id(OTHER) or OTHER, time.time())]}})
-out = server.stackshot_update(item_id="a211", sender=BACK, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a211", sender=BACK, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 an unrelated session after another's token is substituted, not waved through", holder(211) == BUILD and "as you sent it" not in out, (out[:300], mt(211)))
 fput(212, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", server._session_id(OTHER) or OTHER, time.time() - 2 * DAY)]}})
-out = server.stackshot_update(item_id="a212", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a212", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 …and the same session after a stale token (two days) is substituted again", holder(212) == BUILD and "as you sent it" not in out, (out[:300], mt(212)))
 fput(213, mover=BUILD, **{SF.MARK: {SF.FRONT_MOVER: [SF.bind(f"mover={FRONT}", server._session_id(OTHER) or OTHER, time.time() - 2 * HOUR)]}})
-out = server.stackshot_update(item_id="a213", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
+out = _wt_update.stackshot_update(item_id="a213", sender=OTHER, mover=FRONT, next=f"{BUILD}: carry on")
 check("6.3 …while the same session within the day sending it again is kept as sent", holder(213) == FRONT and "as you sent it" in out, (out[:300], mt(213)))
 
 # 6.4 a negation, a waiting word before the name and his name alone in quotes still wait on him

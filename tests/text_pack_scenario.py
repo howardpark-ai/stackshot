@@ -131,7 +131,7 @@ check("the `run` command that called a model is gone", r.returncode != 0, r.stdo
 check("the tool_text.touched gate still reads through the shared changed_since (no change in what it says)", tt.touched(R, BASE, H_PARAM, "")[0] == 1 and tt.touched(R, BASE, H_COMMENT, "")[0] == 0, (tt.touched(R, BASE, H_PARAM, ""),))
 
 # ================================================================= 5. tool names, the real HELPERS, the workflow and the docs
-src = pathlib.Path(STACK, "stackshot/web/server.py").read_text(encoding="utf-8")
+src = "\n".join(pathlib.Path(STACK, f).read_text(encoding="utf-8") for f in ("stackshot/web/server.py", *tt.TOOL_FILES))   # the tools are registered in web/tools/*.py
 names = tc.tool_names(src)
 check("the real server's tool functions map to the snapshot's tool names (stackshot_get -> get ...), every one of them in the snapshot", names["stackshot_get"] == "get" and set(names.values()) <= set(_real["tools"]), sorted(set(names.values()) - set(_real["tools"])))
 check("a changed shared item-line helper reaches the tools that list it", "get" in tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src) or tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src) != [], tc.affected_tools(["stackshot/web/server.py:_mover_lines"], src, src))

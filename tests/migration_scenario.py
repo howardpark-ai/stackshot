@@ -132,12 +132,12 @@ shutil.rmtree(cp4); shutil.copytree(T, cp4)
 (cp4 / "store/github.json").write_text(json.dumps({"repo": "o/r", "issues": {f"g{n}": n for n in (2, 3, 4, 5, 6)}, "aliases": {}}))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.service import gates; from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
+from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import migration as M; from stackshot.model import cold_call as C; from stackshot.waits import watchers as wk; from stackshot.waits import handoff as ho; from stackshot.web import render
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
 from stackshot.tools import migrate_model as MM
 OLIVER = model.owner_display()
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 FAIL_PUSH = [False]

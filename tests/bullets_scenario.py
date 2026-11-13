@@ -40,11 +40,13 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 MAIN = "falcon-main"
 STK = "projects/example"
@@ -55,7 +57,7 @@ def create(desc="- Goal: A thing\n- It lives here\n- Done when done", **kw):
     desc = goaled(desc)
     if not kw.get("next") and "ask" not in kw:
         kw["next"] = f"{MAIN}: carry on"          # an open item has an open step (N6): a create with no next of its own gets a named one
-    r = server.stackshot_create(subject=kw.pop("subject", "[home] a thing"), description=desc, project=STK, owner=MAIN, **kw)
+    r = _wt_create.stackshot_create(subject=kw.pop("subject", "[home] a thing"), description=desc, project=STK, owner=MAIN, **kw)
     return r, _model_ids._norm_id(r.split()[1])
 def refused(name, f, *want):
     try:
@@ -139,12 +141,12 @@ check("…and the stored prose description is untouched", server._load("a31")["d
 
 # ---- 4. a close judges its new description
 prose_item(32); prose_item(33); prose_item(34)
-refused("complete with a prose description is refused", lambda: server.stackshot_complete("a32", outcome="done", reason="finished", description="It is done and in use.", sender=MAIN), "not a `- ` bullet")
+refused("complete with a prose description is refused", lambda: _wt_complete.stackshot_complete("a32", outcome="done", reason="finished", description="It is done and in use.", sender=MAIN), "not a `- ` bullet")
 check("…and the item stays open", server._load("a32")["status"] == "open")
-passes("complete with bullets passes", lambda: server.stackshot_complete("a32", outcome="done", reason="finished", outcome_text="- It is done\n- In use", sender=MAIN))
+passes("complete with bullets passes", lambda: _wt_complete.stackshot_complete("a32", outcome="done", reason="finished", outcome_text="- It is done\n- In use", sender=MAIN))
 refused("update with status=completed and a prose description is refused",
         lambda: server._update("a33", status="completed", outcome="done", reason="finished", description="Done and in use.", sender=MAIN), "not a `- ` bullet")
-refused("complete with a bullet over 120 characters is refused", lambda: server.stackshot_complete("a34", outcome="done", reason="finished", outcome_text=bullet(130), sender=MAIN),
+refused("complete with a bullet over 120 characters is refused", lambda: _wt_complete.stackshot_complete("a34", outcome="done", reason="finished", outcome_text=bullet(130), sender=MAIN),
         "outcome_text bullet is 130 characters")
 
 # ---- 5. the limits come from the config
@@ -434,10 +436,10 @@ why = lambda n: "r" * n
 for i in (62, 63, 64, 65, 66):
     long_subject_item(i, "[home] close me")
 GOOD = "- It is done\n- In use"
-refused("complete: a reason of 121 characters is refused, with its length, the limit and the fix", lambda: server.stackshot_complete("a62", outcome="done", reason=why(121), outcome_text=GOOD, sender=MAIN),
+refused("complete: a reason of 121 characters is refused, with its length, the limit and the fix", lambda: _wt_complete.stackshot_complete("a62", outcome="done", reason=why(121), outcome_text=GOOD, sender=MAIN),
         "Refused: the reason is 121 characters and the limit is 120", "Shorten it", "outcome_text bullets")
 check("…and the item stays open", json.loads((T / "store/a/62.json").read_text())["status"] == "open")
-passes("complete: a reason of 120 characters passes", lambda: server.stackshot_complete("a62", outcome="done", reason=why(120), outcome_text=GOOD, sender=MAIN))
+passes("complete: a reason of 120 characters passes", lambda: _wt_complete.stackshot_complete("a62", outcome="done", reason=why(120), outcome_text=GOOD, sender=MAIN))
 refused("update status=completed: a reason of 121 characters is refused", lambda: server._update("a63", status="completed", outcome="done", reason=why(121), outcome_text=GOOD, sender=MAIN),
         "the reason is 121 characters and the limit is 120")
 passes("update status=completed: a reason of 120 characters passes", lambda: server._update("a63", status="completed", outcome="done", reason=why(120), outcome_text=GOOD, sender=MAIN))

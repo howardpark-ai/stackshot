@@ -82,7 +82,14 @@ def mt(i): return rd(i)["metadata"]
 
 
 from stackshot.web import server; from stackshot.waits import self_wait as SW; from stackshot.router import router as R
-server._publish = lambda: None
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import message as _wt_message
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
 def _no_claude(*a, **k): raise AssertionError("the real model was called")
 R.run_call = _no_claude
@@ -139,7 +146,7 @@ def runs(name, tool, frags, fn, *, swap=None, **extra):
         check(f"{name}: the server takes the example", False, f"{type(e).__name__}: {e}")
 
 
-def upd(i, *frags, **kw): return runs(f"update a{i}", "update", frags, lambda **k: server.stackshot_update(f"a{i}", **k), sender="home-agent", **kw)
+def upd(i, *frags, **kw): return runs(f"update a{i}", "update", frags, lambda **k: _wt_update.stackshot_update(f"a{i}", **k), sender="home-agent", **kw)
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- create
@@ -150,20 +157,20 @@ DESC_X = r'description="- Goal: the export finishes in under a minute\n- Problem
 P = 'project="projects/widgets"'
 
 out = runs("create: own work", "create", [P, SUBJ, 'sender="my-x"', 'mover="my-x"', DESC_X, 'next="my-x: profile the nightly run"'],
-           lambda **k: server.stackshot_create(**k))
+           lambda **k: _wt_create.stackshot_create(**k))
 check("create: own work: written, moved by the sender", bool(out) and "mover: home-agent" in out and "profile the nightly run" in out, out)
 
 out = runs("create: an item that needs the owner's call", "create",
            [[P, SUBJ, 'sender="my-x"'], [DESC_X, 'next="my-x: profile the nightly run"'], ['needs="decision"', 'then="my-x"'], [DEC]],
-           lambda **k: server.stackshot_create(**k))
+           lambda **k: _wt_create.stackshot_create(**k))
 
 out = runs("create: a step that waits on another item", "create",
            [[P, SUBJ, 'sender="my-x"', 'mover="my-x"', DESC_X], ['next="my-x: ship the export once board#N closes"', 'after=["board#N"]', 'ask_by="2099-03-02"']],
-           lambda **k: server.stackshot_create(**k), swap=[("board#N", "a12")])
+           lambda **k: _wt_create.stackshot_create(**k), swap=[("board#N", "a12")])
 
 out = runs("create: work for the builder (mover left out)", "create",
            [[P, SUBJ, 'sender="my-x"'], [DESC_X, 'next="my-x: profile the nightly run"']],
-           lambda **k: server.stackshot_create(**k))
+           lambda **k: _wt_create.stackshot_create(**k))
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- update
 item(40, next=TWO, owner=AGENT)       # the steps are the agent's own: only the writer of a step rewords it
@@ -186,7 +193,7 @@ check("update: a description", "takes 9 minutes" in rd(6)["description"], rd(6)[
 # why the reminder example names a day inside the cap: a far wake with a reason and no wait_basis is refused
 item(9)
 try:
-    server.stackshot_update("a9", sender="home-agent", wake="2099-03-02T09:00", wait_reason="the nightly run finishes at 03:00"); check("update: a wake far past the cap without a wait_basis is refused", False)
+    _wt_update.stackshot_update("a9", sender="home-agent", wake="2099-03-02T09:00", wait_reason="the nightly run finishes at 03:00"); check("update: a wake far past the cap without a wait_basis is refused", False)
 except server.ToolError as e:
     check("update: a wake far past the cap without a wait_basis is refused", "wait_basis" in str(e) or "days" in str(e), str(e))
 check("update: …and the text says a wake past the cap needs a wait_basis", "needs a wait_basis" in SNAP["update"]["description"][:CLI_CUT] + SNAP["update"]["parameters"]["wake"]["description"])
@@ -194,13 +201,13 @@ check("update: …and the text says a wake past the cap needs a wait_basis", "ne
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- complete
 CLOSE = 'sender="my-x"'
 runs("complete: done", "complete", ['outcome="done"', 'reason="Export shipped in PR 12"', r'outcome_text="- PR 12 merged\n- live on the box"'],
-     lambda **k: server.stackshot_complete("a7", **k), sender="home-agent")
+     lambda **k: _wt_complete.stackshot_complete("a7", **k), sender="home-agent")
 check("complete: done: the item is completed", rd(7)["status"] == "completed", rd(7).get("status"))
 item(50)
 runs("complete: dropped", "complete", ['outcome="dropped"', 'reason="No longer needed"', 'outcome_text="- The export moved to another team"'],
-     lambda **k: server.stackshot_complete("a50", **k), sender="home-agent")
+     lambda **k: _wt_complete.stackshot_complete("a50", **k), sender="home-agent")
 runs("complete: superseded", "complete", ['outcome="superseded"', 'superseded_by="board#M"', 'reason="Merged into board#M"', 'outcome_text="- Scope moved to board#M"'],
-     lambda **k: server.stackshot_complete("a51", **k), sender="home-agent", swap=[("board#M", "a52")])
+     lambda **k: _wt_complete.stackshot_complete("a51", **k), sender="home-agent", swap=[("board#M", "a52")])
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- message
 # The examples are called through the real function with the text's names swapped for the fixture's. The delivery itself (the hub, a pane) is not under test: a message to a
@@ -212,7 +219,7 @@ MSGS = [("ask a front agent", 'to="widgets-main", sender="my-x", text="[for the 
         ("a hand-off of a done step (the id as a plain word)", 'to="widgets-builder", sender="my-x", text="board#N: the design is done, build the export"')]
 for what, frag in MSGS:
     check(f"message: {what}: the example is in the first {CLI_CUT} characters", f"message({frag})" in msg, frag)
-    out = runs(f"message: {what}", "message", [frag], lambda **k: server.stackshot_message(**k), swap=[("widgets-main", "home-alpha-main"), ("[for the owner]", server._FOR_OWNER), ("widgets-builder", "home-builder"), ("board#N", "a12")])
+    out = runs(f"message: {what}", "message", [frag], lambda **k: _wt_message.stackshot_message(**k), swap=[("widgets-main", "home-alpha-main"), ("[for the owner]", _wt_text._FOR_OWNER), ("widgets-builder", "home-builder"), ("board#N", "a12")])
     check(f"message: {what}: the reply says what became of it", bool(out) and out.split()[0].lower().rstrip(":—") in ("delivered", "queued", "held", "inbox", "not"), out)
 check("message: the hand-off sentence and the context-only sentence are both in the first characters",
       "which names the item id, written as a plain word, not in backticks or quotes" in msg and "An item id cited only for context, not handed over, goes in backticks" in msg, msg[-400:])
@@ -220,7 +227,7 @@ check("message: the front-agent example opens with the mark the server asks for"
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------- anchors, confirm, route
 P_ = 'project="projects/widgets"'; PR_ = 'add=["https://github.com/acme/widgets/pull/12"]'
-anc = lambda **k: server.stackshot_anchors(**k)
+anc = lambda **k: _wt_anchors.stackshot_anchors(**k)
 item(12)
 runs("anchors: list", "anchors", [P_], anc)
 runs("anchors: add one for the project", "anchors", [P_, PR_], anc)
@@ -230,11 +237,11 @@ check("anchors: the four examples are written as anchors(...) calls", all(f"anch
       P_, f"{P_}, {PR_}", f'{P_}, {PR_}, items=["board#N"]', f'{P_}, remove=["https://github.com/acme/widgets/pull/12"]')), SNAP["anchors"]["description"][:900])
 
 item(8)
-runs("confirm", "confirm", ['item_id="board#N", sender="my-x"'], lambda **k: server.stackshot_confirm(**k), swap=[("board#N", "a8")])
+runs("confirm", "confirm", ['item_id="board#N", sender="my-x"'], lambda **k: _wt_complete.stackshot_confirm(**k), swap=[("board#N", "a8")])
 check("confirm: the example is written as confirm(...)", 'confirm(item_id="board#N", sender="my-x")' in SNAP["confirm"]["description"][:CLI_CUT])
 
 nid = server._routing.record("projects/alpha", kind="board", to=AGENT, label="board note", who="hub", text="a note for the export work", target="project-wide")
-out = runs("route", "route", ['notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x"'], lambda **k: server.stackshot_route(**k),
+out = runs("route", "route", ['notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x"'], lambda **k: _wt_route.stackshot_route(**k),
            swap=[("a1b2c3", nid), ('to="my-x"', 'to="home-builder"')])
 check("route: the example is written as route(...)", 'route(notice="a1b2c3", ruling="passed", to="my-x", reason="belongs to the export work", sender="my-x")' in SNAP["route"]["description"][:CLI_CUT])
 check("route: the reply names the ruling", bool(out) and "ruled" in out and "passed" in out, out)
@@ -245,13 +252,13 @@ CHK = 'next="other-x: build the export", check="pr_merged acme/widgets#12"'
 check("update: the check example is in the parameter text and the description", 'check="pr_merged acme/widgets#12"' in SNAP["update"]["parameters"]["check"]["description"] and 'check="pr_merged acme/widgets#12"' in SNAP["update"]["description"],
       SNAP["update"]["parameters"]["check"]["description"][:300])
 try:
-    out = server.stackshot_update("a10", sender="home-agent", **kwargs_of(CHK, swap=[("other-x", "home-builder")])); check("update a10: the server takes the check example", True)
+    out = _wt_update.stackshot_update("a10", sender="home-agent", **kwargs_of(CHK, swap=[("other-x", "home-builder")])); check("update a10: the server takes the check example", True)
     check("update a10: the check is stored", "pr_merged" in json.dumps(mt(10)), mt(10))
 except server.ToolError as e:
     check("update a10: the server takes the check example", False, str(e))
 
 try:
-    out = server.stackshot_create(sender="home-agent", mover="home-agent", **kwargs_of(P, SUBJ, DESC_X, CHK, swap=[("other-x", "home-builder")])); check("create: the server takes the check example", bool(out) and "created" in out, out)
+    out = _wt_create.stackshot_create(sender="home-agent", mover="home-agent", **kwargs_of(P, SUBJ, DESC_X, CHK, swap=[("other-x", "home-builder")])); check("create: the server takes the check example", bool(out) and "created" in out, out)
 except server.ToolError as e:
     check("create: the server takes the check example", False, str(e))
 check("create: the check example is in the parameter text", 'check="pr_merged acme/widgets#12"' in SNAP["create"]["parameters"]["check"]["description"])

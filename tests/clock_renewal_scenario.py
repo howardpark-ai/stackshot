@@ -66,13 +66,16 @@ sys.path.insert(0, STACK); logging.disable(logging.INFO)
 
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
 wk_ = lambda m: _WT.wake_value(m)
 ab_ = lambda m: _WT.stored_until(m) or m.get("ask_by")
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
@@ -155,11 +158,11 @@ SW._run = fake_run
 item(15, needs=[BACK], next="team-back: do the thing\nteam-back: and the other thing", wake=day(3))
 was15 = raw(15)
 try:
-    server.stackshot_update("a15", sender=BACK, wake=day(5), wait_reason="x" * 60); check("tool: a later wake with a long wait_reason is refused", False, mt(15))
+    _wt_update.stackshot_update("a15", sender=BACK, wake=day(5), wait_reason="x" * 60); check("tool: a later wake with a long wait_reason is refused", False, mt(15))
 except server.ToolError as e:
     check("tool: a later wake with a long wait_reason is refused by the clock gate, after the self-wait gate passed it", "clock pushed out" in str(e) and len(CALLS) == 1, (str(e), len(CALLS)))
 check("tool: …and nothing is written", raw(15) == was15, None)
-server.stackshot_update("a15", sender=BACK, wake=day(5), done=[1], wait_reason="the vendor ships on that day, not before")
+_wt_update.stackshot_update("a15", sender=BACK, wake=day(5), done=[1], wait_reason="the vendor ships on that day, not before")
 check("tool: …with a step marked done accepted", wk_(mt(15)) == day(5), mt(15))
 
 # ================================================================ the owner's words in the same write are a reason

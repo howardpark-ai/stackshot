@@ -60,10 +60,11 @@ def refused(name, f, *want, none=()):
     except Exception as e:
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import model; from stackshot.model import model_guards as mg; from stackshot.model import rebullet as rb; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 raw = lambda i, letter="a": (T / f"store/{letter}/{i}.json").read_text()
@@ -98,10 +99,10 @@ THICK = ("Move the widget to shelf-2 so it syncs from shelf-1 on its own when sh
          "The plan is at https://example.org/plan/42 and the unit is `widget-sync.service`. About 12 checks run every 30 seconds, and the sync must finish within 5 minutes. "
          "Nothing is built yet; the first step is a dry run on shelf-2, and then the full sync test, which needs the second disk mounted first.")
 check("2 setup: the fixture text is thick and over 400 characters", len(THICK) > 400 and P(THICK) != "", len(THICK))
-out = server._create(subject="[home] a thick create", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
+out = _wt_create._create(subject="[home] a thick create", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
 gid = re.search(r"created (\S+) ", out).group(1); stored = server._load(_model_ids._norm_id(gid))
 check("2 note: the default writes the thick description and says so in the reply", stored["description"] == THICK and "(note: description has a paragraph of" in out and "short `- ` bullets, one line each" in out, out[:900])
-out = server._create(subject="[home] a bulleted create", description=DESC, project="projects/alpha", owner="home-front", next="home-front: go")
+out = _wt_create._create(subject="[home] a bulleted create", description=DESC, project="projects/alpha", owner="home-front", next="home-front: go")
 check("2 note: bullets draw no note", "description has" not in out and "(note: description" not in out, out[:600])
 item(60); item(61, desc=THICK); item(62, desc=THICK)
 out = upd(60, description=THICK)
@@ -112,7 +113,7 @@ set_cfg(description_guard="refuse")
 was = raw(60)
 refused("2 refuse: an update with a thick description is refused with the guidance", lambda: upd(60, description=THICK + " More."), "Refused:", "description has a paragraph of", "short `- ` bullets")
 check("2 refuse: …nothing written", raw(60) == was, None)
-refused("2 refuse: a create with a thick description is refused", lambda: server._create(subject="[home] refused create", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go"), "Refused:", "description has a paragraph of")
+refused("2 refuse: a create with a thick description is refused", lambda: _wt_create._create(subject="[home] refused create", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go"), "Refused:", "description has a paragraph of")
 upd(60, description=DESC)
 check("2 refuse: bullets pass", rd(60)["description"] == DESC, rd(60))
 out = upd(61, next="home-front: a third step")
@@ -144,10 +145,10 @@ refused("2 reopen: …but one that sets a thick description is refused, nothing 
 check("2 reopen: …(nothing written)", raw(71) == was71, None)
 upd(71, status="open", next="home-front: pick it up again", description=DESC)
 check("2 reopen: …and one that sets bullets reopens", rd(71)["status"] == "open" and rd(71)["description"] == DESC, rd(71)["status"])
-refused("2 question route: without the exemption the thick create is refused in refuse mode", lambda: server._create(subject="[home] a question", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go"), "description has a paragraph of")
+refused("2 question route: without the exemption the thick create is refused in refuse mode", lambda: _wt_create._create(subject="[home] a question", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go"), "description has a paragraph of")
 writes.QUESTION.on = True
 try:
-    out_q = server._create(subject="[home] a script's question", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
+    out_q = _wt_create._create(subject="[home] a script's question", description=THICK, project="projects/alpha", owner="home-front", next="home-front: go")
 finally:
     writes.QUESTION.on = False
 check("2 question route: …a create under the question route's flag is exempt (a script's text is never stranded on a wording refusal)", out_q.startswith("created") and "description has" not in out_q, out_q[:200])

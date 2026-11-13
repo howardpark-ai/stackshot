@@ -136,6 +136,7 @@ check("an event from it: asked again at the next pass", hub.status["anchors"][dr
 
 # ---- 9. the rulebook's import line (server._rules_source)
 from stackshot.web import server
+from stackshot.web.tools import rules as _wt_rules
 R = T / "rules"; R.mkdir()
 (R / "A.md").write_text("<!-- header -->\n# Rules\n\n## One\n\n- a rule\n\n@B.md\n@missing.md\nnot an @import.md line\n", encoding="utf-8")
 (R / "B.md").write_text("# Agent rules\n\nOne sentence.\n\n<!-- surface: cli -->\n## CLI only\n\n- hidden from Cowork\n\n## Two\n\n- another rule\n- a cli bullet <!-- cli -->\n@C.md\n", encoding="utf-8")
@@ -162,7 +163,7 @@ check("rules: the Cowork preamble names no retired page script and no push overr
       "example-page.sh" not in _pre and "EXAMPLE_PAGE_PUSH" not in _pre, _pre[-1200:])
 check("rules: a marker-less file is served whole (cowork: after the preamble)", cw2.startswith(server._cowork_preamble()) and cw2.endswith(body.strip() + "\n"), cw2[-300:])
 check("rules: a marker-less file under profile full is the file itself", full2 == body, full2)
-tool = getattr(server.stackshot_rules, "fn", server.stackshot_rules)        # the decorated tool's own function
+tool = getattr(_wt_rules.stackshot_rules, "fn", _wt_rules.stackshot_rules)        # the decorated tool's own function
 check("rules: the rules tool serves it, both profiles", tool() == cw2 and tool("full") == body, tool()[-200:])
 # rulebook parts ([paths] rules_parts): skill files appended after the body, cloud and Cowork get no hooks to load them
 check("rules: no parts configured (the default) = nothing appended", server._cfg.paths("paths", "rules_parts") == [], server._cfg.paths("paths", "rules_parts"))

@@ -63,10 +63,11 @@ def refused(name, f, *want):
     except Exception as e:
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.model import model; from stackshot.waits import watchers as wk; from stackshot.waits import event_waits as EW; from stackshot.web import render; from stackshot.web import itempage; from stackshot.waits import stall as S; from stackshot.service import create as create_svc
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 REAL_MERGED_PRS, REAL_GIT_COMMIT = server._merged_prs, server._git_commit      # before the checks below swap them for tables
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 SENT: list[tuple[str, str, str, str]] = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": SENT.append((gid, owner, note, tag))
@@ -396,7 +397,7 @@ for ph in ("fleet_op many", "fleet_op provision", "fleet_op lane box-1"):
     check(f"live: a `{ph}` wait is live, so the reply carries no 'nothing tells the server' line", "Nothing tells the server" not in out and "the fleet tool reports the end of each op" in out, out[-500:])
 check("live: …the pure test says which are live (PR kinds, recycle, every fleet_op form) and which are not (job_run)",
       all(EW.live(P(x)) for x in ("pr_released 7", "pr_merged o/r#7", "recycle", "recycle box-1", "fleet_op recycle", "fleet_op reboot", "fleet_op any", "fleet_op many", "fleet_op provision", "fleet_op update box-1", "fleet_op lane")) and not EW.live(P("job_run nightly")), None)
-check("live: …the tool text says the same (every fleet_op form live, job_run on its backstop) and that the day starts at 00:00 in the instance timezone", "every fleet_op form" in server._MODEL_FORM and "fleet_op recycle, reboot or any" not in server._MODEL_FORM and "job_run wait turns only on its backstop" in server._MODEL_FORM and "00:00 of that day in the instance timezone" in server._MODEL_FORM, None)
+check("live: …the tool text says the same (every fleet_op form live, job_run on its backstop) and that the day starts at 00:00 in the instance timezone", "every fleet_op form" in _wt_text._MODEL_FORM and "fleet_op recycle, reboot or any" not in _wt_text._MODEL_FORM and "job_run wait turns only on its backstop" in _wt_text._MODEL_FORM and "00:00 of that day in the instance timezone" in _wt_text._MODEL_FORM, None)
 
 check("alias: the first name of the kind (sala_op) is still read, as a phrase and as a report, and stored as fleet_op", P("sala_op Lane box-1") == EW.Spec("fleet_op", "lane", "box-1") and EW.text(P("sala_op many")) == "fleet_op many"
       and rep({"kind": "sala_op", "verb": "update"})["kind"] == "fleet_op" and "sala" not in EW.FORMS.lower(), None)

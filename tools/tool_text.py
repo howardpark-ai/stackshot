@@ -56,6 +56,9 @@ REFRESH = "python3 tools/tool_text.py update"
 LABELLED = ("get", "brief", "create", "update", "message", "complete")     # the tools whose returned lines have labels in the snapshot
 
 SERVER_REL = "stackshot/web/server.py"
+# The tools are registered in these modules (each `register` adds its own with `mcp.tool(...)(function)`); until the server was split a revision has them in server.py,
+# which stays watched for that reason.
+TOOL_FILES = tuple(f"stackshot/web/tools/{m}.py" for m in ("brief", "get", "create", "update", "complete", "sessions", "message", "route", "anchors", "rules"))
 # Where each watched file stood before the code moved into the package (Sun Nov 8th 2026): a base revision from before the move has the file there, so the move itself is not a change of every watched function.
 _BEFORE_PACKAGE = {
     "stackshot/model/model.py": "model.py",
@@ -88,20 +91,20 @@ _ITEM_LINES = [   # the item as get shows it, which create, update and complete 
     ("stackshot/waits/watchers.py", "chases_line"), ("stackshot/model/work.py", "words"),
 ]
 _WRITE_NOTES = [   # the notes a create or an update reply ends with
-    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/decision_gates.py", "_options_note"), ("stackshot/web/server.py", "_owner_param"),
+    ("stackshot/web/server.py", "_form_notes"), ("stackshot/web/server.py", "_said_note"), ("stackshot/web/decision_gates.py", "_options_note"), ("stackshot/web/tools/notes.py", "_owner_param"),
     ("stackshot/web/server.py", "_owner_then_default"),
 ]
-_GET_ONLY = [("stackshot/web/server.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
+_GET_ONLY = [("stackshot/web/tools/get.py", "stackshot_get"), ("stackshot/web/server.py", "_notice_report")]     # lines only get returns: a notice's ruling (get with a notice id)
 HELPERS: dict[str, list[tuple[str, str]]] = {
     "get": _GET_ONLY + _ITEM_LINES,
-    "brief": [("stackshot/web/server.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/server.py", "_world_waits_text"),
+    "brief": [("stackshot/web/tools/brief.py", "stackshot_brief"), ("stackshot/web/server.py", "_model_report_line"), ("stackshot/web/tools/brief.py", "_world_waits_text"),
               ("stackshot/web/server.py", "_handoff_brief"), ("stackshot/web/whatschanged.py", "lines"), ("stackshot/model/model_guards.py", "brief_line"), ("stackshot/waits/handoff.py", "brief_lines")] + _ITEM_LINES,
-    "create": [("stackshot/web/server.py", "stackshot_create"), ("stackshot/web/server.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/web/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
-    "update": [("stackshot/web/server.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
+    "create": [("stackshot/web/tools/create.py", "stackshot_create"), ("stackshot/web/tools/create.py", "_create"), ("stackshot/service/create.py", "create_item"), ("stackshot/web/similar.py", "_similar_note")] + _WRITE_NOTES + _ITEM_LINES,
+    "update": [("stackshot/web/tools/update.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
                ("stackshot/web/server.py", "_command_note"), ("stackshot/web/server.py", "_watch_on_write"), ("stackshot/service/telling.py", "mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
-    "message": [("stackshot/web/server.py", "stackshot_message"), ("stackshot/web/server.py", "_message")],
-    "confirm": [("stackshot/web/server.py", "stackshot_confirm"), ("stackshot/service/update.py", "confirm_item")],      # not labelled in the snapshot (its reply has no label), but watched: the gate sees a changed body
-    "complete": [("stackshot/web/server.py", "stackshot_complete"), ("stackshot/service/update.py", "complete_item"), ("stackshot/service/update.py", "_completion_anchor_prompt"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/service/telling.py", "mentions_reply")]
+    "message": [("stackshot/web/tools/message.py", "stackshot_message"), ("stackshot/web/server.py", "_message")],
+    "confirm": [("stackshot/web/tools/complete.py", "stackshot_confirm"), ("stackshot/service/update.py", "confirm_item")],      # not labelled in the snapshot (its reply has no label), but watched: the gate sees a changed body
+    "complete": [("stackshot/web/tools/complete.py", "stackshot_complete"), ("stackshot/service/update.py", "complete_item"), ("stackshot/service/update.py", "_completion_anchor_prompt"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/service/telling.py", "mentions_reply")]
                 + _WRITE_NOTES + _ITEM_LINES,
 }
 ALL_HELPERS = sorted({h for hs in HELPERS.values() for h in hs})
@@ -370,15 +373,20 @@ def git(root: Path, *a: str) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
+def _is_mcp_tool(f: ast.AST) -> bool:
+    return isinstance(f, ast.Attribute) and f.attr == "tool" and isinstance(f.value, ast.Name) and f.value.id == "mcp"
+
+
 def tool_functions(tree: ast.AST) -> set[str]:
-    """The functions registered as tools: decorated @mcp.tool(...)."""
+    """The functions registered as tools: decorated @mcp.tool(...), or handed to `mcp.tool(...)(function)` as the modules of web/tools/ do in `register`."""
     out = set()
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for d in n.decorator_list:
-                f = d.func if isinstance(d, ast.Call) else d
-                if isinstance(f, ast.Attribute) and f.attr == "tool" and isinstance(f.value, ast.Name) and f.value.id == "mcp":
+                if _is_mcp_tool(d.func if isinstance(d, ast.Call) else d):
                     out.add(n.name)
+        elif isinstance(n, ast.Call) and isinstance(n.func, ast.Call) and _is_mcp_tool(n.func.func):
+            out.update(a.id for a in n.args if isinstance(a, ast.Name))
     return out
 
 
@@ -391,7 +399,7 @@ def body_dump(fn: Any) -> str:
 
 
 def watched(src: str | None, file: str) -> dict[str, str] | None:
-    """{function name: its body dump} for the functions of one file the gate watches (the tool functions, in server.py, and the output helpers); None when it does not parse."""
+    """{function name: its body dump} for the functions of one file the gate watches (the tool functions, in web/tools/ (before the split, server.py), and the output helpers); None when it does not parse."""
     if src is None:
         return {}
     try:
@@ -399,7 +407,7 @@ def watched(src: str | None, file: str) -> dict[str, str] | None:
     except SyntaxError:
         return None
     fns = functions(tree)
-    names = {n for f, n in ALL_HELPERS if f == file} | (tool_functions(tree) if file == SERVER_REL else set())
+    names = {n for f, n in ALL_HELPERS if f == file} | (tool_functions(tree) if file == SERVER_REL or file in TOOL_FILES else set())
     return {n: body_dump(fns[n]) for n in names if n in fns}
 
 
@@ -430,7 +438,7 @@ def real_reason(reason: str) -> bool:
 def changed_since(root: Path, base: str, head: str, exact: bool = False) -> tuple[str, list[str]]:
     """(the fork point of base and head, or base itself when exact; the watched functions changed from it to head as `file:function`). Shared with tools/text_check.py."""
     mb = base if exact else (git(root, "merge-base", base, head) or base).strip()    # the fork point: a main that moved on since is not this PR's change
-    files = sorted({f for f, _ in ALL_HELPERS} | {SERVER_REL})
+    files = sorted({f for f, _ in ALL_HELPERS} | {SERVER_REL} | set(TOOL_FILES))
     src = lambda rev: {f: show_at(root, rev, f) for f in files}
     return mb, changed_functions(src(mb), src(head))
 

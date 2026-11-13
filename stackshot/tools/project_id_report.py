@@ -47,12 +47,13 @@ def readers(server: Any, store: Path, now: float) -> dict[str, str]:
     """What the readers show of the store at the clock `now`: the board's markdown and brief, the server's brief, the project key each reader takes for every open item (anchors.project_of: the page), and the project each shows for it (item_project.project_of: the top-level project)."""
     from stackshot.anchors import anchors as _anc  # noqa: PLC0415
     from stackshot.web import render as _render  # noqa: PLC0415
+    from stackshot.web.tools import brief as _brief_tool  # noqa: PLC0415
     out: dict[str, str] = {}
     with SP.frozen(now):
         b = _render.Board(str(store))
         out["board.md"] = b.markdown()
         out["board brief"] = b.brief()
-        out["server brief"] = server.stackshot_brief()
+        out["server brief"] = _brief_tool.stackshot_brief()
     items = SP.load_dir(store)
     out["keys"] = json.dumps({g: _anc.project_of(server._load(g) or {}) for g, it in sorted(items.items(), key=lambda kv: SP.num(kv[0])) if it.get("status") == "open"}, sort_keys=True)
     out["projects shown"] = json.dumps({g: server._ip.project_of((server._load(g) or {}).get("metadata") or {}) for g, it in sorted(items.items(), key=lambda kv: SP.num(kv[0])) if it.get("status") == "open"}, sort_keys=True)      # the top-level project every reader that shows an item's project writes (item_project.project_of)

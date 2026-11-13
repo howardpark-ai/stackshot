@@ -80,8 +80,12 @@ try:
     def mt(i): return rd(i)["metadata"]
 
     from stackshot.web import server
+    from stackshot.web.tools import anchors as _wt_anchors
+    from stackshot.web.tools import route as _wt_route
+    from stackshot.web.tools import complete as _wt_complete
+    from stackshot.web.tools import get as _wt_get
     from stackshot.web.ui import render as r2
-    server._publish = lambda: None
+    server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
     server._refuse_if_owing = lambda debtor: None        # the page rule is not under test here
     def refused(name, f, *want):
         try:
@@ -90,32 +94,32 @@ try:
             check(name, all(w in str(e) for w in want), str(e))
 
     # ---- 1. a close keeps the description and stores the outcome text
-    out = server.stackshot_complete("a1", outcome="done", reason="the export runs from the new bucket", outcome_text=NEW)
+    out = _wt_complete.stackshot_complete("a1", outcome="done", reason="the export runs from the new bucket", outcome_text=NEW)
     check("complete: the description is exactly what it was, the outcome text is stored", rd(1)["status"] == "completed" and rd(1)["description"] == DESC and mt(1).get("outcome_text") == NEW, rd(1))
     check("complete: outcome and reason are stored as before", mt(1).get("outcome") == "done" and mt(1).get("reason") == "the export runs from the new bucket", mt(1))
-    check("complete: the reply and get show the outcome text under a label, and the description as it was", f"outcome text:\n{NEW}" in out and DESC in out and f"outcome text:\n{NEW}" in server.stackshot_get("a1"), out)
+    check("complete: the reply and get show the outcome text under a label, and the description as it was", f"outcome text:\n{NEW}" in out and DESC in out and f"outcome text:\n{NEW}" in _wt_get.stackshot_get("a1"), out)
     server._update("a2", status="completed", outcome="dropped", reason="not needed after the move", outcome_text="- Not needed: the move made it moot")
     check("update status=completed with outcome_text: the same", rd(2)["description"] == DESC and mt(2).get("outcome_text") == "- Not needed: the move made it moot" and mt(2).get("outcome") == "dropped", rd(2))
-    refused("a close with no outcome text is refused and names it", lambda: server.stackshot_complete("a3", outcome="done", reason="it works"), "needs outcome_text")
-    refused("an outcome text that is not bullets is refused, named outcome_text", lambda: server.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="It works now."), "outcome_text line is not a `- ` bullet")
-    refused("an outcome text over the line limit is refused, named outcome_text", lambda: server.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- " + "long " * 40), "outcome_text bullet is")
+    refused("a close with no outcome text is refused and names it", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works"), "needs outcome_text")
+    refused("an outcome text that is not bullets is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="It works now."), "outcome_text line is not a `- ` bullet")
+    refused("an outcome text over the line limit is refused, named outcome_text", lambda: _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- " + "long " * 40), "outcome_text bullet is")
     refused("outcome_text outside a close is refused", lambda: server._update("a3", outcome_text=NEW), "go with a close")
     check("…and nothing above touched the open item", rd(3)["status"] == "open" and rd(3)["description"] == DESC and "outcome_text" not in mt(3), rd(3))
-    server.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- Resolved: the export moved\n- Done: the old bucket is empty")
+    _wt_complete.stackshot_complete("a3", outcome="done", reason="it works", outcome_text="- Resolved: the export moved\n- Done: the old bucket is empty")
     check("an outcome text may say what was resolved and done (the forbidden tokens guard live descriptions, not an end state)", mt(3).get("outcome_text", "").startswith("- Resolved:") and rd(3)["description"] == DESC, mt(3))
 
     # ---- 2. a description passed with a close (an older caller) is the outcome text
     LEGACY = "- The export runs from the new bucket\n- Written by a caller that predates outcome_text"
-    server.stackshot_complete("a4", outcome="done", reason="finished", description=LEGACY)
+    _wt_complete.stackshot_complete("a4", outcome="done", reason="finished", description=LEGACY)
     check("complete with a description: stored as the outcome text, the description is not replaced", rd(4)["status"] == "completed" and rd(4)["description"] == DESC and mt(4).get("outcome_text") == LEGACY, rd(4))
     server._update("a5", status="completed", outcome="done", reason="finished", description=LEGACY)
     check("update status=completed with a description: the same", rd(5)["description"] == DESC and mt(5).get("outcome_text") == LEGACY, rd(5))
-    refused("a description and an outcome text together are refused", lambda: server.stackshot_complete("a6", outcome="done", reason="finished", description=LEGACY, outcome_text=NEW), "passes both")
+    refused("a description and an outcome text together are refused", lambda: _wt_complete.stackshot_complete("a6", outcome="done", reason="finished", description=LEGACY, outcome_text=NEW), "passes both")
     check("…the item is untouched", rd(6)["status"] == "open" and rd(6)["description"] == DESC and "outcome_text" not in mt(6), rd(6))
-    server.stackshot_complete("a6", outcome="done", reason="finished", description=f"  {DESC}\n", outcome_text=NEW)
+    _wt_complete.stackshot_complete("a6", outcome="done", reason="finished", description=f"  {DESC}\n", outcome_text=NEW)
     check("a description passed with an outcome text that equals the stored one (after strip) is ignored: the close goes through with the outcome text",
           rd(6)["status"] == "completed" and rd(6)["description"] == DESC and mt(6).get("outcome_text") == NEW, rd(6))
-    refused("a legacy description that is not bullets is refused as the outcome text", lambda: server.stackshot_complete("a8", outcome="done", reason="finished", description="It is finished."), "outcome_text line is not a `- ` bullet")
+    refused("a legacy description that is not bullets is refused as the outcome text", lambda: _wt_complete.stackshot_complete("a8", outcome="done", reason="finished", description="It is finished."), "outcome_text line is not a `- ` bullet")
 
     # ---- 2b. whose words: a close is judged on what it wrote (the outcome text and the reason), not on the background the description keeps
     QUOTE = f'- {server.OWNER}, Wed Oct 28th: "ship it"'

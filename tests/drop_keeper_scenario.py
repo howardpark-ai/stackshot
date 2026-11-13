@@ -47,9 +47,16 @@ def put(i, status="open", project="projects/alpha", creator=MAIN, **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": creator, "project": project, **meta}}))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, gid, owner, note))
@@ -58,17 +65,17 @@ SID = server._session_id
 NOKEEP = lambda s: "keeper of record" not in str(s).lower()
 
 # ---- 1. D1/D3: any session creates; the creator holds nothing; an item with no mover falls to the builder, else the -main agent
-r = server.stackshot_create(subject="[home] made by a background agent", description=DESC, project="projects/alpha", sender=REVIEW, next=f"{REVIEW}: carry on")
+r = _wt_create.stackshot_create(subject="[home] made by a background agent", description=DESC, project="projects/alpha", sender=REVIEW, next=f"{REVIEW}: carry on")
 g1 = r.split()[1]; m1 = rd(g1)["metadata"]
 check("create: a background agent may create an item (D3): no refusal", r.startswith("created") and "Refused" not in r, r)
 check("create: the creator is stored (metadata.owner) as a fact, and no mover and no `then` is stored from it (D1)", SID(str(m1.get("owner"))) == SID(REVIEW) and "mover" not in m1 and "then" not in m1, m1)
 check("create: the item is moved by the project's builder (a background agent whose mandate builds), never its creator", telling.holder(rd(g1)) == BUILD and telling.holder(rd(g1)) != REVIEW, telling.holder(rd(g1)))
-check("create: the reply and get never say 'keeper of record'", NOKEEP(r) and NOKEEP(server.stackshot_get(g1)), server.stackshot_get(g1))
-r = server.stackshot_create(subject="[home] made on beta", description=DESC, project="projects/beta", sender=MAIN, next=f"{BMAIN}: carry on")
+check("create: the reply and get never say 'keeper of record'", NOKEEP(r) and NOKEEP(_wt_get.stackshot_get(g1)), _wt_get.stackshot_get(g1))
+r = _wt_create.stackshot_create(subject="[home] made on beta", description=DESC, project="projects/beta", sender=MAIN, next=f"{BMAIN}: carry on")
 g2 = r.split()[1]
 check("create: a project with no builder falls to its -main agent, not the creator from another project", telling.holder(rd(g2)) == BMAIN and "mover" not in rd(g2)["metadata"], telling.holder(rd(g2)))
-_create_decl = server._CREATE_DESC
-check("create tool text: says background agents may create, and no tool text says 'keeper of record'", NOKEEP(_create_decl) and NOKEEP(server._UPDATE_DESC) and NOKEEP(server._NEEDS_FORM) and "background agent" in _create_decl.lower(), _create_decl[:300])
+_create_decl = _wt_create._CREATE_DESC
+check("create tool text: says background agents may create, and no tool text says 'keeper of record'", NOKEEP(_create_decl) and NOKEEP(_wt_update._UPDATE_DESC) and NOKEEP(_wt_text._NEEDS_FORM) and "background agent" in _create_decl.lower(), _create_decl[:300])
 
 # ---- 2. D1: the start pass
 put(1)                                         # alpha, no mover: gets the builder
@@ -99,7 +106,7 @@ check("start pass: idempotent: a second run writes nothing for the ones that got
 # ---- 3. D2: every notice goes to the mover alone
 put(10, project="projects/alpha", creator=REVIEW, mover=BUILD)
 told.clear()
-res = server.stackshot_complete("a10", sender=MAIN, outcome="done", reason="it is in", description="- Goal: The work is in place"); time.sleep(0.6)
+res = _wt_complete.stackshot_complete("a10", sender=MAIN, outcome="done", reason="it is in", description="- Goal: The work is in place"); time.sleep(0.6)
 to_ = [o for t, g, o, n in told if g == "a10"]
 check("close: told to the item's mover (the builder) alone, never to its creator", to_ and set(map(SID, to_)) == {SID(BUILD)} and SID(REVIEW) not in map(SID, to_), told)
 check("close: no reply and no notice names a keeper of record", NOKEEP(res) and all(NOKEEP(n) for t, g, o, n in told), res)
@@ -114,7 +121,7 @@ check("move to another project: the project written is the project stored, no re
 bd = ui_render.Board(str(T / "store"))
 row = bd.item("a11")
 page_html = bd.item_html("a11")
-check("item page and get never say 'keeper of record'", NOKEEP(page_html) and NOKEEP(server.stackshot_get("a11")))
+check("item page and get never say 'keeper of record'", NOKEEP(page_html) and NOKEEP(_wt_get.stackshot_get("a11")))
 bd.item_versions = lambda r: [(now0 - 60, json.loads((T / "store/a/11.json").read_text()))]
 evs, more = bd.item_events(row)
 created = [h for _t, k, h in evs if k == "created"]
@@ -135,7 +142,7 @@ check("D9: a background mover that hands the item to Oliver becomes its `then`",
 put(15, project="projects/alpha", creator=MAIN, mover=MAIN, next=f"{BUILD}: building the fix\nOliver: pick the vendor")
 res = server._update("a15", needs=["decision"], ask=ASK, sender=MAIN)
 check("D9: a front agent relaying an item whose next names the builder as building gets the builder as `then`, not itself", rd(15)["metadata"].get("then") == BUILD, (rd(15)["metadata"], res[-300:]))
-r = server.stackshot_create(subject="[home] builder's own decision", description=DESC, project="projects/alpha", sender=BUILD, needs=["decision"], ask=ASK)
+r = _wt_create.stackshot_create(subject="[home] builder's own decision", description=DESC, project="projects/alpha", sender=BUILD, needs=["decision"], ask=ASK)
 g9 = r.split()[1]
 check("D9: a decision item the builder creates has the builder as its own `then`", rd(g9)["metadata"].get("then") == BUILD, (rd(g9)["metadata"], r[-300:]))
 

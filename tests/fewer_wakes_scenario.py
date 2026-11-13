@@ -94,10 +94,15 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.waits import reports
 from stackshot.router import router as _router
 from stackshot.web import server
+from stackshot.web.tools import update as _wt_update
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.anchors.anchorhub import core
-server._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None; telling.PUSH = [sys.executable, str(T / "fakepush.py")]
 server._refuse_if_owing = lambda debtor: None
 PRESENT = [True]    # a front agent Oliver is typing to now: the gate sends its close line (the held case is in front_quiet_scenario)
 _real_verdict = telling.front_verdict
@@ -114,7 +119,7 @@ def to(name, since): return [x for x in pushes()[since:] if x[0] == name]
 def why(fn):
     try: fn(); return ""
     except server.ToolError as e: return str(e)
-MK = server._FOR_OWNER
+MK = _wt_text._FOR_OWNER
 
 # ---- 0. reports.report_doubt: only what clearly reads as a status report is held back; everything else is delivered
 FRONT = ("osprey-main", "osprey-front2")
@@ -471,7 +476,7 @@ h = [v for v in held().values() if v["gid"] == "a20"][0]
 check("…the held line is the one the keeper would have heard, due 180 seconds on", h["gid"] == "a20" and h["oid"] == A and h["line"].startswith("[stackshot] a20 is back with you alone (handed back by osprey-front2): [home] item 20; next: ")
       and h["line"].endswith("/items/a20") and abs(h["due"] - (t0 + 180)) < 30, h)
 check("3c: the tick before the window ends sends nothing", telling.handback_tick(now=t0 + 60) == [] and len(held()) == 1 and not hb_notes("a20", n0))
-out = server.stackshot_update("a20", status="completed", outcome="done", reason="PR 26 is live", description="- The thing works and is in use", sender="osprey-x", done=[2]); settle()      # the hand-back line names the front agent: the builder's close marks it itself (done=[2]), as a close no longer settles another session's step
+out = _wt_update.stackshot_update("a20", status="completed", outcome="done", reason="PR 26 is live", description="- The thing works and is in use", sender="osprey-x", done=[2]); settle()      # the hand-back line names the front agent: the builder's close marks it itself (done=[2]), as a close no longer settles another session's step
 check("3d: the builder closes the item inside the window: the held hand-back is dropped, and the keeper gets only the close line (one marked message)",
       held() == {} and not hb_notes("a20", n0) and not hb_pushes("a20", p0) and len(to(A, p0)) == 1 and "closed by osprey-x: done (PR 26 is live)" in to(A, p0)[0][1] and to(A, p0)[0][1].startswith(MK + " "), (held(), to(A, p0)))
 check("…and the tick after the window sends nothing more", telling.handback_tick(now=t0 + 400) == [] and not hb_notes("a20", n0) and len(to(A, p0)) == 1)
@@ -510,7 +515,7 @@ _cfg.CFG["board"].pop("handback_hold_seconds", None)
 # the close of a different item leaves the held line alone
 n0 = len(pushes()); t3 = time.time()
 server._update("a27", needs=["osprey-main"], next="osprey-main: look", sender="osprey-front2"); settle()
-server.stackshot_complete("a28", outcome="done", reason="done", description="- done", sender="osprey-x"); settle()
+_wt_complete.stackshot_complete("a28", outcome="done", reason="done", description="- done", sender="osprey-x"); settle()
 check("3i negative: closing another item does not drop it", len(held()) == 1 and telling.handback_tick(now=t3 + 181) == ["a27"] and len(hb_notes("a27", n0)) == 1, (held(), hb_notes("a27", n0)))
 # a reopened item is open again: a new hand-back is held again
 server._update("a20", status="open", next="osprey-x: more", needs=["osprey-x"], then="osprey-main", sender="osprey-main"); settle()

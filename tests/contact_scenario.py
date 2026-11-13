@@ -53,9 +53,14 @@ def put(i, status="open", **meta):
         "updated": now0 - 60, "state_updated": now0 - 60, "confirmed": now0 - 60, "metadata": {"owner": BUILD, "project": "projects/delta", **meta}}))
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 sh = server._gh.shown
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 told = []                                              # every notice the server would send: recorded, never sent
 telling.tell_woken = lambda *a, **k: told.append((a, k))
@@ -71,7 +76,7 @@ def made(r): return r.split()[1] if r.startswith("created") else ""
 def mk(**kw):
     base = dict(subject="[home] a contact test", description=DESC, project="projects/delta", sender=BUILD, mover=BUILD, next=f"{BUILD}: build it")
     base.update(kw)
-    return server.stackshot_create(**base)
+    return _wt_create.stackshot_create(**base)
 
 # ---- create: who is the contact
 r = mk(sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on")
@@ -87,7 +92,7 @@ check("create: the name is matched case-folded", ct(made(r)) == SIDE, r)
 r = mk(sender=MAIN, mover=MAIN, next=f"{MAIN}: carry on", contact=SIDE)
 check("create by a front agent that names another front agent of the project: the named one", ct(made(r)) == SIDE, r)
 cid = made(mk(contact=SIDE))
-check("create: the reply carries a contact line", f"contact: {SIDE}" in server.stackshot_get(item_id=cid), server.stackshot_get(item_id=cid)[:600])
+check("create: the reply carries a contact line", f"contact: {SIDE}" in _wt_get.stackshot_get(item_id=cid), _wt_get.stackshot_get(item_id=cid)[:600])
 
 # ---- create: refusals list the project's front agents with their mandates, and write nothing
 nxt = int((T / "store/next-id").read_text())
@@ -106,60 +111,60 @@ check("create: a project with no front agent and no -main agent leaves the item 
 # ---- update
 put(1, contact=MAIN)
 mv0 = rd(1)["metadata"].get("mover"); told.clear()
-r = server.stackshot_update(item_id="a1", sender=BUILD, contact=SIDE)
+r = _wt_update.stackshot_update(item_id="a1", sender=BUILD, contact=SIDE)
 m1 = rd(1)["metadata"]
 check("update: contact changes the contact", "Refused" not in r and m1.get("contact") == SIDE and f"contact: {SIDE}" in r, r)
 check("update: contact is a filing field (no state clock moved, no session named in needs, no mover change)", rd(1)["state_updated"] == now0 - 60 and not m1.get("needs") and m1.get("mover") == mv0, m1)
 check("update: setting the contact sends no notice", told == [], told)
 check("update: …and it is the one field that moved `updated`, as any update does", rd(1)["updated"] > now0 - 60, rd(1)["updated"])
 before = bytes_of("a1")
-msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, contact=REVIEW))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, contact=REVIEW))
 check("update: a background agent as contact is refused with the list, and the item is untouched", msg.startswith("Refused:") and MAIN in msg and SIDE in msg and bytes_of("a1") == before, msg)
-msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, priority="p1", contact=REVIEW))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, priority="p1", contact=REVIEW))
 check("update: a bad contact beside another field (priority) refuses the whole write: nothing is written", msg.startswith("Refused:") and bytes_of("a1") == before and rd(1)["metadata"].get("priority") != "p1", msg)
-msg = refusal(lambda: server.stackshot_update(item_id="a1", sender=BUILD, contact=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a1", sender=BUILD, contact=ECHO))
 check("update: a front agent of another project is refused", msg.startswith("Refused:") and "projects/delta" in msg, msg)
 put(2, status="completed", contact=SIDE, outcome="done", reason="done")
 before = bytes_of("a2")
-msg = refusal(lambda: server.stackshot_update(item_id="a2", sender=BUILD, contact=MAIN))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a2", sender=BUILD, contact=MAIN))
 check("update: a completed item keeps its contact as its record", msg.startswith("Refused:") and "reopen" in msg and bytes_of("a2") == before, msg)
 
 # ---- the project changes
 put(3, contact=SIDE)
-r = server.stackshot_update(item_id="a3", sender=BUILD, project="projects/echo")
+r = _wt_update.stackshot_update(item_id="a3", sender=BUILD, project="projects/echo")
 check("project move: the contact falls to the new project's -main agent", "Refused" not in r and ct(3) == ECHO and rd(3)["metadata"]["project"] == "projects/echo", r)
-r = server.stackshot_update(item_id="a3", sender=BUILD, project="projects/delta", contact=SIDE)
+r = _wt_update.stackshot_update(item_id="a3", sender=BUILD, project="projects/delta", contact=SIDE)
 check("project move with contact passed: the contact is checked against the new project and kept", "Refused" not in r and ct(3) == SIDE, r)
-msg = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, project="projects/echo", contact=REVIEW))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, project="projects/echo", contact=REVIEW))
 check("project move with a contact that is no front agent anywhere: refused, item untouched", msg.startswith("Refused:") and rd(3)["metadata"]["project"] == "projects/delta", msg)
-msg = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, project="projects/echo", contact=ECHO.upper()))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, project="projects/echo", contact=ECHO.upper()))
 check("project move naming the new project's front agent: accepted", msg == "" and ct(3) == ECHO and rd(3)["metadata"]["project"] == "projects/echo", msg)
-msg = refusal(lambda: server.stackshot_update(item_id="a3", sender=BUILD, project="projects/delta", contact=SIDE))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id="a3", sender=BUILD, project="projects/delta", contact=SIDE))
 check("…and back to the first project with its front agent again", msg == "" and ct(3) == SIDE, msg)
-r = server.stackshot_update(item_id="a3", sender=BUILD, project="projects/delta/sub")
+r = _wt_update.stackshot_update(item_id="a3", sender=BUILD, project="projects/delta/sub")
 check("project move to a page of the same project (a sub-page): a contact that is a front agent there stays", "Refused" not in r and ct(3) == SIDE, r)
 # a front agent of another project made the item: it stays the contact wherever the item is filed, and can be set back to
 r = mk(sender=ECHO, mover=ECHO, next=f"{ECHO}: carry on")
 check("cross-project: a front agent of another project that creates an item is its contact", ct(made(r)) == ECHO, r)
 xid = made(r)
-r = server.stackshot_update(item_id=xid, sender=BUILD, contact=SIDE)
+r = _wt_update.stackshot_update(item_id=xid, sender=BUILD, contact=SIDE)
 check("cross-project: the contact can be changed to a front agent of the item's project", "Refused" not in r and ct(xid) == SIDE, r)
-msg = refusal(lambda: server.stackshot_update(item_id=xid, sender=BUILD, contact=ECHO))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id=xid, sender=BUILD, contact=ECHO))
 check("cross-project: …and set back to the creator, a front agent of another project", msg == "" and ct(xid) == ECHO, msg)
-msg = refusal(lambda: server.stackshot_update(item_id=xid, sender=BUILD, contact="home-golf-builder"))
+msg = refusal(lambda: _wt_update.stackshot_update(item_id=xid, sender=BUILD, contact="home-golf-builder"))
 check("cross-project: …but a background agent of another project is still refused", msg.startswith("Refused:"), msg)
-r = server.stackshot_update(item_id=xid, sender=BUILD, project="projects/delta/sub")
+r = _wt_update.stackshot_update(item_id=xid, sender=BUILD, project="projects/delta/sub")
 check("cross-project: the item re-filed under another project keeps its creator as the contact", "Refused" not in r and ct(xid) == ECHO, r)
 r = mk(sender=ECHO, mover=ECHO, next=f"{ECHO}: carry on", contact=ECHO)
 check("cross-project: a creator naming itself in contact= is accepted", ct(made(r)) == ECHO, r)
 put(4)                                                  # an item made before the field: no contact at all
-r = server.stackshot_update(item_id="a4", sender=BUILD, project="projects/echo")
+r = _wt_update.stackshot_update(item_id="a4", sender=BUILD, project="projects/echo")
 check("project move of an item with no contact: it gets the new project's -main agent", ct(4) == ECHO, r)
 put(5, contact=SIDE)
-r = server.stackshot_update(item_id="a5", sender=BUILD, project="projects/golf")
+r = _wt_update.stackshot_update(item_id="a5", sender=BUILD, project="projects/golf")
 check("project move to a project with no -main agent: the contact is dropped", "Refused" not in r and "contact" not in rd(5)["metadata"], r)
 put(6, contact=SIDE)
-r = server.stackshot_update(item_id="a6", sender=BUILD, priority="p2")
+r = _wt_update.stackshot_update(item_id="a6", sender=BUILD, priority="p2")
 check("an update that does not re-file the item leaves the contact", ct(6) == SIDE, r)
 
 # ---- the contact retires, or is renamed
@@ -214,12 +219,12 @@ server._pform.PAGE_IO = None
 
 # ---- reading: a stored contact that is no front agent any more reads as the project's -main agent; get shows the line, the brief does not
 put(15, contact="home-delta-gone")
-g = server.stackshot_get(item_id="a15")
+g = _wt_get.stackshot_get(item_id="a15")
 check("get: a stored contact that no page lists reads as the project's -main agent", f"contact: {MAIN}" in g and "home-delta-gone" not in g, g[:500])
 put(16)
-check("get: an item with no stored contact shows the project's -main agent", f"contact: {MAIN}" in server.stackshot_get(item_id="a16"))
+check("get: an item with no stored contact shows the project's -main agent", f"contact: {MAIN}" in _wt_get.stackshot_get(item_id="a16"))
 put(17, status="completed", contact=SIDE, outcome="done", reason="done")
-check("get: a closed item shows the contact it had", f"contact: {SIDE}" in server.stackshot_get(item_id="a17"))
+check("get: a closed item shows the contact it had", f"contact: {SIDE}" in _wt_get.stackshot_get(item_id="a17"))
 check("brief: the line is left out (the brief loads into every session)", "contact:" not in server._fmt(server._load("a15"), brief=True))
 st, _t, body = server._client_item_facts("some-session", "a15,a17")
 facts = json.loads(body)["items"]

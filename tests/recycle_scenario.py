@@ -58,9 +58,15 @@ def check(name, cond, got=None):
 def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.web.auth import oauth as _oauth
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._wt.cap_needs_owner = lambda: False     # this scenario sets waits far ahead; the cap on a session's wake has its own scenario (waiting)
 told = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": told.append((tag, owner, note))
@@ -73,17 +79,17 @@ check("recycle=true sets the field and when", m.get("recycle") is True and isins
 check("it is a filing edit: the state clock and the confirm stay", rd(1)["state_updated"] == now - 3600 and rd(1)["confirmed"] == now - 3600, rd(1))
 check("it owes no page", "a1" not in owed(), owed())
 check("the update's reply shows it", "recycle: waits for a pane recycle (since " in out, out)
-check("get shows it", "recycle: waits for a pane recycle" in server.stackshot_get("a1"))
+check("get shows it", "recycle: waits for a pane recycle" in _wt_get.stackshot_get("a1"))
 for kw, name in (({"recycle": True, "clear_recycle": True}, "recycle with clear_recycle is refused"),):
     try: server._update("a1", **kw); check(name, False)
     except server.ToolError: check(name, True)
 server._update("a7", recycle=True); server._update("a7", clear_recycle=True)
 check("clear_recycle takes it off", "recycle" not in rd(7)["metadata"] and "recycle_at" not in rd(7)["metadata"], rd(7)["metadata"])
-server._update("a6", recycle=True); server.stackshot_complete("a6", outcome="done", reason="the work landed", description="- The test item's work is in place")
+server._update("a6", recycle=True); _wt_complete.stackshot_complete("a6", outcome="done", reason="the work landed", description="- The test item's work is in place")
 check("a completion takes it off", rd(6)["status"] == "completed" and "recycle" not in rd(6)["metadata"], rd(6)["metadata"])
 try: server._update("a6", recycle=True); check("a completed item cannot wait for a recycle", False)
 except server.ToolError: check("a completed item cannot wait for a recycle", True)
-check("get no longer shows it on a cleared item", "recycle:" not in server.stackshot_get("a7"))
+check("get no longer shows it on a cleared item", "recycle:" not in _wt_get.stackshot_get("a7"))
 
 # ---- 2. sala reports a recycle
 for i in (2, 3, 4): server._update(f"a{i}", recycle=True)
@@ -243,8 +249,8 @@ with TestClient(app) as c:
     check("recycle-due never filed an item", nfiles() == n0, nfiles() - n0)
     res = c.post("/client/recycle-due", json={"item": "a1"})
     check("no token, no write", res.status_code == 401, res.text)
-for name, call in (("create", lambda: server.stackshot_create(subject="[home] y", description="- A thing", project="projects/alpha", owner="home-here")),
-                   ("update", lambda: server.stackshot_update("a1", next="x")), ("complete", lambda: server.stackshot_complete("a1", outcome="done", reason="the work landed", description="- The test item's work is in place"))):
+for name, call in (("create", lambda: _wt_create.stackshot_create(subject="[home] y", description="- A thing", project="projects/alpha", owner="home-here")),
+                   ("update", lambda: _wt_update.stackshot_update("a1", next="x")), ("complete", lambda: _wt_complete.stackshot_complete("a1", outcome="done", reason="the work landed", description="- The test item's work is in place"))):
     try: call(); check(f"the {name} tool still checks the identity", False)
     except server.ToolError as e: check(f"the {name} tool still checks the identity", "unknown identity" in str(e), str(e))
 
@@ -252,21 +258,21 @@ for name, call in (("create", lambda: server.stackshot_create(subject="[home] y"
 server._refuse_if_owing = lambda debtor: None
 for subj in ("[home] Relaunch every pane so the connector's new parameters load", "[home] Recycle the sessions on box-a",
              "[home] Restart all panes after the plugin update", "[home] Load the new skills: re-launch the Claude sessions"):
-    try: server._create(subject=subj, description="- A thing", project="projects/alpha", owner="home-here"); check(f"create refuses {subj!r}", False)
+    try: _wt_create._create(subject=subj, description="- A thing", project="projects/alpha", owner="home-here"); check(f"create refuses {subj!r}", False)
     except server.ToolError as e: check(f"create refuses {subj!r}, naming both paths", "update(<item>, recycle=true)" in str(e) and "sala recycle --when-idle" in str(e), str(e))
 n1 = nfiles()
-server._create(subject="[home] Fix the restart logic of the puller", description="- A thing", project="projects/alpha", owner="home-here")
+_wt_create._create(subject="[home] Fix the restart logic of the puller", description="- A thing", project="projects/alpha", owner="home-here")
 check("a task that only mentions a restart is created", nfiles() == n1 + 1)
-check("update's description says a recycle goes on the item the change serves, else to sala", "never an item of its own" in server._UPDATE_DESC and "sala recycle --when-idle" in server._UPDATE_DESC)
+check("update's description says a recycle goes on the item the change serves, else to sala", "never an item of its own" in _wt_update._UPDATE_DESC and "sala recycle --when-idle" in _wt_update._UPDATE_DESC)
 check("update's description says the flag goes on only once the change is installed, never before, with the early-flag example",
-      "set it only once the change it waits for is installed (merged and deployed, or provisioned), never before" in server._UPDATE_DESC
-      and "a flag set before the provision recycled the box too early" in server._UPDATE_DESC)
+      "set it only once the change it waits for is installed (merged and deployed, or provisioned), never before" in _wt_update._UPDATE_DESC
+      and "a flag set before the provision recycled the box too early" in _wt_update._UPDATE_DESC)
 check("update's description names the board's status line and that sala runs the recycle, not the old notice",
-      "Pane recycle pending for … (sala runs it)" in server._UPDATE_DESC and "sala runs a flagged recycle itself" in server._UPDATE_DESC and "Pane recycle needed" not in server._UPDATE_DESC)
+      "Pane recycle pending for … (sala runs it)" in _wt_update._UPDATE_DESC and "sala runs a flagged recycle itself" in _wt_update._UPDATE_DESC and "Pane recycle needed" not in _wt_update._UPDATE_DESC)
 _ut = next(t for t in __import__("asyncio").run(server.mcp.list_tools()) if t.name == "update")
 check("the update tool as served carries the same guidance", "never before" in (_ut.description or "") and "(sala runs it)" in (_ut.description or ""), (_ut.description or "")[:200])
 server._cfg.CFG["fleet"].update(tool_name="", recycle_when_idle="")      # no fleet tool: nothing named, no command suggested
-try: server._create(subject="[home] Recycle the sessions on box-a", description="- A thing", project="projects/alpha", owner="home-here"); check("with no fleet tool, create still refuses a recycle item", False)
+try: _wt_create._create(subject="[home] Recycle the sessions on box-a", description="- A thing", project="projects/alpha", owner="home-here"); check("with no fleet tool, create still refuses a recycle item", False)
 except server.ToolError as e: check("with no fleet tool, create still refuses a recycle item and names no tool or command", "update(<item>, recycle=true)" in str(e) and "sala" not in str(e) and "next recycle" in str(e), str(e))
 check("with no fleet tool the prose says 'the fleet tool'", server._fleet_tool() == "the fleet tool" and server._when_idle().startswith("leave it for the next recycle"), (server._fleet_tool(), server._when_idle()))
 server._cfg.CFG["fleet"].update(tool_name="sala", recycle_when_idle="sala recycle --when-idle")

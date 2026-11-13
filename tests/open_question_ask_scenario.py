@@ -78,15 +78,16 @@ def refused_nc(name, f, *want):
 def passes(name, f):
     e, out = err(f); check(name, not e, e); return out
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import home; from stackshot.waits import watchers as wk
+from stackshot.web.tools import create as _wt_create
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render as r2
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda *a, **k: None
 upd = lambda i, sender="home-front", **kw: server._update(f"a{i}", sender=sender, **kw)
-mk = lambda **kw: server._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
+mk = lambda **kw: _wt_create._create(**{"subject": "[home] pick the settings layout", "description": DESC, "project": "projects/alpha", "owner": "home-front",
                                     "next": "Oliver: answer the ask", "needs": ["decision"], "ask": YN, **kw})
 OQ = ("Refused", "lists no options", "open question", "Yes / No", "Decide: whether to", "options=[", "exactly one recommended", "cached tool list")
 
@@ -114,7 +115,7 @@ for w in WORDS:
     check(f"1 create: …“{w}” with options is stored", bool(re.match(r"created \w\d+", out or "")), out)
 e = refused_nc("1 create: a list of alternatives is the alternatives gate's, not this one's", lambda: mk(ask=OPEN("ship the wide, narrow or tall layout", "wide")), "names alternatives")
 check("1 create: …and the alternatives refusal no longer says an open question gets Yes / No and a box", "box to write in" not in e and "open question" in e, e)
-passes("1 create: an item that is no decision is not judged (the ask is read only on a decision)", lambda: server._create(subject="[home] build the layout", description=DESC, project="projects/alpha", owner="home-front",
+passes("1 create: an item that is no decision is not judged (the ask is read only on a decision)", lambda: _wt_create._create(subject="[home] build the layout", description=DESC, project="projects/alpha", owner="home-front",
                                                                                                                       next="team-back: build it", needs=["team-back"], ask=OPEN("which layout to ship")))
 
 out = passes("1 create: “ship X now or hold” names no interrogative and no list: this gate leaves it alone", lambda: mk(ask=OPEN("ship the layout now or hold", "yes")))

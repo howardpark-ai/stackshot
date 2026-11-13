@@ -41,10 +41,14 @@ def check(name, cond, got=None):
 
 from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
-from stackshot.web import server; from stackshot.model import bullet_text as BT; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import bullet_text as BT; from stackshot.model import ids as _model_ids; from stackshot.service import create as create_svc
+from stackshot.web.tools import complete as _wt_complete
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import text as _wt_text
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import writes
 server._cfg.CFG.setdefault("model", {})["guards"] = False      # fixture owners the fleet does not know; the write guards have their own suite
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 
 MAIN = "falcon-main"
 STK = "projects/example"
@@ -53,9 +57,9 @@ def n_items(): return len(list((T / "store").rglob("[0-9]*.json")))
 def create(desc=GOOD, **kw):
     if not kw.get("next") and "ask" not in kw:
         kw["next"] = f"{MAIN}: carry on"
-    r = server.stackshot_create(subject=kw.pop("subject", "[home] Make the nightly run finish by 06:00"), description=desc, project=STK, owner=MAIN, **kw)
+    r = _wt_create.stackshot_create(subject=kw.pop("subject", "[home] Make the nightly run finish by 06:00"), description=desc, project=STK, owner=MAIN, **kw)
     return r, _model_ids._norm_id(r.split()[1])
-def update(gid, **kw): return server.stackshot_update(gid, sender=MAIN, **kw)
+def update(gid, **kw): return _wt_update.stackshot_update(gid, sender=MAIN, **kw)
 def stored(gid): return json.loads((T / "store" / gid[0] / f"{gid[1:]}.json").read_text(encoding="utf-8"))
 def legacy(i, desc="- A thing\n- It lives here\n- Done when done"):
     """an item stored before the gate: its first bullet carries no label"""
@@ -130,10 +134,10 @@ check("update passes: …and a later rewrite that keeps a Goal bullet", stored("
 legacy(42)
 r = update("a42", subject="[home] Make the old thing work")
 check("update passes: a new subject alone", stored("a42")["subject"] == "[home] Make the old thing work", r)
-r = server.stackshot_complete("a42", outcome="done", reason="finished", outcome_text="- It is done\n- In use", sender=MAIN)
+r = _wt_complete.stackshot_complete("a42", outcome="done", reason="finished", outcome_text="- It is done\n- In use", sender=MAIN)
 check("complete passes: a close judges its outcome text, not the description", stored("a42")["status"] == "completed" and stored("a42")["description"].startswith("- A thing"), r)
 legacy(43)
-r = server.stackshot_complete("a43", outcome="done", reason="finished", description="- It is done", sender=MAIN)
+r = _wt_complete.stackshot_complete("a43", outcome="done", reason="finished", description="- It is done", sender=MAIN)
 check("complete passes: a description passed with a close is the outcome text, and the description stays", stored("a43")["status"] == "completed" and stored("a43")["description"].startswith("- A thing"), r)
 legacy(44)
 r = update("a44", status="completed", outcome="done", reason="finished", outcome_text="- Done")
@@ -145,7 +149,7 @@ check("update passes: a reopen without a description", stored("a44")["status"] =
 legacy(45)
 out = server._update("a45", description="- A rewrite with no label\n- Second", sender="home-other")
 check("a server-side _update with an unlabeled description is written", stored("a45")["description"].startswith("- A rewrite"), out)
-out = server._create(subject="[home] built by the server", description="- No label here\n- Second", project=STK, owner=MAIN, next=f"{MAIN}: carry on")
+out = _wt_create._create(subject="[home] built by the server", description="- No label here\n- Second", project=STK, owner=MAIN, next=f"{MAIN}: carry on")
 check("the server's own _create is filed whatever its first bullet", out.startswith("created"), out)
 me = "box-1"
 st, ans = server._client_post(me, "question", {"project": "example", "ask": "Decide: whether to cut the retry to three · Recommend: cut it · Stakes: the run waits an hour either way · By: Fri Oct 23rd",
@@ -157,7 +161,7 @@ with writes.session_write():
     out = create_svc.create_item(subject="[home] filed by a script label", description="- No label here\n- Second", project=STK, owner=MAIN, next=f"{MAIN}: carry on", by="a script (a script on box-1)")[1]
 check("an item a script label files is filed whatever its first bullet, even inside a session write", out.startswith("created"), out)
 legacy(46)
-r = server.stackshot_update("a46", description="- A script's rewrite\n- Second", sender="a script on box-1")
+r = _wt_update.stackshot_update("a46", description="- A script's rewrite\n- Second", sender="a script on box-1")
 check("an update from a script's sender is not judged", stored("a46")["description"].startswith("- A script's rewrite"), r)
 before = n_items()
 try:
@@ -181,6 +185,6 @@ TOOLS = {t.name: t.description for t in __import__("asyncio").run(server.mcp.lis
 for t in ("create", "update"):
     check(f"the {t} tool's text says the subject is the outcome and the first bullet opens `Goal:`, a symptom goes under `Problem:`",
           "the outcome wanted" in TOOLS[t] and "opens `Goal:`" in TOOLS[t] and "opens `Problem:`" in TOOLS[t] and "never the symptom" in TOOLS[t] and "case-sensitive" in TOOLS[t], TOOLS[t][:300])
-check("the shared form says an update that leaves the description out is never judged", "an update that leaves description out is never judged" in server._ITEM_FORM, None)
+check("the shared form says an update that leaves the description out is never judged", "an update that leaves description out is never judged" in _wt_text._ITEM_FORM, None)
 
 print(("ok" if not fails else "FAILED") + f": goal_first scenario, {len(ran)} checks" + (f", {len(fails)} failed" if fails else "")); sys.stdout.flush(); os._exit(1 if fails else 0)

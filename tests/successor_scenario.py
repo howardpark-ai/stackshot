@@ -41,9 +41,9 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
+from stackshot.web import server; from stackshot.web.tools import sessions as _wt_sessions; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import successor as S; from stackshot.model import model as M; from stackshot.waits import handoff as H; from stackshot.waits import stall as ST; from stackshot.audit import audit_run  # noqa: E402
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 TOLD = []
 telling.tell_woken = lambda gid, owner, note, tag="wake": TOLD.append((gid, owner, note)) and None      # no push leaves this suite: what would be told is recorded
@@ -189,9 +189,9 @@ off = server._orphan_handover(apply=True, now=now0)
 check("4 server: [audit] orphan_handover = off checks nothing", not off["checked"] and off["found"] == 0 and "off" in off["note"] and all(raw(i) == before[i] for i in before), off)
 server._cfg.CFG["audit"]["orphan_handover"] = "apply"
 real_idx = server._sessions_index
-server._sessions_index = lambda *a, **k: {}
+server._sessions_index = _wt_sessions._sessions_index = lambda *a, **k: {}
 empty = server._orphan_handover(apply=True, now=now0)
-server._sessions_index = real_idx
+server._sessions_index = _wt_sessions._sessions_index = real_idx
 check("4 server: an empty heartbeat (every session would look gone) checks nothing and moves nothing", not empty["checked"] and "heartbeat is empty" in empty["note"] and all(raw(i) == before[i] for i in before), empty)
 
 # 5/6: the apply

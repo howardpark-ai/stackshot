@@ -57,11 +57,12 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.core import config; from stackshot.model import model as _model; from stackshot.tools import stamp_phase as SP; from stackshot.web import render as root_render
+from stackshot.web.tools import brief as _wt_brief
 from stackshot.service import telling
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
@@ -144,7 +145,7 @@ def surfaces(store, t, on):
             out[f"wire {g}"] = json.dumps([server._item_list(probe), server._basis_wait_of(probe), server._wait_fields(g, it, ctx)], sort_keys=True, default=str)
         for k in ("team-back", "home-front", "home-other", "home-owner", OWN):
             out[f"items? {k}"] = server._client_items(k)[2]
-        out["world"] = server._world_waits_text()
+        out["world"] = _wt_brief._world_waits_text()
         now = dt.datetime.fromtimestamp(t, ZONE)
         ub = ui_render.Board(str(store), now=now)
         out["home"] = ub.html(); out["projects"] = ub.projects_html(); out["board.md"] = ub.markdown()

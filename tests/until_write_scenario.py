@@ -57,15 +57,17 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W, until_write as UW, watchers as WK; from stackshot.model import model as MODEL; from stackshot.service import create as create_svc
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.front_sender = lambda who: False
 BACK = "team-back"
 def bupd(i, **kw):
     if kw.get("wake") or kw.get("until") or kw.get("ask_by") or kw.get("wait_kind"): kw.setdefault("wait_reason", "the vendor replies only after that date")
-    return server.stackshot_update(f"a{i}", sender=BACK, **kw)
+    return _wt_update.stackshot_update(f"a{i}", sender=BACK, **kw)
 local_day = lambda ts: dt.datetime.fromtimestamp(ts + ZONE_OFFSET, dt.timezone.utc).strftime("%Y-%m-%d")
 w = lambda n: local_day(now0 + n * DAY)
 OLD = ("wake", "ask_by", "hold", "hold_set")
@@ -313,7 +315,7 @@ st_, ct_, body_ = server._client_get("items", {"key": U["team-back"]})
 held10 = {x["gid"]: x["held"] for x in json.loads(body_)["items"]}
 check("5.10 listing: a decision with an until is held False, a date-only wait True", held10.get("a67") is False and held10.get("a68") is True, held10)
 (T / "board.md").write_text("", encoding="utf-8")
-brief10 = server.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nOn hold (")
+brief10 = _wt_brief.stackshot_brief(); act10, _, hold10 = brief10.partition("\n\nOn hold (")
 check("5.10 brief: a decision with an until is among the active items, a date-only wait among the parked", "a67 [open" in act10 and "a67 [open" not in hold10 and "a68 [open" in hold10 and "a68 [open" not in act10, (act10[-300:], hold10[:300]))
 check("5.10 all three read the one rule: _is_parked is render.is_held", server._is_parked(rd(68)) and not server._is_parked(rd(67)) and server._is_parked(rd(68)) == server._rmod.is_held(rd(68)) and server._is_parked(rd(67)) == server._rmod.is_held(rd(67)), None)
 
@@ -360,9 +362,9 @@ check("5.12 a write that sets a date-only wait tells the keeper 'put on hold', a
 check("5.12 ...and the minute loop is woken by the write that parks it", woke12, None)
 
 # 5.13 the words that teach the date carry the hand-off exception, and none calls a date a reminder or recommends the aliases the window ends
-until_desc = server._UNTIL_PARAM.__metadata__[0].description
+until_desc = _wt_update._UNTIL_PARAM.__metadata__[0].description
 check("5.13 the until parameter's own text says that in a hand-off the date is only the backstop and parks nothing", "outside a hand-off" in until_desc and "backstop" in until_desc and "stays active" in until_desc, until_desc[:400])
-upd_desc = server._UPDATE_DESC
+upd_desc = _wt_update._UPDATE_DESC
 check("5.13 the update description calls a date a reminder nowhere (a decision's dropped hold, the drop of a date) and drops a date with until=none",
       "its wake stays, a reminder" not in upd_desc and "a reminder simply goes" not in upd_desc and "(its date stays" in upd_desc and 'until="none"' in upd_desc, None)
 import pathlib as pathlib_
@@ -416,7 +418,7 @@ item(94, needs=[BACK]); item(95, needs=[BACK]); item(96, needs=[BACK])
 refused("5.14 a bare date within the cap refuses a wait_basis as not needed", lambda: bupd(94, until=w(3), wait_basis=f"the vendor ships {w(3)}"), "wait_basis is not needed", "a wait on its own")
 check("5.14 …a hold's wake takes it", bool(bupd(95, hold=True, wake=w(3), wait_basis=f"the vendor ships {w(3)}")) and bool(W.basis_of(mt(95))), mt(95))
 check("5.14 …and a date past the cap takes it", bool(bupd(96, until=w(40), wait_basis=f"the vendor ships {w(40)}")) and bool(W.basis_of(mt(96))), mt(96))
-upd14 = server._UPDATE_DESC + server._WAIT_FORM
+upd14 = _wt_update._UPDATE_DESC + _wt_update._WAIT_FORM
 check("5.14 the update description says so: a bare date within the cap refuses a basis unless the item is on hold or verifying, and a date no longer leaves an item active as a reminder",
       "A bare date within the cap (until, or its old name wake) is a wait on its own" in upd14 and "refused as not needed unless the item is on hold (hold=true) or verifying" in upd14 and "a date no longer leaves the item active as a reminder" in upd14, None)
 check("5.14 docs/item-model.md names until as the one date of a wait", "stored as `until`" in (root14 / "docs" / "item-model.md").read_text(encoding="utf-8"), None)

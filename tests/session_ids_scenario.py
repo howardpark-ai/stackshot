@@ -75,12 +75,17 @@ from stackshot.fleet import sessions_registry as sr; from stackshot.anchors impo
 sr.TTL = 0          # the directory is looked at on every call here: the test rewrites the registry at once (production trusts a look for a second)
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import text as _wt_text
 from stackshot.service import writes
 from stackshot.projects import project_registry as _projects_registry
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
-server._publish = lambda: None
-def create(owner, **kw): return server.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner=owner, **{"mover": owner, "next": f"{owner}: carry on", **kw})
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
+def create(owner, **kw): return _wt_create.stackshot_create(subject="[home] a thing", description="- Goal: A thing\n- It lives here\n- Done when done", project="projects/alpha", owner=owner, **{"mover": owner, "next": f"{owner}: carry on", **kw})
 def item(gid): return json.loads(server._path(gid).read_text(encoding="utf-8"))
 def meta(gid): return item(gid)["metadata"]
 
@@ -90,7 +95,7 @@ check("no registry file: every lookup is None", sr.resolve("home-sparrow-main") 
 check("no registry: canonical is the old rule (a live pane's name → its transcript uuid)", A.canonical("home-sparrow-main") == Tr["main_b"], A.canonical("home-sparrow-main"))
 r = create("home-sparrow-main"); g0 = r.split()[1]
 check("no registry: the owner is stored as the transcript uuid, as before", meta(g0)["owner"] == Tr["main_b"], meta(g0))
-check("no registry: get shows the owner as it always did (the stored id's name is not looked up)", "mover: home-sparrow-main" in server.stackshot_get(g0), server.stackshot_get(g0))
+check("no registry: get shows the owner as it always did (the stored id's name is not looked up)", "mover: home-sparrow-main" in _wt_get.stackshot_get(g0), _wt_get.stackshot_get(g0))
 rr = create("home-sparrow-docs", needs=["site-builder"]); g_docs0 = rr.split()[1]
 check("no registry: a needs entry is stored as its name, as before", meta(g_docs0)["needs"] == ["site-builder"], meta(g_docs0))
 
@@ -208,10 +213,10 @@ check("canonical: a fresh start the registry does not list yet, which the heartb
 put_fleet(FLEET)
 r = create("home-sparrow-main"); g1 = r.split()[1]
 check("create: the owner is stored as the sala id", meta(g1)["owner"] == S["main"], meta(g1))
-check("get shows the owner by name", "mover: home-sparrow-main\n" in server.stackshot_get(g1) + "\n" and S["main"] not in server.stackshot_get(g1), server.stackshot_get(g1))
+check("get shows the owner by name", "mover: home-sparrow-main\n" in _wt_get.stackshot_get(g1) + "\n" and S["main"] not in _wt_get.stackshot_get(g1), _wt_get.stackshot_get(g1))
 rr = create("home-sparrow-docs", needs=["site-builder"]); g2 = rr.split()[1]
 check("create: a needs entry (the engineer by the name the page lists) is stored as the sala id", meta(g2)["needs"] == [S["eng"]], meta(g2))
-check("get shows needs by name", "needs: site-builder" in server.stackshot_get(g2) and S["eng"] not in server.stackshot_get(g2), server.stackshot_get(g2))
+check("get shows needs by name", "needs: site-builder" in _wt_get.stackshot_get(g2) and S["eng"] not in _wt_get.stackshot_get(g2), _wt_get.stackshot_get(g2))
 rr = create("home-sparrow-docs", needs=[S["eng"]]); g2b = rr.split()[1]
 check("create: needs by the sala id passes the gate even though the page lists the old name", meta(g2b)["needs"] == [S["eng"]], (rr, meta(g2b)))
 try: create("home-sparrow-docs", needs=["home-twin"]); r = ""
@@ -219,7 +224,7 @@ except Exception as e: r = str(e)
 check("a name two live sessions carry is not resolved: the gate refuses it as it refused an unknown name", "not a background agent" in r or "Refused" in r, r)
 # an owner the registry cannot tell: written straight (as an old item) and read back
 gk = create("home-sparrow-docs").split()[1]; it = item(gk); it["metadata"]["owner"] = it["metadata"]["mover"] = "home-twin"; writes.save(gk, it)
-check("an owner the registry cannot tell is shown as stored", "mover: home-twin" in server.stackshot_get(gk), server.stackshot_get(gk))
+check("an owner the registry cannot tell is shown as stored", "mover: home-twin" in _wt_get.stackshot_get(gk), _wt_get.stackshot_get(gk))
 check("update by the owner as the sala id (the session writes under its permanent id) passes", "Refused" not in server._update(g1, next="home-sparrow: the next step", sender=S["main"]))
 check("update by the old name passes too", "Refused" not in server._update(g1, next="home-sparrow: the next step again", sender="home-sparrow"))
 check("a work line by the engineer named in needs: by the sala id and by the old name", "Refused" not in server._update(g2, work={"text": "building", "state": "in progress"}, sender=S["eng"])
@@ -230,7 +235,7 @@ before = hashlib.sha256(server._path(g1).read_bytes()).hexdigest()
 put_registry([r_ if r_["id"] != S["main"] else {**r_, "name": "home-sparrow-lead", "aliases": ["home-sparrow", "home-sparrow-main"]} for r_ in ROWS] )
 put_fleet({**FLEET, Tr["main_b"]: "home-sparrow-lead"})
 check("rename: the stored item did not change", hashlib.sha256(server._path(g1).read_bytes()).hexdigest() == before)
-check("rename: get shows the new name", "mover: home-sparrow-lead" in server.stackshot_get(g1), server.stackshot_get(g1))
+check("rename: get shows the new name", "mover: home-sparrow-lead" in _wt_get.stackshot_get(g1), _wt_get.stackshot_get(g1))
 check("rename: the web page shows the new name, the board.md the new name", "home-sparrow-lead" in ui_render.Board(str(_core_store.STORE)).item_html(g1) and "home-sparrow-lead" in server._rmod.render(str(_core_store.STORE), "full"))
 check("rename: the item page never shows the bare id", S["main"] not in ui_render.Board(str(_core_store.STORE)).item_html(g1))
 check("rename: the owner is still the same session by its old name and by its id (comparisons by sala id)", server._same_sess("home-sparrow-main", meta(g1)["owner"]) and server._same_sess("home-sparrow-lead", meta(g1)["owner"]) and server._session_label(meta(g1)["owner"]) == "home-sparrow-lead")
@@ -242,7 +247,7 @@ put_registry(); put_fleet(FLEET)
 
 # ---- 5. a fresh start left the owner pointing at a finished transcript
 gt = create("home-sparrow-docs").split()[1]; it = item(gt); it["metadata"]["owner"] = it["metadata"]["mover"] = Tr["main_a"]; writes.save(gt, it)       # an old item: owner stored as the first transcript of home-sparrow-main
-check("old transcript owner: shown as the session's name", "mover: home-sparrow-main" in server.stackshot_get(gt), server.stackshot_get(gt))
+check("old transcript owner: shown as the session's name", "mover: home-sparrow-main" in _wt_get.stackshot_get(gt), _wt_get.stackshot_get(gt))
 check("old transcript owner: found by the session's current transcript, which is another one", gt in {i["gid"] for i in json.loads(server._client_items(Tr["main_b"])[2])["items"]})
 check("old transcript owner: compared by sala id (the update by the session's id is its owner's)", "Refused" not in server._update(gt, next="home-sparrow: mine", sender=S["main"]))
 fa = json.loads(server._client_item_facts(Tr["main_b"], gt)[2])["items"][gt]
@@ -257,11 +262,11 @@ def fake_run(argv, *a, **k):
     return real_run(argv, *a, **k)
 subprocess.run = fake_run
 try:
-    out = server._message(S["main"], server._FOR_OWNER + " hello", "home-sparrow-docs")
+    out = server._message(S["main"], _wt_text._FOR_OWNER + " hello", "home-sparrow-docs")
     to_arg = sent[-1][sent[-1].index("--from") + 2]
     check("message to a sala id: push.py is handed the sala id as written (the inbox stores the permanent id; push.py turns it into the session's name as the address)", to_arg == S["main"] and out.startswith("delivered"), (sent[-1][:5], out))
     sent.clear()
-    out = server._message("home-sparrow-docs", server._FOR_OWNER + " hello back", S["main"])
+    out = server._message("home-sparrow-docs", _wt_text._FOR_OWNER + " hello back", S["main"])
     check("message from a sala id: accepted as the sender, labelled by name", out.startswith("delivered") and "home-sparrow-main" in sent[-1][sent[-1].index("--from") + 1], (sent, out))
 finally:
     subprocess.run = real_run
@@ -395,7 +400,7 @@ ud = json.loads(uf[0].read_text()) if uf else {}
 check("apply: one undo file, gid/field/old/new for each change", len(uf) == 1 and ud.get("schema") == 1 and {(c["gid"], c["field"]) for c in ud["changes"]} >= {(mig["tr"], "owner"), (mig["tr"], "needs"), (mig["tr"], "observers"), (mig["name"], "owner")}
       and all(set(c) == {"gid", "field", "old", "new"} for c in ud["changes"]) and not any(c["gid"] == mig["closed"] for c in ud["changes"]), ud)
 check("apply: no temp file left in the store", not [x for x in (T / "store").rglob("*") if x.name.endswith(".tmp")])
-check("apply: get reads the same names as before the migration", "then: home-sparrow-main" in server.stackshot_get(mig["tr"]) and "needs: decision, site-builder, home-twin" in server.stackshot_get(mig["tr"]), server.stackshot_get(mig["tr"]))
+check("apply: get reads the same names as before the migration", "then: home-sparrow-main" in _wt_get.stackshot_get(mig["tr"]) and "needs: decision, site-builder, home-twin" in _wt_get.stackshot_get(mig["tr"]), _wt_get.stackshot_get(mig["tr"]))
 d1 = digest()
 sid.main(["migrate", "--request"]); line2 = server._session_ids_pass()
 check("a second request changes nothing (idempotent) and writes no second undo file", digest() == d1 and "0 field(s)" in line2 and len(undo_files()) == 1, line2)
@@ -470,7 +475,7 @@ it = item(mig["name"]); it["metadata"]["owner"] = it["metadata"]["mover"] = S["m
 
 # ---- 9. a registry that disappears again: everything reads as stored, nothing raises
 SALA.unlink()
-check("registry gone: get shows the stored value", "mover: " + S["main"] in server.stackshot_get(mig["name"]) or "mover: home-sparrow-main" in server.stackshot_get(mig["name"]), server.stackshot_get(mig["name"]))
+check("registry gone: get shows the stored value", "mover: " + S["main"] in _wt_get.stackshot_get(mig["name"]) or "mover: home-sparrow-main" in _wt_get.stackshot_get(mig["name"]), _wt_get.stackshot_get(mig["name"]))
 check("registry gone: the client API still lists the item for the id (the stored form)", mig["name"] in {i["gid"] for i in json.loads(server._client_items(S["main"])[2])["items"]})
 check("registry gone: the web page still renders", "<html" in ui_render.Board(str(_core_store.STORE)).item_html(mig["name"]).lower())
 

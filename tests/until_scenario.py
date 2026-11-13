@@ -46,6 +46,8 @@ from stackshot.waits import waiting as W, watchers as WK, stall as ST, dated_wai
 from stackshot.model import model as M, states as S
 from stackshot.audit import audit_checks as AC, silence as SI
 from stackshot.web import home as HOME, itempage as IP, render as RR, server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.service import gates, telling
 from stackshot.web.ui import render as UR
 
@@ -243,7 +245,7 @@ check("the basis and the words are read for the date they were given for only", 
 # ---- 6. the server's own paths: the write refusal, clear_wait, a close, the wake sweep, the recycle release, the arrival text (a store of fixture items)
 import logging
 logging.disable(logging.INFO)
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 def sitem(i, status="open", **meta):

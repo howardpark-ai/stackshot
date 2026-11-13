@@ -56,8 +56,9 @@ from stackshot.projects import pages as p
 p.cmd_registry(quiet=True)
 from stackshot.fleet import sessions_registry as sr
 sr.TTL = 0
-from stackshot.web import server; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
-server._publish = lambda: None
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.fleet import client; from stackshot.model import model as M; from stackshot.model import ids as _model_ids
+from stackshot.web.tools import get as _wt_get
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 pushed = []                           # every push to a session the server would make: [to, note]
 _orig_run = server.subprocess.run
 def _fake_run(cmd, *a, **kw):
@@ -103,7 +104,7 @@ settle()
 check("…the builder is told once and no one else is: no push names the keeper of record or another agent", len(pushed) == 1 and pushed[0][0] in ("home-sparrow-builder", S["build"]) and out["item"] in pushed[0][1] and "now needs you" in pushed[0][1], pushed)
 check("…one item filed, and the row owes no page: no debt is charged to the script, the builder or the keeper", len(items()) == n0 + 1 and server._owed_load() == {}, (len(items()) - n0, server._owed_load()))
 check("…the item is alive with the builder as the mover (not in the owner's list)", M.derive(it).state == M.ALIVE and M.derive(it).mover == "home-sparrow-builder", (M.derive(it).state, M.derive(it).mover))
-check("…the item is in the brief", out["item"] in server.stackshot_get(out["item"]), server.stackshot_get(out["item"])[:300])
+check("…the item is in the brief", out["item"] in _wt_get.stackshot_get(out["item"]), _wt_get.stackshot_get(out["item"])[:300])
 gid1 = out["item"]
 
 # ---- 2. a repeat open changes nothing; another code or timer is another item

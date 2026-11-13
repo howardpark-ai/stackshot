@@ -326,11 +326,13 @@ R._get = fake_get
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.web.tools import anchors as _wt_anchors
+from stackshot.web.tools import route as _wt_route
 from stackshot.web.routes import ui_api as _rt_ui
 from stackshot.web.auth import signin as _signin
 from stackshot.core import instance as _core_instance
 from stackshot.web import publish as _web_publish
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 from stackshot.web.ui import render as ui_render
 from starlette.testclient import TestClient
 fresh(); setfiles(mode="on\n", hold="", gate="")

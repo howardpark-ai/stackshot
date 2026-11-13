@@ -73,10 +73,14 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 
 from stackshot.projects import pages as pg; from stackshot.projects import project_registry as PR; from stackshot.model import item_project as IP
-from stackshot.web import server; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.anchors import anchors as ANC; from stackshot.web import render as R1; from stackshot.projects import projects as PRJ; from stackshot.tools import stamp_phase as SP; from stackshot.tools import project_id_report as RR
+from stackshot.web.tools import brief as _wt_brief
+from stackshot.web.tools import create as _wt_create
+from stackshot.web.tools import get as _wt_get
+from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 from stackshot.web.ui import render as R2
-server._publish = lambda: None
+server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
 telling.tell_woken = lambda gid, owner, note, tag="wake": None
 telling.front_sender = lambda who: False
@@ -150,7 +154,7 @@ check("3 …a dry run writes nothing", snapshot() == snap0, None)
 def reads(open_only=True):
     out = {}
     with SP.frozen(now0):
-        out["server brief"] = server.stackshot_brief()
+        out["server brief"] = _wt_brief.stackshot_brief()
         for tag, mod in (("render.py", R1), ("ui/render.py", R2)):
             B_ = mod.Board(str(T / "store"))
             out[tag + " md"] = B_.markdown()
@@ -208,9 +212,9 @@ check("8 …a key that names no project leaves the item without an id (nothing i
 m12 = dict(mt(12)); it = server._load("g12"); writes.save("g12", it)
 check("8 …a save of an item whose page moved stores the page now, the id stays, and the move is no re-file (no refile record, the contact and mover as they were)",
       mt(12)["project"] == "projects/gamma" and mt(12)["project_id"] == G and "refiled" not in mt(12) and mt(12).get("contact") == m12.get("contact") and mt(12).get("mover") == m12.get("mover"), (m12, mt(12)))
-r_ = server.stackshot_update("g4", sender="home-sparrow-main", project="projects/alpha")
+r_ = _wt_update.stackshot_update("g4", sender="home-sparrow-main", project="projects/alpha")
 check("8 update(project=…) re-files the item and the id follows it", mt(4)["project"] == "projects/alpha" and mt(4)["project_id"] == A, (mt(4), str(r_)[:200]))
-r_ = server.stackshot_create(subject="[home] a new item", description="- Goal: a new item exists\n- It lives here\n- Done when done", project="projects/beta", sender="home-beta-main", next="home-beta-main: look at it")
+r_ = _wt_create.stackshot_create(subject="[home] a new item", description="- Goal: a new item exists\n- It lives here\n- Done when done", project="projects/beta", sender="home-beta-main", next="home-beta-main: look at it")
 gid_new = re.search(r"\b(g\d+|board#\d+)\b", str(r_)); new_m = None
 for p_ in sorted((T / "store").glob("*/*.json")):
     d_ = json.loads(p_.read_text()) if p_.stem.isdigit() else {}
@@ -222,7 +226,7 @@ REC_KEEP = record()
 d2 = record(); d2["ids"].pop(B, None); d2.get("projects", {}).pop(B, None); write_record(d2)           # beta stays a page of the registry, and the record no longer knows it
 check("8b the fixture: beta is a page, and no project of the record owns it", "projects/beta" in IP._pages() and IP.derive("projects/beta") == "" and IP.derive("projects/alpha") == A, (IP.derive("projects/beta"), IP.derive("projects/alpha")))
 check("8b …the item to re-file stores alpha's id", mt(4)["project"] == "projects/alpha" and mt(4)["project_id"] == A, mt(4))
-r_ = server.stackshot_update("g4", sender="home-sparrow-main", project="projects/beta")
+r_ = _wt_update.stackshot_update("g4", sender="home-sparrow-main", project="projects/beta")
 check("8b (a) update(project=…) to such a page takes the old project's id out of the file", mt(4)["project"] == "projects/beta" and "project_id" not in mt(4), (mt(4), str(r_)[:200]))
 check("8b (a) …and the item reads as its new key, through key_of and the anchors, not as the project it left", IP.key_of(mt(4)) == "projects/beta" and ANC.project_of(server._load("g4")) == "projects/beta"
       and R1.proj_key(server._load("g4")) == "projects/beta" and R2.proj_key(server._load("g4")) == "projects/beta", (IP.key_of(mt(4)), ANC.project_of(server._load("g4"))))
@@ -245,7 +249,7 @@ write_record(REC_KEEP)
 check("8b the record is back as it was", IP.derive("projects/beta") == B, IP.derive("projects/beta"))
 ids_seen = []
 for tgt in ("projects/gamma", "projects/alpha", "projects/beta"):
-    server.stackshot_update("g4", sender="home-sparrow-main", project=tgt); ids_seen.append((mt(4)["project"], mt(4).get("project_id")))
+    _wt_update.stackshot_update("g4", sender="home-sparrow-main", project=tgt); ids_seen.append((mt(4)["project"], mt(4).get("project_id")))
 check("8b (c) a re-file between recorded projects swaps the id each time", ids_seen == [("projects/gamma", G), ("projects/alpha", A), ("projects/beta", B)], ids_seen)
 
 # ---- 9. undo
@@ -369,7 +373,7 @@ snap12 = snapshot()
 with SP.frozen(now0):
     bd = {tag: mod.Board(str(T / "store")) for tag, mod in (("render.py", R1), ("ui/render.py", R2))}
     mds = {tag: b_.markdown() for tag, b_ in bd.items()}
-    brief12, get20, get21 = server.stackshot_brief(), server.stackshot_get("g20"), server.stackshot_get("g21")
+    brief12, get20, get21 = _wt_brief.stackshot_brief(), _wt_get.stackshot_get("g20"), _wt_get.stackshot_get("g21")
     page20, page21, page22 = (bd["ui/render.py"].item_html(f"g{i}") for i in (20, 21, 22))
 def card(md, n):
     i = md.find(f"[home] item {n}**")
