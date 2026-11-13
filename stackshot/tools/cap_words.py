@@ -209,7 +209,7 @@ def plan_b(n: int, basis_override: str, now: float) -> dict[str, Any]:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description="Record the owner's park words (A) and the real-world date of a long wait (B) on the items named by --a-item and --b-item. Dry run by default.")
+    ap = argparse.ArgumentParser(description="Record the park words of the board's owner (A) and the real-world date of a long wait (B) on the items named by --a-item and --b-item. Dry run by default.")
     ap.add_argument("--apply", action="store_true", help="record what the dry run prints, through the server's client API")
     ap.add_argument("--sender", default="", help="with --apply: the name of the session that runs the job (required; the record keeps \"<sender> via a script on <machine>\")")
     ap.add_argument("--a-item", action="append", default=[], metavar="board#N", help="an item whose park is the owner's own words (repeatable)")

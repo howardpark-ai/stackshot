@@ -563,7 +563,7 @@ check("step rows: plain words show as they read with no block", "Call the office
 check("step rows: the form has an optional note box and TWO buttons, Done (the main one) and Send note (needs text), both disabled until the token, no comment button, the old one-Send label gone, the token empty and `back` empty, nothing hidden",
       all(sform(S[n]).count("<button") == 2 and sform(S[n]).count('class="b main" name="act" value="done" disabled>Done</button>') == 1 and sform(S[n]).count('class="b" name="act" value="note" title="Write a note to send it" data-hint="Write a note to send it" data-needs-text disabled>Send note</button>') == 1
           and 'value="send"' not in sform(S[n]) and 'value="comment"' not in sform(S[n]) and "data-step" in sform(S[n]).split(">", 1)[0]
-          and 'placeholder="Note (optional)"' in sform(S[n]) and 'aria-label="Note for the next owner (optional)"' in sform(S[n])
+          and 'placeholder="Note (optional)"' in sform(S[n]) and 'aria-label="Note for the next mover (optional)"' in sform(S[n])
           and "Send with an empty box finishes the step" not in sform(S[n]) and "A note, or nothing to finish the step" not in sform(S[n])
           and ('<div class="abox"><textarea id="astep-a%d" name="text"' % n) in sform(S[n]) and 'aria-controls="astep-a%d"' % n in sform(S[n]) and 'name="token" value=""' in sform(S[n]) and 'name="back" value=""' in sform(S[n]) and 'action="/items/a%d/answer"' % n in sform(S[n])
           and " hidden" not in sform(S[n]).split(">", 1)[0] for n in S), sform(S[50]))

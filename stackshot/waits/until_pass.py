@@ -123,7 +123,7 @@ def release_differs(meta: dict[str, Any], is_owner: Any) -> str:
     pwm = clean(meta.get("post_wake_mover"))
     out = []
     if any(is_owner(n) for n in needs):
-        out.append("needs names the owner: the old wake pass put it back in his lane with no new ask, the watchers give it an owner step and an ask")
+        out.append("needs names the board's owner: the old wake pass put it back in his lane with no new ask, the watchers give it a step for him and an ask")
     if needs and pwm and [n.lower() for n in needs] != [pwm.lower()]:
         out.append(f"post_wake_mover {pwm} is not its needs {needs}: the old release and its message went to needs, the watchers hand it to {pwm} and rewrite needs as [{pwm}]")
     return "; ".join(out)

@@ -98,7 +98,7 @@ terms, scans = rt.load(pathlib.Path(SCR, "retired_terms.toml"))
 byname = {t.retired: t for t in terms}
 check("the live list names owner (mover), keeper of record (mover, then, created by) and steward (the router), each with its replacement", {"owner", "keeper of record", "steward"} <= set(byname) and "mover" in byname["owner"].use and "created by" in byname["keeper of record"].use and "router" in byname["steward"].use, [(t.retired, t.use) for t in terms])
 scanned = " ".join(f for sc in scans for f in sc.get("files", []))
-check("the live scan reads the tools' text snapshot, server.py's strings (the output templates and the brief), pages.py and client.py", "tests/tool_text.snapshot.json" in scanned and "*.py" in scanned, scanned)
+check("the live scan reads the tools' text snapshot, the root scripts' strings, the package's modules (stackshot/**/*.py) and the guides (docs/*.md)", "tests/tool_text.snapshot.json" in scanned and "*.py" in scanned and "stackshot/**/*.py" in scanned and "docs/*.md" in scanned, scanned)
 planted = T / "plant"; planted.mkdir()
 for f in ("pages.py", "client.py", "server.py", "whatschanged.py"):
     (planted / f).write_text('LINE = "hello steward"\n')
@@ -107,13 +107,29 @@ planted_hits = rt.lint(planted, pathlib.Path(SCR, "retired_terms.toml"))
 check("the live list, run on a tree that plants a retired word in pages.py, client.py, server.py, whatschanged.py and the snapshot, finds all five",
       sorted(h.file for h in planted_hits) == ["client.py", "pages.py", "server.py", "tests/tool_text.snapshot.json", "whatschanged.py"], [str(h) for h in planted_hits])
 
+# the paths the REAL repository keeps its text in: a fixture that plants into a path the repository lacks passes while the real scan has a gap, so every planted
+# file here is a path that exists in the repository (asserted), and the live list must reach it
+REAL = ("stackshot/web/server.py", "stackshot/web/ui/render.py", "stackshot/tools/migrate_model.py", "docs/item-model.md", "docs/router.md")
+check("the files the scenario plants into are files of the real repository", all((pathlib.Path(STACK) / f).is_file() for f in REAL), [f for f in REAL if not (pathlib.Path(STACK) / f).is_file()])
+PHRASES = ("steward", "Send with an empty box finishes the step.", "the stuck state")
+for rel in REAL:
+    real_plant = T / ("real-" + rel.replace("/", "_")); (real_plant / rel).parent.mkdir(parents=True)
+    for phrase in PHRASES:
+        (real_plant / rel).write_text(f'LINE = "a line that says {phrase} here"\nOK = "a stuck item is a failed wait"\n' if rel.endswith(".py") else f"A line that says {phrase} in a guide.\nA stuck item is a failed wait.\n")
+        got = rt.lint(real_plant, pathlib.Path(SCR, "retired_terms.toml"))
+        check(f"the live list finds \"{phrase}\" planted in {rel} (the real path), and only that", len(got) == 1 and got[0].file == rel and got[0].line == 1, [str(h) for h in got])
+doc_owner = T / "doc-owner"; (doc_owner / "docs").mkdir(parents=True)
+(doc_owner / "docs" / "g.md").write_text("The owner answers the ask.\nThe steward does not.\n")
+got = rt.lint(doc_owner, pathlib.Path(SCR, "retired_terms.toml"))
+check("a guide in docs/ may say \"the owner\" for the instance's person (the scan skips that term there) and still fails on another retired word", [(h.file, h.line, h.term) for h in got] == [("docs/g.md", 2, "steward")], [str(h) for h in got])
+
 # the stuck state (a hand-off marked stuck and raised with a "Nag again" button, [idle] stuck_to) and the waiting ladder's stuck list are retired: each is a hit in a string a session reads
 check("the live list names the stuck state, Nag again and stuck_to, each with what to use instead", {"stuck state", "Nag again", "stuck_to", "stuck list"} <= set(byname) and "fleet" in byname["stuck state"].use and "fleet" in byname["Nag again"].use and "operator_session" in byname["stuck_to"].use, [(t.retired, t.use) for t in terms])
 for word in ("stuck state", "Nag again", "stuck_to", "stuck list"):
-    plant = T / ("plant-" + word.replace(" ", "_")); plant.mkdir()
-    (plant / "server.py").write_text(f'LINE = "the item is in the {word} now"\nOK = "a stuck item is a failed wait"\n')
+    plant = T / ("plant-" + word.replace(" ", "_")); (plant / "stackshot" / "web").mkdir(parents=True)
+    (plant / "stackshot" / "web" / "server.py").write_text(f'LINE = "the item is in the {word} now"\nOK = "a stuck item is a failed wait"\n')
     got = rt.lint(plant, pathlib.Path(SCR, "retired_terms.toml"))
-    check(f"retired: \"{word}\" in a string of server.py is a hit, and the nearby \"a stuck item\" is not", len(got) == 1 and got[0].file == "server.py" and got[0].term == word, [str(h) for h in got])
+    check(f"retired: \"{word}\" in a string of stackshot/web/server.py is a hit, and the nearby \"a stuck item\" is not", len(got) == 1 and got[0].file == "stackshot/web/server.py" and got[0].term == word, [str(h) for h in got])
 
 # the step form's one Send (a note box that read "A note, or nothing to finish the step", an empty Send that finished the step, a draft dropped by "his Send on the step") is retired for the two buttons Done and Send note:
 # each old phrase is a hit when it comes back in a string a session reads, and the replacement wording is not
