@@ -887,9 +887,9 @@ check("the code comment says how the two paths exclude each other (the host file
 # WAIT_MAIN's default and the workflow step that publishes the map
 src = pathlib.Path(STACK, "release.sh").read_text(); WF0 = pathlib.Path(STACK, ".github/workflows/tests.yml").read_text()
 check("WAIT_MAIN defaults to 5400 s (90 min: main's full run can be slow on a loaded host), with the reason given", 'WAIT_MAIN="${RELEASE_WAIT_MAIN:-5400}"' in src and "90 min" in src.split("WAIT_MAIN=")[1].split("\n")[0])
-check("tests.yml publishes the map as an artifact, on main's push run only", "name: suitemap\n" in WF0 and "actions/upload-artifact@v4" in WF0 and
-      WF0.split("publish the map for release.sh")[1].split("- name:")[0].count("github.event_name == 'push'") == 1, "workflow")
-STEP = WF0.split("name: publish the map for release.sh")[1].split("- name:")[0]
+check("tests.yml publishes the map as an artifact, on main's push run and on a merge-queue entry's run (the entry's map is how main's proof job finds it) and on no other", "name: suitemap\n" in WF0 and "actions/upload-artifact@v4" in WF0 and
+      WF0.split("name: publish the map\n")[1].split("- name:")[0].count("github.event_name == 'push'") == 1 and WF0.split("name: publish the map\n")[1].split("- name:")[0].count("github.event_name == 'merge_group'") == 1, "workflow")
+STEP = WF0.split("name: publish the map\n")[1].split("- name:")[0]
 check("tests.yml: the publishing step never turns main's run red (continue-on-error), a repeated upload of the same name replaces it (overwrite), and the map under the hidden folder .suitemap is uploaded (include-hidden-files)",
       "continue-on-error: true" in STEP and "overwrite: true" in STEP and "include-hidden-files: true" in STEP and "path: .suitemap/map.json" in STEP, STEP)
 
