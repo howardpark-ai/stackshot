@@ -52,7 +52,7 @@ server._audit.cue = lambda reason: (posts.append(reason), (202, "audit cued to f
 # ---- 1. the catalog and the counts, before any page
 check("the catalog: eight groups in the order the page lists them; the two that report to a machine or to CI keep no findings log", [g["name"] for g in ov.GROUPS] == NAMES
       and [g["log"] for g in ov.GROUPS] == [True] * 6 + [False, False])
-check("group_of: a finding's kind says its group; `stale` is the silence pass's or the dates pass's by its source; a kind no group lists is None",
+check("group_of: a finding's kind says its group; `stale` is the dates pass's by its source; a kind no group lists is None",
       ov.group_of("run", "stuck-elsewhere") == "filing" and ov.group_of("filing", "board checks:why-not-now") == "filing" and ov.group_of("run", "next rules:N3") == "wording"
       and ov.group_of("silence", "stale") == "silence" and ov.group_of("dates", "stale") == "dates" and ov.group_of("run", "proof-wait") == "proof" and ov.group_of("run", "older-than-page") == "pages"
       and ov.group_of("run", "no-such-kind") is None)

@@ -63,7 +63,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
         ("tool-text touched check", "every PR", None), ("clean-text", "every PR", None))},
 )
 
-# the findings log's kinds (audit_checks.pattern_kind: the category, and for `next rules` and `board checks` the rule or kind after a colon) by group. `stale` is the dates pass's, and, in a log written before the 45-minute news ask was retired, the silence pass's:
+# the findings log's kinds (audit_checks.pattern_kind: the category, and for `next rules` and `board checks` the rule or kind after a colon) by group. `stale` is the dates pass's, and, in a log written before the 45-minute news ask was retired, that ask's:
 # the row's source, the pass that appended it, tells them apart (an old row keeps its "silence" source and group).
 # `wait-end` (a next line waits in words for something nothing tells the item has happened) and `event-missing` (the same rule found a wait that no event type reports) are the filing pass's waits, beside reads-as-wait.
 _FILING = {"stuck-elsewhere", "board checks", "reads-as-wait", "wait-end", "event-missing", "step-handover", "ask-options", "why-not-now", "wrong-needs", "obsolete-wait"}

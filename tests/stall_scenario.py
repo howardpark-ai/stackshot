@@ -998,7 +998,7 @@ close(83)
 
 # D. an untaken hand-off to a session is the hand-off audit's: the stall pass does not start it, so one item never has two ladders
 item(86, mover="home-peer", handoff=H.new_record("home-peer", U["home-peer"], "home-send", IDLE0 + 5 * MIN, delivered_at=IDLE0 + 5 * MIN + 10)); cli_row("home-peer", "idle", IDLE0)
-check("22 D: a hand-off that nobody took yet is left alone by the silence audit, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in server._stall_load(), (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
+check("22 D: a hand-off that nobody took yet is left alone by the stall pass, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in server._stall_load(), (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
 check("22 D: …until the hand-off audit brings it (its entry says so), and then the ladder takes the later rungs here, once, in its order",
       server._handoff_tick(now=T1 + 61 * MIN, only=["a86"]) == ["a86"] and (server._stall_load().get("a86") or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a86")) == 1
       and "a86" not in stk(T1 + 62 * MIN) and len(pushes_to("home-peer", "a86")) == 1 and "a86" in stk(T1 + 92 * MIN) and len(pushes_to("home-peer", "a86")) == 2, (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))

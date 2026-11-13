@@ -1,6 +1,6 @@
 """Scenario test for the audit's board checks (tools/board_report.py, audit.py board-check) — fixture data, no live store, no network, no server socket.
 
-The two kinds, each on the item that has it and on none other (an item on an agent that has gone quiet is no board check any more: it is the silence pass's, tests/silence_scenario.py): arbitrary-hold (a hold with no after, check, party, anchor or words of Oliver's and with words that name no
+The two kinds, each on the item that has it and on none other (an item on an agent that has gone quiet is no board check any more: it is the hourly audit line's, tests/audit_hourly_scenario.py): arbitrary-hold (a hold with no after, check, party, anchor or words of Oliver's and with words that name no
 event; not one an open after item, needs external, Oliver's recorded words or an event in the wait basis holds) and mislabeled-state (stored state against the derived one, a your-call with no ask, an outside item with
 no external in needs, a hold whose words wait on Oliver's decision or on an outside party; not a clean parked item). The tool changes no file (a digest of the store before and after), `--line`, `--json` and the listing agree, and
 `audit.py board-check` runs the same report.
@@ -36,7 +36,7 @@ def item(i, status="open", updated=None, wrote=None, by="home-agent", store="sto
 def doing(i, ago, **kw):                 # a doing item on a session, its expected_by a day out
     item(i, state="doing", needs=["home-agent"], next="home-agent: build it", expected_by=at(now + 30 * H), expected_reason="the build runs overnight", wrote=now - ago * H, updated=now - ago * H, **kw)
 
-doing(1, 8)                                                                                                                       # quiet 8 hours (no board finding; the silence pass's), a far expected_by does not excuse it
+doing(1, 8)                                                                                                                       # quiet 8 hours (no board finding; the hourly audit line's), a far expected_by does not excuse it
 doing(2, 1)                                                                                                                       # clean: written an hour ago
 item(3, state="doing", needs=["home-agent"], next="home-agent: build it", expected_by=at(now + 30 * H), expected_reason="the build runs overnight", wrote=now - H, by="migration", updated=now - 9 * H)         # quiet: the migration's stamp is no session write
 item(4, state="doing", needs=["home-agent"], next="home-agent: build it", expected_by=at(now + 30 * H), expected_reason="the build runs overnight", wrote=now - 9 * H, by="home-agent", updated=now - H)         # quiet: a server save moved `updated`, but the session stamp says 9 hours and that is what counts
@@ -119,7 +119,7 @@ check("names_event: Monitor, Satisfied and Friends are no weekday or month, Frid
 check("a stored doing item that reads as blocked is a mislabeled-state finding only, not also idle", kind(28) == ["mislabeled-state"], by)
 BR._wt.FALLBACK_MOVER = lambda project: "home-fallback" if project == "projects/alpha" else ""
 rep2 = BR.scan(NR.load_all(T / "store2"), {}, now)
-check("an item with no mover of its own gets the project's fallback mover, and no board finding (its silence is the silence pass's)", rep2["findings"] == [] and BR.mover_of(NR.load_all(T / "store2")["a29"]) == "home-fallback", rep2["findings"])
+check("an item with no mover of its own gets the project's fallback mover, and no board finding (its quiet is the hourly audit line's)", rep2["findings"] == [] and BR.mover_of(NR.load_all(T / "store2")["a29"]) == "home-fallback", rep2["findings"])
 BR._wt.FALLBACK_MOVER = None
 check("fallback_mover reads the registry and never raises: '' where the project names no agent", BR.fallback_mover("projects/alpha") == "", BR.fallback_mover("projects/alpha"))
 check("a closed item is left as it is", "board#9011" not in by, by)

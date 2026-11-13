@@ -1,4 +1,4 @@
-"""Scenario test for the item's `activity` clock (activity.py and the stamp in writes.save): the time of the last real activity on an item, which a later silence pass reads.
+"""Scenario test for the item's `activity` clock (activity.py and the stamp in writes.save): the time of the last real activity on an item, which the hourly audit line reads.
 Fixture data in a temp store, no live store, no network, no server socket, no tmux.
 
   1  activity.counts: every kind against an ordinary writer, an audit writer (by session name, by id, by author label, case and spacing ignored) and no writer

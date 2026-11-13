@@ -1474,7 +1474,7 @@ check("18 A ask: a delivered hand-off not taken in 10 minutes: the mover gets th
       and mt(1800)["mover"] == "home-peer" and ho(1800).get("to") == "home-peer" and not pushes_to("team-back", "a1800") and not COLD_MSGS, (done, pushes(), mt(1800)))
 check("18 A ask: …ONE record: the item's entry in stall.json carries who brought it (the hand-off audit) and the rung taken; the hand-off record has no second ladder of its own",
       e.get("via") == "handoff" and e.get("step") == 1 and e.get("last") == N0 and not ho(1800).get("reminded_at") and not ho(1800).get("recovery_at") and len(slog(1800)) == 1 and "has not taken it" in slog(1800)[0], (e, ho(1800), slog(1800)))
-check("18 A ask: …the hand-off audit leaves it on the next ticks, and the silence audit does not start a second ladder on the untaken hand-off: still one notice, one entry",
+check("18 A ask: …the hand-off audit leaves it on the next ticks, and the stall pass does not start a second ladder on the untaken hand-off: still one notice, one entry",
       hot(N0 + 2 * MIN, 1800) == [] and stk(N0 + 2 * MIN) == [] and hot(N0 + 9 * MIN, 1800) == [] and stk(N0 + 12 * MIN) == [] and len(notices("home-peer", 1800)) == 1 and entry(1800).get("step") == 1, (pushes_to("home-peer"), entry(1800)))
 check("18 A look: 29 minutes after the ask, nothing", stk(N0 + 29 * MIN) == [] and len(notices("home-peer", 1800)) == 1, pushes_to("home-peer"))
 done = stk(N0 + 31 * MIN)
@@ -1533,7 +1533,7 @@ start(1805, "home-peer2", goal="on it"); drain()
 n_ = len(pushes_to("home-peer2", "a1805"))
 stk(N0 + 31 * MIN); hot(N0 + 31 * MIN, 1805)
 later_ = pushes_to("home-peer2", "a1805")[n_:]
-check("18 F: the mover starts work on the item: the hand-off is taken, the entry is no longer the hand-off audit's, and the look never comes: whatever the silence audit then sends is in its own wording, never the hand-off notice again",
+check("18 F: the mover starts work on the item: the hand-off is taken, the entry is no longer the hand-off audit's, and the look never comes: whatever the stall pass then sends is in its own wording, never the hand-off notice again",
       ho(1805).get("taken_at") and (entry(1805) or {}).get("via") != "handoff" and len(notices("home-peer2", 1805)) == 1 and all("is handed to you by" not in p[1] for p in later_) and not COLD_MSGS
       and all("no turn running" in p[1] for p in later_), (ho(1805), entry(1805), pushes_to("home-peer2", "a1805")))
 close_(1805)
@@ -1544,7 +1544,7 @@ item(1809, mover="home-peer2", handoff=rec("home-peer2")); cli_row("home-peer2",
 hot(N0, 1809)
 upd(1809, "home-send", goal="more detail for whoever takes it"); drain()
 a_, b_ = stk(N0 + 5 * MIN), hot(N0 + 6 * MIN, 1809)
-check("18 H write: the sender writes after the ask: the silence audit sends no second notice at once and the hand-off audit does not bring the item again (one notice, no stall wording)",
+check("18 H write: the sender writes after the ask: the stall pass sends no second notice at once and the hand-off audit does not bring the item again (one notice, no stall wording)",
       a_ == [] and b_ == [] and len(pushes_to("home-peer2", "a1809")) == 1 and len(notices("home-peer2", 1809)) == 1, (a_, b_, pushes_to("home-peer2", "a1809")))
 e_ = entry(1809) or {}
 check("18 H write: …the entry is the same ladder's: still the hand-off audit's (`via`), on the look, counted from the ask", e_.get("via") == "handoff" and e_.get("step") == 1 and e_.get("last") == N0, e_)
@@ -1554,7 +1554,7 @@ p_ = LD.episode
 same_ = lambda a, b: a == b
 r0_ = {"mover": "x", "ver": [1.0, 1.0], "conf": 0.0, "step": 1, "last": 5.0, "via": "handoff"}
 w_ = p_(r0_, "x", [2.0, 2.0], same_, 0.0, 0.0)
-check("18 H pure: a write (a new version) keeps the mover, the hand-off audit's mark and the rung taken; a taken hand-off, a new mover or an entry the silence audit made starts over as before",
+check("18 H pure: a write (a new version) keeps the mover, the hand-off audit's mark and the rung taken; a taken hand-off, a new mover or an entry the dates pass made starts over as before",
       w_ is not r0_ and w_["via"] == "handoff" and w_["step"] == 1 and w_["last"] == 5.0 and w_["ver"] == [2.0, 2.0] and "via" not in p_(r0_, "x", [2.0, 2.0], same_, 0.0, None)
       and "via" not in p_(r0_, "y", [2.0, 2.0], same_, 0.0, 0.0) and "via" not in p_({**r0_, "via": "stall"}, "x", [2.0, 2.0], same_, 0.0, 0.0) and p_(r0_, "x", [1.0, 1.0], same_, 0.0, 0.0) is r0_, w_)
 g_ = p_(LD.enter(None, "x", [1.0, 1.0], 0.0, gone=True), "x", [2.0, 2.0], same_, 0.0, 0.0)
@@ -1616,7 +1616,7 @@ n_ = len(notices("home-peer2", 1814))
 check("18 M while the pass runs: …so the next hand-off tick does not bring it again and ask twice", hot(N0 + 13 * MIN, 1814) == [] and stk(N0 + 14 * MIN) in ([], ["a1813"]) and len(notices("home-peer2", 1814)) == n_, (pushes_to("home-peer2", "a1814"), entry(1814)))
 close_(1813, 1814)
 
-# N. a real confirm by the mover (the tool) is no start; the start then takes the hand-off, so the ladder ends; the silence audit may read the quiet pane afresh, in its own wording
+# N. a real confirm by the mover (the tool) is no start; the start then takes the hand-off, so the ladder ends; the stall pass may read the quiet pane afresh, in its own wording
 COLD_MSGS.clear()
 item(1815, mover="home-peer2", handoff=rec("home-peer2")); cli_row("home-peer2", "idle", IDLE17)
 hot(N0, 1815)
@@ -1626,7 +1626,7 @@ start(1815, "home-peer2"); drain()
 n_ = len(pushes_to("home-peer2", "a1815"))
 stk(N0 + 40 * MIN); hot(N0 + 40 * MIN, 1815)
 later_ = pushes_to("home-peer2", "a1815")[n_:]
-check("18 N real confirm: the confirm, then the start, takes the hand-off; the entry is no longer the hand-off audit's; no hand-off notice comes again, nothing is asked of the cold call, and what the silence audit sends is in its own wording",
+check("18 N real confirm: the confirm, then the start, takes the hand-off; the entry is no longer the hand-off audit's; no hand-off notice comes again, nothing is asked of the cold call, and what the stall pass sends is in its own wording",
       isinstance(ho(1815).get("taken_at"), float) and (entry(1815) or {}).get("via") != "handoff" and len(notices("home-peer2", 1815)) == 1 and all("is handed to you by" not in p[1] for p in later_)
       and all("no turn running" in p[1] for p in later_) and not COLD_MSGS, (ho(1815), entry(1815), pushes_to("home-peer2", "a1815")))
 close_(1815)
