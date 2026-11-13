@@ -2,7 +2,8 @@
 
 The pure half of audit/hourly.py: no server import, no clock read, no file. The lines are an item's History (one line each, "stackshot: Audit hh:mm: …"), written in a log of their own,
 `metadata.hourly_audit.log`, so they neither crowd out the stall ladder's last eight entries nor read as steps of the stall pass (`get` prints them with an `audit:` prefix, not `stall:`).
-Each entry is {"at", "text", "kind"}, kind `audit` (something was verified) or `audit_idle` (nothing was). Importable from the renderers: it pulls in nothing."""
+Each entry is {"at", "text", "kind"}, kind `audit` (something was verified), `audit_idle` (nothing was) or `audit_unknown` (the audit could not tell: a running subagent of the mover is tied to no item, or the mover's subagents could not be read;
+the item is not idle and nothing is stamped). Importable from the renderers: it pulls in nothing."""
 from __future__ import annotations
 
 from typing import Any
@@ -11,7 +12,7 @@ KEY = "hourly_audit"
 KEEP = 8                    # the lines an item keeps (the History keeps every one it has shown: it reads the item's revisions)
 MAX_AT = 1e11                # a time past the year 5000 is no time (datetime cannot print 1e30 or inf)
 CLIP = 240                  # one line's text
-KIND_OK, KIND_IDLE = "audit", "audit_idle"
+KIND_OK, KIND_IDLE, KIND_UNKNOWN = "audit", "audit_idle", "audit_unknown"
 
 
 def _well_formed(x: Any) -> bool:

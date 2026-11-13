@@ -6005,11 +6005,47 @@ def _silence_pass_tick() -> "dict[str, Any] | None":
     return res
 
 
-def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None) -> list[str]:
+def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float | None = None) -> "list[dict[str, Any]]":
+    """The running subagents of the session `who` on this box (audit/subagent_tie.running, read from the transcript Claude Code keeps: its `subagents/` folder beside the session's transcript, in the roots `[said] transcripts`), the one
+    the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
+    run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
+    whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover
+    there must not read idle and be handed on), and a sessions index that cannot be read. Only a session with no row anywhere (the heartbeat marks it gone, or holds none) gives []."""
+    from stackshot.audit import subagent_tie as _tie
+    try:
+        idx = _sessions_index() if idx is None else idx
+    except Exception as e:  # noqa: BLE001
+        raise _tie.Unreadable(f"the fleet's sessions index cannot be read ({e.__class__.__name__})") from e
+    row = _handoff_pane_row(who, idx)
+    if row is None:
+        if _handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
+            raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
+        w = str(who or "").strip()
+        names = {x for x in (w, _session_label(w)) if x}
+        rows = [r for r in dict.values(idx) if isinstance(r, dict) and r.get("name") in names]
+        byid = idx.get(w) if w else None
+        if isinstance(byid, dict) and not any(byid is r for r in rows):
+            rows.append(byid)
+        if any(_lv.running(r) for r in rows):      # no row on this box, but the fleet's heartbeat holds the session running: it is on another machine (or its row here is not yet written), and its subagents cannot be read from here
+            raise _tie.Unreadable("the session runs on another machine, whose subagents this server cannot read")
+        return []      # no row of a live process anywhere (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
+    st = str(row[1].get("status") or "")
+    if st in ("idle", "shell"):
+        return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)
+    if st != "busy":
+        raise _tie.Unreadable(f"the pane's registry status is {st or 'missing'}, not one this server knows")
+    sid = str(row[1].get("sessionId") or "")
+    if not sid:
+        raise _tie.Unreadable("the pane's registry row names no session")
+    return _tie.running(sid, _said.roots_of(_cfg.get("said", "transcripts")), time.time() if now is None else now)
+
+
+def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, pane: "Callable[[str], str] | None" = None,
+                 subagents: "Callable[[str], list[dict[str, Any]]] | None" = None, anchored: "dict[str, Any] | None" = None) -> list[str]:
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, off by default), run from the ten-minute silence tick: an open item on an agent with no activity for an hour, and no audit line in the last
     hour, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
-    `metadata.stall.log`; kind `audit` or `audit_idle`).
-    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a step status in progress (a subagent), and a tied pull
+    `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
+    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment or merge in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
@@ -6022,15 +6058,37 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
     env = env if env is not None else _silence_env()
+    try:
+        idx = _sessions_index() if (pane is None or subagents is None) else {}
+        idx_ok = True
+    except Exception as e:  # noqa: BLE001  — the pane reads then see this box's registry alone; the subagents read tries the index again and is unknown when it still fails
+        idx, idx_ok = {}, False
+        print(f"audit: sessions index not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if pane is None:
-        idx = _sessions_index()
         pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
+    if subagents is None:
+        seen: dict[str, Any] = {}      # a mover's subagents are read once a pass, not once an item: a read that failed is kept too (as the exception), so the transcript lookup is not repeated for every item and again under the item lock
+        def subagents(who: str) -> "list[dict[str, Any]]":
+            if who not in seen:
+                try:
+                    seen[who] = _mover_subagents(who, idx if idx_ok else None, now)
+                except Exception as e:  # noqa: BLE001
+                    seen[who] = e
+            if isinstance(seen[who], Exception):
+                raise seen[who]
+            return seen[who]
+    if anchored is None:
+        try:
+            anchored = _released_anchors()      # {item id: the pull requests anchored to it}: a subagent whose brief names one of them is tied to the item
+        except Exception as e:  # noqa: BLE001  — without the anchors a subagent is tied by the item's own id alone
+            anchored = {}
+            print(f"audit: anchors not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     written: list[str] = []
-    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same):
+    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same, subagents, anchored):
         try:
             with _writes.ITEM_LOCK:
                 item = _load(gid)
-                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same)      # read again under the lock: the item may have been written, held or closed since
+                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"])
@@ -8411,6 +8469,15 @@ def _handoff_pane(who: str, idx: dict[str, Any] | None = None) -> str:
     return whys[0] if all(whys) else ""
 
 
+def _handoff_registered(who: str, idx: dict[str, Any] | None = None) -> bool:
+    """Is there a row in the CLI's registry on this box for the session `who`, of any kind and of a live process (`liveness.registered`)? The names and ids are `_handoff_pane_row`'s."""
+    w = str(who or "").strip()
+    idx = _sessions_index() if idx is None else idx
+    names = {x for x in (w, _session_label(w)) if x}
+    ids = {w, _session_id(w)} | {k for k, r in dict.items(idx) if isinstance(r, dict) and r.get("name") in names}
+    return _lv.registered(names, ids, CLI_SESSIONS)
+
+
 def _handoff_pane_row(who: str, idx: dict[str, Any] | None = None) -> tuple[float, dict[str, Any]] | None:
     """(the epoch second its status last changed, the row) of a pane on this box, from the CLI's own registry (~/.claude/sessions/<pid>.json; push.py reads the same): None for a
     session this box does not run. Only an interactive pane's row counts (`kind` == "interactive": a headless `claude -p` of the same session is no pane that holds a notice), its
@@ -10493,7 +10560,7 @@ _STALL_FORM = (
     f"a notice or a recovery message already sent cannot be unsent and needs nothing; (2) fix the cause through a normal PR to {NAME} (hand it to the project's builder); (3) if wrong steps keep reaching {OWNER}'s call before the fix lands, ask him for a pause that ends by itself. "
     f"Never switch the pass off: {NAME} refuses `[stall] enabled = false` and a `paused_until` unless `[stall] pause_item` names a board item that carries {OWNER}'s own answer approving a pause (it says pause) from the 4 hours before it saw the setting, "
     f"and no pause lasts longer than 24 hours. "
-    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`), about every 50 minutes for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
+    f"An `audit:` line is the newest hourly audit line the server wrote on the item (`Audit hh:mm: verified …`, `Audit hh:mm: idle, nothing verified`, or, when the server could not tell and the item is not idle, `Audit hh:mm: a subagent of the mover is running, not tied to an item, nothing verified` or `Audit hh:mm: the mover's subagents could not be read, nothing verified`), about every 50 minutes for the first 24 hours the item is silent and then every 6 hours; it is the server's own record of what it saw, not a step of the stall pass and not a write by the mover."
 )
 
 
