@@ -218,6 +218,20 @@ send(GBUILD, "a80 is yours")
 r = server._update("a80", sender=MAIN, mover=GBUILD, needs=[GBUILD], next=f"{GBUILD}: build it", clear_next=True)
 check("80 …handing the item over by update(mover=…) works, and the item is the new mover's alone", "Refused" not in str(r) and needs(80) == [GBUILD], (r, needs(80)))
 
+# ---- 9b. a stored mover that is the agent being named, or the legacy word `none`, is no second mover
+item(100, needs=[], mover=GBUILD)             # the stored mover is the agent the message goes to
+out = send(GBUILD, "a100 is yours: build it")
+check("100 the stored mover is the agent being named: it is named, with no \"already moves it\" line", needs(100) == [GBUILD] and "(named " in out and "did not name" not in out, (needs(100), out))
+item(101, needs=[], mover=S["gbuild"])        # the same, stored by its id
+out = send(GBUILD, "a101 is yours: build it")
+check("101 the stored mover is the agent being named, stored by its id: named", needs(101) == [GBUILD] and "did not name" not in out, (needs(101), out))
+item(102, needs=[], mover="none")             # the legacy literal: nobody moves it
+out = send(GBUILD, "a102 is yours: build it")
+check("102 a stored mover of the legacy word `none` is nobody: the agent is named", needs(102) == [GBUILD] and "did not name" not in out and "none already moves" not in out, (needs(102), out))
+item(103, needs=[], mover=MAIN)               # control: another session stored as the mover still declines
+out = send(GBUILD, "a103 is yours: build it")
+check("103 control: another session stored as the mover still declines", not needs(103) and f"{MAIN} already moves it" in out, (needs(103), out))
+
 # ---- 10. the tool text and the notes say it
 check("90 the message tool's text says the naming can be declined for a second mover and what to do then", "second mover" in server._MESSAGE_DESC and "update(mover=<agent>)" in server._MESSAGE_DESC, server._MESSAGE_DESC[:300])
 src = (pathlib.Path(STACK) / "docs" / "overview.md").read_text(encoding="utf-8")

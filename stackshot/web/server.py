@@ -1332,8 +1332,10 @@ def _one_mover_clash(item: dict[str, Any], agent: str) -> str:
         if _mg.second_mover_in([*needs_now, _store_ref(agent)], project, ctx):
             others = _mg.counted_movers(needs_now, project, ctx)
             return f"{', '.join(_session_label(x) for x in others)} already moves it" if others else f"it waits on {_model.owner_display()}'s call (needs decision)"
-        stored = _model.norm_who(meta.get("mover"))
-        if stored and not _model.is_owner(stored) and not ctx.background_of(stored, project) and not any(_anc.canonical(stored) == _anc.canonical(x) for x in needs_now):
+        stored = _model.pick_who(meta.get("mover"))      # the legacy literal `none` names nobody
+        # The stored mover is the agent being named: naming it keeps one mover, so it is no clash (and the reply would say the agent "already moves it" and tell it to hand the item to itself).
+        if (stored and not _model.is_owner(stored) and not ctx.background_of(stored, project) and _anc.canonical(stored) != _anc.canonical(agent)
+                and not any(_anc.canonical(stored) == _anc.canonical(x) for x in needs_now)):
             return f"{_session_label(stored)} already moves it"
         return ""
     except Exception as e:  # noqa: BLE001  — a registry that cannot be read names the agent as before
