@@ -2084,13 +2084,16 @@ def project_ref(x: str) -> dict[str, Any] | None:
     return _prj.ref(x, _registry("projects"))
 
 
-def _front_keeper(who: str, project: str = "", strict: bool = False) -> tuple[bool, str]:
+def _front_keeper(who: str, project: str = "", strict: bool = False, unread_front: bool = False) -> tuple[bool, str]:
     """is `who` (a name or a transcript id) a front agent, by anchors.session_roles() (which roles.json builds on)? → (True, the
     keeper of `project`, else of the project it is front in: notice_name or keeper, as _gate_front finds it; "" when none),
     or (False, "") for a back agent, a keeper or a session with no role, and for the keeper of `project` itself even when
-    session_roles ranks it front for another page. `strict` (the queue rule's: model/queued.py) answers (True, "") for any session whose role is front, the keeper of `project` included, and when the roles cannot be read, where the default answers False."""
+    session_roles ranks it front for another page. `strict` (the queue rule's: model/queued.py) answers (True, "") for any session whose role is front, the keeper of `project` included, and when the roles cannot be read, where the default answers False.
+    `unread_front` (the hourly audit's: audit/hourly.py) keeps the default's answers for a role map that was read, and answers (True, "") when it was not (an error, or no role at all: the registry reads {} when its file cannot be read), so an unreadable registry is no proof that the session is a builder."""
     try:
         roles = _anc.session_roles()
+        if unread_front and not roles:
+            return True, ""
         name = _role_name(roles, who)
         if not name or roles[name]["role"] != "front":
             return False, ""
@@ -2108,7 +2111,7 @@ def _front_keeper(who: str, project: str = "", strict: bool = False) -> tuple[bo
                 return True, stew
         return True, ""
     except Exception:
-        return (True, "") if strict else (False, "")
+        return (True, "") if (strict or unread_front) else (False, "")
 
 
 # A front agent does not watch handed-off work itself: stackshot
@@ -5937,7 +5940,8 @@ def _silence_env() -> Any:
     """The silence pass's environment, built in one place for the pass and its backstop: sends through the filing deliver, and `front` is the server's own answer to who is a front agent (`_front_keeper`), which is stricter than the
     role map (a project's keeper is not front for its own project; a transcript id resolves). The backstop must judge a hand-off by the very answer the pass did, or it lists what the pass found and hides what it did not."""
     from stackshot.audit import audit_run as _ar
-    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0])
+    return _ar.Env(deliver=_filing_deliver, front=lambda who, project: _front_keeper(who, project)[0], front_strict=lambda who, project: _front_keeper(who, project, True)[0],
+                    front_or_unread=lambda who, project: _front_keeper(who, project, unread_front=True)[0])
 
 
 _queued.configure(is_front=lambda who, project: _front_keeper(who, project, True)[0])      # the board's rendering asks the same question the passes' environment answers
@@ -6009,7 +6013,7 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
     the hourly audit ties to an item. Only a pane that is in a turn right now has any (a subagent keeps its pane busy; one left by a recycled pane is not running), so a pane that is idle or showing a shell and a session this box does not
     run give []: nothing is claimed there. A session registered on this box but not as an interactive pane (a headless session), a registry status this server does not know, a pane in a turn whose transcript this box does not hold, or one
     whose registry row names no session raise `subagent_tie.Unreadable`: the audit reads that as unknown, never as idle. So does a session with no row on this box that the fleet's heartbeat holds running (it is on another machine: a mover
-    there must not read idle and be handed on), and a sessions index that cannot be read. Only a session with no row anywhere (the heartbeat marks it gone, or holds none) gives []."""
+    there must not read idle and be handed on), a sessions index that cannot be read, one that is empty, and one that is partial (a machine's sessions.json that could not be read: `fleet.sessions_unreadable`). Only a session with no row anywhere in a whole index (the heartbeat marks it gone, or holds none) gives []."""
     from stackshot.audit import subagent_tie as _tie
     try:
         idx = _sessions_index() if idx is None else idx
@@ -6027,7 +6031,11 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
             rows.append(byid)
         if any(_lv.running(r) for r in rows):      # no row on this box, but the fleet's heartbeat holds the session running: it is on another machine (or its row here is not yet written), and its subagents cannot be read from here
             raise _tie.Unreadable("the session runs on another machine, whose subagents this server cannot read")
-        return []      # no row of a live process anywhere (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
+        if not len(idx):      # an empty index says nothing about this session (the heartbeat was not read, or holds nothing yet): "no row" is not "gone" then
+            raise _tie.Unreadable("the fleet's sessions index is empty")
+        if getattr(idx, "unreadable", None):      # a machine's sessions.json that could not be read leaves its sessions out: this one may be on it
+            raise _tie.Unreadable(f"the fleet's sessions index is partial (machine {', '.join(str(x) for x in idx.unreadable)} not read)")
+        return []      # no row of a live process anywhere in a whole index (local registry or heartbeat; one the heartbeat marks gone is no live session): nothing is claimed for it (idle, as before; the orphan hand-over and the idle hand-over are right to act)
     st = str(row[1].get("status") or "")
     if st in ("idle", "shell"):
         return []      # a pane that is not in a turn has no subagent running (a subagent keeps its pane busy)

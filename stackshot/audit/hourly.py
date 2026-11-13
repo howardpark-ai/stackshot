@@ -4,7 +4,7 @@ Part of the rule that no item an agent moves goes more than an hour without an u
 writes the line itself, so the owner never sees an item on an agent idle for over an hour. This is the audit side; handing an idle item on is audit/hand_idle.py. Off by default (`[audit] hourly_line`).
 
   enabled()                                    `[audit] hourly_line`, only a TOML true
-  due(items, gid, now, env, pane, same, subagents, anchored)   the line an item is owed now, None when none: {"text", "verified", "kind"}
+  due(items, gid, now, env, pane, same, subagents, anchored, queue)   the line an item is owed now, None when none: {"text", "verified", "kind"}
   pass_(items, now, env, pane, same, subagents, anchored)      [(gid, line)] of every open item that is owed one; reads only
   last_line(meta)                              the newest audit line on an item (its log entry), None when it has none
   stamp_signal(line, now)                      the `audit` signal a line that verified something stamps as the item's last_activity, None for one that did not
@@ -168,7 +168,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
         queue = _silence.queued(items, now, env)      # the mover's other items it is busy on (model/queued.py): `pass_` reads it once for every item
     if not _silence.reading(it, mover, after_open, now, queue.get(gid, "")) or _wt.is_held(it):
         return None      # not on an agent as the board shows it (a hold, a park, a stored wait, an item queued behind another of its mover's, the owner's or an outsider's move), or on hold
-    raw_front = (env.is_front if hasattr(env, "is_front") else None)
+    raw_front = getattr(env, "is_front_or_unread", None) or getattr(env, "is_front", None)      # an env that cannot tell who is front because its registry cannot be read says front (Env.is_front_or_unread), not builder
 
     def front(who: Any, project: str) -> bool:
         """Is `who` a front agent? None reads none as front. A test that raises reads as front: a front agent's items are never handed on and its busy pane verifies them, so an error leaves the item where it is."""
