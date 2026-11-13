@@ -4,7 +4,7 @@ store, a fake clock (the pass is given its `now`), the pane registry replaced by
 
 Every rule is a probe that returns whether the rule held on a fixture, run twice: as the code is (it must hold) and with that one rule reverted by a patch (it must fail), so a check that cannot fail is caught.
 
-  1  off by default: the example config documents `balance = false` and `balance_minutes = 10`, only a TOML true turns it on, the minutes read at use with a floor of 1, a read-only copy and agent mode do nothing
+  1  on by default: the example config documents `balance = true` and `balance_minutes = 10`, absent or a TOML true is on, false / the string "true" / 1 are off, the minutes read at use with a floor of 1, a read-only copy and agent mode do nothing
   2  an untaken hand-off older than balance_minutes moves to the least-loaded builder: one History line, the new builder told, the former mover told ONCE to disregard it (not by the message tool), a balance record
   3  the wait: counted from the delivery (else from the hand-off), balance_minutes read at use, an item written to meanwhile stays
   4  a queued item moves (the queue read over the balancer's window, `[model] queued_behind` off), the item in hand never does
@@ -91,7 +91,6 @@ def fake_status(who, idx=None):
 server._handoff_status = fake_status
 server._handoff_pane = lambda who, idx=None: dead.get(who, "")
 server._sessions_index = lambda: {}
-server._stall_active = lambda: set()
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", last=None, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. `last` = minutes ago (or (minutes, kind)) of its `last_activity` record, which the queue rule reads."""
@@ -113,9 +112,9 @@ def mover_of(i): return mt(i).get("mover")      # the stored mover (a waiting it
 def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     sent.clear(); panes.clear(); dead.clear(); (T / "store/anchors.json").write_text("{}")
-    for k in ("balance", "balance_minutes"): server._cfg.CFG["audit"].pop(k, None)
+    server._cfg.CFG["audit"].pop("balance_minutes", None); off()      # the baseline of every section is the switch off until it says `on()`
 def on(): server._cfg.CFG["audit"]["balance"] = True
-def off(): server._cfg.CFG["audit"].pop("balance", None)
+def off(): server._cfg.CFG["audit"]["balance"] = False
 def tick(at=None, **kw):
     """One pass of the balancer at `at` (default now0), the server's clock set to it → the ids moved."""
     at = now0 if at is None else at
@@ -155,15 +154,16 @@ def rule(name, probe, patches):
     except Exception as e_: broke = f"raised {e_!r}"
     check(name + " [reverted: the check fails]", broke is not True, broke)
 
-# ================================================================ 1. off by default
+# ================================================================ 1. on by default
 EXAMPLE = pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")
 wipe(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-check("1 the example config documents `balance = false` and `balance_minutes = 10` in [audit]",
-      re.search(r"(?m)^balance = false\b", EXAMPLE) is not None and re.search(r"(?m)^balance_minutes = 10\b", EXAMPLE) is not None)
-check("1 …and the config as loaded (from that example) has it off: nothing moves, nobody is told", HI.balance_enabled() is False and tick() == [] and mover_of(1) == "home-peer" and sent == [])
+check("1 the example config documents `balance = true` and `balance_minutes = 10` in [audit]",
+      re.search(r"(?m)^balance = true\b", EXAMPLE) is not None and re.search(r"(?m)^balance_minutes = 10\b", EXAMPLE) is not None)
+server._cfg.CFG["audit"].pop("balance", None)
+check("1 …and with the key absent the code's default is on", HI.balance_enabled() is True)
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
     server._cfg.CFG["audit"]["balance"] = val
-    check(f"1 {label} does not switch it on (only a TOML true does)", HI.balance_enabled() is False and tick() == [] and mover_of(1) == "home-peer")
+    check(f"1 {label} leaves it off (only a TOML true leaves it on)", HI.balance_enabled() is False and tick() == [] and mover_of(1) == "home-peer")
 on()
 check("1 a TOML true switches it on", HI.balance_enabled() is True)
 ro = server._ro.is_read_only
@@ -717,7 +717,7 @@ def probe_audit_disabled():
 rule("14 with `[audit] enabled` false the balancer stands still (it needs the audit on, not hand_idle or hourly_line)", probe_audit_disabled, [(server._cfg, "audit_enabled", lambda: True)])
 def probe_needs_only_audit():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
-    for k in ("hand_idle", "hourly_line"): server._cfg.CFG["audit"].pop(k, None)
+    for k in ("hand_idle", "hourly_line"): server._cfg.CFG["audit"][k] = False
     return HI.enabled() is False and tick() == ["a1"]
 check("14 …and it runs with hand_idle and hourly_line off", probe_needs_only_audit() is True)
 def probe_dead_former():

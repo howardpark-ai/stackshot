@@ -2,10 +2,10 @@
 
 Part of the rule that no item an agent moves goes more than an hour without an update (audit/hourly.py is the line side). The hourly audit marks an item `idle, nothing verified` (kind `audit_idle`);
 this module reads that mark and decides which items are handed on. It decides and the server writes (`server._hand_idle_tick`): the move is the minute pass's own write
-(`_handoff_exec` → `_handoff_write_move`, the path of the audit's orphan hand-over), so the new mover is told by the hand-off notice and the hand-off audit then clocks it like any other. Off by default
+(`_handoff_exec` → `_handoff_write_move`, the path of the audit's orphan hand-over), so the new mover is told by the hand-off notice and the hand-off audit then clocks it like any other. On by default
 (`[audit] hand_idle`).
 
-  enabled()                                     `[audit] hand_idle`, only a TOML true
+  enabled()                                     `[audit] hand_idle`, on unless a TOML false
   due(items, gid, now, front)                   {"mover", "project", "line_at", "told_none"} when the item is to be handed on now, else None
   due_all(items, now, front)                    [(gid, row)] of every such item, in id order; reads only
   busy_movers(items, now)                       the movers of the open items that are on an agent (a builder among them is not free)
@@ -27,10 +27,10 @@ A builder is free when it is not the mover of any open item that is on an agent 
 background agents, best first; when none of them is free, the background agents of any project whose mandate says build. With none free nothing is handed on and -main is told that none was, once per
 item per 24 hours. At most `MAX_PER_TICK` items are handed on in one pass.
 
-THE BALANCER (`[audit] balance`, off by default; `server._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
+THE BALANCER (`[audit] balance`, on by default; `server._balance_tick`, its own minute tick ahead of the hand-off tick). The same module decides, the server writes. An item that is NOT STARTED (an untaken hand-off to a
 builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance_minutes` (default 10) goes to the builder with the FEWEST open items; the former mover is told to disregard it.
 
-  balance_enabled() / balance_minutes()         `[audit] balance` (only a TOML true) and `[audit] balance_minutes` (default 10, floor 1), both read at use
+  balance_enabled() / balance_minutes()         `[audit] balance` (on unless a TOML false) and `[audit] balance_minutes` (default 10, floor 1), both read at use
   balance_queue(items, now, window, front)      the queue rule (model/queued.py) read over the balancer's own window, whatever `[model] queued_behind` says: {queued item: the item it waits behind}
   balance_due(items, gid, now, minutes, front, behind, same, anchored, builder)    the row of an item to move now, else None
   balance_all(...)                              [(gid, row)] in id order; reads only
@@ -83,7 +83,7 @@ WHY = "no activity for an hour, nothing verified"      # the reason the History 
 
 
 def enabled() -> bool:
-    """`[audit] hand_idle` (default false): only a TOML true switches the pass on. Read at use, so a reload turns it on or off."""
+    """`[audit] hand_idle` (default true): a TOML false (or any value that is not a TOML true) switches the pass off. Read at use, so a reload turns it on or off."""
     return _cfg.audit_hand_idle()
 
 
@@ -185,7 +185,7 @@ def pick_free(candidates: list[str], busy: list[str], status: Callable[[str], st
 
 # ---------------------------------------------------------------------------------------------------------------- the balancer
 def balance_enabled() -> bool:
-    """`[audit] balance`, only a TOML true. Read at use."""
+    """`[audit] balance`, on unless a TOML false. Read at use."""
     return _cfg.audit_balance()
 
 

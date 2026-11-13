@@ -52,7 +52,7 @@ server._audit.cue = lambda reason: (posts.append(reason), (202, "audit cued to f
 # ---- 1. the catalog and the counts, before any page
 check("the catalog: eight groups in the order the page lists them; the two that report to a machine or to CI keep no findings log", [g["name"] for g in ov.GROUPS] == NAMES
       and [g["log"] for g in ov.GROUPS] == [True] * 6 + [False, False])
-check("group_of: a finding's kind says its group; `stale` is the silence pass's or the dates pass's by its source; a kind no group lists is None",
+check("group_of: a finding's kind says its group; `stale` is the dates pass's by its source; a kind no group lists is None",
       ov.group_of("run", "stuck-elsewhere") == "filing" and ov.group_of("filing", "board checks:why-not-now") == "filing" and ov.group_of("run", "next rules:N3") == "wording"
       and ov.group_of("silence", "stale") == "silence" and ov.group_of("dates", "stale") == "dates" and ov.group_of("run", "proof-wait") == "proof" and ov.group_of("run", "older-than-page") == "pages"
       and ov.group_of("run", "no-such-kind") is None)
@@ -61,6 +61,19 @@ KINDS = set(audit_checks.FIX) | set(audit_checks.CHECKS_CODE) | set(audit_checks
 check("every finding category the audits can write (the FIX table and the CHECKS_* tables, plus proof-wait) maps to a group, whichever pass wrote it",
       len(KINDS) >= 14 and all(ov.group_of(src, k) is not None for k in KINDS for src in ("run", "silence", "filing", "dates")), sorted(k for k in KINDS if ov.group_of("run", k) is None))
 check("a category with a sub-kind (`next rules:N3`, `board checks:why-not-now`) keeps its group", all(ov.group_of("run", f"{k}:x") == ov.group_of("run", k) for k in KINDS if k != "stale"))
+def _modes():
+    return {k: ov._mode(k) for k in ("hourly_line", "hand_idle", "balance")}
+_saved = dict(config.CFG.get("audit", {}))
+try:
+    config.CFG["audit"].pop("hourly_line", None); config.CFG["audit"].pop("hand_idle", None); config.CFG["audit"].pop("balance", None)
+    m_default = _modes()
+    config.CFG["audit"]["hourly_line"] = False; m_noline = _modes()
+    config.CFG["audit"]["hourly_line"] = True; config.CFG["audit"]["hand_idle"] = False; m_nohand = _modes()
+finally:
+    config.CFG["audit"].clear(); config.CFG["audit"].update(_saved)
+check("the audit modes: all three are on by default; the idle hand-over reads off without the hourly line it works from (the line off leaves the balancer on), and off when its own switch is off",
+      m_default == {"hourly_line": "on", "hand_idle": "on", "balance": "on"} and m_noline == {"hourly_line": "off", "hand_idle": "off", "balance": "on"}
+      and m_nohand == {"hourly_line": "on", "hand_idle": "off", "balance": "on"}, (m_default, m_noline, m_nohand))
 check("item_path: a numbered id is /items/<n>, a temporary id keeps its prefix, any other shape is no link", ov.item_path(f"board#{12}") == "12" and ov.item_path(f"board-tmp-x#{7}") == "board-tmp-x-7"
       and ov.item_path(f"board-tmp-X#{7}") is None and ov.item_path("elsewhere#3") is None and ov.item_path("12") is None)
 
@@ -80,7 +93,7 @@ with TestClient(server.mcp.http_app()) as c:
     check("the page: the title, an h1 'Audits' and the three paces", "<title>Audits ·" in h and h.count("<h1>Audits</h1>") == 1
           and all(x in w for x in ("Every minute", "Every 10 minutes", "05:00")), w[:400])
     check("the groups: eight folds in the catalog's order, each with its number of audits", re.findall(r'<details class="audg"><summary><span class="agn"><b>([^<]+)</b>', h) == NAMES
-          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "51 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
+          and re.findall(r'<span class="anum">(\d+) audits</span>', h) == [str(len(g["audits"])) for g in ov.GROUPS] and "53 audits in 8 groups." in w, re.findall(r'<span class="anum">(\d+) audits', h))
     nums = re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h)
     check("the groups' findings in 24 hours from the log: 1, 3, 2, 1, 1, 1, and 'not logged' (never a zero) for the two that keep no log", nums == ["1 found", "3 found", "2 found", "1 found", "1 found", "1 found", "not logged", "not logged"], nums)
     check("a group with findings is marked (hit), a group without a log is not", h.count('<span class="anum hit">') == 6 and "0 found" not in h)
@@ -132,7 +145,7 @@ with TestClient(server.mcp.http_app()) as c:
           r.status_code == 200 and "No findings in the last 24 hours." in w and "No audit has run yet." in w
           and re.findall(r'<span class="anum(?: hit)?">((?:\d+ found)|not logged|log off)</span>', h) == ["0 found"] * 6 + ["not logged"] * 2, w[:600])
     check("without findings: no error text, no finding rows, no table", not re.search(r"Traceback|[Ee]rror|[Ee]xception|undefined|\bNone\b|\bNaN\b", w) and 'class="af"' not in h and "<table>" not in h, w)
-    check("without findings: the card shows zeros for the logged groups and dashes for the others", re.findall(r'<span class="val a-n">([^<]+)</span><span class="val a-n">([^<]+)</span>', h)[:1] == [("7", "0")]
+    check("without findings: the card shows zeros for the logged groups and dashes for the others", re.findall(r'<span class="val a-n">([^<]+)</span><span class="val a-n">([^<]+)</span>', h)[:1] == [("9", "0")]
           and h.count('<span class="val a-n">–</span>') == 2)
     LOG.unlink()
     r = c.get("/audits")
@@ -205,9 +218,9 @@ with TestClient(server.mcp.http_app()) as c:
         far = c.get("/audits")
     finally:
         server._runner_status = real_runner
-    check("the ten-minute pace says its last run as the clock today", re.search(r"last \d\d:\d\d: filing, dates, silence", today) is not None, re.findall(r"Every 10 minutes.{0,60}", today))
-    check("... and with its date for a run of another day", re.search(r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th) \d\d:\d\d: filing, dates, silence", old) is not None, re.findall(r"Every 10 minutes.{0,60}", old))
-    check("a time no date can hold (1e300 in the runner's record and in a run record): the page answers 200 and draws a dash", far.status_code == 200 and "last –: filing, dates, silence" in text_of(far.text), (far.status_code, far.text[:200]))
+    check("the ten-minute pace says its last run as the clock today", re.search(r"last \d\d:\d\d: filing, dates, audit lines", today) is not None, re.findall(r"Every 10 minutes.{0,60}", today))
+    check("... and with its date for a run of another day", re.search(r"last [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2}(?:st|nd|rd|th) \d\d:\d\d: filing, dates, audit lines", old) is not None, re.findall(r"Every 10 minutes.{0,60}", old))
+    check("a time no date can hold (1e300 in the runner's record and in a run record): the page answers 200 and draws a dash", far.status_code == 200 and "last –: filing, dates, audit lines" in text_of(far.text), (far.status_code, far.text[:200]))
     (D / "run-2026-02-25.json").unlink()
 
     # ---- 6. the findings log off

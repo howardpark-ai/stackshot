@@ -170,7 +170,7 @@ f1 = build(item(1, wrote=now - H, state="your-call", needs=["decision"], mover="
            doing(2, 5, wake=local(now - 2 * H)),                                                      # stale: its wake passed 2 hours ago, nothing written since (5 hours)
            doing(3, 1, nxt="ops-other: do the first part\nhome-agent: then the second", expected_by=local(now + 30 * H), expected_reason="the build"),   # stuck-elsewhere: the first open step is ops-other's
            doing(4, 1, nxt="build it", expected_by=local(now + 30 * H), expected_reason="the build"),                                     # next rules: no one named in next
-           doing(5, 8, expected_by=local(now + 30 * H), expected_reason="the build runs overnight"),                                       # quiet 8 hours: the silence pass's, no daily finding
+           doing(5, 8, expected_by=local(now + 30 * H), expected_reason="the build runs overnight"),                                       # quiet 8 hours: the hourly audit line's, no daily finding
            clean(6), clean(7), clean(8), clean(9), clean(72), item(33, status="completed", wrote=now - 40 * H, state="doing", needs=["home-agent"], next="", outcome="done"))
 rec_clear(); fake()
 rec = go(f1)
@@ -178,7 +178,7 @@ check("ask-missing: a decision item with no ask is a finding in code", ids(rec, 
 check("stale: past its wake with no write since is the dates pass's, so the run makes no finding for it", ids(rec, "stale") == [], rec["findings"])
 check("stuck-elsewhere is the filing pass's, so the run makes no finding for it", ids(rec, "stuck-elsewhere") == [], rec["findings"])
 check("next rules: the report's finding is carried as a finding of its category", "board#4" in ids(rec, "next rules"), rec["findings"])
-check("board checks: the daily run makes none (the filing kinds are the filing pass's, an item quiet for 8 hours is the silence pass's)", ids(rec, "board checks") == [] and "board#5" not in ids(rec, "stale"), rec["findings"])
+check("board checks: the daily run makes none (the filing kinds are the filing pass's, an item quiet for 8 hours is the hourly audit line's)", ids(rec, "board checks") == [] and "board#5" not in ids(rec, "stale"), rec["findings"])
 check("a clean item and a closed one are no finding", not any(f["id"] in ("board#6", "board#7", "board#8", f"board#{BID_23}") for f in rec["findings"]), rec["findings"])
 check("the field checks made no model call (nothing to suspect)", calls() == [] and rec["calls"]["made"] == 0, calls())
 check("every finding names its mover and its source", all(f.get("source") == "code" and f.get("mover") for f in rec["findings"]), rec["findings"])
@@ -190,7 +190,7 @@ def _pin_rows(fs): return sorted([f["id"], f["category"], f["source"], f["mover"
 PIN_F = build(*f1.items(),
               item(52, wrote=now - H, state="parked", needs=["home-agent"], hold=True, next="home-agent: later"),                                       # arbitrary-hold: a hold whose words name no event
               item(34, wrote=now - H, state="blocked", needs=["home-agent"], next="home-agent: build it"),                                             # mislabeled-state: blocked with no after
-              doing(60, 14, nxt="home-agent: build it"),                                                                                               # no date of its own: the silence pass's, no daily finding
+              doing(60, 14, nxt="home-agent: build it"),                                                                                               # no date of its own: the hourly audit line's, no daily finding
               item(92, wrote=now - H, state="parked", needs=["home-agent"], hold=True, wake=local(now + 30 * H), next="ops-other: the first part\nhome-agent: then the second"),   # a parked item, its wake ahead: no stuck-elsewhere
               doing(41, 1, nxt="home-agent: waiting for the build", expected_by=local(now + 30 * H), expected_reason="the build"))
 PIN_F["a9250"]["metadata"]["idle"] = {"poked": now - H}; PIN_F["a9250"]["confirmed"] = now - 2 * H          # the server's idle pass poked it since the last confirm
@@ -414,7 +414,7 @@ check("pin: audit_run offers every check it offered before they moved, and each 
 # what the ten-minute passes took over: stuck-elsewhere, the board report's arbitrary-hold and mislabeled-state, and the wake half of stale
 _pin_moved = lambda r: r[1] == "stuck-elsewhere" or (r[1] == "board checks" and r[5].startswith(("arbitrary-hold", "mislabeled-state"))) or (r[1] == "stale" and "past its wake" in r[5])
 _pin_without = lambda rows: [[r for r in rows[0] if not _pin_moved(r)], rows[1], rows[2]]
-check("pin: with ten_minute=True field_findings gives, on the pinned fixtures, the rows the old audit_run gave less the two silence rules (the 12-hour stale half and idle-on-agent), which the silence pass has", _pin_run(AR, ten_minute=True) == PIN_GOLD["run"], _pin_run(AR, ten_minute=True))
+check("pin: with ten_minute=True field_findings gives, on the pinned fixtures, the rows the old audit_run gave less the two quiet-time rules (the 12-hour stale half and idle-on-agent), which the hourly audit line has", _pin_run(AR, ten_minute=True) == PIN_GOLD["run"], _pin_run(AR, ten_minute=True))
 check("pin: …and without it (the daily run) the same rows less the moved checks, and every moved kind was in the old rows", _pin_run(AR) == _pin_without(PIN_GOLD["run"])
       and {r[1] for r in PIN_GOLD["run"][0] if _pin_moved(r)} == {"stuck-elsewhere", "board checks", "stale"} and len(_pin_run(AR)[0]) < len(PIN_GOLD["run"][0]), _pin_run(AR))
 check("pin: …and each per-item check (ask-missing, stale, stuck-elsewhere, idle-pass) gives what it gave", _pin_each(AR) == PIN_GOLD["each"], _pin_each(AR))
@@ -531,7 +531,7 @@ check("an item flagged on the previous run and not written since is on `stuck` w
 jobs = [t for to, t, fy in sent if to == "alpha-builder"]
 check("…and goes to the project's builder as ONE job message", len(jobs) == 1 and "board#1" in jobs[0] and "board#2" not in jobs[0] and "unmoved since " + prev_day in jobs[0], jobs)
 
-# ---- 12. idle-pass: the daily run no longer checks stale (the dates pass and the silence pass do), so it counts no idle-pass entry and makes no finding for an item the idle pass poked
+# ---- 12. idle-pass: the daily run no longer checks stale (the dates pass does), so it counts no idle-pass entry and makes no finding for an item the idle pass poked
 ip = build(*[(k, d) for k, d in f1.items() if k in ("a6", "a7")], doing(2, 5, wake=local(now - 2 * H)))
 ip["a2"]["metadata"]["idle"] = {"poked": now - 600}; ip["a2"]["confirmed"] = now - 3 * H
 rec_clear(); rec = go(ip)
@@ -547,7 +547,7 @@ rec = go(op, env_=env(page_of=pg))
 check("older-than-page: the page is newer than the item's write and mentions it: one call, a finding", len(calls()) == 1 and "the project page" in calls()[0]["stdin"] and ids(rec, "older-than-page") == [f"board#{BID_11}"], (calls(), rec["findings"]))
 fake()
 
-# ---- 14. the shared engine: the stall pass reads the pane through mover_state (the board check no longer does: silence is the silence pass's)
+# ---- 14. the shared engine: the stall pass reads the pane through mover_state (the board check no longer does: quiet time is the hourly audit line's)
 rows = T / "home/.claude/sessions"
 def pane_row(status, ago):
     (rows / "1.json").write_text(json.dumps({"kind": "interactive", "pid": os.getpid(), "name": "home-agent", "sessionId": "s-1", "status": status, "statusUpdatedAt": (now - ago) * 1000.0}))

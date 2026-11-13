@@ -17,7 +17,7 @@ status busy | idle and when it changed); the clocks are given to the pass as `no
   8  the delays are config keys ([stall] minutes, every_seconds, enabled), and the pass is off with [model] handoff off
   9  the cold call is made once per item in 24 hours: past it the builder takes the step
   10 History: each step is a line; get shows the last steps
-  11 an item whose stall ladder has taken a step is active until the ladder stops moving
+  11 (retired with the news ask: the overlap between the stall ladder and that pass)
   12 a deploy: the first pass sends nothing for 10 minutes (no clock starts before the pass first ran, kept in stall.json), and at most [stall] max_per_tick first steps go out a tick
   13b a background agent whose pane shows `shell` (a background job running) is not quiet; a front agent's `shell` pane and a builder's `idle` pane are nudged
   13 a quiet builder is nudged at once: a `doing` item carries no expected time, so the pass waits for none (a time stored by an earlier version is not read)
@@ -407,19 +407,6 @@ check("10 get: the last steps are shown on the item", re.search(r"stall: .*sent 
 new = S.new_entries({"stall": {"log": []}}, mt(27))
 check("10 history: a new log entry is one History line (new_entries), an old one is not repeated", len(new) == 1 and not S.new_entries(mt(27), mt(27)), new)
 close(27)
-
-# ================================================================ 11. an item the ladder has stepped on is active, until the ladder stops moving
-item(28, mover="home-peer", owner=U["home-peer"], updated=now0 - 5 * 3600)
-item(29, mover="home-peer", needs=["home-peer"], updated=now0 - 5 * 3600)
-server._stall_save({})
-check("11 overlap: (setup) with no step taken, no item is active in the stall pass", "a29" not in server._stall_active(), server._stall_active())
-server._stall_save({"a28": {"mover": "home-peer", "ver": [1.0, 1.0], "step": 1, "last": time.time() - 60}, "a29": {"mover": "home-peer", "ver": [1.0, 1.0], "step": 1, "last": time.time() - 60}})
-check("11 overlap: …and an item whose stall ladder has taken a step within two waits is active", "a29" in server._stall_active(), server._stall_active())
-server._stall_save({"a28": {"mover": "home-peer", "ver": [1.0, 1.0], "step": 1, "last": time.time() - 60}})
-check("11 overlap: an item whose stall ladder has taken a step within two waits is active", "a28" in server._stall_active(), server._stall_active())
-server._stall_save({"a28": {"mover": "home-peer", "ver": [1.0, 1.0], "step": 1, "last": time.time() - 3 * 3600}})
-check("11 overlap: a ladder that stopped moving (last step 3 hours ago) lets go of the item", "a28" not in server._stall_active(), server._stall_active())
-server._stall_save({}); close(28, 29)
 
 # ================================================================ 12. a deploy: no flood
 for i in (40, 41, 42, 43, 44, 45):
@@ -991,9 +978,8 @@ finally:
 check("21 kept: a `kept` mark written while the pass ran survives the pass's own save", (server._stall_load().get("a67") or {}).get("marker") == "written during the tick" and (server._stall_load().get("a67") or {}).get("kept"), server._stall_load().get("a67"))
 close(67)
 
-# ================================================================ 22. the one ladder ([ladder] enabled): a silent pane climbs the same ladder an untaken hand-off does
-# ask the mover at 10 minutes of no turn; 30 minutes later, and only then, look at the pane (no turn running: the notice again); the cold call 10 minutes after that, then the project's builder,
-# then the fleet's builder asked once. With the flag off (the default) sections 1 to 21 above are the ladder.
+# ================================================================ 22. the one ladder ([ladder] enabled): the stall pass takes the later rungs of an entry the hand-off audit or the dates pass made
+# A pane with no turn running starts no ladder here. With the flag off (the default) sections 1 to 21 above are the ladder.
 from stackshot.waits import ladder as LD
 def ladder_cfg(on=True, **kw): server._cfg.CFG["ladder"] = {"enabled": on, "main_hours": 10000, **kw}      # main_hours: a value no scenario reaches; the hand-up of an item that has not moved is tests/ladder_progress_scenario.py's
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "no turn running" in p[1]]
@@ -1005,75 +991,31 @@ check("22 on: [ladder] enabled = true turns it on (only a TOML true), look_minut
       and (ladder_cfg(True, look_minutes=20) or server._ladder_look() == 20.0) and (ladder_cfg(True, look_minutes="x") or server._ladder_look() == 30.0) and (ladder_cfg("yes") or not server._ladder_on()), None)
 ladder_cfg(True)
 
-# A. the ladder: ask at 10 minutes, look at +30, cold at +10 after the look, the builder at once when the cold call names no taker
+# A. a pane with no turn running starts no ladder: the items come to it from the dates pass's entry and the hand-off audit, not from the stall pass (the rungs themselves are tests/ladder_silence_scenario.py's)
 item(83); cli_row("home-peer", "idle", IDLE0)
-check("22 A ask: 599 seconds of no turn is not enough", "a83" not in stk(IDLE0 + 599) and not stall_notices("home-peer", 83), pushes())
-done = stk(T1)
-check("22 A ask: at 10 minutes the mover is sent the notice (the stall wording, as before), the entry is on step 1", "a83" in done and len(stall_notices("home-peer", 83)) == 1 and server._stall_load()["a83"]["step"] == 1
-      and not COLD_MSGS, (done, pushes_to("home-peer", "a83"), server._stall_load().get("a83")))
-check("22 A look: 10 minutes after the ask the cold call is NOT due (the old ladder's second step), nor is anything at 29 minutes", "a83" not in stk(T1 + 10 * MIN + 1) and "a83" not in stk(T1 + 29 * MIN) and not COLD_MSGS and len(stall_notices("home-peer", 83)) == 1, (pushes_to("home-peer", "a83"), COLD_MSGS))
-done = stk(T1 + 31 * MIN)
-check("22 A look: 31 minutes after the ask the pane has no turn running: the notice goes again", "a83" in done and len(stall_notices("home-peer", 83)) == 2 and server._stall_load()["a83"]["step"] == 2 and not COLD_MSGS, (done, pushes_to("home-peer", "a83")))
-check("22 A cold: 9 minutes after the look, nothing; 10 minutes after it, the cold call", "a83" not in stk(T1 + 40 * MIN) and not COLD_MSGS, COLD_MSGS)
-done = stk(T1 + 41 * MIN + 1)
-check("22 A cold: …it gave nothing: the item falls on at once to the project's builder, a stall record", "a83" in done and len(COLD_MSGS) == 1 and mt(83).get("mover") == "team-back" and ho(83).get("to") == "team-back" and ho(83).get("stall") is True, (done, mt(83), ho(83)))
-check("22 A: the History lines read in the ladder's order", [("sent to it again" in x) for x in [t["text"] for t in log_of(83)][:2]] == [True, True] and "cold call" in log_of(83)[2]["text"], log_of(83))
+check("22 A: with the ladder on, a pane idle for 10 minutes, for 41 minutes and for hours starts nothing: no notice, no cold call, no step taken",
+      all("a83" not in stk(t) for t in (T1, T1 + 31 * MIN, T1 + 41 * MIN + 1, T1 + 5 * 3600)) and not stall_notices("home-peer", 83) and not COLD_MSGS and not (server._stall_load().get("a83") or {}).get("step"), (pushes_to("home-peer", "a83"), COLD_MSGS, server._stall_load().get("a83")))
 close(83)
 
-# B. a pane with a turn running at the look is left alone; the look comes when it is idle
-item(84, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
-stk(T1)
-cli_row("home-peer2", "busy", T1 + 20 * MIN)
-check("22 B: a turn started after the ask: 35 minutes on, nothing is sent", "a84" not in stk(T1 + 35 * MIN) and len(stall_notices("home-peer2", 84)) == 1, pushes_to("home-peer2", "a84"))
-cli_row("home-peer2", "idle", T1 + 36 * MIN)
-check("22 B: …the turn ends: the look sends the notice again at once", "a84" in stk(T1 + 37 * MIN) and len(stall_notices("home-peer2", 84)) == 2, pushes_to("home-peer2", "a84"))
-close(84)
-
-# C. the last rung: no builder and no cold call, ONE message to the project's -main agent; the item stays with its mover, not on the owner's list
-set_cfg(cold_call=False)
-item(85, project="projects/beta", mover="home-peer3"); cli_row("home-peer3", "idle", IDLE0)
-stk(T1); stk(T1 + 31 * MIN)
-check("22 C: ask and look sent, no recovery request yet", len(stall_notices("home-peer3", 85)) == 2 and not main_recovery_pushes("a85"), pushes_to("home-peer3", "a85"))
-done = stk(T1 + 41 * MIN + 1)
-check("22 C last: cold call off, the project lists no builder: ONE message asks its -main agent; the mover keeps the item and it is not on the owner's list",
-      "a85" in done and len(main_recovery_pushes("a85")) == 1 and bool(ho(85).get("recovery_at")) and mt(85).get("mover") == "home-peer3" and "decision" not in (mt(85).get("needs") or []) and not mt(85).get("ask"), (done, ho(85), mt(85)))
-check("22 C last: …and nothing more later", stk(T1 + 5 * 3600) == [] and len(main_recovery_pushes("a85")) == 1, main_recovery_pushes("a85"))
-close(85); set_cfg()
-
-# D. an untaken hand-off to a session is the hand-off audit's: silence does not start it, so one item never has two ladders
+# D. an untaken hand-off to a session is the hand-off audit's: the stall pass does not start it, so one item never has two ladders
 item(86, mover="home-peer", handoff=H.new_record("home-peer", U["home-peer"], "home-send", IDLE0 + 5 * MIN, delivered_at=IDLE0 + 5 * MIN + 10)); cli_row("home-peer", "idle", IDLE0)
-check("22 D: a hand-off that nobody took yet is left alone by the silence audit, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in server._stall_load(), (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
+check("22 D: a hand-off that nobody took yet is left alone by the stall pass, however quiet its pane (no notice, no entry)", "a86" not in stk(T1 + 60 * MIN) and not pushes_to("home-peer", "a86") and "a86" not in server._stall_load(), (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
 check("22 D: …until the hand-off audit brings it (its entry says so), and then the ladder takes the later rungs here, once, in its order",
       server._handoff_tick(now=T1 + 61 * MIN, only=["a86"]) == ["a86"] and (server._stall_load().get("a86") or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a86")) == 1
       and "a86" not in stk(T1 + 62 * MIN) and len(pushes_to("home-peer", "a86")) == 1 and "a86" in stk(T1 + 92 * MIN) and len(pushes_to("home-peer", "a86")) == 2, (pushes_to("home-peer", "a86"), server._stall_load().get("a86")))
 close(86)
 
-# E. the flag turned off in the middle of a ladder: the old ladder takes the entry on from its step, not from nothing
-item(87, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
-stk(T1)
-ladder_cfg(False)
-n_cold = len(COLD_MSGS)
-check("22 E off mid-ladder: the ask went on the one ladder (step 1); with the flag turned off the old ladder goes on from there: the cold call 10 minutes later",
-      server._stall_load()["a87"]["step"] == 1 and "a87" in stk(T2) and len(COLD_MSGS) == n_cold + 1, (server._stall_load().get("a87"), COLD_MSGS[-1:]))
-close(87)
 # E0. the flag off from the start: the old ladder's own first step and the cold call after it
+ladder_cfg(False)
 item(88, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE0)
 stk(T1)
 n_cold = len(COLD_MSGS)
 check("22 E0 off: with the flag off from the start the first step is the old ladder's (the notice, step 1) and the next is the cold call 10 minutes later", server._stall_load()["a88"]["step"] == 1 and "a88" in stk(T2) and len(COLD_MSGS) == n_cold + 1, (server._stall_load().get("a88"), COLD_MSGS[-1:]))
 close(88)
 
-# F. the flag turned off when the ladder is on its last rung (the builder still to come): the old table is one step shorter, so that rung must not read as done
-ladder_cfg(True)
-item(89, mover="home-peer"); cli_row("home-peer", "idle", IDLE0)
-stk(T1)
-st_ = server._stall_load(); st_["a89"].update(step=3, last=T1, ladder=True); server._stall_save(st_)
-ladder_cfg(False)
-done = stk(T1 + 11 * MIN)
-check("22 F off on the last rung: the builder rung the ladder had still to take is taken by the old ladder (the item goes to the project's builder), not dropped as done", "a89" in done and mt(89).get("mover") == "team-back", (done, mt(89), server._stall_load().get("a89")))
+# F. the ladder steps read in the old table when the flag is turned off
 check("22 F off: pure: the ladder's steps read in the old table: ask 0, look 1, cold 1, builder 2, done 3; an entry the ladder did not write is as it was",
       [LD.unwind({"step": n, "ladder": True, "via": "handoff"})["step"] for n in range(5)] == [0, 1, 1, 2, 3] and "via" not in LD.unwind({"step": 1, "via": "handoff"}) and LD.unwind({"step": 3}) == {"step": 3} and LD.unwind(None) is None, None)
-close(89)
 ladder_cfg(True)
 
 check("16 follow: after every save of the run (the pass's moves, raises and returns) no OPEN record named someone but the item's mover", INV_SAVES[0] > 50 and not INV_BAD, (INV_SAVES[0], INV_BAD[:4]))

@@ -1,25 +1,24 @@
-"""Scenario test for the ladder switch: with `[ladder] enabled` and `[ladder] silence` the ten-minute silence pass (and the dates pass) bring an item to the one ladder, and a pane with no turn running
-no longer does (ladder.py, silence.silence_pass `entered`, audit_run.dates_pass `entered`, server._ladder_enter_quiet, _ladder_quiet_look, _stall_tick). Fixture items, panes that are files in a temp
-folder, messages recorded by a fake push, a fake clock (every pass is given its `now`), no live store, no network, no model call.
+"""Scenario test for the one ladder's quiet entry: with `[ladder] enabled` the dates pass brings an item to the one ladder, and a pane with no turn running no longer does (ladder.py, audit_run.dates_pass `entered`,
+server._ladder_enter_quiet, _ladder_quiet_look, _stall_tick). The file once also tested the retired 45-minute news ask, the other way in ( `enter` below makes the entry the dates pass makes after its message). Fixture items,
+panes that are files in a temp folder, messages recorded by a fake push, a fake clock (every pass is given its `now`), no live store, no network, no model call.
 
-  1  the switch: `[ladder] silence` is off by default and does nothing without `[ladder] enabled`; only a TOML true with both turns it on; the silence tick and the dates tick hand the ladder to their pass only
-     then; with it off the stall pass starts a ladder from a pane with no turn running, as before
-  2  the ask: a fresh silence finding is sent to its mover (the message is the ask) and puts the item on the ladder at the look, its clock started then, a History line saying so; a second pass sends
-     and enters nothing; a finding sent in an earlier episode (before the switch) is not entered
+  1  the switch: `[ladder] enabled` alone is the whole switch (there is no `silence` key); the dates tick gives the ladder to the dates pass only then; with the one ladder off the stall pass starts a ladder from a pane with no
+     turn running, as before
+  2  the ask: the message the dates pass sent is the ask and puts the item on the ladder at the look, its clock started then, a History line saying so
   3  the look: nothing before `look_minutes` (30); then, with the mover's pane idle, the mover is told once more (a front agent gets the History line alone); a pane with a turn running is left alone until it ends
-  4  cold, builder: ten minutes after the look the cold call is asked; with no taker the item goes to the project's builder, and the silence entry ends with the mover change; with no builder and no cold call the last rung
+  4  cold, builder: ten minutes after the look the cold call is asked; with no taker the item goes to the project's builder, and the entry ends with the mover change; with no builder and no cold call the last rung
      is ONE message to the fleet's builder, the item staying with its mover and off the owner's list
   5  activity ends it: a write that counts (the activity clock moves) before the look ends the entry; a bare confirm and the ladder's own notes do not, and the ladder goes on
-  6  a pane with no turn running no longer starts a ladder (the silence audit does); an untaken hand-off is still the hand-off audit's, and its ladder is taken here as before
+  6  a pane with no turn running starts no ladder (with the one ladder on); an untaken hand-off is still the hand-off audit's, and its ladder is taken here as before
   7  the dates pass: an item past its expected time with no write since is sent its message and put on the same ladder
-  8  the switch turned off in the middle of a ladder, and the whole one-ladder flag turned off: the entry is read in the old table (nothing is repeated, the builder rung stays reachable)
+  8  the whole one-ladder flag turned off in the middle of a ladder: the entry is read in the old table (nothing is repeated, the builder rung stays reachable)
   9  pure: ladder.enter_quiet, quiet_over, via_of, unwind, action
  10  a background mover whose pane is busy (or shows a background shell) is still chased past the ask: the look is sent in the "nothing written for N minutes" wording; a work line in progress changed
      within 90 minutes holds the ladder; a live pane gets no cold call and no builder (its silence goes to -main, section 11), a pane that is not live goes on to the cold call and the builder (never the builder itself); one notice per agent per pass;
      a front agent keeps the pane rule; ladder.action for a background mover;
      only the mover's own work line holds the ladder; an empty or unreadable heartbeat is unknown (live); a gone entry reaches the cold call whatever the heartbeat shows
  11  a live background mover that stays silent after the look is handed up: a notice to the project's -main agent `minutes` after the look (marked for the owner, naming the silence, asking for a nudge or a
-     different mover and saying how to stop the repeats), the same notice again only every `ladder.MAIN_EVERY`, never one per pass; ONE notice per -main agent per pass, listing every item due for it; a front mover, an item with activity, an item a fresh work line holds and
+     different mover and saying how to stop the repeats), the same notice again only every `ladder.MAIN_EVERY`, never one per pass; ONE notice per -main agent per pass, listing every item due for it; a front mover, a fresh work line and
      a mover whose pane is not live (the cold call, the builder) get none; a project with no -main agent gets the History line alone
 
     tests/run-suite ladder_silence       -> exit 0 / 1"""
@@ -82,7 +81,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
-from stackshot.web import server; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.web import server; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
 from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -107,9 +106,9 @@ def main_recovery_pushes(gid): return [p for p in pushes_to("home-beta-front", g
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
-def ladder_cfg(enabled=True, silence=True, **kw):
-    # main_hours defaults to a value no scenario reaches: these sections test the silence ladder's rungs, and an item that has not moved for hours is handed up by the other way in (tests/ladder_progress_scenario.py)
-    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "silence": silence, "main_hours": 10000, **kw}.items() if v is not None}
+def ladder_cfg(enabled=True, **kw):
+    # main_hours defaults to a value no scenario reaches: these sections test the quiet entry's rungs, and an item that has not moved for hours is handed up by the other way in (tests/ladder_progress_scenario.py)
+    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "main_hours": 10000, **kw}.items() if v is not None}
 set_cfg(); server._cfg.CFG["stall"] = {}
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
 COLD_MSGS = []
@@ -140,66 +139,50 @@ def clear_records():
     for p in (T / "state/audit").glob("*.json"): p.unlink()
     sent.clear()
 def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
-def silence_pass(ids, at=None, entered=True):
-    """One silence pass over these items at `at`, as the server's tick runs it: the real pane view, and the ladder given to it when the switch is on."""
-    return SL.silence_pass(now=now0 if at is None else at, items=load(*ids), env=env(), skip=server._silence_skip(), entered=server._ladder_enter_quiet if entered and server._ladder_silence_on() else None)
+def enter(ids, at=None):
+    """The dates pass's entry for these items at `at`: what `audit_run.dates_pass` does for each fresh finding that reached its mover (`entered=server._ladder_enter_quiet`), without the pass's own message. → {"entered": n}."""
+    now_ = now0 if at is None else at; n = 0
+    for gid, it in load(*ids).items():
+        n += bool(server._ladder_enter_quiet(gid, str((it.get("metadata") or {}).get("mover") or ""), now_, "no activity"))
+    return {"entered": n}
 def entry(i): return server._stall_load().get(f"a{i}")
 IDLE_SINCE = now0 - 50 * MIN        # the pane went idle then (the silent item's last activity was 60 minutes before now0)
 
 # ================================================================ 1. the switch
-check("1 off: with no [ladder] section the one ladder and the silence switch are off", not server._ladder_on() and not server._ladder_silence_on() and server._cfg.get("ladder", "silence", default=False) is False, None)
-ladder_cfg(False, True)
-check("1 off: `silence` alone does nothing (the one ladder is off)", not server._ladder_silence_on(), None)
-ladder_cfg(True, None)
-check("1 off: `enabled` alone leaves silence off (a pane with no turn running still starts a ladder, as before)", server._ladder_on() and not server._ladder_silence_on(), None)
-ladder_cfg(True, "yes")
-check("1 off: only a TOML true turns it on", not server._ladder_silence_on(), None)
-ladder_cfg(True, True)
-check("1 on: both `enabled` and `silence` true turn it on, and the look is 30 minutes", server._ladder_silence_on() and server._ladder_look() == 30.0, None)
+ladder_cfg(False)
+check("1 off: with `enabled` false the one ladder is off", not server._ladder_on(), None)
+ladder_cfg(True)
+check("1 on: `enabled` alone turns the one ladder on, and the look is 30 minutes", server._ladder_on() and server._ladder_look() == 30.0, None)
 spy = []
-_real_pass, _real_dates = SL.silence_pass, AR.dates_pass
-SL.silence_pass = lambda **kw: spy.append(("silence", kw.get("entered"))) or {}
-AR.dates_pass = lambda **kw: spy.append(("dates", kw.get("entered"))) or {}
+_real_dates = AR.dates_pass
+AR.dates_pass = lambda **kw: spy.append(kw.get("entered")) or {}
 try:
-    server._silence_tick(); server._dates_expected_tick()
+    server._dates_expected_tick()
     on_spy = list(spy); spy.clear()
-    ladder_cfg(True, None); server._silence_tick(); server._dates_expected_tick()
+    ladder_cfg(False); server._dates_expected_tick()
     off_spy = list(spy); spy.clear()
-    ladder_cfg(False, True); server._silence_tick(); server._dates_expected_tick()
-    off2_spy = list(spy); spy.clear()
 finally:
-    SL.silence_pass, AR.dates_pass = _real_pass, _real_dates
-ladder_cfg(True, True)
-check("1 wiring: the silence tick and the dates tick give the ladder to their pass only with both on", [(k, e is server._ladder_enter_quiet) for k, e in on_spy] == [("silence", True), ("dates", True)]
-      and [(k, e) for k, e in off_spy] == [("silence", None), ("dates", None)] and [(k, e) for k, e in off2_spy] == [("silence", None), ("dates", None)], (on_spy, off_spy, off2_spy))
-# a pane with no turn running starts a ladder with the switch off, and none with it on
+    AR.dates_pass = _real_dates
+ladder_cfg(True)
+check("1 wiring: the dates tick gives the ladder to the dates pass only with the one ladder on", [e is server._ladder_enter_quiet for e in on_spy] == [True] and off_spy == [None], (on_spy, off_spy))
+# a pane with no turn running starts a ladder with the one ladder off, and none with it on
 put(1, act=30); cli_row("home-peer", "idle", IDLE_SINCE)
-ladder_cfg(True, None)
+ladder_cfg(False)
 done = stk(now0 + 1)
-check("1 off: with `silence` off an item whose pane has had no turn for 10 minutes gets the stall notice and a via=stall entry, as before", "a1" in done and len(stall_notices("home-peer", 1)) == 1 and LD.via_of(entry(1)) == "stall", (done, pushes(), entry(1)))
+check("1 off: with the one ladder off an item whose pane has had no turn for 10 minutes gets the stall notice and a via=stall entry, as before", "a1" in done and len(stall_notices("home-peer", 1)) == 1 and LD.via_of(entry(1)) == "stall", (done, pushes(), entry(1)))
 close(1); server._stall_save({})
-ladder_cfg(True, True)
+ladder_cfg(True)
 
 # ================================================================ 2. the ask
 clear_records()
 put(10, act=60); cli_row("home-peer", "idle", IDLE_SINCE)
-r = silence_pass([10])
+r = enter([10])
 e10 = entry(10)
-check("2 ask: a silent item is found and the finding goes to its mover (the message is the ask)", r["findings"] == 1 and r["fresh"] == 1 and len(sent) == 1 and sent[0][0] == "home-peer" and "board#10" in sent[0][1], (r, sent))
-check("2 ask: …and the item is on the ladder at the look: via silence, step 1, started now, for this silence (the activity clock), the mover and the version noted",
-      e10 and e10.get("via") == "silence" and e10.get("step") == 1 and e10.get("last") == now0 and e10.get("act") == rd(10)["activity"] and e10.get("mover") == "home-peer" and e10.get("ladder") is True
-      and LD.quiet(e10), e10)
+check("2 ask: the item is on the ladder at the look: via silence (the stored value keeps its name), step 1, started now, for this stretch (the activity clock), the mover and the version noted",
+      r["entered"] == 1 and e10 and e10.get("via") == "silence" and e10.get("step") == 1 and e10.get("last") == now0 and e10.get("act") == rd(10)["activity"] and e10.get("mover") == "home-peer" and e10.get("ladder") is True
+      and LD.quiet(e10), (r, e10))
 check("2 ask: …a History line says so, and the item is as it was (no write by a session: version and activity unmoved)",
       len(log_of(10)) == 1 and "asked for news" in log_of(10)[0]["text"] and rd(10)["activity"] == now0 - 60 * MIN and rd(10)["updated"] == now0 - 60 * MIN, (log_of(10), rd(10)))
-sent.clear(); r2 = silence_pass([10], at=now0 + 600)
-check("2 ask: a second pass sends nothing and does not enter it again (the item is on the ladder: the pass leaves it to the ladder)", r2["fresh"] == 0 and not sent and entry(10) == e10 and len(log_of(10)) == 1, (r2, sent, entry(10)))
-# a finding sent before the switch (an earlier episode) is not entered: the pass never floods the ladder
-clear_records(); ladder_cfg(True, None)
-put(11, act=60); cli_row("home-peer2", "idle", IDLE_SINCE); d11 = rd(11); d11["metadata"]["mover"] = "home-peer2"; d11["metadata"]["needs"] = ["home-peer2"]; (T / "store/a/11.json").write_text(json.dumps(d11))
-silence_pass([11]); ladder_cfg(True, True); sent.clear()
-r3 = silence_pass([11], at=now0 + 600)
-check("2 ask: a finding sent before the switch was turned on is a repeat: not sent again, not put on the ladder", r3["repeats"] == 1 and r3["fresh"] == 0 and entry(11) is None and not sent, (r3, entry(11)))
-close(11)
 
 # ================================================================ 3. the look
 no_msgs = lambda: not look_notices("home-peer", 10)
@@ -208,18 +191,18 @@ done = stk(now0 + 31 * MIN)
 check("3 look: 31 minutes after the ask, the pane having no turn running, the mover is told once more, in the silence wording, with the step on the item and the ladder on the cold call",
       "a10" in done and len(look_notices("home-peer", 10)) == 1 and "nothing written for" in look_notices("home-peer", 10)[0][1] and entry(10)["step"] == 2 and entry(10)["last"] == now0 + 31 * MIN
       and len(log_of(10)) == 2 and "nothing was written to it" in log_of(10)[1]["text"] and not stall_notices("home-peer", 10), (done, pushes_to("home-peer", "a10"), entry(10), log_of(10)))
-check("3 look: …the stall wording (a pane with no turn for N minutes) is not used for an item the silence audit brought", not stall_notices("home-peer", 10), pushes_to("home-peer", "a10"))
+check("3 look: …the stall wording (a pane with no turn for N minutes) is not used for an item the dates pass brought", not stall_notices("home-peer", 10), pushes_to("home-peer", "a10"))
 # a pane with a turn running at the look is left alone; the look comes when the turn ends
 clear_records()
 put(12, act=60, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE_SINCE)
-silence_pass([12]); cli_row("home-peer2", "busy", now0 + 20 * MIN)
+enter([12]); cli_row("home-peer2", "busy", now0 + 20 * MIN)
 check("3 look: a turn started after the ask: 35 minutes on, nothing is sent", "a12" not in stk(now0 + 35 * MIN) and not look_notices("home-peer2", 12), pushes_to("home-peer2", "a12"))
 cli_row("home-peer2", "idle", now0 + 36 * MIN)
 check("3 look: …the turn ends: the look comes at once", "a12" in stk(now0 + 37 * MIN) and len(look_notices("home-peer2", 12)) == 1, pushes_to("home-peer2", "a12"))
 close(12)
 # a front agent's item: the look is a History line alone
 clear_records(); put(13, act=60, mover="home-front"); cli_row("home-front", "idle", IDLE_SINCE)
-silence_pass([13]); done = stk(now0 + 31 * MIN)
+enter([13]); done = stk(now0 + 31 * MIN)
 check("3 look: a front agent is sent no notice at the look (the History line alone), and the entry goes on to the cold call", "a13" in done and not pushes_to("home-front", "a13") and entry(13)["step"] == 2
       and any("no notice is sent to a front agent" in x["text"] for x in log_of(13)), (done, pushes(), log_of(13)))
 close(13)
@@ -236,7 +219,7 @@ close(10)
 # the last rung: no builder and no cold call, ONE message to the fleet's builder; the item stays with its mover, off the owner's list
 clear_records(); set_cfg(cold_call=False)
 put(14, project="projects/beta", mover="home-peer3", act=60); cli_row("home-peer3", "idle", IDLE_SINCE)
-silence_pass([14]); stk(now0 + 31 * MIN)
+enter([14]); stk(now0 + 31 * MIN)
 check("4 last: ask and look sent, no recovery request yet", len(look_notices("home-peer3", 14)) == 1 and not main_recovery_pushes("a14"), pushes_to("home-peer3", "a14"))
 done = stk(now0 + 41 * MIN + 1)
 check("4 last: cold call off and no builder: ONE message asks the project's -main agent (no background agent to build); the mover keeps the item; it is not on the owner's list",
@@ -246,13 +229,13 @@ close(14); set_cfg()
 
 # ================================================================ 5. activity ends it; a bare confirm and the ladder's notes do not
 clear_records(); put(15, act=60); cli_row("home-peer", "idle", IDLE_SINCE)
-silence_pass([15]); a15 = entry(15)
+enter([15]); a15 = entry(15)
 d = rd(15); d["activity"] = now0 + 5 * MIN; d["updated"] = now0 + 5 * MIN; d["written_by"] = "home-peer"; (T / "store/a/15.json").write_text(json.dumps(d))     # the mover wrote to it: real activity
 done = stk(now0 + 31 * MIN)
 check("5 activity: a write that counts before the look ends the entry: no look is sent and the stall table keeps no silence entry", "a15" not in done and not look_notices("home-peer", 15) and not (entry(15) and LD.quiet(entry(15))), (done, entry(15)))
 close(15)
 clear_records(); put(16, act=60); cli_row("home-peer", "idle", IDLE_SINCE)
-silence_pass([16]); d = rd(16); d["confirmed"] = now0 + 5 * MIN; d["written_by_id"] = U["home-peer"]; d["written_by"] = "home-peer"; (T / "store/a/16.json").write_text(json.dumps(d))     # a bare confirm by the mover
+enter([16]); d = rd(16); d["confirmed"] = now0 + 5 * MIN; d["written_by_id"] = U["home-peer"]; d["written_by"] = "home-peer"; (T / "store/a/16.json").write_text(json.dumps(d))     # a bare confirm by the mover
 done = stk(now0 + 31 * MIN)
 check("5 confirm: the mover's bare confirm is no activity: it does not restart the silence, and the look comes on time", "a16" in done and len(look_notices("home-peer", 16)) == 1 and entry(16)["step"] == 2 and LD.quiet(entry(16)), (done, entry(16)))
 d = rd(16); d["updated"] = now0 + 32 * MIN; (T / "store/a/16.json").write_text(json.dumps(d))        # a write of the item's version that is not activity (an audit's, a repair's)
@@ -260,23 +243,23 @@ n_cold = len(COLD_MSGS)
 check("5 confirm: …nor does a write that moves the item's version without activity: the cold call still comes ten minutes after the look", "a16" in stk(now0 + 41 * MIN + 1) and len(COLD_MSGS) == n_cold + 1, (entry(16), COLD_MSGS[-1:]))
 close(16)
 clear_records(); put(17, act=60, wait_kind="relay"); cli_row("home-peer", "idle", IDLE_SINCE)
-check("5 not due: an item on a stored wait is not silent and never enters", silence_pass([17])["findings"] == 0 and entry(17) is None, entry(17))
+check("5 not due: an item on a stored wait never enters", enter([17])["entered"] == 0 and entry(17) is None, entry(17))
 close(17)
 # the item put on a hold after it was asked: not due, its entry dropped
 clear_records(); put(18, act=60); cli_row("home-peer", "idle", IDLE_SINCE)
-silence_pass([18]); d = rd(18); d["metadata"]["hold"] = True; d["metadata"].pop("phase", None); d["metadata"].pop("waits_on", None); d["metadata"]["wake"] = local(now0 + 5 * H); (T / "store/a/18.json").write_text(json.dumps(d))
+enter([18]); d = rd(18); d["metadata"]["hold"] = True; d["metadata"].pop("phase", None); d["metadata"].pop("waits_on", None); d["metadata"]["wake"] = local(now0 + 5 * H); (T / "store/a/18.json").write_text(json.dumps(d))
 stk(now0 + 31 * MIN)
 check("5 not due: …put on a hold after the ask, the entry is dropped and nothing is sent", entry(18) is None and not look_notices("home-peer", 18), (entry(18), pushes_to("home-peer", "a18")))
 close(18)
 
 # ================================================================ 6. a pane with no turn running starts nothing; an untaken hand-off is still the hand-off audit's
 put(20, act=30, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE_SINCE)
-check("6 pane: with the switch on, an item whose pane has had no turn for 40 minutes and which is not silent is sent nothing and has no entry", "a20" not in stk(now0 + 1 * MIN) and not (entry(20) or {}).get("step") and not pushes_to("home-peer2", "a20"), (entry(20), pushes_to("home-peer2", "a20")))
-check("6 pane: …nor 5 hours later (the silence pass, not the pane, brings an item)", "a20" not in stk(now0 + 5 * H) and not (entry(20) or {}).get("step") and not pushes_to("home-peer2", "a20"), entry(20))
+check("6 pane: with the one ladder on, an item whose pane has had no turn for 40 minutes and which is not silent is sent nothing and has no entry", "a20" not in stk(now0 + 1 * MIN) and not (entry(20) or {}).get("step") and not pushes_to("home-peer2", "a20"), (entry(20), pushes_to("home-peer2", "a20")))
+check("6 pane: …nor 5 hours later (the dates pass, not the pane, brings an item)", "a20" not in stk(now0 + 5 * H) and not (entry(20) or {}).get("step") and not pushes_to("home-peer2", "a20"), entry(20))
 close(20)
 put(21, act=2, mover="home-peer", handoff=H_.new_record("home-peer", U["home-peer"], "home-send", IDLE_SINCE + 5 * MIN, delivered_at=IDLE_SINCE + 5 * MIN + 10)); cli_row("home-peer", "idle", IDLE_SINCE)
 d = rd(21); d["activity"] = d["updated"] = d["state_updated"] = now0 - 3 * H; (T / "store/a/21.json").write_text(json.dumps(d))
-check("6 hand-off: an untaken hand-off is left alone by the silence audit and the stall pass, however quiet", silence_pass([21])["findings"] == 0 and "a21" not in stk(now0 + 1 * MIN) and not pushes_to("home-peer", "a21"), pushes_to("home-peer", "a21"))
+check("6 hand-off: an untaken hand-off is left alone by the stall pass, however quiet", "a21" not in stk(now0 + 1 * MIN) and not pushes_to("home-peer", "a21"), pushes_to("home-peer", "a21"))
 check("6 hand-off: …until the hand-off audit brings it (via handoff); the ladder then takes its later rungs here, once, as before",
       server._handoff_tick(now=now0 + 61 * MIN, only=["a21"]) == ["a21"] and (entry(21) or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a21")) == 1
       and "a21" not in stk(now0 + 62 * MIN) and "a21" in stk(now0 + 92 * MIN) and len(pushes_to("home-peer", "a21")) == 2, (pushes_to("home-peer", "a21"), entry(21)))
@@ -298,20 +281,14 @@ AR.dates_pass(now=now0, items=load(31), anchors={}, env=env())
 check("7 dates: with the ladder not handed to the pass (the switch off) the item is sent the message and nothing is entered, as before", len(sent) == 1 and entry(31) is None, (sent, entry(31)))
 close(31)
 
-# ================================================================ 8. the switch turned off in the middle of a ladder
-clear_records(); put(40, act=60, mover="home-peer2"); cli_row("home-peer2", "idle", IDLE_SINCE)
-silence_pass([40]); stk(now0 + 31 * MIN)
-check("8 mid-ladder: the entry is on the cold call (step 2, silence)", entry(40)["step"] == 2 and LD.quiet(entry(40)), entry(40))
-ladder_cfg(True, None); n_cold = len(COLD_MSGS)
-done = stk(now0 + 41 * MIN + 1)
-check("8 silence off, ladder on: the entry still takes its cold call (the ladder reads it as it was made), nothing is sent twice", "a40" in done and len(COLD_MSGS) == n_cold + 1 and len(look_notices("home-peer2", 40)) == 1, (done, COLD_MSGS[-1:]))
-close(40)
-clear_records(); ladder_cfg(True, True); put(41, act=60, mover="home-peer3"); cli_row("home-peer3", "idle", IDLE_SINCE)
-silence_pass([41]); stk(now0 + 31 * MIN)
-ladder_cfg(False, True); n_cold = len(COLD_MSGS)
+# ================================================================ 8. the one ladder turned off in the middle of a ladder
+clear_records(); ladder_cfg(True); put(41, act=60, mover="home-peer3"); cli_row("home-peer3", "idle", IDLE_SINCE)
+enter([41]); stk(now0 + 31 * MIN)
+check("8 mid-ladder: the entry is on the cold call (step 2, via silence)", entry(41)["step"] == 2 and LD.quiet(entry(41)), entry(41))
+ladder_cfg(False); n_cold = len(COLD_MSGS)
 done = stk(now0 + 41 * MIN + 1)
 check("8 ladder off: the old stall ladder reads the entry in its own table (the look maps to the cold call): the cold call comes, the look is not sent again", "a41" in done and len(COLD_MSGS) == n_cold + 1 and len(look_notices("home-peer3", 41)) == 1, (done, entry(41)))
-close(41); ladder_cfg(True, True)
+close(41); ladder_cfg(True)
 
 # ================================================================ 9. pure
 ent = LD.enter_quiet(None, "m", [1.0, 2.0], 3.0, 100.0, 500.0)
@@ -335,7 +312,7 @@ def set_live(name):
 def work_line(i, state, ts, agent="x"):
     d_ = rd(i); d_["metadata"]["work"] = [{"id": "build", "text": "building the fix", "state": state, "agent": agent, "ts": ts}]; (T / f"store/a/{i}.json").write_text(json.dumps(d_))
 set_live("home-docs"); set_live("team-back")
-ladder_cfg(True, True)
+ladder_cfg(True)
 # 10a. the builder's pane is busy (a turn, or subagents, running) and the item is past due: the look is sent all the same, in the new wording
 clear_records(); put(50, act=300, mover="team-back", wake=local(now0 - 2 * H)); d = rd(50); d["written_at"] = now0 - 5 * H; (T / "store/a/50.json").write_text(json.dumps(d)); cli_row("team-back", "busy", now0 - 20 * MIN)
 AR.dates_pass(now=now0, items=load(50), anchors={}, env=env(), entered=server._ladder_enter_quiet)
@@ -354,65 +331,54 @@ check("10c live pane: 10 minutes after the look the cold call is not made, and n
 close(50)
 # 10b. a CI watch (a background shell) does not exempt the builder either
 clear_records(); put(51, act=60, mover="team-back"); cli_row("team-back", "idle", IDLE_SINCE)
-silence_pass([51]); cli_row("team-back", "shell", now0 + 5 * MIN)
+enter([51]); cli_row("team-back", "shell", now0 + 5 * MIN)
 done = stk(now0 + 31 * MIN)
 check("10b shell builder: a builder whose pane shows a background shell (a CI watch) gets the look", "a51" in done and len(look_notices("team-back", 51)) == 1, (done, pushes_to("team-back", "a51")))
 close(51)
 # 10d. the evidence: a work line in progress changed within 90 minutes holds the ladder; an older line, or one not in progress, does not
 clear_records(); put(52, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([52]); work_line(52, "in progress", now0 + 20 * MIN, "home-docs")
+enter([52]); work_line(52, "in progress", now0 + 20 * MIN, "home-docs")
 check("10d work line: a work line in progress changed 11 minutes before the look: the look is not sent", "a52" not in stk(now0 + 31 * MIN) and not look_notices("home-docs", 52) and entry(52)["step"] == 1, (entry(52), pushes_to("home-docs", "a52")))
 check("10d work line: …still held 89 minutes after the line was changed", "a52" not in stk(now0 + 20 * MIN + 89 * MIN) and not look_notices("home-docs", 52), pushes_to("home-docs", "a52"))
 check("10d work line: …91 minutes after the line was changed the look is sent", "a52" in stk(now0 + 20 * MIN + 91 * MIN) and len(look_notices("home-docs", 52)) == 1, pushes_to("home-docs", "a52"))
 close(52)
 clear_records(); put(53, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([53]); work_line(53, "assigned", now0 + 20 * MIN, "home-docs")
+enter([53]); work_line(53, "assigned", now0 + 20 * MIN, "home-docs")
 check("10d work line: a line that is only assigned is no evidence of work: the look is sent", "a53" in stk(now0 + 31 * MIN) and len(look_notices("home-docs", 53)) == 1, pushes_to("home-docs", "a53"))
 close(53)
 # 10e. a background mover whose pane is not live is chased on: the cold call, then the builder
 clear_records(); put(54, act=60, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
-silence_pass([54]); stk(now0 + 31 * MIN); no_row("home-docs"); set_gone("home-docs")
+enter([54]); stk(now0 + 31 * MIN); no_row("home-docs"); set_gone("home-docs")
 n_cold = len(COLD_MSGS)
 done = stk(now0 + 41 * MIN + 1)
 check("10e dead pane: with the pane gone (no registry row, the heartbeat shows it gone for hours) the cold call is made 10 minutes after the look and the item falls to the builder", "a54" in done and len(COLD_MSGS) == n_cold + 1 and mt(54).get("mover") == "team-back", (done, COLD_MSGS[n_cold:], mt(54)))
 close(54); set_live("home-docs")
 # 10f. a builder is never handed its own item: the last rung is the one message to the fleet's builder
 clear_records(); set_cfg(cold_call=False); put(55, act=60, mover="team-back"); cli_row("team-back", "idle", IDLE_SINCE)
-silence_pass([55]); stk(now0 + 31 * MIN); no_row("team-back"); set_gone("team-back")
+enter([55]); stk(now0 + 31 * MIN); no_row("team-back"); set_gone("team-back")
 done = stk(now0 + 41 * MIN + 1)
 check("10f builder mover: with its pane gone, the builder rung does not hand the item to the builder itself: ONE message asks the fleet's builder and the item stays with its mover",
       "a55" in done and mt(55).get("mover") == "team-back" and len(recovery_pushes("a55")) == 1 and bool(ho(55).get("recovery_at")) and not [x for x in pushes_to("team-back", "a55") if "is handed to you by" in x[1]], (done, ho(55), recovery_pushes("a55"), mt(55).get("mover")))
 close(55); set_live("team-back"); set_cfg()
 # 10g. one notice per agent per pass: two items of one background agent due for the look at once get one notice a pass
 clear_records(); put(56, act=60, mover="home-docs"); put(57, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([56, 57]); n0 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
+enter([56, 57]); n0 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
 done1 = stk(now0 + 31 * MIN); n1 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
 done2 = stk(now0 + 31 * MIN + 60); n2 = len(look_notices("home-docs", 56)) + len(look_notices("home-docs", 57))
 check("10g one notice a pass: the first pass sends one look to the agent, the next pass the other, and no item gets two", n0 == 0 and len(done1) == 1 and n1 == 1 and len(done2) == 1 and n2 == 2 and len(look_notices("home-docs", 56)) == 1 and len(look_notices("home-docs", 57)) == 1, (done1, done2, pushes_to("home-docs")))
 close(56, 57)
 # 10h. a front agent is as before: a pane with a turn running waits
 clear_records(); put(58, act=60, mover="home-front"); cli_row("home-front", "idle", IDLE_SINCE)
-silence_pass([58]); cli_row("home-front", "busy", now0 + 20 * MIN)
+enter([58]); cli_row("home-front", "busy", now0 + 20 * MIN)
 check("10h front agent: a front agent with a turn running at the look is left alone", "a58" not in stk(now0 + 35 * MIN) and entry(58)["step"] == 1, entry(58))
 close(58)
-# 10i. the ladder a pane with no turn running brought (`silence` off): the ask waits for the pane, the look after it does not, and a background agent's look is in the same wording
-ladder_cfg(True, None); clear_records()
-put(59, act=30, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
-done = stk(now0 + 1)
-check("10i pane-triggered: the ask is the stall notice, sent to an idle pane", "a59" in done and len(stall_notices("home-docs", 59)) == 1 and LD.via_of(entry(59)) == "stall" and entry(59)["step"] == 1, (done, entry(59)))
-cli_row("home-docs", "busy", now0 + 5 * MIN)
-check("10i pane-triggered: 29 minutes after the ask the busy pane is left alone", "a59" not in stk(now0 + 1 + 29 * MIN), entry(59))
-done = stk(now0 + 1 + 31 * MIN)
-check("10i pane-triggered: 31 minutes after the ask, the pane busy, the background agent's look is sent in the item's wording (nothing written), not the pane's",
-      "a59" in done and len(look_notices("home-docs", 59)) == 1 and len(stall_notices("home-docs", 59)) == 1 and entry(59)["step"] == 2, (done, pushes_to("home-docs", "a59"), entry(59)))
-close(59); ladder_cfg(True, True)
 # 10k. the hold is the mover's own work line: a line in progress that another agent left on the item holds nothing
 clear_records(); put(60, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([60]); work_line(60, "in progress", now0 + 20 * MIN, "team-back")
+enter([60]); work_line(60, "in progress", now0 + 20 * MIN, "team-back")
 check("10k other agent's line: a recent line in progress written by another agent does not hold the ladder: the look is sent", "a60" in stk(now0 + 31 * MIN) and len(look_notices("home-docs", 60)) == 1, (entry(60), pushes_to("home-docs", "a60")))
 close(60)
 clear_records(); put(61, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([61]); work_line(61, "in progress", now0 + 20 * MIN, "home-docs")
+enter([61]); work_line(61, "in progress", now0 + 20 * MIN, "home-docs")
 check("10k mover's own line: the same line written by the mover holds it", "a61" not in stk(now0 + 31 * MIN) and not look_notices("home-docs", 61) and entry(61)["step"] == 1, (entry(61), pushes_to("home-docs", "a61")))
 close(61)
 from stackshot.audit import silence as SLN
@@ -421,7 +387,7 @@ check("10k pure: subagent_running counts a line of any agent without a mover, an
       SLN.subagent_running(it_, 1100.0) and SLN.subagent_running(it_, 1100.0, "team-back", server._ho_same) and not SLN.subagent_running(it_, 1100.0, "home-docs", server._ho_same), None)
 # 10l. a heartbeat that is empty or unreadable says nothing about the pane: a background mover with no registry row is taken as live (not cold-called, not handed on)
 clear_records(); put(62, act=60, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
-silence_pass([62]); stk(now0 + 31 * MIN); no_row("home-docs")
+enter([62]); stk(now0 + 31 * MIN); no_row("home-docs")
 hb_ = (T / "fleet/a/sessions.json").read_text(); (T / "fleet/a/sessions.json").write_text("{}")
 n_cold = len(COLD_MSGS)
 try:
@@ -452,10 +418,10 @@ check("10j action: the first rung of a pane-triggered ladder (the ask) still wai
 # ================================================================ 11. a live background mover that stays silent after the look reaches the project's -main agent
 def main_notices(i, to="home-front"): return [p for p in pushes_to(to, f"a{i}") if "background mover" in p[1]]
 def all_main_notices(to="home-front"): return [p for p in pushes_to(to) if "background mover" in p[1]]
-ladder_cfg(True, True, main_hours=4); set_live("home-docs"); set_live("team-back")      # section 11 runs with the real 4 hours: the silent mover's notice and the no-progress hand-up share one mark
+ladder_cfg(True, main_hours=4); set_live("home-docs"); set_live("team-back")      # section 11 runs with the real 4 hours: the silent mover's notice and the no-progress hand-up share one mark
 # 11a. the incident: a silent item on a live busy background agent: ask, look, then nothing for hours; now -main hears of it, once an interval
 clear_records(); put(70, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([70]); stk(now0 + 31 * MIN)
+enter([70]); stk(now0 + 31 * MIN)
 check("11a after the look the entry is on the cold call's rung, nothing has gone to -main yet", entry(70)["step"] == 2 and not main_notices(70) and len(look_notices("home-docs", 70)) == 1, (entry(70), pushes_to("home-front", "a70")))
 n_cold = len(COLD_MSGS)
 check("11a nine minutes after the look: nothing yet", "a70" not in stk(now0 + 31 * MIN + 9 * MIN) and not main_notices(70), pushes_to("home-front", "a70"))
@@ -483,17 +449,17 @@ check("11a …it goes on every interval while the silence lasts", len(main_notic
 close(70)
 # 11b. a front agent's own item is untouched by this rung
 clear_records(); sent_before = len(all_main_notices()); put(71, act=60, mover="home-front"); cli_row("home-front", "idle", IDLE_SINCE)
-silence_pass([71]); stk(now0 + 31 * MIN); stk(now0 + 41 * MIN + 1); stk(now0 + 6 * H); stk(now0 + 12 * H)
+enter([71]); stk(now0 + 31 * MIN); stk(now0 + 41 * MIN + 1); stk(now0 + 6 * H); stk(now0 + 12 * H)
 check("11b front mover: its item never goes to -main as a silent background mover", len(all_main_notices()) == sent_before and not any("background mover" in p[1] for p in pushes_to("home-front", "a71")), pushes_to("home-front", "a71"))
 close(71)
 # 11c. an item that is not silent: activity after the entry ends it, a fresh work line holds it, and neither reaches -main
 clear_records(); put(72, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([72]); d_ = rd(72); d_["activity"] = now0 + 35 * MIN; (T / "store/a/72.json").write_text(json.dumps(d_))
+enter([72]); d_ = rd(72); d_["activity"] = now0 + 35 * MIN; (T / "store/a/72.json").write_text(json.dumps(d_))
 stk(now0 + 31 * MIN); stk(now0 + 45 * MIN); stk(now0 + 5 * H)
 check("11c an item with activity after the entry was made: no notice to -main", not main_notices(72), pushes_to("home-front", "a72"))
 close(72)
 clear_records(); put(73, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([73]); work_line(73, "in progress", now0 + 20 * MIN, "home-docs")
+enter([73]); work_line(73, "in progress", now0 + 20 * MIN, "home-docs")
 stk(now0 + 31 * MIN); stk(now0 + 41 * MIN + 1); stk(now0 + 20 * MIN + 89 * MIN)
 check("11c a work line of the mover in progress, changed within 90 minutes, holds the item: no notice to -main", not main_notices(73) and entry(73)["step"] == 1, (entry(73), pushes_to("home-front", "a73")))
 done = stk(now0 + 20 * MIN + 91 * MIN)
@@ -503,7 +469,7 @@ check("11c …ten minutes after that look -main is told", len(main_notices(73)) 
 close(73)
 # 11d. a mover whose pane is not live gets the cold call and the builder as before, and -main is not told
 clear_records(); put(74, act=60, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
-silence_pass([74]); stk(now0 + 31 * MIN); no_row("home-docs"); set_gone("home-docs")
+enter([74]); stk(now0 + 31 * MIN); no_row("home-docs"); set_gone("home-docs")
 n_cold = len(COLD_MSGS)
 done = stk(now0 + 41 * MIN + 1)
 check("11d dead pane: the cold call is made and the item falls to the builder; nothing goes to -main", "a74" in done and len(COLD_MSGS) == n_cold + 1 and mt(74).get("mover") == "team-back" and not main_notices(74), (done, pushes_to("home-front", "a74")))
@@ -511,7 +477,7 @@ close(74); set_live("home-docs")
 # 11e. ONE notice per -main agent per pass, listing every item due for it: three silent items of live background agents of one project, and one item of another project (another -main)
 clear_records(); put(75, act=60, mover="home-docs"); put(76, act=60, mover="team-back"); put(78, act=60, mover="team-back"); put(79, project="projects/beta", act=60, mover="home-docs")
 cli_row("home-docs", "busy", now0 - 20 * MIN); cli_row("team-back", "busy", now0 - 20 * MIN)
-c_a, c_b = len(all_main_notices()), len(all_main_notices("home-beta-front")); silence_pass([75, 76, 78, 79])
+c_a, c_b = len(all_main_notices()), len(all_main_notices("home-beta-front")); enter([75, 76, 78, 79])
 for k in range(4): stk(now0 + (31 + k) * MIN)      # one look a pass for each agent: the four items reach the cold call's rung a minute or two apart
 check("11e before it, nothing has gone to either -main", len(all_main_notices()) == c_a and len(all_main_notices("home-beta-front")) == c_b and all(entry(i)["step"] == 2 for i in (75, 76, 78, 79)), [entry(i) for i in (75, 76, 78, 79)])
 p0 = len(pushes()); d1 = stk(now0 + 50 * MIN)
@@ -526,13 +492,24 @@ check("11e …every listed item's entry is stamped and has its History line; the
 close(75, 76, 78, 79)
 # 11f. a project with no -main agent: the History line alone, the rung is taken (no retry every pass)
 clear_records(); put(77, act=60, mover="home-docs"); cli_row("home-docs", "busy", now0 - 20 * MIN)
-silence_pass([77]); stk(now0 + 31 * MIN); real_main = server._main_agent; server._main_agent = lambda project: ""
+enter([77]); stk(now0 + 31 * MIN); real_main = server._main_agent; server._main_agent = lambda project: ""
 try:
     n_push = len(pushes()); done = stk(now0 + 41 * MIN + 1); done2 = stk(now0 + 41 * MIN + 61)
 finally:
     server._main_agent = real_main
 check("11f no -main agent: nothing is sent, a History line says so, and the rung is taken once (the next pass does nothing)", "a77" in done and "a77" not in done2 and len(pushes()) == n_push and any("no -main agent to tell" in x["text"] for x in log_of(77)) and entry(77).get("main_at"), (done, done2, log_of(77)))
 close(77)
+# 11h. an untaken hand-off whose mover is a live background session: a write by someone else (the owner's comment, 20 minutes before the notice is due) does not delay the notice to -main:
+# it is due ten minutes after the look, whatever the item's activity (a pin: no "recent activity" wait stands between the look and -main)
+clear_records()
+put(80, act=60, mover="home-docs", handoff=H_.new_record("home-docs", U["home-docs"], "home-send", now0 - 40 * MIN, delivered_at=now0 - 40 * MIN + 10)); cli_row("home-docs", "busy", now0 - 20 * MIN)
+check("11h (setup) the hand-off audit brings the untaken hand-off to the ladder (via handoff), the ask is sent",
+      server._handoff_tick(now=now0, only=["a80"]) == ["a80"] and (drain() or True) and (entry(80) or {}).get("via") == "handoff" and entry(80).get("step") == 1, (entry(80), pushes_to("home-docs", "a80")))
+d_ = rd(80); d_["activity"] = now0 + 21 * MIN; d_["updated"] = now0 + 21 * MIN; d_["written_by"] = "home-front"; (T / "store/a/80.json").write_text(json.dumps(d_))      # the owner's comment, 20 minutes before the notice is due
+stk(now0 + 31 * MIN)
+done = stk(now0 + 41 * MIN + 1)
+check("11h the notice to -main goes at once, ten minutes after the look, although the owner wrote to the item 20 minutes before", "a80" in done and len(main_notices(80)) == 1 and entry(80).get("main_at") == now0 + 41 * MIN + 1, (done, entry(80), pushes_to("home-front", "a80")))
+close(80)
 # 11g. pure: ladder.action / advance for the rung
 live_rec = {**ent2, "step": 2, "last": 3000.0}
 check("11g action: a live background mover on the cold call's rung is due 'main' `minutes` after the look and not before, whatever its pane shows",

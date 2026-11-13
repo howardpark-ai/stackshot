@@ -13,7 +13,7 @@ messages recorded by a fake push, a fake clock (every pass is given its `now`, a
   8  several items due in one pass: ONE notice that lists them
   9  the setting `[ladder] main_hours` (4; a bad value is 4) and the ladder switch
  10  a project with no -main agent: the History line alone
- 11  the silent mover's notice and this hand-up share one mark: an item handed up the one way is not handed up the other within the interval
+ 11  the stall pass's silent-mover notice and this hand-up share one mark: an item handed up the one way is not handed up the other within the interval
 
     tests/run-suite ladder_progress       -> exit 0 / 1"""
 import json, os, re, sys, pathlib, time, logging
@@ -99,9 +99,9 @@ def recovery_pushes(gid): return [p for p in pushes_to("home-fleet", gid) if "fl
 def look_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "nothing written for" in p[1]]
 def stall_notices(who, i): return [p for p in pushes_to(who, f"a{i}") if "have had no turn running" in p[1]]
 def set_cfg(**kw): server._cfg.CFG["model"] = dict(kw)
-def ladder_cfg(enabled=True, silence=True, **kw):
+def ladder_cfg(enabled=True, **kw):
     # main_hours defaults to a value no scenario reaches: these sections test the silence ladder's rungs, and an item that has not moved for hours is handed up by the other way in (tests/ladder_progress_scenario.py)
-    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "silence": silence, "main_hours": 10000, **kw}.items() if v is not None}
+    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "main_hours": 10000, **kw}.items() if v is not None}
 set_cfg(); server._cfg.CFG["stall"] = {}
 server._cfg.CFG.setdefault("fleet", {})["operator_session"] = "home-fleet"
 COLD_MSGS = []
@@ -137,14 +137,11 @@ def clear_records():
     for p in (T / "state/audit").glob("*.json"): p.unlink()
     sent.clear()
 def load(*ids): return {f"a{i}": server._load(f"a{i}") for i in ids}
-def silence_pass(ids, at=None, entered=True):
-    """One silence pass over these items at `at`, as the server's tick runs it: the real pane view, and the ladder given to it when the switch is on."""
-    return SL.silence_pass(now=now0 if at is None else at, items=load(*ids), env=env(), skip=server._silence_skip(), entered=server._ladder_enter_quiet if entered and server._ladder_silence_on() else None)
 def entry(i): return server._stall_load().get(f"a{i}")
 
 from stackshot.model import progress as PG; from stackshot.model import activity as ACT
-def ladder_cfg(enabled=True, silence=True, **kw):
-    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, "silence": silence, **kw}.items() if v is not None}
+def ladder_cfg(enabled=True, **kw):
+    server._cfg.CFG["ladder"] = {k: v for k, v in {"enabled": enabled, **kw}.items() if v is not None}
 def up_notices(i, to="home-front"): return [p for p in pushes_to(to, f"a{i}") if "has not moved for" in p[1]]
 def prog(i, ts):
     """Put the item's progress clock at `ts` (the fixture has none: an unstamped item reads as last written)."""
@@ -160,7 +157,7 @@ def save_at(ts, i, mutate, writer="home-peer", **kw):
     d_ = server._load(f"a{i}"); mutate(d_); CLK.t = ts
     try: writes.save(f"a{i}", d_, writer=writer, **kw)
     finally: CLK.t = None
-ladder_cfg(True, True, main_hours=4)
+ladder_cfg(True, main_hours=4)
 cli_row("home-peer", "busy", now0 - 20 * MIN); cli_row("home-peer2", "busy", now0 - 20 * MIN)
 
 # ================================================================ 1. pure: progress.py
@@ -299,13 +296,13 @@ close(150, 151)
 
 # ================================================================ 9. the setting: main_hours (4), a bad value is 4, the ladder switch gates the path
 put(160, act=30, mover="home-peer"); prog(160, now0)
-ladder_cfg(True, True, main_hours=2)
+ladder_cfg(True, main_hours=2)
 check("9 main_hours = 2: the item goes up after 2 hours, not before, and the notice says it comes again in 2 hours", "a160" not in stk(now0 + 2 * H - 60) and "a160" in stk(now0 + 2 * H) and "again in 2 hours" in up_notices(160)[0][1], pushes_to("home-front", "a160"))
 close(160)
-check("9 main_hours: 4 when it is missing, zero, negative or not a number", all((ladder_cfg(True, True, **kw) or server._ladder_main_hours() == 4.0) for kw in ({}, {"main_hours": 0}, {"main_hours": -3}, {"main_hours": "x"})) and (ladder_cfg(True, True, main_hours=6) or server._ladder_main_hours() == 6.0), None)
-put(161, act=30, mover="home-peer"); prog(161, now0 - 9 * H); ladder_cfg(False, True, main_hours=4)
+check("9 main_hours: 4 when it is missing, zero, negative or not a number", all((ladder_cfg(True, **kw) or server._ladder_main_hours() == 4.0) for kw in ({}, {"main_hours": 0}, {"main_hours": -3}, {"main_hours": "x"})) and (ladder_cfg(True, main_hours=6) or server._ladder_main_hours() == 6.0), None)
+put(161, act=30, mover="home-peer"); prog(161, now0 - 9 * H); ladder_cfg(False, main_hours=4)
 check("9 the ladder switch off: nothing is handed up (the path is the ladder's)", "a161" not in stk(now0 + 1) and not up_notices(161), pushes_to("home-front", "a161"))
-close(161); ladder_cfg(True, True, main_hours=4)
+close(161); ladder_cfg(True, main_hours=4)
 
 # ================================================================ 10. a project with no -main agent: the History line alone, once per stretch
 put(170, act=30, mover="home-peer"); prog(170, now0 - 5 * H)
@@ -317,7 +314,7 @@ finally:
 check("10 no -main agent: nothing is sent, a History line says so, the hand-up is marked once (the next pass does nothing)", "a170" in done and "a170" not in done2 and len(pushes()) == n_push and any("no -main agent to tell" in x["text"] for x in log_of(170)), (done, done2, log_of(170)))
 close(170)
 
-# ================================================================ 11. one message, one mark: a silent mover's notice (the ladder's own way in) counts as the hand-up
+# ================================================================ 11. one message, one mark: a silent mover's notice (the stall ladder's own hand-up) counts as the hand-up
 put(180, act=600, mover="home-peer"); prog(180, now0 - 9 * H)
 server._ladder_main("a180", "home-peer", {}, now0)
 drain(); c1 = len(up_notices(180)) + len([p for p in pushes_to("home-front", "a180") if "background mover" in p[1]])

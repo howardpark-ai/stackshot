@@ -10,9 +10,9 @@ tokens; the checks that need judgment get one `claude -p` call per suspect item,
 The checks (category names as the audit agent's brief has them; one finding = {"id", "project", "owner" (= mover), "mover", "category", "detail", "fix", "source"}):
 
   in code, no tokens      ask-missing (a decision item with no ask) · next rules (tools/next_report.py, N1 to N7) · idle-pass (counted in by_category, not a finding)
-  not made here           the ten-minute passes make these (audit_checks.py, silence.py, the server's runner): stuck-elsewhere (the first open step opens with someone other than the item's mover) and the board checks'
-                          arbitrary-hold and mislabeled-state, the filing pass (`filing_pass`); stale (an item's own wake has passed with no write since), the dates pass (`dates_pass`); an item on an agent with no
-                          activity for 45 minutes (stale, for an item with no date of its own; the board checks' idle-on-agent), the silence pass (`silence.silence_pass`). They
+  not made here           the ten-minute passes make these (audit_checks.py, the server's runner): stuck-elsewhere (the first open step opens with someone other than the item's mover) and the board checks'
+                          arbitrary-hold and mislabeled-state, the filing pass (`filing_pass`); stale (an item's own wake has passed with no write since), the dates pass (`dates_pass`). An item on an agent with no date of its own and no
+                          activity is not a finding of any pass: the hourly audit line (audit/hourly.py) writes it a History line and the idle hand-over (audit/hand_idle.py) hands it on. The passes
                           send their findings to the same recipient through the same `deliver_findings`, with the same text and send stamps (`merged_sent` joins the records), so a finding reaches its
                           mover once whichever pass finds it; they stand still while a run is in progress. Not counted in this run's `by_category`, the unmoved digest, the threshold or the 20% tightening share.
   one model call each     next-done · wrong-needs · ask-missing (an ask that no longer fits) · unneeded-escalation · older-than-page · obsolete-wait (a waiting item, held or after another item or parked or outside, whose wait a later change may have overtaken) · why-not-now (a stored doing item whose wake is more than an hour out and whose every open step is dated for that day or later: is there a concrete reason the step cannot run before then?) · goal-unclear (an open item whose subject and `Goal:` bullet are new or reworded since the last judgment: does each name an outcome wanted rather than a symptom, cause, task or trigger, and do the two name the same one? Items with no Goal bullet are the one-time pass's, tools/goal_pass.py; at most `GOAL_MAX` a run; the stamps judged are the record's `goal_judged`). A suspect is an item a heuristic picks for one or more of
@@ -219,7 +219,7 @@ class Env:
 
     def is_front_or_unread(self, who: Any, project: str = "") -> bool:
         """Is `who` a front agent, for the hourly audit (audit/hourly.py)? As `is_front` where the role map was read, but a role map that cannot be read (or holds no role at all) counts as front: a front agent's items are never handed
-        on, so an unreadable registry leaves the item where it is, where `is_front` would read the mover as a builder. The silence pass and the others keep `is_front`."""
+        on, so an unreadable registry leaves the item where it is, where `is_front` would read the mover as a builder. The other passes keep `is_front`."""
         try:
             if self.front_or_unread:
                 return bool(self.front_or_unread(who, project))
@@ -1875,7 +1875,7 @@ def dates_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | N
     """The dates rule (audit_checks.dates_findings: an item's own wake has passed with no write since) over the open items, and what a finding owes. Delivered as the filing pass delivers:
     to the recipient the daily run's `stale` finding goes to (`deliver_findings`), once, not again while its item has not been written since (the newest daily record counts too, so a send an earlier run made still holds), and again once the item has been written since. The record is `<paths.state>/audit/dates.json`, rewritten each pass. Nothing is sent or written while a
     daily run is in progress (the pass stands still then, and what falls due is sent by the first pass after the run) or with `dry`. `entered(gid, mover, now, detail)`, when given (the server gives it
-    with `[ladder] silence` on), is called for each fresh finding that reached someone, as the silence pass calls it: the message is the ask of the one ladder.
+    with `[ladder] enabled` on), is called for each fresh finding that reached someone: the message is the ask of the one ladder.
     → {"skipped": why} or {"open", "findings", "fresh", "repeats", "idle_pass", "sent"}."""
     from stackshot.tools import board_report as _br  # noqa: PLC0415
     from stackshot.tools import next_report as _nr  # noqa: PLC0415
@@ -1891,10 +1891,8 @@ def dates_pass(*, now: float | None = None, items: dict[str, dict[str, Any]] | N
     recs = _audit.runs(limit=5)
     latest = next((r for r in recs if r.get("finished") is not None and not r.get("error")), None)
     prior = read_dates()
-    from stackshot.audit import silence as _silence  # noqa: PLC0415  (silence imports this module)
-    quiet = _silence.sent_record()      # the silence pass's sends: one `stale` finding is one finding, whichever pass found it first (a passed wake on an item on an agent is both passes')
-    before = merged_sent(latest, prior, quiet)
-    repeats, fresh = split_sent(findings, items, before, by_shown, tries_before(latest, prior, quiet), now, levels=levels_before(latest, prior, quiet))
+    before = merged_sent(latest, prior)
+    repeats, fresh = split_sent(findings, items, before, by_shown, tries_before(latest, prior), now, levels=levels_before(latest, prior))
     res = {"open": n_open, "findings": len(findings), "fresh": len(fresh), "repeats": len(repeats), "idle_pass": len(passes), "sent": []}
     if dry:
         return {**res, "dry": True, "detail": findings, "idle_pass_detail": passes}

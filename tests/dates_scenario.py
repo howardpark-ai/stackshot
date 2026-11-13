@@ -1,7 +1,7 @@
 """Scenario test for the ten-minute dates pass (audit_checks.dates_findings, audit_run.dates_pass, server._dates_tick): has an item's own expected time passed with nobody acting? Fixture items, messages
 replaced by recorders, no live store, no network, no model call.
 
-  1  the rule: an item whose wake passed with no write since is a `stale` finding with the evidence the daily run gives; a doing item with no date of its own is never found (its silence is the silence pass's), nor is a wake still ahead, a write since the wake, a closed item, an item on the owner, behind an open item or in a state that is itself a wait; a held item follows the stale rule (its wake
+  1  the rule: an item whose wake passed with no write since is a `stale` finding with the evidence the daily run gives; a doing item with no date of its own is never found (its quiet is the hourly audit line's), nor is a wake still ahead, a write since the wake, a closed item, an item on the owner, behind an open item or in a state that is itself a wait; a held item follows the stale rule (its wake
      ahead or no wake is no finding, its wake passed is one); an item the idle pass poked is an idle-pass entry, no finding
   2  the pass: a finding goes to the recipient the daily run sends a stale one to, once, headed as a dates check; a second pass sends nothing; a write to the item sends it again; a finding that ended and came
      back is sent afresh; the record is <state>/audit/dates.json (written atomically, no run record); the daily run no longer makes the wake half of stale, so it sends nothing for an item past its wake, and the pass does not send again what an earlier daily run sent;
@@ -76,7 +76,7 @@ dsent = lambda: "\n".join(t for _to, t, _f in sent)
 rules = build(
     pastwake(1, 2, 3),                                                                                                                                      # past its wake, no write since: found
     doing(2, 1),                                                                                                                                            # doing, no date of its own, written an hour ago
-    doing(3, 30),                                                                                                                                           # doing, no date of its own, silent for 30 hours: the daily run's silence rule
+    doing(3, 30),                                                                                                                                           # doing, no date of its own, silent for 30 hours: the daily run's quiet rule
     item(4, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: build it", wake=local(now + 5 * H)),                                        # wake still ahead
     item(5, wrote=now - H, state="doing", needs=["home-agent"], next="home-agent: build it", wake=local(now - 2 * H)),                                        # wake passed, written since: somebody acted
     item(6, status="completed", wrote=now - 40 * H, state="doing", needs=["home-agent"], next="home-agent: done", outcome="done", wake=local(now - 30 * H)), # closed
@@ -97,7 +97,7 @@ check("1 an overdue wake is found: stale, saying past its wake and the last writ
       ("board#1", "stale") in got and next(f["detail"] for f in fs if f["id"] == "board#1") == f"past its wake ({AC._stamp(now - 2 * H)}) with no write since (last write {AC._stamp(now - 3 * H)})", fs)
 check("1 …with the daily run's shape: id, project, owner, mover, category, detail, fix, source code", all(set(f) >= {"id", "project", "owner", "mover", "category", "detail", "fix", "source"} and f["source"] == "code" and f["fix"] == AC.FIX["stale"] for f in fs), fs)
 check("1 a doing item with no date of its own is not found, written an hour ago or silent for 30 hours", not any(f["id"] in ("board#2", "board#3") for f in fs), fs)
-check("1 …nor is it the daily run's stale finding any more: the silence of an item with no date of its own is the silence pass's (tests/silence_scenario.py)",
+check("1 …nor is it the daily run's stale finding any more: the silence of an item with no date of its own is the hourly audit line's (tests/audit_hourly_scenario.py)",
       "board#3" not in {i for i, _d in stale_daily(rules)} and "board#2" not in {i for i, _d in stale_daily(rules)}, stale_daily(rules))
 check("1 a wake still ahead, a write since the wake, a closed item, the owner's item, an item behind an open one, a parked or verifying state: none found",
       not any(f["id"] in ("board#4", "board#5", "board#6", "board#7", "board#8", "board#9", "board#9041") for f in fs), fs)
@@ -175,7 +175,7 @@ check("2 the daily run sends no stale line for an item past its wake, whether or
 clear_state()
 silent = build(doing(3, 30))
 sent.clear(); AR.run(now=now, items=silent, anchors={}, env=env(), rubric="unused")
-check("2 the daily run no longer sends the silence of an item with no date of its own (the silence pass's)", "board#3" not in dsent(), dsent())
+check("2 the daily run no longer sends the silence of an item with no date of its own (the hourly audit line's)", "board#3" not in dsent(), dsent())
 clear_state()
 rec = daily(share, now)
 sent.clear()

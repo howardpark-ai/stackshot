@@ -4,7 +4,7 @@ clock (the pass is given its `now`), the pane registry replaced by a dict, no li
 
 Every rule is a probe that returns whether the rule held on a fixture, run twice: as the code is (it must hold) and with that one rule reverted by a patch (it must fail), so a check that cannot fail is caught.
 
-  1  off by default: the example config documents `hand_idle = false`, absent / false / the string "true" / 1 do nothing, only a TOML true does; a read-only copy does nothing
+  1  on by default: the example config documents `hand_idle = true`, absent or a TOML true is on; false / the string "true" / 1 do nothing; a read-only copy does nothing
   2  an idle item with a free builder is handed to it through the minute pass's own write: the builder is the mover, the hand-off record names it from the server, ONE History line says why and names the
      mover it left, the builder is told, -main gets ONE message that asks nothing, nobody else is told (the owner never), no step or decision is made for the owner
   3  what is read: the newest line must be idle (a verified one is not), not old (a line older than 6 hours 15 minutes is no news), and nothing may have moved the item since it
@@ -89,7 +89,6 @@ def fake_status(who, idx=None):
 server._handoff_status = fake_status
 server._handoff_pane = lambda who, idx=None: dead.get(who, "")
 server._sessions_index = lambda: {}
-server._stall_active = lambda: set()
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", idle_line=True, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. With `idle_line` it carries the hourly audit's idle line, written 5 minutes before now0."""
@@ -106,7 +105,7 @@ def wipe():
     for p_ in (T / "store/a").glob("*.json"): p_.unlink()
     sent.clear(); panes.clear(); dead.clear()
 def on(): server._cfg.CFG["audit"]["hand_idle"] = True
-def off(): server._cfg.CFG["audit"].pop("hand_idle", None)
+def off(): server._cfg.CFG["audit"]["hand_idle"] = False
 def tick(at=None, **kw):
     """One pass of the hand-over at `at` (default now0), the server's clock set to it → the ids handed on."""
     at = now0 if at is None else at
@@ -139,13 +138,16 @@ def rule(name, probe, patches):
     except Exception as e_: broke = f"raised {e_!r}"
     check(name + " [reverted: the check fails]", broke is not True, broke)
 
-# ================================================================ 1. off by default
-wipe(); put(1, act=90); panes["home-peer"] = "idle"
-check("1 the example config documents `hand_idle = false` in [audit]", re.search(r"(?m)^hand_idle = false\b", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
-check("1 …and the config as loaded (from that example) has it off: nothing is handed on, nobody is told", HI.enabled() is False and tick() == [] and mover_of(1) == "home-peer" and sent == [])
+# ================================================================ 1. on by default
+wipe(); put(1, act=90, idle_line=False); panes["home-peer"] = "idle"
+check("1 the example config documents `hand_idle = true` in [audit]", re.search(r"(?m)^hand_idle = true\b", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
+check("1 …and the config as loaded (from that example) has it on; with no audit line on the item nothing is handed on and nobody is told", HI.enabled() is True and tick() == [] and mover_of(1) == "home-peer" and sent == [])
+server._cfg.CFG["audit"].pop("hand_idle", None)
+check("1 …and with the key absent the code's default is on", HI.enabled() is True)
+put(1, act=90)      # now with the hourly audit's idle line on it: only the switch decides whether it is handed on
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
     server._cfg.CFG["audit"]["hand_idle"] = val
-    check(f"1 {label} does not switch it on (only a TOML true does)", HI.enabled() is False and tick() == [] and mover_of(1) == "home-peer")
+    check(f"1 {label} leaves it off (only a TOML true leaves it on)", HI.enabled() is False and tick() == [] and mover_of(1) == "home-peer")
 on()
 check("1 a TOML true switches it on", HI.enabled() is True)
 ro = server._ro.is_read_only
@@ -440,7 +442,6 @@ check("8 an item that cannot be read at all is left out and stops no other", pro
 # ================================================================ 9. the tick
 wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
 server._cfg.CFG["audit"]["hourly_line"] = True
-real_pass = server._silence_pass_tick; server._silence_pass_tick = lambda: None
 order = []
 real_hourly, real_hand = server._hourly_tick, server._hand_idle_tick
 server._hourly_tick = lambda *a, **k: (order.append("hourly"), real_hourly(*a, **k))[1]
@@ -462,7 +463,7 @@ server._cfg.CFG["audit"]["mode"] = "agent"
 wipe(); on(); put(1, act=90); panes["team-back"] = "idle"
 server._silence_tick()
 check("9 the tick stands still when the audit runs in agent mode", mover_of(1) == "home-peer")
-server._cfg.CFG["audit"]["mode"] = "script"; server._silence_pass_tick = real_pass
+server._cfg.CFG["audit"]["mode"] = "script"
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

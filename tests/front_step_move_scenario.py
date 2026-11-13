@@ -11,9 +11,8 @@ no network, no model call.
   4  (d) the clock is dropped when the finding ends (the step done, dropped or reworded: a reworded step starts its own clock; the mover changed), an item with a clock left over when the rule is switched off loses it
   5  (f) the threshold is `[audit] front_step_move_hours` (a decimal reads), 0 = off (nothing kept, nothing moved), a bad value reads as the default (3); a pass with no writers, an empty role map or a dry run does nothing
   6  the server's tick wires the two writers into the pass
-  7  a moved step is chased again: a step that moves to a mover who then does not act, on an item with a wake far ahead that is only a reminder, is found silent by the silence pass 45 minutes after the move,
-     reaches the mover and is entered on the ladder with no person asking; the controls (a wake that stands on a dated event silences an unmoved item, a step that names a date, a mover who acts) stay quiet;
-     a step already found stuck is not covered by a wake set after it
+  7  a moved step is counted from the move: a step that moves to a mover, on an item with a wake far ahead that is only a reminder, keeps the item on an agent and its quiet time counts from the move (`silence.clock`),
+     until the mover acts; the controls (a wake that stands on a dated event, a step that names a date) read as waiting; a step already found stuck is not covered by a wake set after it
   8  an unanswered finding is not sent once and forgotten (the filing pass): it is sent again after `[audit] remind_hours`, worded as a later try so the router does not drop it as a repeat, up to three
      sends, then once to the project's builder as unmoved (by the page key when the builder is the mover), then, a finding that went to a builder, once to the project's -main agent, and no more; 0 = once only
 
@@ -342,11 +341,13 @@ check("6 …and moves a step whose clock is due, telling the mover through the s
 server._message = real_msg; _anc.file_roles = real_roles
 
 # ---- 7. a moved step is chased again (a far wake that is only a backstop does not silence it)
-from stackshot.audit import silence as SL; from stackshot.tools import next_report as NR
+from stackshot.audit import silence as SL, audit_checks as AC; from stackshot.tools import next_report as NR
 ZONE = dt.timezone(dt.timedelta(seconds=ZONE_OFFSET))
 def wake_in(hours): return dt.datetime.fromtimestamp(now + hours * H, ZONE).strftime("%Y-%m-%dT%H:%M")
 def items_now(): return NR.load_all(T / "store")
-def silent_ids(at): return [f["id"] for f in SL.findings(items_now(), at)[0]]
+def agent_ids(at):
+    """The open items the board shows on an agent at `at` (`silence.reading`): what the hourly line and the idle hand-over work over."""
+    its = items_now(); return [bid(int(g[1:])) for g in sorted(its, key=AC._num) if its[g].get("status") == "open" and SL.reading(*(lambda v: (v[0], v[3], v[2]))(AC._item_view(its, g)), at) == "agent"]
 M = 60
 def seven_fixtures(first_step="alpha-main: clear the old copy"):
     wipe_store(); clear_state()
@@ -354,13 +355,11 @@ def seven_fixtures(first_step="alpha-main: clear the old copy"):
     k, d = doing(9030, f"{first_step}\nhome-agent: then rerun the drill", wake=w); put(k, d)
     k, d = doing(21, "home-agent: keep going\nhome-agent: then rerun the drill", wake=w, wait_basis={"text": "the vendor answers on that day", "wake": w, "by": "home-agent", "at": T0}); put(k, d)      # control: the same far wake, standing on a dated event: the board shows it waiting
 seven_fixtures()
-check("7 control: an item whose far wake stands on a dated event (a wait_basis) is not silent, however long it stands; the same wake without one is only a reminder, so its item is silent after 45 minutes",
-      bid(21) not in silent_ids(T0 + 5 * H) and bid(21) not in silent_ids(T0 + 20 * H) and silent_ids(T0 + 5 * H) == [bid(9030)], (silent_ids(T0 + 5 * H), silent_ids(T0 + 20 * H)))
+check("7 control: an item whose far wake stands on a dated event (a wait_basis) is not on an agent, however long it stands; the same wake without one is only a reminder, so its item is",
+      bid(21) not in agent_ids(T0 + 5 * H) and bid(21) not in agent_ids(T0 + 20 * H) and agent_ids(T0 + 5 * H) == [bid(9030)], (agent_ids(T0 + 5 * H), agent_ids(T0 + 20 * H)))
 AR.filing_pass(now=T0, env=env()); sent.clear()
 check("7 the stuck-elsewhere finding still holds on an item with a far wake (a wake on a doing item is a backstop, not a wait): the clock starts", clock_of("a9030") is not None, list(get("a9030")["metadata"]))
-f7 = SL.findings(items_now(), T0 + 50 * M)[0]
-check("7 a step found stuck is no longer covered by a wake: its mover is found silent after 45 minutes without activity, the evidence says why (the clock only, nothing moved yet)",
-      [f["id"] for f in f7] == ["board#9030"] and "does not cover the step in hand" in f7[0]["detail"], f7)
+check("7 a step found stuck is no longer covered by a wake: the item is on an agent although the wake is far", agent_ids(T0 + 50 * M) == [bid(9030)], agent_ids(T0 + 50 * M))
 seven_fixtures()
 AR.filing_pass(now=T0, env=env()); sent.clear()
 r7 = AR.filing_pass(now=T0 + 3 * H, env=env())
@@ -369,35 +368,25 @@ check("7 the front-step rule moves the step to the mover", opener_of("a9030") ==
 check("7 …and records where it landed: the reworded step's hash, the mover and the time", m20.get(FS.LANDED) == {"step": FS.step_hash(moved_step), "mover": "home-agent", "at": T0 + 3 * H}, m20.get(FS.LANDED))
 check("7 …the landing is the server's bookkeeping (no writer, no activity), so the mover's silence is counted from the move, not from the item's old activity",
       get("a9030")["written_by"] == "home-agent" and SL.clock(get("a9030"), "home-agent") == T0 + 3 * H, (get("a9030")["written_by"], SL.clock(get("a9030"), "home-agent"), T0 + 3 * H))
-check("7 the mover has the usual 45 minutes: nothing 44 minutes after the move, although the item's own activity is hours old", silent_ids(T0 + 3 * H + 44 * M) == [], silent_ids(T0 + 3 * H + 44 * M))
 at7 = T0 + 3 * H + 50 * M
-check("7 …and 50 minutes after it the item is found silent although its wake is a day away; the control standing on a dated event still is not", silent_ids(at7) == [bid(9030)], silent_ids(at7))
-entered = []
-sent.clear()
-res = SL.silence_pass(now=at7, items=items_now(), env=env(), entered=lambda gid, who, n, detail: entered.append((gid, who, detail)))
-check("7 the silence pass tells the mover (a message, no person asking) and puts the item on the ladder", res["fresh"] == 1 and [to for to, _t, _f in sent] == ["home-agent"] and bid(9030) + " · stale · no write for 50 minutes and a wake that" in sent[0][1]
-      and len(entered) == 1 and entered[0][:2] == ("a9030", "home-agent") and entered[0][2].startswith("no write for 50 minutes and a wake that"), (res, sent, entered))
-sent.clear()
-res2 = SL.silence_pass(now=at7 + 10 * M, items=items_now(), env=env())
-check("7 …once per silence: the next pass sends nothing", res2["fresh"] == 0 and res2["repeats"] == 1 and sent == [], (res2, sent))
+check("7 …the item's own activity is hours old, yet its quiet time counts from the move; 50 minutes after it the item is on an agent although its wake is a day away, and the control standing on a dated event is not",
+      SL.clock(get("a9030"), "home-agent") == T0 + 3 * H and agent_ids(at7) == [bid(9030)], (SL.clock(get("a9030"), "home-agent"), agent_ids(at7)))
 d = get("a9030"); d["activity"] = at7 + 12 * M; put("a9030", d)
-check("7 a mover who acts (activity on the item) ends it: nothing 40 minutes later", silent_ids(at7 + 52 * M) == [], silent_ids(at7 + 52 * M))
-check("7 …and the next silence is counted from that write, not from the move: still quiet 44 minutes after it, found 46 minutes after it (a wake that is only a backstop covers nothing)",
-      get("a9030")["metadata"].get(FS.LANDED, {}).get("step") == FS.step_hash(first_open("a9030")) and silent_ids(at7 + 12 * M + 44 * M) == [] and silent_ids(at7 + 12 * M + 46 * M) == [bid(9030)],
-      (silent_ids(at7 + 12 * M + 44 * M), silent_ids(at7 + 12 * M + 46 * M)))
+check("7 a mover who acts (activity on the item) moves the clock to that write, not the move's time; the landing record still names the step in hand",
+      SL.clock(get("a9030"), "home-agent") == at7 + 12 * M and get("a9030")["metadata"].get(FS.LANDED, {}).get("step") == FS.step_hash(first_open("a9030")), (SL.clock(get("a9030"), "home-agent"), get("a9030")["metadata"].get(FS.LANDED)))
 d = get("a9030"); d["activity"] = 0; d["metadata"]["next"] = "home-agent: done differently\nhome-agent: then rerun the drill"; put("a9030", d)
 check("7 …and a reworded step has no landing record any more: the move is no longer the clock", SL.clock(get("a9030"), "home-agent") < T0 + 3 * H, SL.clock(get("a9030"), "home-agent"))
 seven_fixtures()
 AR.filing_pass(now=T0, env=env()); AR.filing_pass(now=T0 + 3 * H, env=env())
 d = get("a9030"); d["metadata"].pop("phase", None); d["metadata"].pop("waits_on", None); d["metadata"]["next"] = f"home-agent: after {(dt.datetime.fromtimestamp(now + 30 * H, ZONE) + dt.timedelta(days=1)).strftime('%Y-%m-%d')} rerun the drill"; d["metadata"][FS.LANDED]["step"] = FS.step_hash(d["metadata"]["next"]); put("a9030", d)
-check("7 a step that names a date after its wake is the wake's business: the board shows the item waiting, so it is not chased, whatever its record says", silent_ids(T0 + 9 * H) == [], silent_ids(T0 + 9 * H))
+check("7 a step that names a date after its wake is the wake's business: the board shows the item waiting, so it is not on an agent, whatever its record says", agent_ids(T0 + 9 * H) == [], agent_ids(T0 + 9 * H))
 seven_fixtures()
 AR.filing_pass(now=T0, env=env()); cfg_audit["front_step_move_hours"] = 0; AR.filing_pass(now=T0 + 3 * H, env=env()); cfg_audit["front_step_move_hours"] = 3
 check("7 with the rule off nothing is recorded and nothing is moved, and the move is no clock", FS.LANDED not in get("a9030")["metadata"] and opener_of("a9030") == "alpha-main" and SL.clock(get("a9030"), "home-agent") < T0 + 3 * H, (list(get("a9030")["metadata"]), SL.clock(get("a9030"), "home-agent")))
 seven_fixtures()
 AR.filing_pass(now=T0, env=env()); AR.filing_pass(now=T0 + 3 * H, env=env())
 at7b = T0 + 3 * H + 50 * M
-before_off = silent_ids(at7b)
+before_off = agent_ids(at7b)
 cfg_audit["front_step_move_hours"] = 0
 cl_off = SL.clock(get("a9030"), "home-agent")
 cfg_audit["front_step_move_hours"] = 3

@@ -7,7 +7,7 @@ fleet's clocks in a fixed order. Fixture data, no live store, no network, no Git
   2  the lock and the thread (real clock): two callers of run_round never overlap a tick · start runs the first event round at once and the first paced round one pace later ·
      setting the wake event runs an event round · shutdown stops the thread, even one asleep for a minute, and a restart works · a round that raises does not end the loop
   3  the server's table: the settle events first in their order (watchers' pass, anchor pass, event waits, done check, step proof), then the hand-off tick, then the answers, then the
-     fleet's clocks and the publish, then the ten-minute set (the filing pass, the dates pass, the silence pass); the For-you look runs as the dates pass; a replaced function is the one called;
+     fleet's clocks and the publish, then the ten-minute set (the filing pass, the dates pass, the audit lines); the For-you look runs as the dates pass; a replaced function is the one called;
      the old loops (_wake_loop, _fleet_watch, _run_fleet_ticks) and the flag (_runner_enabled, status_off) are gone
   3b the ten-minute set on its own (fake clock): it runs in the first paced round after each tenth minute, after the minute set, on the start's schedule (a late round does not shift the
      next one, a long gap does not run it twice), is skipped with the board held, and a tick of it that raises does not stop the next; the filing and dates ticks are the server's
@@ -312,10 +312,10 @@ check("3 order: the settle events come first, in order: the watchers' pass, the 
 check("3 order: …then the balancer and the hand-off tick (the balancer first, so a move at ten minutes comes before the hand-off tick's reminder), then the answers, then the fleet's clocks",
       names[6:8] == ["balance_tick", "handoff_tick"] and {t.group for t in ticks[6:8]} == {"handoff"} and names[8] == "answer_tick" and ticks[8].group == "answers"
       and {t.group for t in ticks[9:15]} == {"fleet"} and names[9:15] == ["roles_sync_safe", "clients_tick", "pilot_fallback_tick", "stall_tick", "handback_tick", "fleet_publish"], names)
-check("3 order: …then the ten-minute set last: the filing pass, the dates pass, then the wake catch-up, then the silence pass, then the archive sweep, all paced as the ten-minute set and standing still while the board is held",
+check("3 order: …then the ten-minute set last: the filing pass, the dates pass, then the wake catch-up, then the audit lines and the hand-over, then the archive sweep, all paced as the ten-minute set and standing still while the board is held",
       names[15:] == ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"] and {t.group for t in ticks[15:]} == {"tenmin"} and {t.pace for t in ticks[15:]} == {"tenmin"} and all(t.board for t in ticks[15:]), names)
 check("3 order: …the groups never go back (settle, handoff, answers, fleet, tenmin)", [R.GROUPS.index(t.group) for t in ticks] == sorted(R.GROUPS.index(t.group) for t in ticks))
-check("3 pace: only the watchers' pass and the anchor pass are event ticks ; the filing, dates and silence passes and the wake catch-up are the ten-minute set's; every other tick is paced",
+check("3 pace: only the watchers' pass and the anchor pass are event ticks ; the filing, dates and audit-line passes and the wake catch-up are the ten-minute set's; every other tick is paced",
       [t.name for t in ticks if t.pace == "event"] == ["wake_pass", "anchor_pass"] and [t.name for t in ticks if t.pace == "tenmin"] == ["filing_tick", "dates_tick", "wake_catchup", "silence_tick", "archive_tick"]
       and all(t.pace == "paced" for t in ticks[2:15]))
 check("3 coverage: the table is the fleet's clocks and the wake passes, the publish and the ten-minute set, nothing twice (the For-you look is the dates pass, not a tick of its own)",

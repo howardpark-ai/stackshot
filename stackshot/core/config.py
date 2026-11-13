@@ -321,8 +321,8 @@ def audit_wait_end_settle_minutes() -> float:
 
 
 def audit_hourly_line() -> bool:
-    """[audit] hourly_line: the hourly audit line (audit/hourly.py): an item on an agent with no write for an hour gets one line saying what the audit verified. Default false; only a TOML true switches it on."""
-    return get("audit", "hourly_line", default=False) is True
+    """[audit] hourly_line: the hourly audit line (audit/hourly.py): an item on an agent with no write for an hour gets one line saying what the audit verified. Default true (it replaces the 45-minute news ask); a TOML false, or any value that is not a TOML true, switches it off, read at use."""
+    return get("audit", "hourly_line", default=True) is True
 
 
 def model_queued_behind() -> bool:
@@ -331,8 +331,8 @@ def model_queued_behind() -> bool:
 
 
 def audit_hand_idle() -> bool:
-    """[audit] hand_idle: an item the hourly audit marked idle (nothing verified) goes to a free builder and the project's -main agent is told (audit/hand_idle.py). Default false; only a TOML true switches it on."""
-    return get("audit", "hand_idle", default=False) is True
+    """[audit] hand_idle: an item the hourly audit marked idle (nothing verified) goes to a free builder and the project's -main agent is told (audit/hand_idle.py). Default true (it is the net under the hourly line); a TOML false, or any value that is not a TOML true, switches it off, read at use."""
+    return get("audit", "hand_idle", default=True) is True
 
 
 AUDIT_BALANCE_MINUTES = 10.0
@@ -340,8 +340,8 @@ AUDIT_BALANCE_MINUTES = 10.0
 
 def audit_balance() -> bool:
     """[audit] balance: an item not started, or queued behind its mover's other item, that has waited `balance_minutes` goes to the builder with the fewest open items, and the mover it left is told to disregard it
-    (audit/hand_idle.py, server._balance_tick). Default false; only a TOML true switches it on, read at use."""
-    return get("audit", "balance", default=False) is True
+    (audit/hand_idle.py, server._balance_tick). Default true; a TOML false, or any value that is not a TOML true, switches it off, read at use."""
+    return get("audit", "balance", default=True) is True
 
 
 def audit_balance_minutes() -> float:

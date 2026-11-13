@@ -1,4 +1,4 @@
-"""Scenario test for the hourly audit line (audit/hourly.py, server._hourly_tick, called from the ten-minute silence tick, `[audit] hourly_line`): an item on an agent with no activity for an hour gets ONE
+"""Scenario test for the hourly audit line (audit/hourly.py, server._hourly_tick, called from the ten-minute audit tick, `[audit] hourly_line`, on by default): an item on an agent with no activity for an hour gets ONE
 History line saying what the audit verified, or that it is idle. Fixture items in a temporary store, a fake clock (the pass is given its `now`), the pane registry replaced by a dict, no live store, no
 network, no model call, no message sent.
 
@@ -6,19 +6,19 @@ network, no model call, no message sent.
      them: `Audit hh:mm: verified …` in the instance's zone; the entry of the item's own log, metadata.hourly_audit.log (not the stall ladder's metadata.stall.log), has kind `audit`; a line that rests on a busy pane or a subagent alone says `live state only`; a line that verified something is stamped as the item's last-activity record (section 16), one that verified nothing or rests on a recorded event alone is not; the activity clock, the progress clock, `updated` and the
      writer are as they were; an idle, shell or unreadable pane, another agent's status line, a done or old one, and a pull request event older than an hour verify nothing
   2  due and nothing verified: `Audit hh:mm: idle, nothing verified`, kind `audit_idle`, `hourly.idle_marked`; the last-activity record is untouched
-  3  not due: under an hour of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the clock the silence pass reads decides
+  3  not due: under an hour of silence (a confirm just now moves nothing), a recent write, an item that just left a hold; the quiet-time clock (`silence.clock`) decides
   4  twice in 45 minutes: a second pass writes nothing, the next line comes 45 minutes after the first, and a mover's write in between starts the hour again
   5  not on an agent: a hold (dated wake or none), a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off to a back agent are skipped; one to a front
      agent is written
-  6  the switch: absent, false, the string "true" and 1 write nothing; only a TOML true does; the example config documents it as false; read-only copies write nothing
+  6  the switch: absent or a TOML true writes the line (on by default); false, the string "true" and 1 write nothing; the example config documents it as true; read-only copies write nothing
   7  a front agent's item gets its line like any other and nothing is sent to anyone (no message, no ladder entry)
-  8  the tick: `_silence_tick` runs it (with the audit on in script mode) and stands still when the audit is off or in agent mode; an item read again under the lock that is no longer due is left alone; one that cannot
+  8  the tick: `_silence_tick` (the audit tick) runs it (with the audit on in script mode) and stands still when the audit is off or in agent mode; an item read again under the lock that is no longer due is left alone; one that cannot
      be saved stops no other
   9  the pure parts: the line's words, `last_line`, the log's cap, a malformed item, a log entry dated far ahead, an item with no timestamp, each tied-pull-request kind, `new_entries`
   10 the cap on lines: one every 50 minutes on the ten-minute grid for the first 24 hours of silence (27), then one every 6 hours (51 in a week, the clock stepped), a clock that goes backwards delays the next line without a second write
   11 the lines are kept out of the stall ladder's log: its entries are untouched and not crowded out, `get` prints the newest as `audit:` and never as `stall:`, both History renderers show the line
   12 a last-activity record dated ahead of the clock is no event
-  13 the hourly line runs whatever the silence pass did: a ladder view that cannot be built (the pass returns early) or a pass that raises still gets the hourly line
+  13 the audit tick stands still as a whole while the audit is off
   14 tick jitter: on a ten-minute grid with 0 to 8 seconds of jitter the lines come every 50 minutes in the first day and every 6 hours after
   15 a torn entry in the log never raises
   16 a verified line is the item's last activity: the row reads its time and words, an idle line leaves the record alone, an older line never replaces a newer real event, the backfill does not undo it
@@ -98,7 +98,6 @@ def fake_status(who, idx=None):
     return (st, now0 - 3600) if st else ("", 0.0)
 server._handoff_status = fake_status
 server._sessions_index = lambda: {}
-server._stall_active = lambda: set()
 
 def put(i, mover="home-peer", status="open", act=90, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0 (a bare confirm and the server's saves are recent)."""
@@ -121,7 +120,7 @@ def tick(at=None, **kw):
     try: return server._hourly_tick(now=at, **kw)
     finally: CLK.t = None
 def on(): server._cfg.CFG["audit"]["hourly_line"] = True
-def off(): server._cfg.CFG["audit"].pop("hourly_line", None)
+def off(): server._cfg.CFG["audit"]["hourly_line"] = False
 def hm(at): return time.strftime("%H:%M", time.gmtime(at + 4 * 3600))      # the instance zone is Asia/Dubai, UTC+4
 def clean_pane(): panes.clear(); SUBS.clear(); ANCH.clear()
 class _Err:
@@ -132,13 +131,17 @@ class _Err:
 def pr_event(i, kind, what, ago_min): mt_ = rd(i); mt_["metadata"]["last_activity"] = {"at": now0 - ago_min * MIN, "kind": kind, "what": what}; (T / f"store/a/{i}.json").write_text(json.dumps(mt_))
 def work(state, ago_min, agent="home-peer"): return [{"id": "build-it", "text": "build it", "agent": agent, "state": state, "ts": now0 - ago_min * MIN}]
 
-# ================================================================ 6a. the switch is off by default
+# ================================================================ 6a. the switch is on by default
 put(1, act=90); panes["home-peer"] = "busy"
-check("6 the example config documents `hourly_line = false` in [audit]", re.search(r"(?m)^hourly_line = false\b", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
-check("6 …and the config as loaded (from that example) has it off: nothing is written", HR.enabled() is False and tick() == [] and lines(1) == [] and sent == [])
+check("6 the example config documents `hourly_line = true` in [audit]", re.search(r"(?m)^hourly_line = true\b", pathlib.Path(STACK, "stackshot.example.toml").read_text(encoding="utf-8")) is not None)
+check("6 …and the config as loaded (from that example) has it on", HR.enabled() is True)
+server._cfg.CFG["audit"].pop("hourly_line", None)
+check("6 …and with the key absent the code's default is on: a pass writes the line", HR.enabled() is True and tick() == ["a1"] and len(lines(1)) == 1, lines(1))
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(1, act=90)
 for label, val in (("false", False), ("the string true", "true"), ("1", 1), ("yes", "yes")):
     server._cfg.CFG["audit"]["hourly_line"] = val
-    check(f"6 {label} does not switch it on (only a TOML true does)", HR.enabled() is False and tick() == [] and lines(1) == [])
+    check(f"6 {label} leaves it off (only a TOML true leaves it on)", HR.enabled() is False and tick() == [] and lines(1) == [])
 on()
 check("6 a TOML true switches it on", HR.enabled() is True)
 ro = server._ro.is_read_only
@@ -215,7 +218,7 @@ put(5, act=240); d5 = rd(5); d5["state_updated"] = now0 - 20 * MIN; (T / "store/
 put(6, act=90); d6 = rd(6); d6["confirmed"] = now0 - 1 * MIN; (T / "store/a/6.json").write_text(json.dumps(d6))                      # a bare confirm just now moves nothing: due
 got = tick()
 check("3 under an hour without activity is not due (59 minutes, 10 minutes); 61 and a confirm just now are", got == ["a2", "a4", "a6"], got)
-check("3 an item that left a hold twenty minutes ago counts from then (the silence pass's clock), not from its activity four hours back", lines(5) == [] and SL.clock(rd(5), "home-peer") == now0 - 20 * MIN)
+check("3 an item that left a hold twenty minutes ago counts from then (the quiet-time clock), not from its activity four hours back", lines(5) == [] and SL.clock(rd(5), "home-peer") == now0 - 20 * MIN)
 put(7, act=59.9); check("3 the limit is exact: 59 minutes 54 seconds is not due", tick() == [])
 put(7, act=60); check("3 …an hour is", tick() == ["a7"], tick())
 
@@ -258,12 +261,12 @@ put(6, act=30)                                                                  
 put(7, mover="Oliver", act=90, state="your-call", needs=["decision"], ask="pick one", next="Oliver: pick")
 put(8, act=90, status="completed", outcome="done")
 put(9, mover="team-back", act=90, **{HO.KEY: HO.new_record("team-back", "", "home-front", now0 - 90 * MIN)})      # handed to a back agent, not taken
-put(10, mover="home-front", act=90, **{HO.KEY: HO.new_record("home-front", "", "team-back", now0 - 90 * MIN)})   # handed to a front agent, not taken: checked, as the silence pass does
+put(10, mover="home-front", act=90, **{HO.KEY: HO.new_record("home-front", "", "team-back", now0 - 90 * MIN)})   # handed to a front agent, not taken: checked
 put(11, mover="home-peer", act=90, wake=time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now0 + 5 * H + 4 * H)))     # a wake with no wait behind it leaves the item on agent
 d1 = rd(1); got5 = tick()
 check("5 a hold (dated wake or none), a parked item, a stored wait, an item behind an open one, the owner's item, a closed item, an untaken hand-off to a back agent, and an item not yet due: none written",
       not any(g in got5 for g in ("a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9")), got5)
-check("5 …an untaken hand-off to a front agent is written (the silence pass checks it too), and so is an item with a wake alone", sorted(got5) == ["a10", "a11"], got5)
+check("5 …an untaken hand-off to a front agent is written and so is an item with a wake alone", sorted(got5) == ["a10", "a11"], got5)
 check("5 the skipped items are byte for byte as they were", rd(1) == d1)
 
 # ================================================================ 7. a front agent's item
@@ -288,7 +291,7 @@ check("8 …and in agent mode (the rollback)", server._silence_tick() is None an
 server._cfg.CFG["audit"]["mode"] = "script"
 real_now = time.time
 res = server._silence_tick()
-check("8 with the audit on in script mode the silence tick writes the hourly line too: one on each item", res is not None and len(lines(1)) == 1 and len(lines(2)) == 1, (res, lines(1), lines(2)))
+check("8 with the audit on in script mode the audit tick writes the hourly line: one on each item", len(lines(1)) == 1 and len(lines(2)) == 1, (res, lines(1), lines(2)))
 off()
 for i in (1, 2): put(i, act=90)
 server._silence_tick()
@@ -308,32 +311,16 @@ def boom(**kw): raise RuntimeError("pass failed")
 server._hourly_tick = boom
 with _Err() as e8b: r8 = server._silence_tick()
 server._hourly_tick = real_hourly
-check("8 a hourly pass that raises never stops the silence tick that called it", e8b.text.count("hourly line not run: RuntimeError") == 1, e8b.text)
+check("8 a hourly pass that raises never stops the audit tick that called it", e8b.text.count("hourly line not run: RuntimeError") == 1, e8b.text)
 
-# ================================================================ 13. the hourly line runs whatever the silence pass did
+# ================================================================ 13. the audit tick with the audit off stands still as a whole
 clean_pane(); panes["home-peer"] = "busy"
 for p_ in (T / "store/a").glob("*.json"): p_.unlink()
 put(1, act=90); put(2, act=90)
-real_skip = server._silence_skip
-def skip_boom(*a, **k): raise RuntimeError("ladder view failed")
-server._silence_skip = skip_boom
-with _Err() as e13: r13 = server._silence_tick()
-server._silence_skip = real_skip
-check("13 a ladder view that cannot be built sends the silence pass home early, and the hourly line is written all the same: one on each item", r13 is None and "ladder view not read" in e13.text and len(lines(1)) == 1 and len(lines(2)) == 1, (r13, e13.text, lines(1), lines(2)))
-for i in (1, 2): put(i, act=90)
-real_pass = server._silence_pass_tick
-def pass_boom(*a, **k): raise RuntimeError("silence pass failed")
-server._silence_pass_tick = pass_boom
-raised = None
-try: server._silence_tick()
-except RuntimeError as e: raised = e
-server._silence_pass_tick = real_pass
-check("13 a silence pass that raises still lets the hourly line run, and its error is not hidden", raised is not None and "silence pass failed" in str(raised) and len(lines(1)) == 1 and len(lines(2)) == 1, (raised, lines(1), lines(2)))
 server._cfg.CFG["audit"]["enabled"] = False
-for i in (1, 2): put(i, act=90)
 server._silence_tick()
 server._cfg.CFG["audit"]["enabled"] = True
-check("13 …but not with the audit off: the tick stands still as a whole", lines(1) == [] and lines(2) == [])
+check("13 with the audit off the tick stands still as a whole: no line", lines(1) == [] and lines(2) == [])
 
 # ================================================================ 10. the cap on lines, a clock that goes backwards
 clean_pane(); panes["home-peer"] = "busy"
@@ -387,7 +374,7 @@ check("12 a last-activity record dated ahead of the clock is no recorded event (
       lines(1)[0]["text"] == f"Audit {hm(now0)}: idle, nothing verified" and mt(1)["last_activity"]["at"] == now0 + 10 * MIN
       and lines(2)[0]["text"] == f"Audit {hm(now0)}: verified CI failed on PR 6" and mt(2)["last_activity"] == {"at": now0 - 10 * MIN, "kind": "ci_result", "what": "CI failed on PR 6"}, (lines(1), mt(1).get("last_activity"), lines(2)))
 put(3, act=90); off()
-check("12 with the key absent from the loaded config the pass is off and writes nothing", "hourly_line" not in server._cfg.CFG["audit"] and HR.enabled() is False and tick() == [] and lines(3) == [])
+check("12 with `hourly_line = false` in the loaded config the pass is off and writes nothing", server._cfg.CFG["audit"]["hourly_line"] is False and HR.enabled() is False and tick() == [] and lines(3) == [])
 on()
 
 # ================================================================ 14. tick jitter: an hour on the grid is an hour

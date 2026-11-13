@@ -3,7 +3,7 @@ recorders, no live store, no network, no model call.
 
   1  one item per filing rule: stuck-elsewhere (the first open step is someone else's), arbitrary-hold (a hold nothing explains), mislabeled-state (a stored state its fields contradict), reads-as-wait (an alive
      item whose next says it waits) are each a finding of the category and the evidence the daily run gave before the pass took them (field_findings(ten_minute=True)), which the daily run no longer makes; the broad words (when, once, after, until) are a flag and no finding; and none of these is raised
-     for a clean item, a closed one, an item that already waits (its next is the record of the wait), an item idle for hours (a silence rule: the silence pass's) or one stale by its dates (stale is, too)
+     for a clean item, a closed one, an item that already waits (its next is the record of the wait), an item idle for hours (an hourly audit line's rule) or one stale by its dates (stale is, too)
   2  the words of an alive item's next are read from next itself (audit_checks.wait_words): a precise line, the broad words only when no line reads as a wait, a negation, a waiting item, a closed one;
      the note that get carries comes from the same words (nothing is stored), and a flag stored by an older write is ignored
   3  the pass: findings go to their movers, one message per recipient, headed as a filing check; a second pass sends nothing (the same finding is not sent again while its item is unwritten) and keeps the stamps;
@@ -77,8 +77,8 @@ rules = build(
     clean(6),                                                                                                                                                    # clean
     item(7, status="completed", wrote=now - 40 * H, state="doing", needs=["home-agent"], next="home-agent: waiting for the build", outcome="done"),            # closed
     item(8, wrote=now - H, state="blocked", needs=["home-agent"], after=["a6"], next="home-agent: waiting for the build"),                                      # already waits: its next is the record of the wait
-    doing(9, 8),                                                                                    # idle for 8 hours: a silence rule, not a filing rule
-    doing(9041, 5, wake=local(now - 2 * H)),                                                                                     # past its wake with no write since: stale is a silence rule
+    doing(9, 8),                                                                                    # idle for 8 hours: an hourly-line matter, not a filing rule
+    doing(9041, 5, wake=local(now - 2 * H)),                                                                                     # past its wake with no write since: stale is the dates pass's rule
 )
 fs, flags = AC.filing_findings(rules, {}, now, env())
 got = cats(fs)

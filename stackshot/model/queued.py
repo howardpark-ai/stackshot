@@ -1,6 +1,6 @@
 """queued.py: a mover busy on another item reads waiting, queued behind that item, not on agent.
 
-A session that moves several open items works on one at a time. The board used to show every one of them on an agent, so the quiet ones were chased (the silence pass, the hourly audit line, the stall
+A session that moves several open items works on one at a time. The board used to show every one of them on an agent, so the quiet ones were chased (the 45-minute news ask, the hourly audit line, the stall
 ladder) as if nobody had them. This module is the one rule that tells which of a mover's on-agent items it is working on and which wait in line behind it. It is DERIVED, never stored: nothing is written to an
 item, nothing is migrated, and a reader that stops asking sees the item as it always did. `[model] queued_behind` (default false, read at use) switches it on.
 
@@ -16,7 +16,7 @@ It ends by itself, because the same rule is read again every time: the mover mov
 handed to another mover, or the mover's other items thin out to one.
 
 A queued item reads as a wait of the `item` kind (`model.Wait.queued`, `after` = the item it is behind), so the board lists it under Waiting with the reason `queued behind <item>`, and the passes that leave a waiting
-item alone (silence.py, audit/hourly.py, the stall pass) leave it alone too. Pure: no server import, no clock read, no file; the callers supply the candidates and `now`."""
+item alone (audit/hourly.py, audit/hand_idle.py, the stall pass) leave it alone too. Pure: no server import, no clock read, no file; the callers supply the candidates and `now`."""
 from __future__ import annotations
 
 import re
