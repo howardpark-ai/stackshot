@@ -1,4 +1,4 @@
-"""Scenario test for the hand-over of a finished step (handover.py, server._handover / _handover_by_hand / _gate_step_gap, step_proof.proof_gaps, audit_checks.check_step_handover) — fixture data,
+"""Scenario test for the hand-over of a finished step (handover.py, server._handover / service/update.py _handover_by_hand / _gate_step_gap, step_proof.proof_gaps, audit_checks.check_step_handover) — fixture data,
 no live store, no network (GitHub's answers are a table, the pane notices go to a fake push).
 
 Covers: the pure rules (the first open step decides; the owner, a front agent, an unknown name and the mover's own step move nothing; a session that is down falls back once; a step handed over is not

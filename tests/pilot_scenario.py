@@ -3168,11 +3168,12 @@ e = refusal(lambda: server._update(e6, work={"state": "done"}, sender="work-ospr
 check("auto-name: a finish on a completed item is refused as before, the writer not named", "work-osprey-x is neither" in e and "needs" not in rd(e6)["metadata"], (e, rd(e6)["metadata"]))
 # …and the status text is the one the update path gets: it rewrites a bare store id (g9999) to first (patched here so that g9999 maps)
 e7 = mk46()
-_shown_was = server._shown_ids; server._shown_ids = lambda t: str(t or "").replace("g9999", f"board#{BID_B}")
+from stackshot.service import update as _upd_svc      # the update path reads `_shown_ids` in its owner, service/update.py (the server's copy is the telling's)
+_shown_was = (server._shown_ids, _upd_svc._shown_ids); server._shown_ids = _upd_svc._shown_ids = lambda t: str(t or "").replace("g9999", f"board#{BID_B}")
 try:
     res = server._update(e7, work={"text": "wait for g9999 now"}, sender="work-osprey-x")
 finally:
-    server._shown_ids = _shown_was
+    server._shown_ids, _upd_svc._shown_ids = _shown_was
 check(f"auto-name: a status whose text the update path rewrites (g9999 → board#{BID_B}) is stored as rewritten, and the writer is named",
       needs46(e7) == ["work-osprey-x"] and "(named" in res and ("work-osprey-x", "open", f"wait for board#{BID_B} now") in st46(e7), (needs46(e7), st46(e7), res))
 wait_push(0)
