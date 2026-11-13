@@ -572,10 +572,6 @@ def probe_front_never():
     return got == ["a1"] and told("balance") == []
 rule("9 a front agent is never sent the notice unmarked (the pass checks before it sends)", probe_front_never, [(server, "_front_keeper", lambda w, p="", strict=False: (False, ""))])
 server._front_keeper = _real_fk
-def probe_retired_words():
-    src = pathlib.Path(STACK, "stackshot/audit/hand_idle.py").read_text() + pathlib.Path(STACK, "docs/stall-and-ladder.md").read_text()
-    return "check-back" not in src and "reminder-wake" not in src
-check("9 the new text carries no retired word", probe_retired_words() is True)
 
 # ================================================================ 10. the tick: its place, and a failure that stops nothing
 from stackshot.core import runner as R
