@@ -100,6 +100,7 @@ HELPERS: dict[str, list[tuple[str, str]]] = {
     "update": [("stackshot/web/server.py", "stackshot_update"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_report_note"),
                ("stackshot/web/server.py", "_command_note"), ("stackshot/web/server.py", "_watch_on_write"), ("stackshot/web/server.py", "_mentions_reply")] + _WRITE_NOTES + _ITEM_LINES,
     "message": [("stackshot/web/server.py", "stackshot_message"), ("stackshot/web/server.py", "_message")],
+    "confirm": [("stackshot/web/server.py", "stackshot_confirm"), ("stackshot/service/update.py", "confirm_item")],      # not labelled in the snapshot (its reply has no label), but watched: the gate sees a changed body
     "complete": [("stackshot/web/server.py", "stackshot_complete"), ("stackshot/service/update.py", "complete_item"), ("stackshot/service/update.py", "_completion_anchor_prompt"), ("stackshot/service/update.py", "update_item"), ("stackshot/service/update.py", "update_unlocked"), ("stackshot/web/server.py", "_mentions_reply")]
                 + _WRITE_NOTES + _ITEM_LINES,
 }

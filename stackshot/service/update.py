@@ -206,6 +206,7 @@ class Hooks:
     watch_on_write: Callable[..., Any]
     writer_charge: Callable[..., Any]
     writer_owes: Callable[..., Any]
+    zone: Callable[..., Any]               # the board's time zone as server.py holds it (ZONE, read when the reply is made): the confirm reply says when in it
 
 
 _hooks_: Hooks | None = None
@@ -1276,5 +1277,5 @@ def confirm_item(item_id: str, sender: str = "") -> str:
     _writes.save(gid, item, writer=h.session_id(sender) if sender.strip() else h.holder(item), activity=_activity.CONFIRM, ctx=_writes.QUIET)
     h.publish()
     item["gid"] = gid
-    at = h.render_when_words(dt.datetime.fromtimestamp(item["confirmed"], _cfg.tz()))
+    at = h.render_when_words(dt.datetime.fromtimestamp(item["confirmed"], h.zone()))
     return f"confirmed {_gh.shown(gid)} at {at}.\n" + h.fmt(item) + h.nag(sender)

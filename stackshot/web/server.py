@@ -1421,7 +1421,7 @@ def _gate_state_args(carry: dict[str, str]) -> tuple[str, dict[str, str], bool]:
         if str(carry.get("supplies") or "").strip():
             raise ToolError('Refused: step="none" withdraws the step and supplies sets a wait on another item: pass one of them')
         carry = {**carry, "step": ""}
-    given = {k: _states.carry_text(k, v) for k, v in carry.items() if k not in _states.RETIRED_FIELDS and _states.carry_text(k, v)}      # expected_by and expected_reason are accepted and not kept (RETIRED_NOTE)
+    given = {k: _states.carry_text(k, v) for k, v in carry.items() if k not in _states.RETIRED_FIELDS and _states.carry_text(k, v)}      # expected_by and expected_reason are accepted and not kept (RETIRED_NOTE, in service/update.py)
     for k, v in given.items():
         if k == "step":
             if _states.step_problem(v):
@@ -12467,6 +12467,7 @@ _update_svc.install(_update_svc.Hooks(
     watch_on_write=_late("_watch_on_write"),
     writer_charge=_late("_writer_charge"),
     writer_owes=_late("_writer_owes"),
+    zone=lambda: ZONE,      # looked up when the reply is made, as the confirm tool did before the move
 ))
 
 
