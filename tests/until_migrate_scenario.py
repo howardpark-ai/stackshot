@@ -62,6 +62,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import watchers as WK_, waiting as W, until_pass as UP, until_write as UW, stall as STALL; from stackshot.model import model as _model; from stackshot.tools import until_migrate as UM; from stackshot.tools import stamp_phase as SP
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.web.tools import update as _wt_update
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -438,7 +439,7 @@ check("13 a future ask_by in that form is rewritten (the decided one-date model)
 st_, d_ = call(op="until", items=["g95", "g96", "g98"])
 check("13 the write leaves the due items byte for byte and rewrites the future one", bytes_of(95) == b95 and {i: bytes_of(i) for i in (95, 98)} == snap_before and mt(96).get("until") == day(6) and mt(96).get("wait_kind") == "item" and "ask_by" not in mt(96), (wk(mt(96))))
 before_ticks = {i: bytes_of(i) for i in (95, 96, 98)}
-woke13 = server._wake_pass(); watched13 = server._watch_pass()
+woke13 = wakes_svc.wake_pass(); watched13 = watching_svc.watch_pass()
 check("13 a wake pass and a watch pass after the migration change none of the three items and message no one about the two a person has to look at or the migrated one (the old-form wake pass already notes a past wake with its own wording, unchanged)", {i: bytes_of(i) for i in (95, 96)} == {i: before_ticks[i] for i in (95, 96)} and not [x for x in sent if x[0] in ("g95", "g96")], (woke13, watched13, sent[-3:]))
 # the apply prints both lists, plans again before it writes, and refuses a plan that changed
 put(97, needs=[BACK], hold=True, wake=day(3))                       # an ordinary item for the apply to write
@@ -501,7 +502,7 @@ check("14 a hold with a wake is consumed by the old wake pass: it is neither lis
 check("14 a wake beside an after link is listed as previously only a notice", r14[105]["action"] == "would_set" and r14[105]["newly"] == day(5) and r14[105]["how"] == "previously only a notice", r14[105])
 st_, d_ = call(op="until", items=["g102", "g103"])
 before_t = bytes_of(102), bytes_of(103)
-woke14 = server._wake_pass(); watched14 = server._watch_pass()
+woke14 = wakes_svc.wake_pass(); watched14 = watching_svc.watch_pass()
 check("14 the write leaves the due one byte for byte, and a wake and a watch pass change neither it nor the future one, and message nobody about them", bytes_of(102) == b102 and (bytes_of(102), bytes_of(103)) == before_t and mt(103).get("until") == day(8) and mt(103).get("hold") is True and not [x for x in sent if x[0] in ("g102", "g103")], (woke14, watched14, sent[-2:]))
 # the boundaries: the day itself (a date alone is the start of that day), tomorrow, an hour ago, an hour ahead
 cases = {106: (nowz.strftime("%Y-%m-%d"), True), 107: ((nowz + _dtm.timedelta(days=1)).strftime("%Y-%m-%d"), False), 108: (stamp(nowz - _dtm.timedelta(hours=1)), True), 109: (stamp(nowz + _dtm.timedelta(hours=1)), False)}
@@ -797,7 +798,7 @@ for d_ in (run14, run14b, run14d, base_v): shutil.rmtree(d_, ignore_errors=True)
 REASON = "no push reaches this session for the vendor"
 put(219, needs=[BACK], wait_kind="time", until=day(-1), watch_reason=REASON)
 put(221, needs=["external"], wait_kind="relay", until=day(-1), watch_reason=REASON, post_wake_mover=BACK)
-woke16 = server._wake_pass()
+woke16 = wakes_svc.wake_pass()
 check("16.9 the watchers end a time wait and a relay's ask-by day and take watch_reason with them", {"g219", "g221"} <= set(woke16) and "watch_reason" not in mt(219) and "watch_reason" not in mt(221) and "until" not in mt(219), (woke16, wk(mt(219)), wk(mt(221))))
 check("16.9 …the list of what the end of a wait clears names it (one list for the watcher's arrival and the owner's Done)", "watch_reason" in WK_.LIVE_DROP and "watch_reason" in WK_.DATE_DROP, None)
 

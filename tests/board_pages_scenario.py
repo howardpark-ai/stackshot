@@ -70,6 +70,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.web import landed as ld
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web import render; from stackshot.web import search; from stackshot.web import runners
+from stackshot.service import watching as watching_svc
 from stackshot.web import app as _wapp
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.routes import answers as _rt_answers
@@ -480,7 +481,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     # a wait that ends hands the item's own options to the owner as stored: the post-wake question reads them raw, so a letter the card draws is not stripped out of the store
     for stored in (["A Report", "B Plan", "C Fix"], ["A", "B", "C"]):
         wm = {"needs": ["wait"], "ask": ASKL, "options": opts_of(*stored)}
-        wask, wopts = server._watch_ask("a72", wm, "its wait ended")
+        wask, wopts = watching_svc.watch_ask("a72", wm, "its wait ended")
         server._watch.turn_to_owner(wm, "", wask, wopts, "its wait ended", time.time())
         check(f"a wait that ends keeps the stored options {stored}: the post-wake question carries them, the item stores them unchanged",
               wask == ASKL and [o["label"] for o in wopts] == stored and wm["options"] == opts_of(*stored), (wask, wm.get("options")))

@@ -68,6 +68,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.model import model; from stackshot.waits import watchers as wk
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.service import runner as runner_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.web.tools import get as _wt_get
@@ -148,7 +149,7 @@ check("anchor_hit: any notice counts; a routine line counts for a merge or close
 item(10, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, needs=[], subject="[home] time wait")
 item(11, wait_kind="time", hold=True, wake=day(3), post_wake_mover=BACK, needs=[], subject="[home] time wait not yet")
 reset()
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 m = mt(10)
 check("time: the wake that passed turns the item alive with the post-wake mover", "a10" in woke and m.get("mover") == BACK and "wake" not in m and "hold" not in m and "wait_kind" not in m and "post_wake_mover" not in m and m.get("needs") == [BACK], m)
 mod = server._model_of({**rd(10), "gid": "a10"})
@@ -157,16 +158,16 @@ check("time: …and records what arrived, once", m.get("woke", {}).get("what") =
 check("time: the mover is told in one line: the item, what it waited on, that it is theirs", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "is yours now" in sent("watch")[0][2] and "its wake" in sent("watch")[0][2]
       and "time wait" in sent("watch")[0][2] and "\n" not in sent("watch")[0][2], sent())
 check("time: an item whose wake has not come is left as it was", mt(11).get("wait_kind") == "time" and hd_(mt(11)) is True and wk_(mt(11)) == day(3), mt(11))
-reset(); server._wake_pass()
+reset(); wakes_svc.wake_pass()
 check("time: the next pass tells nobody again and moves nothing", not sent() and mt(10).get("mover") == BACK, sent())
-check("time: the next moment of an item still waiting is its wake", server._next_wake() is not None and server._next_wake().strftime("%Y-%m-%d") == day(3), server._next_wake())
+check("time: the next moment of an item still waiting is its wake", wakes_svc.next_wake() is not None and wakes_svc.next_wake().strftime("%Y-%m-%d") == day(3), wakes_svc.next_wake())
 
 # ================================================================ item
 item(20, wait_kind="item", after=["a21", "a22"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] item wait")
 item(21, subject="[home] first blocker"); item(22, subject="[home] second blocker")
 def close(g, outcome="done"):
     it = rd(g); it["status"] = "completed"; it["metadata"].update(outcome=outcome, reason="r"); (T / f"store/a/{g}.json").write_text(json.dumps(it))
-    return server._release_after(f"a{g}", outcome, "", "home-front")
+    return wakes_svc.release_after(f"a{g}", outcome, "", "home-front")
 reset(); close(21)
 check("item: one `after` item closing, another still open: the wait goes on", mt(20).get("wait_kind") == "item" and not mt(20).get("mover") and not sent("watch"), mt(20))
 close(22)
@@ -175,24 +176,24 @@ check("item: the last `after` item closing turns the item alive with the post-wa
 check("item: …told in one line, with what closed", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "a22" in sent("watch")[0][2] and "closed" in sent("watch")[0][2], sent())
 item(30, wait_kind="item", after=["a31"], post_wake_mover=BACK, ask_by=day(-1), needs=[], subject="[home] backstop")
 item(31, subject="[home] never closes")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 m = mt(30)
 check("item: the backstop passing first turns it alive with the post-wake mover and the note that the item is still open", "a30" in woke and m.get("mover") == BACK and "a31" in m["woke"]["what"] and "still open" in m["woke"]["what"], m)
 item(32, wait_kind="item", after=["a33", "a34"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] superseded blocker")
 item(33, subject="[home] old"); item(34, subject="[home] replacement")
 it = rd(33); it["status"] = "completed"; it["metadata"].update(outcome="superseded", reason="r", superseded_by="a34"); (T / "store/a/33.json").write_text(json.dumps(it))
-server._release_after("a33", "superseded", "a34", "home-front")
+wakes_svc.release_after("a33", "superseded", "a34", "home-front")
 check("item: a superseded blocker is followed to its open replacement and the wait goes on", mt(32).get("wait_kind") == "item" and "a34" in mt(32).get("after") and not mt(32).get("mover"), mt(32))
 item(35, wait_kind="item", after=["a36"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] catch-up")
 item(36, status="completed", outcome="done", reason="r")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("item: a close nobody saw (every `after` item already closed) is found by the next pass", "a35" in woke and mt(35).get("mover") == BACK, mt(35))
 
 # the runner's ten-minute catch-up finds the same close even with the ask-by days away (the minute tick's due-wake gate does not see such a wait)
 from stackshot.core import runner as RUN
 item(94, wait_kind="item", after=["a95"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] catch-up through the runner")
 item(95, status="completed", outcome="done", reason="r")
-reset(); server._minute_wake_pass()
+reset(); wakes_svc.minute_wake_pass()
 check("item: the minute tick's gate (no wake due) leaves a wait whose blockers all closed unseen, with a far ask-by", mt(94).get("wait_kind") == "item" and not mt(94).get("mover"), mt(94))
 ten_ticks = [t for t in runner_svc.ticks() if t.pace == "tenmin" and t.name == "wake_catchup"]
 check("item: the runner's table has the ten-minute wake catch-up", len(ten_ticks) == 1 and ten_ticks[0].group == "tenmin", [t.name for t in runner_svc.ticks()])
@@ -204,27 +205,27 @@ item(40, wait_kind="anchor", wait_anchor=AURL, wait_event="PR merged", ask_by=da
 item(41, wait_kind="anchor", wait_anchor=AURL, wait_event="PR merged", ask_by=day(5), post_wake_mover=BACK, needs=[], project="projects/beta", subject="[home] same anchor, another project")
 item(42, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/6", wait_event="PR merged", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] another anchor")
 reset()
-server._anchor_release("projects/alpha", notice("old comment", ts=now0 - 20 * DAY))
+wakes_svc.anchor_release("projects/alpha", notice("old comment", ts=now0 - 20 * DAY))
 check("anchor: a notice older than the item's last move does not count", mt(40).get("wait_kind") == "anchor", mt(40))
-server._anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
+wakes_svc.anchor_release("projects/alpha", notice("CI passed on the PR", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
 check("anchor: a routine line of the fleet's own PR (CI passing) does not end a wait for a merge", mt(40).get("wait_kind") == "anchor", mt(40))
-server._anchor_release("projects/alpha", notice("dropped by the keeper", ruling="dropped"))
+wakes_svc.anchor_release("projects/alpha", notice("dropped by the keeper", ruling="dropped"))
 check("anchor: a notice the keeper dropped does not count (as for today's anchor wait)", mt(40).get("wait_kind") == "anchor", mt(40))
-rel = server._anchor_release("projects/alpha", notice("PR #5 merged: the work landed"), by="home-stew")
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged: the work landed"), by="home-stew")
 m = mt(40)
 check("anchor: a notice the keeper passed turns the item alive with the post-wake mover, the gist on it", rel == ["a40"] and m.get("mover") == BACK and "PR #5 merged" in m["woke"]["what"] and AURL in m["woke"]["what"] and "wait_kind" not in m, (rel, m))
 check("anchor: …told in one line", len(sent("watch")) == 1 and sent("watch")[0][1] == UB and "PR #5 merged" in sent("watch")[0][2], sent())
 check("anchor: another project's item and another anchor's item are not touched", mt(41).get("wait_kind") == "anchor" and mt(42).get("wait_kind") == "anchor", (mt(41), mt(42)))
-check("anchor: a notice again does nothing (the item is alive now)", server._anchor_release("projects/alpha", notice("PR #5 merged again")) == [], None)
+check("anchor: a notice again does nothing (the item is alive now)", wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged again")) == [], None)
 item(43, wait_kind="anchor", wait_anchor=AURL, wait_event="PR merged", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] anchor wait, merged routine line")
 reset()
-rel = server._anchor_release("projects/alpha", notice("PR #5 merged by home-front", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged by home-front", log_only=True, ruled_by=server.AUTO_RULER, ruling="merged", to=""))
 check("anchor: …but a routine line that says merged does", "a43" in rel and mt(43).get("mover") == BACK, (rel, mt(43)))
 item(44, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(5), post_wake_mover=BACK, needs=[], project="projects/beta", subject="[home] no keeper")
-rel = server._anchor_release("projects/beta", notice("someone replied", ruling=None, to="", live=True), by="")
+rel = wakes_svc.anchor_release("projects/beta", notice("someone replied", ruling=None, to="", live=True), by="")
 check("anchor: in a project nobody rules, a notice that arrived turns the items waiting on it there (a line the live router holds counts)", set(rel) == {"a41", "a44"}, (rel, mt(44)))
 item(45, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] silent")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 m = mt(45)
 check("anchor: the backstop passing with no notice turns it alive with the note that the anchor stayed silent", "a45" in woke and m.get("mover") == BACK and "the anchor stayed silent" in m["woke"]["what"], m)
 item(46, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(5), post_wake_mover=BACK, needs=[], subject="[home] found by the minute pass", watch={"set_at": now0 - 3600})
@@ -232,7 +233,7 @@ server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label
 nid = server._routing.read("projects/alpha", since=now0 - 60)[-1]["id"]
 server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
 time.sleep(0.01)
-out = server._anchor_pass()
+out = wakes_svc.anchor_pass()
 check("anchor: the minute pass finds a keeper-passed notice in the routing log for an item that waits on it", "a46" in out and mt(46).get("mover") == BACK, (out, mt(46)))
 
 # the wait-set report
@@ -248,14 +249,14 @@ out = server._watch_anchor_seen("projects/alpha", "https://github.com/o/r/pull/9
 check("anchor: …the report for a stored wait, nothing recorded, says so, and an anchor anchor-hub does not watch for the project is named", "recorded nothing" in out and "does not watch" in out and "anchors(project=\"projects/alpha\"" in out, out)
 out = server._update("a47", sender=FRONT, ask_by=day(8))
 check("anchor: moving the awaited date (ask_by) resets the backstop's stamp, and says nothing more of the anchor", mt(47)["watch"]["set_at"] >= now0 and "anchor-hub already" not in out, out)
-rel = server._anchor_release("projects/alpha", notice("older than the wait", ts=now0 - 56))
+rel = wakes_svc.anchor_release("projects/alpha", notice("older than the wait", ts=now0 - 56))
 check("anchor: a notice from before the wait was set is not its arrival", mt(47).get("wait_kind") == "anchor", mt(47))
 
 # ================================================================ relay
 RASK = "Decide: has countersigned NDA arrived? · Options: arrived / not yet, ask again on <date> / drop"
 item(50, wait_kind="relay", wait_event="countersigned NDA", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay wait")
 item(51, wait_kind="relay", wait_event="the lease", ask_by=day(4), post_wake_mover=BACK, needs=[], subject="[home] relay wait not yet due")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 m = mt(50)
 check("relay: the ask-by day turns the item to the owner with the fixed ask", "a50" in woke and m.get("ask") == RASK and m.get("needs") == ["decision"] and m.get("then") == BACK and "wait_kind" not in m, m)
 check("relay: …its three options map to the board's buttons", [o["label"] for o in render.options_of(rd(50))] == ["arrived", "not yet, ask again on <date>", "drop"], m.get("options"))
@@ -302,21 +303,21 @@ server._answer("a50", "not yet, ask again on <date>", f"ask again on {day(10)}",
 m = mt(50)
 check("relay answer: not yet with a date puts the wait back on that date", m.get("wait_kind") == "relay" and ab_(m) == day(10) and m.get("wait_event") == "countersigned NDA" and m.get("post_wake_mover") == BACK
       and "ask" not in m and "options" not in m and "decision" not in (m.get("needs") or []) and "then" not in m, m)
-check("relay answer: …and the loop's next moment is that date", server._next_wake().strftime("%Y-%m-%d") <= day(10), server._next_wake())
+check("relay answer: …and the loop's next moment is that date", wakes_svc.next_wake().strftime("%Y-%m-%d") <= day(10), wakes_svc.next_wake())
 item(52, wait_kind="relay", wait_event="the parcel", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay to arrive")
-server._wake_pass(); reset()
+wakes_svc.wake_pass(); reset()
 server._answer("a52", "arrived", "", "answer")
 m = mt(52)
 check("relay answer: arrived puts it with the post-wake mover, alive", m.get("mover") == BACK and m.get("needs") == [BACK] and "ask" not in m and "options" not in m and "wait_kind" not in m and "arrived" in m["woke"]["what"], m)
 check("relay answer: …the mover is told through the answer's own notice", any(x[1] == UB and x[3] == "answer" for x in SENT), sent())
 item(53, wait_kind="relay", wait_event="the quote", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay to drop")
 item(54, wait_kind="item", after=["a53"], post_wake_mover=OTHER, ask_by=day(9), needs=[], subject="[home] waits on the one dropped")
-server._wake_pass(); reset()
+wakes_svc.wake_pass(); reset()
 server._answer("a53", "drop", "", "answer")
 check("relay answer: drop closes it as not planned (dropped), the items that waited on it turn", rd(53)["status"] == "completed" and mt(53).get("outcome") == "dropped" and "dropped on" in mt(53).get("reason", "")
       and "ask" not in mt(53) and "chases" not in mt(53) and "watch" not in mt(53) and mt(54).get("mover") == OTHER, (mt(53), mt(54)))
 item(55, wait_kind="relay", wait_event="the review", ask_by=day(-1), post_wake_mover=OWN, needs=[], subject="[home] relay, the owner relays and the owner takes it")
-server._wake_pass()
+wakes_svc.wake_pass()
 server._answer("a55", "arrived", "", "answer")
 check("relay answer: a post-wake mover that is the owner falls back to the project's default holder on 'arrived' (not the creator)", mt(55).get("mover") in (UF, "home-front") and "wait_kind" not in mt(55), mt(55))
 
@@ -357,7 +358,7 @@ for note_ in ("ok\n\u00b7\nRecommend: later", "ok\u00a0\u00b7\u00a0Recommend: la
 def next_dow(n): return (TODAY + datetime.timedelta(days=(n - TODAY.weekday()) % 7 or 7)).isoformat()
 def fresh_relay(i, ask_by=None):
     item(i, wait_kind="relay", wait_event="the contract", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay for the box")
-    server._wake_pass()
+    wakes_svc.wake_pass()
 for i_, txt_, want_ in ((70, "Friday, a day after the review", next_dow(4)), (71, "I'll look at it next week, it is a month-end task", ymd(7)), (72, "ok, a month-end report", None)):
     fresh_relay(i_)
     out_ = server._answer(f"a{i_}", "not yet, ask again on <date>", txt_, "answer")
@@ -385,7 +386,7 @@ check("chase: get shows chases: n with the last note of a stored chase", "chases
 out = server._update("a60", sender=BACK, ask_by=day(5))
 check("chase: a moved ask_by resets the backstop and the chases (they were about the old date)", "chases" not in mt(60) and ab_(mt(60)) == day(5), mt(60))
 it = rd(60); it["metadata"].pop("until", None); it["metadata"]["ask_by"] = day(-1); it["metadata"]["chases"] = [{"at": 1.0, "by": BACK, "note": "one"}, {"at": 2.0, "by": BACK, "note": "two"}]; (T / "store/a/60.json").write_text(json.dumps(it))
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 m = mt(60)
 check("chase: two chases and no arrival: at the wait's end the item comes to the owner as drop it?", "a60" in woke and m["ask"].startswith("Decide: drop it?") and "· Options: drop / keep waiting until <date>" in m["ask"] and m.get("needs") == ["decision"]
       and [o["label"] for o in render.options_of(rd(60))] == ["drop", "keep waiting until <date>"] and len(m.get("chases") or []) == 2 and m.get("then") == BACK, m)
@@ -397,14 +398,14 @@ server._answer("a60", "keep waiting until <date>", f"until {day(12)}", "answer")
 m = mt(60)
 check("chase: keep waiting until a date puts the wait back on it and starts the chases over", m.get("wait_kind") == "relay" and ab_(m) == day(12) and "chases" not in m and "ask" not in m, m)
 item(61, wait_kind="relay", wait_event="the schedule", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] chased then dropped", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
-server._wake_pass()
+wakes_svc.wake_pass()
 server._answer("a61", "drop", "", "answer")
 check("chase: drop it? answered drop closes the item", rd(61)["status"] == "completed" and mt(61).get("outcome") == "dropped", mt(61))
 item(62, wait_kind="relay", wait_event="the form", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] one chase only", chases=[{"at": 1.0, "by": BACK, "note": "a"}])
-server._wake_pass()
+wakes_svc.wake_pass()
 check("chase: one chase is not enough: the usual relay question comes", mt(62).get("ask") == "Decide: has the form arrived? · Options: arrived / not yet, ask again on <date> / drop", mt(62))
 item(63, wait_kind="anchor", wait_anchor=AURL, wait_event="a reply", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] anchor chased twice", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
-reset(); server._wake_pass()
+reset(); wakes_svc.wake_pass()
 check("chase: an anchor that stayed silent after two chases comes to the owner as drop it?, not to the post-wake mover", mt(63).get("ask", "").startswith("Decide: drop it?") and not sent("watch") and "mover" not in mt(63), mt(63))
 server._answer("a63", "keep waiting until <date>", f"{day(7)}", "answer")
 check("chase: …keep waiting restores the anchor wait with its anchor and event", mt(63).get("wait_kind") == "anchor" and mt(63).get("wait_anchor") == AURL and mt(63).get("wait_event") == "a reply" and ab_(mt(63)) == day(7), mt(63))
@@ -419,13 +420,13 @@ item(73, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=OTHER, needs
 item(74, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=FRONT, needs=[], subject="[home] batch front")
 item(75, hold=True, wake=day(-1), needs=[BACK], subject="[home] plain hold, today's wake pass")
 cfg(pause=True); reset()
-check("pause: the wake pass does nothing and the watchers do nothing", server._wake_pass() == [] and server._watch_pass() == [] and not SENT and mt(70).get("wait_kind") == "time" and hd_(mt(75)) is True, (SENT, mt(70)))
+check("pause: the wake pass does nothing and the watchers do nothing", wakes_svc.wake_pass() == [] and watching_svc.watch_pass() == [] and not SENT and mt(70).get("wait_kind") == "time" and hd_(mt(75)) is True, (SENT, mt(70)))
 check("pause: …the item whose wake passed is left exactly as it was, the plain hold too", wk_(mt(75)) == day(-1), mt(75))
-check("pause: the wake loop does not spin on a due wake", server._next_wake() is not None and server._next_wake() < server._pages.zone_now(), None)
-rel = server._anchor_release("projects/alpha", notice("PR #5 merged", ts=now0 + 1))
+check("pause: the wake loop does not spin on a due wake", wakes_svc.next_wake() is not None and wakes_svc.next_wake() < server._pages.zone_now(), None)
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged", ts=now0 + 1))
 check("pause: a notice for an anchor wait does not turn it either", mt(47).get("wait_kind") == "anchor" and rel == [], mt(47))
 cfg(pause=False); reset()
-woke = server._wake_pass()
+woke = wakes_svc.wake_pass()
 check("pause off: the due ones fire in one pass", {"a70", "a71", "a72", "a73", "a74"} <= set(woke), woke)
 w = sent()
 tos = sorted(x[1] for x in w)
@@ -439,7 +440,7 @@ mf = next(x for x in w if x[1] == UF)
 check("pause off: …a front agent gets the mark a front agent takes", mf[2].startswith(_wt_text._FOR_OWNER), mf[2])
 check("pause off: …the messages that carry only watched items are tagged watch, the merged one is the wake pass's", [x[3] for x in w if x[1] == UO] == ["watch"] and [x[3] for x in w if x[1] == UB] == ["wake"], [(x[1], x[3]) for x in w])
 check("pause off: today's wake pass released the plain hold in the same pass", "hold" not in mt(75) and "a75" in woke, mt(75))
-SENT_COUNT = len(SENT); server._wake_pass()
+SENT_COUNT = len(SENT); wakes_svc.wake_pass()
 check("pause off: nothing is told twice", len(SENT) == SENT_COUNT, sent())
 
 # ================================================================ the gate
@@ -447,16 +448,16 @@ now = time.time()
 item(80, hold=True, wake=day(-20), su=now0 - 40 * DAY, needs=[BACK], subject="[home] overdue hold, today's wake pass")
 item(81, wait_kind="time", hold=True, wake=day(-20), su=now0 - 40 * DAY, needs=[BACK], post_wake_mover=BACK, subject="[home] overdue, watched")
 cfg(watchers=False)
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("gate: …the wake pass too: today's release (the hold and the wake go), no watcher message", "a81" in woke and "hold" not in mt(81) and "wake" not in mt(81) and not sent("watch") and mt(81).get("wait_kind") == "time" and "mover" not in mt(81), mt(81))
 item(82, wait_kind="relay", wait_event="the form", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] relay, switch off")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("switch off: a relay's ask-by day does nothing", "a82" not in woke and mt(82).get("wait_kind") == "relay" and "ask" not in mt(82), mt(82))
 item(83, wait_kind="item", after=["a84"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] item wait, switch off")
 item(84, subject="[home] its blocker")
 close(84)
 check("switch off: an `after` close releases the item as today (the after goes, no watcher mover)", "after" not in mt(83) and "mover" not in mt(83) and not sent("watch"), mt(83))
-rel = server._anchor_release("projects/alpha", notice("PR #5 merged", ts=now0 + 2))
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #5 merged", ts=now0 + 2))
 check("switch off: an anchor notice leaves the anchor wait alone", mt(47).get("wait_kind") == "anchor" and rel == [], mt(47))
 cfg(watchers=True)
 item(85, wait_kind="item", after=["a86"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] item wait, switch on")
@@ -498,7 +499,7 @@ server._anc.save({"projects/alpha": [{"url": A3, "items": ["a56", "a13", "a14"],
 item(56, hold=True, wake=day(9), wait_kind="anchor", wait_anchor=A3, wait_event="PR merged", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] held and watched", watch=WATCHED())
 item(13, hold=True, wake=day(9), needs=[BACK], subject="[home] held, no stored wait")
 reset()
-rel = server._anchor_release("projects/alpha", notice("PR #65 merged: it landed", anchor="github:o/r#65"), by="home-stew")
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #65 merged: it landed", anchor="github:o/r#65"), by="home-stew")
 m = mt(56)
 check("review 1: a held, anchor-scoped item with a stored anchor wait is turned by the watchers (alive, post-wake mover, the notice's gist), not released from hold by today's branch first",
       m.get("mover") == BACK and "wait_kind" not in m and "hold" not in m and "PR #65 merged" in m["woke"]["what"] and "stayed silent" not in m["woke"]["what"], m)
@@ -506,7 +507,7 @@ check("review 1: …told once, in the watchers' line", len([x for x in sent() if
 check("review 1: …and the held item with no stored wait is released from hold as before, in the same call", "a13" in rel and "hold" not in mt(13) and "wait_kind" not in mt(13) and "mover" not in mt(13), (rel, mt(13)))
 cfg(watchers=False)
 item(14, hold=True, wake=day(9), wait_kind="anchor", wait_anchor=A3, wait_event="PR merged", ask_by=day(9), post_wake_mover=BACK, needs=[BACK], subject="[home] held, anchor kind, switch off")
-rel = server._anchor_release("projects/alpha", notice("PR #65 merged again", anchor="github:o/r#65"), by="home-stew")
+rel = wakes_svc.anchor_release("projects/alpha", notice("PR #65 merged again", anchor="github:o/r#65"), by="home-stew")
 check("review 1: with [model] watchers = false the same item is a plain held item again: released from hold, no mover", "a14" in rel and "hold" not in mt(14) and "mover" not in mt(14) and mt(14).get("wait_kind") == "anchor", (rel, mt(14)))
 cfg(watchers=True)
 
@@ -515,7 +516,7 @@ item(57, wait_kind="anchor", wait_anchor=A2, wait_event="a reply", ask_by=day(9)
 item(15, hold=True, wake=day(9), needs=[BACK], subject="[home] replay, held and unwatched, same anchor")
 nid = server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="a reply on PR 77", anchor="github:o/r#77", pilot=True)
 server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
-reset(); out = server._anchor_pass()
+reset(); out = wakes_svc.anchor_pass()
 check("review 1: the minute pass replays the keeper's ruling for the watched wait", "a57" in out and mt(57).get("mover") == BACK, (out, mt(57)))
 check("review 1: …and gives the held item on the same anchor no release it did not get before (a keeper's ruling released it in no pass, only in _route)", "a15" not in out and hd_(mt(15)) is True and not mt(15).get("woke"), (out, mt(15)))
 
@@ -530,7 +531,7 @@ class _Spy:
 item(58, wait_kind="relay", wait_event="the badge", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] lock order, arrived")
 item(59, wait_kind="relay", wait_event="the key", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] lock order, drop")
 item(66, wait_kind="relay", wait_event="the card", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] lock order, not yet")
-server._wake_pass()
+wakes_svc.wake_pass()
 spy = _Spy(server._ANSWER_LOCK); server._ANSWER_LOCK = spy
 try:
     server._answer("a58", "arrived", "", "answer"); server._answer("a59", "drop", "", "answer"); server._answer("a66", "not yet, ask again on <date>", f"on {day(6)}", "answer")
@@ -557,7 +558,7 @@ check("review 2: an answer and an update on one item at once do not deadlock", n
 item(16, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] box-only answer, relay ask")
 item(17, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] box-only answer, drop it? ask", chases=[{"at": 1.0, "by": BACK, "note": "a"}, {"at": 2.0, "by": BACK, "note": "b"}])
 item(18, wait_kind="relay", wait_event="the lease", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] a comment on a watcher ask")
-server._wake_pass(); reset()
+wakes_svc.wake_pass(); reset()
 check("review 4: the fixtures are up: the relay ask, and the drop it? ask after two chases", mt(16).get("ask", "").startswith("Decide: has") and mt(17).get("ask", "").startswith("Decide: drop it?"), (mt(16), mt(17)))
 server._answer("a16", "", "not yet, try next Friday", "answer")
 m = mt(16)
@@ -576,25 +577,25 @@ check("review 4: a comment (not an answer) on a watcher ask leaves the ask up", 
 # --- 5. a wait stored before the stamp existed: no week-old notice wakes it
 item(19, wait_kind="anchor", wait_anchor=A4, wait_event="PR merged", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] stored before the stamp existed")
 it = rd(19); it["updated"] = now0 - 2 * DAY; (T / "store/a/19.json").write_text(json.dumps(it))
-check("review 5: with no stamp the floor is the item's last write, not only its state clock", server._watch_floor(rd(19)) == now0 - 2 * DAY, server._watch_floor(rd(19)))
+check("review 5: with no stamp the floor is the item's last write, not only its state clock", watching_svc.watch_floor(rd(19)) == now0 - 2 * DAY, watching_svc.watch_floor(rd(19)))
 server._anc.save({"projects/alpha": [{"url": A4, "items": None, "added": now0, "by": "x"}]})
-server._anchor_release("projects/alpha", notice("PR #78 merged long ago", anchor="github:o/r#78", ts=now0 - 5 * DAY), by="home-stew")
+wakes_svc.anchor_release("projects/alpha", notice("PR #78 merged long ago", anchor="github:o/r#78", ts=now0 - 5 * DAY), by="home-stew")
 check("review 5: a notice from before the item's last write does not wake it", mt(19).get("wait_kind") == "anchor", mt(19))
 nid = server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="PR #78 merged three days ago", anchor="github:o/r#78", pilot=True, ts=now0 - 3 * DAY)
 server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
 before = rd(19)["state_updated"]
-server._anchor_pass()
+wakes_svc.anchor_pass()
 check("review 5: the minute pass stamps the wait on first sight (a filing save: the state clock stays) and does not wake it for the old line in the log", mt(19).get("watch", {}).get("set_at", 0) >= now0 and rd(19)["state_updated"] == before and mt(19).get("wait_kind") == "anchor", mt(19))
 time.sleep(0.02)
 nid = server._routing.record("projects/alpha", kind="anchor", to=U["home-stew"], label="github anchor", who="someone", text="PR #78 merged now", anchor="github:o/r#78", pilot=True)
 server._routing.rule(nid, "passed", to=BACK, reason="for the builder", by="home-stew")
-out = server._anchor_pass()
+out = wakes_svc.anchor_pass()
 check("review 5: …a notice after the stamp wakes it", "a19" in out and mt(19).get("mover") == BACK, (out, mt(19)))
 
 # --- 6. a wait no watcher can end keeps today's mechanisms, and the brief lists it
 item(68, wait_kind="anchor", hold=True, wake=day(-1), needs=[BACK], subject="[home] anchor kind, no anchor stored")
 item(69, wait_kind="time", needs=[BACK], subject="[home] time kind, no date")
-reset(); woke = server._wake_pass()
+reset(); woke = wakes_svc.wake_pass()
 check("review 6: an anchor wait with no stored anchor is released by today's wake pass (the hold goes, no watcher mover)", "a68" in woke and "hold" not in mt(68) and "mover" not in mt(68) and not any("a68" in x[0] for x in sent("watch")), mt(68))
 br = _wt_brief.stackshot_brief()
 check("review 6: the brief lists the waits no watcher can end", "Waits no watcher can end" in br and "a68" in br and "a69" in br, br[:1800])
@@ -602,7 +603,7 @@ check("review 6: the brief lists the waits no watcher can end", "Waits no watche
 # --- 8. the item turned to the owner passes the second-mover guard
 cfg(guards=True)
 item(23, wait_kind="relay", wait_event="the badge", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] second-mover guard")
-server._wake_pass()
+wakes_svc.wake_pass()
 mod = server._model_of({**rd(23), "gid": "a23"})
 check("review 8: the turned item's needs is decision alone, the post-wake mover is `then`, and the model reads no conflict", mt(23).get("needs") == ["decision"] and mt(23).get("then") == BACK and mod.owner_moves and not mod.conflicts, (mt(23), mod))
 out = server._update("a23", sender=FRONT, next="home-front: read his answer on the board")
@@ -618,7 +619,7 @@ def _fake_due(it, now, ao=None):
     return _real_due(it, now, ao)
 wk.due = _fake_due
 try:
-    reset(); moved = server._watch_pass()
+    reset(); moved = watching_svc.watch_pass()
 finally:
     wk.due = _real_due
 check("review 9: an item that reads as due outside the lock but is not due under it is left alone", "a76" not in moved and mt(76).get("wait_kind") == "time" and hd_(mt(76)) is True and not any("a76" in x[0] for x in sent()), (moved, mt(76)))
@@ -632,13 +633,13 @@ def _flaky(gid, it, *a, **k):
     return _save0(gid, it, *a, **k)
 writes.save = _flaky
 try:
-    reset(); moved = server._watch_pass(); n1 = len(_fails); moved2 = server._watch_pass()
+    reset(); moved = watching_svc.watch_pass(); n1 = len(_fails); moved2 = watching_svc.watch_pass()
 finally:
     writes.save = _save0
 check("review 12: a turn that fails is noted on the item (watch.failed_at) and is not retried in the same minute; nobody is told of it", "a92" not in moved and n1 >= 1 and len(_fails) == n1 and "a92" not in moved2
       and mt(92).get("watch", {}).get("failed_at", 0) >= now0 and mt(92).get("wait_kind") == "time" and not any("a92" in x[0] for x in sent("watch")), (mt(92), len(_fails), sent()))
 check("review 12: …and its next moment is after the back-off, so the wake loop does not spin on it", wk.next_moment(mt(92)) > time.time() + wk.BACKOFF - 60, wk.next_moment(mt(92)))
-reset(); moved = server._watch_pass(time.time() + wk.BACKOFF + 5)
+reset(); moved = watching_svc.watch_pass(time.time() + wk.BACKOFF + 5)
 check("review 12: …after the back-off it turns, and the failure note goes", "a92" in moved and mt(92).get("mover") == BACK and "failed_at" not in (mt(92).get("watch") or {}), mt(92))
 
 item(24, wait_kind="time", hold=True, wake=day(-1), post_wake_mover=BACK, needs=[], subject="[home] fails to turn, and to note it")
@@ -649,24 +650,24 @@ def _dead(gid, it, *a, **k):
     return _save1(gid, it, *a, **k)
 writes.save = _dead
 try:
-    reset(); server._watch_pass(); n1 = len(_tries); server._watch_pass(); n2 = len(_tries)
-    at_a = [at for g, _p, _i, at in server._wakes() if g == "a24"]
+    reset(); watching_svc.watch_pass(); n1 = len(_tries); watching_svc.watch_pass(); n2 = len(_tries)
+    at_a = [at for g, _p, _i, at in wakes_svc.wake_rows() if g == "a24"]
 finally:
     writes.save = _save1
 check("review 2nd: a turn that fails and cannot even be noted on the item is not retried in the next pass (the back-off is kept in memory)", n1 >= 1 and n2 == n1 and "failed_at" not in (mt(24).get("watch") or {}), (n1, n2, mt(24)))
 check("review 2nd: …and the wake loop's next moment for it is after the back-off", bool(at_a) and at_a[0] > server._pages.zone_now(), at_a)
-server._WATCH_BACKOFF.pop("a24", None)
+watching_svc.WATCH_BACKOFF.pop("a24", None)
 item(25, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/91", wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] bad stamp")
 item(183, wait_kind="anchor", wait_anchor="https://github.com/o/r/pull/96", wait_event="a reply", ask_by=day(9), post_wake_mover=BACK, needs=[], subject="[home] good stamp")
-_stamp0 = server._watch_stamp
+_stamp0 = watching_svc.watch_stamp
 def _bad_stamp(gid):
     if gid == "a25": raise RuntimeError("unreadable")
     return _stamp0(gid)
-server._watch_stamp = _bad_stamp
+watching_svc.watch_stamp = _bad_stamp
 try:
-    server._anchor_pass()
+    wakes_svc.anchor_pass()
 finally:
-    server._watch_stamp = _stamp0
+    watching_svc.watch_stamp = _stamp0
 check("review 2nd: one bad stamp does not abort the minute pass: the other waits are stamped", mt(183).get("watch", {}).get("set_at", 0) >= now0 and "set_at" not in (mt(25).get("watch") or {}), (mt(25), mt(183)))
 
 # --- 11. the exemption for a watcher's ask holds only while the item's watch says it is up
@@ -684,10 +685,10 @@ check("review 11: …and leaves a watcher's own ask up", server._lift_ask(mm) ==
 item(190, wait_kind="item", after=["a37"], post_wake_mover=BACK, ask_by=day(9), needs=[], subject="[home] waits on a superseded blocker")
 item(37, subject="[home] old blocker"); item(38, status="completed", outcome="done", reason="r", subject="[home] its replacement, already closed")
 it = rd(37); it["status"] = "completed"; it["metadata"].update(outcome="superseded", reason="r", superseded_by="a38"); (T / "store/a/37.json").write_text(json.dumps(it))
-reset(); server._release_after("a37", "superseded", "a38", "home-front")
+reset(); wakes_svc.release_after("a37", "superseded", "a38", "home-front")
 check("review 12: a superseded blocker whose replacement is closed too: the arrival names the replacement", mt(190).get("mover") == BACK and "a38" in mt(190)["woke"]["what"] and "superseded" in mt(190)["woke"]["what"], mt(190).get("woke"))
 item(93, wait_kind="relay", wait_event="the draft", ask_by=day(-1), post_wake_mover=BACK, needs=[], subject="[home] one chase, then not yet", chases=[{"at": 1.0, "by": BACK, "note": "a"}])
-server._wake_pass()
+wakes_svc.wake_pass()
 server._answer("a93", "not yet, ask again on <date>", f"on {day(8)}", "answer")
 check("review 12: not yet with a new date resets the chases as well", ab_(mt(93)) == day(8) and "chases" not in mt(93) and mt(93).get("wait_kind") == "relay", mt(93))
 server._anc.save({"projects/alpha": [{"url": A5, "items": ["a39", "a49"], "added": now0, "by": "x"}]})
@@ -702,7 +703,7 @@ def _read_spy(project, since=0.0, *a, **k):
     _since.append((project, since)); return _read0(project, since, *a, **k)
 server._routing.read = _read_spy
 try:
-    server._anchor_pass()
+    wakes_svc.anchor_pass()
 finally:
     server._routing.read = _read0
 check("review 12: the minute pass reads the routing log from the oldest floor of the watched waits, not a week back", any(p == "projects/beta" and s >= now0 - 56 - 1 for p, s in _since) and not any(p == "projects/beta" and s < now0 - 56 - 1 for p, s in _since), _since)

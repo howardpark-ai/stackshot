@@ -45,6 +45,7 @@ old = tok; tok = open(client.mint("box-far")).read().strip(); check("minting aga
 
 # ---- 2. whom the server takes a token for
 from stackshot.web import server
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import brief as _wt_brief
@@ -173,7 +174,7 @@ check("a hold_set.by with newlines is collapsed to one line before it reaches bo
       and server._rmod.hold_by({"metadata": {"hold_set": {"by": "x\ny" + "z" * 200}}}) == "x y" + "z" * 77 and "\n## injected" not in rep_ and "\n## injected" not in _wt_get.stackshot_get("a37"), (md_[md_.find("a37"):][:200],))
 # a hold's record goes when the hold ends: by the wake pass, by an after closing, by a release
 mk(40, hold=True, wake=(server._pages.zone_now() - server.dt.timedelta(days=1)).strftime("%Y-%m-%d"), hold_set={"at": _t.time() - 3600, "by": "sparrow"})
-server._wake_pass()
+wakes_svc.wake_pass()
 check("the wake pass that releases a hold drops its record too", not server._is_held(server._load("a40")) and "hold_set" not in rdm(40) and "hold" not in rdm(40), rdm(40))
 mk(41, hold=True, wake=WK, after=["a42"], hold_set={"at": _t.time() - 3600, "by": "sparrow"}); mk(42)
 check("while its after item is open, nothing is unexplained about the hold", "a41" not in [r["gid"] for r in server._holds_unexplained()])

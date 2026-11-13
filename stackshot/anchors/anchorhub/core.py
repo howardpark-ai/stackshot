@@ -64,7 +64,7 @@ def direct() -> dict[str, str]:
 # in [pilot] own_repos (by owner/repo, owner/*, or the repository's numeric ID, Event.repo_id), a pull request opened, merged, closed or given new commits, and CI passing again after a failure, is routine. For a
 # project in the pilot it is logged and not delivered: a routing-log line with no recipient, marked log_only and ruled
 # `merged` by stackshot (auto) at once, which stays on the project's routing page and which still
-# releases an item held on the anchor (the server's _anchor_pass). Decided by the event's type at its source (Event.etype),
+# releases an item held on the anchor (service/wakes.py's anchor_pass). Decided by the event's type at its source (Event.etype),
 # never by its text, since the owner and the sessions share one GitHub account. A comment, a review, a review comment, failing
 # CI, a reopen, an unclassified event, an event on any other repository, a route outside the pilot and a session bound by
 # extra.json are delivered as before.
@@ -494,7 +494,7 @@ class Hub:
         release events must wake no session). The event is written to the routing log of every project the
         anchor belongs to, with no recipient (to ""), target "direct", pilot False and the reason LOG_ONLY_REASON, and goes
         no further: nothing is delivered, nothing is held in self.pending (so no follow-up), no ruling is owed,
-        and a line with no recipient releases no item that waits on the anchor (server._anchor_release)."""
+        and a line with no recipient releases no item that waits on the anchor (service/wakes.py anchor_release)."""
         with self.lock:
             if ev.anchor in self.bindings: self._seen(ev)
         projects = sorted({r["project"] for r in _ROUTES.get(ev.anchor, [])})

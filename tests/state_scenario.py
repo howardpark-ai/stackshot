@@ -62,6 +62,7 @@ def refused(name, f, *want):
         check(name, all(w in str(e) for w in want), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import waiting as W; from stackshot.web import render; from stackshot.github import ghsync; from stackshot.model import states
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import brief as _wt_brief
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
@@ -183,7 +184,7 @@ item(31, needs=[BACK], hold=True, wake=day(20), cap_ok={"wake": day(20), "by": "
 item(32, needs=[BACK], wake=day(20), cap_ok={"wake": day(20), "by": "the owner", "quote": "park it until then"}, state="parked")
 item(33, needs=[BACK], state="doing", expected_by=hrs(2), hold=True, wake=day(20))
 with contextlib.redirect_stderr(io.StringIO()):
-    server._wake_pass(server._pages.zone_now() + datetime.timedelta(days=21))
+    wakes_svc.wake_pass(server._pages.zone_now() + datetime.timedelta(days=21))
 check("release: a wake that fires ends the park that stood on it (held, and a reminder alike)", "wake" not in mt(31) and "hold" not in mt(31) and "state" not in mt(31) and "state" not in mt(32) and "wake" not in mt(32), (mt(31), mt(32)))
 check("release: …a state that did not stand on the wake is kept", mt(33).get("state") == "doing" and mt(33).get("expected_by") == hrs(2) and "wake" not in mt(33), mt(33))
 

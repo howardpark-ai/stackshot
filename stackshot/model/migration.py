@@ -56,8 +56,8 @@ RESIDUE_GUARDS = ("wait_input", "no_end", "snooze", "mover", "post_wake")       
 AUTHOR = "migration"
 # The event paths that still notify while the pass holds the board, each a person's or a session's own act (the pass writes through none of them); an item one moves is `moved` when the pass reaches it.
 MID_PASS_PATHS = (
-    "a keeper's ruling on an anchor notice (`_route` → `_anchor_release`): a held item that waited on that anchor is released and its session told; the waits' watchers stand still (the hold)",
-    "a session closing an item (`_release_after`): an item with an old `after` wait that closes the last blocker wakes and its session is told; a watched item's wait stands still (the hold)",
+    "a keeper's ruling on an anchor notice (`_route` → `anchor_release` in service/wakes.py): a held item that waited on that anchor is released and its session told; the waits' watchers stand still (the hold)",
+    "a session closing an item (`release_after` in service/wakes.py): an item with an old `after` wait that closes the last blocker wakes and its session is told; a watched item's wait stands still (the hold)",
     "any session's own update, answer or comment on an item: the usual History line, notices and hand-off record, as ever",
 )
 

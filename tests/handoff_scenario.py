@@ -85,6 +85,7 @@ def refused(name, f, *want, none=()):
         check(name, all(w in str(e) for w in want) and not any(w in str(e) for w in none), str(e))
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 from stackshot.service import gates; from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.web.tools import brief as _wt_brief; from stackshot.web.tools import complete as _wt_complete; from stackshot.web.tools import create as _wt_create; from stackshot.web.tools import get as _wt_get; from stackshot.web.tools import text as _wt_text; from stackshot.web.tools import update as _wt_update; from stackshot.service import writes; from stackshot.waits import handoff as H; from stackshot.model import cold_call as CC; from stackshot.model import model; from stackshot.router import router_live
+from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -1071,7 +1072,7 @@ check("15 needs: …and a later needs naming another one moves the record there"
 # 15.4 a time wait's post_wake_mover takes effect on a wake: the server's own save records it, the wake notice delivers it
 dayp = lambda n: time.strftime("%Y-%m-%d", time.gmtime(now0 + n * 86400.0 + ZONE_OFFSET))
 item(93, wait_kind="time", hold=True, wake=dayp(-1), post_wake_mover="team-back", needs=[], handoff=rec("home-peer"))
-clear_pushes(); woke = server._wake_pass(); drain()
+clear_pushes(); woke = wakes_svc.wake_pass(); drain()
 check("15 wake: a time wait's post_wake_mover becomes the mover on the wake, and the record names it, from the server (the record to the one before goes to the history)",
       "a93" in woke and mt(93).get("mover") == "team-back" and ho(93).get("to") == "team-back" and ho(93).get("from") == "stackshot" and "home-peer" in hist(93) and not stale_now(93), (woke, mt(93)))
 check("15 wake: …and the wake notice delivered it (the clock can start)", isinstance(ho(93).get("delivered_at"), float) and len(pushes_to("team-back", "a93")) >= 1, (ho(93), pushes()))
@@ -1146,7 +1147,7 @@ check("15 repair: nobody is told and no record is made new", not pushes() and "h
 def parked(i, post, **kw):
     item(i, wait_kind="time", hold=True, wake=dayp(-1), post_wake_mover=post, needs=kw.pop("needs", []), **kw)
 parked(116, "team-back", handoff=rec("team-back", taken_at=now0 - 900))          # team-back took it, then parked it for itself
-clear_pushes(); woke = server._wake_pass(); drain()
+clear_pushes(); woke = wakes_svc.wake_pass(); drain()
 r_wake = ho(116); h_wake = (mt(116).get("handoff_history") or [{}])[-1]
 check("15 wake after a take: a wake to a mover who already holds a TAKEN record to the same name makes a new record (from the server, not taken); the taken one goes to the history as handed on",
       f"a{116}" in woke and r_wake.get("to") == "team-back" and r_wake.get("from") == "stackshot" and not r_wake.get("taken_at") and h_wake.get("taken_at") and h_wake.get("ended") == "handed on" and not stale_now(116), (woke, mt(116)))
@@ -1160,12 +1161,12 @@ check("15 no clock: a server save that leaves the mover alone makes no record ov
 _real_gate = telling.front_gate
 parked(119, "home-peer", handoff=rec("home-docs", taken_at=now0 - 900))
 telling.front_gate = lambda gid, owner, note, tag, kind: True          # the front gate holds every notice (a front agent away, a quiet hour)
-clear_pushes(); woke = server._wake_pass(); drain()
+clear_pushes(); woke = wakes_svc.wake_pass(); drain()
 telling.front_gate = _real_gate
 check("15 undelivered: a wake whose notice the front gate holds still records the hand-off (no_clock), and nothing marks it delivered while no notice reached the mover",
       f"a{119}" in woke and ho(119).get("to") == "home-peer" and ho(119).get("no_clock") is True and not ho(119).get("delivered_at") and not pushes_to("home-peer", f"a{119}"), (woke, ho(119), pushes()))
 parked(120, "home-front", handoff=rec("home-docs", taken_at=now0 - 900))
-clear_pushes(); woke = server._wake_pass(); drain()
+clear_pushes(); woke = wakes_svc.wake_pass(); drain()
 check("15 undelivered: a record to a front agent is made, no_clock, and is delivered only if a notice reached it", f"a{120}" in woke and ho(120).get("to") == "home-front" and ho(120).get("no_clock") is True
       and bool(ho(120).get("delivered_at")) == bool(pushes_to("home-front", f"a{120}")), (woke, ho(120), pushes()))
 item(121, mover="home-peer", needs=["home-docs"], handoff=rec("home-peer", taken_at=now0 - 900))
@@ -1228,7 +1229,7 @@ check("15 repair: the start-time pass ends the stale records (here two or more),
 import inspect
 src_start = inspect.getsource(server._start_background)
 check("15 repair: the pass runs at start, after the mover migrations and before the wake pass and the threads",
-      src_start.index("_migrate_owner_mover()") < src_start.index("_mover_backfill_pass()") < src_start.index("_handoff_repair_pass()") < src_start.index("_wake_pass()") < src_start.index("threading.Thread"), None)
+      src_start.index("_migrate_owner_mover()") < src_start.index("_mover_backfill_pass()") < src_start.index("_handoff_repair_pass()") < src_start.index("wake_pass()") < src_start.index("threading.Thread"), None)
 set_cfg(handoff=False); item(130, mover="team-back", handoff=rec("home-peer")); n_off = server._handoff_repair_pass(); set_cfg()
 check("15 repair: …and not while [model] handoff is false", n_off == 0 and ho(130).get("to") == "home-peer", ho(130))
 server._handoff_repair_pass()

@@ -65,6 +65,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:900]}" if got is not None else ""))
 logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.audit import audit_checks as AC; from stackshot.audit import audit_run as AR; from stackshot.model import model as MODEL; from stackshot.waits import server_fixes as SF; from stackshot.waits import wait_end as WE; from stackshot.core import config as CFG; from stackshot.waits import watchers as WATCH
+from stackshot.service import event_waits as evwaits_svc
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -76,7 +77,7 @@ telling.front_sender = lambda who: False
 server._evwait_preread = lambda kind, phrase: None                       # no GitHub call
 server._own_repo = lambda: "acme/widgets"
 BOXES = {"hp-box": ("hp-box", {}), "hp-up": ("hp-up", {"puller": time.time()})}
-server._evw_boxes = lambda: dict(BOXES)
+evwaits_svc.evw_boxes = lambda: dict(BOXES)
 from stackshot.fleet import liveness as LV
 LV.puller_online = lambda rec: bool(rec)
 BACK = "team-back"

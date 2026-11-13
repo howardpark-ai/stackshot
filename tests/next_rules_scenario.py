@@ -72,6 +72,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 def mt(i): return rd(i)["metadata"]
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.model import steps as S; from stackshot.model import nextlines as NL; from stackshot.model import next_rules as NR
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import create as _wt_create
 from stackshot.web.tools import update as _wt_update
@@ -346,7 +347,7 @@ import datetime as _dt
 _w = (_dt.date.today() + _dt.timedelta(days=3)).isoformat()
 r = upd(48, hold=True, wake=_w, wait_basis=f"the vendor ships the part {_w}")
 check("a hold through the tool keeps the step it had (an item on hold has the step its wake leads to)", hd_(mt(48)) and st(48) == [OPEN("home-agent: build it")], (r, st(48)))
-server._wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
+wakes_svc.wake_pass(_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=10))
 check("the wake pass over the held item raises no refusal and leaves its step", not hd_(mt(48)) and st(48) == [OPEN("home-agent: build it")], (mt(48), st(48)))
 check("the router never calls the two tools (they write through the server's own functions)",
       not re.search(r"\bstackshot_(update|create)\(", pathlib.Path(STACK, "stackshot/router/router.py").read_text() + pathlib.Path(STACK, "stackshot/router/router_live.py").read_text()), None)

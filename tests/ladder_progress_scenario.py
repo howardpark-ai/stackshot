@@ -76,6 +76,7 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import silence as SL; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.service import wakes as wakes_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -515,14 +516,14 @@ check("14 the server resolves a stored ref as it resolves any id (a legacy lette
 fixture(232, project="projects/alpha")
 (T / "store/anchors.json").write_text(json.dumps({"projects/alpha": [{"url": f"{W_}/pull/75", "items": ["a232"]}]}))
 ML.append({"ts": time.time(), "repo": "acme/widgets", "n": 75, "refs": []})
-_real_anchor_pass = server._anchor_pass
+_real_anchor_pass = wakes_svc.anchor_pass
 def _broken_anchor_pass(): raise RuntimeError("anchor pass broke")
-server._anchor_pass = _broken_anchor_pass
+wakes_svc.anchor_pass = _broken_anchor_pass
 errs = _io.StringIO()
 try:
-    with _cl.redirect_stderr(errs): server._minute_anchor_pass()
+    with _cl.redirect_stderr(errs): wakes_svc.minute_anchor_pass()
 finally:
-    server._anchor_pass = _real_anchor_pass
+    wakes_svc.anchor_pass = _real_anchor_pass
 check("14 _minute_anchor_pass: an anchor pass that raises is logged and the merge pass still runs (the item the merge is tied to is saved)",
       "anchor pass: RuntimeError: anchor pass broke" in errs.getvalue() and mt(232).get("merged_seen") == ["acme/widgets#75"], (errs.getvalue()[-300:], mt(232)))
 close(230, 231, 232)

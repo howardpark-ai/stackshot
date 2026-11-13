@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.github import ghsync as G
+from stackshot.service import wakes as wakes_svc, watching as watching_svc
 from stackshot.web.tools import complete as _wt_complete
 from stackshot.web.tools import get as _wt_get
 from stackshot.web.tools import text as _wt_text
@@ -852,7 +853,7 @@ check("F1, a hold with a wake still standing: the stored mover Oliver goes, the 
       and rd("a", 58)["metadata"].get("wait_kind") == "time" and rd("a", 58)["metadata"].get("post_wake_mover") == "home-agent" and rd("a", 58)["metadata"].get("watch", {}).get("set_at")
       and b(58).state == "waiting" and not b(58).conflicts and not any("yours now" in t[2] for t in told if t[0] == "a58"), (rd("a", 58)["metadata"], b(58), told))
 _out = {}
-server._watch_fire("a58", "time", time.time(), _out)
+watching_svc.watch_fire("a58", "time", time.time(), _out)
 check("F1, a58 followed to the wake: alive, home-agent moves it, named in needs, no wait fields, no conflict, the arrival is owed to home-agent",
       b(58).state == "alive" and b(58).mover == "home-agent" and not b(58).conflicts and rd("a", 58)["metadata"].get("needs") == ["home-agent"] and AGENT in _out
       and not any(k in rd("a", 58)["metadata"] for k in ("hold", "wake", "then", "wait_kind", "post_wake_mover")), (rd("a", 58)["metadata"], _out))
@@ -869,7 +870,7 @@ check("F1, an open after link: mover Oliver goes, the item reads waiting (blocke
 # the prerequisite closes (its file says so), and the release hands to their then-movers
 _p62 = json.loads((T / "store/a/62.json").read_text()); _p62["status"] = "completed"; _p62["outcome"] = "done"; (T / "store/a/62.json").write_text(json.dumps(_p62))
 told.clear()
-server._release_after("a62", "done", "", "home-here")
+wakes_svc.release_after("a62", "done", "", "home-here")
 check("F1, a60 followed to the end of its after: home-agent moves it (mover, first in needs), then cleared, no conflict, and home-agent is told by the release",
       b(60).state == "alive" and b(60).mover == "home-agent" and not b(60).conflicts and rd("a", 60)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 60)["metadata"]
       and any(t[0] == "a60" and t[1] == AGENT for t in told), (rd("a", 60)["metadata"], b(60), told))
@@ -880,7 +881,7 @@ check("F2, a pick that carries a wake with a then: it waits on its until, the mo
       and rd("a", 61)["metadata"].get("watch", {}).get("set_at")
       and b(61).state == "waiting" and b(61).wait.post_wake_mover == "home-agent" and not b(61).conflicts, (rd("a", 61)["metadata"], b(61)))
 _out = {}
-server._watch_fire("a61", "time", time.time(), _out)
+watching_svc.watch_fire("a61", "time", time.time(), _out)
 check("F2, through the wake: the item turns alive with home-agent as its mover, named in needs, the wake and the wait's fields gone, and the arrival is owed to home-agent",
       rd("a", 61)["metadata"].get("mover") == "home-agent" and rd("a", 61)["metadata"].get("needs") == ["home-agent"] and not any(k in rd("a", 61)["metadata"] for k in ("hold", "wake", "post_wake_mover", "wait_kind", "then"))
       and b(61).state == "alive" and b(61).mover == "home-agent" and not b(61).conflicts and AGENT in _out, (rd("a", 61)["metadata"], _out))
@@ -889,7 +890,7 @@ check("a park on an item that also waits after an open item: no time wait is sto
       server._answer("a63", "Park", "", "") == "decision" and "wait_kind" not in rd("a", 63)["metadata"] and "post_wake_mover" not in rd("a", 63)["metadata"] and rd("a", 63)["metadata"].get("then") == "home-agent"
       and rd("a", 63)["metadata"].get("after") == ["a67"] and hd_(rd("a", 63)["metadata"]) is True and not b(63).conflicts, (rd("a", 63)["metadata"], b(63)))
 _p67 = json.loads((T / "store/a/67.json").read_text()); _p67["status"] = "completed"; _p67["outcome"] = "done"; (T / "store/a/67.json").write_text(json.dumps(_p67))
-told.clear(); server._release_after("a67", "done", "", "home-here")
+told.clear(); wakes_svc.release_after("a67", "done", "", "home-here")
 check("...a63 followed to the end of its after: the hold and wake go with it, home-agent moves it (mover, first in needs), then cleared, no conflict, and home-agent is told",
       b(63).state == "alive" and b(63).mover == "home-agent" and not b(63).conflicts and rd("a", 63)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 63)["metadata"]
       and any(t[0] == "a63" and t[1] == AGENT for t in told), (rd("a", 63)["metadata"], b(63), told))
@@ -902,7 +903,7 @@ check("a park with a then stored its post-wake mover; update clear_hold=true rel
       and (server._update("a65", clear_hold=True, sender="home-agent") or True) and not any(k in rd("a", 65)["metadata"] for k in ("hold", "wake", "wait_kind", "post_wake_mover", "watch", "then"))
       and b(65).state == "alive" and not b(65).conflicts, (rd("a", 65)["metadata"], b(65)))
 told.clear()
-server._wake_pass()
+wakes_svc.wake_pass()
 check("the wake pass hands a stored then (an old hold whose wake has come): home-agent moves it, no conflict, and is told",
       b(66).state == "alive" and b(66).mover == "home-agent" and not b(66).conflicts and "then" not in rd("a", 66)["metadata"] and rd("a", 66)["metadata"].get("needs") == [AGENT], (rd("a", 66)["metadata"], b(66), told))
 check("the board item's shape (hold due, mover Oliver, then home-agent, no needs): the wake pass hands it to home-agent: the Oliver mover goes, mover and needs home-agent, then cleared, no conflict, home-agent told",
@@ -915,7 +916,7 @@ check("a then that is no session (free text), hold due: not handed, mover Oliver
 check("a session already in needs (hold due, then home-agent): left alone, needs unchanged, then stays",
       rd("a", 73)["metadata"].get("then") == "home-agent" and rd("a", 73)["metadata"].get("needs") == ["home-keeper"] and rd("a", 73)["metadata"].get("mover") is None, rd("a", 73)["metadata"])
 _p70 = json.loads((T / "store/a/70.json").read_text()); _p70["status"] = "completed"; _p70["outcome"] = "done"; (T / "store/a/70.json").write_text(json.dumps(_p70))
-told.clear(); server._release_after("a70", "done", "", "home-here")
+told.clear(); wakes_svc.release_after("a70", "done", "", "home-here")
 check("the board item's shape through an after release: handed to home-agent (stored Oliver mover dropped), no conflict, home-agent told",
       b(69).state == "alive" and b(69).mover == "home-agent" and not b(69).conflicts and rd("a", 69)["metadata"].get("needs") == [AGENT] and "then" not in rd("a", 69)["metadata"]
       and any(t[0] == "a69" and t[1] == AGENT for t in told), (rd("a", 69)["metadata"], b(69), told))
@@ -950,7 +951,7 @@ check("D2, before the release: Yes on needs [decision, home-agent] + then home-a
       server._answer("a82", "Yes", "", "") == "decision" and rd("a", 82)["metadata"].get("then") == "home-agent" and "mover" not in rd("a", 82)["metadata"] and rd("a", 82)["metadata"].get("needs") == ["home-agent"]
       and b(82).state == "waiting" and not b(82).conflicts, (rd("a", 82)["metadata"], b(82)))
 _p83 = json.loads((T / "store/a/83.json").read_text()); _p83["status"] = "completed"; _p83["outcome"] = "done"; (T / "store/a/83.json").write_text(json.dumps(_p83))
-server._release_after("a83", "done", "", "home-here")
+wakes_svc.release_after("a83", "done", "", "home-here")
 check("D2, the prerequisite closes: the hand-over declines (home-agent is already named in needs) and the stale then is dropped: no then, home-agent moves it, no conflict",
       "then" not in rd("a", 82)["metadata"] and rd("a", 82)["metadata"].get("needs") == ["home-agent"] and b(82).state == "alive" and b(82).mover == "home-agent" and not b(82).conflicts, (rd("a", 82)["metadata"], b(82)))
 check("D2, the wake pass drops a then that already is the mover (mover home-agent, then home-agent, hold due)",
@@ -964,7 +965,7 @@ try:
           and rd("a", 85)["metadata"].get("then") == "home-agent" and not any(k in rd("a", 85)["metadata"] for k in ("mover", "wait_kind", "post_wake_mover", "watch")) and not b(85).conflicts, (rd("a", 85)["metadata"], b(85)))
     _p85 = rd("a", 85); _p85["metadata"]["until"] = "2020-01-01"; (T / "store/a/85.json").write_text(json.dumps(_p85))
     told.clear()
-    server._wake_pass()
+    wakes_svc.wake_pass()
     check("D3, the old wake pass ends the hold and hands the stored then: alive, home-agent moves it (mover, first in needs), no wait fields left, then cleared, no conflict, home-agent told",
           b(85).state == "alive" and b(85).mover == "home-agent" and rd("a", 85)["metadata"].get("needs") == [AGENT] and not any(k in rd("a", 85)["metadata"] for k in ("hold", "wake", "then", "wait_kind", "post_wake_mover"))
           and not b(85).conflicts and any(t[0] == "a85" and t[1] == AGENT for t in told), (rd("a", 85)["metadata"], b(85), told))

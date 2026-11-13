@@ -103,6 +103,7 @@ def check(name, cond, got=None):
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.router import router; from stackshot.router import router_live as live; from stackshot.anchors import anchors as a; from stackshot.waits import held
 from stackshot.service import gates
 from stackshot.web import server
+from stackshot.service import wakes as wakes_svc
 from stackshot.web.tools import route as _wt_route
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import complete as _wt_complete
@@ -196,7 +197,7 @@ check("live: a relay to a background agent that keeps the page (not the keeper) 
 held.take("work-osprey-docs")
 nids = telling.pilot_relay_many("work-osprey", [("projects/alpha", "a1", item1, "completed", "work-osprey-x"), ("projects/alpha", "a2", server._load("a2"), "changed", "work-osprey-x")])
 check("live: several page debts moved to the keeper are held, one routing line each, nothing pushed", len(nids) == 2 and all(rule_of(i).get("live") for i in nids) and len(pushes()) == p0, (nids, pushes()[p0:]))
-server._wake_tell(S, [("a2", server._load("a2"), "woke", "as the keeper of its page", False)])
+wakes_svc.wake_tell(S, [("a2", server._load("a2"), "woke", "as the keeper of its page", False)])
 n_wake = routing.read("projects/alpha")[-1]
 check("live: a wake meant for the keeper is held for the router", n_wake["label"].startswith("wake") and n_wake["live"] is True and len(pushes()) == p0, (n_wake, pushes()[p0:]))
 
@@ -709,7 +710,7 @@ k_, r_k = telling.pilot_keeper("ops/note-x/kept"); p_n = len(pushes())
 res_ = telling.pilot_relay("ops/note-x/kept", "a31", server._load("a31"), "changed (next)", "work-osprey-x", k_, r_k); settle()
 check("…and the relay to the agent keeper pushes nothing unmarked to it", res_ == "" and len(pushes()) == p_n and not [x for x in pushes() if x[0] == "work-osprey-main" and "the page update is yours" in x[1]], (res_, pushes()[p_n:]))
 check("a front agent that owns an item on a one-session page (beta, name line home-beta): its keeper is the page's own session, not the general -main agent", telling.front_keeper("home-eta-main", "projects/beta") == (True, "home-beta"), telling.front_keeper("home-eta-main", "projects/beta"))
-check("…a reminder for an item it moves goes to the mover itself (no keeper stands in for a front agent)", server._reminder_to({"mover": "home-eta-main", "project": "projects/beta"})[:1] == [(server._session_id("home-eta-main"), "as its mover")], server._reminder_to({"mover": "home-eta-main", "project": "projects/beta"}))
+check("…a reminder for an item it moves goes to the mover itself (no keeper stands in for a front agent)", wakes_svc.reminder_to({"mover": "home-eta-main", "project": "projects/beta"})[:1] == [(server._session_id("home-eta-main"), "as its mover")], wakes_svc.reminder_to({"mover": "home-eta-main", "project": "projects/beta"}))
 _an = json.loads((T / "store/anchors.json").read_text()); _an["projects/beta"].append({"url": "https://x.slack.com/archives/C0000000009", "items": ["a40"], "added": 1, "by": "t"}); (T / "store/anchors.json").write_text(json.dumps(_an))
 item(40, "projects/beta", "home-other", status="completed")
 p_n = len(pushes()); txt_ = __import__("stackshot.service.update", fromlist=["x"])._completion_anchor_prompt("a40", server._load("a40")); settle()
@@ -1133,7 +1134,7 @@ cfg(live=True); fake("good", "[]")
 item(50, "projects/alpha", A, hold=True, wake="2020-01-01", hold_set={"by": "t", "at": 1.0}, mover=S)       # a hold whose wake has come; its mover is the -main notice session
 item(51, "projects/alpha", A, mover=S, next="work-osprey: go on once a52 is in")
 item(52, "projects/alpha", A, mover=A)
-p0 = len(pushes()); server._wake_pass(); live.tick(); settle()
+p0 = len(pushes()); wakes_svc.wake_pass(); live.tick(); settle()
 w19 = [n for n in routing.read("projects/alpha") if str(n.get("label") or "").startswith("wake") and "a50" in str(n.get("label"))]
 check("19 a hold wakes on a live project whose mover is the notice-name session: the wake is ruled passed, not dropped, and the mover is told",
       bool(w19) and rule_of(w19[-1]["id"]).get("ruling") == "passed" and rule_of(w19[-1]["id"]).get("ruled_to") == "work-osprey"
