@@ -129,11 +129,11 @@ for rel in REAL:
         got = rt.lint(real_plant, pathlib.Path(SCR, "retired_terms.toml"))
         check(f"the live list finds \"{phrase}\" planted in {rel} (the real path), and only that", len(got) == 1 and got[0].file == rel and got[0].line == 1, [str(h) for h in got])
 # `owner` is skipped in docs/*.md only: the same retired sense planted in a code path of the real repository is a hit (a skip_terms leaking to a code scan, or onto the package scan, would pass it)
-for rel in ("stackshot/web/server.py", "stackshot/cli.py", "stackshot/tools/migrate_model.py"):
+for rel in ("stackshot/web/server.py", "stackshot/cli.py", "stackshot/tools/migrate_model.py", "server.py", "pages.py", "tests/tool_text.snapshot.json", "client/hooks/project-page.sh"):
     own = T / ("owner-" + rel.replace("/", "_")); (own / rel).parent.mkdir(parents=True)
-    (own / rel).write_text('LINE = "the item waits on an owner step here"\nOK = "a stuck item is a failed wait"\n')
+    (own / rel).write_text(json.dumps({"tools": {"create": {"description": "the item waits on an owner step here"}}}, indent=2) + "\n" if rel.endswith(".json") else 'LINE = "the item waits on an owner step here"\nOK = "a stuck item is a failed wait"\n')
     got = rt.lint(own, pathlib.Path(SCR, "retired_terms.toml"))
-    check(f"the live list reports `owner` in its retired sense planted in {rel} (the real path): it is skipped in docs only", len(got) == 1 and got[0].file == rel and got[0].term == "owner" and got[0].line == 1, [str(h) for h in got])
+    check(f"the live list reports `owner` in its retired sense planted in {rel} (the real path): it is skipped in docs only", len(got) == 1 and got[0].file == rel and got[0].term == "owner" and got[0].line in (1, 4), [str(h) for h in got])
 doc_owner = T / "doc-owner"; (doc_owner / "docs").mkdir(parents=True)
 (doc_owner / "docs" / "g.md").write_text("The owner answers the ask.\nThe steward does not.\n")
 got = rt.lint(doc_owner, pathlib.Path(SCR, "retired_terms.toml"))
