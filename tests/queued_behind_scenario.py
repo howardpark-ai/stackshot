@@ -87,7 +87,7 @@ def env(): return AR.Env(roles=ROLES, fallback=lambda p: "home-front", builder=l
                          deliver=lambda to, text, fyi=False: (True, "[200] ok"), push=lambda to, text: (True, "delivered"))
 def on(): server._cfg.CFG.setdefault("model", {})["queued_behind"] = True
 def off(): server._cfg.CFG.setdefault("model", {}).pop("queued_behind", None)
-def bid(n): return f"board#{n}"
+def bid(n): return NR.shown(f"a{n}")      # an item as the pass words it
 
 def put(i, mover="home-peer", act=180, last=None, status="open", **meta):
     """An open doing item of `mover`: its silence clock (`activity`, the last write) was `act` minutes before now0, and its last_activity record (`last`, minutes before now0; None: no record) is the visible activity."""
@@ -138,7 +138,7 @@ on(); check("2 a TOML true switches it on, read at use", Q.enabled() is True); o
 alive = MODEL.derive({"status": "open", "metadata": {"state": "doing", "needs": ["home-peer"], "mover": "home-peer"}}, now0)
 ov = Q.overlay(alive, "a7")
 check("3 overlay: waiting, of the item kind, after the item in hand, queued, the same mover, no `then`", ov.state == MODEL.WAITING and ov.wait.kind == "item" and ov.wait.after == ("a7",) and ov.wait.queued is True and ov.wait.mover == "home-peer" and not ov.then and not ov.wait.due, ov)
-check("3 …the line of get says it", MODEL.words(ov, shown=lambda g: "board#" + g[1:], derived=False) == "model: waiting on the mover's other item (queued behind board#7) · mover home-peer", MODEL.words(ov, shown=lambda g: "board#" + g[1:], derived=False))
+check("3 …the line of get says it", MODEL.words(ov, shown=lambda g: "x" + g[1:], derived=False) == "model: waiting on the mover's other item (queued behind x7) · mover home-peer", MODEL.words(ov, shown=lambda g: "x" + g[1:], derived=False))
 check("3 …a wait stored as an item wait is not a queue (queued is False)", MODEL.words(MODEL.derive({"status": "open", "metadata": {"state": "blocked", "after": ["a1"], "wait_kind": "item", "mover": "home-peer"}}, now0)).startswith("model: waiting on the close of"))
 check("3 a reading that is not alive, or no item to queue behind, is returned as it was", Q.overlay(ov, "a9") is ov and Q.overlay(alive, "") is alive and Q.overlay(MODEL.Model(MODEL.DEAD), "a9").state == MODEL.DEAD)
 check("3 the reason: `queued behind <item>`", Q.reason("a12", lambda g: "x" + g[1:]) == "queued behind x12")

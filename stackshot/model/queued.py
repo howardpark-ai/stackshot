@@ -96,7 +96,7 @@ def overlay(mod: "_model.Model", behind: str) -> "_model.Model":
 
 
 def reason(behind: str, shown: Callable[[str], str] = str) -> str:
-    """The reason a queued item gives: `queued behind board#N`, the item as `shown` writes it."""
+    """The reason a queued item gives: `queued behind <item>`, the item as `shown` writes it."""
     return f"queued behind {shown(behind)}"
 
 
