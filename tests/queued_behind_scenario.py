@@ -373,10 +373,18 @@ for gate in (False, True):
         check("8 …and the queued item has no stall log entry", not S.log_of(rd(2)["metadata"]) and S.log_of(rd(1)["metadata"]), (S.log_of(rd(2)["metadata"]), S.log_of(rd(1)["metadata"])))
 
 # ================================================================ 9. the items sheet's list word and the server's map
+import contextlib
+@contextlib.contextmanager
+def at_now0():
+    """The clock reads now0 (the suite's data is built at now0, which the midnight guard above may have moved two hours back): the server and every module under it that asks the clock for the time."""
+    real = time.time; CLK.t = now0; time.time = lambda: now0
+    try: yield
+    finally: time.time = real; CLK.t = None
 base(); on(); server._QUEUE_CACHE.update(at=0.0, map={})
-check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", server._item_list(dict(rd(2), gid="a2")) == home.WAITING and server._item_list(dict(rd(1), gid="a1")) == home.AGENTS and server._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
-check("9 _queue_map: {a2: a1} and nothing for the others", server._queue_map(now0, items()) == {"a2": "a1"}, server._queue_map(now0, items()))
-off(); check("9 …and {} with the gate off", server._queue_map(now0, items()) == {} and server._item_list(dict(rd(2), gid="a2")) == home.AGENTS)
+with at_now0():
+    check("9 _item_list: waiting for a queued item, agents for the item in hand and for a mover's only item", server._item_list(dict(rd(2), gid="a2")) == home.WAITING and server._item_list(dict(rd(1), gid="a1")) == home.AGENTS and server._item_list(dict(rd(4), gid="a4")) == home.AGENTS)
+    check("9 _queue_map: {a2: a1} and nothing for the others", server._queue_map(now0, items()) == {"a2": "a1"}, server._queue_map(now0, items()))
+    off(); check("9 …and {} with the gate off", server._queue_map(now0, items()) == {} and server._item_list(dict(rd(2), gid="a2")) == home.AGENTS)
 
 # ================================================================ 10. revert-proof: each rule mutated, the guard must fail
 def observe():
