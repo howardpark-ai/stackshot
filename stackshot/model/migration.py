@@ -47,7 +47,7 @@ from stackshot.waits import waiting as _wt
 # outcome. `needs` follows a mover swap (the one session that moves the item now).
 OUTCOME_FIELDS = frozenset({"outcome", "reason", "superseded_by"})
 OPEN_SET_FIELDS = frozenset({"mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover", "next", "cap_ok", "wait_basis", "wake", "hold", "hold_set", "after",
-                             "needs", "waits", "wait_mode"})
+                             "needs"})
 SET_FIELDS = OPEN_SET_FIELDS | OUTCOME_FIELDS
 DROP_FIELDS = frozenset({"hold", "hold_set", "state", "mover", "then", *_states.CARRY_FIELDS})
 MODEL_KEYS = ("mover", "then", "wait_kind", "wait_anchor", "wait_event", "ask_by", "post_wake_mover")

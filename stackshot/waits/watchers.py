@@ -615,7 +615,7 @@ def what_event_silent(phrase: Any, date: str) -> str:
 
 def what_list(meta: dict[str, Any], cause: str, shown=str) -> str:
     """A list's arrival: what the list's end says, from the record of what arrived (read before the wait's fields are dropped), the form the message to the mover and the History carry:
-    "all 3 arrived: a; b; c", "a arrived (any of 3); b, c were not needed", "backstop day 2026-11-20: arrived a; still open b, c" (waits/wait_list.outcome_text)."""
+    "all 3 arrived: a; b; c", "any of 3 arrived: a; not needed: b; c", "backstop day 2026-11-20: arrived a; b; still open: c; d" (waits/wait_list.outcome_text)."""
     return _wl.outcome_text(meta, cause, shown)
 
 

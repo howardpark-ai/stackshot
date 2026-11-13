@@ -29,6 +29,8 @@ ALIAS_UNTIL = "2026-11-25"
 def kind_of(m: dict[str, Any]) -> str:
     """The wait_kind an item stores, "" when it stores none or a word that is not one of the six."""
     k = " ".join(str(m.get("wait_kind") or "").split()).lower()
+    if k == "list" and not _wt.list_holds(m):      # a stored list that does not hold is ignored: the wait stands on the date alone, as the model reads it
+        return ""
     return k if k in KINDS else ""
 
 
