@@ -1044,6 +1044,22 @@ def gate_close(gid: str, item: dict[str, Any], outcome: str, reason: str, supers
     return rep
 
 
+def gate_close_steps(gid: str, steps: list[dict[str, Any]], others: list[int]) -> None:
+    """Refuse a session's close while another session's step is still open on the item (`others`: the positions steps.others_open found). A close ticks only the closer's own steps (the ones it wrote or that open with its name); it never settles a step
+    that another session still owes, and a closed item holds no open step, so the close waits until that session's step is marked or the closer marks it in the same call. The refusal opens with the way forward."""
+    if not others:
+        return
+
+    lines = "; ".join(f"{i + 1}. {_clip_line(_steps.first_line(steps[i]['text']), 90)} (owed by {_steps.opener(steps[i]['text'])})" for i in others[:5])
+    more = f" and {len(others) - 5} more" if len(others) > 5 else ""
+    n = [i + 1 for i in others]
+    many = len(others) > 1
+    raise ToolError(f"Refused: {_gh.shown(gid)} is not closed and nothing is ticked. To close it now, mark {'those steps' if many else 'that step'} in the closing call itself: "
+                    f"update(item_id=..., status=\"completed\", outcome=..., reason=..., outcome_text=..., sender=..., dropped={n}) "
+                    f"(done={n} when {'their' if many else 'its'} work was done; the complete tool takes no marks). Otherwise leave the item open: ask the session that owes {'them' if many else 'it'} to finish, or mark your own steps with update (done=[n]). "
+                    f"A close ticks only the steps you wrote or that open with your name, and a step another session still owes stays open. Still open and not yours: {lines}{more}.")
+
+
 def _said_roots() -> tuple[str, ...]:
     """[said] transcripts: where this box keeps Claude Code's transcripts (<root>/*/<session uuid>.jsonl), one path or a list;
     the default is ~/.claude/projects (a second Claude config dir keeps its own)."""

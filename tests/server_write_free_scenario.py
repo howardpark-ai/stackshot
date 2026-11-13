@@ -3,7 +3,7 @@
 The write path (create, update, close and the telling of who hears a write) runs from service/. It used to keep its per-write state in thread-locals on the web module and
 to reach the notices through hooks. This suite holds what is true now:
 
-  1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the four per-write flags the gates and the services read are on service/writes.py, the telling's four
+  1  flags       no thread-local is made in web/ (a `threading.local` call or reference), the five per-write flags the gates and the services read are on service/writes.py, the telling's four
                  are on service/telling.py, and no other service module makes one
   2  tables      the five hook tables the server installs are installed at import, at the top of the module (not inside a function), once each
   3  values      what a table takes as a plain value (not a function, not a late lookup) is a constant of the module that cannot change after the install, so a copy taken at the install cannot go stale
@@ -28,7 +28,7 @@ def locals_made(tree):
 # ---------------------------------------------------------------- 1. flags
 in_web = [f"{p.name}:{n.lineno}" for p in sorted(PKG.glob("web/*.py")) for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))) if is_local(n)]
 check("1 no thread-local is made or named in web/ (the per-write flags left the server)", not in_web, in_web)
-check("1 the flags the gates and the services read are on service/writes.py", locals_made(parse("service/writes.py")) == ["QUESTION", "REFORMAT", "SESSION_NEXT", "TERMINAL_ROW"], locals_made(parse("service/writes.py")))
+check("1 the flags the gates and the services read are on service/writes.py", locals_made(parse("service/writes.py")) == ["CLOSE_TOOL", "QUESTION", "REFORMAT", "SESSION_NEXT", "TERMINAL_ROW"], locals_made(parse("service/writes.py")))
 check("1 the telling's own are on service/telling.py", locals_made(parse("service/telling.py")) == ["CLOSE_WAS", "FRONT_HINT", "HO_STATE", "MENTIONED"], locals_made(parse("service/telling.py")))
 others = {p.name: locals_made(ast.parse(p.read_text(encoding="utf-8"))) for p in sorted(PKG.glob("service/*.py")) if p.name not in ("writes.py", "telling.py")}
 check("1 no other service module keeps one", not any(others.values()), {k: v for k, v in others.items() if v})

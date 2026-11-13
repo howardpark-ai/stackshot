@@ -639,7 +639,7 @@ def update_unlocked(
     if marks and not steps_on:
         raise ToolError(f"Refused: {_gh.shown(gid)} is closed and its checklist is the record of what was done; reopen it (status=open with a next) before marking or rewording a step")
     if rewording and (closing or clear_next):
-        raise ToolError("Refused: reword changes the words of a step that stays open; " + ("a close marks every open step, so reword goes with a call that keeps the item open" if closing else "clear_next=true wipes every line, so reword goes with a call that keeps them"))
+        raise ToolError("Refused: reword changes the words of a step that stays open; " + ("a close settles the open steps itself, so reword goes with a call that keeps the item open" if closing else "clear_next=true wipes every line, so reword goes with a call that keeps them"))
     steps_old = _steps.view(item_was.get("metadata"), keeper=keeper_was) if steps_on else []          # the checklist as it stood: the stored steps lined up with the lines of next, each open one with its writer
     steps_before = list(steps_old)          # …as the write found it: a reword below replaces entries of steps_old, and the front-agent step check judges the new words against these
     steps_by = _session_label(debtor) or debtor or "unknown"
@@ -652,6 +652,8 @@ def update_unlocked(
             raise _steps.StepError(f"step {both[0] + 1} is in reword and in done or dropped ({_steps.first_line(steps_old[both[0]]['text'])[:90]}); pick one")
     except _steps.StepError as e:
         raise ToolError(f"Refused: {e}")
+    if closing and steps_old and (_writes.session_next() or _writes.close_tool()):      # a session's close ticks its own steps only: another session's open step is never settled by it
+        _gates.gate_close_steps(gid, steps_old, _steps.others_open(steps_old, lambda w: not w or h.ho_same(w, next_writer), {*done_ix, *drop_ix}, lambda nm: h.ho_same(nm, next_writer)))
     reword_note = ""
     if reword_ix:                  # the step keeps its number, its place and its open state; its text (and its line of next, its proof) become the new words before anything below lines the checklist up with next
         for i, text in reword_ix.items():
@@ -848,7 +850,7 @@ def update_unlocked(
         if opts: meta["options"] = opts
         else: meta.pop("options", None)
     if closing:                   # the end state is the record; nothing is left to do, ask or wait on (due stays as a record)
-        if steps_old:             # a close marks every step still open, by the closer: done when the outcome is done, dropped otherwise; a mark passed with the close counts first
+        if steps_old:             # a close marks the steps still open (a session's close has refused above while another session's is one), by the closer: done when the outcome is done, dropped otherwise; a mark passed with the close counts first
             try:
                 meta["steps"] = _steps.stored(_steps.mark_open(_steps.apply(steps_old, None, done_ix, drop_ix, steps_by, time.time()), outcome, steps_by, time.time()))
             except _steps.StepError as e:
@@ -1227,7 +1229,8 @@ def complete_item(item_id: str, outcome: str = "", reason: str = "", description
     h = _hooks()
     gid = _norm_id(item_id)
     before = _load(gid)
-    out = h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
+    with _writes.close_write():      # the complete tool's own call: the close ticks the sender's own steps only (update_unlocked reads it, as it reads session_next for the update tool's)
+        out = h.update(item_id, description=description, status="completed", sender=sender, outcome=outcome, reason=reason, superseded_by=superseded_by, said=said, outcome_text=outcome_text)
     try:
         out += _completion_anchor_prompt(gid, before)
     except Exception as e:  # never fail a completion over the prompt

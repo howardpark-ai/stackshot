@@ -23,6 +23,7 @@ import json
 import re
 from typing import Any, Callable
 
+from stackshot.core import config as _cfg
 from stackshot.model import model as _model
 from stackshot.model import model_guards as _mg
 from stackshot.model import nextlines as _nl
@@ -149,6 +150,21 @@ def mark_open(steps: list[dict[str, Any]], outcome: Any, by: str, at: float) -> 
     """The checklist with every step still open marked by the closer: done when the outcome is done, dropped otherwise, `by` and `at` like any other mark. Marked steps stay as they are."""
     st = close_status(outcome)
     return [_with_tag(_step(s["text"], st, by, at), _done_tag(tag_of(s), st)) if s["status"] == OPEN else dict(s) for s in steps]
+
+
+def others_open(steps: list[dict[str, Any]], own: Callable[[str], bool], marked: set[int] | list[int] = (), names: Callable[[str], bool] | None = None) -> list[int]:
+    """The positions of the open steps a close by one session would settle that another session still owes: open, not marked by the same call (`marked`: the positions done=[n] and dropped=[n] give), opening with a session's name
+    (`names(opener)` says the name is the sender's: that step is the sender's to take, whoever wrote the line), not the owner's own step (the server makes it and his answer ticks it, and a close settles it) and not written by the sender (`own(writer)`; a line
+    with no writer is the creator's, which `own` takes as the sender's). A line that names nobody owes nothing to anyone, so it never holds a close up."""
+    out = []
+    for i, s in enumerate(steps):
+        if s["status"] != OPEN or i in marked or own(str(s.get("writer") or "")):
+            continue
+        nm = opener(s["text"])
+        if not nm or _model.is_owner(nm) or _cfg.owner_opener_rx().match(first_line(s["text"]).strip()) or (names is not None and names(nm)):
+            continue      # no name, the owner's (his display name, an alias, `you:`, `<owner> to …`: config.owner_opener_rx), or the sender's own
+        out.append(i)
+    return out
 
 
 def _done_tag(tag: dict[str, Any] | None, status: str) -> dict[str, Any] | None:
