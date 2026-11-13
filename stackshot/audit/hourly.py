@@ -12,7 +12,7 @@ writes the line itself, so the owner never sees an item on an agent idle for ove
 An item is owed a line when all of these hold, using the silence pass's own scope (`silence.reading`, `silence.clock`):
 
   - it is open and on an agent as the board shows it: a session is its mover, its state is not the owner's move, and the board does not show it waiting. A hold, a parked item and any stored
-    wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) are left alone, exactly as the silence pass leaves them;
+    wait (a dated wake, an item it waits after, a release, a CI run, a relay, an outside party) and an item queued behind its mover's other item (`[model] queued_behind`, model/queued.py) are left alone, exactly as the silence pass leaves them;
   - an untaken hand-off to a back agent is left alone (the hand-off audit clocks it); an untaken hand-off to a front agent is not, as in the silence pass. A front agent's item is otherwise
     treated like any other: the pass sends nobody anything, it writes a History line, so there is no notice to hold back from a front agent;
   - the item has had no real activity for an hour: `silence.clock`, the clock the silence pass reads (a step done or added, a state change, the owner's answer, a message, an event on an anchor,
@@ -156,16 +156,18 @@ def text(now: float, what: list[str], recorded: list[str] | None = None) -> str:
 
 
 def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None, pane: Callable[[str], str] | None = None, same: Any = None,
-        subagents: Callable[[str], list[dict[str, Any]]] | None = None, anchored: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind" (audit, audit_idle or audit_unknown)}. `env.is_front(name, project)` says who is a front agent (None reads none as front).
+        subagents: Callable[[str], list[dict[str, Any]]] | None = None, anchored: dict[str, Any] | None = None, queue: dict[str, str] | None = None) -> dict[str, Any] | None:
+    """The line the open item `gid` is owed now (see the module doc), or None. → {"text", "verified" (the phrases), "recorded" (those that rest on a recorded event), "kind" (audit, audit_idle or audit_unknown)}. `env.is_front(name, project)` says who is a front agent (None reads none as front). `queue` is {item: the item it is queued behind} (`silence.queued`, model/queued.py; None reads it here).
     `subagents(mover)` → the mover's running subagents ([{"text": description and brief, ...}], subagent_tie.running; None reads none; one that raises reads the mover's subagents as unknown), `anchored` {item id: the pull requests ("owner/repo#n") anchored to it}: a subagent counts for the item only when it names
     the item or one of those pull requests."""
     item = items.get(gid) or {}
     if item.get("status") != "open":
         return None
     it, meta, after_open, mover = _ac._item_view(items, gid)
-    if not _silence.reading(it, mover, after_open, now) or _wt.is_held(it):
-        return None      # not on an agent as the board shows it (a hold, a park, a stored wait, the owner's or an outsider's move), or on hold
+    if queue is None:
+        queue = _silence.queued(items, now, env)      # the mover's other items it is busy on (model/queued.py): `pass_` reads it once for every item
+    if not _silence.reading(it, mover, after_open, now, queue.get(gid, "")) or _wt.is_held(it):
+        return None      # not on an agent as the board shows it (a hold, a park, a stored wait, an item queued behind another of its mover's, the owner's or an outsider's move), or on hold
     raw_front = (env.is_front if hasattr(env, "is_front") else None)
 
     def front(who: Any, project: str) -> bool:
@@ -196,7 +198,7 @@ def due(items: dict[str, dict[str, Any]], gid: str, now: float, env: Any = None,
             if not (mover2 and eq(mover2, mover)):
                 continue
             mine.append(g)
-            if _silence.reading(it2, mover2, after2, now) and not _wt.is_held(it2):
+            if _silence.reading(it2, mover2, after2, now, queue.get(g, "")) and not _wt.is_held(it2):
                 busy_elsewhere = True
         except Exception:  # noqa: BLE001  (an item that cannot be read is no other item of the mover's)
             continue
@@ -230,11 +232,12 @@ def pass_(items: dict[str, dict[str, Any]], now: float, env: Any = None, pane: C
           subagents: Callable[[str], list[dict[str, Any]]] | None = None, anchored: dict[str, Any] | None = None) -> list[tuple[str, dict[str, Any]]]:
     """[(gid, line)] of every open item that is owed a line now, in id order; reads only. An item that cannot be read is left out (the server logs nothing for it: the board's other passes report it)."""
     out: list[tuple[str, dict[str, Any]]] = []
+    queue = _silence.queued(items, now, env)
     for gid in sorted(items, key=_ac._num):
         if items[gid].get("status") != "open":
             continue
         try:
-            line = due(items, gid, now, env, pane, same, subagents, anchored)
+            line = due(items, gid, now, env, pane, same, subagents, anchored, queue)
         except Exception:  # noqa: BLE001
             continue
         if line is not None:

@@ -27,6 +27,11 @@ with HOME and the XDG folders pointed into the scratch folder, a fake `gh` on PA
      or holds a huge, infinite, negative or mistyped limit (all exit 2 or a note, never a traceback); no config file at all still runs
   16 the previous record's clock and the arithmetic: a record dated in the future is clamped to age 0; LIST_MAX cuts the name lists and says
      how many more; minutes at zero and at the rounding boundaries; the net figure comes from the previous record's test_lines
+  17 the edges by plain numbers (not the tool's own constants): a suite time of 31622400 s is a time and 31622401 s is not; a limit of 10**12 is
+     accepted and one more refused by name; 20 names list whole, 21 list 20 and 'and 1 more', 25 list 20 and 'and 5 more' (added, deleted, the
+     note of ignored times); a config is a file: a pipe (a FIFO with no writer, one with a writer, /dev/stdin) is refused within 15 s instead of
+     hanging, a terminal is refused, a folder gives its old message, no descriptor is left open; a limit of 0, 0.0 or -0.0 is stored as zero
+     (never -0); a config with a UTF-8 byte order mark or in UTF-16 is a clear status 2, never a traceback
 
     tests/run-suite test_trim_report        -> exit 0 / 1"""
 import contextlib, hashlib, io, json, os, pathlib, shutil, signal, stat, subprocess, sys, tempfile, time
@@ -646,6 +651,201 @@ for prev_lines, expect in ((0, f"(net +{now_lines:,})"), (now_lines + 7, "(net -
     r = run("--map", str(MAP), "--state-dir", str(st21), "--dry-run", now="2026-03-08T09:00:00+00:00")
     check(f"net growth is the test lines now minus the previous record's test_lines: {expect}", expect in r.stdout, r.stdout)
 (REPO / "tests" / "zbig_scenario.py").unlink()
+
+# ------------------------------------------------------------------ 17 the edges of the constants, pinned by their plain numbers
+# (sections 15 and 16 read the limits from the tool itself, so a changed constant moved the test with it: these use the numbers)
+check("the constants are the documented numbers: a year of seconds, 20 listed names, a limit of 10**12", (TR.SECONDS_MAX, TR.LIST_MAX, TR.THRESHOLD_MAX) == (31622400, 20, 10 ** 12), (TR.SECONDS_MAX, TR.LIST_MAX, TR.THRESHOLD_MAX))
+
+
+def edge_map(name, seconds_by_suite):
+    f = T / f"{name}.json"; f.write_text(json.dumps({"format": 1, "suites": {n: {"seconds": s} for n, s in seconds_by_suite.items()}}))
+    return f
+
+
+# what the fake repository holds now, from the repository and the map themselves (not from what an earlier section left in mind)
+NOW17 = TR.measure_suites(str(REPO)); N17 = len(NOW17); A17, B17 = sorted(NOW17)[:2]
+TIMED17 = sorted(((n, round(SECONDS[n] / 60, 2)) for n in NOW17 if n in SECONDS), key=lambda x: (-x[1], x[0]))
+SER17 = round(sum(m for _, m in TIMED17), 2)
+check("(the control: the fake repository has suites, some of them timed and some not, for the checks below)", N17 >= 3 and 0 < len(TIMED17) < N17, (N17, TIMED17))
+
+# (a) SECONDS_MAX: 31,622,400 s is a time, one second more is not
+r = run("--map", str(edge_map("sec-edge", {A17: 31622400, B17: 31622401})), "--state-dir", str(T / "st22"), "--dry-run", "--json")
+j = json.loads(r.stdout) if r.returncode == 0 else {}
+check("a suite time of exactly 31622400 s (366 days) is timed, at 527040.0 min", r.returncode == 0 and j.get("timed") == [[A17, 527040.0]] and j.get("serial_minutes") == 527040.0, (r.returncode, r.stdout[:300], r.stderr))
+check("a suite time of 31622401 s is ignored and counted as untimed: every suite but one is untimed", j.get("untimed") == N17 - 1 and len(j.get("timed", [])) == 1, (j.get("untimed"), j.get("timed")))
+check("the note for 31622401 s names that suite, in the whole text",
+      j.get("notes") == ["suite times ignored (negative, not a finite number or above a year), counted as untimed: " + B17], j.get("notes"))
+r = run("--map", str(edge_map("sec-edge2", {A17: 31622400.5})), "--state-dir", str(T / "st22"), "--dry-run", "--json")
+j = json.loads(r.stdout)
+check("a float time of 31622400.5 s is above the limit as well", j["timed"] == [] and j["notes"] and j["notes"][0].endswith(": " + A17), (j["timed"], j["notes"]))
+
+# (b) THRESHOLD_MAX: 10**12 is a limit, one more is refused by name
+for key in ("max_suites", "max_serial_minutes", "max_suite_minutes", "max_test_line_growth"):
+    CONF.write_text(f"{key} = 1000000000000\n")
+    r = run("--map", str(MAP), "--dry-run", "--json", "--state-dir", str(T / "st23"), "--config", str(CONF))
+    j = json.loads(r.stdout) if r.returncode == 0 else {}
+    check(f"{key} = 1000000000000 (the maximum) is accepted and kept as the limit", r.returncode == 0 and j.get("thresholds", {}).get(key) == 10 ** 12 and j.get("triggers") == [], (r.returncode, r.stderr[-300:]))
+    for over in ("1000000000001", "1000000000000.5"):
+        CONF.write_text(f"{key} = {over}\n")
+        r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st23"), "--config", str(CONF))
+        check(f"{key} = {over} (above the maximum) is refused: exit 2, naming the key and the maximum, nothing on stdout",
+              r.returncode == 2 and r.stdout == "" and f"{key} must be a number from 0 to 1000000000000, got " in r.stderr and "Traceback" not in r.stderr, (r.returncode, r.stdout[:100], r.stderr[-300:]))
+CONF.write_text("[fakerepo]\nmax_suites = 1000000000001\n")
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st23"), "--config", str(CONF))
+check("1000000000001 in the repository's table is refused too", r.returncode == 2 and "max_suites must be a number from 0 to 1000000000000" in r.stderr, (r.returncode, r.stderr[-300:]))
+
+
+# (c) LIST_MAX = 20: 20 names list whole, 21 list 20 and "and 1 more"; added, deleted and the note of ignored times
+def zz(n):
+    return [f"zy{i:02d}" for i in range(n)]
+
+
+def list_lines(n, kind):
+    """run the report with n suites added (kind 'added'), n deleted ('deleted') or n with an unusable time ('note'); the matching output line"""
+    names = zz(n); st = T / f"st24{kind}{n}"; shutil.rmtree(st, ignore_errors=True)
+    try:
+        if kind == "added":
+            run("--map", str(MAP), "--state-dir", str(st), now="2026-03-01T09:00:00+00:00")
+            for x in names:
+                suite(x, 1)
+            r = run("--map", str(MAP), "--state-dir", str(st), "--dry-run", now="2026-03-08T09:00:00+00:00")
+            return names, [l for l in r.stdout.splitlines() if l.startswith("  added:")]
+        if kind == "deleted":
+            for x in names:
+                suite(x, 1)
+            run("--map", str(MAP), "--state-dir", str(st), now="2026-03-01T09:00:00+00:00")
+            for x in names:
+                (REPO / "tests" / f"{x}_scenario.py").unlink()
+            r = run("--map", str(MAP), "--state-dir", str(st), "--dry-run", now="2026-03-08T09:00:00+00:00")
+            return names, [l for l in r.stdout.splitlines() if l.startswith("  deleted:")]
+        for x in names:
+            suite(x, 1)
+        r = run("--map", str(edge_map(f"neg{n}", {x: -1 for x in names})), "--state-dir", str(st), "--dry-run")
+        return names, [l for l in r.stdout.splitlines() if l.startswith("note:")]
+    finally:
+        for x in names:
+            (REPO / "tests" / f"{x}_scenario.py").unlink(missing_ok=True)
+        shutil.rmtree(st, ignore_errors=True)
+
+
+NOTE_HEAD = "note: suite times ignored (negative, not a finite number or above a year), counted as untimed: "
+for kind, head in (("added", "  added: "), ("deleted", "  deleted: "), ("note", NOTE_HEAD)):
+    names, lines = list_lines(20, kind)
+    check(f"exactly 20 names ({kind}) are listed whole, with no 'and N more'", lines == [head + ", ".join(names)], lines)
+    names, lines = list_lines(21, kind)
+    check(f"21 names ({kind}) list the first 20 and say 'and 1 more'", lines == [head + ", ".join(names[:20]) + ", and 1 more"], lines)
+    names, lines = list_lines(25, kind)
+    check(f"25 names ({kind}) list the first 20 and say 'and 5 more' (the count is worked out, not a fixed 1)", lines == [head + ", ".join(names[:20]) + ", and 5 more"], lines)
+check("names_line at the edge by plain numbers: 20 names whole, 21 cut to 20 and 'and 1 more', 25 cut to 20 and 'and 5 more'",
+      TR.names_line("x", zz(20)) == "  x: " + ", ".join(zz(20)) and TR.names_line("x", zz(21)) == "  x: " + ", ".join(zz(20)) + ", and 1 more"
+      and TR.names_line("x", zz(25)) == "  x: " + ", ".join(zz(20)) + ", and 5 more", TR.names_line("x", zz(25)))
+
+# (d) a config is a file: a pipe is refused, with a writer or without one, and a hang fails the check (each run has its own 15 s limit)
+def run_limited(*args, stdin_text=None):
+    """the tool with its own 15 s limit, by its Popen object (only the child this test started): (returncode, stdout, stderr, hung)"""
+    e = {"PATH": os.environ["PATH"], "HOME": str(HOME), "TMPDIR": tmp, "LANG": "C.UTF-8"}
+    p = subprocess.Popen([sys.executable, TOOL, "--now", "2026-01-05T09:00:00+00:00", "--map", str(MAP), "--dry-run", "--state-dir", str(T / "st25"), *args],
+                         stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=e, cwd=REPO)
+    try:
+        try:
+            out, err = p.communicate(stdin_text, timeout=15)
+            return p.returncode, out, err, False
+        except subprocess.TimeoutExpired:
+            p.kill(); out, err = p.communicate()
+            return p.returncode, out, err, True
+    finally:
+        if p.poll() is None:
+            p.kill(); p.wait()
+
+
+def open_fds():
+    return sorted(os.listdir("/proc/self/fd"))
+
+
+fifo = T / "fifo.toml"; os.mkfifo(fifo)
+try:
+    rc, fout, ferr, hung = run_limited("--config", str(fifo))
+    check("a FIFO with no writer as the config file does not hang the report (it ends within 15 s)", not hung, "still waiting after 15 s")
+    check("a FIFO with no writer: exit 2, one clear line naming the file, nothing on stdout, no traceback",
+          not hung and rc == 2 and fout == "" and f"config file {fifo} is a pipe, not a file" in ferr and "Traceback" not in ferr, (rc, fout[:100], ferr[-300:]))
+    wfd = os.open(fifo, os.O_RDWR)                  # this test holds the pipe open both ways, so the tool finds a writer with data waiting
+    try:
+        os.write(wfd, b"max_suites = 7\n")
+        rc, fout, ferr, hung = run_limited("--config", str(fifo))
+    finally:
+        os.close(wfd)
+    check("a FIFO with a writer and a config waiting is refused too (a config is a file), without a hang",
+          not hung and rc == 2 and fout == "" and f"config file {fifo} is a pipe, not a file" in ferr and "Traceback" not in ferr, (hung, rc, fout[:100], ferr[-300:]))
+finally:
+    fifo.unlink()
+rc, fout, ferr, hung = run_limited("--config", "/dev/stdin", stdin_text="max_suites = 7\n")
+check("echo 'max_suites = 7' | tool --config /dev/stdin is refused: exit 2, 'is a pipe, not a file', nothing on stdout, no hang, no traceback",
+      not hung and rc == 2 and fout == "" and "config file /dev/stdin is a pipe, not a file" in ferr and "Traceback" not in ferr, (hung, rc, fout[:100], ferr[-300:]))
+r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st25"), "--config", "/dev/null")
+check("a device that reads as empty (/dev/null) is still a config file with no keys", r.returncode == 0 and "TRIGGER" not in r.stdout and r.stderr == "", (r.returncode, r.stderr[-300:]))
+try:
+    pty_master, pty_slave = os.openpty()
+except OSError:
+    pty_master = pty_slave = None
+if pty_slave is not None:
+    try:
+        pty_name = os.ttyname(pty_slave)
+        rc, fout, ferr, hung = run_limited("--config", pty_name)
+        check("a terminal as the config file: exit 2, 'is not a regular file', no hang, no traceback (the non-blocking flag does not leak into a read)",
+              not hung and rc == 2 and fout == "" and f"config file {pty_name} is not a regular file" in ferr and "Traceback" not in ferr, (hung, rc, fout[:100], ferr[-300:]))
+    finally:
+        os.close(pty_master); os.close(pty_slave)
+rc, fout, ferr, hung = run_limited("--config", str(T))
+check("a folder as the config file: the message it always had, exit 2, no traceback",
+      not hung and rc == 2 and fout == "" and f"cannot read config file {T}: Is a directory" in ferr and "Traceback" not in ferr, (hung, rc, ferr[-300:]))
+# no descriptor is left open by a config that is refused or unreadable (50 calls each, so one leak per call shows)
+fifo2 = T / "fifo2.toml"; os.mkfifo(fifo2); (T / "bad.toml").write_text("max_suites = \n"); (T / "latin2.toml").write_bytes(b"\xff\xfe")
+try:
+    for label, target in (("a folder", T), ("a pipe", fifo2), ("a file that is not TOML", T / "bad.toml"), ("a file that is not UTF-8", T / "latin2.toml"), ("a good file", EMPTY_CONF)):
+        before = open_fds()
+        for _ in range(50):
+            try:
+                TR.load_thresholds(str(target), "fakerepo", True)
+            except TR.Fail:
+                pass
+        check(f"{label} as the config file leaves no descriptor open after 50 calls", open_fds() == before, (before, open_fds()))
+finally:
+    fifo2.unlink()
+
+# (e) a limit of zero is zero in every key and is stored as zero (0.0 for a float, 0 for a whole number), never -0.0: only -0.0 differs from what
+# a plain comparison with 0 would let through, so it is the pin; 0, 0.0, +0 and -0 are controls (they already were zero)
+top17 = TIMED17[0]
+for key, line in (("max_suites", f"TRIGGER: max_suites: {N17} suites > 0"), ("max_serial_minutes", f"TRIGGER: max_serial_minutes: {SER17:.1f} serial minutes > 0"),
+                  ("max_suite_minutes", f"TRIGGER: max_suite_minutes: {top17[0]} takes {top17[1]:.1f} min ({sum(1 for _, m in TIMED17 if m > 0)} over) > 0")):
+    for zero in ("0", "0.0", "-0.0", "+0", "-0"):
+        CONF.write_text(f"{key} = {zero}\n")
+        r = run("--map", str(MAP), "--dry-run", "--json", "--state-dir", str(T / "st26"), "--config", str(CONF))
+        j = json.loads(r.stdout) if r.returncode == 0 else {}
+        stored = json.dumps(j.get("thresholds", {}).get(key)); want_stored = "0.0" if "." in zero else "0"
+        check(f"{key} = {zero} ({'the pin: -0.0 is stored as zero' if zero == '-0.0' else 'control'}): accepted, the line says '> 0', stored as {want_stored}, no minus sign anywhere",
+              r.returncode == 0 and [t["line"] for t in j.get("triggers", [])] == [line] and stored == want_stored and "-0" not in json.dumps(j["thresholds"]) and "-0" not in line,
+              (r.returncode, r.stderr[-200:], j.get("triggers"), j.get("thresholds")))
+st26 = T / "st26g"; run("--map", str(MAP), "--state-dir", str(st26), now="2026-03-01T09:00:00+00:00"); suite("zg1", 1)
+for zero in ("0", "0.0", "-0.0"):
+    CONF.write_text(f"max_test_line_growth = {zero}\n")
+    r = run("--map", str(MAP), "--state-dir", str(st26), "--dry-run", "--json", "--config", str(CONF), now="2026-03-08T09:00:00+00:00")
+    j = json.loads(r.stdout) if r.returncode == 0 else {}
+    check(f"max_test_line_growth = {zero} ({'the pin' if zero == '-0.0' else 'control'}): one added line triggers, '> 0', stored as {'0.0' if '.' in zero else '0'}",
+          r.returncode == 0 and [t["line"] for t in j.get("triggers", [])] == ["TRIGGER: max_test_line_growth: +1 test lines per week > 0"]
+          and json.dumps(j["thresholds"]["max_test_line_growth"]) == ("0.0" if "." in zero else "0"), (r.returncode, r.stderr[-200:], j.get("triggers"), j.get("thresholds")))
+(REPO / "tests" / "zg1_scenario.py").unlink()
+CONF.write_text(f"max_suites = {N17}\n"); r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st26"), "--config", str(CONF))
+check("(the control: a limit equal to the count does not trigger, so the zero cases above are the limit's doing)", "TRIGGER" not in r.stdout, r.stdout)
+CONF.write_text("")
+
+# (f) a config file with a byte order mark, and one in UTF-16: a clear failure each, never a traceback (the tool does not strip a mark)
+for label, raw, want in (("a UTF-8 byte order mark", b"\xef\xbb\xbfmax_suites = 5\n", "is not valid TOML"),
+                         ("UTF-16 with its byte order mark", "max_suites = 5\n".encode("utf-16"), "is not UTF-8 text"),
+                         ("UTF-16 without a byte order mark", "max_suites = 5\n".encode("utf-16-le"), "is not valid TOML")):
+    bom = T / "bom.toml"; bom.write_bytes(raw)
+    r = run("--map", str(MAP), "--dry-run", "--state-dir", str(T / "st27"), "--config", str(bom))
+    check(f"a config in {label}: exit 2, '{want}', the file named, nothing on stdout, no traceback",
+          r.returncode == 2 and r.stdout == "" and want in r.stderr and str(bom) in r.stderr and "Traceback" not in r.stderr and not (T / "st27").exists(), (r.returncode, r.stdout[:100], r.stderr[-300:]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.stdout.flush()

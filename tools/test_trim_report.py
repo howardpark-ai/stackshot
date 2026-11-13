@@ -36,7 +36,7 @@ the top of the file apply to every repository, and a table named after the repos
 
 A key the file names that is none of these four (a mistyped `max_suite`) is not used: a `warning: unknown key <name> in <file>` line
 goes to stderr for each, and the exit status is unchanged. A value that is not a number from 0 to 10**12 (a boolean, a string, nan, inf, a
-negative or a huge one), a file that is not UTF-8 text and one nested too deep are config problems, exit 2.
+negative or a huge one), a file that is not UTF-8 text, a pipe in place of a file (also one with a writer: `--config /dev/stdin` is refused; a config is a file) and one nested too deep are config problems, exit 2.
 
 The defaults are placeholders that never trigger: set the real values from the measured medians. When a value is above its limit the
 report ends with `TRIGGER: <which>` lines (one per threshold, in the order above), the same lines are kept in the state file, and the
@@ -55,12 +55,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import errno
 import glob
 import json
 import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -175,12 +177,34 @@ def config_path(arg: str | None) -> str:
     return os.path.join(base, "stackshot", "test-trim.toml")
 
 
+def read_config(path: str) -> dict:
+    """the TOML file's data. A config is a file: a pipe is refused (also one with a writer), and so is a terminal, a block device or a socket.
+    The path is opened non-blocking so that a pipe with no writer cannot hold the open for ever, and the descriptor is looked at before anything
+    is read and closed on every way out."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    f = None
+    try:
+        mode = os.fstat(fd).st_mode
+        if stat.S_ISDIR(mode):
+            raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), path)
+        if stat.S_ISFIFO(mode):
+            raise Fail(f"config file {path} is a pipe, not a file")
+        if not (stat.S_ISREG(mode) or (stat.S_ISCHR(mode) and not os.isatty(fd))):          # a regular file, or a device like /dev/null
+            raise Fail(f"config file {path} is not a regular file")
+        f = os.fdopen(fd, "rb")                                                           # f owns the descriptor from here
+        return tomllib.load(f)
+    finally:
+        if f is not None:
+            f.close()
+        else:
+            os.close(fd)
+
+
 def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
     """DEFAULTS, then the file's top-level keys, then its [<repo>] table. A missing default file is no error; a bad value is."""
     t: dict = dict(DEFAULTS)
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        data = read_config(path)
     except FileNotFoundError:
         if explicit:
             raise Fail(f"config file {path} does not exist")
@@ -207,7 +231,7 @@ def load_thresholds(path: str, repo: str, explicit: bool) -> dict[str, float]:
             if k in DEFAULTS:
                 if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= THRESHOLD_MAX:     # false for nan, inf, a negative, a huge int
                     raise Fail(f"config file {path}: {k} must be a number from 0 to {THRESHOLD_MAX}, got {str(v)[:40]!r}")
-                t[k] = v
+                t[k] = v if v != 0 else type(v)(0)       # -0.0 is zero: it would otherwise print as a limit of -0
     return t
 
 

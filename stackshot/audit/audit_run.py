@@ -176,6 +176,7 @@ class Env:
         self.wake_park = kw.get("wake_park")        # (gid, now) -> {"parked": bool, "wake": str, "line": str}: the server parks a wake that is the whole of the mover's wait, with a History line (server_fixes.py); None = the pass only reports it
         self.front = kw.get("front")                # (name, project) -> whether that session is a front agent of the project (the server's `_front_keeper`); None = the role map's `front` role
         self.front_only_of = kw.get("front_only")   # (project) -> whether the project is front-only (anchors.front_only); None = read it from the registry (`registry` when given), except that an environment which names the builder itself (`builder`) says the project has one
+        self.front_strict = kw.get("front_strict")  # (name, project) -> whether that session is a front agent, answering True when it cannot tell (the server's `_front_keeper(strict=True)`); the queue rule's test (model/queued.py)
         self._told: set[str] = set()                # the projects whose "front-only, no -main agent" line this run has already printed
 
     def role_map(self) -> dict[str, dict[str, Any]]:
@@ -196,6 +197,24 @@ class Env:
                 return False
         name = str(who or "").strip().lower()
         return any(str(k).strip().lower() == name and isinstance(v, dict) and v.get("role") == "front" for k, v in self.role_map().items())
+
+    def is_front_safe(self, who: Any, project: str = "") -> bool:
+        """Is `who` a front agent, for the queue rule (model/queued.py)? As `is_front`, but an answer that cannot be read counts as front: the rule queues nothing it cannot be sure is no front agent's. Only the queue
+        rule asks this; every other caller keeps `is_front`, which reads an unreadable role map as no front agent."""
+        try:
+            if self.front_strict:
+                return bool(self.front_strict(who, project))
+            if self.front:
+                return bool(self.front(who, project))
+            name = str(who or "").strip().lower()
+            if self.roles is None:
+                from stackshot.anchors import anchors as _anc  # noqa: PLC0415
+                roles = _anc.file_roles(_anc.registry())      # raises when the registry cannot be read
+            else:
+                roles = self.roles
+            return any(str(k).strip().lower() == name and isinstance(v, dict) and v.get("role") == "front" for k, v in roles.items())
+        except Exception:  # noqa: BLE001
+            return True
 
     def main_of(self, project: str) -> str:
         try:

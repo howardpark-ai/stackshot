@@ -360,6 +360,7 @@ CATALOG: dict[str, str] = {
     "home.wait.no_date": "With no date set",
     "home.wait.proof": "proof: {proof}",
     "home.wait.after": "After {ids}",
+    "home.wait.queued": "Queued behind {ids}",
     "home.wait.item_none": "On an item (none recorded)",
     "home.wait.back_anyway": "· back anyway {day}",
     "home.wait.on": "On {what}",
@@ -663,6 +664,7 @@ CATALOG: dict[str, str] = {
     # ------------------------------------------------------------------ item page: the words that describe a wait
     "wait.a_date": "a date",
     "wait.what.close_of": "the close of {items}",
+    "wait.what.queued": "queued behind {items}",
     "wait.what.an_item": "an item",
     "wait.what.anchor_event": "an anchor event",
     "wait.what.fleet_event": "a fleet event",
@@ -679,6 +681,7 @@ CATALOG: dict[str, str] = {
     # ------------------------------------------------------------------ item page: the wait block
     "wait.item_none": "an item (none recorded)",
     "wait.state_open": "(open)",
+    "wait.queued_note": "its mover is working on that item first",
     "wait.state_closed": "(closed)",
     "wait.relay_note": "(news only {who} relays)",
     "wait.waits_on": "Waits on",

@@ -27,6 +27,7 @@ from stackshot.web import itempage as _ip  # the item page's words on the item m
 from stackshot.model import steps as _steps   # the checklist behind next: done, dropped and open steps (steps.py)
 from stackshot.waits import dated_wait as _dw   # a stored doing item whose open steps are all dated for a later day reads as waiting (dated_wait.py)
 from stackshot.model import model as _model   # the item model: dead, alive or waiting, the mover and the wait (model.py)
+from stackshot.model import queued as _queued   # a mover busy on another item: its other items on an agent read waiting, queued behind it (queued.py)
 from stackshot.web import home as _home   # the home page's three lists on that model: Your move, On agent, Waiting (home.py); board.md and the brief count from them
 from stackshot.audit import hourly_log as _hlog   # the hourly audit lines written on an item (History lines)
 from stackshot.waits import stall as _stall   # the steps of the stall pass written on an item (History lines)
@@ -1463,11 +1464,24 @@ class Board:
         if "full" in modes: out["full"] = self.markdown()
         return out
 
+    def base_mod(self, r):
+        """The item as the model reads it before the queue rule (model.derive, then model.view: a doing item whose wake is far out with every step dated reads as waiting), once per row."""
+        m = r.get("_base")
+        if m is None:
+            m = r["_base"] = _model.view(r, _model.derive(r, self.now.timestamp(), after_open=after_open, anchored=lambda it: str(it["gid"]) in self.scoped_urls()), self.now.timestamp(), after_open)
+        return m
+
+    def queue_map(self):
+        """{item: the item it is queued behind} over the board's open rows (queued.board_queue: a mover busy on another item, `[model] queued_behind`), {} while the rule is off; read once per Board."""
+        if getattr(self, "_queue", None) is None:
+            self._queue = _queued.board_queue(self.rows, self.base_mod, self.now.timestamp(), _home.front_test())
+        return self._queue
+
     def mod_of(self, r):
-        """The item as the model reads it (model.derive, then model.view: a doing item whose wake is far out with every step dated reads as waiting), once per row: the reading the home page's lists, the item page and board.md share."""
+        """The item as the board shows it (base_mod, then the queue rule: an item behind its mover's other item reads waiting, queued behind it), once per row: the reading the home page's lists, the item page and board.md share."""
         m = r.get("_mod")
         if m is None:
-            m = r["_mod"] = _model.view(r, _model.derive(r, self.now.timestamp(), after_open=after_open, anchored=lambda it: str(it["gid"]) in self.scoped_urls()), self.now.timestamp(), after_open)
+            m = r["_mod"] = _queued.overlay(self.base_mod(r), self.queue_map().get(str(r.get("gid") or ""), ""))
         return m
 
     def scoped_urls(self, gid=None):
@@ -1503,7 +1517,7 @@ class Board:
                  + (f" · {len(self.undelivered)} with an undelivered notice" if self.undelivered else "") + "."]
         lines += _wc.lines()                      # step 4b: what changed in the tools in the last 7 days (whatschanged.py)
         lines += [f"  your move: {rid_full(r)} {r['subject']} [{self.lab(r)}]" for r, _m in pairs[_home.YOUR_MOVE][:5]]
-        lines += [f"  waiting: {rid_full(r)} {r['subject']} [{self.lab(r)}]{' · on ' + _home.wait_words(m_) if _home.wait_words(m_) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
+        lines += [f"  waiting: {rid_full(r)} {r['subject']} [{self.lab(r)}]{' · ' + _home.wait_phrase(m_, 'on', shown_full) if _home.wait_phrase(m_, 'on', shown_full) else ''}" for r, m_ in pairs[_home.WAITING][:5]]
         nh = new_holds(self.held, self.now)       # the holds set in the last 24 hours, with their reason
         lines += [f"  new hold (24 h): {rid_full(r)} {r['subject']} [{self.lab(r)}] · {self.new_hold_words(r)}" for r in nh[:8]]
         if len(nh) > 8: lines.append(f"  … and {len(nh) - 8} more new holds")
@@ -1536,7 +1550,7 @@ class Board:
             m = r["metadata"]; out = [f"<a id=\"{anchor(r)}\"></a>**{rid_full(r)} · {r['subject']}**" + (f" ({self.md_hold(r)})" if is_parked(r) else "")]
             k = "" if is_parked(r) else needs_kind(r)   # parked: its needs field waits with it
             meta = ([f"**Due in {(due_of(r) - now.date()).days} d ({due_of(r):%m-%d %a})**"] if due_of(r) else []) + [m.get("priority") or "p2"]
-            if _home.wait_words(self.mod_of(r)): meta.append("waiting on " + _home.wait_words(self.mod_of(r)))      # the kind of its wait, in the model's words
+            if _home.wait_phrase(self.mod_of(r), "waiting on", shown_full): meta.append(_home.wait_phrase(self.mod_of(r), "waiting on", shown_full))      # the kind of its wait, in the model's words
             if r.get("_fresh") == "stale": meta.append("stale")                       # before the ask, whose own " · " would swallow it
             if k == "call" and open_ask(r): meta.append("ask: " + open_ask(r))
             out.append("- " + " · ".join(meta))
