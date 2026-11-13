@@ -1,7 +1,7 @@
 """Scenario test for the wait on a LIST of waits (waits/wait_list.py, the model's sixth kind, the ending in watchers.py and server.py) — fixture data, no live store, no network, no server socket.
 
 An item can wait on 2 to 8 waits at once, of any kind (time, anchor, item, relay, event), with a mode: `all` (it comes back when every line has arrived) or `any` (when the first has), and on its backstop
-day at the latest. This part of the feature is storage, the model and the ending: nothing a caller passes writes a list yet, so the fixtures store the metadata directly. Covered:
+day at the latest. This part of the feature is storage, the model and the ending: the fixtures store the metadata directly (what a caller passes to write a list is held by wait_list_write_scenario.py). Covered:
 
   * the pure half: what a stored list must be (a malformed or short one is not one), arrived marks that are idempotent, the group's end by mode, which lines an arrival is for (two lines on one item or anchor),
     the scheduler's next moment, the words of an end

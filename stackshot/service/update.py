@@ -52,6 +52,8 @@ from stackshot.waits import handoff as _ho
 from stackshot.waits import server_fixes as _sf
 from stackshot.waits import until_write as _uw
 from stackshot.waits import wait_end as _we
+from stackshot.waits import wait_list as _wl
+from stackshot.waits import wait_list_write as _wlw
 from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
 
@@ -88,6 +90,7 @@ class Hooks:
     date_only_wait: Callable[..., Any]
     date_parked: Callable[..., Any]
     eff_state: Callable[..., Any]
+    evwait_gate: Callable[..., Any]
     evwait_preread: Callable[..., Any]
     fallback_wait_date: Callable[..., Any]
     finishes_own_line: Callable[..., Any]
@@ -229,6 +232,37 @@ def _wait_refs(meta: dict[str, Any], names: tuple[str, ...]) -> set[str]:
             except Exception:  # noqa: BLE001
                 continue
     return out
+
+
+def _list_plan(waits: Any, wait_mode: str, *, gid: str, meta: dict[str, Any], proj_for: str, wake: str, clear_wake: bool, status: str, others: dict[str, Any]) -> "_gates.WaitsPlan | None":
+    """The `waits` and `wait_mode` of an update (gates.gate_waits, with the gates of the single waits as its callbacks), judged on the item's metadata as the write works on it (the stored `until` stands as the wake). The backstop
+    day is the one this call gives (`wake`, which `until` came in as), else the one the item holds. None when the call passes neither."""
+    h = _hooks()
+    leaves_list = status != "completed" and not any(others.get(k) for k in ("wait_kind", "wait_anchor", "wait_event", "after", "clear_wait"))      # a write that keeps the stored list (a single wait, a clear or a close replaces it)
+    if leaves_list and not _wlw.passed(waits) and wake.strip() and not clear_wake and _wl.valid(meta):      # a new backstop day alone (until=…) on a stored list: a time line later than it could never arrive, as when the list is sent again with it
+        gate_dates = [(i, ln["until"]) for i, ln in enumerate(_wl.lines(meta), 1) if ln["kind"] == "time" and not _wl.arrived(ln)]
+        _gates.gate_time_lines(gate_dates, str(h.parse_wake(wake)))
+    if waits is None and not str(wait_mode or "").strip():
+        return None
+    if _wlw.passed(waits) and not _wlw.clearing(waits):
+        if status == "completed":
+            raise ToolError("Refused: a completed item waits on nothing; waits goes with an open item")
+        if clear_wake:
+            raise ToolError("Refused: a list needs its backstop day, so until cannot be none beside waits: pass until=<date>, or clear_wait=true to end the wait")
+    backstop = (str(h.parse_wake(wake)) if wake.strip() else "") or _uw.date_of(meta)
+    return _gates.gate_waits(waits, wait_mode, gid=gid, project=proj_for, creating=False, stored=meta, backstop=backstop, others=others,
+                             anchor_gate=lambda tmp: h.anchor_wait_gate({}, tmp, gid), event_gate=lambda tmp: h.evwait_gate({}, tmp, creating=True))
+
+
+def _list_note(plan: "_gates.WaitsPlan", meta: dict[str, Any], open_: bool) -> str:
+    """The reply's line for a write of a list: what the item waits on now."""
+    if not open_:
+        return ""
+    if plan.kind == "list":
+        return "\n(wait list: " + _wl.summary({**meta, "until": _uw.date_of(meta)}, _gh.shown) + ")"
+    if plan.kind == "one":
+        return f"\n(the list is down to one wait, so it is stored as the single wait it is: {_wl.line_text(plan.lines[0], _gh.shown)})"
+    return "\n(the wait on a list is cleared: the item waits on nothing now)"
 
 
 def _stale_wait_notes(item_was: dict[str, Any], item: dict[str, Any], keeper: str = "") -> str:
@@ -453,6 +487,8 @@ def update_unlocked(
     reword: dict[Any, str] | str | None = None,
     fixes: "list[tuple[str, str, str]] | None" = None,
     until_wait: bool = False,
+    waits: list[dict[str, Any]] | str | None = None,
+    wait_mode: str = "",
 ) -> str:
     """The update tool; its description is _UPDATE_DESC (+ _WAIT_FORM). The caller checks the identity (_who): the update and
     complete tools do, the client API's recycle-due write is proved by its machine token instead."""
@@ -514,9 +550,44 @@ def update_unlocked(
             _needs_store(meta, _canon_needs([*kinds, _gates.gate_needs_session(agent, proj_for, own_for, _model.norm_who(meta.get("then")))], _anc.names()))
     state_st, state_given, step_withdrawn = _gates.gate_state_args({"expected_by": expected_by, "expected_reason": expected_reason, "step": step, "supplies": supplies})   # a bad value is refused before anything is written
     draft_set, clear_draft = _gates.gate_draft_args(draft, clear_draft)   # a bad draft is refused before anything is written
+    list_plan = _list_plan(waits, wait_mode, gid=gid, meta=meta, proj_for=project or str(meta.get("project") or ""), wake=wake, clear_wake=clear_wake, status=status or str(item.get("status") or ""),
+                           others={"wait_kind": wait_kind.strip(), "wait_anchor": wait_anchor.strip(), "wait_event": wait_event.strip(), "after": after if after is not None and after != [] and str(after).strip() else "",
+                                   "ask_by": ask_by.strip(), "hold": hold, "wait_basis": str(wait_basis or "").strip(), "clear_hold": clear_hold, "clear_after": clear_after,
+                                   "clear_wait_basis": clear_wait_basis, "clear_wait": clear_wait and not _wlw.clearing(waits)})
+    list_drop: set[str] = set()
+    if list_plan is not None and list_plan.kind == "clear":
+        clear_wait = True                       # a list cleared (waits=[]), or the one line left had arrived: the wait ends as clear_wait ends it
+    elif list_plan is not None and list_plan.kind == "one":     # a list an edit leaves with one line is stored as the single wait that line is: the same call as if the writer had passed that wait
+        one = _wlw.single(list_plan.lines[0])
+        list_drop = {"waits", "wait_mode"}
+        wait_kind, wait_anchor, wait_event = one.get("wait_kind", ""), one.get("wait_anchor", ""), one.get("wait_event", "")
+        if "after" in one:
+            after = one["after"]
+        if "until" in one:                      # a date alone: the wait is the date (never later than the backstop the list had)
+            back_ = _uw.date_of(meta) if not wake else str(h.parse_wake(wake))
+            date_ = back_ if _wlw.time_before(back_, one["until"]) else one["until"]
+            if h.wake_at(date_) <= _pages.zone_now():      # the date has come: the line has arrived, the wait is over
+                clear_wait, list_plan = True, _gates.WaitsPlan("clear", [], note="\n(the one line left is a date that has come, so the wait is over and is cleared)")
+            else:
+                list_drop.add("wait_kind")
+                wake, until_wait = date_, True
+        elif wait_kind in ("relay", "event"):   # a relay or event wait takes its ask-by day alone
+            wake = wake.strip()[:10]
+            if meta.get("wake") and len(str(meta["wake"])) > 10:
+                meta["wake"] = str(meta["wake"])[:10]
     model_set, model_drop = _gates.gate_model_args({"goal": goal, "mover": mover, "then": then, "wait_kind": wait_kind, "wait_anchor": wait_anchor, "wait_event": wait_event,
                                               "ask_by": ask_by, "post_wake_mover": post_wake_mover},
                                              {"goal": clear_goal, "mover": clear_mover, "then": clear_then, "wait": clear_wait})   # a bad value is refused before anything is written
+    model_drop |= list_drop
+    list_set = list_plan is not None and list_plan.kind == "list"
+    if list_set:                                 # a wait on a list: the lines, the mode, and the kind; a single wait the list replaces leaves nothing of its own behind
+        model_set["wait_kind"], model_set["wait_mode"] = "list", list_plan.mode
+        meta["waits"] = [dict(ln) for ln in list_plan.lines]
+        model_drop |= {"wait_anchor", "wait_event"}
+        if _watch.stored_kind(item_was.get("metadata") or {}) == "item":
+            meta.pop("after", None)              # the wait on the item's close was the single wait this list replaces
+        for k_ in ("hold", "hold_set", "wait_basis"):
+            meta.pop(k_, None)
     clear_obs = observers is not None and (observers == [] or (isinstance(observers, str) and observers.strip().lower() in h.ask_none))
     if clear_obs:
         meta.pop("observers", None)
@@ -535,6 +606,10 @@ def update_unlocked(
         h.wait_end_sent_back(meta, (_we.ITEM,))          # a wait the server set from the line's words, sent back: the server leaves that line alone
     elif after_set:
         meta["after"] = _gates.gate_after(after, gid)
+    if _wl.stored(item_was.get("metadata") or {}) and list_plan is None and (wait_kind.strip() or wait_anchor.strip() or wait_event.strip() or after_set):
+        model_drop |= {"waits", "wait_mode"}     # a single wait written over a stored list replaces it, as a new list replaces a single wait: the lines and the mode go (what has arrived on them with them)
+        if "wait_kind" not in model_set and "wait_kind" not in model_drop:
+            meta.pop("wait_kind", None)          # …and so does its kind, list (popped here, not dropped as a clear of the wait is: the backstop day stays beside the new wait)
     nm = _anc.names() if owner else {}                 # the fleet's names, read once for the owner and its name
     raw, owner = owner.strip(), (_anc.canonical(owner, nm) if owner else "")   # = _session_id: a pane name → its transcript id
     if owner and not owner_name and owner != _anc.canonical(str(meta.get("owner") or ""), nm):
@@ -903,6 +978,10 @@ def update_unlocked(
             for k_ in _uw.LEGACY_FIELDS:                # clear_wait drops the stored until (model.WAIT_GROUP); the old working fields it stood as go with it
                 meta.pop(k_, None)
     wait_note = ""
+    if list_plan is not None:
+        wait_note += list_plan.note + _list_note(list_plan, meta, item.get("status") == "open")
+    elif _wlw.clearing(waits) and not _wl.stored(item_was.get("metadata") or {}):
+        wait_note += "\n(waits=[] clears a list of waits; this item stores none, so nothing was cleared and its wait is as it was)"
     if relay_clear_hold:
         wait_note += "\n(clear_hold releases a hold, and this relay or event wait holds no flag: it goes on waiting; clear_wait=true ends the wait)"
     if relay_hold:
@@ -1026,6 +1105,8 @@ def update_unlocked(
         touched_m = {k for k, v in (("next", next_touch), ("ask", ask), ("subject", subject), ("description", description.strip()),("needs", needs_set or clear_needs or agent.strip()), ("hold", hold or clear_hold),
                                     ("wake", wake or clear_wake), ("after", after_set or clear_after), ("state", state_st), ("wait_basis", basis_txt or clear_wait_basis)) if v}
         touched_m |= set(model_set) | set(model_drop)           # goal, mover, then and the wait's fields this write sets or clears
+        if list_plan is not None:
+            touched_m |= {"waits", "wait_mode"}
         if wake:
             touched_m.add("cap_ok")                             # a wake records his words for it
         full_judgement = reopening or (h.switchover_on() and not filing_only)     # step 4's switchover: every write is judged whole, old items included; a bookkeeping write (a page rename) still only by what it touches
@@ -1070,6 +1151,9 @@ def update_unlocked(
                 wait_note += (f"\n(the item was waiting until {_uw.date_of(item_was.get('metadata') or {})}: this hand-off ends that wait. The date stays as the hand-off's backstop, and the item is active in the new mover's lane)")
         else:
             _uw.fold(meta)                 # every gate above judged the wait in the words of the old fields; it is stored as the one date, until, and none of them
+            if str(meta.get("wait_kind") or "").strip().lower() == _wl.LIST and not _wl.valid(meta) and (list_set or _wl.valid(item_was.get("metadata") or {})):
+                raise ToolError(f"Refused: this write would leave {_gh.shown(gid)} with a wait on a list that does not hold ({_wl.problem(meta) or 'no backstop day'}). A list needs its backstop day: "
+                                "pass until=<date>, or clear_wait=true to end the wait")
         if keep_hold:
             meta["hold"] = True
             if kept_hold_set:
@@ -1225,6 +1309,8 @@ def update_item(*args: Any, **kwargs: Any) -> str:
     come through it (server.py's `_update` calls it)."""
     h = _hooks()
     h.evwait_preread(kwargs.get("wait_kind"), kwargs.get("wait_event"))      # an event wait's facts (GitHub, git) are read before the lock, not under it
+    for phrase_ in _wlw.event_phrases(kwargs.get("waits")):      # …and those of every event line of a list
+        h.evwait_preread("event", phrase_)
     with _writes.ITEM_LOCK:
         try:
             return update_unlocked(*args, **kwargs)

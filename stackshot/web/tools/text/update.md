@@ -141,7 +141,7 @@ update that hands the item to another session the date parks nothing, it is the 
 active in the new mover's lane (unless the item carries hold, wait_kind, wait_basis or an after link, in this call or
 stored by an earlier one: then the date stays a wait)); wait_kind goes only beside it (none: it waits on the date
 alone). until="none" drops it. It replaces wake, ask_by and hold with a wake, still accepted for now. Moving it later
-with nothing else changed is refused, as for wake.
+with nothing else changed is refused, as for wake. Beside waits it is the list's backstop day.
 
 ## param NEXT
 Your lines of the checklist, one step per line, each opening with who takes it, then a space: next="my-x: open the PR"

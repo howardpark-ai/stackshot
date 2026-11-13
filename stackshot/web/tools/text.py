@@ -141,6 +141,8 @@ _OPTIONS_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=
 _CHECK_PARAM = Annotated[str, Field(description=_T.param("CHECK"))]
 _STEP_PROOF_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=_T.param("STEP_PROOF"))]
 _WAIT_KIND_PARAM = Annotated[str, Field(description=_T.param("WAIT_KIND"))]
+_WAITS_PARAM = Annotated[list[dict[str, Any]] | str | None, Field(description=_T.param("WAITS"))]
+_WAIT_MODE_PARAM = Annotated[str, Field(description=_T.param("WAIT_MODE"))]
 _WAIT_EVENT_PARAM = Annotated[str, Field(description=_T.param("WAIT_EVENT"))]
 _MOVER_PARAM = Annotated[str, Field(description=_T.param("MOVER"))]
 _THEN_PARAM = Annotated[str, Field(description=_T.param("THEN"))]

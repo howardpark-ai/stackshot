@@ -17,6 +17,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -51,6 +52,8 @@ from stackshot.waits import handover as _hv
 from stackshot.waits import self_wait as _selfwait
 from stackshot.waits import server_fixes as _sf
 from stackshot.waits import until_write as _uw
+from stackshot.waits import wait_list as _wl
+from stackshot.waits import wait_list_write as _wlw
 from stackshot.waits import waiting as _wt
 from stackshot.waits import watchers as _watch
 
@@ -414,6 +417,121 @@ def gate_model_args(vals: dict[str, str], clears: dict[str, bool]) -> tuple[dict
     if probs:
         raise ToolError("Refused: " + "; ".join(probs))
     return setv, drop
+
+
+@dataclass
+class WaitsPlan:
+    """What the `waits` argument of a write comes to (`gate_waits`): kind `list` (2 to 8 lines, stored as a list), `one` (a list that is left with one line: stored as the single wait that line is), or `clear` (the
+    list is cleared, or the one line left has arrived: the wait ends as clear_wait ends it); `lines` are the lines to store (item ids as stored, an arrival carried from the stored list), `mode` all or any,
+    `note` the reply's lines."""
+    kind: str
+    lines: list[dict[str, Any]]
+    mode: str = ""
+    note: str = ""
+
+
+def waits_clash(names: list[str]) -> ToolError:
+    """The refusal of a list passed beside single-wait parameters (one way to say a wait): the names passed, and what to do instead."""
+    return ToolError(f"Refused: waits is a wait on a list and does not go with {', '.join(names)}: put each thing waited on in a line of waits and the backstop day in until ({_wlw.FORM}); "
+                     "clear_wait=true ends a wait on its own")
+
+
+def _line_refusal(i: int, e: ToolError) -> ToolError:
+    return ToolError(f"Refused: waits[{i}]: " + str(e).removeprefix("Refused: "))
+
+
+def _no_repeat(lines: list[dict[str, Any]], held: "Counter[tuple[str, ...]]") -> None:
+    """Refuse a wait given twice in one list, naming both lines; a line the stored list holds that many times is not a repeat when the list is sent again."""
+    dup = _wlw.duplicate(lines, held)
+    if dup:
+        raise ToolError(f"Refused: waits[{dup[1]}] repeats waits[{dup[0]}] (the same {lines[dup[1] - 1]['kind']} line twice); give each wait once")
+
+
+def gate_time_lines(dated: list[tuple[int, str]], backstop: str) -> None:
+    """Refuse a time line (its 1-based position in the list, its date) that falls later than the backstop day: it could never arrive before the item comes back."""
+    for i, until in dated:
+        if _wlw.time_before(backstop, until):
+            raise ToolError(f"Refused: waits[{i}] is a date ({until}) later than the backstop day {backstop}, so it could never arrive before the item comes back: give an earlier date or a later until")
+
+
+def gate_waits(waits: Any, wait_mode: Any, *, gid: str, project: str, creating: bool, stored: dict[str, Any], backstop: str, others: dict[str, Any],
+               anchor_gate: Callable[[dict[str, Any]], Any], event_gate: Callable[[dict[str, Any]], str]) -> "WaitsPlan | None":
+    """The `waits` and `wait_mode` arguments of a create or update (a wait on a list of waits: waits/wait_list_write.py) → what they come to, or None when the call passes neither (or clears a list that is not
+    there). Everything the single waits are judged by is reused, line by line, on the lines that are new or changed (a line the stored list already holds is not judged again, and keeps what has arrived):
+    the item of an item line by `gate_after`, the anchor of an anchor line and the event of an event line by the gates of the single waits (`anchor_gate`, `event_gate`: callables that take the metadata of that one
+    wait), the date of a time line against now. Refused, naming the line (waits[2]) and the way out: a list passed beside single-wait parameters (`others`: name → value), a line that is no line (kind, fields,
+    an anchor or an item id over 300 characters, an `arrived`), a repeated line, fewer than 2 or more than 8 lines (one line is allowed only as what an edit leaves of a stored list), a list with no backstop day
+    (`backstop`: the day the call or the item gives), a time line later than the backstop day, a wait_mode that is not all or any. `stored` = the item's metadata as it stands (empty for a create)."""
+    h = _hooks()
+    mode_given = bool(_model.clean(wait_mode)) and _model.clean(wait_mode).lower() not in h.ask_none
+    if not _wlw.passed(waits):
+        if mode_given:
+            raise ToolError("Refused: wait_mode is the mode of a list and goes with waits; to change the mode of a list the item stores, send its lines again with the new wait_mode (what has arrived is kept)")
+        return None
+    clash = [k for k, v in others.items() if v]
+    if clash:
+        raise waits_clash(clash)
+    try:
+        lines = _wlw.parse(waits)
+    except ValueError as e:
+        raise ToolError(f"Refused: {e}")
+    holds = _wl.valid(stored)
+    if not lines:
+        if mode_given:
+            raise ToolError("Refused: wait_mode does not go with a clear of the list (waits=[])")
+        return WaitsPlan("clear", []) if holds else None
+    try:
+        mode = _wlw.mode_of(wait_mode, stored)
+    except ValueError as e:
+        raise ToolError(f"Refused: {e}")
+    held = Counter(_wl.line_key(ln) for ln in _wl.lines(stored))
+    have = set(held)
+    for i, ln in enumerate(lines, 1):
+        if ln["kind"] == "item":
+            try:
+                nid = _norm_id(str(ln["after"]))
+            except Exception:  # noqa: BLE001  — an id that no form reads is refused below, by gate_after, with its own words
+                nid = ""
+            if nid and ("item", nid) in have:
+                ln["after"] = nid        # a line the stored list holds already: kept as it is (its item may have closed since, which the watchers end the line for)
+            else:
+                try:
+                    ln["after"] = gate_after([ln["after"]], gid)[0]
+                except ToolError as e:
+                    raise _line_refusal(i, e)
+        elif ln["kind"] == "time":
+            try:
+                ln["until"] = str(h.parse_wake(ln["until"]))
+            except ToolError:
+                raise ToolError(f"Refused: waits[{i}]: a time line's until is YYYY-MM-DD or YYYY-MM-DDTHH:MM ({_cfg.tz_abbr()}), a real date (got {ln['until']!r})")
+            if _wl.line_key(ln) not in have and h.wake_at(ln["until"]) <= _pages.zone_now():
+                raise ToolError(f"Refused: waits[{i}]: a time line's until must be in the future ({_cfg.tz_abbr()})")
+    _no_repeat(lines, held)
+    lines = _wlw.carry_arrived(lines, stored)
+    kind, why = _wlw.shape(lines, holds)
+    if not kind:
+        raise ToolError(f"Refused: {why}")
+    if kind == "none":
+        return WaitsPlan("clear", [], note="\n(the one line left had already arrived, so the wait is over and is cleared)")
+    if kind == "list":
+        if not backstop:
+            raise ToolError("Refused: a list needs its backstop day, the day the item comes back at the latest whatever has arrived: pass until=YYYY-MM-DD (or YYYY-MM-DDTHH:MM) beside waits")
+        gate_time_lines([(i, ln["until"]) for i, ln in enumerate(lines, 1) if ln["kind"] == "time"], backstop)
+    note = ""
+    for i, ln in enumerate(lines, 1):
+        if ln.get("arrived") or _wl.line_key(ln) in have:
+            continue
+        try:
+            if ln["kind"] == "anchor":
+                anchor_gate({"wait_kind": "anchor", "wait_anchor": ln["anchor"], "wait_event": ln["event"], "project": project})
+            elif ln["kind"] == "event":
+                tmp = {"wait_kind": "event", "wait_event": ln["event"], "wake": backstop}
+                note += event_gate(tmp)
+                ln["event"] = _model.clean(tmp.get("wait_event")) or ln["event"]
+        except ToolError as e:
+            raise _line_refusal(i, e)
+    _no_repeat(lines, held)      # …and again now that an event line is in its canonical form (`Recycle` and `recycle` are one wait)
+    return WaitsPlan(kind, lines, mode, note)
 
 
 def gate_ask_on_wait(gid: str, item: dict[str, Any], meta: dict[str, Any], was_needs: list[str], closing: bool) -> None:

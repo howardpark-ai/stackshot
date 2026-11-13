@@ -31,7 +31,7 @@ it has not ended, YYYY-MM-DD, tomorrow at the earliest: ask_by="2099-03-02".
 ## param UNTIL_PARAM_NEW
 The one date the new item's wait ends on, in the future: YYYY-MM-DD, or YYYY-MM-DDTHH:MM, in the board timezone (a
 relay or event wait takes the day alone, YYYY-MM-DD). wait_kind goes only beside it (none: the date alone). It
-replaces ask_by, still accepted for now.
+replaces ask_by, still accepted for now. Beside waits it is the list's backstop day, required.
 
 ## param NEXT_CREATE
 The checklist, one step per line, each opening with who takes it: next="my-x: open the PR" (or several lines with \n).
