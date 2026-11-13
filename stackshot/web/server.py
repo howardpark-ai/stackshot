@@ -2072,9 +2072,13 @@ def _wakes() -> list[tuple[str, Path, dict[str, Any], dt.datetime]]:
             continue
         if _wl.valid(meta):                  # a list is the watchers' alone, so with them off only its backstop day is looked at (the wake pass ends it there: _watch_fire(legacy=True)); the date as a time wait's wake would drop half the list
             try:
-                out.append((gid, p, it, _wake_at(_wl.backstop(meta))))
+                at = _wake_at(_wl.backstop(meta))
             except ValueError:
                 continue
+            until = _WATCH_BACKOFF.get(gid, 0.0)           # a list whose end failed is not due again before its back-off ends (as the watched branch above), so the runner does not spin on it
+            if until > time.time():
+                at = max(at, dt.datetime.fromtimestamp(until, _pages.zone_now().tzinfo))
+            out.append((gid, p, it, at))
             continue
         if not _wt.wake_value(meta):
             continue
@@ -2126,12 +2130,14 @@ def _wake_pass(now: dt.datetime | dt.date | None = None) -> list[str]:
                 continue
             meta = it.get("metadata") or {}
             if _wl.valid(meta):                # a list with the watchers off: its backstop day has come, so it ends as the watchers would end it there (the same words, an open relay line asks the owner)
-                try:
+                try:                           # a list whose turn failed is not due again before its back-off ends (_wakes moves its moment, as it does for a watched wait)
                     cause = _watch.due(it, epoch)       # the backstop day, or (a list edited by hand so that every line has arrived) the kind of the line that completed the group
                     if cause and _watch_fire(gid, cause, epoch, wout, recheck=True, legacy=True):
                         woke.append(gid)
-                except _WatchStuck as e:
-                    print(f"watch: {e}", file=sys.stderr, flush=True)
+                        _WATCH_BACKOFF.pop(gid, None)
+                except Exception as e:  # noqa: BLE001  — as _watch_pass: one bad item never stops the pass, so the lists after it are still ended
+                    print(f"watch: {gid} skipped this pass: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+                    _watch_failed(gid, epoch)
                 continue
             wake = _wt.wake_value(meta)
             had_u = bool(_wt.stored_until(meta))      # a date stored as until is a wait on it, not a backstop: its end releases the item like a hold's
@@ -5873,7 +5879,7 @@ def _arrival_when(ts: float) -> str:
     """The time a line of a wait on a list arrived, for the `model:` line: YYYY-MM-DD HH:MM and the zone's name (as the refusals that give a time name it), in the board's zone; "" for a time no date can show,
     so the line keeps its arrival words and drops the time (a get never loses its model line over one)."""
     try:
-        t = dt.datetime.fromtimestamp(float(ts), ZONE)
+        t = dt.datetime.fromtimestamp(float(ts), _cfg.tz())      # the zone read at the call, as tz_abbr reads it (ZONE is fixed at import): the clock and its name never come from two zones
         return f"{t:%Y-%m-%d %H:%M} {_cfg.tz_abbr(t)}"
     except (ValueError, OverflowError, OSError):
         return ""
