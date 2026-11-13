@@ -6198,6 +6198,24 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     return handed
 
 
+def _balance_builders(project: str) -> list[str]:
+    """The sessions the balancer may move an item of `project` to, best first: BUILDERS only (the mandate says build, maintain, merge or engineer; a reviewer or any other background agent is no candidate), the project's own first,
+    then those of any other project. `_handoff_ranked` classes the project's own (0 builds, 1 maintains, merges or engineers, 2 the rest); the others are read from the role map as `_hand_idle_builders` does."""
+    out = [n for c, _o, n in _handoff_ranked(project) if c < 2]
+    try:
+        out += [n for n in _balance_builder_names() if not any(_ho_same(n, o) for o in out)]
+    except Exception:  # noqa: BLE001  — with no view of the other projects the item's own project's builders are all there is
+        pass
+    return out
+
+
+def _balance_builder_names() -> list[str]:
+    """Every background agent, of any project, whose mandate says build, maintain, merge or engineer and that is not retired (raises when the registry cannot be read)."""
+    reg = _anc.registry()
+    return [n for n, r in _anc.session_roles(reg).items()
+            if r.get("role") == "back" and not r.get("retired") and _router._BUILDER.search(str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""))]
+
+
 def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                   dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
     """The balancer (audit/hand_idle.py, `[audit] balance`, off by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
@@ -6205,11 +6223,12 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `_tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
     subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
-    in all (then the existing ladders have it and -main is told once), three per pass. With no builder that has fewer open items the item stays, one History line says so and -main is told once per item per 24 hours.
-    Stands still while the audit is off or runs in agent mode, while the board is paused, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
+    in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it the item stays, one History line says so and -main is told once per item per 24 hours (a builder that is no improvement is a log line only).
+    Only an item whose mover is itself a builder is balanced, and only to builders. The notice to the mover it left is at-most-once (a crash between the save and the send loses it) and is not sent to a pane that is gone. An item the idle
+    hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
     from stackshot.audit import hand_idle as _hi
     from stackshot.tools import next_report as _nr
-    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff_paused():
+    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff_paused() or not _handoff_on():
         return []
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
@@ -6226,8 +6245,14 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         except Exception:  # noqa: BLE001
             return True
     anchored = anchored or anchors_of
+    try:
+        names = _balance_builder_names()
+    except Exception as e:  # noqa: BLE001  — with no view of who builds, nothing is judged a builder: nothing moves on a guess
+        print(f"balance: builders not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+    is_builder = lambda who: any(_ho_same(who, n) for n in names)      # noqa: E731
     behind = _hi.balance_queue(items, now, minutes * 60.0, front)
-    rows = _hi.balance_all(items, now, minutes, front, behind, _ho_same, anchored)
+    rows = _hi.balance_all(items, now, minutes, front, behind, _ho_same, anchored, is_builder)
     if not rows:
         return []
     if status is None or dead is None:
@@ -6246,7 +6271,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
         try:
             project = row["project"]
             if project not in builders:
-                builders[project] = _hand_idle_builders(project)
+                builders[project] = _balance_builders(project)
                 mains[project] = _main_agent(project)
             main = mains[project]
             if main and _model.is_owner(main):
@@ -6255,7 +6280,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             if row["capped"]:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
-                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored)
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
                     if cur is None or not cur["capped"] or not _ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
@@ -6266,40 +6291,49 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                     told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_session_label(row['mover'])} to the ladders"))
                 print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
                 continue
+            if row["told_none"]:
+                continue      # no live builder was found today and -main was told: the panes are not read again for this item until the day is over
             to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
-            if to and _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
+            if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
+                print(f"balance: {gid} stays with {row['mover']}: no builder has few enough open items", file=sys.stderr, flush=True)      # silent otherwise: a spread that is as good as it can be is no news
+            elif to:
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
-                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored)
+                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
                     if cur is None or cur["capped"] or not _ho_same(cur["mover"], st.frm):
                         return False
                     _hi.mark_balanced(item.setdefault("metadata", {}), now, st.frm, st.to)
                     return True
                 st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
-                if not _handoff_exec([st], now, verify=False, recheck=still):
+                try:
+                    ok = bool(_handoff_exec([st], now, verify=False, recheck=still))
+                except Exception as e:  # noqa: BLE001  — a send after the save failed: the move itself was made when the item carries this pass's record
+                    print(f"balance: {gid} sending after the move failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+                    ok = (((_load(gid).get("metadata") or {}).get(_hi.BALANCE_KEY) or {}).get("at") == now)
+                if not ok:
                     continue
                 moved.append(gid)
                 _hi.shift(load, row["mover"], to, _ho_same)
                 gone.append((row["mover"], gid, to))
                 print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
-            elif not row["told_none"]:
+            else:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
-                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored)
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
                     if cur is None or cur["capped"] or cur["told_none"] or not _ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_none(meta, now)
-                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no builder has fewer open items, so it stays with {_session_label(row['mover'])}: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
-                    _writes.save(gid, item, note="balance: no builder with fewer open items")
+                    _stall.note(meta, now, f"not started or queued for {minutes:g} min, but no live builder could take it, so it stays with {_session_label(row['mover'])}: " + (f"{_session_label(main)} was told" if main else "the project has no -main agent to tell"))
+                    _writes.save(gid, item, note="balance: no live builder")
                 if main:
-                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no builder has fewer open items, so it stays with {_session_label(row['mover'])}"))
-                print(f"balance: {gid} no builder with fewer open items", file=sys.stderr, flush=True)
+                    told.setdefault(main, []).append((gid, f"{lead}: not started or queued for {minutes:g} min, and no live builder could take it, so it stays with {_session_label(row['mover'])}"))
+                print(f"balance: {gid} no live builder", file=sys.stderr, flush=True)
         except Exception as e:  # noqa: BLE001  — one item never stops the others
             print(f"balance: {gid} not balanced: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     for frm in dict.fromkeys(f for f, _g, _t in gone):      # the former mover is told once per item it left, in one message however many: only for an item this pass moved
         try:
-            if _front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm):
-                continue
+            if _front_keeper(frm, "")[0] or _model.is_owner(frm) or not _ho.is_session_name(frm) or dead(frm):
+                continue      # a front agent is never sent it unmarked; a pane that is gone cannot take it (and a failed send would leave an `undelivered` note on the item that just moved)
             mine = [(g, t) for f, g, t in gone if f == frm]
             if len(mine) == 1:
                 text = f"Disregard: {_gh.shown(mine[0][0])} is now with {_session_label(mine[0][1])}. Drop it, stop any work or subagent on it, and write nothing to it. No reply is owed."

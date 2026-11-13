@@ -36,16 +36,16 @@ toml, n = re.subn(r'(?m)^(\[audit\][^\n]*\n)enabled = false', r'\g<1>enabled = t
 (T / "home/.claude/sessions").mkdir(parents=True)                                              # an isolated HOME: never the host's pane registry
 os.environ.update(STACKSHOT_CONFIG=f"{tmp}/stackshot.toml", STACKSHOT_AUTH="off", HOME=str(T / "home"), STACKSHOT_FLEET_DIR=f"{tmp}/fleet"); os.environ.pop("STACKSHOT_URL", None)
 for d in ("store/a", "fleet/a", "state", "brain/projects", "transcripts/-home-x", "cli"): (T / d).mkdir(parents=True)
-NAMES = ("home-main", "team-back", "team-aux", "other-back", "beta-main", "home-peer", "home-peer2", "home-stew", "lone-back", "lone-main")
+NAMES = ("home-main", "team-back", "team-aux", "other-back", "beta-main", "home-peer", "home-peer2", "home-stew", "lone-back", "lone-main", "team-rev")
 U = {n: f"00000000-0000-4000-8000-0000000000{i:02d}" for i, n in enumerate(NAMES, 1)}
 now0 = float(int(time.time()))
 if min((now0 + 4 * 3600) % 86400, 86400 - (now0 + 4 * 3600) % 86400) < 4000: now0 -= 7200      # not near a local midnight: the times in the lines stay on one day
 (T / "fleet/a/machine.json").write_text(json.dumps({"letter": "a", "fleet": "testbox", "claude": "1.0.0", "online": {"ok": True, "since": "2026-01-01T00:00:00Z"}}))
 (T / "fleet/a/sessions.json").write_text(json.dumps({u: {"name": n, "machine": "a"} for n, u in U.items()}))
-ALPHA = {"home-main": "the front", "team-back": "builds, merges and releases the code", "team-aux": "reviews the notes"}
+ALPHA = {"home-main": "the front", "team-back": "builds, merges and releases the code", "team-aux": "maintains and merges the notes", "team-rev": "reviews the notes"}
 BETA = {"beta-main": "the front", "other-back": "builds the beta code"}
-LONE = {"lone-main": "the front", "lone-back": "reviews the notes"}
-pages = {"projects/alpha": ("home-stew", ALPHA), "projects/beta": ("beta-main", BETA)}
+LONE = {"lone-main": "the front", "lone-back": "reviews the notes", "home-peer": "builds the side code"}
+pages = {"projects/alpha": ("home-stew", ALPHA), "projects/beta": ("beta-main", BETA), "projects/lone": ("lone-main", LONE)}
 (T / "store/projects.json").write_text(json.dumps({"pages": {k: {"title": "x", "name": "x", "org": "home", "tags": [], "type": "project", "session": s, "status": "active", "board": [], "board_open": 0,
                                                                   "agents": ag, "back_agents": {n: m for n, m in ag.items() if not n.endswith("-main")}} for k, (s, ag) in pages.items()}}))
 for k, (s, ag) in pages.items():
@@ -332,7 +332,7 @@ def probe_stale_view():
     d = rd(2); d["metadata"]["steps"] = STEP("in progress", now0 - 95 * MIN); (T / "store/a/2.json").write_text(json.dumps(d))      # its mover started it after the pass read the store
     return tick(items=view) == [] and mover_of(2) == "home-peer" and sent == []
 rule("5 an item its mover started after the pass read it is read again under the lock and stays", probe_stale_view,
-     [(HI, "balance_due", lambda items, gid, now, minutes, front, behind, same, anchored=None: {"mover": "home-peer", "project": "projects/alpha", "kind": "queued", "tried": [], "told_none": False, "capped": False})])
+     [(HI, "balance_due", lambda items, gid, now, minutes, front, behind, same, anchored=None, builder=None: {"mover": "home-peer", "project": "projects/alpha", "kind": "queued", "tried": [], "told_none": False, "capped": False})])
 def probe_anchors_unreadable():
     queue_setup()
     real = server._anc.load
@@ -365,7 +365,7 @@ def probe_busy_lower():
     return got == ["a1"] and mover_of(1) == "team-back"
 rule("6 a busy pane is no exclusion: the builder with the fewest open items wins even in a turn", probe_busy_lower, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": next((x for x in c if status(x) != "busy"), ""))])
 def probe_merge():
-    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); busy_on("home-peer", 1, first=45); busy_on("team-aux", 1, first=40); put(60, mover=U["team-back"], act=3, last=3); put(61, mover="team-back", act=3, last=3)
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); busy_on("home-peer", 2, first=45); busy_on("team-aux", 1, first=40); put(60, mover=U["team-back"], act=3, last=3); put(61, mover="team-back", act=3, last=3)
     for n in ("team-back", "team-aux", "other-back"): panes[n] = "idle"
     busy_on("other-back", 3, first=70)
     got = tick()
@@ -375,7 +375,10 @@ def probe_strict():
     return untaken_with_load(from_extra=0, loads={"team-back": 1, "team-aux": 1, "other-back": 1}, idle=("team-back", "team-aux", "other-back")) == [] and mover_of(1) == "home-peer"
 rule("6 an untaken hand-off stays when no builder has strictly fewer open items than its mover (one each)", probe_strict, [(HI, "balance_ok", lambda kind, to, frm: True)])
 check("6 …and goes when the builder has none (one item on its mover, none on the builder)", untaken_with_load(idle=("team-aux",)) == ["a1"])
-check("6 …and when the mover has two and the builder one", untaken_with_load(from_extra=1, loads={"team-back": 1, "team-aux": 1, "other-back": 1}, idle=("team-aux",)) == ["a1"])
+check("6 …and when the mover has three and the builder one (1 + 1 < 3)", untaken_with_load(from_extra=2, loads={"team-back": 1, "team-aux": 1, "other-back": 1}, idle=("team-aux",)) == ["a1"])
+def probe_swap():
+    return untaken_with_load(from_extra=1, loads={"team-back": 1, "team-aux": 1, "other-back": 1}, idle=("team-aux",)) == [] and mover_of(1) == "home-peer" and sent == []
+rule("6 …but not when it would only swap them: two on the mover and one on the builder stays (to == 0 or to + 1 < from), and nobody is told", probe_swap, [(HI, "balance_ok", lambda kind, to, frm: to < frm)])
 def probe_plus1():
     queue_setup(n_queued=1)
     busy_on("team-back", 1, first=60); busy_on("team-aux", 1, first=70); busy_on("other-back", 1, first=80)
@@ -400,21 +403,23 @@ def probe_cap():
     wipe(); on()
     for i in range(1, 6): put(i, act=15, **ho("home-peer", 12))
     for n in ("team-back", "team-aux", "other-back", "lone-back"): panes[n] = "idle"
-    real = server._hand_idle_builders; server._hand_idle_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
+    real = server._balance_builders; server._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
     try: got = tick()
-    finally: server._hand_idle_builders = real
+    finally: server._balance_builders = real
     return len(got) == 3 and len({mover_of(i) for i in range(1, 6)} - {"home-peer"}) == 3
 rule("6 at most three items are moved in one pass", probe_cap, [(HI, "BALANCE_MAX_PER_TICK", 99)])
 def probe_no_front_target():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-back"] = "idle"
-    real = server._hand_idle_builders; server._hand_idle_builders = lambda project: ["home-main", "team-back"]
+    real = server._balance_builders; server._balance_builders = lambda project: ["home-main", "team-back"]
     try: got = tick()
-    finally: server._hand_idle_builders = real
+    finally: server._balance_builders = real
     return got == ["a1"] and mover_of(1) == "team-back"
 rule("6 a front agent is never the target, whatever its load (home-main has none)", probe_no_front_target, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": c[0])])
 def probe_front_mover():
     wipe(); on(); put(1, mover="home-main", act=15, **ho("home-main", 12)); panes["team-aux"] = "idle"
-    return tick() == [] and mover_of(1) == "home-main" and sent == []
+    real = server._balance_builder_names; server._balance_builder_names = lambda: [*real(), "home-main"]      # so only the front test stands between the item and a move
+    try: return tick() == [] and mover_of(1) == "home-main" and sent == []
+    finally: server._balance_builder_names = real
 rule("6 an item a front agent moves is never moved", probe_front_mover, [(server, "_front_keeper", lambda w, p="", strict=False: (False, ""))])
 def probe_dead_target():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"; dead["team-aux"] = "a retired session, its pane gone"
@@ -439,12 +444,12 @@ def none_setup():
     for n in ("team-back", "team-aux", "other-back"): dead[n] = "a retired session, its pane gone"
 def probe_none():
     none_setup(); got = tick()
-    return got == [] and mover_of(1) == "home-peer" and len(to_main()) == 1 and len(sent) == 1 and not told("balance") and "no builder has fewer open items" in to_main()[0][2] and "stays with home-peer" in to_main()[0][2]
-rule("7 with no builder to take it the item stays, nobody is told to disregard it, and -main is told, and only -main", probe_none, [(HI, "balance_ok", lambda kind, to, frm: True), (HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": "team-aux")])
+    return got == [] and mover_of(1) == "home-peer" and len(to_main()) == 1 and len(sent) == 1 and not told("balance") and "no live builder could take it" in to_main()[0][2] and "stays with home-peer" in to_main()[0][2]
+rule("7 with NO live builder to take it the item stays, nobody is told to disregard it, and -main is told, and only -main", probe_none, [(HI, "balance_ok", lambda kind, to, frm: True), (HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": "team-aux")])
 none_setup(); tick(); m7 = to_main()[0][2]
 check("7 the message to -main is the notice path's (the front agent's mark on line 1, tag stall), says what stayed where, and asks nothing", m7.startswith(server._FOR_OWNER + "\n") and to_main()[0][3] == "stall" and "Nothing is asked of you and no reply is owed" in m7 and "?" not in m7.split("\n", 1)[1], m7)
 h7 = history(1)
-check("7 one History line says so; the item keeps its mover, its hand-off and the balance record carries only the day's note", len(h7) == 1 and h7[0].startswith("not started or queued for 10 min, but no builder has fewer open items, so it stays with home-peer: home-main was told")
+check("7 one History line says so; the item keeps its mover, its hand-off and the balance record carries only the day's note", len(h7) == 1 and h7[0].startswith("not started or queued for 10 min, but no live builder could take it, so it stays with home-peer: home-main was told")
       and mt(1)["balance"] == {"none_at": now0} and HO.record_of(rd(1))["to"] == "home-peer", (h7, mt(1).get("balance")))
 def probe_once_per_day():
     none_setup(); tick(); n1 = len(to_main())
@@ -457,8 +462,17 @@ def probe_next_day():
 check("7 …and again after 24 hours while it stays put", probe_next_day() is True)
 def probe_not_better():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12)); [busy_on(n, 1, first=60 + 10 * k) for k, n in enumerate(("team-back", "team-aux", "other-back"))]
-    return tick() == [] and len(to_main()) == 1 and not told("balance") and mover_of(1) == "home-peer"
-check("7 builders with as many open items as its mover are no target: the item stays and -main is told", probe_not_better() is True)
+    for n in ("team-back", "team-aux", "other-back"): panes[n] = "idle"
+    return tick() == [] and sent == [] and history(1) == [] and "balance" not in mt(1) and mover_of(1) == "home-peer"
+rule("7 a builder that is no improvement (as many open items as its mover) is SILENT: the item stays, no History line, nobody told, nothing written", probe_not_better, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": "")])
+def probe_told_none_skips_pick():
+    wipe(); on(); put(1, act=15, balance={"none_at": now0 - 2 * H}, **ho("home-peer", 12)); [panes.__setitem__(n, "idle") for n in ("team-back", "team-aux")]
+    calls = []; real = HI.pick_least
+    HI.pick_least = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    try: got = tick()
+    finally: HI.pick_least = real
+    return got == [] and calls == [] and sent == [] and mover_of(1) == "home-peer"
+rule("7 while the day's no-builder note stands the panes are not read again for the item (pick_least is not called, nothing moves)", probe_told_none_skips_pick, [(HI, "balance_none_told_recently", lambda meta, now: False)])
 def probe_batched():
     none_setup(); put(2, act=15, **ho("home-peer", 12)); put(3, act=15, **ho("home-peer", 12)); tick()
     return len(to_main()) == 1 and to_main()[0][2].count("\n- ") == 3
@@ -508,11 +522,15 @@ def probe_tried():
     wipe(); on(); put(1, act=15, **ho("home-peer", 12, tried=["team-aux", "other-back"])); busy_on("team-back", 1, first=60); [panes.__setitem__(n, "idle") for n in ("team-back", "team-aux", "other-back")]
     return tick() == [] and mover_of(1) == "home-peer"
 rule("8 a builder in the hand-off record's `tried` is never the target, with no load at all", probe_tried, [(HI, "pick_least", lambda c, load, status, dead, same, frm="", tried=(), front=None, project="": c[1]), (HI, "balance_ok", lambda kind, to, frm: True)])
-def probe_hand_idle_apart():
+def probe_hand_idle_recent():
     wipe(); on(); put(1, act=15, hand_idle={"handed_at": now0 - H, "from": "x", "to": "home-peer"}, **ho("home-peer", 12)); panes["team-aux"] = "idle"
+    return tick() == [] and mover_of(1) == "home-peer" and sent == []
+rule("8 an item the idle hand-over moved in the last 24 hours is not moved by the balancer (the two never both move one item inside a day)", probe_hand_idle_recent, [(HI, "handed_recently", lambda meta, now: False)])
+def probe_hand_idle_apart():
+    wipe(); on(); put(1, act=15, hand_idle={"handed_at": now0 - 30 * H, "from": "x", "to": "home-peer"}, **ho("home-peer", 12)); panes["team-aux"] = "idle"
     got = tick()
-    return got == ["a1"] and mt(1)["hand_idle"] == {"handed_at": now0 - H, "from": "x", "to": "home-peer"} and mt(1)["balance"]["count"] == 1
-check("8 the idle hand-over's record is a separate key: the balancer neither reads nor replaces it", probe_hand_idle_apart() is True)
+    return got == ["a1"] and mt(1)["hand_idle"] == {"handed_at": now0 - 30 * H, "from": "x", "to": "home-peer"} and mt(1)["balance"]["count"] == 1
+check("8 …after 24 hours it moves it, and the idle hand-over's record is a separate key the balancer neither reads nor replaces", probe_hand_idle_apart() is True)
 
 
 # ================================================================ 9. the notice to the mover it left
@@ -570,7 +588,7 @@ def probe_item_failure():
     try:
         with _Err() as e: got = tick()
     finally: server._handoff_exec = real
-    return got == ["a2"] and mover_of(1) == "home-peer" and "a1 not balanced: OSError: disk full" in e.text and len(told("balance")) == 1
+    return got == ["a2"] and mover_of(1) == "home-peer" and "a1 sending after the move failed: OSError: disk full" in e.text and len(told("balance")) == 1
 rule("10 one item's failure is a stderr line and stops the others", probe_item_failure, [(server, "_handoff_exec", lambda *a, **k: (_ for _ in ()).throw(OSError("every move fails")))])
 
 # the order matters: a move at ten minutes comes before the hand-off tick's reminder to the mover
@@ -615,6 +633,102 @@ def probe_torn_handoff():
     try: return tick() == []
     except Exception as e_: return f"raised {e_!r}"
 check("11 a hand-off record with no readable time is no wait: nothing moves and nothing raises", probe_torn_handoff() is True)
+
+
+# ================================================================ 12. builders only
+def probe_builders_list():
+    return server._balance_builders("projects/alpha") == ["team-back", "team-aux", "home-peer", "other-back"] and "team-rev" not in server._balance_builders("projects/alpha") and "lone-back" not in server._balance_builders("projects/alpha")
+rule("12 the candidates are builders only (a mandate that says build, maintain, merge or engineer): the project's own first, then other projects'; a reviewer is none", probe_builders_list, [(server, "_handoff_ranked", lambda project: [(2, i, n) for i, n in enumerate(("team-back", "team-aux", "team-rev"))])])
+def probe_reviewer_no_target():
+    wipe(); on(); put(1, mover="team-back", act=15, **ho("team-back", 12)); [busy_on(n, 1, first=60 + 10 * k) for k, n in enumerate(("team-aux", "other-back", "home-peer"))]
+    for n in ("team-rev", "team-aux", "team-back", "other-back", "home-peer"): panes[n] = "idle"
+    return tick() == [] and mover_of(1) == "team-back" and sent == []
+rule("12 a builder's item does not go to a reviewer with no open items: with every builder as loaded as its mover it stays", probe_reviewer_no_target, [(server, "_balance_builders", lambda project: server._hand_idle_builders(project))])
+def probe_reviewer_mover():
+    wipe(); on(); put(1, mover="team-rev", act=15, **ho("team-rev", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
+    return tick() == [] and mover_of(1) == "team-rev" and sent == []
+rule("12 an item whose mover is a reviewer is never balanced", probe_reviewer_mover, [(server, "_balance_builder_names", lambda: ["team-rev", "team-back", "team-aux", "other-back", "home-peer"])])
+def probe_stranger_mover():
+    wipe(); on(); put(1, mover="home-peer2", act=15, **ho("home-peer2", 12)); panes["team-aux"] = "idle"; panes["team-back"] = "idle"
+    return tick() == [] and mover_of(1) == "home-peer2" and sent == []
+rule("12 …nor one whose mover is no agent of any project page", probe_stranger_mover, [(server, "_balance_builder_names", lambda: ["home-peer2", "team-back", "team-aux"])])
+def probe_roles_unreadable():
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
+    real = server._balance_builder_names
+    def boom(): raise OSError("registry gone")
+    server._balance_builder_names = boom
+    try:
+        with _Err() as e: got = tick()
+    finally: server._balance_builder_names = real
+    return got == [] and mover_of(1) == "home-peer" and "builders not read" in e.text
+check("12 with no view of who builds nothing is judged a builder: nothing moves, a stderr line says so", probe_roles_unreadable() is True)
+
+# ================================================================ 13. bookkeeping when a send after the save fails
+def raising_handoff_tell(gid, owner, note, tag="wake", result=None):
+    if tag == "handoff": raise OSError("push gone")
+    return fake_tell(gid, owner, note, tag, result)
+def probe_send_fails():
+    queue_setup(n_queued=2); real = server._tell_woken; server._tell_woken = raising_handoff_tell
+    try:
+        with _Err() as e: got = tick()
+    finally: server._tell_woken = real
+    return got == ["a2", "a3"] and mover_of(2) == "team-back" and mover_of(3) == "team-aux" and len(told("balance")) == 1 and "sending after the move failed" in e.text
+rule("13 a failed send of the new builder's notice (after the save) does not lose the bookkeeping: the move counts, the next item sees the new load (+1 rule), and the former mover is still told", probe_send_fails,
+     [(HI, "mark_balanced", lambda meta, now, frm, to: meta.__setitem__("balance", {"at": now + 1, "from": frm, "to": to, "count": 1}))])
+def probe_send_fails_cap():
+    wipe(); on()
+    for i in range(1, 6): put(i, act=15, **ho("home-peer", 12))
+    for n in ("team-back", "team-aux", "other-back", "lone-back"): panes[n] = "idle"
+    real_b = server._balance_builders; server._balance_builders = lambda project: ["team-back", "team-aux", "other-back", "lone-back"]
+    real = server._tell_woken; server._tell_woken = raising_handoff_tell
+    try:
+        with _Err(): got = tick()
+    finally: server._tell_woken = real; server._balance_builders = real_b
+    return len(got) == 3
+rule("13 …and the cap of three per pass still holds", probe_send_fails_cap, [(HI, "mark_balanced", lambda meta, now, frm, to: meta.__setitem__("balance", {"at": now + 1, "from": frm, "to": to, "count": 1}))])
+
+# ================================================================ 14. the gates: [model] handoff, [audit] enabled, a pane that is gone
+def probe_handoff_off():
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
+    server._cfg.CFG.setdefault("model", {})["handoff"] = False
+    try: return tick() == [] and mover_of(1) == "home-peer" and sent == []
+    finally: server._cfg.CFG["model"].pop("handoff", None)
+rule("14 with `[model] handoff` off the balancer stands still, as the hand-off tick does", probe_handoff_off, [(server, "_handoff_on", lambda: True)])
+def probe_audit_disabled():
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
+    old = server._cfg.CFG["audit"].get("enabled"); server._cfg.CFG["audit"]["enabled"] = False
+    try: return tick() == [] and mover_of(1) == "home-peer" and sent == []
+    finally: server._cfg.CFG["audit"]["enabled"] = old
+rule("14 with `[audit] enabled` false the balancer stands still (it needs the audit on, not hand_idle or hourly_line)", probe_audit_disabled, [(server._cfg, "audit_enabled", lambda: True)])
+def probe_needs_only_audit():
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"
+    for k in ("hand_idle", "hourly_line"): server._cfg.CFG["audit"].pop(k, None)
+    return HI.enabled() is False and tick() == ["a1"]
+check("14 …and it runs with hand_idle and hourly_line off", probe_needs_only_audit() is True)
+def probe_dead_former():
+    wipe(); on(); put(1, act=15, **ho("home-peer", 12)); panes["team-aux"] = "idle"; dead["home-peer"] = "a retired session, its pane gone"
+    got = tick()
+    return got == ["a1"] and mover_of(1) == "team-back" and told("balance") == [] and "undelivered" not in mt(1)
+rule("14 a former mover whose pane is gone is not sent the disregard notice (nothing is left undelivered on the item that moved)", probe_dead_former, [(server, "_handoff_pane", lambda who, idx=None: "")])
+
+# ================================================================ 15. what the mover took before still counts
+HIST = lambda to, taken=now0 - 50 * MIN: [{"to": to, "from": "home-stew", "at": now0 - 60 * MIN, "delivered_at": now0 - 59 * MIN, "taken_at": taken, "ended_at": now0 - 40 * MIN, "ended": "x"}]
+def probe_history_taken(**meta):
+    def probe():
+        queue_setup(queued_meta=meta)
+        return tick() == [] and mover_of(2) == "home-peer" and sent == []
+    return probe
+cases15 = {
+    "the latest record names another mover and an earlier one to this mover was taken": dict(**ho("home-peer2", 30), handoff_history=HIST("home-peer")),
+    "the latest record is missing": dict(handoff_history=HIST("home-peer")),
+    "the latest record is torn": dict(handoff="torn", handoff_history=HIST("home-peer")),
+}
+for name, meta in cases15.items():
+    rule(f"15 a queued item stays with its mover when {name} (handoff_history carries its taken_at)", probe_history_taken(**meta), [(HI._ho, "HISTORY", "no_such_key")])
+def probe_history_other():
+    queue_setup(queued_meta=dict(handoff_history=HIST("home-peer2")))
+    return tick() == ["a2"]
+check("15 control: a taken hand-off in the history that was to another session, or one never taken, is no start of this mover's", probe_history_other() is True and (queue_setup(queued_meta=dict(handoff_history=HIST("home-peer", taken=None))) or tick() == ["a2"]))
 
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

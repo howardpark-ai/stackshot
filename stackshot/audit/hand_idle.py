@@ -32,7 +32,7 @@ builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance
 
   balance_enabled() / balance_minutes()         `[audit] balance` (only a TOML true) and `[audit] balance_minutes` (default 10, floor 1), both read at use
   balance_queue(items, now, window, front)      the queue rule (model/queued.py) read over the balancer's own window, whatever `[model] queued_behind` says: {queued item: the item it waits behind}
-  balance_due(items, gid, now, minutes, front, behind, same, anchored)    the row of an item to move now, else None
+  balance_due(items, gid, now, minutes, front, behind, same, anchored, builder)    the row of an item to move now, else None
   balance_all(...)                              [(gid, row)] in id order; reads only
   load_counts / load_of / shift                 open items per builder (`busy_movers`, names merged with `same`), updated as the pass moves items
   pick_least(...) / balance_ok(kind, to, frm)   the least-loaded builder, and whether moving to it is an improvement
@@ -40,17 +40,19 @@ builder) or QUEUED BEHIND its mover's other item and has waited `[audit] balance
 
 An item is moved when all of these hold:
 
-  - it is open, on an agent as the board shows it (`silence.reading`), not held, and its mover is a session that is no front agent;
+  - it is open, on an agent as the board shows it (`silence.reading`), not held, and its mover is a BUILDER (`builder(name)`: a background agent whose mandate says build, maintain, merge or engineer; a reviewer's or any other
+    session's item is never balanced) and no front agent;
   - it waited the whole time: its hand-off (when its latest one names the mover) was delivered, else made, at least `balance_minutes` ago, and `silence.clock` is that old too;
   - it is NOT STARTED (an untaken hand-off to a session, `handoff.awaiting_session`) or QUEUED (`balance_queue`: the mover has another item in hand with activity inside the window and this one has none);
-  - the mover has NOT STARTED it: no `taken_at`, no step status in progress or done and no step marked done on a step that opens with the mover's name, no subagent running (`silence.subagent_running`), no anchor scoped to it, and
+  - the mover has NOT STARTED it: no `taken_at` (in the latest hand-off to it, nor in `handoff_history`), no step status in progress or done and no step marked done on a step that opens with the mover's name, no subagent running (`silence.subagent_running`), no anchor scoped to it, and
     no pull request event (a CI result, review, comment, merge or commit) as its last activity;
-  - it was not moved by the balancer in the last 24 hours and has been moved fewer than `BALANCE_LIFETIME` (2) times; one at the lifetime cap is left to the ladders, and -main is told once (`capped_at`).
+  - it was not moved by the idle hand-over (`metadata.hand_idle`) nor by the balancer in the last 24 hours and has been moved fewer than `BALANCE_LIFETIME` (2) times; one at the lifetime cap is left to the ladders, and -main is told once (`capped_at`).
 
-Which builder: the candidates are the item's project's builders (`server._hand_idle_builders`) less any whose pane is known dead, the item's own mover, and every name in the hand-off record's `tried`; the pick is the one with the fewest
-open items (a busy pane only breaks a tie: an idle one first; then the candidates' order). An untaken hand-off moves when the pick has strictly fewer open items than the mover (`to < from`, the mover's count includes the item);
-a queued item only when `to + 1 < from`, so the move does not just swap the queue. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With no such builder the item stays, one History line says so and -main is told once per
-item per 24 hours (`none_at`).
+Which builder: the candidates are the builders only (`server._balance_builders`: the item's project's background agents whose mandate says build, maintain, merge or engineer, then those of any other project) less any whose pane
+is known dead, the item's own mover, every name in the hand-off record's `tried` and any front agent; the pick is the one with the fewest open items (a busy pane only breaks a tie: an idle one first; then the candidates' order).
+The move must improve the spread, the mover's count including the item: an untaken hand-off moves when `to == 0 or to + 1 < from` (a lone item goes to an empty builder; a swap does not happen), a queued item only when
+`to + 1 < from`. At most `BALANCE_MAX_PER_TICK` (3) items are moved in a pass. With NO eligible candidate (no live builder) the item stays, one History line says so and -main is told once per item per 24 hours (`none_at`; while that
+note stands the pass does not look for a builder again); a pick that is no improvement is silent (a log line only).
 
 Pure: no server import, no file, no clock read. Stdlib plus the repo's modules."""
 from __future__ import annotations
@@ -246,6 +248,9 @@ def started_reason(item: dict[str, Any], mover: str, now: float, same: Callable[
     r = _ho.record_of(item)
     if r and r.get("taken_at") and same(r.get("to"), mover):
         return "its hand-off was taken"
+    hist = meta.get(_ho.HISTORY)
+    if any(isinstance(h, dict) and h.get("taken_at") and same(h.get("to"), mover) for h in (hist if isinstance(hist, list) else [])):
+        return "an earlier hand-off to it was taken"      # the latest record may be missing, torn or another session's: what the mover took before still counts
     if any(l["state"] in ("in progress", "done") and same(l["agent"], mover) for l in _work.lines_of(meta)):
         return "a step of the mover has a status in progress or done"
     if any(s["status"] == _steps.DONE and same(_steps.opener(s["text"]), mover) for s in _steps.view(meta)):
@@ -277,9 +282,9 @@ def balance_queue(items: dict[str, dict[str, Any]], now: float, window: float, f
 
 
 def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes: float, front: Callable[[Any, str], bool] | None, behind: dict[str, str], same: Callable[[Any, Any], bool],
-                anchored: Callable[[str, dict[str, Any]], bool] | None = None) -> dict[str, Any] | None:
+                anchored: Callable[[str, dict[str, Any]], bool] | None = None, builder: Callable[[str], bool] | None = None) -> dict[str, Any] | None:
     """The row of the open item `gid` when the balancer is to move it now (see the module doc), else None: {"mover", "project", "kind" ("untaken" | "queued"), "tried", "told_none", "capped"}. `behind` is the queue
-    (`balance_queue`); `anchored(gid, item)` says whether an anchor is scoped to the item. A row with `capped` true is an item at its lifetime cap whose -main agent is not yet told: it is not to be moved."""
+    (`balance_queue`); `anchored(gid, item)` says whether an anchor is scoped to the item; `builder(name)` says whether the mover is a builder (None reads every session as one). A row with `capped` true is an item at its lifetime cap whose -main agent is not yet told: it is not to be moved."""
     item = items.get(gid) or {}
     if item.get("status") != "open":
         return None
@@ -289,6 +294,8 @@ def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes:
     project = str(meta.get("project") or "")
     if front is not None and front(mover, project):
         return None      # an item a front agent moves is the owner's work, never moved
+    if builder is not None and not builder(mover):
+        return None      # a reviewer's (or any non-builder's) item is not the balancer's to move
     window = max(_num(minutes), 0.0) * 60.0
     rec = _ho.record_of(it)
     if rec and not same(rec.get("to"), mover):
@@ -307,8 +314,8 @@ def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes:
         return None
     if started_reason(it, mover, now, same, (lambda x: anchored(gid, x)) if anchored is not None else None):
         return None
-    if balanced_recently(meta, now):
-        return None
+    if balanced_recently(meta, now) or handed_recently(meta, now):
+        return None      # moved by the balancer, or by the idle hand-over (`metadata.hand_idle`), in the last 24 hours: the two never both move one item inside a day
     capped = balance_count(meta) >= BALANCE_LIFETIME
     if capped and balance_capped_told(meta):
         return None
@@ -317,14 +324,14 @@ def balance_due(items: dict[str, dict[str, Any]], gid: str, now: float, minutes:
 
 
 def balance_all(items: dict[str, dict[str, Any]], now: float, minutes: float, front: Callable[[Any, str], bool] | None, behind: dict[str, str], same: Callable[[Any, Any], bool],
-                anchored: Callable[[str, dict[str, Any]], bool] | None = None) -> list[tuple[str, dict[str, Any]]]:
+                anchored: Callable[[str, dict[str, Any]], bool] | None = None, builder: Callable[[str], bool] | None = None) -> list[tuple[str, dict[str, Any]]]:
     """[(gid, row)] of every item the balancer is to deal with now, in id order; reads only. An item that cannot be read is left out."""
     out: list[tuple[str, dict[str, Any]]] = []
     for gid in sorted(items, key=_ac._num):
         if items[gid].get("status") != "open":
             continue
         try:
-            row = balance_due(items, gid, now, minutes, front, behind, same, anchored)
+            row = balance_due(items, gid, now, minutes, front, behind, same, anchored, builder)
         except Exception:  # noqa: BLE001
             continue
         if row is not None:
@@ -375,9 +382,9 @@ def pick_least(candidates: list[str], load: dict[str, int], status: Callable[[st
 
 
 def balance_ok(kind: str, to_load: int, from_load: int) -> bool:
-    """Is a move to a builder with `to_load` open items an improvement for an item whose mover has `from_load` (the item itself counted)? An untaken hand-off: strictly fewer (`to < from`). A queued item: `to + 1 < from`,
-    since the item will count for the builder it goes to."""
-    return to_load + 1 < from_load if kind == "queued" else to_load < from_load
+    """Is a move to a builder with `to_load` open items an improvement of the spread for an item whose mover has `from_load` (the item itself counted)? The item will count for the builder it goes to, so `to + 1 < from`
+    for a queued item; an untaken hand-off also moves to an empty builder (`to == 0`: the lone item goes, a swap of equals does not)."""
+    return to_load + 1 < from_load or (kind != "queued" and to_load == 0)
 
 
 def balance_why(kind: str, minutes: float) -> str:
