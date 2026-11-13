@@ -117,7 +117,6 @@ from stackshot.waits import dated_wait as _dw  # noqa: E402  — a doing item th
 from stackshot.web import home as _home  # noqa: E402  — the home page's three lists (your-move, agents, waiting) on that model (home.py: the items API carries the list)
 from stackshot.core import call_log as _calls  # noqa: E402  — the count of refused writes and the corrections the server made instead (call_log.py)
 from stackshot.model import model_guards as _mg  # noqa: E402  — the item model's write guards and the report on existing items (model_guards.py)
-from stackshot.waits import self_wait as _selfwait  # noqa: E402  — a wait a session sets on its own item names its blocker, and a model says whether the step could be done now (self_wait.py)
 from stackshot.model import steps as _steps  # noqa: E402  — the checklist behind next: done, dropped and open steps, next derived from it (steps.py)
 from stackshot.waits import event_waits as _ew  # noqa: E402  — a wait on a fleet event (wait_kind=event): the phrase, what matches it (event_waits.py)
 from stackshot.waits import watchers as _watch  # noqa: E402  — the waits' watchers of the item model: what ends a wait, the relay's ask, the chases (watchers.py)

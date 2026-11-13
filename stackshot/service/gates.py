@@ -1,6 +1,6 @@
 """gates.py: the write gates of the create, update and complete tools, and the checks that come before the item lock: the rules that refuse a write, with the text of each refusal.
 
-Every gate raises `ToolError` itself, with the sentence the writer reads, and returns nothing (a few return what they normalised: the stored form of a list, the replacing item's id of a close). A gate judges the item a
+Every gate raises `ToolError` itself, with the sentence the writer reads, and returns nothing (a few return what they normalized: the stored form of a list, the replacing item's id of a close). A gate judges the item a
 write leaves, or the arguments it passes, against a rule of the model (model/, waits/, anchors/) and never writes. `service/create.py` and `service/update.py` call them in the order those modules keep; the order is part
 of what a write means. The checks that come before the lock (`fix_front_mover`, `until_in`, `ask_pre`, `gate_self_wait`) are called by the tool wrappers on the surface, which stay in web/server.py and only parse input.
 
@@ -200,7 +200,7 @@ def fix_front_mover(field: str, value: str, sender: str, project: str, current: 
 
 def gate_front_step(gid: str, item: dict[str, Any], before: list[dict[str, Any]], after: list[dict[str, Any]], sender: str) -> None:
     """A session's create or update may not put a NEW or reworded open step that opens with a front agent on an item another session moves: a front agent gets no work notice and its own wakes are
-    refused, so nothing could wake it for the step and it would sit until the owner noticed (the mover check of _fix_front_mover, applied to a step line). `before` and `after` = the checklist as it stood and
+    refused, so nothing could wake it for the step and it would sit until the owner noticed (the mover check of fix_front_mover, applied to a step line). `before` and `after` = the checklist as it stood and
     as this write leaves it (`item` = the item as the write leaves it); only an open step whose text is not among the open steps before is judged, so a step already held by a front agent stays whatever else the
     write changes. Passes: the item's own mover (its own item), a background agent or the owner as opener, an item with no mover or a retired one (front_step.held reads the rest). A failing read lets the write through."""
     h = _hooks()
