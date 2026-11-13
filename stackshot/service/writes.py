@@ -35,6 +35,7 @@ from stackshot.model import activity as _activity
 from stackshot.model import item_project as _ip
 from stackshot.model import last_activity as _lastact
 from stackshot.model import migration as _mig
+from stackshot.model import model as _model
 from stackshot.model import progress as _progress
 from stackshot.router import routing as _routing
 from stackshot.service.store import _path
@@ -143,12 +144,45 @@ def _stamp_progress(item: dict[str, Any], before: dict[str, Any] | None, writer:
         print(f"progress: {item.get('id')} clock not stamped: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 
 
+def _is_mover(item: dict[str, Any], writer: str) -> bool:
+    """Is `writer` (a session's name or id) the item's mover as the item stands now: the model's mover while it is alive, the post-wake mover while it waits, else the stored mover (the board's own reading,
+    tools/board_report.mover_of)? A name, an alias and an id of one session are one mover (`anchors.canonical`: the registry's permanent id, else the fleet's). No writer, no mover or the owner as mover is no."""
+    who = str(writer or "").strip()
+    if not who:
+        return False
+    mod = _model.derive(item)
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    mover = (mod.mover if mod.state == _model.ALIVE else (mod.wait.mover if mod.wait else "")) or _model.clean(meta.get("mover"))
+    if not mover or _model.is_owner(mover):
+        return False
+    nm = _anc.names()
+    return bool({who.casefold(), _anc.canonical(who, nm).casefold()} & {mover.casefold(), _anc.canonical(mover, nm).casefold()})
+
+
+def _update_signals(item: dict[str, Any], before: dict[str, Any] | None, writer: str, now: float) -> list[dict[str, Any]]:
+    """The `update` signals of a save that is a session's real write as the item's mover: what `last_activity.update_signals` finds, kept only when `writer` is the mover (asked last: it reads the fleet's sessions).
+    [] for anything else, and for a save whose item or earlier version is not what it should be; it never raises."""
+    try:
+        meta = item.get("metadata")
+        sigs = _lastact.update_signals(before.get("metadata") if isinstance(before, dict) else None, meta if isinstance(meta, dict) else None, now)
+        return sigs if sigs and _is_mover(item, writer) else []
+    except Exception as e:  # noqa: BLE001  — never takes the step, state or merge stamp of the same save with it
+        print(f"last activity: {item.get('id')} update not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
+        return []
+
+
 def _stamp_last_activity(item: dict[str, Any], before: dict[str, Any] | None, writer: str = "", author: tuple[str, str] | None = None, kind: str = "") -> None:
     """Record in `metadata.last_activity` what this save did that is visible activity (last_activity.stamp: the progress clock's own test, with the words for it); the events on a tied pull request come
-    through `_event_activity_tick`. It only records, with no publish of its own (the home page is kept for 30 s, then drawn again, and picks the record up); the On agent rows and the item page show it. A failure here never fails the write."""
+    through `_event_activity_tick`. A session's own write as the item's mover that sets a status line (the update tool's `work`) to text different from the step's previous status is an `update`, the item's
+    hourly update, counted here beside the audit's line (`last_activity.update_signals`): the same text again, a write by anyone else (a front agent relaying, the owner's answer, the audit) and the server's own
+    save are none. It only records, with no publish of its own (the home page is kept for 30 s, then drawn again, and picks the record up); the On agent rows and the item page show it. A failure here never fails the write."""
     try:
         who = [writer, _session_label(writer) if writer else "", author[0] if author else ""]
-        _lastact.stamp(item, before, time.time(), _activity.counts(_activity.kind_of(writer, author, kind), who, audit_writer_names()))
+        k = _activity.kind_of(writer, author, kind)
+        real = _activity.counts(k, who, audit_writer_names())
+        now = time.time()
+        extra = _update_signals(item, before, writer, now) if real and k == _activity.WRITE and item.get("status") == "open" else []
+        _lastact.stamp(item, before, now, real, extra)
     except Exception as e:  # noqa: BLE001  — groundwork for a later part; a write is never refused for it
         print(f"last activity: {item.get('id')} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
 

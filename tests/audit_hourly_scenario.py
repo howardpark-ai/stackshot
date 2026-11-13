@@ -28,6 +28,8 @@ network, no model call, no message sent.
   21 an empty or partial fleet index reads the mover unknown, never idle; the lookups by a session id (a transcript id, a neutral heartbeat id) beside the lookups by name
   22 a role map that cannot be read reads the mover as front (never as a builder) for the hourly line
   23 a pull request number written alone is the item's own repository's: two items anchored to the same number in two repositories are told apart by the URL or `owner/repo#n`
+  24 a mover's own status write with new text is the item's hourly update (kind `update`, the text its words, the row reads it), as the audit's line is: the same text again, a write by anyone but the mover and a cleared status
+     are not; the audit's own line still stamps beside it and the newer of the two is the record
   20 the tie by description first, the 90-minute and 6-hour boundaries through the audit, an absent registry row (idle, unless the fleet heartbeat holds the session running elsewhere: unknown) against a present but unreadable one (unknown), a read error kept for the pass, a front test that raises
 
 
@@ -961,6 +963,147 @@ put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90); SUBS.cle
 tick(); k_url = [lines(i)[0]["kind"] for i in (1, 2)]
 check("23 …through the audit: a subagent whose brief says `PR 5` while two of the mover's items are anchored to pull request 5 of two repositories leaves both UNKNOWN (not idle, not handed on); with the URL of one of them only that item is verified and the other reads idle",
       k_amb == ["audit_unknown", "audit_unknown"] and k_url == ["audit", "audit_idle"], (k_amb, k_url))
+clean_pane()
+
+# ================================================================ 24. a mover's status write with new text is the hourly update
+from stackshot.service import writes as WR24
+WR24.time = CLK      # the save stamps from the server's own (fake) clock
+def tagged(text, state="in progress", ts=0.0, who="home-peer"):
+    """The mover's one open step, with a status line (its tag) when `text` is given."""
+    st = {"text": f"{who}: do the thing", "status": "open", "by": who, "at": 0}
+    if text: st["tag"] = {"text": text, "state": state, "ts": ts}
+    return st
+def save24(i, at, mutate, writer="home-peer", **kw):
+    """A real save of item `i` by `writer` at the fake time `at`, `mutate` changing the loaded item's metadata first."""
+    d_ = server._load(f"a{i}"); mutate(d_["metadata"]); CLK.t = at
+    try: WR24.save(f"a{i}", d_, writer=writer, **kw)
+    finally: CLK.t = None
+def status_of(i, text, state="in progress", ts=0.0, who="home-peer"): return lambda m: m.update(steps=[tagged(text, state, ts, who)])
+def rec24(i): return mt(i).get("last_activity")
+clean_pane()
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+for i_ in (1, 2, 3, 4, 5): put(i_, mover="home-peer", act=90, steps=[tagged(None)])
+T0 = now0 - 30 * MIN
+save24(1, T0, status_of(1, "building the fix", ts=T0))
+check("24 the mover's first status line is an update: the record is kind update at the save's time, the words the text itself; the activity clock moved too",
+      rec24(1) == {"at": T0, "kind": "update", "what": "building the fix"} and rd(1)["activity"] == T0, (rec24(1), rd(1).get("activity")))
+a24 = parts("a1", T0 + 2 * MIN)
+check("24 …the On agent row reads it as an audit line's: active, the age <1m, `Last: building the fix at hh:mm`", a24 is not None and 'data-b="ok"' in a24[1] and ">active<" in a24[1] and last_words(a24[1]) == f"Last: building the fix at {hm(T0)}", a24)
+save24(1, T0 + 10 * MIN, status_of(1, "tests pass, opening the PR", ts=T0 + 10 * MIN))
+check("24 a second, different text is the newer update", rec24(1) == {"at": T0 + 10 * MIN, "kind": "update", "what": "tests pass, opening the PR"}, rec24(1))
+save24(1, T0 + 20 * MIN, status_of(1, "  TESTS pass,   opening the PR ", ts=T0 + 10 * MIN))
+check("24 the same text again (case and spacing aside) is no update: the record keeps its time, and the save still moved the activity clock", rec24(1) == {"at": T0 + 10 * MIN, "kind": "update", "what": "tests pass, opening the PR"} and rd(1)["activity"] == T0 + 20 * MIN, (rec24(1), rd(1).get("activity")))
+save24(1, T0 + 22 * MIN, lambda m: m.update(steps=[tagged("tests pass, opening the PR", "done", T0 + 22 * MIN)]))
+check("24 …nor is the same text moved to another state: only the words count", rec24(1)["at"] == T0 + 10 * MIN, rec24(1))
+save24(1, T0 + 24 * MIN, lambda m: m.update(steps=[tagged(None)]))
+check("24 …nor a cleared status line", rec24(1)["at"] == T0 + 10 * MIN, rec24(1))
+# a write by anyone but the mover
+save24(2, T0, status_of(2, "building the fix", ts=T0), writer="home-front")
+save24(2, T0 + MIN, status_of(2, "somebody else's words", ts=T0 + MIN), writer="home-peer2")
+save24(2, T0 + 2 * MIN, status_of(2, "the owner's words", ts=T0 + 2 * MIN), writer="", author=("Oliver", "board"))
+save24(2, T0 + 3 * MIN, status_of(2, "a bookkeeping save", ts=T0 + 3 * MIN), writer="")
+save24(2, T0 + 4 * MIN, status_of(2, "the audit's own write", ts=T0 + 4 * MIN), writer=server.NAME)
+check("24 a status written by someone who is not the item's mover (a front agent, another session, the owner's answer, the server's own save, the audit's writer) is no update: the item has no record", rec24(2) is None, rec24(2))
+save24(3, T0, status_of(3, "by the session id", ts=T0), writer=U["home-peer"])
+check("24 the mover writing under its session id (not its name) is the mover", rec24(3) == {"at": T0, "kind": "update", "what": "by the session id"}, rec24(3))
+save24(4, T0, lambda m: m.update(steps=[tagged("building the fix", ts=T0), {"text": "home-peer: second", "status": "open", "by": "home-peer", "at": 0}]), writer="home-peer")
+save24(4, T0 + 5 * MIN, lambda m: m.update(steps=[{**tagged("building the fix", ts=T0), "text": "home-peer: do the thing, reworded"}, {"text": "home-peer: second", "status": "open", "by": "home-peer", "at": 0}]), writer="home-peer")
+check("24 a step reworded with its status line kept is no update (the text is one the session already had)", rec24(4) == {"at": T0, "kind": "update", "what": "building the fix"}, rec24(4))
+# the audit's own line still stamps, and the newest wins
+clean_pane(); panes["home-peer"] = "busy"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()      # the mover's one item on an agent, so its busy pane verifies it
+put(5, mover="home-peer", act=90, steps=[tagged(None)])
+save24(5, now0 - 70 * MIN, status_of(5, "an hour ago", ts=now0 - 70 * MIN))
+d5 = rd(5); d5["activity"] = d5["progress"] = now0 - 90 * MIN; wr5 = (T / "store/a/5.json"); wr5.write_text(json.dumps(d5))      # the hour's silence is the item's, whatever the save above moved
+got24 = tick()
+check("24 the audit's own line still stamps (kind audit, its words) over an older update, and the update's own text is no longer the record", got24 == ["a5"] and rec24(5) == {"at": now0, "kind": "audit", "what": "audit verified the mover's pane is in a turn"} and lines(5)[0]["kind"] == "audit", (got24, rec24(5), lines(5)))
+save24(5, now0 + 5 * MIN, status_of(5, "back at it", ts=now0 + 5 * MIN))
+check("24 …and a later mover's update is newer than the audit line: newest wins both ways", rec24(5) == {"at": now0 + 5 * MIN, "kind": "update", "what": "back at it"}, rec24(5))
+# the hourly clock: an update resets it as the audit line does
+clean_pane(); panes["home-peer"] = "idle"
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+put(6, mover="home-peer", act=90, steps=[tagged(None)])
+save24(6, now0 - 5 * MIN, status_of(6, "still going", ts=now0 - 5 * MIN))
+check("24 an item whose mover wrote new text 5 minutes ago is not owed a line (the update is the hour's update), the row reads its words and an age under an hour",
+      tick() == [] and lines(6) == [] and last_words(parts("a6", now0)[1]) == f"Last: still going at {hm(now0 - 5 * MIN)}" and 'data-b="ok"' in parts("a6", now0)[1], parts("a6", now0))
+check("24 …an hour later, when the mover has written nothing more, the audit's line is owed again (an idle one: nothing verified, the update stays the record)",
+      tick(now0 + 56 * MIN) == ["a6"] and lines(6)[0]["kind"] == "audit_idle" and rec24(6)["kind"] == "update", (lines(6), rec24(6)))
+clean_pane()
+# --- what the first review found: a status text reused on a later stage, and each way a write is no update
+clean_pane()
+for p_ in (T / "store/a").glob("*.json"): p_.unlink()
+S1 = {"text": "home-peer: stage 1", "status": "done", "by": "home-peer", "at": 1, "tag": {"text": "waiting for CI", "state": "done", "ts": 1.0}}
+S2 = {"text": "home-peer: stage 2", "status": "open", "by": "home-peer", "at": 0}
+put(7, mover="home-peer", act=90, steps=[S1, S2], next="home-peer: stage 2")
+save24(7, T0, lambda m: m.update(steps=[S1, {**S2, "tag": {"text": "waiting for CI", "state": "in progress", "ts": T0}}]))
+check("24 a status text the mover used on an earlier stage is a first status on a later step that already existed with none: it is an update", rec24(7) == {"at": T0, "kind": "update", "what": "waiting for CI"}, rec24(7))
+# a mover that is the audit's own name: the audit's writes are never an update
+put(8, mover=server.NAME, act=90, steps=[tagged(None, who=server.NAME)], next=f"{server.NAME}: do the thing", needs=[server.NAME])
+save24(8, T0, status_of(8, "the audit's own words", ts=T0, who=server.NAME), writer=server.NAME)
+check("24 the audit's own writer is no mover for this: the audit's name as the item's mover and as the writer stamps no update (the audit's writes never count as work)", rec24(8) is None, rec24(8))
+# a mover's write filed under another kind of activity, or under none the clock counts
+put(9, mover="home-peer", act=90, steps=[tagged(None)])
+for n_, kind_ in enumerate((ACT.MESSAGE, ACT.EVENT), 1): save24(9, T0 + n_ * MIN, status_of(9, f"filed as {kind_}", ts=T0), activity=kind_)
+check("24 a mover's save filed as a message or an event of an anchor (kinds the activity clock counts) is no status write by the mover: no update", rec24(9) is None, rec24(9))
+for n_, kind_ in enumerate((ACT.BOOKKEEPING, ACT.MIGRATION, ACT.CONFIRM), 3): save24(9, T0 + n_ * MIN, status_of(9, f"filed as {kind_}", ts=T0), activity=kind_)
+check("24 …nor is a save of the server's own kind (bookkeeping, a migration, a confirm) written under the mover's name: it is no real write about the work", rec24(9) is None, rec24(9))
+save24(9, T0 + 9 * MIN, status_of(9, "a plain write", ts=T0 + 9 * MIN))
+check("24 …while the same mover's plain write (no kind given) does", rec24(9) == {"at": T0 + 9 * MIN, "kind": "update", "what": "a plain write"}, rec24(9))
+# the owner is the mover (the item waits on his decision): a session's status write is no update
+put(10, mover="home-peer", act=90, steps=[tagged(None)], needs=["decision"], state="your-call")
+save24(10, T0, status_of(10, "building while he decides", ts=T0))
+check("24 a session writing a status while the owner is the item's mover (it waits on his decision) is no update, whatever mover the item stores", (rec24(10) or {}).get("kind") != "update" and server._model.is_owner(server._model.derive(rd(10)).mover), (rec24(10), server._model.derive(rd(10)).mover))
+put(16, mover="home-peer", act=90, steps=[tagged(None)]); d16 = rd(16); d16["metadata"].pop("mover"); (T / "store/a/16.json").write_text(json.dumps(d16))      # no stored mover: the model reads it from the needs
+save24(16, T0, status_of(16, "mover read from the needs", ts=T0), ctx=WR24.QUIET)
+put(17, mover="Oliver", act=90, steps=[tagged(None, who="Oliver")], next="Oliver: do the thing", needs=["decision"], state="your-call")
+save24(17, T0, status_of(17, "a session named as the owner", ts=T0, who="Oliver"), writer="Oliver")
+check("24 the mover is the model's, not the stored field alone (an item with no stored mover whose needs name the session: its write is an update), and a session that carries the owner's name while he is the mover is not him: no update",
+      rec24(16) == {"at": T0, "kind": "update", "what": "mover read from the needs"} and rec24(17) is None and server._model.is_owner(server._model.derive(rd(17)).mover), (rec24(16), rec24(17), mt(16).get("mover")))
+# a mover known by another name of the same session: the registry's alias, and its id
+from stackshot.fleet import sessions_registry as SR24
+sala24 = T / "sala/a"; sala24.mkdir(parents=True)
+PID = "00000000-0000-4000-8000-0000000000aa"
+(sala24 / "session-registry.json").write_text(json.dumps({"schema": 1, "machine": "a", "written": "2026-10-22T07:00:00Z", "sessions": {PID: {"id": PID, "name": "home-peer-new", "aliases": ["home-peer-old"], "project": None, "project_key": None,
+        "role": None, "lane": "max", "model": "opus", "effort": "medium", "pane": "home-peer-new", "cwd": "/srv/work", "state": "live", "created": "2026-10-21T21:00:00Z", "retired_at": None, "transcripts": []}}}))
+cl24 = server._cfg.CFG.setdefault("client", {}); had24 = cl24.get("session_links"); cl24["session_links"] = str(T / "sala"); SR24.reset()
+try:
+    put(11, mover="home-peer-old", act=90, steps=[tagged(None, who="home-peer-old")], next="home-peer-old: do the thing", needs=["home-peer-old"])
+    save24(11, T0, status_of(11, "under its new name", ts=T0, who="home-peer-old"), writer="home-peer-new")
+    a24_ = rec24(11)
+    put(12, mover=PID, act=90, steps=[tagged(None, who=PID)], next=f"{PID}: do the thing", needs=[PID])
+    save24(12, T0, status_of(12, "by its name, stored as its id", ts=T0, who=PID), writer="home-peer-new")
+    b24_ = rec24(12)
+    put(13, mover="home-peer-old", act=90, steps=[tagged(None, who="home-peer-old")], next="home-peer-old: do the thing", needs=["home-peer-old"])
+    save24(13, T0, status_of(13, "somebody else", ts=T0, who="home-peer-old"), writer="home-peer2")
+    c24_ = rec24(13)
+finally:
+    if had24 is None: cl24.pop("session_links", None)
+    else: cl24["session_links"] = had24
+    SR24.reset()
+check("24 a mover stored under an old name (the registry's alias) is the mover when its current name writes, and one stored as its permanent id likewise; another session is still not",
+      a24_ == {"at": T0, "kind": "update", "what": "under its new name"} and b24_ == {"at": T0, "kind": "update", "what": "by its name, stored as its id"} and c24_ is None, (a24_, b24_, c24_))
+# an odd earlier version or item never takes the step, state or merge stamp of the same save with it
+d24 = server._load("a7"); d24["metadata"]["steps"] = "not a list"; CLK.t = T0 + MIN
+try: WR24.save("a7", d24, writer="home-peer")
+finally: CLK.t = None
+bad_before = server._load("a7"); bad_before["metadata"] = ["torn"]
+err24 = _Err()
+with err24: ups24 = WR24._update_signals(rd(7), bad_before, "home-peer", T0), WR24._update_signals({"id": "x", "metadata": None}, None, "home-peer", T0), WR24._update_signals({"id": "x"}, {"metadata": 3}, "home-peer", T0)
+check("24 an earlier version or item that is not what it should be gives no update and never raises out of the save's stamp", ups24 == ([], [], []), (ups24, err24.text))
+def tripped(*a, **k): raise RuntimeError("fleet unreadable")
+mv24 = WR24._is_mover; WR24._is_mover = tripped
+try:
+    put(14, mover="home-peer", act=90, steps=[tagged(None)]); d14 = server._load("a14"); d14["metadata"]["state"] = "verifying"; d14["metadata"]["steps"] = [tagged("x", ts=T0)]; CLK.t = T0
+    with _Err() as e14: WR24.save("a14", d14, writer="home-peer")
+finally: WR24._is_mover = mv24; CLK.t = None
+check("24 a mover test that fails costs only the update: the save is written, the state change of the same save is still stamped, and the failure is on stderr", rec24(14) is not None and rec24(14)["kind"] == "state_change" and "update not recorded" in e14.text, (rec24(14), e14.text))
+calls24 = []; mv24 = WR24._is_mover; WR24._is_mover = lambda *a, **k: (calls24.append(1), mv24(*a, **k))[1]
+try:
+    put(15, mover="home-peer", act=90, steps=[tagged("same words", ts=T0)])
+    save24(15, T0 + MIN, lambda m: m.update(note="no status change here")); save24(15, T0 + 2 * MIN, status_of(15, "same words", ts=T0)); n_plain = len(calls24)
+    save24(15, T0 + 3 * MIN, status_of(15, "new words", ts=T0 + 3 * MIN)); n_new = len(calls24)
+finally: WR24._is_mover = mv24
+check("24 the mover test (it reads the fleet's sessions) is asked only when a save carries new status text: none for a save with no status change or the same text, one for a new text", (n_plain, n_new) == (0, 1), (n_plain, n_new))
 clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)

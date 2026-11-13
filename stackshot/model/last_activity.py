@@ -10,15 +10,14 @@ The one definition of activity. Something visible happened to the item when:
   own bookkeeping and counts only by a status or phase change, as it does for progress; or
   a pull request tied to the item had an event: a CI result (failed, or a new head passing), a comment by a person, a review, a merge, a new head commit (anchors/event_log.py, tied by merge_tie).
 
-What is not activity: a status line (`work`), a reply or a "no change" answer, a note, a message, a bare confirm, a new or reworded step, a description edit; and the server's own
+What is not activity: a status line that repeats the previous text, or one written by anyone but the item's mover (a new text by the mover is an `update`, below), a reply or a "no change" answer, a note, a message, a bare confirm, a new or reworded step, a description edit; and the server's own
 writes about the item, which are not in progress either: a History line (the ladder's, an audit pass's, a merge pass's reason), the ask itself, the step a session or the server
 makes for the owner. Those move the `activity` clock (activity.py), which this does not touch, and not this record.
 
 Signals have named kinds, and the record keeps the kind of the newest: `step_done`, `step_dropped`, `state_change`, `pr_merged`, `ci_result`, `review`, `comment`, `commit` (stamped today: the
-progress signals of a save and the events of a tied pull request), and `audit` (stamped by the hourly audit line, audit/hourly.py `stamp_signal`, when the line verified something: a pane in a turn, a subagent running; its `what` is "audit verified …"; a line that verified nothing stamps nothing),
-and one that is defined and tested here but not stamped by anything yet: `update` (a mover's status write whose text differs from the previous status text, `update_signal`; its `what` is the short text itself). A later part stamps
-`update`; this one only knows it, so the record is extended by adding a signal, not by changing the record.
-A reply that says nothing changed is no `update` (same text as before), and the ladder's and the server's own lines are none of these kinds.
+progress signals of a save and the events of a tied pull request), `audit` (stamped by the hourly audit line, audit/hourly.py `stamp_signal`, when the line verified something: a pane in a turn, a subagent running; its `what` is "audit verified …"; a line that verified nothing stamps nothing),
+and `update` (a mover's own status write whose text differs from the previous status text: `update_signal` is the test, `update_signals` finds the writes of a save, and service/writes.py stamps it when the writer is the item's mover; its `what` is the short text itself).
+A reply that says nothing changed is no `update` (same text as before), a status written by anyone but the mover is none, and the ladder's and the server's own lines are none of these kinds.
 
 Newest wins: a candidate replaces the stored record only when it is strictly later; a record never goes back. A candidate that is torn (no time, no words, a time that is not a number or is past MAX_AT, a kind that is none of KINDS)
 is skipped. The caller passes `now`; a candidate time after it is read as `now`.
@@ -39,6 +38,7 @@ import unicodedata
 from typing import Any, Iterable
 
 from stackshot.model import progress as _progress
+from stackshot.model import steps as _steps
 
 FIELD = "last_activity"
 MAX_WHAT = 80         # characters of the words kept
@@ -49,11 +49,11 @@ BAND_BAD_S = 60 * 60    # the age past which it reads "idle over 1 h" (red): str
 SKEW_S = 3600.0         # how far ahead of the reader's clock a stored time may stand and still read as just now (anchors/event_log.py AHEAD_S, the window a hub event's own time is allowed); further ahead it is no record
 OK, WARN, BAD = "ok", "warn", "bad"
 
-# The named kinds of signal. STAMPED ones are what the server stamps today; `update` is defined here for a part that comes later.
+# The named kinds of signal. All of them are stamped today.
 STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT = "step_done", "step_dropped", "state_change", "pr_merged", "ci_result", "review", "comment", "commit"
 UPDATE, AUDIT = "update", "audit"
-STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, AUDIT)
-KINDS = frozenset(STAMPED) | {UPDATE}
+STAMPED = (STEP_DONE, STEP_DROPPED, STATE_CHANGE, PR_MERGED, CI_RESULT, REVIEW, COMMENT, COMMIT, AUDIT, UPDATE)
+KINDS = frozenset(STAMPED)
 
 # The kinds of a tied pull request's events as anchors/event_log.py files them, the signal each is, and the words each is given.
 PR_SIGNAL = {"ci_failed": CI_RESULT, "ci_passed": CI_RESULT, "comment": COMMENT, "review": REVIEW, "merged": PR_MERGED, "commit": COMMIT}
@@ -136,11 +136,43 @@ def pr_candidate(kind: str, n: int, ts: Any, now: float) -> dict[str, Any] | Non
 
 def update_signal(previous: Any, text: Any, at: Any) -> dict[str, Any] | None:
     """The `update` signal for a mover's status write: its text is the words, but only when it differs from the previous status text (compared as words, case and spacing aside). The same text again
-    ("no change" said twice), a blank one and a torn time give None: that is no update. Nothing stamps it yet."""
+    ("no change" said twice), a blank one and a torn time give None: that is no update. `update_signals` applies it to a save; service/writes.py stamps it."""
     now_t, was = " ".join(str(text or "").split()), " ".join(str(previous or "").split())
     if not now_t or now_t.casefold() == was.casefold():
         return None
     return signal(UPDATE, at, now_t)
+
+
+def update_signals(before: dict[str, Any] | None, after: dict[str, Any] | None, now: float) -> list[dict[str, Any]]:
+    """The `update` signals of one save: for each open step of `after` (an item's metadata) whose status line carries text that differs from the status text that step had in `before`, the `update_signal`
+    at `now`. A first status on a step that already existed (with no status line yet) counts, whatever other steps said before it (statuses are a few words and are reused from stage to stage). The same text again, a status
+    moved to another state with its text unchanged, a cleared status, a step that is no longer open and a step that was only reworded are none: a step is found by its words, so a reworded step is not among the steps of `before`
+    at all, and its status text is compared with every status text the same session had in `before`; a text that session already had is no new text. Input that is not an item's metadata (not a dict, `steps` not a list) gives none.
+    Pure: whose write it was is the caller's test (service/writes.py: the item's mover, a real write)."""
+    if not isinstance(after, dict) or (before is not None and not isinstance(before, dict)):
+        return []
+    present: set[str] = set()      # every step of `before`, with a status line or without
+    old: dict[str, str] = {}
+    had: dict[str, set[str]] = {}
+    for s in _steps._valid((before or {}).get("steps")):
+        k = _steps.key(s["text"])
+        present.add(k)
+        t = _steps.tag_of(s)
+        if t is not None:
+            old[k] = t["text"]
+            had.setdefault(_steps.opener(s["text"]).casefold(), set()).add(" ".join(t["text"].split()).casefold())
+    out: list[dict[str, Any]] = []
+    for s in _steps._valid(after.get("steps")):
+        t = _steps.tag_of(s) if s["status"] == _steps.OPEN else None
+        if t is None:
+            continue
+        k = _steps.key(s["text"])
+        if k not in present and " ".join(t["text"].split()).casefold() in had.get(_steps.opener(s["text"]).casefold(), set()):
+            continue      # a reworded step (not a step of `before`) keeping a status its session already had
+        sig = update_signal(old.get(k), t["text"], now)
+        if sig is not None:
+            out.append(sig)
+    return out
 
 
 def audit_signal(verified: Any, at: Any) -> dict[str, Any] | None:
@@ -237,9 +269,10 @@ def apply(item: dict[str, Any], events: Iterable[Any] = (), now: float | None = 
     return True
 
 
-def stamp(item: dict[str, Any], before: dict[str, Any] | None, now: float, real: bool = True) -> bool:
-    """Apply one save: the signals it made (save_signals) become the record when later. Only an open item has one (as the progress clock). → True when the field changed."""
+def stamp(item: dict[str, Any], before: dict[str, Any] | None, now: float, real: bool = True, extra: Iterable[Any] = ()) -> bool:
+    """Apply one save: the signals it made (save_signals) become the record when later. `extra` are further signals of the same save the caller found (the mover's `update`, `update_signals`); they come first, so of signals at the same time a
+    progress signal wins over them (the last given wins). Only an open item has one (as the progress clock). → True when the field changed."""
     if item.get("status") != "open":
         return False
-    sigs = save_signals(before, item, now, real)
+    sigs = [*extra, *save_signals(before, item, now, real)]
     return bool(sigs) and apply(item, sigs, now)
