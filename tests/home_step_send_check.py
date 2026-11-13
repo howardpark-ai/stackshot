@@ -51,6 +51,7 @@ git("init", "-q"); git("config", "user.email", "t@example.org"); git("config", "
 
 sys.path.insert(0, STACK); logging.disable(logging.INFO)
 import uvicorn; from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -69,7 +70,7 @@ for _ in range(200):
     time.sleep(0.05)
 if not srv.started: print("the test server did not start"); sys.exit(1)
 
-COOKIE = {"name": server._UI_COOKIE, "value": server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600})), "url": BASE}
+COOKIE = {"name": _signin._UI_COOKIE, "value": _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600})), "url": BASE}
 from playwright.sync_api import sync_playwright
 STATE = """() => { const q = (s) => document.querySelector(s), v = (f) => !!f && !f.hidden && f.getClientRects().length > 0;
   const st = q('li#task-a-2 form.hstep'), dc = q('li#task-a-1 form[data-cards]');

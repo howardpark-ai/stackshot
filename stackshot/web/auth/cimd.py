@@ -1,4 +1,4 @@
-"""The CIMD fallback for the OAuth provider (`_auth()` in stackshot/web/server_auth.py): a client that identifies itself by a URL client id
+"""The CIMD fallback for the OAuth provider (`_auth()` in stackshot/web/auth/oauth.py): a client that identifies itself by a URL client id
 (claude.ai) is looked up by fetching that URL, and a failed fetch must not turn into a lost connector grant.
 Kept apart from server.py so a test can import it without the server's import-time setup."""
 from __future__ import annotations

@@ -3,7 +3,7 @@ same-origin check (`_answer_token`, `_origin_of`, `_answer_same_origin`), the le
 pending answers are kept in (`_answers_path`, `_answers_load`, `_answers_save`).
 
 server.py is being split into one module per area (CONTRIBUTING.md, Layout). The module needs nothing of server.py (a module here cannot import it, and it runs as `__main__`): it reads the config, the renderer, the option labels, the item
-states, the instance settings (`core/instance.py`) and the sign-in key (`signin.py`). server.py imports each name its answer routes, its tick and the suites read back from here, so `server._answer_words`, `server._answers_load` and
+states, the instance settings (`core/instance.py`) and the sign-in key (`auth/signin.py`). server.py imports each name its answer routes, its tick and the suites read back from here, so `server._answer_words`, `server._answers_load` and
 the others stay the names they use. `_ANSWER_LOCK` is taken only by the functions that stay in server.py (`_answer_ack`, `_answer` and `_answer_tick`), nothing here takes it: the suite that puts a spy in its place (`server._ANSWER_LOCK = ...`) sets
 it on `server`, which is where those functions look it up."""
 from __future__ import annotations
@@ -22,7 +22,7 @@ from stackshot.model import option_labels as _option_labels
 from stackshot.model import states as _states
 from stackshot.web import render as _rmod
 from stackshot.core import instance as _inst
-from stackshot.web.signin import _ui_key
+from stackshot.web.auth.signin import _ui_key
 
 
 # ----------------------------------------------------------------------------- the owner answers an item from its page

@@ -48,7 +48,7 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 | Google redirect URI | `<base_url>/auth/callback` | stackshot |
 | Connector URL | `<base_url>/mcp` | stackshot |
 | OAuth metadata | `<base_url>/.well-known/oauth-authorization-server` | stackshot |
-| Board sign-in callback | `<base_url>/ui/callback` (no extra Google URI needed) | stackshot/web/signin.py: the comment block above `_ui_open`, and `_ui_redirect_uri` |
+| Board sign-in callback | `<base_url>/ui/callback` (no extra Google URI needed) | stackshot/web/auth/signin.py: the comment block above `_ui_open`, and `_ui_redirect_uri` |
 | claude.ai callbacks | already in `[auth] allowed_client_redirect_uris` | example `[auth]` |
 | Units (always) | `stackshot.service`, `stackshot-reload.path`, `stackshot-reload.service`, `stackshot-puller.service`, in `~/.config/systemd/user/` | install.sh |
 | Units (off by default) | `anchor-hub.service`, `stackshot-portal-sync.service` (+ drop-in), `stackshot-audit.{service,timer}` | install.sh |
@@ -74,7 +74,7 @@ Out of scope (mention only as later options): sala, gbrain, a hooks/rulebook lay
 | `[subject] prefixes` | the user's prefixes, each ending in a space | `--prefixes` |
 | `[paths] repo/store/markdown/rules/brain/fleet_names` | derived from `--data` and `--pages` | `--data`, `--pages` |
 | `[server] port` | 8020 unless taken | `--port` |
-| `[auth] ui_open` | `false` | `sed` after setup (step 3). Default `true` serves the board page to anyone who reaches the URL (stackshot/web/signin.py: the comment block above `_ui_open`, and `_ui_guard`) |
+| `[auth] ui_open` | `false` | `sed` after setup (step 3). Default `true` serves the board page to anyone who reaches the URL (stackshot/web/auth/signin.py: the comment block above `_ui_open`, and `_ui_guard`) |
 
 Do not pass `--yes` unless every answer is given as a flag. `--yes` fills gaps with defaults. An empty `--emails` is the usual gap (stackshot).
 
@@ -389,11 +389,11 @@ Check with `get` that `mover:` shows your session. If a message or notice stays 
 | T3 | `setup` exits 2: "port 8020 is taken on this box by <user>" | Another account's server | stackshot | `--port <free port>` |
 | T4 | `setup` exits 2: "not a timezone this Python knows" | Bad `--tz` | stackshot | Use an IANA name |
 | T5 | Server will not start: `auth=google but STACKSHOT_GOOGLE_CLIENT_ID/SECRET not set (env file ...)` | `oauth.env` empty or wrong key names | stackshot/web/server.py | Step 5 checks; restart: `systemctl --user restart stackshot.service` |
-| T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | stackshot/web/server_auth.py | Add an email; doctor refuses to start it in this case |
+| T6 | Server crashes at start with `IndexError` in `_auth` | `[auth] allowed_emails` is empty | stackshot/web/auth/oauth.py | Add an email; doctor refuses to start it in this case |
 | T7 | Server exits 1: "port 127.0.0.1:8020 is taken" | A second server or another program | stackshot/web/server.py | `ss -ltnp \| grep 8020`; change `[server] port`, then `./install.sh units --start` |
 | T8 | Server exits 2: "STACKSHOT_CONFIG is unset and ... is not the production checkout" | Started by hand from outside `~/stackshot` | stackshot/web/server.py | Use the unit, or export `STACKSHOT_CONFIG` |
 | T9 | Data repo never reaches the remote; no error | Empty remote has no `main`, so the publisher's fetch fails and it returns silently | stackshot/web/publish.py:62-70 | Step 4: `git push -u origin main` by hand |
-| T10 | Board page opens for anyone with the URL | `[auth] ui_open = true` (default) | stackshot/web/signin.py: the comment block above `_ui_open`, and `_ui_email`/`_ui_guard` | Step 3 |
+| T10 | Board page opens for anyone with the URL | `[auth] ui_open = true` (default) | stackshot/web/auth/signin.py: the comment block above `_ui_open`, and `_ui_email`/`_ui_guard` | Step 3 |
 | T11 | `systemctl --user` "cannot reach your user manager" | Shell is not a login session; no `XDG_RUNTIME_DIR` | stackshot; units/scope.sh:19 | `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in with ssh/console |
 | T12 | Units stop at logout or are missing after reboot | Lingering off | install.sh; stackshot | H5 |
 | T13 | `deploy.sh` says "cannot fetch main from origin" | No `origin`, origin unreachable, or no `main` | deploy.sh | Check `git -C ~/stackshot remote -v` and that the URL is reachable |

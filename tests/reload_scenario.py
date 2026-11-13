@@ -51,6 +51,7 @@ def reload_with(text):
     return out, err.getvalue()
 
 from stackshot.core import config; from stackshot.projects import pages; from stackshot.fleet import clients; from stackshot.fleet import fleet; from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.core import store as _core_store
 from stackshot.web.ui import render as ui_render
 from stackshot.anchors.anchorhub import core as hubcore
@@ -71,7 +72,7 @@ check("valid: CFG is a new dict, swapped whole", config.CFG is not cfg_was and c
 check("valid: nothing logged for a clean reload", log == "", log)
 after = (server._page_slack(), clients._online(), fleet._grace(), server._publish_every(), hubcore._quiet_max())
 check("valid: the server, clients, fleet and anchor-hub read the new values at once", after == (120, 180.0, 180.0, 240.0, 600), after)
-check("valid: [auth] ui_open is read at each request", server._ui_open() is False)
+check("valid: [auth] ui_open is read at each request", _signin._ui_open() is False)
 check("derived: the board page's stale threshold follows [publish] every_minutes", ui_render._stale_s() == 360 and ui_render._every_m() == 4.0, ui_render._stale_s())
 check("derived: the page-dirs regex and a bare slug follow [pages] dirs", config.page_dirs_re() == "(?:areas|systems)" and pages.norm("x") == "areas/x"
       and re.fullmatch(config.page_dirs_re() + r"/[\w./-]+", "systems/box") and not re.fullmatch(config.page_dirs_re() + r"/[\w./-]+", "projects/box"), pages.norm("x"))

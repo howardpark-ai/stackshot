@@ -1,4 +1,4 @@
-"""Scenario test for the CIMD fallback (cimd.py, wired in stackshot/web/server_auth.py `_auth()`; a failed fetch of
+"""Scenario test for the CIMD fallback (cimd.py, wired in stackshot/web/auth/oauth.py `_auth()`; a failed fetch of
 the client's metadata document was refused and the client dropped the connector grant for every pane)
 — fake fetchers and a patched transport, no network, no Google credentials.
 
@@ -17,7 +17,7 @@ def check(name, cond, got=None):
     ran.append(name)
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:600]}" if got is not None else ""))
 
-from stackshot.web import cimd
+from stackshot.web.auth import cimd
 from fastmcp.server.auth import cimd as fcimd
 from fastmcp.server.auth.cimd import CIMDDocument, CIMDFetchError, CIMDValidationError, _CIMDCacheEntry
 from fastmcp.server.auth.ssrf import SSRFFetchError

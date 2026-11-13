@@ -244,6 +244,7 @@ check("…the CLI's cue was logged like any other", n0 == 5 and json.loads((D / 
 
 # ---- 7. over HTTP, in-process
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.service import writes
 server._publish = lambda: None
 from starlette.testclient import TestClient
@@ -271,12 +272,12 @@ with TestClient(server.mcp.http_app()) as c:
           and [g["found"] for g in card_["groups"]][-2:] == [None, None] and all(isinstance(g["found"], int) and isinstance(g["audits"], int) for g in card_["groups"][:6])
           and card_.get("note") == "– keeps no findings log", card_)
     check("POST /audit/status is not a route: 405", c.post("/audit/status").status_code == 405)
-    real_mode, server._signin._auth_mode = server._signin._auth_mode, (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
+    real_mode, _signin._auth_mode = _signin._auth_mode, (lambda: "google"); server._cfg.CFG["auth"]["ui_open"] = False
     r1, r2 = c.post("/audit/now", follow_redirects=False), c.get("/audit/status", follow_redirects=False)
     check("[auth] ui_open = false: both ask for the board's sign-in first, as the board and the item pages do",
           r1.status_code == 302 and r1.headers["location"].startswith("/ui/login") and r2.status_code == 302 and r2.headers["location"] == "/ui/login?next=%2Faudit%2Fstatus" and calls == [],
           (r1.status_code, r1.headers.get("location"), r2.status_code, r2.headers.get("location")))
-    server._signin._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
+    _signin._auth_mode = real_mode; server._cfg.CFG["auth"]["ui_open"] = True
 
 # ---- 8. the audit's own writes and a bare confirm do not move an item's activity clock (activity.py; its full table is tests/activity_scenario.py)
 from stackshot.model import activity

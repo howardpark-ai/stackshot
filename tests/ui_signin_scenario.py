@@ -41,23 +41,24 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""), flush=True)
 
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 server._publish = lambda: None
 from starlette.testclient import TestClient
 
 EMAIL, DAY = "you@example.com", 86400
 NAV, FETCH = {"Sec-Fetch-Mode": "navigate"}, {"Sec-Fetch-Mode": "cors"}
-T0 = 1_800_000_000.0                                    # the test's clock: a fixed moment the sign-in code reads through server._signin._ui_now
+T0 = 1_800_000_000.0                                    # the test's clock: a fixed moment the sign-in code reads through _signin._ui_now
 CLOCK = [T0]
-server._signin._ui_now = lambda: CLOCK[0]
-DAYS = server._ui_days()
-def cookie(email=EMAIL, exp=None): return server._ui_sign(json.dumps({"email": email, "exp": (CLOCK[0] + DAYS * DAY) if exp is None else exp}))
+_signin._ui_now = lambda: CLOCK[0]
+DAYS = _signin._ui_days()
+def cookie(email=EMAIL, exp=None): return _signin._ui_sign(json.dumps({"email": email, "exp": (CLOCK[0] + DAYS * DAY) if exp is None else exp}))
 def set_cookies(r, name):
     """The Set-Cookie lines of a response that set `name` (a deletion included)."""
     return [v for k, v in r.headers.multi_items() if k == "set-cookie" and v.startswith(name + "=")]
 def renewed(r):
     """The expiry the response's session cookie carries, None when it set none."""
     ls = [v for v in set_cookies(r, "stackshot_ui") if "max-age=0" not in v.lower() and not v.startswith("stackshot_ui=;") and not v.startswith('stackshot_ui="";')]
-    return json.loads(server._ui_unsign(ls[0].split(";")[0].split("=", 1)[1].strip('"')))["exp"] if ls else None
+    return json.loads(_signin._ui_unsign(ls[0].split(";")[0].split("=", 1)[1].strip('"')))["exp"] if ls else None
 
 app = server.mcp.http_app()
 with TestClient(app) as c:
@@ -69,7 +70,7 @@ with TestClient(app) as c:
     attrs = (set_cookies(r, "stackshot_ui") or [""])[0].lower()
     check("…with the attributes the sign-in gave it (HttpOnly, Secure, SameSite=Lax, the whole site, 30 days)", "httponly" in attrs and "secure" in attrs and "samesite=lax" in attrs
           and "path=/" in attrs and f"max-age={DAYS * DAY}" in attrs, attrs)
-    check("…for the same address", bool(set_cookies(r, "stackshot_ui")) and json.loads(server._ui_unsign(set_cookies(r, "stackshot_ui")[0].split(";")[0].split("=", 1)[1]))["email"] == EMAIL)
+    check("…for the same address", bool(set_cookies(r, "stackshot_ui")) and json.loads(_signin._ui_unsign(set_cookies(r, "stackshot_ui")[0].split(";")[0].split("=", 1)[1]))["email"] == EMAIL)
     r = c.get("/", cookies={"stackshot_ui": old}, follow_redirects=False)
     check("a client that says nothing about how it opens the page (a tool) is a visit too", renewed(r) == T0 + DAYS * DAY, renewed(r))
     r = c.get("/", cookies={"stackshot_ui": cookie(exp=T0 + DAYS * DAY - 600)}, headers=NAV, follow_redirects=False)
@@ -110,7 +111,7 @@ with TestClient(app) as c:
     check("a forged cookie is not renewed", r.status_code == 302 and renewed(r) is None)
     r = c.get("/", cookies={"stackshot_ui": cookie("left@example.com", T0 + 20 * DAY)}, headers=NAV, follow_redirects=False)
     check("a cookie of an address that is no longer allowed is not renewed", r.status_code == 302 and renewed(r) is None)
-    legacy = server._ui_sign(json.dumps({"email": EMAIL, "exp": T0 + 25 * DAY}))                # the cookie as it was written before (email and exp only) is read and renewed
+    legacy = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": T0 + 25 * DAY}))                # the cookie as it was written before (email and exp only) is read and renewed
     r = c.get("/", cookies={"stackshot_ui": legacy}, headers=NAV, follow_redirects=False)
     check("a cookie written by the earlier release still works and is renewed", r.status_code == 200 and renewed(r) == T0 + DAYS * DAY, (r.status_code, renewed(r)))
     server._cfg.CFG["auth"]["ui_open"] = True
@@ -123,8 +124,8 @@ with TestClient(app) as c:
         r = c.post(path, data=data) if form else c.post(path, json=data)
         try: return r.status_code, r.json()
         except Exception: return r.status_code, {}
-    server._signin._ui_http = ui_http
-    server._UI_CLIENT.clear()
+    _signin._ui_http = ui_http
+    _signin._UI_CLIENT.clear()
     r = c.get("/ui/login?next=/projects", headers=NAV, follow_redirects=False)
     auth_url = r.headers.get("location", "")
     r = c.get(auth_url.replace("https://stackshot.test", ""), follow_redirects=False)
@@ -153,15 +154,15 @@ with TestClient(app) as c:
     a, ct = authorize(fake.json().get("client_id", ""), "https://stackshot.test/ui/callback")
     check("…and so does a client that registers itself under the board's name with the board's callback", fake.status_code in (200, 201) and ct is not None and ct.status_code == 200 and "Allow Access" in ct.text,
           (fake.status_code, a.status_code, ct and ct.status_code, ct and ct.text[:80]))
-    check("the board's own client is told apart by the id it registered, not by its name or callback", server._ui_is_board_client(server._UI_CLIENT["id"], "https://stackshot.test/ui/callback")
-          and not server._ui_is_board_client(fake.json().get("client_id", "x"), "https://stackshot.test/ui/callback")
-          and not server._ui_is_board_client(server._UI_CLIENT["id"], "https://claude.ai/api/mcp/auth_callback")
-          and not server._ui_is_board_client("", "https://stackshot.test/ui/callback"))
+    check("the board's own client is told apart by the id it registered, not by its name or callback", _signin._ui_is_board_client(_signin._UI_CLIENT["id"], "https://stackshot.test/ui/callback")
+          and not _signin._ui_is_board_client(fake.json().get("client_id", "x"), "https://stackshot.test/ui/callback")
+          and not _signin._ui_is_board_client(_signin._UI_CLIENT["id"], "https://claude.ai/api/mcp/auth_callback")
+          and not _signin._ui_is_board_client("", "https://stackshot.test/ui/callback"))
 
     # ============================================================= 4. a lapsed tab does not retry
-    server._UI_CLIENT.clear()
+    _signin._UI_CLIENT.clear()
     regs = []
-    server._signin._ui_http = lambda *a, **k: (regs.append(a), ui_http(*a, **k))[1]
+    _signin._ui_http = lambda *a, **k: (regs.append(a), ui_http(*a, **k))[1]
     r = c.get("/render-stamp", headers=FETCH, follow_redirects=False)
     check("a script's request with no session (the open tab's poll) is a plain 401 with the text, not a redirect to the sign-in", r.status_code == 401 and "location" not in r.headers
           and "signed out" in r.text and r.headers.get("cache-control") == "no-store", (r.status_code, dict(r.headers)))
@@ -173,7 +174,7 @@ with TestClient(app) as c:
     check("/ui/login asked by a script starts nothing: 401, no OAuth client registered, no flow cookie, no redirect", r.status_code == 401 and not regs and not set_cookies(r, "stackshot_ui_flow") and "location" not in r.headers, (r.status_code, regs, dict(r.headers)))
     r = c.get("/", headers=NAV, follow_redirects=False); r2 = c.get("/ui/login?next=/", headers=NAV, follow_redirects=False)
     fl = set_cookies(c.get("/ui/login?next=/", headers=NAV, follow_redirects=False), "stackshot_ui_flow")
-    check("the sign-in's flow cookie runs ten minutes on the same clock the callback reads", bool(fl) and json.loads(server._ui_unsign(fl[0].split(";")[0].split("=", 1)[1].strip('"')))["exp"] == T0 + 600, fl)
+    check("the sign-in's flow cookie runs ten minutes on the same clock the callback reads", bool(fl) and json.loads(_signin._ui_unsign(fl[0].split(";")[0].split("=", 1)[1].strip('"')))["exp"] == T0 + 600, fl)
     check("a page the browser opens still goes to the sign-in, and the sign-in starts", r.status_code == 302 and r.headers["location"] == "/ui/login?next=%2F" and r2.status_code == 302 and set_cookies(r2, "stackshot_ui_flow") and regs)
     r = c.get("/render-stamp", cookies={"stackshot_ui": cookie()}, headers=FETCH, follow_redirects=False)
     check("a script's request with a good session is served as before", r.status_code in (200, 503), r.status_code)

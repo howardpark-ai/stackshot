@@ -46,10 +46,11 @@ def check(name, cond, got=None):
 
 from stackshot.core import config as _cfg
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
 server._publish = lambda: None
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 PATH = "/probe/sala-link"
 URL = f"{SALA}/#s=zeta-main"          # the first live session's view, from the template
 
@@ -66,7 +67,7 @@ def attrs(li): return re.search(r"<a\b[^>]*>", li).group(0)
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path, follow_redirects=False)
 
     # ---- signed out: refused as the other pages are

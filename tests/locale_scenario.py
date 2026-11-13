@@ -63,6 +63,7 @@ from stackshot.core import config as _cfg
 from stackshot.web import i18n, i18n_catalog, search
 from stackshot.web import uiprefs as up
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.web import board_home as _web_board_home
 from stackshot.web.ui import render as r2
 from starlette.testclient import TestClient
@@ -292,7 +293,7 @@ check("an unreadable settings file: a save raises, a read gives English", raised
 UI.unlink()
 
 # ---- 5. the route, the switch and the pages
-COOKIE = {e: server._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
+COOKIE = {e: _signin._ui_sign(json.dumps({"email": e, "exp": time.time() + 3600})) for e in (MINA, NOOR)}
 SAME = {"Origin": BOARD}
 JSON_H = {**SAME, "Content-Type": "application/json"}
 search.sync(__import__("stackshot.web.render", fromlist=["_"]).Board(str(T / "store")))
@@ -304,11 +305,11 @@ def lang_toggle(h):
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def get(path, who=MINA):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.get(path, follow_redirects=False)
     def post(body, who=MINA, headers=JSON_H, raw=None, path="/prefs/lang"):
         c.cookies.clear()
-        if who: c.cookies.set(server._UI_COOKIE, COOKIE[who])
+        if who: c.cookies.set(_signin._UI_COOKIE, COOKIE[who])
         return c.post(path, content=raw if raw is not None else json.dumps(body), headers=headers, follow_redirects=False)
 
     # -- no folder configured: the pages are English, with no marker and no switch

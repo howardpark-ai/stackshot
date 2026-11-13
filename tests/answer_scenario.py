@@ -171,6 +171,7 @@ def rd(L, i): return json.loads((T / f"store/{L}/{i}.json").read_text())
 STORE = T / "store"
 
 from stackshot.web import server; from stackshot.github import ghsync as G
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.waits import waiting as _WT  # the wait is stored as one date, until: these read it as the old fields were read
 hd_ = lambda m: bool(m.get("hold") or _WT.stored_until(m))
@@ -252,18 +253,18 @@ check("pages restored from the back-forward cache reload: the item page (with or
 
 # ---- 2. the routes: who may post, with what
 from starlette.testclient import TestClient
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
-OTHER = server._ui_sign(json.dumps({"email": "someone@example.org", "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+OTHER = _signin._ui_sign(json.dumps({"email": "someone@example.org", "exp": time.time() + 3600}))
 tok = lambda g: server._answer_token(EMAIL, g)
 SAME = {"Origin": BOARD}
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def post(path, data, headers=SAME, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.post(path, data=data, headers=headers, follow_redirects=False)
     def page(path, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path)
     g0, g1 = page("/items/a1", cookie=None), page("/items/a1")
     check("GET: not signed in, the page has no form; signed in, it carries the form with this item's token for this person",
@@ -296,18 +297,18 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("GET /answer-tokens: with the server's own sign-in off (this scenario's STACKSHOT_AUTH=off), not signed in gets 200 and no token", t_anon.status_code == 200 and t_anon.json() == {}, (t_anon.status_code, t_anon.text[:200]))
     t_forged = page("/answer-tokens?ids=a1", cookie="forged.cookie")
     check("GET /answer-tokens: a forged cookie is nobody: 200 and no token", t_forged.status_code == 200 and t_forged.json() == {} and tok("a1") not in t_forged.text, (t_forged.status_code, t_forged.text[:200]))
-    _am, _uo = server._signin._auth_mode, server._cfg.CFG["auth"]["ui_open"]
+    _am, _uo = _signin._auth_mode, server._cfg.CFG["auth"]["ui_open"]
     try:
-        server._signin._auth_mode = lambda: "oauth"          # the server's own sign-in on, [auth] ui_open = false as this scenario's config has it
+        _signin._auth_mode = lambda: "oauth"          # the server's own sign-in on, [auth] ui_open = false as this scenario's config has it
         def raw(cookie):
             c.cookies.clear()
-            if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+            if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
             return c.get("/answer-tokens?ids=a1", follow_redirects=False)
         r_no, r_bad, r_ok = raw(None), raw("forged.cookie"), raw(COOKIE)
         server._cfg.CFG["auth"]["ui_open"] = True
         r_open = raw(None)
     finally:
-        server._signin._auth_mode = _am; server._cfg.CFG["auth"]["ui_open"] = _uo
+        _signin._auth_mode = _am; server._cfg.CFG["auth"]["ui_open"] = _uo
     check("GET /answer-tokens: ui_open = false and no cookie is a redirect to the sign-in, with no token in it", r_no.status_code == 302 and r_no.headers["location"].startswith("/ui/login?next=") and tok("a1") not in r_no.text + r_no.headers["location"], (r_no.status_code, r_no.headers.get("location")))
     check("GET /answer-tokens: ui_open = false and a forged cookie is the same redirect", r_bad.status_code == 302 and r_bad.headers["location"].startswith("/ui/login?next=") and tok("a1") not in r_bad.text, (r_bad.status_code, r_bad.headers.get("location")))
     check("GET /answer-tokens: ui_open = false and a good cookie still gets the token; ui_open = true and no cookie gets {} (the edge decides who reaches the board, nobody has a token)",
@@ -341,7 +342,7 @@ with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     check("home answer: the item page's own form (no back) behaves as before: 303 to its own page, ?sent only", b_(None).headers["location"] == "/items/a5?sent=empty", b_(None).headers["location"])
     check("home answer: _answer_back keeps (path, anchor) for a known page and None for the rest", server._answer_back("/#task-a-5") == ("/", "#task-a-5") and server._answer_back("/projects/alpha/sub") == ("/projects/alpha/sub", "")
           and server._answer_back("/index.html") == ("/index.html", "") and server._answer_back(None) is None and server._answer_back("//x") is None)
-    c.cookies.clear(); c.cookies.set(server._UI_COOKIE, COOKIE)
+    c.cookies.clear(); c.cookies.set(_signin._UI_COOKIE, COOKIE)
     rf = c.post("/items/a5/answer", content="token=" + tok("a5") + "&text=+&act=comment", headers={**SAME, "Content-Type": "application/x-www-form-urlencoded"}, follow_redirects=True)
     check("a POST as the page's fetch sends it (url-encoded, following the redirect) lands on the item's page with its notice, 303 then no-store; nothing written for an empty box",
           rf.status_code == 200 and str(rf.url) == f"{BOARD}/items/a5?sent=empty" and [h.status_code for h in rf.history] == [303]

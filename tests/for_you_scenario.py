@@ -90,6 +90,7 @@ def rd(i): return json.loads((T / f"store/a/{i}.json").read_text())
 
 from stackshot.core import config as _cfg; from stackshot.router import routing; from stackshot.web import foryou as fy
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 from stackshot.service import writes
 from stackshot.web.ui import render as ui_render
@@ -368,16 +369,16 @@ check("…the one switch brings the section back after the status block and befo
       and "for-you" in [p.split("=")[0] for p in re.search(r'<meta name="stackshot-blocks" content="([^"]*)">', full_on).group(1).split()])
 fy.seen(str(next(r["id"] for r in fy.rows() if r["what"] == "row behind the hidden section")))
 
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 SAME = {"Origin": BOARD}
 with TestClient(server.mcp.http_app(), base_url=BOARD) as c:
     def post(path, data, headers=SAME, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.post(path, data=data, headers=headers, follow_redirects=False)
     def page(path, cookie=COOKIE):
         c.cookies.clear()
-        if cookie: c.cookies.set(server._UI_COOKIE, cookie)
+        if cookie: c.cookies.set(_signin._UI_COOKIE, cookie)
         return c.get(path)
     wtok = lambda g: server._watch_token(EMAIL, g)
     atok = lambda g: server._answer_token(EMAIL, g)

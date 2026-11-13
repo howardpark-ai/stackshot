@@ -874,7 +874,7 @@ _THEME_HEAD = ("<script>(function(){var p='system';try{p=localStorage.getItem('"
 # an installed app (Chrome, Android) takes its icons through the browser's HTTP cache and Cloudflare's edge, and an icon
 # under an unchanged URL never reached it (the maskable icon kept its old look). The
 # versions are read once, when this module is imported (the server's start; deploy.sh restarts it when icons/ changes),
-# from the committed icons/ (signin.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
+# from the committed icons/ (auth/signin.py _APP_ICONS) and the favicon in <state>/site. The version is a query string and the
 # file names stay: the Cloudflare Access bypass names the icons' exact paths, which a query string keeps and a new name would
 # not. server.py serves a request whose ?v= is the version of the bytes it sends as immutable; any other, as before.
 # The icon and font files, their versions and addresses are the shared ones (render.py): static files at their root addresses, served once for both UIs.
@@ -899,7 +899,7 @@ _LACT_JS = ("function lact(){var n=Date.now()/1000;document.querySelectorAll('[d
             "m<1?SST('age.span_now'):m<60?SST('age.span_min',{m:m}):m<1440?SST('age.span_hour',{h:Math.floor(m/60),m:m%%60}):SST('age.span_day',{d:Math.floor(m/1440),h:Math.floor(m%%1440/60)})})}"
             "lact();setInterval(lact,30000);document.addEventListener('stackshot:swapped',lact);") % (int(_lastact.SKEW_S), _lastact.BAND_BAD_S, _lastact.BAND_WARN_S)
 _APP_HEAD = _SST_HEAD + ('<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">'
-             f'<link rel="apple-touch-icon" href="{icon_href("apple-touch-icon.png")}">'          # 180 px, opaque (signin.py _APP_ICONS)
+             f'<link rel="apple-touch-icon" href="{icon_href("apple-touch-icon.png")}">'          # 180 px, opaque (auth/signin.py _APP_ICONS)
              '<meta name="theme-color" content="#fafaf8" media="(prefers-color-scheme: light)">'   # the app's title bar: each theme's --bg
              '<meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)">'
              "<script>(function(){var m=window.matchMedia?matchMedia('(display-mode: standalone)'):null;"

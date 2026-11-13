@@ -61,9 +61,10 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 import uvicorn
 server._publish = lambda: None
-COOKIE = server._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
+COOKIE = _signin._ui_sign(json.dumps({"email": EMAIL, "exp": time.time() + 3600}))
 srv = uvicorn.Server(uvicorn.Config(server.mcp.http_app(), host="127.0.0.1", port=PORT, log_level="critical", lifespan="on"))
 th = threading.Thread(target=srv.run, daemon=True); th.start()
 for _ in range(100):
@@ -94,7 +95,7 @@ MEASURE = """() => {
 from playwright.sync_api import sync_playwright
 def ctx_for(br, w, scheme):
     ctx = br.new_context(viewport={"width": w, "height": 800}, color_scheme=scheme)
-    ctx.add_cookies([{"name": server._UI_COOKIE, "value": COOKIE, "url": BOARD}])
+    ctx.add_cookies([{"name": _signin._UI_COOKIE, "value": COOKIE, "url": BOARD}])
     return ctx
 try:
   with sync_playwright() as p:

@@ -90,6 +90,7 @@ git = lambda *a: subprocess.run(["git", "-C", f"{tmp}/store", "-c", "user.name=t
 git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "fixture")
 logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.web.auth import signin as _signin
 from stackshot.service import telling
 server._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -491,17 +492,17 @@ check("Closed card (a big count in a narrow card): the badge's font size never g
       and "max(9px,min(12px," in r2._HNEW_BF and (61 + 2) - _bsz[1] * 9 > 0 and r2._hnew_parts(40, 2) == (30.8, round((7.2 + 3.4 + 21) / 12, 2)), _bsz)
 # the language default: a person with no saved language reads English, and so does everyone on a board where English is the only language (no locale folder: no switch, a stored or asked-for "ko" reads English)
 from stackshot.web import i18n as _i18n, uiprefs as _uip
-class _Req:      # a bare request: what _request_lang reads is the method, the state it keeps its answer on, and the signed-in person (server._ui_email)
+class _Req:      # a bare request: what _request_lang reads is the method, the state it keeps its answer on, and the signed-in person (_signin._ui_email)
     method = "GET"
     def __init__(self): self.state = type("S", (), {})()
-_ue0 = server._ui_email
+_ue0 = _signin._ui_email
 try:
-    server._ui_email = lambda request: "nobody-saved@example.org"      # signed in, never picked a language
+    _signin._ui_email = lambda request: "nobody-saved@example.org"      # signed in, never picked a language
     _lang_nosaved = server._request_lang(_Req())
-    server._ui_email = lambda request: ""                              # not signed in
+    _signin._ui_email = lambda request: ""                              # not signed in
     _lang_anon = server._request_lang(_Req())
 finally:
-    server._ui_email = _ue0
+    _signin._ui_email = _ue0
 check("language default: with no locale folder English is the only language (no switch drawn), a person with no saved language and a visitor read English, and a code that is not available reads English too",
       _i18n.available() == ["en"] and r2._lang_toggle() == "" and _uip.lang_of("nobody-saved@example.org") == "en" and _uip.lang_of("") == "en" and _lang_nosaved == "en" and _lang_anon == "en"
       and _i18n.norm("ko") == "en" and _i18n.norm(None) == "en" and _i18n.norm("") == "en" and _i18n.current() == "en", (_i18n.available(), _lang_nosaved, _lang_anon))
