@@ -73,6 +73,7 @@ def check(name, cond, got=None):
 
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.service import writes; from stackshot.waits import waiting as W; from stackshot.model import model as _model; from stackshot.waits import dated_wait as _dw; from stackshot.waits import watchers as wk; from stackshot.tools import stamp_phase as SP
+from stackshot.service import handoff as handoff_svc
 from stackshot.service import telling
 from stackshot.core import store as _core_store
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
@@ -190,20 +191,20 @@ for i, name, *_ in CASES:
 for n in (51, 52, 53):
     put(n, needs=[BACK], state="doing", hold=True, wake=wk_(24 * 5)) if n != 53 else put(n, needs=[BACK], state="doing")
 calls = []
-real = {k: getattr(server, k) for k in ("_foryou_on_save", "_landed_on_save", "_handoff_on_save")}; real_tw = telling.tell_woken
+real = {(m, k): getattr(m, k) for m, k in ((server, "_foryou_on_save"), (server, "_landed_on_save"), (handoff_svc, "handoff_on_save"))}; real_tw = telling.tell_woken
 real_gh = (server._gh.enabled, server._gh.on_change); real_touch = server._search.touch; real_save = writes.save
 def spy(name):
     def f(*a, **k): calls.append(name); return None
     return f
-for k in real:
-    setattr(server, k, spy(k))
+for m, k in real:
+    setattr(m, k, spy(k))
 telling.tell_woken = spy("_tell_woken")
 server._gh.enabled = lambda: True; server._gh.on_change = spy("gh.on_change"); server._search.touch = spy("search.touch"); writes.save = spy("save")
 state0 = state_listing(); b0 = {n: bytes_of(n) for n in (51, 52, 53)}
 try:
     res = [server._stamp_one(f"g{n}") for n in (51, 52, 53)]
 finally:
-    for k, v in real.items(): setattr(server, k, v)
+    for (m, k), v in real.items(): setattr(m, k, v)
     telling.tell_woken = real_tw
     server._gh.enabled, server._gh.on_change = real_gh; server._search.touch = real_touch; writes.save = real_save
 check("4 a stamp calls no save, no GitHub job, no notice, no For you or landed row, no hand-off, no search touch", calls == [] and [r["action"] for r in res] == ["set"] * 3, (calls, res))

@@ -45,6 +45,7 @@ from stackshot.model.ids import _bare_id_ok, _norm_id
 from stackshot.model.needs import _NEEDS_KINDS, _canon_needs, _needs_kinds, _needs_list, _needs_of, _needs_sessions, _needs_store, _waits_decision
 from stackshot.projects import pages as _pages
 from stackshot.service import gates as _gates
+from stackshot.service import handoff as _handoff
 from stackshot.service import telling as _telling
 from stackshot.service import writes as _writes
 from stackshot.service.store import _load, _shown_ids
@@ -112,8 +113,6 @@ class Hooks:
     gate_subject: Callable[..., Any]
     handoffs_in: Callable[..., Any]
     handover: Callable[..., Any]
-    ho_derive: Callable[..., Any]
-    ho_same: Callable[..., Any]
     hold_held_by: Callable[..., Any]
     hold_set: Callable[..., Any]
     is_held: Callable[..., Any]
@@ -191,14 +190,13 @@ def _hands_on(gid: str, was: dict[str, Any], now_item: dict[str, Any], handed: A
     """Does this write hand the item on to a session: a hand-off line in next, or a change of the DERIVED mover (what the hand-off record reads, handoff.detect): a mover argument, needs naming a
     session, a reopen with one. The date a bare wait carries is left out of both readings (an item with it reads as waiting and has no mover), so the question is the write's own: with the date
     it gives (or already held) set aside, did the mover change to a session other than the writer? A hand-off to the owner is none here (his step with a date is a park of its own). A reading that fails counts as a hand-off (fail closed), and says so in `failed` when the caller passes a list."""
-    h = _hooks()
     if handed:
         return True
     try:
         def undated(it: dict[str, Any]) -> dict[str, Any]:
             m = it.get("metadata") or {}
             return {**it, "gid": gid, "metadata": {k: v for k, v in m.items() if k not in ("wake", "until", "ask_by")}} if _wait_is_bare(m) else {**it, "gid": gid}
-        to = _ho.detect(undated(was), undated(now_item), _session_label(writer) or writer, writer if _anc.is_id(writer) else "", h.ho_derive, h.ho_same)
+        to = _ho.detect(undated(was), undated(now_item), _session_label(writer) or writer, writer if _anc.is_id(writer) else "", _handoff.ho_derive, _handoff.ho_same)
         return bool(to) and not _model.is_owner(to)
     except Exception as e:  # noqa: BLE001  — the reading is an extra: a failure fails closed, the date stays the hand-off's backstop and the item stays active (a park that hides a hand-off costs more than a date left as a wake)
         print(f"handoff: {gid} backstop not judged: {e.__class__.__name__}: {e}; the date stays a backstop and the item stays active", file=sys.stderr, flush=True)
@@ -671,7 +669,7 @@ def update_unlocked(
                 if not work_spec["text"]:
                     raise ToolError(f"Refused: work: {work_who} has no open step on {_gh.shown(gid)}, so the status needs its text: it makes the step. {_work.FORM}")
                 work_made = f"{work_who}: {work_spec['text']}"
-                kept_own = _nl.text_of(meta, next_writer, keeper_was, h.ho_same)                     # the sender's lines stay: next replaces them as a whole
+                kept_own = _nl.text_of(meta, next_writer, keeper_was, _handoff.ho_same)                     # the sender's lines stay: next replaces them as a whole
                 next = (next.rstrip() + "\n" if next.strip() else (kept_own.rstrip() + "\n" if kept_own.strip() else "")) + work_made
                 next_touch = True
     said_l = _gates.gate_said(said, sender.strip() or own_for, debtor)   # the trailers: his words checked against the transcript; a failed check refuses the write here
@@ -734,14 +732,14 @@ def update_unlocked(
     except _steps.StepError as e:
         raise ToolError(f"Refused: {e}")
     if closing and steps_old and (_writes.session_next() or _writes.close_tool()):      # a session's close ticks its own steps only: another session's open step is never settled by it
-        _gates.gate_close_steps(gid, steps_old, _steps.others_open(steps_old, lambda w: not w or h.ho_same(w, next_writer), {*done_ix, *drop_ix}, lambda nm: h.ho_same(nm, next_writer)))
+        _gates.gate_close_steps(gid, steps_old, _steps.others_open(steps_old, lambda w: not w or _handoff.ho_same(w, next_writer), {*done_ix, *drop_ix}, lambda nm: _handoff.ho_same(nm, next_writer)))
     reword_note = ""
     if reword_ix:                  # the step keeps its number, its place and its open state; its text (and its line of next, its proof) become the new words before anything below lines the checklist up with next
         for i, text in reword_ix.items():
             w = str(steps_old[i].get("writer") or "")
             if _steps.is_his(steps_old[i]["text"], unnamed_is_his=False):
                 raise ToolError(f"Refused: reword: step {i + 1} is {OWNER}'s own step, made by the server from the ask and the step and ticked by his answer; it is never reworded")
-            if w and not h.ho_same(w, next_writer):
+            if w and not _handoff.ho_same(w, next_writer):
                 raise ToolError(f"Refused: reword: step {i + 1} is a line of {_session_label(w) or w}, not of this write's sender; only the session that wrote a step rewords it (ask it, or mark the step done or dropped)")
             if _writes.session_next() and _nr.grows(_steps.first_line(steps_old[i]["text"]), _steps.first_line(text)):       # N3 holds for a reword as for a rewritten line: the old text plus added words is progress, which goes on the page
                 raise ToolError(f"Refused: reword: the new text of step {i + 1} is its old text with words added (\"{_clip_line(_steps.first_line(text), 90)}\"): a step is never rewritten to add progress, so progress, results and what was tried go on the project page "
@@ -1023,7 +1021,7 @@ def update_unlocked(
                                 "progress, results and what was tried go on the project page (Current state or a timeline line)")
         try:
             steps_new = _steps.apply(steps_old, h.nl_text_without(meta, marked_text, keeper_was), done_ix, drop_ix, steps_by, time.time(),
-                                     written=next, own=lambda w: not w or h.ho_same(w, next_writer), wipe=clear_next, strict=h.require_marks(), reworded=reword_ix)
+                                     written=next, own=lambda w: not w or _handoff.ho_same(w, next_writer), wipe=clear_next, strict=h.require_marks(), reworded=reword_ix)
         except _steps.StepError as e:
             raise ToolError(f"Refused: {e}")
         _nl.prune(meta, marked_text, keeper_was)

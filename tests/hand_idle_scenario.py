@@ -64,6 +64,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -80,7 +82,7 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"
 server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every notice the server was asked to send: (items, recipient's id, text, tag)
@@ -93,9 +95,9 @@ def fake_status(who, idx=None):
     st = panes.get(who, "")
     if st == "boom": raise OSError("registry unreadable")
     return (st, now0 - 3600) if st else ("", 0.0)
-server._handoff_status = fake_status
-server._handoff_pane = lambda who, idx=None: dead.get(who, "")
-server._sessions_index = _wt_sessions._sessions_index = lambda: {}
+handoff_svc.handoff_status = fake_status
+handoff_svc.handoff_pane = lambda who, idx=None: dead.get(who, "")
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: {}
 
 def put(i, mover="home-peer", status="open", act=90, project="projects/alpha", idle_line=True, **meta):
     """An open doing item on `mover`; its last real activity was `act` minutes before now0. With `idle_line` it carries the hourly audit's idle line, written 5 minutes before now0."""
@@ -330,7 +332,7 @@ def probe_held_builder_free():
     return got == ["a1"] and mv == "team-back"
 rule("5 a builder that moves only a held item is free", probe_held_builder_free, [(HI, "busy_movers", lambda items, now: [it.get("metadata", {}).get("mover") for it in items.values() if it.get("status") == "open"])])
 def old_builders(project):      # the reverted rule: the project's own background agents, then every other project's agent whose mandate says build
-    out = list(server._handoff_background(project))
+    out = list(handoff_svc.handoff_background(project))
     reg = server._anc.registry()
     return out + [n for n, r in server._anc.session_roles(reg).items() if r.get("role") == "back" and not r.get("retired") and n not in out
                   and re.search(r"\bbuild", str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or ""), re.I)]

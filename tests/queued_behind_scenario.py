@@ -61,6 +61,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:500]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server, home
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.web.tools import sessions as _wt_sessions
 from stackshot.web.tools import anchors as _wt_anchors
 from stackshot.web.tools import route as _wt_route
@@ -79,15 +81,15 @@ class _Clock:
     t = None
     def __getattr__(self, n): return getattr(time, n)
     def time(self): return time.time() if self.t is None else self.t
-CLK = _Clock(); server.time = CLK
+CLK = _Clock(); server.time = handoff_svc.time = hcold_svc.time = CLK
 server._cfg.CFG["audit"]["pattern_review"] = "off"; server._cfg.CFG["audit"]["mode"] = "script"
 sent = []                                                          # every message the server was asked to send: none is expected here
 server._message = lambda to, text, sender, auth="", origin="", fyi=False: (sent.append((to, text)), "delivered to " + to)[1]
 telling.tell_woken = lambda *a, **k: sent.append(("tell_woken", a))
 server._inbox_flag_send = lambda *a, **k: sent.append(("flag", a))
-REAL = {n: getattr(server, n) for n in ("_handoff_status", "_sessions_index")}      # the stall pass below reads the real ones
-server._handoff_status = lambda who, idx=None: ("", 0.0)
-server._sessions_index = _wt_sessions._sessions_index = lambda: {}
+REAL = {(m, n): getattr(m, n) for m, n in ((handoff_svc, "handoff_status"), (server, "_sessions_index"), (handoff_svc, "_sessions_index"), (hcold_svc, "_sessions_index"))}      # the stall pass below reads the real ones
+handoff_svc.handoff_status = lambda who, idx=None: ("", 0.0)
+server._sessions_index = _wt_sessions._sessions_index = handoff_svc._sessions_index = hcold_svc._sessions_index = lambda: {}
 FRONT = {"home-front"}
 REAL_HOOK = Q.front_hook()                                         # what the server installed (`front_keeper`, strict), before the fixture's own answer replaces it
 Q._HOOKS["is_front"] = lambda who, project: str(who) in FRONT      # the server's `front_keeper` is replaced by the one front agent of the fixture
@@ -349,8 +351,8 @@ def stall_rows():
 PUSHLOG = T / "push.log"
 (T / "fakepush.py").write_text(f"import sys, json\na = sys.argv[1:]\nif a[:1] == ['--from']: a = a[2:]\nopen({str(PUSHLOG)!r}, 'a').write(json.dumps(a) + '\\n')\nprint('delivered → ' + a[0])\n")
 telling.PUSH = [sys.executable, str(T / "fakepush.py")]
-server.CLI_SESSIONS = T / "cli"
-for _n, _f in REAL.items(): setattr(server, _n, _f)
+handoff_svc.CLI_SESSIONS = T / "cli"
+for (_m, _n), _f in REAL.items(): setattr(_m, _n, _f)
 server._cfg.CFG["model"] = {}; server._cfg.CFG["stall"] = {}
 def cli_row(who, status, at): (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def stk(at, gate):

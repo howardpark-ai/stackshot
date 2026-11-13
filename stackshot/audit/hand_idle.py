@@ -2,7 +2,7 @@
 
 Part of the rule that no item an agent moves goes more than an hour without an update (audit/hourly.py is the line side). The hourly audit marks an item `idle, nothing verified` (kind `audit_idle`);
 this module reads that mark and decides which items are handed on. It decides and the server writes (`server._hand_idle_tick`): the move is the minute pass's own write
-(`_handoff_exec` → `_handoff_write_move`, the path of the audit's orphan hand-over), so the new mover is told by the hand-off notice and the hand-off audit then clocks it like any other. On by default
+(service/handoff.py `handoff_exec` → `handoff_write_move`, the path of the audit's orphan hand-over), so the new mover is told by the hand-off notice and the hand-off audit then clocks it like any other. On by default
 (`[audit] hand_idle`).
 
   enabled()                                     `[audit] hand_idle`, on unless a TOML false

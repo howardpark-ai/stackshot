@@ -82,6 +82,8 @@ def check(name, cond, got=None):
     if not cond: fails.append(name); print(f"FAIL {name}" + (f": {str(got)[:300]}" if got is not None else ""))
 sys.path.insert(0, STACK); sys.path.insert(0, os.path.join(STACK, "tools")); logging.disable(logging.INFO)
 from stackshot.web import server; from stackshot.web.tools import anchors as _wt_anchors; from stackshot.web.tools import route as _wt_route; from stackshot.waits import handoff as H_; from stackshot.waits import stall as S; from stackshot.waits import ladder as LD; from stackshot.audit import audit_run as AR; from stackshot.audit import audit
+from stackshot.service import handoff as handoff_svc
+from stackshot.service import handoff_cold as hcold_svc
 from stackshot.service import telling
 server._publish = _wt_anchors._publish = _wt_route._publish = lambda: None
 server._refuse_if_owing = lambda debtor: None
@@ -97,7 +99,7 @@ def _tell(gid, owner, note, tag="wake"):
 telling.tell_woken = _tell
 def drain():
     while THREADS: THREADS.pop(0).join(30)
-    while server._HO_COLD_THREADS: server._HO_COLD_THREADS.pop(0).join(30)
+    while hcold_svc.HO_COLD_THREADS: hcold_svc.HO_COLD_THREADS.pop(0).join(30)
     while THREADS: THREADS.pop(0).join(30)
 def pushes(): return [json.loads(l) for l in PUSHLOG.read_text().splitlines()] if PUSHLOG.exists() else []
 def pushes_to(who, gid=None): return [p for p in pushes() if p[0] == U[who] and (gid is None or gid in p[1])]
@@ -116,12 +118,12 @@ def cold(answer, status="ok"):
     def run(msg):
         COLD_MSGS.append(msg)
         return {"status": status, "text": json.dumps(answer) if isinstance(answer, dict) else str(answer), "duration_s": 0.1, "usage": {}, "note": "stub"}
-    server._COLD_RUNNER = run
+    hcold_svc.COLD_RUNNER = run
 cold("no json at all here")
 def cli_row(who, status, at):
     (T / f"cli/{os.getpid()}-{who}.json").write_text(json.dumps({"pid": os.getpid(), "kind": "interactive", "sessionId": U[who], "name": who, "status": status, "statusUpdatedAt": int(at * 1000), "updatedAt": int(at * 1000)}))
 def no_row(who): (T / f"cli/{os.getpid()}-{who}.json").unlink(missing_ok=True)
-server.CLI_SESSIONS = T / "cli"
+handoff_svc.CLI_SESSIONS = T / "cli"
 server._stall_since(B)
 def stk(at):
     """One stall pass at `at` (the 20-second gate reset), the threads it started finished → the items it acted on."""
@@ -261,7 +263,7 @@ put(21, act=2, mover="home-peer", handoff=H_.new_record("home-peer", U["home-pee
 d = rd(21); d["activity"] = d["updated"] = d["state_updated"] = now0 - 3 * H; (T / "store/a/21.json").write_text(json.dumps(d))
 check("6 hand-off: an untaken hand-off is left alone by the stall pass, however quiet", "a21" not in stk(now0 + 1 * MIN) and not pushes_to("home-peer", "a21"), pushes_to("home-peer", "a21"))
 check("6 hand-off: …until the hand-off audit brings it (via handoff); the ladder then takes its later rungs here, once, as before",
-      server._handoff_tick(now=now0 + 61 * MIN, only=["a21"]) == ["a21"] and (entry(21) or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a21")) == 1
+      handoff_svc.handoff_tick(now=now0 + 61 * MIN, only=["a21"]) == ["a21"] and (entry(21) or {}).get("via") == "handoff" and (drain() or True) and len(pushes_to("home-peer", "a21")) == 1
       and "a21" not in stk(now0 + 62 * MIN) and "a21" in stk(now0 + 92 * MIN) and len(pushes_to("home-peer", "a21")) == 2, (pushes_to("home-peer", "a21"), entry(21)))
 close(21)
 
@@ -384,7 +386,7 @@ close(61)
 from stackshot.audit import silence as SLN
 it_ = {"metadata": {"work": [{"id": "w", "text": "t", "state": "in progress", "agent": "team-back", "ts": 1000.0}]}}
 check("10k pure: subagent_running counts a line of any agent without a mover, and only the mover's own line with one",
-      SLN.subagent_running(it_, 1100.0) and SLN.subagent_running(it_, 1100.0, "team-back", server._ho_same) and not SLN.subagent_running(it_, 1100.0, "home-docs", server._ho_same), None)
+      SLN.subagent_running(it_, 1100.0) and SLN.subagent_running(it_, 1100.0, "team-back", handoff_svc.ho_same) and not SLN.subagent_running(it_, 1100.0, "home-docs", handoff_svc.ho_same), None)
 # 10l. a heartbeat that is empty or unreadable says nothing about the pane: a background mover with no registry row is taken as live (not cold-called, not handed on)
 clear_records(); put(62, act=60, mover="home-docs"); cli_row("home-docs", "idle", IDLE_SINCE)
 enter([62]); stk(now0 + 31 * MIN); no_row("home-docs")
@@ -504,7 +506,7 @@ close(77)
 clear_records()
 put(80, act=60, mover="home-docs", handoff=H_.new_record("home-docs", U["home-docs"], "home-send", now0 - 40 * MIN, delivered_at=now0 - 40 * MIN + 10)); cli_row("home-docs", "busy", now0 - 20 * MIN)
 check("11h (setup) the hand-off audit brings the untaken hand-off to the ladder (via handoff), the ask is sent",
-      server._handoff_tick(now=now0, only=["a80"]) == ["a80"] and (drain() or True) and (entry(80) or {}).get("via") == "handoff" and entry(80).get("step") == 1, (entry(80), pushes_to("home-docs", "a80")))
+      handoff_svc.handoff_tick(now=now0, only=["a80"]) == ["a80"] and (drain() or True) and (entry(80) or {}).get("via") == "handoff" and entry(80).get("step") == 1, (entry(80), pushes_to("home-docs", "a80")))
 d_ = rd(80); d_["activity"] = now0 + 21 * MIN; d_["updated"] = now0 + 21 * MIN; d_["written_by"] = "home-front"; (T / "store/a/80.json").write_text(json.dumps(d_))      # the owner's comment, 20 minutes before the notice is due
 stk(now0 + 31 * MIN)
 done = stk(now0 + 41 * MIN + 1)

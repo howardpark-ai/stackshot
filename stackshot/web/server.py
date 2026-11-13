@@ -148,6 +148,9 @@ from stackshot.service import wakes as _wakes  # noqa: E402  — the wake pass, 
 from stackshot.service import watching as _watching  # noqa: E402  — the waits' watchers: a wait that ends turns its item; anchor ids and the routine-line test (service/watching.py)
 from stackshot.service import event_waits as _evwaits  # noqa: E402  — the waits on a fleet event: the reports, the polls and the machine anchors (service/event_waits.py)
 from stackshot.service import wake_hooks as _wake_hooks  # noqa: E402  — what those three still reach on this module (service/wake_hooks.py)
+from stackshot.service import handoff as _handoff  # noqa: E402  — the hand-off record, its delivery, the minute pass, the gone-mover hand-over and the display (service/handoff.py)
+from stackshot.service import handoff_cold as _hcold  # noqa: E402  — the cold call of the hand-off ladder (service/handoff_cold.py)
+from stackshot.service import handoff_hooks as _handoff_hooks  # noqa: E402  — what those two still reach on this module (service/handoff_hooks.py)
 from stackshot.waits import quiet as _frontq  # noqa: E402  — the History line a front agent's notice always leaves on the item (quiet.py)
 from stackshot.model import cold_call as _cold  # noqa: E402  — the cold call of section 5: the item and its page to `claude -p`, one of three answers (cold_call.py)
 from stackshot.waits import held as _held  # noqa: E402  — notices that ask nothing of a background agent wait for its next turn (held.py)
@@ -254,7 +257,7 @@ def _migrate_needs() -> list[str]:
 
 
 def _migrate_owner_mover() -> list[str]:
-    """Once per start (idempotent, so every start runs it): the rules of _settle_mover_on_save and _handoff_his_over applied to the items stored before them. An open item that waits on
+    """Once per start (idempotent, so every start runs it): the rules of _settle_mover_on_save and _handoff.handoff_his_over applied to the items stored before them. An open item that waits on
     him with a session stored as its mover gets him as mover and the session in `then`; one that stores him as mover while no longer in his state, with an answer of his newer than the change of mover to him
     (his hand-off record's time; else the item's last write) as the proof he let it go, gets its `then` agent back as mover (an older answer followed by a deliberate mover=the owner is left); a hand-off record to him that nobody took is ended when an answer of his is on the item after it (a board answer, a comment, a Done) or when the
     item is no longer his to move (some kept a stale hand-over marker after he answered). `updated` and the clocks stay as they were.
@@ -282,7 +285,7 @@ def _migrate_owner_mover() -> list[str]:
                     was_mover = _model.norm_who(it["metadata"].get("mover"))
                     _settle_apply(it["metadata"], ch)
                     did.append(f"mover {was_mover} → {ch['mover'] or 'default'}" + (f", then {ch['then']}" if ch.get("then") else ""))
-            r = _ho.pending_his(it) if _handoff_on() else None
+            r = _ho.pending_his(it) if _handoff.handoff_on() else None
             if r is not None:
                 answers = [float(a.get("ts") or 0) for a in (it["metadata"].get("answers") or []) if isinstance(a, dict) and float(a.get("ts") or 0) >= float(r.get("at") or 0)]
                 if answers:
@@ -391,7 +394,7 @@ def _mover_backfill_pass(apply: bool = True) -> list[dict[str, Any]]:
     agent, stored as its mover, never the creator (an item that waits has a post-wake mover, not a mover; one on his call is his). Once per start, before the server serves; idempotent (an item
     that has a mover stored, names a session in needs, waits or is his is not touched, so a store with none writes nothing); only metadata.mover changes, the clocks stay and nothing is posted to
     GitHub (mirror off). The save is quiet (the QUIET write context of `service/writes.py`): it records no hand-off and ends none, so a hand-off record that names another mover than the one given here is left for the repair pass
-    (_handoff_repair_pass), which runs right after. An item whose project names no builder and no -main agent is left and counted in the stderr line.
+    (_handoff.handoff_repair_pass), which runs right after. An item whose project names no builder and no -main agent is left and counted in the stderr line.
     `apply=False` is the dry run: the same rows, nothing written. → [{gid, item, project, mover, creator}] in id order, the items given a mover (apply) or that would be; `mover` is "" for the ones no agent can be named for."""
     out: list[dict[str, Any]] = []
     for gid, p in _item_files():
@@ -624,9 +627,9 @@ _writes.install(_writes.Steps(
     settle_mover=lambda item, before: _settle_mover_on_save(item, before),
     owner_steps=lambda item, before, writer, author: _owner_steps_on_save(item, before, writer, author),
     ask_stamp=lambda item, before, writer: _ask_stamp(item, before, writer),
-    handoff_on_save=lambda gid, before, item, writer, author: _handoff_on_save(gid, before, item, writer, author),
-    handoff_his_over=lambda gid, item, author, quiet: _handoff_his_over(gid, item, author, quiet),
-    handoff_follow=lambda gid, before, item, writer, author, quiet: _handoff_follow(gid, before, item, writer, author, quiet),
+    handoff_on_save=lambda gid, before, item, writer, author: _handoff.handoff_on_save(gid, before, item, writer, author),
+    handoff_his_over=lambda gid, item, author, quiet: _handoff.handoff_his_over(gid, item, author, quiet),
+    handoff_follow=lambda gid, before, item, writer, author, quiet: _handoff.handoff_follow(gid, before, item, writer, author, quiet),
     phase_stamp=lambda gid, item: _phase_stamp(gid, item),
     foryou_on_save=lambda gid, before, item, writer, own: _foryou_on_save(gid, before, item, writer, own),
     landed_on_save=lambda gid, before, item, writer, own: _landed_on_save(gid, before, item, writer, own),
@@ -679,7 +682,7 @@ def _github_comment(gid: str, c: dict[str, Any]) -> bool:
         meta["answers"] = answers
         try:
             r_ = _ho.pending_his(item)
-            if _handoff_on() and r_ and float(c.get("ts") or time.time()) >= float(r_.get("at") or 0):      # his comment, made after the hand-off, ends his hand-off record
+            if _handoff.handoff_on() and r_ and float(c.get("ts") or time.time()) >= float(r_.get("at") or 0):      # his comment, made after the hand-off, ends his hand-off record
                 _ho.answered(item, time.time(), f"{OWNER} commented on GitHub", at=float(c.get("ts") or time.time()))
         except Exception as e:  # noqa: BLE001
             print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
@@ -1338,8 +1341,8 @@ def _name_on_write(gid: str, item: dict[str, Any], meta: dict[str, Any], sender:
 
 
 def _router_delivered(target: str, text: str, outcome: str) -> str:
-    """The router's push to `target` came back `outcome`: an open hand-off to it of an item the text names is delivered (_handoff_told_text). → the outcome, unchanged."""
-    _handoff_told_text(target, text, outcome, link_only=True)
+    """The router's push to `target` came back `outcome`: an open hand-off to it of an item the text names is delivered (_handoff.handoff_told_text). → the outcome, unchanged."""
+    _handoff.handoff_told_text(target, text, outcome, link_only=True)
     return outcome
 
 
@@ -1656,7 +1659,7 @@ _ASK_IN_NEXT = "A client whose tool has no ask parameter writes the line as the 
 def _next_put(meta: dict[str, Any], text: str, writer: str, keeper: str, **kw: Any) -> list[tuple[str, str]]:
     """nextlines.write for the tools: a next text that cannot sit beside other writers' lines is a refusal. → the lines of the text that another session's open line already reads (left out, not added twice)."""
     try:
-        return _nl.write(meta, text, writer, keeper, _ho_same, **kw)
+        return _nl.write(meta, text, writer, keeper, _handoff.ho_same, **kw)
     except _nl.NextFormError as e:
         raise ToolError(f"Refused: {e}")
 
@@ -1676,7 +1679,7 @@ def _lift_ask(meta: dict[str, Any], refresh: bool = False, writer: str | None = 
     valid = _rmod.parse_ask(had) is not None or bool(_watch.asked_of(meta))
     if valid and not refresh:
         return ""
-    line = _nl.lift_first(meta, lambda ln: _rmod.parse_ask(ln) is not None, writer, keeper, _ho_same)
+    line = _nl.lift_first(meta, lambda ln: _rmod.parse_ask(ln) is not None, writer, keeper, _handoff.ho_same)
     if not line:
         return ""
     meta["ask"] = line
@@ -1805,7 +1808,7 @@ def _ask_leave(gid: str, why: str, sender: str = "", expect: str = "") -> str:
     to = _telling.holder(item)
     line = (f"[stackshot] the ask on {_gh.shown(gid)} was taken off {OWNER}'s move (its author said it is wrong: {_clip_line(why, 140)}). "
             f"The item is back with {_session_label(to) if to else 'its default mover'}. If he answers it late, his answer is kept as a comment → {_item_url(gid) or _telling.notice_link(gid)}")
-    if to and not (sender.strip() and _ho_same(to, sender)):
+    if to and not (sender.strip() and _handoff.ho_same(to, sender)):
         try:
             _telling.tell_woken(gid, _session_id(to), f"{_FOR_OWNER} {line}" if _telling.front_keeper(to, str(meta.get("project") or ""))[0] else line, tag="ask")
         except Exception as e:  # noqa: BLE001  — the ask is off his move; a notice that fails is a stderr line
@@ -1838,14 +1841,14 @@ def _ask_after_write(pre: "dict[str, Any]", sender: str, ask: str, clear_ask: bo
             notes = _askl.notes_since(meta, float(pre.get("look") or 0))
             return _askl.check_line(OWNER, _askl.notes_line(notes, _clip_line, _ask_when)) if notes else ""
         authors = _ask_authors(item)
-        mine = bool(who) and any(_ho_same(who, a) for a in authors)
+        mine = bool(who) and any(_handoff.ho_same(who, a) for a in authors)
         if _cfg.ask_leaves_on():
             word = _askl.author_says_wrong(_askl.new_lines(texts, str(pre.get("old") or ""))) if mine and pre.get("ask") == now_ask else ""
             if word:
                 out = _ask_leave(gid, word, sender=who, expect=now_ask)
                 if out:
                     return out
-        if mine or (who and _ho_same(who, _telling.holder(item))) or (who and _ho_same(who, str(meta.get("owner") or ""))):
+        if mine or (who and _handoff.ho_same(who, _telling.holder(item))) or (who and _handoff.ho_same(who, str(meta.get("owner") or ""))):
             since = float(_askl.rec_of(meta).get("at") or pre.get("look") or 0)
             at = _askl.rec_of(meta).get("at")      # an ask with no record has no time to compare a drop with: nothing is said of its dependencies
             dropped = _askl.dropped_line(_askl.dropped_deps(now_ask, _ask_lookup, float(at)), _ask_when) if mine and at else ""
@@ -2407,9 +2410,9 @@ def _mover_subagents(who: str, idx: "dict[str, Any] | None" = None, now: float |
         idx = _sessions_index() if idx is None else idx
     except Exception as e:  # noqa: BLE001
         raise _tie.Unreadable(f"the fleet's sessions index cannot be read ({e.__class__.__name__})") from e
-    row = _handoff_pane_row(who, idx)
+    row = _handoff.handoff_pane_row(who, idx)
     if row is None:
-        if _handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
+        if _handoff.handoff_registered(who, idx):      # a row is there but it is no interactive pane (a headless session, say): this server cannot look into it, which is not the same as the session being gone
             raise _tie.Unreadable("the session is registered here but is no interactive pane this server can look into")
         w = str(who or "").strip()
         names = {x for x in (w, _session_label(w)) if x}
@@ -2440,7 +2443,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
     """The hourly audit line (audit/hourly.py, `[audit] hourly_line`, on by default), run from the ten-minute audit tick: an open item on an agent with no activity for 45 minutes (`hourly.EVERY`, so the line lands inside the hour), and no audit line in the last
     45 minutes, gets ONE History line, `Audit hh:mm: verified …` or `Audit hh:mm: idle, nothing verified`, one every 45 minutes (`hourly.FAST_GAP`) for the first 24 hours of silence and then one every 6 hours (an entry of `metadata.hourly_audit.log`, kept apart from the stall ladder's
     `metadata.stall.log`; kind `audit`, `audit_idle` or `audit_unknown`: a line for an item the audit could not tell about, because a running subagent of the mover is tied to no item or the mover's subagents could not be read).
-    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
+    What is verified is recorded data: the mover's pane `busy` in the CLI's registry on this box (`_handoff.handoff_status`, the stall pass's own read), a running subagent of the mover whose description or brief names THIS item or a pull request anchored to it (`_mover_subagents`, audit/subagent_tie.py: a step status in progress is only the mover's claim and is not read), and a tied pull
     request's CI result, review, comment, merge or commit in `metadata.last_activity`; nothing is read from GitHub. A line that rests on live states alone (a busy pane, a subagent) says so. A line that verified something is stamped as the item's last-activity record (kind `audit`, `hourly.stamp_signal`: it is the hourly update, so the On agent row shows it;
     newest wins), one that verified nothing is not, and neither is one that rests on a recorded event alone (the event is in the record already). The save is
     the server's own bookkeeping (no writer): it moves neither the activity clock nor the progress clock, sends nobody anything and so spares no front agent. Each item is read again under the lock, so two
@@ -2460,7 +2463,7 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
         idx, idx_ok = {}, False
         print(f"audit: sessions index not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     if pane is None:
-        pane = lambda who: _handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
+        pane = lambda who: _handoff.handoff_status(who, idx)[0]      # noqa: E731  — a pane on another box shows nothing: unknown, so not verified
     if subagents is None:
         seen: dict[str, Any] = {}      # a mover's subagents are read once a pass, not once an item: a read that failed is kept too (as the exception), so the transcript lookup is not repeated for every item and again under the item lock
         def subagents(who: str) -> "list[dict[str, Any]]":
@@ -2479,11 +2482,11 @@ def _hourly_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | N
             anchored = {}
             print(f"audit: anchors not read for the hourly line: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
     written: list[str] = []
-    for gid, _line in _hourly.pass_(items, now, env, pane, _ho_same, subagents, anchored):
+    for gid, _line in _hourly.pass_(items, now, env, pane, _handoff.ho_same, subagents, anchored):
         try:
             with _writes.ITEM_LOCK:
                 item = _load(gid)
-                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
+                line = _hourly.due({**items, gid: item}, gid, now, env, pane, _handoff.ho_same, subagents, anchored)      # read again under the lock: the item may have been written, held or closed since
                 if line is None:
                     continue
                 _hlog.note(item.setdefault("metadata", {}), now, line["text"], line["kind"], pane_only=_hourly.pane_only(line))
@@ -2509,7 +2512,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
     from stackshot.audit import hourly as _hourly
     from stackshot.audit import silence as _silence
     from stackshot.tools import next_report as _nr
-    if not _bt.enabled() or not _hourly.enabled() or _ro.is_read_only() or _handoff_paused():
+    if not _bt.enabled() or not _hourly.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
         return []
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
@@ -2531,7 +2534,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 if row["project"] not in mains:
                     mains[row["project"]] = _main_agent(row["project"])
                 to = mains[row["project"]]
-                if to and _ho_same(to, mover):
+                if to and _handoff.ho_same(to, mover):
                     kind = _bt.KIND_FRONT      # the mover is the project's -main agent itself: the front wording, to the same session
             if not to or _model.is_owner(to):
                 _balance_log_once(gid, "busy-tell-no-main", now, f"audit: {gid} busy stretch not told: no -main agent to tell")
@@ -2539,7 +2542,7 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
             with _writes.ITEM_LOCK:
                 item = _load(gid)
                 cur = _bt.due({**items, gid: item}, gid, now, front, None, hrs)      # read again under the lock: the item may have been written, held, closed or told of since
-                if cur is None or not _ho_same(cur["mover"], mover):
+                if cur is None or not _handoff.ho_same(cur["mover"], mover):
                     continue
                 meta = item.setdefault("metadata", {})
                 span = _bt.span(cur["shown"], now, hrs)      # the real length of the stretch (whole hours, never under the threshold), not the threshold: a front agent's item counts from its last real activity, which can be days back; a background mover's stretch is measured only as far back as its audit lines show (`shown`)
@@ -2566,22 +2569,22 @@ def _busy_tell_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
 
 
 def _hand_idle_builders(project: str) -> list[str]:
-    """The sessions an idle item of `project` may be handed to, best first: the project's own background agents (`_handoff_background`) and no other project's. A project's work is built, reviewed and released by its
+    """The sessions an idle item of `project` may be handed to, best first: the project's own background agents (`_handoff.handoff_background`) and no other project's. A project's work is built, reviewed and released by its
     own builder, so a builder of an unrelated project is never a candidate, however idle. A project with no free background agent of its own keeps the item, and `_hand_idle_tick` says so to its -main agent."""
-    return list(_handoff_background(project))
+    return list(_handoff.handoff_background(project))
 
 
 def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | None" = None, env: Any = None, status: "Callable[[str], str] | None" = None,
                     dead: "Callable[[str], str] | None" = None) -> list[str]:
     """Idle items go to a free builder (audit/hand_idle.py, `[audit] hand_idle`, on by default), run from the ten-minute audit tick right after the hourly line: an open item on an agent whose newest audit line is
     `idle, nothing verified` and that nothing has moved since goes to the first free builder (a background agent of its own project, never another project's; one whose pane is in no turn on this box and
-    that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff_exec` → `_handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
+    that moves no open item on an agent), by the minute hand-off pass's own write (`_handoff.handoff_exec` → `_handoff.handoff_write_move`, as the audit's orphan hand-over does): the builder heads `needs`, the hand-off record is made
     from the server and the builder is told. One History line says why and names the mover it left. The project's -main agent gets one message that asks nothing. With no builder free nothing moves: a History
     line says so and -main is told once per item per 24 hours. No message goes to the owner and no step is made for him. At most `hand_idle.MAX_PER_TICK` items are handed on per pass and one per item per 24 hours.
     `now`, `items`, `env`, `status`, `dead` are for tests and the tick. → the ids handed on."""
     from stackshot.audit import hand_idle as _hi
     from stackshot.tools import next_report as _nr
-    if not _hi.enabled() or _ro.is_read_only() or _handoff_paused():
+    if not _hi.enabled() or _ro.is_read_only() or _handoff.handoff_paused():
         return []
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
@@ -2592,8 +2595,8 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
         return []
     if status is None or dead is None:
         idx = _sessions_index()
-        status = status or (lambda who: _handoff_status(who, idx)[0])
-        dead = dead or (lambda who: _handoff_pane(who, idx))
+        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
+        dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
     busy = _hi.busy_movers(items, now)
     handed: list[str] = []
     told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
@@ -2606,7 +2609,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
             if row["project"] not in builders:
                 builders[row["project"]] = _hand_idle_builders(row["project"])
                 mains[row["project"]] = _main_agent(row["project"])
-            to = _hi.pick_free(builders[row["project"]], busy, status, dead, _ho_same, row["mover"])
+            to = _hi.pick_free(builders[row["project"]], busy, status, dead, _handoff.ho_same, row["mover"])
             main = mains[row["project"]]
             if main and _model.is_owner(main):
                 main = ""      # the owner is told nothing by this pass, whatever the page names as -main
@@ -2614,12 +2617,12 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
             if to:
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due, and still with the mover it was found with; the stamp goes on the metadata the move saves
                     cur = _hi.due({**items, st.gid: item}, st.gid, now, front)
-                    if cur is None or not _ho_same(cur["mover"], st.frm):
+                    if cur is None or not _handoff.ho_same(cur["mover"], st.frm):
                         return False
                     _hi.mark_handed(item.setdefault("metadata", {}), now, st.frm, st.to)
                     return True
                 st = _ho.Step("move", gid, f"{_hi.WHY} (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
-                if not _handoff_exec([st], now, verify=False, recheck=still):
+                if not _handoff.handoff_exec([st], now, verify=False, recheck=still):
                     continue
                 handed.append(gid)
                 busy.append(to)
@@ -2630,7 +2633,7 @@ def _hand_idle_tick(now: float | None = None, items: "dict[str, dict[str, Any]] 
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
                     cur = _hi.due({**items, gid: item}, gid, now, front)
-                    if cur is None or cur["told_none"] or not _ho_same(cur["mover"], row["mover"]):
+                    if cur is None or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_none(meta, now)
@@ -2668,10 +2671,10 @@ def _balance_log_once(gid: str, key: str, now: float, line: str) -> None:
 
 
 def _balance_builders(project: str) -> list[str]:
-    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff_ranked` classes them 0 and 1). Never another
+    """The sessions the balancer may move an item of `project` to, best first: the project's own BUILDERS only (the mandate says build, maintain, merge or engineer: `_handoff.handoff_ranked` classes them 0 and 1). Never another
     project's builder: a project's code is built, reviewed and released by its own builder, and a builder of an unrelated project has a different mandate. With no other builder here the item stays where it is. A reviewer or any
     other background agent is no candidate."""
-    return [n for c, _o, n in _handoff_ranked(project) if c < 2]
+    return [n for c, _o, n in _handoff.handoff_ranked(project) if c < 2]
 
 
 def _balance_builder_names() -> list[str]:
@@ -2686,7 +2689,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                   dead: "Callable[[str], str] | None" = None, anchored: "Callable[[str, dict[str, Any]], bool] | None" = None) -> list[str]:
     """The balancer (audit/hand_idle.py, `[audit] balance`, on by default), its own minute tick ahead of the hand-off tick, so a move at `balance_minutes` (10) comes before that tick's reminder: an item NOT STARTED (an
     untaken hand-off to a builder) or QUEUED BEHIND its mover's other item (the queue rule over the balancer's own window, whatever `[model] queued_behind` says) that has waited that long goes to the builder of its own project with the fewest open
-    items, by the same write as the idle hand-over (`_handoff_exec` → `_handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
+    items, by the same write as the idle hand-over (`_handoff.handoff_exec` → `_handoff.handoff_write_move`): the builder heads `needs`, the hand-off record is made from the server, the builder is told by the hand-off notice, one History line says
     why. The mover it left is told ONCE, by `tell_woken` (not the message tool, which would name it in `needs` again), to disregard the item. An item its mover started (a taken hand-off, a step status in progress or done, a
     subagent, an anchor, a pull request event) is never moved. `metadata.balance` ({at, from, to, count}) keeps the limits and is written in the save of the move, before anything is sent: one move per item per 24 hours, two
     in all (then the existing ladders have it and -main is told once), three per pass. With NO live builder to take it (another builder than its mover is in the role map and none is usable) the item stays, one History line says so and -main is told once per item per 24 hours, and the pass looks again every minute; with no other builder, or a builder that is no improvement, it is a log line only.
@@ -2694,7 +2697,7 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     hand-over moved in the last 24 hours is left alone. Stands still while the audit is off (`[audit] enabled`) or runs in agent mode, while the board is paused, with `[model] handoff` off, and in a read-only copy. `now`, `items`, `env`, `status`, `dead`, `anchored` are for tests and the tick. → the ids moved."""
     from stackshot.audit import hand_idle as _hi
     from stackshot.tools import next_report as _nr
-    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff_paused() or not _handoff_on():
+    if not _hi.balance_enabled() or not _cfg.audit_enabled() or _cfg.audit_mode() != "script" or _ro.is_read_only() or _handoff.handoff_paused() or not _handoff.handoff_on():
         return []
     now = time.time() if now is None else now
     items = items if items is not None else _nr.load_all(None)
@@ -2716,16 +2719,16 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
     except Exception as e:  # noqa: BLE001  — with no view of who builds, nothing is judged a builder: nothing moves on a guess
         print(f"balance: builders not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
         return []
-    is_builder = lambda who: any(_ho_same(who, n) for n in names)      # noqa: E731
+    is_builder = lambda who: any(_handoff.ho_same(who, n) for n in names)      # noqa: E731
     behind = _hi.balance_queue(items, now, minutes * 60.0, front)
-    rows = _hi.balance_all(items, now, minutes, front, behind, _ho_same, anchored, is_builder)
+    rows = _hi.balance_all(items, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
     if not rows:
         return []
     if status is None or dead is None:
         idx = _sessions_index()
-        status = status or (lambda who: _handoff_status(who, idx)[0])
-        dead = dead or (lambda who: _handoff_pane(who, idx))
-    load = _hi.load_counts(_hi.busy_movers(items, now), _ho_same)
+        status = status or (lambda who: _handoff.handoff_status(who, idx)[0])
+        dead = dead or (lambda who: _handoff.handoff_pane(who, idx))
+    load = _hi.load_counts(_hi.busy_movers(items, now), _handoff.ho_same)
     moved: list[str] = []
     gone: list[tuple[str, str, str]] = []      # (the mover it left, the item, who has it now): the former mover's notice
     told: dict[str, list[tuple[str, str]]] = {}      # -main agent -> (item, line) of its message
@@ -2746,8 +2749,8 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
             if row["capped"]:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
-                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
-                    if cur is None or not cur["capped"] or not _ho_same(cur["mover"], row["mover"]):
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
+                    if cur is None or not cur["capped"] or not _handoff.ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_capped(meta, now)
@@ -2757,35 +2760,35 @@ def _balance_tick(now: float | None = None, items: "dict[str, dict[str, Any]] | 
                     told.setdefault(main, []).append((gid, f"{lead}: it was moved {_hi.BALANCE_LIFETIME} times to balance the builders and is still not started, so the balancer leaves it with {_session_label(row['mover'])} to the ladders"))
                 print(f"balance: {gid} at its lifetime cap", file=sys.stderr, flush=True)
                 continue
-            to = _hi.pick_least(builders[project], load, status, dead, _ho_same, row["mover"], row["tried"], front, project)
-            if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _ho_same), _hi.load_of(load, row["mover"], _ho_same)):
+            to = _hi.pick_least(builders[project], load, status, dead, _handoff.ho_same, row["mover"], row["tried"], front, project)
+            if to and not _hi.balance_ok(row["kind"], _hi.load_of(load, to, _handoff.ho_same), _hi.load_of(load, row["mover"], _handoff.ho_same)):
                 _balance_log_once(gid, "load", now, f"balance: {gid} stays with {row['mover']}: no builder has few enough open items")      # silent otherwise: a spread that is as good as it can be is no news
             elif to:
                 def still(item: dict[str, Any], st: "_ho.Step") -> bool:      # under the item lock, on the fresh read: still due and still with the mover it was found with; the record goes on the metadata the move saves
-                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
-                    if cur is None or cur["capped"] or not _ho_same(cur["mover"], st.frm):
+                    cur = _hi.balance_due({**items, st.gid: item}, st.gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
+                    if cur is None or cur["capped"] or not _handoff.ho_same(cur["mover"], st.frm):
                         return False
                     _hi.mark_balanced(item.setdefault("metadata", {}), now, st.frm, st.to)
                     return True
                 st = _ho.Step("move", gid, _hi.balance_why(row["kind"], minutes) + f" (it was with {_session_label(row['mover'])})", row["mover"], to, via="orphan")
                 try:
-                    ok = bool(_handoff_exec([st], now, verify=False, recheck=still))
+                    ok = bool(_handoff.handoff_exec([st], now, verify=False, recheck=still))
                 except Exception as e:  # noqa: BLE001  — a send after the save failed: the move itself was made when the item carries this pass's record
                     print(f"balance: {gid} sending after the move failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
                     ok = (((_load(gid).get("metadata") or {}).get(_hi.BALANCE_KEY) or {}).get("at") == now)
                 if not ok:
                     continue
                 moved.append(gid)
-                _hi.shift(load, row["mover"], to, _ho_same)
+                _hi.shift(load, row["mover"], to, _handoff.ho_same)
                 gone.append((row["mover"], gid, to))
                 print(f"balance: {gid} {row['kind']}, moved from {row['mover']} to {to}", file=sys.stderr, flush=True)
-            elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _ho_same, front, project):
+            elif not _hi.balance_others(builders[project], row["mover"], row["tried"], _handoff.ho_same, front, project):
                 _balance_log_once(gid, "alone", now, f"balance: {gid} stays with {row['mover']}: no other builder to move it to")      # a mover that is the only builder has nobody to lose: no note, no message
             else:
                 with _writes.ITEM_LOCK:
                     item = _load(gid)
-                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _ho_same, anchored, is_builder)
-                    if cur is None or cur["capped"] or cur["told_none"] or not _ho_same(cur["mover"], row["mover"]):
+                    cur = _hi.balance_due({**items, gid: {**item, "gid": gid}}, gid, now, minutes, front, behind, _handoff.ho_same, anchored, is_builder)
+                    if cur is None or cur["capped"] or cur["told_none"] or not _handoff.ho_same(cur["mover"], row["mover"]):
                         continue
                     meta = item.setdefault("metadata", {})
                     _hi.mark_balance_none(meta, now)
@@ -2990,7 +2993,7 @@ def _recovery_target(project: str, quiet: str) -> tuple[str, str, bool]:
         if proj and _anc.front_only(proj):
             builderless = True
             main = _main_agent(proj)
-            if main and not (_ho_same(main, quiet) or _session_id(main) == (_session_id(quiet) or quiet)):
+            if main and not (_handoff.ho_same(main, quiet) or _session_id(main) == (_session_id(quiet) or quiet)):
                 return main, "main", True
     except Exception as e:  # noqa: BLE001  — the choice is an extra: a failed read keeps the fleet's builder
         print(f"recovery: front-only test of {project} failed ({e.__class__.__name__}: {e}); the fleet's builder is asked", file=sys.stderr, flush=True)
@@ -3885,7 +3888,7 @@ def _release_green(to: str, text: str, sender: str, machine: str, pr: str) -> st
 from stackshot.web import app as _app  # noqa: E402  — the MCP application (web/app.py): FastMCP, the middleware, the tools (web/tools/), the board's sign-in and the routes (web/routes/), registered in that order; what they take from this module is passed late-bound, looked up at each call
 mcp = _app.build(
     fmt=lambda *a, **k: _fmt(*a, **k),
-    handoff_brief=lambda *a, **k: _handoff_brief(*a, **k),
+    handoff_brief=lambda *a, **k: _handoff.handoff_brief(*a, **k),
     is_parked=lambda *a, **k: _is_parked(*a, **k),
     model_report_line=lambda *a, **k: _model_report_line(*a, **k),
     notice_asked=lambda *a, **k: _notice_asked(*a, **k),
@@ -4035,10 +4038,10 @@ def _wake_step_found(item: dict[str, Any], senders: tuple[str, ...], dated_only:
     if not _wake_alone_on_agent(meta) or not any(str(x or "").strip() for x in senders):
         return []
     mod = _model_of(item)
-    if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not any(_ho_same(mod.mover, x) for x in senders):
+    if mod.state != _model.ALIVE or not mod.mover or _model.is_owner(mod.mover) or not any(_handoff.ho_same(mod.mover, x) for x in senders):
         return []
     return _dw.timed_wait_lines(meta.get("next"), _wt.wake_value(meta), _pages.zone_now().date(),
-                                lambda who: _ho_same(mod.mover, who) or _session_label(mod.mover).casefold() == who.casefold(), dated_only)
+                                lambda who: _handoff.ho_same(mod.mover, who) or _session_label(mod.mover).casefold() == who.casefold(), dated_only)
 
 
 def _date_only_wait(item: dict[str, Any], meta: dict[str, Any], next_after: Any, wake_in: str, senders: tuple[str, ...], reason: str) -> tuple[str, str]:
@@ -4182,7 +4185,7 @@ def _wait_end_fix(gid: str, plan: "dict[str, Any]", now: float) -> "dict[str, An
             return no(f"{OWNER} moves it")
         if _sf.declined(meta, _sf.WAIT_END, tok) or _sf.marked(meta, _sf.WAIT_END, tok):
             return no("this line was fixed or sent back already")
-        gap = next((g for g in _we.item_gaps(gid, meta, mover, "alive" if alive else "waiting", facts, _open_item_named, _ho_same, now,
+        gap = next((g for g in _we.item_gaps(gid, meta, mover, "alive" if alive else "waiting", facts, _open_item_named, _handoff.ho_same, now,
                                              pending=lambda t: _sf.declined(meta, _sf.WAIT_END, t)) if g.token == tok and g.plan.get("op") == op), None)
         if gap is None:
             return no("the line or the wait changed")
@@ -4486,27 +4489,10 @@ def _model_lines(item: dict[str, Any], short: bool = False) -> list[str]:
         return []
 
 
-# ----------------------------------------------------------------------------- the hand-off machinery (handoff.py, cold_call.py)
-# An alive item has one mover. A write that changes the effective mover to a session other than the writer records a hand-off on the item (metadata.handoff, handoff.py): who it
-# went to, from whom, when, when it was delivered (a push that came back "delivered": tell_woken reports to _handoff_pushed), and when the new mover first started work on it (a write showing it: handoff.started; `writes.save`
-# reports to _handoff_on_save). A delivered hand-off not taken in [model] handoff_minutes, one whose recipient's turn ended with no write to it, and a mover whose pane is gone go
-# down section 5 (_handoff_tick): the project's background agent, the cold call, the sender, then a recovery request to the fleet's builder; a background agent that is the mover is reminded once first (handoff.remind), and an anchor scoped to the item counts as taken. [model] handoff = false turns all of it off; [model] pause = true holds the
-# tick, and what is due fires in one batch, one message per recipient, when it is turned off again. The send-time guard (gates.gate_handoff) refuses a hand-off to a session with no pane.
+# ----------------------------------------------------------------------------- the hand-off machinery (service/handoff.py, service/handoff_cold.py)
+# The hand-off record, its delivery, the minute pass, the cold call and the display are service/handoff.py's and service/handoff_cold.py's. What stays here is the item model's switch
+# and the reader of one item the hooks of those modules and of the wake passes share.
 _ho.SERVER = NAME
-_HO_COLD_THREADS: list[threading.Thread] = []       # the cold calls started (a test joins them)
-_COLD_RUNNER: Any = None           # a test puts a callable here: runner(message) -> router.run_call's result dict; None = a real `claude -p`
-CLI_SESSIONS = Path.home() / ".claude" / "sessions"    # the CLI's own registry of its panes on this box (push.py reads it too): status busy | idle | shell and when it changed
-
-
-def _handoff_on() -> bool:
-    """[model] handoff (default true): the hand-off machinery. false: no record is written, no clock runs, no gone mover is looked for, no hand-off is refused for a dead pane."""
-    return bool(_cfg.get("model", "handoff", default=True))
-
-
-def _handoff_paused() -> bool:
-    """[model] pause (default false): the board-wide pause switch (design section 5): the clock and the gone-mover pass do nothing while it is true. The key is SHARED with the
-    watchers (they own it and document it in stackshot.example.toml; this reads it with the same reader, `_cfg.get("model", "pause")`)."""
-    return _watch.paused()          # the config's switch, or the migration's pass holding the board (_migrate_write)
 
 
 def _switchover_on() -> bool:
@@ -4523,357 +4509,6 @@ def _old_wait_off() -> bool:
     return _switchover_on() and not bool(_cfg.get("model", "switchover_fallback", default=True))
 
 
-def _cold_call_on() -> bool:
-    return bool(_cfg.get("model", "cold_call", default=True))
-
-
-def _handoff_num(key: str, default: float) -> float:
-    try:
-        v = float(_cfg.get("model", key, default=default))
-        return v if v > 0 else default
-    except (TypeError, ValueError):
-        return default
-
-
-def _ho_same(a: Any, b: Any) -> bool:
-    """Two references are one session: the same text, the same registry session, or the same canonical id (as the guards resolve sessions); the owner only with himself."""
-    a, b = str(a or "").strip(), str(b or "").strip()
-    if not a or not b:
-        return False
-    if a.casefold() == b.casefold():
-        return True
-    if _model.is_owner(a) or _model.is_owner(b):
-        return _model.is_owner(a) and _model.is_owner(b)
-    try:
-        s = _sr.same(a, b)
-        if s is not None:
-            return bool(s)
-    except Exception:  # noqa: BLE001
-        pass
-    return _session_id(a) == _session_id(b)
-
-
-def _ho_ident(who: str) -> str:
-    """The id a hand-off keeps beside the name it shows: the session's transcript or permanent id when it has one."""
-    i = _session_id(str(who or ""))
-    return i if _anc.is_id(i) else ""
-
-
-def _ho_derive(item: dict[str, Any]) -> "_model.Model":
-    return _model_of(item)
-
-
-def _handoff_pane(who: str, idx: dict[str, Any] | None = None) -> str:
-    """"" when `who` may have a live pane, else why not in words: the message tool's dead-recipient rule (_dead_recipient and _pane_dead: a retired session, or one whose
-    every row has been gone longer than [client] dead_after_minutes on a machine that is online), plus a session no heartbeat row holds at all (a message to it is refused too).
-    The owner and a cloud session (cse_ …) have none to check."""
-    w = str(who or "").strip()
-    if not w or _model.is_owner(w) or w.startswith("cse_"):
-        return ""
-    idx = _sessions_index() if idx is None else idx
-    names = {x for x in (w, _session_label(w)) if x}
-    rows = [r for r in idx.values() if isinstance(r, dict) and r.get("name") in names]
-    byid = idx.get(w)
-    if isinstance(byid, dict) and not any(byid is r for r in rows):
-        rows.append(byid)
-    if not rows or not any(_lv.running(r) for r in rows):
-        try:
-            reg_row = _sr.row(w)
-        except Exception:  # noqa: BLE001
-            reg_row = None
-        try:
-            roles = _anc.session_roles()
-            held = _role_name(roles, w)
-        except Exception:  # noqa: BLE001
-            roles, held = {}, ""
-        if (reg_row and reg_row.get("state") != "live") or (held and roles[held].get("retired")):
-            return "a retired session, its pane gone"
-    if not rows:
-        return "no pane of it is in the heartbeat"
-    whys = [_pane_dead(r) for r in rows]
-    return whys[0] if all(whys) else ""
-
-
-def _handoff_registered(who: str, idx: dict[str, Any] | None = None) -> bool:
-    """Is there a row in the CLI's registry on this box for the session `who`, of any kind and of a live process (`liveness.registered`)? The names and ids are `_handoff_pane_row`'s."""
-    w = str(who or "").strip()
-    idx = _sessions_index() if idx is None else idx
-    names = {x for x in (w, _session_label(w)) if x}
-    ids = {w, _session_id(w)} | {k for k, r in dict.items(idx) if isinstance(r, dict) and r.get("name") in names}
-    return _lv.registered(names, ids, CLI_SESSIONS)
-
-
-def _handoff_pane_row(who: str, idx: dict[str, Any] | None = None) -> tuple[float, dict[str, Any]] | None:
-    """(the epoch second its status last changed, the row) of a pane on this box, from the CLI's own registry (~/.claude/sessions/<pid>.json; push.py reads the same): None for a
-    session this box does not run. Only an interactive pane's row counts (`kind` == "interactive": a headless `claude -p` of the same session is no pane that holds a notice), its
-    process must be alive, and the most recently updated row wins. The one place both `_handoff_status` and `_handoff_started` read, so the two never disagree about which row is the pane."""
-    w = str(who or "").strip()
-    idx = _sessions_index() if idx is None else idx
-    names = {x for x in (w, _session_label(w)) if x}
-    ids = {w, _session_id(w)} | {k for k, r in dict.items(idx) if isinstance(r, dict) and r.get("name") in names}
-    return _lv.pane_row(names, ids, CLI_SESSIONS)       # the shared engine reads the registry; CLI_SESSIONS is read at call time
-
-
-def _handoff_status(who: str, idx: dict[str, Any] | None = None) -> tuple[str, float]:
-    """(busy | idle | shell | "", the epoch second its status last changed) of a pane on this box, from the row `_handoff_pane_row` picks: "" for a session this box does not run."""
-    return _lv.status(_handoff_pane_row(who, idx))
-
-
-def _handoff_started(who: str, idx: dict[str, Any] | None = None) -> float:
-    """The epoch second the live process of a pane on this box started (`startedAt` in the row `_handoff_pane_row` picks, the same row `_handoff_status` reads): a relaunch, a resume or
-    a recycle is a new process, so a start after a hand-off's delivery means the pane that was told is gone. 0.0 for a session this box does not run, a row without the
-    field, or no live process: there the hand-off goes on as before."""
-    best = _handoff_pane_row(who, idx)
-    try:
-        return float(best[1].get("startedAt") or 0) / 1000.0 if best else 0.0
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _handoff_background(project: str) -> list[str]:
-    """The project's background agents, the one to hand to first first (the send-time guard names one): the builder before the rest, the page's order within each."""
-    return [n for _a, _b, n in _handoff_ranked(project)]
-
-
-def _handoff_ranked(project: str) -> list[tuple[int, int, str]]:
-    """(class, order, name) of the project's background agents, best first: those of the page whose hub is the project's (the guards' own reading, model_guards.Ctx.background_of);
-    class 0 a mandate that says build, 1 one that says maintain, merge or engineer, 2 the rest. The builder is the first of class 0 or 1."""
-    try:
-        reg = _anc.registry()
-        roles = _anc.session_roles(reg)
-        hub = _anc.hub_of(project, reg)
-        out = []
-        for i, (n, r) in enumerate(roles.items()):
-            if r.get("role") != "back" or _anc.hub_of(r.get("project", ""), reg) != hub:
-                continue
-            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
-            out.append((0 if re.search(r"\bbuild", mand, re.I) else 1 if _router._BUILDER.search(mand) else 2, i, n))
-        return sorted(out)
-    except Exception:  # noqa: BLE001
-        return []
-
-
-def _handoff_builder(project: str) -> list[str]:
-    """Where a hand-off nobody took falls first: the project's BUILDER alone (router_live.builder's pick: the background agent whose mandate says build, else maintain, merge or
-    engineer, the page's order within each; not every background agent on the page). A list of one, or none."""
-    ranked = _handoff_ranked(project)
-    return [ranked[0][2]] if ranked and ranked[0][0] < 2 else []
-
-
-def _handoff_exempt(item: dict[str, Any], who: str) -> bool:
-    """Never clocked: a front agent (a session the owner talks to: no item notice wakes one, so nothing was delivered to start a clock)."""
-    m = item.get("metadata") or {}
-    return _telling.front_keeper(who, str(m.get("project") or ""))[0]
-
-
-def _handoff_reminder_target(who: str, roles: dict[str, Any] | None) -> str:
-    """The session id a reminder goes to, or "" (fail closed): only a live session that the registry or the fleet resolves and that `roles` lists with a background role (`back`) and not
-    retired. Not a front agent, a page's name-line session (the one session of a one-session project is the one the user talks to), an unknown name, and nothing at all when the roles
-    could not be read or anything here raises."""
-    try:
-        if not roles or not who or not _ho.is_session_name(who) or _model.is_owner(who):
-            return ""
-        sid = _session_id(who)
-        if not (_anc.is_id(sid) or _sr.resolve(sid)):
-            return ""
-        entry = roles.get(_role_name(roles, who)) or {}
-        return sid if entry.get("role") == "back" and not entry.get("retired") else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _handoff_env(now: float) -> "_ho.Env":
-    idx = _sessions_index()          # read once for the pass
-    cells: dict[str, Any] = {}       # read at most once per pass, and only when an item would act: the anchors, the role map
-    reminded: dict[str, str] = {}
-
-    def anchored(gid: str, item: dict[str, Any]) -> bool:
-        try:
-            if "anchors" not in cells:
-                try:
-                    cells["anchors"] = _anc.load()
-                except Exception:  # noqa: BLE001
-                    cells["anchors"] = {}                       # unreadable: nothing counts as anchored, the clock runs as before
-            at = float((_ho.record_of(item) or {}).get("at") or 0)      # an anchor older than the hand-off (an earlier pull request, one added before the hand-over) says nothing about it
-            return any(float(e.get("added") or 0) >= at for e in _scoped_anchors(str((item.get("metadata") or {}).get("project") or ""), gid, cells["anchors"]))
-        except Exception:  # noqa: BLE001
-            return False
-
-    def remind(item: dict[str, Any], who: str) -> str:
-        if who not in reminded:
-            if "roles" not in cells:
-                try:
-                    cells["roles"] = _anc.session_roles()
-                except Exception:  # noqa: BLE001
-                    cells["roles"] = None
-            reminded[who] = _handoff_reminder_target(who, cells["roles"])
-        return reminded[who]
-    return _ho.Env(now=now, derive=_ho_derive, same=_ho_same, minutes=_handoff_minutes(), idle_grace=_handoff_num("handoff_idle_seconds", _ho.IDLE_GRACE),
-                   gone_days=_handoff_num("handoff_gone_days", _ho.GONE_DAYS), cold_call=_cold_call_on(), pane=lambda w: _handoff_pane(w, idx),
-                   inbox_grace=_handoff_num("handoff_inbox_grace_minutes", 10.0), status=lambda w: _handoff_status(w, idx), started=lambda w: _handoff_started(w, idx), background=_handoff_builder,
-                   exempt=_handoff_exempt, label=_session_label, cover_all=_switchover_on(), is_front=lambda w, _p: _telling.front_sender(w), anchored=anchored, remind=remind,
-                   ladder=_ladder_on(), laddered=lambda g, w, at: _laddered(g, w, now, at))
-
-
-def _handoff_minutes() -> float:
-    return _handoff_num("handoff_minutes", _ho.MINUTES)
-
-
-# ---- recording: every real write
-def _handoff_on_save(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None) -> None:
-    """Called by `writes.save` right after the writer is stamped: the writer touches the item (a hand-off to it is taken), and a change of the effective mover to someone else makes a
-    hand-off record. Not for the server's own saves (no writer). Never fails a write."""
-    if not _handoff_on() or author or not writer or _ho.is_script(writer):
-        return      # the server's own save; the owner's board answer (author: _answer_tick covers it); a script's write (cap-words): no session's, so no hand-off
-    try:
-        _telling.HO_STATE.told = set()
-        name, wid = str(item.get("written_by") or ""), str(item.get("written_by_id") or "")
-        derive = lambda it: _ho_derive({**it, "gid": gid})
-        r = _ho.apply(item, before, name, wid, time.time(), derive, _ho_same, _session_label, _ho_ident)
-        fresh = getattr(_telling.HO_STATE, "fresh", None)
-        if fresh is None:
-            fresh = _telling.HO_STATE.fresh = {}
-        fresh.pop(gid, None)
-        if r:
-            fresh[gid] = (str(r.get("to")), r.get("at"))
-    except Exception as e:  # noqa: BLE001  — the record is an extra: a write is never failed by it
-        print(f"handoff: {gid} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _handoff_his_over(gid: str, item: dict[str, Any], author: tuple[str, str] | None = None, quiet: bool = False) -> bool:
-    """a hand-off to the owner is taken by no write of his own (he writes through the board, whose save carries `author`, or a session relays his answer), so it read "handed to the owner,
-    not yet taken" after he had answered. Called by `writes.save` for every save, right after the hand-off record of the write: his answer on the board ends it, and so does any save that leaves the item
-    not his to move (the mover is no longer he, or the item waits, or is closed): the record stays as history, taken then, with the reason. A save that just handed the item to him
-    (a new record, or he still the mover) leaves it. Never fails a write. → True when it ended one."""
-    try:
-        if not _handoff_on() or _ho.pending_his(item) is None or (quiet and not author):      # a write that only files or only confirms ends nothing
-            return False
-        if author and author[1] == "board":
-            why = f"{OWNER} answered on the board"
-        else:
-            mod = _model_of({**item, "gid": gid})
-            if mod.state == _model.ALIVE and _model.is_owner(mod.mover):
-                return False
-            why = f"it is no longer {OWNER}'s to move"
-        return _ho.answered(item, time.time(), why)
-    except Exception as e:  # noqa: BLE001  — the record is an extra: a write is never failed by it
-        print(f"handoff: {gid} his hand-off not ended: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return False
-
-
-def _handoff_follow(gid: str, before: dict[str, Any] | None, item: dict[str, Any], writer: str, author: tuple[str, str] | None, quiet: bool = False) -> str:
-    """Called by `writes.save` for every save, after the session's own hand-off record (_handoff_on_save) and the owner's (_handoff_his_over): the hand-off record follows the item's effective
-    mover, whatever path changed it. The invariant: an item has no OPEN record (nobody has taken it) whose `to` differs from its mover, so a record never names a mover the item left.
-    A save of the server's own (no writer, no author: a wake that makes the post-wake mover the mover, an event wake, the stall pass, a release of `after`) that changes the mover to
-    someone else makes a new record to the new mover, from the server. The record is `no_clock` (the 10-minute take clock runs only on a session's hand-off; a woken mover is timed by the
-    stall pass) and is not delivered until a notice reaches the mover (_handoff_pushed): one to a front agent, one held, or one that goes to a session in needs other than the mover marks nothing.
-    It makes none when the item came
-    from the owner's state (a hand-back after his answer is taken, not handed), nor to the owner (his is the session's write or his answer). The owner's answer on the board, a script's save (cap-words, the migration), a close,
-    a wait that leaves no mover and a session's write that makes itself the mover hand nothing over: they end a record that names the mover the item left. A write that only files or
-    confirms ends nothing.
-    Never fails a write. → "recorded" | "ended" | ""."""
-    if not _handoff_on() or (quiet and not author):
-        return ""
-    try:
-        derive = lambda it: _ho_derive({**it, "gid": gid})
-        m1 = _ho.mover_of(item, derive, strict=True)
-        if m1 is None:      # the model could not read the item: a failed reading is not "no mover", so no record is ended or made
-            print(f"handoff: {gid} record left as it is: its mover could not be read", file=sys.stderr, flush=True)
-            return ""
-        if before:      # `before` is the file as stored, `item` was loaded through the legacy readers: read both the same way
-            before = json.loads(json.dumps(before))
-            _legacy_hold(before); _legacy_needs(before)
-        m0 = _ho.mover_of(before, derive, strict=True) if before else ""
-        # own: the server's own save (the owner's answer and a hand-back from his state, m0 the owner, hand nothing to anyone: they end a stale record and make none); an unreadable `before`
-        # is no known mover, so nothing is made new from it (a stale record still ends)
-        own = not (writer or author) and m0 is not None
-        m0 = m0 or ""
-        return _ho.follow(item, m0, m1, time.time(), frm=_ho.SERVER, record=own and before is not None and not _model.is_owner(m0) and not _model.is_owner(m1),
-                          same=_ho_same, label=_session_label, ident=_ho_ident)
-    except Exception as e:  # noqa: BLE001  — the record is an extra: a write is never failed by it
-        print(f"handoff: {gid} record not followed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-
-
-def _handoff_repair(apply: bool = False, now: float | None = None) -> list[dict[str, Any]]:
-    """The one-off repair of the records written before the record followed the mover (tools/handoff_repair.py runs it): every stored item, open or closed, whose OPEN hand-off record
-    names someone other than the item's effective mover (handoff.stale) has the record ended into its history ("handed on, not taken", or why the item has no mover), as _handoff_follow
-    does on the next save. Nothing is made new: no notice was ever sent to the mover the item holds now, so a fresh record would only show a hand-off that never happened. Dry by default
-    (reads, writes nothing); `apply` saves each repaired item as the server's own save, under the item lock. → one row per item: {gid, shown, status, record_to, record_from, record_at,
-    delivered, mover, ended}."""
-    now = time.time() if now is None else now
-    rows: list[dict[str, Any]] = []
-    for gid, p in _item_files():
-        try:
-            row = _handoff_repair_one(gid, p, apply, now)
-        except Exception as e:  # noqa: BLE001  — one item never stops the repair
-            print(f"handoff: {gid} record not repaired: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-            continue
-        if row is not None:
-            rows.append(row)
-    return rows
-
-
-def _handoff_repair_one(gid: str, p: Any, apply: bool, now: float) -> dict[str, Any] | None:
-    """One item of _handoff_repair. → its row, None when its record is fine (or it has none or cannot be read)."""
-    try:
-        with open(p, encoding="utf-8") as f:
-            it = json.load(f)
-    except Exception:  # noqa: BLE001
-        return None
-    if not isinstance(it, dict) or _ho.record_of(it) is None:
-        return None
-    with _writes.ITEM_LOCK:
-        if apply:      # the item as stored now, under the lock
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        calc = json.loads(json.dumps(it))      # the legacy forms (a retired hold status, an old needs) are read as the model reads them, and never written back by this
-        _legacy_hold(calc); _legacy_needs(calc)
-        mover = _ho.mover_of(calc, lambda i_: _ho_derive({**i_, "gid": gid}), strict=True)
-        if mover is None:      # a failed reading is not "no mover": the record is kept
-            print(f"handoff: {gid} record kept: its mover could not be read", file=sys.stderr, flush=True)
-            return None
-        if not _ho.stale(calc, mover, _ho_same):
-            return None
-        r = dict(_ho.record_of(calc) or {})
-        row = {"gid": gid, "shown": _gh.shown(gid), "status": it.get("status"), "record_to": r.get("to"), "record_from": r.get("from"), "record_at": r.get("at"),
-               "delivered": bool(r.get("delivered_at")), "recovery": bool(r.get("recovery_at")), "mover": mover, "ended": ""}
-        if apply:
-            row["ended"] = _ho.follow(it, "", mover, now, same=_ho_same, label=_session_label, ident=_ho_ident)
-            _writes.save(gid, it, note="hand-off record repaired: it named a mover the item no longer has", mirror=False, ctx=_writes.QUIET)      # a repair writes the history of the record and nothing else: no mover is settled, no other record ended
-        return row
-
-
-def _handoff_repair_pass() -> int:
-    """Once per start, before any thread starts and before the wake pass (idempotent, so every start runs it; a store with no stale record writes nothing): the repair of _handoff_repair,
-    applied. It runs after the migrations that change a mover (_migrate_owner_mover, _mover_backfill_pass), whose quiet saves leave a record they find naming another mover. Skipped while
-    [model] handoff is false. One stderr line with the count. → the number of items repaired."""
-    if not _handoff_on():
-        return 0
-    rows = _handoff_repair(apply=True)
-    if rows:
-        print(f"migrate: hand-off records: {len(rows)} open record(s) that named someone but the item's mover ended into the history "
-              f"({sum(1 for r in rows if r['status'] != 'open')} of closed items, {sum(1 for r in rows if r['status'] == 'open' and not r['mover'])} of open items with no mover)", file=sys.stderr, flush=True)
-    return len(rows)
-
-
-def _handoff_told_text(to: str, text: str, outcome: str, err: str = "", link_only: bool = False) -> None:
-    """A push to `to` whose text names items (a message, a router pass, a page-owed relay) came back `outcome`: an open hand-off of any of those items to `to` is delivered, or waits
-    in the inbox (_handoff_pushed). Only a push that reached the inbox or the pane counts here; a failed one is the notice senders' own (tell_woken retries and falls back).
-    `link_only`: the text must carry the item's own notice link (notice_link), not just cite its id. The router's push and the keeper's batch pass it: a batch cites other items in a subject,
-    and a citation is no notice of that item; a message a session sends on purpose does not (a session names the item it means). Never raises."""
-    try:
-        if not str(outcome or "").startswith(("delivered", "queued", "inbox")) or not to:
-            return
-        gids = [g for g in _item_refs(text) if (_ho.record_of(_load_or_none(g)) or {}).get("to")]
-        if link_only:
-            gids = [g for g in gids if re.search(re.escape(_telling.notice_link(g)) + r"(?![\w])", str(text or ""))]
-        if gids:
-            _handoff_pushed(",".join(gids), to, outcome, err)
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: delivery of a push to {to} not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
 def _load_or_none(gid: str) -> dict[str, Any] | None:
     try:
         return _load(gid)
@@ -4881,625 +4516,11 @@ def _load_or_none(gid: str) -> dict[str, Any] | None:
         return None
 
 
-def _handoff_text(gid: str, item: dict[str, Any], r: dict[str, Any], again: bool = False) -> str:
-    """The notice a hand-off sends. `again`: the second one, after the pane was relaunched before the item was written to; it says so. A record whose mover was reminded
-    (`reminded_at`) words it as the reminder: the item was handed over, no work on it has started, start its subagent alongside the current work."""
-    meta = item.get("metadata") or {}
-    nxt = _clip_line((str(meta.get("next") or "").strip().splitlines() or [""])[0], 160)
-    by = str(r.get("from") or "a session")
-    if float(r.get("reminded_at") or 0) > float(r.get("resent_at") or 0):      # the later of the two is what this notice is (a reminder's retry stays a reminder; a resend after it is a resend)
-        return (f"[stackshot] reminder: {_gh.shown(gid)} was handed to you by {by} and no work on it has started in {_handoff_minutes():g} min: {item.get('subject') or ''} ({meta.get('project') or ''})"
-                + (f"; next: {nxt}" if nxt else "")
-                + f". Start its subagent alongside the current work (or hand it back, sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
-    return (f"[stackshot] {_gh.shown(gid)} is handed to you by {by}" + (" (sent again: your pane restarted before the item was written to)" if again else "")
-            + f": {item.get('subject') or ''} ({meta.get('project') or ''})" + (f"; next: {nxt}" if nxt else "")
-            + f". Do your part and close it or hand it back (sender={by!r}); starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → {_telling.notice_link(gid)}")
-
-
-def _front_handed_by_peer(rec: dict[str, Any], to: str, project: str) -> bool:
-    """Is the hand-off `rec` (to the front agent `to`) one front agent made to another of a front-only project (anchors.front_only; the case gates.fix_front_mover lets through)?"""
-    try:
-        _roles, key = _role_of(to)
-        return bool(key) and _front_pair_ok(str(rec.get("from") or ""), key, project)
-    except Exception:  # noqa: BLE001
-        return False
-
-
-# ---- delivery: every push about an item
-def _handoff_pushed(gids: str, owner: str, outcome: str, why: str = "") -> None:
-    """Called by tell_woken when a push to `owner` about these items is over: `outcome` is push.py's last line (delivered … | queued … | inbox …), or "failed". A delivered push
-    makes the open hand-off to that session delivered now (its clock starts); one that waits (`inbox`, `queued`: the machine is away, the pane is not reachable now, a reboot's pause)
-    is neither delivered nor failed: the puller's ack makes it delivered (_handoff_acked), else the clock starts [model] handoff_inbox_grace_minutes after it was queued; only a
-    refusal or an error is a failure: sent once more, and a second failure sends the item down section 5 with the sender told on the item. Never raises."""
-    if not _handoff_on():
-        return
-    for g in [x for x in re.split(r"[,\s]+", str(gids or "")) if _GID.match(x)]:
-        try:
-            act = ""
-            with _writes.ITEM_LOCK:
-                it = _load(g)
-                r = _ho.record_of(it)
-                if it.get("status") != "open" or not r or r.get("recovery_at"):
-                    continue
-                now = time.time()
-                if outcome.startswith("delivered"):
-                    changed = _ho.delivered(it, owner, now, _ho_same)
-                elif outcome.startswith(("inbox", "queued")):      # waiting, not failed: the line is in the inbox for its machine, the pane is not reachable now (queued), or a reboot's pause holds it
-                    changed = _ho.queued(it, owner, outcome, now, _ho_same)
-                    if changed:
-                        _HO_QUEUED[g] = str((_ho.record_of(it) or {}).get("to") or owner)
-                else:
-                    act = _ho.failed(it, owner, why or outcome, now, _ho_same)
-                    changed = bool(act)
-                if changed:
-                    _writes.save(g, it)
-            if act == "retry":
-                rec = _ho.record_of(it) or {}
-                _telling.tell_woken(g, owner, _handoff_text(g, it, rec, again=bool(rec.get("resent_at"))), tag="handoff")      # a notice sent again stays worded as one when its push is tried once more
-            elif act == "fallback":
-                _handoff_fallback(g, f"a push to {_session_label(owner)} failed twice ({_clip_line(why or outcome, 100)})")
-        except Exception as e:  # noqa: BLE001
-            print(f"handoff: {g} push result not recorded: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-_HO_QUEUED: dict[str, str] = {}      # gid → the session its hand-off notice waits for (set when a push is queued; read by _handoff_acked; a restart empties it, and the inbox grace covers that)
-
-
-def _handoff_acked(lines: list[dict[str, Any]]) -> None:
-    """The puller confirmed these inbox lines (the /inbox/ack route reads them before they go). A line to the session a queued hand-off went to, that names the item (the id the
-    item is shown with), whatever its phrasing (the hand-off notice, a needs-based "now needs you", a page-owed relay), was read by its machine: the hand-off is delivered now.
-    The server sees the ack here and only here. Race: an ack can come before the push's own "inbox" outcome is recorded (the line is put, the puller takes and acks it, then push.py
-    prints); the hand-off is then marked queued after the ack and the inbox grace covers it. Never raises."""
-    try:
-        if not _handoff_on() or not _HO_QUEUED:
-            return
-        hits = [(str(it.get("name") or ""), str(it.get("uuid") or ""), str(it.get("text") or "")) for it in lines if it.get("src") == "msg"]
-        for gid, to in list(_HO_QUEUED.items()):
-            it = _load(gid)
-            r = _ho.record_of(it)
-            if it.get("status") != "open" or not r or r.get("delivered_at") or not r.get("queued") or not _ho_same(r.get("to"), to):
-                _HO_QUEUED.pop(gid, None)
-                continue
-            pat = re.compile(rf"(?<![\w#]){re.escape(_gh.shown(gid))}(?!\d)")
-            if any((_ho_same(r.get("to"), n) or (u and _ho_same(r.get("to_id"), u))) and pat.search(t) for n, u, t in hits):
-                _HO_QUEUED.pop(gid, None)
-                _handoff_pushed(gid, str(r.get("to")), "delivered (acked by its machine)")
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: ack not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-# ---- the pass: the clock, the turn end, the gone mover
-def _handoff_tick(now: float | None = None, only: "set[str] | list[str] | None" = None) -> list[str]:
-    """The periodic pass (the runner calls it every 60 s): every open item that is alive with a session as its mover, looked at by handoff.plan, and what is due is done:
-    a delivered hand-off not taken in [model] handoff_minutes, one whose recipient's turn ended with no write, a mover whose pane is gone; and a mover whose pane was relaunched after the
-    notice is sent the notice again, once, instead. Nothing while [model] pause is true.
-    `only` limits the pass to those items (a test, a rerun). → the gids moved, handed to the fleet's builder as a recovery request, sent to the cold call or sent the notice again."""
-    if not _handoff_on() or _handoff_paused():
-        return []
-    now = time.time() if now is None else now
-    items: dict[str, dict[str, Any]] = {}
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:  # noqa: BLE001
-            continue
-        if isinstance(it, dict) and it.get("status") == "open" and (only is None or gid in only):
-            _legacy_hold(it); _legacy_needs(it); _ip.read_through(it)
-            it["gid"] = gid
-            items[gid] = it
-    env = _handoff_env(now)            # one env for the plan and for the steps' re-check: the anchors and the role map are read once a tick
-    return _handoff_exec(_ho.plan(items, env), now, env=env)
-
-
-ORPHAN_CEILING = 10        # more orphans than this, or than a quarter of the open items, is read as a partial view of the fleet (a machine's rows missing): reported, nothing moved
-ORPHAN_MAX = 40            # open items one audit hand-over moves; the rest wait for the next run (a partial heartbeat must not move the board in one pass)
-
-
-def _orphan_handover(apply: bool = False, now: float | None = None) -> dict[str, Any]:
-    """The audit's check of open items left with a session that is gone (successor.py), and its fix: each such item goes to the closest live agent, through the write path of the minute hand-off pass
-    (`_handoff_exec` → `_handoff_write_move`: the new mover heads `needs`, an alive item gets the hand-off record, the History line reads `handed to X: <who> is gone (...); closest live agent: ...`, the new mover is told,
-    one message per recipient). Dry by default: reads, writes nothing, tells nobody. Only open items; an item the owner moves or waits on is never listed; one with no live successor stays and is listed under `left`.
-    Idempotent: the mover a hand-over names is live, so the next call finds the item whole. Each move is checked again under the item lock (the item must still be open with the mover it was found with).
-    Stands still, `checked` false, while [audit] orphan_handover is "off" or the fleet's heartbeat is empty (every name would look gone), and moves nothing in "report" (the shipped default). A partial view of the fleet is not taken for gone sessions:
-    a mover on a machine whose machine.json cannot be read, or with no row while a machine's session list is empty or unreadable, is not read as gone, and more orphans than ORPHAN_CEILING or than a quarter of the open items is answered with
-    `ceiling` true and the list, and nothing moved. An alive item goes to a background agent first (successor.pick: the minute pass sends a front agent no notice); a held item is not listed. → {checked, mode, applied, read, found, moved: [{id,
-    project, from, to, tier, why}], left: [{id, project, from, why}], skipped, over_cap, note}."""
-    now = time.time() if now is None else now
-    mode = _cfg.audit_orphan_handover()
-    out: dict[str, Any] = {"checked": False, "mode": mode, "applied": False, "read": 0, "found": 0, "moved": [], "left": [], "skipped": 0, "over_cap": 0, "note": "", "ceiling": False}
-    if mode == "off":
-        out["note"] = "[audit] orphan_handover is off"
-        return out
-    idx = _sessions_index()
-    if not idx:
-        out["note"] = "the fleet's heartbeat is empty: every session would look gone, nothing was checked"
-        return out
-    letters = _fleet.letters()
-    unread = {L for L in letters if not _fleet.read(L, "machine")}          # a machine whose machine.json cannot be read: its panes cannot be told gone from unseen
-    partial = unread | {L for L in letters if not _fleet.read(L, "sessions")}      # …and one whose session list is empty or unreadable: a mover on it has no row, which proves nothing
-    items: dict[str, dict[str, Any]] = {}
-    for gid, p in _item_files():
-        try:
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-        except Exception:  # noqa: BLE001
-            continue
-        if isinstance(it, dict) and it.get("status") == "open":
-            _legacy_hold(it); _legacy_needs(it)
-            it["gid"] = gid
-            items[gid] = it
-    reg = _prj.with_pending(_anc.registry(), made=True)       # an agent made through the New session form counts as its project's agent, as session_roles has it
-    def gone(who: str) -> str:
-        why = _handoff_pane(who, idx)
-        if not why:
-            return ""
-        names = {x for x in (str(who).strip(), _session_label(who)) if x}
-        mine = [r for r in idx.values() if isinstance(r, dict) and r.get("name") in names]
-        if any(r.get("machine") in unread for r in mine):
-            return ""                                                          # on a machine the view cannot read: not known to be gone
-        if not mine and partial and why == "no pane of it is in the heartbeat":
-            return ""                                                          # no row, while a machine's view is partial: it may be on that machine
-        return why
-    rows = _succ.plan(items, reg, _ho_derive, gone, _session_label, back_of=_handoff_background)
-    out.update(checked=True, read=len(items), found=len(rows))
-    if len(rows) > ORPHAN_CEILING or len(rows) > len(items) // 4:
-        out.update(ceiling=True, moved=[{"id": _gh.shown(r["gid"]), "project": r["project"], "from": _session_label(r["from"]) if r["from"] else "", "to": r["to"], "tier": r["tier"], "why": r["why"]} for r in rows if r["to"]][:ORPHAN_MAX],
-                   left=[{"id": _gh.shown(r["gid"]), "project": r["project"], "from": _session_label(r["from"]) if r["from"] else "", "why": r["why"]} for r in rows if not r["to"]],
-                   note=f"{len(rows)} of {len(items)} open items read as left with a gone session (more than {ORPHAN_CEILING}, or more than a quarter): that is a partial view of the fleet more likely than that many gone sessions, so nothing was moved")
-        return out
-    todo = [r for r in rows if r["to"]]
-    out["left"] = [{"id": _gh.shown(r["gid"]), "project": r["project"], "from": _session_label(r["from"]) if r["from"] else "", "why": r["why"]} for r in rows if not r["to"]]
-    out["over_cap"] = max(0, len(todo) - ORPHAN_MAX)
-    todo = todo[:ORPHAN_MAX]
-    row = lambda r: {"id": _gh.shown(r["gid"]), "project": r["project"], "from": _session_label(r["from"]) if r["from"] else "", "to": r["to"], "tier": r["tier"], "why": r["why"]}
-    if not apply or mode != "apply":
-        out["moved"] = [row(r) for r in todo]
-        if apply:
-            out["note"] = f"[audit] orphan_handover is {mode}: nothing was moved; set it to apply under [audit] to hand these over"
-        return out
-    by_gid = {r["gid"]: r for r in todo}
-    steps = [_ho.Step("move", r["gid"], r["why"], r["from"], r["to"], via="orphan") for r in todo]
-
-    def still(item: dict[str, Any], st: "_ho.Step") -> bool:
-        r = by_gid[st.gid]
-        state, who = _succ.record_of(item, _ho_derive)
-        return state == r["state"] and (_ho_same(who, r["from"]) if r["from"] else not who)
-
-    done = _handoff_exec(steps, now, verify=False, recheck=still)
-    out.update(applied=True, moved=[row(by_gid[g]) for g in done], skipped=len(todo) - len(done))
-    return out
-
-
-def _handoff_fallback(gid: str, why: str, cold_ok: bool = True, cold_at: float | None = None) -> list[str]:
-    """An item that has a hand-off record and cannot go on (a push failed twice, the cold call failed): the next step of section 5 now, not at the next pass. Not when its mover has
-    taken it since, or (`cold_at`: the cold call's own stamp) when the record is no longer the one that call was asked about."""
-    now = time.time()
-    with _writes.ITEM_LOCK:
-        item = _load(gid)
-        r = _ho.record_of(item)
-        if item.get("status") != "open" or not r or r.get("taken_at") or r.get("recovery_at"):
-            return []
-        if cold_at is not None and not (isinstance(r.get("cold"), dict) and r["cold"].get("at") == cold_at):
-            return []
-        if r.get("reason") and r["reason"] not in why:
-            why = f"{r['reason']}; {why}"
-        if _ladder_on() and not r.get("stall"):      # the one ladder: two failed pushes mean the ask cannot reach the mover, so the item starts at the cold call
-            st = _ho.Step("enter", gid, why, str(r.get("to") or ""), via="gone")
-        else:
-            st = _ho.next_step({**item, "gid": gid}, r, str(r.get("to") or ""), why, _handoff_env(now), gid=gid, cold_ok=cold_ok)
-    return _handoff_exec([st], now, verify=False)
-
-
-def _handoff_write_move(item: dict[str, Any], st: "_ho.Step", now: float) -> None:
-    """The item-side write of a `move` step, shared by the minute pass (the builder or the sender takes an item nobody took) and the audit's hand-over to the closest live agent (`via` == "orphan"): the new mover
-    heads `needs` (a stored mover that named the old one follows; for the audit's hand-over, `via` == "orphan", so do `then` and a post-wake mover, which the minute pass has never touched), and an alive item gets the hand-off record, from the server, with the way walked so far. A waiting item has no mover to record
-    a hand-off for: it takes the new session in `needs` (its post-wake mover by default) and keeps no record. The caller saves with the History line. The item is changed in place."""
-    alive = st.via != "orphan" or _model_of({**item, "gid": st.gid}).state == _model.ALIVE       # read before the fields change
-    meta = dict(item.get("metadata") or {})
-    keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_ho_same(x, st.frm) or _ho_same(x, st.to))]
-    _needs_store(meta, _canon_needs([st.to, *keep]))
-    for key in (("mover", "then", "post_wake_mover") if st.via == "orphan" else ("mover",)):      # the minute pass has only ever followed the stored mover; the audit's hand-over also follows `then` and a post-wake mover
-        if meta.get(key) and st.frm and _ho_same(meta[key], st.frm):
-            meta[key] = st.to
-    item["metadata"] = meta
-    if alive:
-        _ho.successor(item, st, _ho_ident(st.to), now, _session_label)
-    if st.via == "orphan":
-        _stall.note(item["metadata"], now, f"handed to {_session_label(st.to)}: {st.why}")      # the History line with the reason (a mover change alone shows only the names; a waiting item has no record to carry it)
-
-
-def _handoff_exec(steps: "list[_ho.Step]", now: float, verify: bool = True, env: "_ho.Env | None" = None,
-                  recheck: "Callable[[dict[str, Any], _ho.Step], bool] | None" = None) -> list[str]:
-    """Do the steps of a pass, each under the item lock on a fresh read (verify: the plan must still hold on it), then tell, one message per recipient listing its items.
-    `env`: the pass's own (the tick passes the one it planned with), else a new one. `recheck(item, step)`: the caller's own look at the fresh item, under the lock; False skips the step (the audit's hand-over
-    checks that the item still has the mover it found)."""
-    env = env or _handoff_env(now)
-    to_new: list[tuple[str, str, str]] = []          # (recipient, gid, the item's line)
-    to_sender: list[tuple[str, str, str]] = []       # (sender, gid, the line)
-    to_again: list[tuple[str, str, str]] = []        # (gid, the mover, the notice) of a hand-off sent again after a relaunch
-    to_remind: list[tuple[str, str, str, str]] = []  # (gid, the session id, the item's line, the reminder alone) of a hand-off a background agent did not take
-    to_recover: list[tuple[str, dict[str, Any], str, str, str, "tuple[str, str, bool]"]] = []   # (gid, the item, the quiet session, why, what was tried, the recipient chosen once) of an item nobody could take: the fleet's builder, or a front-only project's -main agent, is asked
-    entered: list[tuple[str, str, dict[str, Any]]] = []   # (gid, the mover, its entry) of an item the one ladder took: its first rung is taken after the loop
-    done: list[str] = []
-    cold_started = False
-    for st in steps:
-        try:
-            with _writes.ITEM_LOCK:
-                item = _load(st.gid)
-                if item.get("status") != "open":
-                    continue
-                if recheck is not None and not recheck({**item, "gid": st.gid}, st):
-                    continue
-                if verify:
-                    fresh = _ho.plan({st.gid: {**item, "gid": st.gid}}, env)
-                    if not fresh or fresh[0].kind != st.kind or not _ho_same(fresh[0].frm, st.frm):
-                        continue
-                    st = fresh[0]
-                if st.kind == "recover":
-                    # nobody is left to hand the item to: the item stays with its mover and the fleet's builder (a front-only project's -main agent) is asked once for this record (mark_recovery returns None for one asked already)
-                    target = _recovery_target(str((item.get("metadata") or {}).get("project") or ""), st.frm)      # once, on the raw session: the record, the wording of `tried` and the send all follow it
-                    r = _ho.mark_recovery(item, st, now, _ho_same, _session_label, asked=_RECOVERY_ROLE[target[1]])
-                    if r is None:
-                        continue
-                    quiet = _session_label(st.frm) or st.frm
-                    nobuilder = target[2]      # a front-only project has no builder to have tried, whoever is asked
-                    tried = (("the stall pass sent the notice again and asked a fresh session who takes it" if nobuilder else "the stall pass sent the notice again, asked a fresh session who takes it and tried the project's builder") if r.get("stall")
-                             else "the hand-off ladder tried " + ("a fresh session's call and the sender" if nobuilder else "the project's builder, a fresh session's call and the sender"))
-                    _writes.save(st.gid, item, note=f"nobody could take it: recovery requested ({st.why})")      # the mark (recovery_at) is written BEFORE the send, on purpose: a failed send is not retried every pass (metadata.undelivered records it, the audit's unmoved digest is the backstop); the send writes the History line
-                    to_recover.append((st.gid, dict(item), quiet, st.why, tried, target))
-                elif st.kind == "enter":
-                    # the one ladder takes the item (ladder.py): its entry is written now, the first rung is taken below once the item lock is let go
-                    rec = _ladder_enter(item, st, now)
-                    if rec is None:
-                        continue
-                    entered.append((st.gid, st.frm, rec))
-                elif st.kind == "resend":
-                    # the mover's pane was relaunched after the notice reached it, so the notice died with the old process: no move down section 5, the notice goes out once more
-                    r = _ho.resend(item, st, now, _cfg.tz(), env.started(st.frm))
-                    if r is None:
-                        continue
-                    _writes.save(st.gid, item, note=f"{st.why}: the notice was sent again, and the clock restarts from it")
-                    to_again.append((st.gid, st.frm, _handoff_text(st.gid, item, r, again=True)))
-                elif st.kind == "remind":
-                    # a background agent that did not take it is reminded once, ahead of the ladder; the clock restarts from the reminder's delivery
-                    r = _ho.remind(item, st, now)
-                    if r is None or not st.to:
-                        continue
-                    _writes.save(st.gid, item, note=f"{st.why}: its mover was reminded, and the clock restarts from the reminder")
-                    to_remind.append((st.gid, st.to, f"{_gh.shown(st.gid)} {item.get('subject') or ''} ({(item.get('metadata') or {}).get('project') or ''}): handed to you by {r.get('from') or 'a session'}",
-                                      _handoff_text(st.gid, item, r)))
-                elif st.kind == "cold":
-                    _HO_COLD_THREADS[:] = [t for t in _HO_COLD_THREADS if t.is_alive()]
-                    if _HO_COLD_THREADS or cold_started:
-                        continue               # one cold call at a time board-wide, one started per pass: this item is planned again at the next tick
-                    cold_started = True
-                    r = _ho.mark_cold(item, st, now, _ho_same, _session_label)
-                    _writes.save(st.gid, item, note=f"{st.why}: the cold call was asked")
-                    th = threading.Thread(target=_handoff_cold, args=(st.gid, now), daemon=True)
-                    _HO_COLD_THREADS.append(th)
-                    th.start()
-                else:
-                    _handoff_write_move(item, st, now)
-                    _writes.save(st.gid, item, note=f"handed to {_session_label(st.to)}: {st.why}")
-                    subject, project = str(item.get("subject") or ""), str((item.get("metadata") or {}).get("project") or "")
-                    to_new.append((st.to, st.gid, f"{_gh.shown(st.gid)} {subject} ({project}): {st.why}" + ("; it comes back to you as its sender" if st.via == "return" else "")))
-                    if st.sender and not _ho_same(st.sender, st.to):
-                        to_sender.append((st.sender, st.gid, f"{_gh.shown(st.gid)} {subject}: {st.why}; it went to {_session_label(st.to)}"))
-                done.append(st.gid)
-        except Exception as e:  # noqa: BLE001  — one item's failure never stops the rest of the pass
-            print(f"handoff: {st.gid} step {st.kind} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for gid, who, rec in entered:
-        _ladder_first(gid, who, rec, now)
-    for gid, it, quiet, why, tried, target in to_recover:
-        _recovery_tell(gid, it, quiet, why, tried, tag="handoff", now=now, target=target)
-    for gid, who, text in to_again:
-        try:
-            _telling.tell_woken(gid, _session_id(who) or who, text, tag="handoff")      # its push result makes the record delivered (or queued), which starts the clock again
-        except Exception as e:  # noqa: BLE001
-            print(f"handoff: {gid} resend not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for sid, lines in _ho.batch([(w, g, ln) for g, w, ln, _t in to_remind]).items():      # one message per recipient, however many of its items fired
-        gs = [g for g, w, _l, _t in to_remind if w == sid]
-        text = next(t for g, w, _l, t in to_remind if g == gs[0]) if len(gs) == 1 else _ho.message(
-            lines, "", f"[stackshot] reminder: {{n}} items were handed to you and nothing has been written to them in {_handoff_minutes():g} min:",
-            f"\nStart their subagents alongside the current work (or hand them back); starting work on an item (a step marked done, a step status in progress) counts as taking it; a note does not. → {_inst.BOARD_URL}")
-        try:
-            _telling.tell_woken(",".join(gs), sid, text, tag="handoff")      # its push result makes each record delivered (or queued), which starts the clock again; a failed push is retried once per item, then the ladder goes on
-        except Exception as e:  # noqa: BLE001
-            print(f"handoff: {','.join(gs)} reminder not sent: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-    for who, lines in _ho.batch(to_new).items():
-        gids = ",".join(g for w, g, _l in to_new if w == who)
-        if _telling.front_keeper(who, "")[0]:
-            continue                                 # a front agent is never pushed to unmarked: the board shows it
-        tail = " Do your part and close it or hand it back; starting work on it (a step marked done, a step status in progress) counts as taking it; a note does not. → " + (_telling.notice_link(gids) if len(lines) == 1 else f"{_inst.BOARD_URL}")
-        _telling.tell_woken(gids, _session_id(who) or who, _ho.message(lines, "[stackshot] it came to you:", "[stackshot] {n} items came to you, the sessions they were handed to did not take them:", tail),
-                    tag="handoff")
-    for who, lines in _ho.batch(to_sender).items():
-        if _telling.front_keeper(who, "")[0] or _model.is_owner(who):
-            continue
-        _telling.tell_woken(",".join(g for w, g, _l in to_sender if w == who), _session_id(who) or who,
-                    _ho.message(lines, "[stackshot] a hand-off of yours was not taken:", "[stackshot] {n} hand-offs of yours were not taken:"), tag="handoff")
-    if done:
-        _publish()
-    return done
-
-
-# ---- the cold call
-def _handoff_agents(project: str) -> list[dict[str, str]]:
-    """The sessions the cold call may hand to: the project's background agents (its hub's page), each with its mandate and whether it has a pane. a front agent is not
-    offered; the call's answer is an automatic move, and none goes to a front agent (the ladder then tries the builder, else the fleet's builder is asked to recover the session)."""
-    out: list[dict[str, str]] = []
-    try:
-        reg = _anc.registry()
-        roles = _anc.session_roles(reg)
-        hub = _anc.hub_of(project, reg)
-        idx = _sessions_index()
-        for n, r in roles.items():
-            if r.get("role") != "back" or _anc.hub_of(r.get("project", ""), reg) != hub or r.get("retired"):
-                continue
-            mand = str(((reg.get(r.get("project", "")) or {}).get("agents") or {}).get(n) or "")
-            out.append({"name": n, "role": "background" if r.get("role") == "back" else "front", "mandate": mand, "live": "" if _handoff_pane(n, idx) else "yes"})
-    except Exception:  # noqa: BLE001
-        pass
-    return out
-
-
-def _handoff_page_state(project: str) -> str:
-    try:
-        content, _rev = _page_io().get(project)
-        span = _page_debt.section_span(content or "")
-        if span:
-            return (content or "")[span[0]:span[1]].strip()
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        return _pages.current_state(project, cap=3000) or ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _handoff_cold(gid: str, cold_at: float) -> None:
-    """One cold call for one item (a thread of its own): the item and its page's Current state go to `claude -p`, which answers hand to <session> | close with <outcome> | ask
-    the owner; the answer is validated and written through the update path as the author `cold-call`. A call that fails ends the cold step and the item goes on down section 5 (the sender, then
-    the fleet's builder is asked); an answer the write refuses is written once more (`_handoff_write`, each refusal in the journal), and refused twice the fleet's builder is asked, with the refusal text
-    (`_handoff_recover`), and the item is not returned to its sender. The call takes minutes: before its write the item is read again under the lock and the answer is dropped, quietly (a log
-    line), unless the item is still open with the same hand-off record (the cold call's own stamp, `cold_at`, unchanged), not taken, and with the same mover.
-    The stall ladder's cold call (the record carries `stall`) never asks <owner>: it is offered hand_to and close only (cold_call.STALL_RUBRIC), an ask_owner, a none, an answer
-    it could not give or a write the item refused is never written, and `_stall_cold_no_taker` sends the item on to the builder. Never raises."""
-    try:
-        with _writes.ITEM_LOCK:
-            item = _load(gid)
-        meta = item.get("metadata") or {}
-        rec0 = _ho.record_of(item) or {}
-        mover0 = str(rec0.get("to") or "")
-        exclude = [x for x in (mover0, rec0.get("from"), rec0.get("origin"), *(rec0.get("tried") or [])) if x and not _model.is_owner(x)]
-        stall = bool(rec0.get("stall"))      # the stall ladder's cold call (step 2): it offers hand_to and close only and never asks the owner; no taker → the builder (step 3)
-        project = str(meta.get("project") or "")
-        agents = _handoff_agents(project)
-        msg = _cold.build_message(_gh.shown(gid), item, _handoff_page_state(project), agents, _cfg.tz(), time.time(), OWNER)
-        status, ans, note, res = _cold.run(msg, _COLD_RUNNER, stall=stall)
-        try:
-            _router._append(_router.calls_path(), {"call": "", "kind": "cold_call", "ts": time.time(), "project": project, "item": gid, "status": status, "model": _router.model(),
-                                                   "duration_s": res.get("duration_s"), "usage": res.get("usage") or {}, "cost_usd": res.get("cost_usd"), "note": _clip_line(note, 200)})
-        except Exception:  # noqa: BLE001  — the log is an extra
-            pass
-        kept: dict[str, Any] | None = None      # the stall call named the session that already moves the item: it stays with it, and the ladder does not go on to the builder and the owner
-        if stall and ans is not None and _cold.names_mover(ans, mover0, _ho_same):
-            kept, ans = ans, None
-        if ans is not None:
-            ans, note = _cold.validate(ans, {a["name"] for a in agents if a.get("live")}, _ho_same, exclude,
-                                       desc_limits=_description_limits() if _bullets_on() else None, gate=(lambda t: _gate_description(t, "outcome_text")) if _bullets_on() else None, stall=stall)
-        with _writes.ITEM_LOCK:               # the check and the write are one step: nothing writes the item between them
-            cur = _load(gid)
-            r = _ho.record_of(cur)
-            why = ""
-            if cur.get("status") != "open":
-                why = "it is no longer open"
-            elif not r or not isinstance(r.get("cold"), dict) or r["cold"].get("at") != cold_at:
-                why = "its hand-off record is no longer the one the call was asked about"
-            elif r.get("taken_at"):
-                why = "its mover took it meanwhile"
-            elif not _ho_same(r.get("to"), mover0):
-                why = "its mover changed"
-            if why:
-                print(f"handoff: {gid} the cold call's answer was dropped: {why}", file=sys.stderr, flush=True)
-                if r and isinstance(r.get("cold"), dict) and r["cold"].get("at") == cold_at:
-                    _handoff_cold_end(gid, "done", f"the cold call's answer was dropped: {why}", cold_at)
-                return
-            if kept is not None:
-                _stall_cold_kept(gid, cold_at, mover0, str(kept.get("reason") or ""))
-                return
-            if stall and (ans is None or ans["action"] == "none"):
-                _stall_cold_no_taker(gid, cold_at, note if ans is None else str(ans.get("reason") or ""), failed=ans is None)      # an ask_owner, a none or no usable answer is never written: the builder is next
-                return
-            if ans is None:
-                _handoff_cold_end(gid, "failed", f"the cold call gave no usable answer: {note}", cold_at)
-                _handoff_fallback(gid, f"the cold call gave no usable answer ({_clip_line(note, 100)})", cold_ok=False)
-                return
-            def write() -> None:                         # one attempt, built from the item as it stands now (a retry re-reads it), not as the call began
-                cur = _load(gid)
-                cmeta = cur.get("metadata") or {}
-                if ans["action"] == "hand_to":
-                    kinds = [k for k in _needs_kinds(cmeta) if k != "decision"]
-                    to_front = _telling.front_keeper(ans["to"], str(cmeta.get("project") or ""))[0]      # a user-facing agent is never named in needs (only a mover): the item goes to it by mover=
-                    _update(gid, needs=[*kinds] if to_front else [*kinds, ans["to"]], sender=_ho.COLD, **({"mover": ans["to"]} if (cmeta.get("mover") or to_front) else {}),
-                            **({"clear_needs": True} if to_front and not kinds else {}))      # a stored doing or verifying state stands on a session in needs, and a front agent is never named there: the write drops the state (_state_apply) and the item reads as derived
-                elif ans["action"] == "close":
-                    _update(gid, status="completed", outcome=ans["outcome"], reason=_fit(_shown_ids(ans["reason"]), _close_reason_max()), outcome_text=ans["outcome_text"], sender=_ho.COLD)     # the model's reason is cut to the limit after its ids are expanded (g7 to board#N, which _update does), never refused
-                else:
-                    _update(gid, needs=["decision"], ask=ans["ask"], options=ans["options"], next=f"{OWNER}: answer the ask on the item", clear_next=True, sender=_ho.COLD,    # his item's next is this line alone, as before: the server's own write wipes the others
-                            **({"clear_mover": True} if cmeta.get("mover") else {}))      # a stored mover would stay the mover beside decision
-            refused, how = _handoff_write(gid, f"the cold call's {ans['action']}", write)
-            if refused:                                  # refused twice, or an error inside the write: the item is not returned to its sender over a write stackshot's own ladder could not make; the fleet's builder is asked, with the text
-                why = f"the cold call's answer ({ans['action']}) {how}: {_clip_line(refused, 160)}"
-                if stall:                                # the stall ladder's next step is the builder; the owner is asked only when it cannot take the item either
-                    _stall_cold_no_taker(gid, cold_at, why, failed=True)
-                    return
-                _handoff_cold_end(gid, "failed", why, cold_at)
-                _handoff_recover(gid, why)
-                return
-            _handoff_cold_end(gid, "done", f"the cold call: {ans['action']}" + (f" {ans.get('to') or ans.get('outcome') or ''}" if ans["action"] != "ask_owner" else f" ({OWNER})")
-                              + (f": {ans['reason']}" if ans.get("reason") else ""), cold_at)
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: cold call for {gid} failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        try:
-            _handoff_cold_end(gid, "failed", f"the cold call failed: {e.__class__.__name__}", cold_at)
-            _handoff_fallback(gid, "the cold call failed", cold_ok=False, cold_at=cold_at)
-        except Exception:  # noqa: BLE001
-            pass
-
-
-def _stall_cold_kept(gid: str, cold_at: float, mover: str, reason: str) -> None:
-    """the stall ladder's cold call named the session that already moves the item as the right one: the item stays with it. Nothing is handed on, the builder is not asked and the owner is not
-    asked about (an idle pane is not a lost item: the mover may be waiting on something, and the call has judged the item its own). The cold step ends, the History line says so, the episode is marked
-    `kept` (stall.spent: the pass leaves the item alone for a day, or until anyone writes or confirms it), and the mover is told once, with how to store a wait the server watches. Never raises."""
-    try:
-        now = time.time()
-        why = _clip_line(reason, 140)
-        with _writes.ITEM_LOCK:
-            item = _load(gid)
-            r = _ho.record_of(item)
-            if item.get("status") != "open" or not r or not isinstance(r.get("cold"), dict) or r["cold"].get("at") != cold_at:
-                return
-            _ho.end_cold(item, "done", now, "the cold call named its mover as the one to keep it" + (f": {why}" if why else ""))
-            meta = item.setdefault("metadata", {})
-            _stall.note(meta, now, "the cold call named its mover as the one to keep it" + (f" ({why})" if why else "") + ": left with it")
-            _writes.save(gid, item, note="stall: the cold call kept it with its mover")
-            ver, conf = _stall_ver(item), _stall_confirm(item, mover)
-            untaken = float(r.get("at") or 0) if r and not r.get("taken_at") else None
-            project = str(meta.get("project") or "")
-            subject = str(item.get("subject") or "")
-        with _STALL_LOCK:
-            st = _stall_load()
-            rec = _ladder.episode(st.get(gid), mover, ver, _ho_same, conf, untaken)      # on the one ladder it stays there (`via`), and the ask is not sent again
-            rec["kept"] = now
-            st[gid] = rec
-            _stall_save(st)
-        if not _telling.front_keeper(mover, project)[0]:          # no item notice wakes a front agent
-            _telling.tell_woken(gid, _session_id(mover) or mover,
-                        f"[stackshot] {_gh.shown(gid)} \"{subject}\" is still yours: a fresh session read it and judged you the right one" + (f" ({why})" if why else "") + ". "
-                        "If you are waiting on something to happen (a release, a PR's merge, a recycle or fleet op, a job's run), store the wait so the server watches it and the item stops reading as idle: "
-                        "update(wait_kind=\"event\", wait_event=\"<the event>\", ask_by=<the day it comes back anyway>, post_wake_mover=<who takes it then>). Otherwise work it, hand it on or close it. "
-                        f"→ {_telling.notice_link(gid)}", tag="stall")
-        print(f"stall: {gid} cold call named its mover {mover} as the right owner: left with it", file=sys.stderr, flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"stall: {gid} cold call's keep step failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _stall_cold_no_taker(gid: str, cold_at: float, why: str, failed: bool) -> None:
-    """the stall ladder's cold call (step 2) named no taker: it answered ask_owner or none, gave no usable answer, or its write was refused. Nothing is written to the item's
-    needs, ask or mover, and the owner is not asked; the cold step ends and the item goes on to the project's builder (step 3) at once (`_handoff_fallback`, which for a stall record never
-    returns it to a sender), and to the fleet's builder as a recovery request (step 4) only if the project's builder cannot take it. A History line (metadata.stall.log) and a journal line say so. Never raises."""
-    try:
-        now = time.time()
-        reason = _clip_line(why, 120)
-        with _writes.ITEM_LOCK:
-            item = _load(gid)
-            r = _ho.record_of(item)
-            if item.get("status") != "open" or not r or not isinstance(r.get("cold"), dict) or r["cold"].get("at") != cold_at:
-                return
-            _ho.end_cold(item, "failed" if failed else "done", now, "the cold call named no taker" + (f": {reason}" if reason else ""))
-            _stall.note(item.setdefault("metadata", {}), now, "the cold call named no taker" + (f" ({reason})" if reason else "") + ": to the builder")
-            _writes.save(gid, item, note="stall: the cold call named no taker")
-        print(f"stall: {gid} cold call named no taker: to the builder", file=sys.stderr, flush=True)
-        _handoff_fallback(gid, "the cold call named no taker", cold_ok=False, cold_at=cold_at)
-    except Exception as e:  # noqa: BLE001
-        print(f"stall: {gid} cold call's no-taker step failed: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _handoff_write(gid: str, what: str, write: "Callable[[], None]") -> tuple[str, str]:
-    """a write of stackshot's own ladder (the cold call's answer through `_update`) the server refuses is tried once more, `write` rebuilding it from a fresh read. Each refusal is
-    logged to the journal (stderr) with its text. Any other error inside the write (a bug, a store failure) is not tried again: it is logged, and reported the same way, so the fleet's
-    builder is asked with its text and the item is not sent back to its sender. → ("", "") when a write went through, else (the text of the last refusal or error, "was refused twice" | "failed with an error")."""
-    err = ""
-    for n in (1, 2):
-        try:
-            write()
-            return "", ""
-        except ToolError as e:
-            err = str(e) or "refused"
-            print(f"handoff: {gid} {what} refused (attempt {n} of 2): {_clip_line(err, 300)}", file=sys.stderr, flush=True)
-        except Exception as e:  # noqa: BLE001
-            err = f"{e.__class__.__name__}: {e}"
-            print(f"handoff: {gid} {what} failed on attempt {n} of 2: {_clip_line(err, 300)}", file=sys.stderr, flush=True)
-            return err, "failed with an error"
-    return err, "was refused twice"
-
-
-def _handoff_recover(gid: str, why: str) -> None:
-    """The last rung for an item whose cold call's answer the write refused: the fleet's builder is asked to recover the session (`_handoff_exec` does it for a `recover` step), once for the
-    record; not when the item was taken since, or the request was made already. Never raises."""
-    try:
-        now = time.time()
-        with _writes.ITEM_LOCK:
-            item = _load(gid)
-            r = _ho.record_of(item)
-            if item.get("status") != "open" or not r or r.get("taken_at") or r.get("recovery_at"):
-                return
-            frm = str(r.get("to") or "")
-        _handoff_exec([_ho.Step("recover", gid, why, frm)], now, verify=False)
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: {gid} fleet recovery not asked: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-
-
-def _handoff_cold_end(gid: str, state: str, text: str, cold_at: float | None = None) -> None:
-    """The cold call's outcome on its record. With `cold_at` (the call's own stamp) only the record the call was asked about is written, as _handoff_fallback does."""
-    with _writes.ITEM_LOCK:
-        item = _load(gid)
-        if _ho.cold_target(item, cold_at) is not None:
-            _ho.end_cold(item, state, time.time(), text, cold_at)
-            _writes.save(gid, item, note=text if state == "failed" else "")
-
-
-# ---- display
-def _handoff_lines(item: dict[str, Any]) -> list[str]:
-    """get's hand-off lines (handoff.words), in the instance's timezone. [] when the item has none or the machinery is off."""
-    try:
-        return _ho.words(item, time.time(), _cfg.tz(), _session_label, _handoff_minutes()) if _handoff_on() else []
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: {item.get('gid') or item.get('id')} not shown: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return []
-
-
-def _handoff_brief() -> str:
-    """The brief's short lines: the hand-offs not yet taken and (a count only) the items from before the machinery whose mover has no pane: moving
-    those is the migration's, so they are reported and never touched ("" when none)."""
-    if not _handoff_on():
-        return ""
-    try:
-        all_open: dict[str, dict[str, Any]] = {}
-        for gid, p in _item_files():
-            with open(p, encoding="utf-8") as f:
-                it = json.load(f)
-            if it.get("status") == "open":
-                _ip.read_through(it)
-                it["gid"] = gid
-                all_open[gid] = it
-        env = _handoff_env(time.time())
-        lines = _ho.brief_lines({g: it for g, it in all_open.items() if _ho.record_of(it)}, time.time(), _cfg.tz(), _gh.shown, _session_label, _handoff_exempt)
-        gone = _ho.gone_unrecorded(all_open, env)
-        if gone:
-            lines.append(f"mover gone: {len(gone)} item{'' if len(gone) == 1 else 's'} whose mover has no pane " + ("(no hand-off record: the hand-off pass takes them at its next tick)" if _switchover_on()
-                         else "(from before the hand-off machinery; the migration moves them, nothing does now)"))
-        if _switchover_on():           # step 4: an old wait (a hold, an after) no watcher owns waits on the old pass only (switchover_fallback), or on nothing
-            loose = [g for g, it in all_open.items() if ((it.get("metadata") or {}).get("hold") or _after_open(it.get("metadata") or {})) and not _watch.watches(it)]
-            if loose:
-                lines.append(f"waits no watcher owns: {len(loose)} item{'' if len(loose) == 1 else 's'} ({', '.join(_gh.shown(g) for g in loose[:6])}{', ...' if len(loose) > 6 else ''}) "
-                             + ("end by the old wake pass until set by hand" if not _old_wait_off() else "end only when their mover writes: set the wait's input or end by hand"))
-        if _handoff_paused():          # a held clock says what it holds: this is what fires, in one batch, when [model] pause is turned off
-            n = len(_ho.plan(all_open, env))
-            lines.append(f"hand-off clock paused ({'the migration pass holds the board' if _watch.holding() else '[model] pause = true'}): {n} item{'' if n == 1 else 's'} would fire now" + ("" if n else ", none due"))
-        return "\n".join(lines)
-    except Exception as e:  # noqa: BLE001
-        print(f"handoff: brief not read: {e.__class__.__name__}: {e}", file=sys.stderr, flush=True)
-        return ""
-
-
 # ----------------------------------------------------------------------------- the stall pass (stall.py)
 # When the session that moves a live item has no turn running for [stall] minutes (10), stackshot moves the item on itself. The signal is the CLI's registry, read by
-# _handoff_status: the mover's pane is idle (or `shell`: turn over, a background Bash task running) and its status changed that long ago. Every [stall] every_seconds (20), every open alive item whose mover is a session, a front
+# _handoff.handoff_status: the mover's pane is idle (or `shell`: turn over, a background Bash task running) and its status changed that long ago. Every [stall] every_seconds (20), every open alive item whose mover is a session, a front
 # agent included, is looked at. After the minutes: (1) the notice goes to the mover once more; (2) the same minutes later, with no turn and no write: the hand-off's cold call
-# (_handoff_cold) names who takes it, or hands over to the builder when it names no one: it never asks the owner (_stall_cold_no_taker); (3) the same minutes after that, the project's builder (_handoff_builder, through _handoff_exec); (4) when none can take it, ONE message
+# (_hcold.handoff_cold) names who takes it, or hands over to the builder when it names no one: it never asks the owner (_hcold.stall_cold_no_taker); (3) the same minutes after that, the project's builder (_handoff.handoff_builder, through _handoff.handoff_exec); (4) when none can take it, ONE message
 # goes to the fleet's builder (_recovery_tell: the item, the quiet session, what was tried, asking it to take the fix through its usual path), or to the project's -main agent when the project is front-only (anchors.front_only: no background agent on its map, so no builder was tried; _recovery_target), once for the hand-off record (recovery_at), with a History line; the item stays with its mover and does not go to the owner. Not looked at: an item in a hold or on a wait, one the owner or an outside party
 # moves (the model derives no session mover), a hand-off in flight to a session that is not a front agent (the hand-off ladder has it), a cold call running, a pane
 # the registry does not show (nothing can be told of it), and an item whose hand-off record already carries the recovery request. Each step is written onto the item (metadata.stall.log, a History line) and the journal.
@@ -5510,7 +4531,7 @@ _STALL_LOCK = threading.RLock()
 def _stall_on(now: float | None = None) -> bool:
     """The stall pass runs: [model] handoff is on (it moves items through the hand-off machinery) and the pass is not paused. A pause always ends on its own (as when
     a switch that is off while nothing wakes idle builders): see `_stall_pause_check`."""
-    return _handoff_on() and _stall_pause_check(now) is None
+    return _handoff.handoff_on() and _stall_pause_check(now) is None
 
 
 _STALL_PAUSE: dict[str, Any] = {"rec": None, "loaded": False, "said": ""}     # the pause's record (stall.pause): in memory, and in <state>/stall_pause.json so a restart keeps the clock; `said`: the refusal already logged
@@ -5683,14 +4704,14 @@ def _stall_background(who: str) -> bool:
 
 
 def _stall_mover(gid: str, item: dict[str, Any]) -> str:
-    return _mover_state.mover({**item, "gid": gid}, _ho_derive)
+    return _mover_state.mover({**item, "gid": gid}, _handoff.ho_derive)
 
 
 def _stall_confirm(item: dict[str, Any], mover: str) -> float:
     """The item's `confirmed` clock when the last session to write the item (the confirm tool stamps `written_by`) is its mover, else 0: another session's confirm says nothing about whether the mover
     is working, so it neither restarts the stall episode nor moves its minutes."""
     c = float(item.get("confirmed") or 0)
-    return c if c and (_ho_same(item.get("written_by_id"), mover) or _ho_same(item.get("written_by"), mover)) else 0.0
+    return c if c and (_handoff.ho_same(item.get("written_by_id"), mover) or _handoff.ho_same(item.get("written_by"), mover)) else 0.0
 
 
 def _stall_ver(item: dict[str, Any]) -> list[float]:
@@ -5703,12 +4724,12 @@ def _stall_record(item: dict[str, Any], who: str, now: float) -> dict[str, Any]:
     would make the cold call drop its answer). It runs no clock (`no_clock`: the hand-off ladder leaves it alone) and carries `stall`, which keeps the item from going back to a sender."""
     meta = item.setdefault("metadata", {})
     old = _ho.record_of(item)
-    if old and _ho_same(old.get("to"), who) and not old.get("taken_at") and not old.get("recovery_at"):
+    if old and _handoff.ho_same(old.get("to"), who) and not old.get("taken_at") and not old.get("recovery_at"):
         r = old
     else:
         if old:
             _ho.push_history(meta, old, now, "replaced by the stall pass")
-        r = _ho.new_record(_session_label(who), _ho_ident(who), _ho.SERVER, now, tried=[t for t in ((old or {}).get("tried") or []) if t], origin=(old or {}).get("origin"),
+        r = _ho.new_record(_session_label(who), _handoff.ho_ident(who), _ho.SERVER, now, tried=[t for t in ((old or {}).get("tried") or []) if t], origin=(old or {}).get("origin"),
                            steps=int((old or {}).get("steps") or 0), cold=(old or {}).get("cold"))
         meta[_ho.KEY] = r
     r["stall"], r["no_clock"] = True, True
@@ -5719,10 +4740,10 @@ def _stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tu
     """Step 1: the notice goes to the mover once more (batched per recipient by the tick)."""
     with _writes.ITEM_LOCK:
         item = _load(gid)
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who):
             return ""
         meta = item.setdefault("metadata", {})
-        # review: no item notice wakes a front agent (see _rekeyed, and _handoff_exec, which skips them via front_keeper). For a front mover this step is the History line
+        # review: no item notice wakes a front agent (see _rekeyed, and _handoff.handoff_exec, which skips them via front_keeper). For a front mover this step is the History line
         # alone; the cold call and the builder, steps 2 and 3, are what cover its item.
         front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
         _stall.note(meta, now, f"{_session_label(who)} had no turn running for {minutes:g} min" + (": no notice is sent to a front agent, the next step follows" if front else ": the notice was sent to it again"))
@@ -5735,41 +4756,41 @@ def _stall_resend(gid: str, who: str, now: float, minutes: float, lines: list[tu
 
 
 def _stall_cold(gid: str, who: str, now: float, minutes: float) -> str:
-    """Step 2: the hand-off's cold call, through the machinery that already handles its answer (_handoff_cold). The record carries `stall`, so the call never asks <owner>: with no taker
+    """Step 2: the hand-off's cold call, through the machinery that already handles its answer (_hcold.handoff_cold). The record carries `stall`, so the call never asks <owner>: with no taker
     named the item goes on to the builder (step 3) at once."""
     with _writes.ITEM_LOCK:
         item = _load(gid)
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who):
             return ""
-        _HO_COLD_THREADS[:] = [t for t in _HO_COLD_THREADS if t.is_alive()]
-        if _HO_COLD_THREADS:
+        _hcold.HO_COLD_THREADS[:] = [t for t in _hcold.HO_COLD_THREADS if t.is_alive()]
+        if _hcold.HO_COLD_THREADS:
             return ""                  # one cold call at a time board-wide: this step waits for the next tick
         why = f"{_session_label(who)} had no turn running for {minutes:g} min since the last step"
         _stall_record(item, who, now)
-        _ho.mark_cold(item, _ho.Step("cold", gid, why, who), now, _ho_same, _session_label)
+        _ho.mark_cold(item, _ho.Step("cold", gid, why, who), now, _handoff.ho_same, _session_label)
         _stall.note(item["metadata"], now, f"{why}: the cold call was asked who takes it")
         _writes.save(gid, item, note="stall: the cold call was asked")
-        th = threading.Thread(target=_handoff_cold, args=(gid, now), daemon=True)
-        _HO_COLD_THREADS.append(th)
+        th = threading.Thread(target=_hcold.handoff_cold, args=(gid, now), daemon=True)
+        _hcold.HO_COLD_THREADS.append(th)
         th.start()
     print(f"stall: {gid} {who} still no turn: cold call asked", file=sys.stderr, flush=True)
     return "cold"
 
 
 def _stall_builder(gid: str, who: str, now: float, minutes: float) -> str:
-    """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff_exec`, a `recover` step), or, for a front-only project
+    """Step 3: the project's builder (section 5's first choice); none able, the last rung: the fleet's builder is asked to recover the session (`_handoff.handoff_exec`, a `recover` step), or, for a front-only project
     (anchors.front_only: no background agent on its map), the project's -main agent (`_recovery_target`)."""
     with _writes.ITEM_LOCK:
         item = _load(gid)
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who):
             return ""
         r = _stall_record(item, who, now)
         why = f"{_session_label(who)} had no turn running for {minutes:g} min and nothing was written to it"
-        st = _ho.next_step({**item, "gid": gid}, r, who, why, _handoff_env(now), gid=gid, allow_return=False, cold_ok=False)
+        st = _ho.next_step({**item, "gid": gid}, r, who, why, _handoff.handoff_env(now), gid=gid, allow_return=False, cold_ok=False)
         if st.kind == "move":
             _stall.note(item["metadata"], now, f"{why}: handed to {_session_label(st.to)}, the project's builder")
         _writes.save(gid, item, note="stall: " + ("handed to the builder" if st.kind == "move" else "nobody can take it: recovery is requested"))      # a `recover` step writes its own History line
-    done = _handoff_exec([st], now, verify=False)
+    done = _handoff.handoff_exec([st], now, verify=False)
     print(f"stall: {gid} {who} no turn: " + (f"handed to {st.to}" if st.kind == "move" else f"nobody can take it ({st.why}); recovery requested"), file=sys.stderr, flush=True)
     return "builder" if done else ""
 
@@ -5833,7 +4854,7 @@ def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> boo
     from stackshot.audit import silence as _silence
     with _writes.ITEM_LOCK:
         item = _load(gid)
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
             return False
         clock = _silence.clock(item, who)
         _stall.note(item.setdefault("metadata", {}), now, f"{_session_label(who)} was asked for news ({_clip_line(detail, 120) or 'no activity'}): the ladder goes on from here")
@@ -5842,7 +4863,7 @@ def _ladder_enter_quiet(gid: str, who: str, now: float, detail: str = "") -> boo
     with _STALL_LOCK:
         cur = _stall_load()
         old = cur.get(gid)
-        if old and _ladder.quiet(old) and _ho_same(old.get("mover"), who) and float(old.get("act") or 0) == clock:
+        if old and _ladder.quiet(old) and _handoff.ho_same(old.get("mover"), who) and float(old.get("act") or 0) == clock:
             return False
         cur[gid] = _ladder.enter_quiet(old, who, ver, conf, clock, now)
         _stall_save(cur)
@@ -5857,7 +4878,7 @@ def _ladder_quiet_look(gid: str, who: str, now: float, minutes: float) -> bool:
     from stackshot.audit import silence as _silence
     with _writes.ITEM_LOCK:
         item = _load(gid)
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who):
             return False
         meta = item.setdefault("metadata", {})
         front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
@@ -5901,7 +4922,7 @@ def _ladder_main(gid: str, who: str, rec: dict[str, Any], now: float, rows: "lis
     from stackshot.audit import silence as _silence
     with _writes.ITEM_LOCK:
         item = _load(gid)
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who):
             return ""
         last = _silence.clock(item, who)
         meta = item.setdefault("metadata", {})
@@ -5936,7 +4957,7 @@ def _hand_up_others(gid: str, who: str, now: float, limit: int = 5) -> str:
             if g == gid:
                 continue
             it = _load(g)
-            if it.get("status") != "open" or _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or not _ho_same(_stall_mover(g, it), who):
+            if it.get("status") != "open" or _stall.not_due(it, now, lambda i_: _after_open(i_.get("metadata") or {})) or not _handoff.ho_same(_stall_mover(g, it), who):
                 continue
             pr = str((it.get("metadata") or {}).get("priority") or "p2")
             rows.append((pr, int(g[1:]) if g[1:].isdigit() else 10 ** 9, g))
@@ -5962,7 +4983,7 @@ def _ladder_stuck(gid: str, who: str, now: float, rows: "list[tuple[str, str, st
     with _writes.ITEM_LOCK:
         item = _load(gid)
         meta = item.setdefault("metadata", {})
-        if item.get("status") != "open" or not _ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
+        if item.get("status") != "open" or not _handoff.ho_same(_stall_mover(gid, item), who) or _stall.not_due(item, now, lambda i_: _after_open(i_.get("metadata") or {})):
             return ""
         handed = float(meta.get(_PROGRESS_UP) or 0)
         if not _progress.due(item, now, hours, handed, alive_at):
@@ -6021,7 +5042,7 @@ def _ladder_main_tell(to: str, items: "list[tuple[str, str]]", info: "dict[str, 
 def _laddered(gid: str, who: str, now: float, at: float | None = None) -> bool:
     """Is the item on the one ladder for this mover and this hand-off (`at`: the record's) already (an entry the hand-off audit made, within its bounds)? Then the hand-off audit leaves it."""
     rec = _stall_load().get(gid)
-    return bool(rec) and _ho_same(rec.get("mover"), who) and _ladder.on_ladder(rec, now, at)
+    return bool(rec) and _handoff.ho_same(rec.get("mover"), who) and _ladder.on_ladder(rec, now, at)
 
 
 def _ladder_enter(item: dict[str, Any], st: "_ho.Step", now: float) -> dict[str, Any] | None:
@@ -6035,8 +5056,8 @@ def _ladder_enter(item: dict[str, Any], st: "_ho.Step", now: float) -> dict[str,
         old = cur.get(st.gid)
         ver = _stall_ver(item)
         r_ = _ho.record_of(item)
-        at = float((r_ or {}).get("at") or 0) if r_ and _ho_same(r_.get("to"), who) else 0.0
-        if old and _ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, at) and list(old.get("ver") or []) == ver:
+        at = float((r_ or {}).get("at") or 0) if r_ and _handoff.ho_same(r_.get("to"), who) else 0.0
+        if old and _handoff.ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, at) and list(old.get("ver") or []) == ver:
             return None
         rec = _ladder.enter(old, who, ver, _stall_confirm(item, who), gone=st.via == "gone", at=at)
         cur[st.gid] = rec
@@ -6049,13 +5070,13 @@ def _ladder_ask(gid: str, who: str, now: float, act: str) -> str:
     with _writes.ITEM_LOCK:
         item = _load(gid)
         r = _ho.record_of(item)
-        if item.get("status") != "open" or not r or not _ho_same(_stall_mover(gid, item), who):
+        if item.get("status") != "open" or not r or not _handoff.ho_same(_stall_mover(gid, item), who):
             return ""
         meta = item.setdefault("metadata", {})
         front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
         _stall.note(meta, now, f"{_session_label(who)} has not taken it" + (": no notice is sent to a front agent, the next rung follows" if front else ": the notice was sent to it again"))
         _writes.save(gid, item, note="ladder: " + ("no notice to a front agent" if front else "the notice was sent again"))
-        text = "" if front else _handoff_text(gid, item, r)
+        text = "" if front else _handoff.handoff_text(gid, item, r)
     if text:
         _telling.tell_woken(gid, _session_id(who) or who, text, tag="handoff")
     print(f"ladder: {gid} {who} has not taken it: " + ("front agent, history line only" if front else "notice sent again"), file=sys.stderr, flush=True)
@@ -6088,9 +5109,9 @@ def _ladder_first(gid: str, who: str, rec: dict[str, Any], now: float) -> None:
     """The first rung of an item the hand-off audit just brought (its ask, or the cold call of a mover whose pane is gone). Never raises."""
     try:
         minutes = _stall_minutes()
-        status, at = _handoff_status(who, _sessions_index())
+        status, at = _handoff.handoff_status(who, _sessions_index())
         act = _ladder.action(rec, status, at, 0.0, now, minutes, _ladder_look())
-        if act == "cold" and not _cold_call_on():
+        if act == "cold" and not _handoff.cold_call_on():
             act = "builder"
         if not act:
             return
@@ -6105,7 +5126,7 @@ def _ladder_first(gid: str, who: str, rec: dict[str, Any], now: float) -> None:
 def _stall_tick(now: float | None = None) -> list[str]:
     """The stall pass (the runner calls it every 60 s; [stall] every_seconds gates it, so a value below 60 still runs once per round): the items it acted on, by gid."""
     now = time.time() if now is None else now
-    if not _stall_on(now) or _handoff_paused():
+    if not _stall_on(now) or _handoff.handoff_paused():
         return []
     if now - _STALL_LAST[0] < _stall_num("every_seconds", _stall.EVERY):
         return []
@@ -6150,44 +5171,44 @@ def _stall_tick(now: float | None = None) -> list[str]:
                 continue                 # a cold call is out
             front = _telling.front_keeper(who, str(meta.get("project") or ""))[0]
             quiet = bool(ladder_on and old and _ladder.quiet(old))      # the dates pass's entry: it ends with activity on the item, a new mover, not with a write or a confirm that is no activity
-            if quiet and _ladder.quiet_over(old, who, _ho_same, _silence.clock(it, who)):
+            if quiet and _ladder.quiet_over(old, who, _handoff.ho_same, _silence.clock(it, who)):
                 keep.pop(gid, None)
                 if old.get("cold_at"):
                     keep[gid] = _stall.fresh(who, _stall_ver(it), old, 0.0)      # what outlives an episode (the cold call's 24-hour bound) stays
                 continue
-            if not front and _ho.awaiting_session(it, who, _ho_same) and not (ladder_on and old and _ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, float((r or {}).get("at") or 0))):
+            if not front and _ho.awaiting_session(it, who, _handoff.ho_same) and not (ladder_on and old and _handoff.ho_same(old.get("mover"), who) and _ladder.on_ladder(old, now, float((r or {}).get("at") or 0))):
                 continue                 # an untaken hand-off is the hand-off audit's alone (the dates pass does not start it); once that audit has brought it to the one ladder, the ladder takes its rungs here
             # review: the registry row shows background work in its status. A pane whose turn is over but which has a run_in_background Bash task running (a CI watch, a release) shows
             # `shell`, not `idle`, and stall.action counts `shell` as idle; a pane with a background subagent running shows `busy` and is left alone. A background agent's `shell` pane is
             # working on that job, so it is not quiet (with `[ladder] enabled` the pane is not read for a background agent at all: its item's own step status decides, below). A front agent does no background work of its own (it hands that to the builder), so its `shell` pane counts as idle. A doing item
             # carries no expected time: a mover with no background work running is chased by the minutes of its pane alone.
-            status, at = _handoff_status(who, idx)
+            status, at = _handoff.handoff_status(who, idx)
             back = bool(ladder_on and not front and _stall_background(who))
             if back:
                 # the one ladder: a background agent's pane says nothing about this item (it is nearly always busy, or shows a background shell for a CI watch or a release), so the pane no longer holds
                 # the rungs after the ask; the item's own step status does: a line in progress, changed within 90 minutes, is a subagent at work on it. A live pane gets no cold call or builder: its silence goes to the project's -main agent (ladder.action, `_ladder_main`).
-                if _silence.subagent_running(it, now, who, _ho_same):      # only the mover's own line: another agent's stale one holds nothing
+                if _silence.subagent_running(it, now, who, _handoff.ho_same):      # only the mover's own line: another agent's stale one holds nothing
                     continue
             elif not front and status == "shell" and _stall_background(who):
                 continue
             mine = _stall_confirm(it, who)      # only the mover's own confirm says it still has the item
             rec = (old if quiet else
-                   _ladder.episode(old, who, _stall_ver(it), _ho_same, mine, float(r.get("at") or 0) if r and _ho_same(r.get("to"), who) and not r.get("taken_at") else None) if ladder_on
-                   else _stall.episode(old, who, _stall_ver(it), _ho_same, mine))
+                   _ladder.episode(old, who, _stall_ver(it), _handoff.ho_same, mine, float(r.get("at") or 0) if r and _handoff.ho_same(r.get("to"), who) and not r.get("taken_at") else None) if ladder_on
+                   else _stall.episode(old, who, _stall_ver(it), _handoff.ho_same, mine))
             keep[gid] = rec
             if ladder_on and not quiet and _ladder.via_of(rec) != "handoff":
                 continue                 # a pane with no turn running starts no ladder here: the dates pass (a wake passed) does, and the hand-off audit its own
             if _stall.spent(rec, now):
                 continue
             floor = max(float(it.get("state_updated") or it.get("updated") or 0), 0.0 if rec.get("capped") else float(rec.get("conf") or 0))      # the mover's own last confirm, kept in the entry (another session's later confirm does not erase it): the minutes count from it, up to stall.RESTARTS times
-            if r and _ho_same(r.get("to"), who):
+            if r and _handoff.ho_same(r.get("to"), who):
                 floor = max(floor, float(r.get("at") or 0))
             floor = max(floor, _stall.due_at(it, now))    # an item whose wake has just passed has its minutes first
             if quiet:
                 floor = 0.0              # the quiet entry's rungs count from the last rung taken and the pane going idle: a write or a confirm that is no activity moves nothing
-            live = bool(back and (status or not idx or not _handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
+            live = bool(back and (status or not idx or not _handoff.handoff_pane(who, idx)))      # a pane the registry shows, or one the heartbeat holds live (another machine's); a heartbeat that is empty or unreadable says nothing, so the pane is taken as live
             act = (_ladder.action(rec, status, at, max(floor, since), now, minutes, look, background=back, live=live, main_every=main_hours * 3600.0) if ladder_on else _stall.action(rec, status, at, max(floor, since), now, minutes))
-            if act == "cold" and not _cold_call_on():
+            if act == "cold" and not _handoff.cold_call_on():
                 act = "builder"
             if act:
                 todo.append((act, gid, who, rec))
@@ -6340,7 +5361,7 @@ def _fmt(item: dict[str, Any], brief: bool = False) -> str:
         out.extend(_state_check_notes(item))            # next names the owner under an agent's state; next may be stale (the owner-step and stale-next checks)
     out.extend(_model_lines(item, brief))                   # dead, alive or waiting, with the mover and the wait
     if not brief:
-        out.extend(_handoff_lines(item))                    # step 2: handed to X, not yet taken | taken | returned
+        out.extend(_handoff.handoff_lines(item))                    # step 2: handed to X, not yet taken | taken | returned
     for k in ("project", "needs", "ask", "priority", "due", "wake", "until"):       # the creator is no line here (the History says "created by"); the mover leads the model line
         if k == "needs":                     # the list
             needs = _needs_of(m)
@@ -6604,8 +5625,9 @@ def _late(name: str) -> Callable[..., Any]:
     return lambda *a, **k: globals()[name](*a, **k)
 
 
-# What the telling still reaches on this module (service/telling.py tells the sessions a write concerns): the hand-off record's own functions, the page keepers of a project's agents, the For you list's rows, the
-# page debt's marks and the time zone. A hook leaves this table when the area that holds it moves under service/.
+# What the telling still reaches (service/telling.py tells the sessions a write concerns): the hand-off record's own functions (service/handoff.py imports the telling, so the telling cannot import it back: each
+# is looked up on that module when it runs), the page keepers of a project's agents, the For you list's rows, the page debt's marks and the time zone. A hook leaves this table when the area that holds it
+# moves under service/ and does not import the telling.
 _telling.install(_telling.Hooks(
     back_agent=_late("_back_agent"),
     builder_for=_late("_builder_for"),
@@ -6614,17 +5636,17 @@ _telling.install(_telling.Hooks(
     debt_mover=_late("_debt_mover"),
     foryou_failed=lambda: _FORYOU_FAILED,
     foryou_key=_late("_foryou_key"),
-    front_handed_by_peer=_late("_front_handed_by_peer"),
+    front_handed_by_peer=lambda *a, **k: _handoff.front_handed_by_peer(*a, **k),
     fy_flag=lambda *a, **k: _fy.flag(*a, **k),
     fy_has_key=lambda *a, **k: _fy.has_key(*a, **k),
     grace_min=_late("_grace_min"),
-    handoff_builder=_late("_handoff_builder"),
-    handoff_on=_late("_handoff_on"),
-    handoff_pane_row=_late("_handoff_pane_row"),
-    handoff_pushed=_late("_handoff_pushed"),
-    handoff_text=_late("_handoff_text"),
-    handoff_told_text=_late("_handoff_told_text"),
-    ho_same=_late("_ho_same"),
+    handoff_builder=lambda *a, **k: _handoff.handoff_builder(*a, **k),
+    handoff_on=lambda *a, **k: _handoff.handoff_on(*a, **k),
+    handoff_pane_row=lambda *a, **k: _handoff.handoff_pane_row(*a, **k),
+    handoff_pushed=lambda *a, **k: _handoff.handoff_pushed(*a, **k),
+    handoff_text=lambda *a, **k: _handoff.handoff_text(*a, **k),
+    handoff_told_text=lambda *a, **k: _handoff.handoff_told_text(*a, **k),
+    ho_same=lambda *a, **k: _handoff.ho_same(*a, **k),
     main_agent=_late("_main_agent"),
     model_of=_late("_model_of"),
     owed_mark=_late("_owed_mark"),
@@ -6644,7 +5666,6 @@ _runner.install(_runner.Hooks(
     check_tick=_late("_check_tick"),
     proof_tick=_late("_proof_tick"),
     balance_tick=_late("_balance_tick"),
-    handoff_tick=_late("_handoff_tick"),
     answer_tick=_late("_answer_tick"),
     roles_sync_safe=_late("_roles_sync_safe"),
     clients_tick=_late("_clients_tick"),
@@ -6696,6 +5717,43 @@ _wake_hooks.install(_wake_hooks.Hooks(
     state_end=_late("_state_end"),
     told_recent=_late("_told_recent"),
     zone=lambda: ZONE,
+))
+
+
+# What the hand-off passes still reach on this module (service/handoff.py and service/handoff_cold.py): the write gates and limits, the item model's reader and its switch, the stall pass and the one ladder,
+# the recovery request, the page store, the publish and the session ids. A hook leaves this table when the area that holds it moves under service/.
+_handoff_hooks.install(_handoff_hooks.Hooks(
+    after_open=_late("_after_open"),
+    bullets_on=_late("_bullets_on"),
+    close_reason_max=_late("_close_reason_max"),
+    description_limits=_late("_description_limits"),
+    fit=_late("_fit"),
+    front_pair_ok=_late("_front_pair_ok"),
+    gate_description=_late("_gate_description"),
+    item_refs=_late("_item_refs"),
+    ladder_enter=_late("_ladder_enter"),
+    ladder_first=_late("_ladder_first"),
+    ladder_on=_late("_ladder_on"),
+    laddered=_late("_laddered"),
+    load_or_none=_late("_load_or_none"),
+    model_of=_late("_model_of"),
+    old_wait_off=_late("_old_wait_off"),
+    page_io=_late("_page_io"),
+    publish=_late("_publish"),
+    recovery_role=lambda: _RECOVERY_ROLE,
+    recovery_target=_late("_recovery_target"),
+    recovery_tell=_late("_recovery_tell"),
+    role_name=_late("_role_name"),
+    role_of=_late("_role_of"),
+    scoped_anchors=_late("_scoped_anchors"),
+    session_id=_late("_session_id"),
+    stall_confirm=_late("_stall_confirm"),
+    stall_load=_late("_stall_load"),
+    stall_lock=lambda: _STALL_LOCK,
+    stall_save=_late("_stall_save"),
+    stall_ver=_late("_stall_ver"),
+    switchover_on=_late("_switchover_on"),
+    update=_late("_update"),
 ))
 
 
@@ -7845,7 +6903,7 @@ def _migrate_write(spec: dict[str, Any], machine: str) -> dict[str, Any]:
     by = _script_sender(spec, machine)
     _sender_not_owner(str(spec.get("sender") or ""))
     op = str(spec.get("op") or "apply")
-    state = lambda: {"guards": _model_guards_on(), "pause": bool(_cfg.get("model", "pause", default=False)), "switchover": _switchover_on(), "handoff": _handoff_on(),
+    state = lambda: {"guards": _model_guards_on(), "pause": bool(_cfg.get("model", "pause", default=False)), "switchover": _switchover_on(), "handoff": _handoff.handoff_on(),
                      "watchers": _watch.enabled(), "held": _watch.holding(), "by": by}
     if op not in ("begin", "apply", "end", "wake_text", "send_wake", "stamp", "unstamp", "retire", "unretire", "project_id", "unproject_id", "until", "ununtil", "lastact", "unlastact"):
         raise ToolError("Refused: op = begin | apply | end | wake_text | send_wake | stamp | unstamp | retire | unretire | project_id | unproject_id | until | ununtil | lastact | unlastact")
@@ -7940,14 +6998,8 @@ _gates.install(_gates.Hooks(
     front_held=_late("_front_held"),
     front_pair_ok=_late("_front_pair_ok"),
     gate_description=_late("_gate_description"),
-    handoff_background=_late("_handoff_background"),
-    handoff_builder=_late("_handoff_builder"),
-    handoff_on=_late("_handoff_on"),
-    handoff_pane=_late("_handoff_pane"),
     handoffs_in=_late("_handoffs_in"),
     handover_kind=_late("_handover_kind"),
-    ho_derive=_late("_ho_derive"),
-    ho_same=_late("_ho_same"),
     hub_sessions=_late("_hub_sessions"),
     item_mover=_late("_item_mover"),
     main_agent=_late("_main_agent"),
@@ -8013,8 +7065,6 @@ _update_svc.install(_update_svc.Hooks(
     gate_subject=_late("_gate_subject"),
     handoffs_in=_late("_handoffs_in"),
     handover=_late("_handover"),
-    ho_derive=_late("_ho_derive"),
-    ho_same=_late("_ho_same"),
     hold_held_by=_late("_hold_held_by"),
     hold_set=_late("_hold_set"),
     is_held=_late("_is_held"),
@@ -8403,7 +7453,7 @@ def _message(to: str, text: str, sender: str, auth: str = "", origin: str = "", 
     except Exception:
         pass
     if not origin and not held:
-        _handoff_told_text(to, text, outcome, err)      # a message to an item's mover that names the item is a notice about it: its hand-off is delivered, or waits in the inbox
+        _handoff.handoff_told_text(to, text, outcome, err)      # a message to an item's mover that names the item is a notice about it: its hand-off is delivered, or waits in the inbox
     named = ""
     if not origin and outcome.startswith(("delivered", "queued", "inbox")):   # a session's handover to a background agent names it on the items the text names
         try:
@@ -9363,7 +8413,7 @@ def _handover_kind(name: str) -> str:
 def _handover_down(name: str) -> str:
     """Why this session cannot take an item now ("" when it can): no pane, a retired one, no heartbeat, or a last turn that ended in an error."""
     try:
-        return _handoff_pane(name) or _session_down(name, _anc.names(), _sessions_index())
+        return _handoff.handoff_pane(name) or _session_down(name, _anc.names(), _sessions_index())
     except Exception as e:  # noqa: BLE001
         return f"its pane could not be read ({e.__class__.__name__})"
 
@@ -9381,7 +8431,7 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
         row: dict[str, Any] = {"item": gid, "shown": _gh.shown(gid), "action": "none", "to": "", "step": "", "why": "", "told": ""}
         if (why := _released_skip(it, meta, mover)):
             return {**row, "action": "left", "why": why}
-        plan = _hv.decide(meta, str(meta.get("owner") or ""), mover, _handover_kind, _handover_down, _ho_same)
+        plan = _hv.decide(meta, str(meta.get("owner") or ""), mover, _handover_kind, _handover_down, _handoff.ho_same)
         step = _clip_line(_steps.first_line(plan["step"]), 140)
         row.update(to=plan["to"], step=step, why=plan["why"])
         if plan["action"] == "none" or dry:
@@ -9399,7 +8449,7 @@ def _handover(gid: str, now: float, done: list[str], dry: bool = False) -> dict[
                             f"so it stays with you. Do the step yourself, hand the item to another session, or reword the step. {subject} ({project}) → {_telling.notice_link(gid)}", tag="handoff")
                 row["told"] = _session_label(frm)
             return row
-        keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_ho_same(x, frm) or _ho_same(x, to))]
+        keep = [x for x in _needs_of(meta) if x.lower() in _NEEDS_KINDS or not (_handoff.ho_same(x, frm) or _handoff.ho_same(x, to))]
         _needs_store(meta, _canon_needs([to, *keep]))
         if meta.get("mover"):
             meta["mover"] = to
@@ -10849,7 +9899,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         return 200, {"enabled": enabled, "mode": _page_debt.mode() if enabled else "", "counts": _page_debt_pass(run=run, deadline=deadline)}
     if what == "orphan-handover":   # the audit run's hand-over of open items whose mover is gone (audit_run.py); a dry run unless the body says apply
         try:
-            return 200, _orphan_handover(apply=body.get("apply") is True)
+            return 200, _handoff.orphan_handover(apply=body.get("apply") is True)
         except ToolError as e:
             return 400, {"error": str(e)}
     if what == "backfill-contact":   # every open item without a live contact gets one (client.py backfill-contact [--dry-run]); a dry run unless the body says apply
@@ -10965,7 +10015,7 @@ def _client_post(machine: str, what: str, body: dict[str, Any]) -> tuple[int, di
         acked = _inbox.peek([str(x) for x in d])           # step 2: the lines are gone once acked; a hand-off notice among them is the delivery of its hand-off
         removed = _inbox.ack([str(x) for x in d], [str(x) for x in f])
         if acked:
-            _handoff_acked(acked)
+            _handoff.handoff_acked(acked)
         return 200, {"removed": removed}
     if what == "held":          # a session's UserPromptSubmit hook fetches the notices held for it while it was busy (held.py); handed over once
         uuid = str(body.get("uuid") or "").lower()
@@ -11527,7 +10577,7 @@ def _start_background() -> list[str]:
     except Exception as e:
         print(f"mover backfill pass failed: {e}", file=sys.stderr, flush=True)
     try:
-        if _handoff_repair_pass():          # an open hand-off record that names someone but the item's mover is ended into its history; idempotent, and before the wake pass and any thread
+        if _handoff.handoff_repair_pass():          # an open hand-off record that names someone but the item's mover is ended into its history; idempotent, and before the wake pass and any thread
             _publish()
     except Exception as e:
         print(f"hand-off record repair failed: {e}", file=sys.stderr, flush=True)

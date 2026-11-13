@@ -36,10 +36,10 @@ check("1 no other service module keeps one", not any(others.values()), {k: v for
 
 # ---------------------------------------------------------------- 2. tables
 SERVER = parse("web/server.py")
-TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks")
+TABLES = ("_writes", "_telling", "_create_svc", "_gates", "_update_svc", "_runner", "_wake_hooks", "_handoff_hooks")
 installs = [(n, n.value.func.value.id) for n in SERVER.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "install"
             and isinstance(n.value.func.value, ast.Name)]
-check("2 the server installs the seven tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
+check("2 the server installs the eight tables, each once, at the top of the module", sorted(t for _n, t in installs) == sorted(TABLES), [t for _n, t in installs])
 inside = [n.lineno for fn in ast.walk(SERVER) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.walk(fn)
           if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "install" and isinstance(n.func.value, ast.Name) and n.func.value.id in TABLES]
 check("2 …and no function of the server installs one (a table is never replaced while the server runs)", not inside, inside)
@@ -82,19 +82,22 @@ check("3 the minute set's table holds only late lookups (a tick function replace
 wake_tab = next((n.value.args[0] for n, t in installs if t == "_wake_hooks"), None)
 wake_plain = [kw.arg for kw in wake_tab.keywords if not is_late(kw.value) and not isinstance(kw.value, ast.Lambda)] if isinstance(wake_tab, ast.Call) else ["no table"]
 check("3 the wake passes' table holds only late lookups and lambdas (a function replaced on the server is the one the passes call), never a value copied at the install", not wake_plain, wake_plain)
+handoff_tab = next((n.value.args[0] for n, t in installs if t == "_handoff_hooks"), None)
+handoff_plain = [kw.arg for kw in handoff_tab.keywords if not is_late(kw.value) and not isinstance(kw.value, ast.Lambda)] if isinstance(handoff_tab, ast.Call) else ["no table"]
+check("3 the hand-off passes' table holds only late lookups and lambdas (a function replaced on the server is the one the passes call), never a value copied at the install", not handoff_plain, handoff_plain)
 expected = {"_ASK_NONE", "_SUBJECT_TAGGED", "_BASIS_WORDS", "_CHECK_HOW", "_CLOSE_REFUSAL", "_MODEL_PAGE", "OUTCOMES", "_RELAUNCH"}
 check("3 the values captured are the eight the tool text and the gates share (a ninth is a decision: say here why it cannot go stale)", set(captured) == expected, sorted(set(captured) ^ expected))
 
 # ---------------------------------------------------------------- 4. telling
 telling_public = {n.name for n in parse("service/telling.py").body if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")} - {"install"}
 held = {}
-for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wake_hooks.py"):
+for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wake_hooks.py", "service/handoff_hooks.py"):
     for n in parse(rel).body:
         if isinstance(n, ast.ClassDef) and n.name == "Hooks":
             held[rel] = sorted(a.target.id for a in n.body if isinstance(a, ast.AnnAssign) and isinstance(a.target, ast.Name) and a.target.id in telling_public)
-check("4 no table of create, gates, update, the runner or the wake passes holds a field named for a telling function (they call service/telling.py on the module)", not any(held.values()), held)
-used = {rel: sorted({n.attr for n in ast.walk(parse(rel)) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "_telling"}) for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wakes.py", "service/watching.py", "service/event_waits.py")}
-check("4 each of the seven services calls the telling on its module, and every name it takes is public there", all(used.values()) and not [a for v in used.values() for a in v if a not in telling_public and not a.isupper() and a not in ("CLOSE_WAS",)], used)
+check("4 no table of create, gates, update, the runner, the wake passes or the hand-off passes holds a field named for a telling function (they call service/telling.py on the module)", not any(held.values()), held)
+used = {rel: sorted({n.attr for n in ast.walk(parse(rel)) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "_telling"}) for rel in ("service/create.py", "service/gates.py", "service/update.py", "service/runner.py", "service/wakes.py", "service/watching.py", "service/event_waits.py", "service/handoff.py", "service/handoff_cold.py")}
+check("4 each of the nine services calls the telling on its module, and every name it takes is public there", all(used.values()) and not [a for v in used.values() for a in v if a not in telling_public and not a.isupper() and a not in ("CLOSE_WAS",)], used)
 
 print(f"server write free scenario: {len(ran) - len(fails)}/{len(ran)} checks")
 if fails:
