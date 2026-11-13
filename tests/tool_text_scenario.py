@@ -202,7 +202,7 @@ for f in ("tests.yml", "clean-text.yml"):
     sw[f] = [(n, j["runs-on"]) for n, j in y["jobs"].items()]
 check("every job of tests.yml and clean-text.yml runs on ubuntu-latest",
       all(r == "ubuntu-latest" for rs in sw.values() for n, r in rs)
-      and sum(len(rs) for rs in sw.values()) == 5, sw)   # tests.yml: shards (main's shard plan), measure (main's measured run, a matrix), suites, tool-text; one in clean-text.yml
+      and sum(len(rs) for rs in sw.values()) == 6, sw)   # tests.yml: proof (main's stamp), shards (the full run's shard plan), measure (the full run, a matrix), suites, tool-text; one in clean-text.yml
 
 # ================================================================= 5. the generated what-changed line
 S = lambda tools, **kw: {"format": 1, "instructions": kw.get("ins", "i"), "resources": kw.get("res", {}), "tools": tools}
