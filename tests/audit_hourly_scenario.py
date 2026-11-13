@@ -961,6 +961,100 @@ put(1, mover="home-peer2", act=90); put(2, mover="home-peer2", act=90); SUBS.cle
 tick(); k_url = [lines(i)[0]["kind"] for i in (1, 2)]
 check("23 …through the audit: a subagent whose brief says `PR 5` while two of the mover's items are anchored to pull request 5 of two repositories leaves both UNKNOWN (not idle, not handed on); with the URL of one of them only that item is verified and the other reads idle",
       k_amb == ["audit_unknown", "audit_unknown"] and k_url == ["audit", "audit_idle"], (k_amb, k_url))
+
+# ================================================================ 24. a subagent flagged finished that is only parked or resumed still runs
+# Claude Code writes `finished: true` into a subagent's meta at the end of every turn, also one that ends waiting for a background task of its own; a resume or the task's notice drops it again.
+SID3 = str(_uuid.UUID("00000000-0000-4000-8000-0000000000cc"))
+sub3 = proj / SID3 / "subagents"; sub3.mkdir(parents=True)
+par3 = proj / f"{SID3}.jsonl"
+BGR = lambda tid: {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": f"Command running in background with ID: {tid}. Output is being written to: /x/{tid}.output. You will be notified when it completes."}]}}
+BGM = lambda tid: {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": f"Command was moved to the background (ID: {tid}) after running for 180s. You will be notified when it completes."}]}}
+MON = lambda tid: {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": f"Monitor started (task {tid}, expires in 30m unless the source ends first)."}]}}
+NOTE = lambda tid, status="completed": {"type": "attachment", "attachment": {"type": "queued_command", "prompt": f"<task-notification>\n<task-id>{tid}</task-id>\n<output-file>/x/{tid}.output</output-file>\n<status>{status}</status>\n<summary>done</summary>\n</task-notification>"}}
+EVT = lambda tid: {"type": "attachment", "attachment": {"type": "queued_command", "prompt": f"<task-notification>\n<task-id>{tid}</task-id>\n<summary>Monitor event: \"w\"</summary>\n<event>one more line</event>\n</task-notification>"}}
+STOP = lambda tid: {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "TaskStop", "input": {"task_id": tid}}]}}
+def fin(aid, extra=(), age=60, meta_age=600, finished=True, desc=None, brief=None):
+    """a subagent of SID3: its transcript (the brief, then `extra` records) written `age` s ago, its meta (flag `finished`) written `meta_age` s ago"""
+    mp, tp = sub3 / f"agent-{aid}.meta.json", sub3 / f"agent-{aid}.jsonl"
+    m = {"agentType": "general-purpose", "description": desc or f"Review {aid}"}
+    if finished is not None: m["finished"] = finished
+    mp.write_text(json.dumps(m))
+    tp.write_text("\n".join(json.dumps(r) for r in [{"type": "user", "message": {"role": "user", "content": brief or f"Review the change of {aid}"}}, *extra]) + "\n")
+    os.utime(tp, (now0 - age, now0 - age)); os.utime(mp, (now0 - meta_age, now0 - meta_age))
+def iso(t): return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".250Z"
+def resume_rec(aid, t, key="resumedAgentId", typ="user", both=False):
+    res = {"success": True, "message": "Resuming agent", key: aid, **({"revivedAgentId" if key == "resumedAgentId" else "resumedAgentId": aid} if both else {})}
+    return {"type": typ, "timestamp": iso(t), "message": {"role": "user", "content": [{"type": "tool_result", "content": [{"type": "text", "text": json.dumps(res)}]}]}, **({"toolUseResult": res} if typ == "user" else {})}
+def parent(*recs, filler=0):
+    par3.write_text("\n".join(json.dumps(r) for r in recs) + ("\n" + json.dumps({"type": "assistant", "x": "y" * filler}) if filler else "") + "\n")
+def run3(): return {x["id"]: x for x in TIE.running(SID3, [str(T / "transcripts")], now0)}
+parent({"type": "assistant", "message": {"role": "assistant", "content": "idle"}})
+fin("pend1", [BGR("bg0001")]); fin("pend2", [BGM("bg0002")]); fin("pend3", [MON("mon001"), EVT("mon001"), EVT("mon001")])
+fin("ended1", [BGR("bg0003"), NOTE("bg0003")]); fin("ended2", [MON("mon002"), NOTE("mon002")]); fin("ended3", [MON("mon003"), STOP("mon003")]); fin("ended4", [BGR("bg0004"), NOTE("bg0004", "failed")])
+fin("half1", [BGR("bg0005"), BGR("bg0006"), NOTE("bg0005")])                                 # one of two tasks ended, the other still waits
+fin("none1", [{"type": "assistant", "message": {"role": "assistant", "content": "done"}}])      # finished, nothing pending
+fin("old1", [BGR("bg0007")], age=int(TIE.PARKED_S) + 60)                                       # pending, but its transcript is older than the window
+fin("old2", [BGR("bg0008")], age=int(TIE.PARKED_S) - 2)
+fin("capped2", [BGR("bg0009")], age=int(TIE.QUIET_CAP_S) + 60)
+fin("live1", [BGR("bg0010")], finished=None)                                                   # no flag: running as ever
+got24 = run3()
+check("24 a subagent flagged finished whose own transcript holds a background Bash (started so, or moved there after its timeout) or a Monitor with no ending notice, written within 90 minutes, is running, in the shape of an unfinished one (no `quiet`)",
+      all(k in got24 for k in ("pend1", "pend2", "pend3", "old2")) and got24["pend1"] == {"id": "pend1", "description": "Review pend1", "brief": "Review the change of pend1", "text": "Review pend1\nReview the change of pend1", "at": now0 - 60}
+      and all("quiet" not in got24[k] for k in ("pend1", "pend2", "pend3", "old2")), sorted(got24))
+check("24 …a Monitor's per-event notices end nothing (pend3 has two and still waits), and one of two tasks ended leaves the subagent parked on the other",
+      "pend3" in got24 and "half1" in got24, sorted(got24))
+check("24 …a task ended by a notice with a status (completed or failed), by a Monitor's end notice or by a TaskStop is no longer pending: the subagent is not running", not any(k in got24 for k in ("ended1", "ended2", "ended3", "ended4")), sorted(got24))
+check("24 …finished with nothing pending (and no resume): not running, as before", "none1" not in got24, sorted(got24))
+check("24 …a pending task whose subagent wrote nothing for more than 90 minutes is not running (90 minutes less two seconds is), and one past the 6-hour cap is dropped as ever; a subagent with no flag is as before", "old1" not in got24 and "old2" in got24 and "capped2" not in got24 and "live1" in got24, sorted(got24))
+check("24 pending_tasks names the ids that wait", TIE.pending_tasks(sub3 / "agent-half1.jsonl") == {"bg0006"} and TIE.pending_tasks(sub3 / "agent-pend3.jsonl") == {"mon001"} and TIE.pending_tasks(sub3 / "agent-ended4.jsonl") == set()
+      and TIE.pending_tasks(sub3 / "agent-none1.jsonl") == set() and TIE.pending_tasks(sub3 / "agent-missing.jsonl") == set(), None)
+# the parent's resume
+for f_ in sub3.glob("agent-*"): f_.unlink()
+fin("res1", meta_age=600); fin("res2", meta_age=600); fin("res3", meta_age=600); fin("res4", meta_age=600); fin("res5", meta_age=600); fin("res6", meta_age=600); fin("res7", meta_age=600, age=100 * 60)
+parent({"type": "assistant", "message": {"role": "assistant", "content": "x"}},
+       resume_rec("res1", now0 - 300),                                                      # newer than the meta's write (600 s ago): resumed since
+       resume_rec("res2", now0 - 300, key="revivedAgentId"),                                # the same on Claude Code 2.1.323
+       resume_rec("res3", now0 - 900),                                                      # older than the meta's write: it ended after the resume
+       resume_rec("res4", now0 - 300, typ="assistant"),                                     # an assistant message that quotes the words resumes nothing
+       resume_rec("res7", now0 - 300, both=True),
+       resume_rec("other", now0 - 300))                                                     # another subagent's
+got24b = run3()
+check("24 a subagent flagged finished that the session's transcript resumed (`resumedAgentId`, or `revivedAgentId`) after its meta's last write is running; one resumed before that write, one the session never resumed, one only an assistant record quotes, and a resume of another subagent are not",
+      {"res1", "res2", "res7"} <= set(got24b) and not ({"res3", "res4", "res5", "res6"} & set(got24b)), sorted(got24b))
+check("24 …the `quiet` rule is unchanged: a resumed one whose transcript is 100 minutes old is running but quiet, a fresh one is not", got24b["res7"].get("quiet") is True and "quiet" not in got24b["res1"], {k: v.get("quiet") for k, v in got24b.items()})
+check("24 resumes: the newest resume time of each subagent, as epoch seconds", abs(TIE.resumes(par3)["res1"] - (now0 - 300 + 0.25)) < 0.01 and "res4" not in TIE.resumes(par3) and TIE.resumes(par3 / "missing") == {}, TIE.resumes(par3))
+parent(resume_rec("res1", now0 - 600), resume_rec("res3", now0 - 601))       # the resume dated as the meta's write (600 s ago) or one second before it counts (the slack), two seconds before it does not
+parent(resume_rec("res1", now0 - 599), resume_rec("res3", now0 - 603))
+got24c = run3()
+check("24 …a resume dated within a second before the meta's write counts (a clock's grain), one dated two seconds before it does not", "res1" in got24c and "res3" not in got24c, sorted(got24c))
+parent(resume_rec("res1", now0 - 300), filler=64 * 1024); saved_tail = TIE.TAIL_BYTES; TIE.TAIL_BYTES = 4096
+try: got24d = run3()
+finally: TIE.TAIL_BYTES = saved_tail
+check("24 …only the tail of the session's transcript is read: a resume further back than TAIL_BYTES from its end is not seen", "res1" not in got24d, sorted(got24d))
+# the session's transcript is read only when it is needed, once, and never raises
+reads = []; real_resumes = TIE.resumes
+TIE.resumes = lambda tr: (reads.append(tr), real_resumes(tr))[1]
+try:
+    for f_ in sub3.glob("agent-*"): f_.unlink()
+    fin("p1", [BGR("bg0020")]); fin("p2", [MON("mon020")]); run3(); n_pending = len(reads)
+    fin("f1"); fin("f2"); fin("f3"); run3(); n_finished = len(reads) - n_pending
+finally: TIE.resumes = real_resumes
+check("24 the session's transcript is not read while every finished subagent is parked on a task of its own, and is read once (not once for each) when some finished subagent has none pending", n_pending == 0 and n_finished == 1, (n_pending, n_finished))
+par3.unlink(); par3.mkdir()                                                                  # a transcript that cannot be read as a file
+try:
+    got24e = run3()
+    check("24 a session transcript that cannot be read: a finished subagent with nothing pending is not running, one parked on a task still is, and nothing raises (unreadable is no reason to list a subagent unreadable)",
+          sorted(got24e) == ["p1", "p2"] and not any(x.get("unreadable") for x in got24e.values()), sorted(got24e))
+finally: par3.rmdir()
+par3.write_text("{not json\n" + '{"type":"user","timestamp":"nope","x":"resumedAgentId\\":\\"f1"}\n' + "\x00\xff" + "\n")
+check("24 …nor a transcript of torn lines, a resume with no readable time, or bytes that are no text", sorted(run3()) == ["p1", "p2"], sorted(run3()))
+check("24 …a finished subagent whose meta cannot be read is still listed running with no words (unreadable, as before)", (lambda: (fin("bad1"), (sub3 / "agent-bad1.meta.json").write_text("{not json"), "bad1" in run3() and run3()["bad1"].get("unreadable") is True)[2])(), None)
+parent({"type": "assistant", "message": {"role": "assistant", "content": "x"}})
+# a parked subagent is tied like any other
+fin("tie1", [BGR("bg0030")], desc=f"Review {BID(1)}", brief="nothing")
+check("24 a parked subagent ties to an item by its description as any other", TIE.tied(list(run3().values()), BID(1)) and not TIE.tied([run3()["tie1"]], BID(2)), None)
+for f_ in sub3.glob("agent-*"): f_.unlink()
+
 clean_pane()
 print(f"{len(ran) - len(fails)}/{len(ran)} checks passed")
 sys.exit(1 if fails else 0)
